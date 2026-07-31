@@ -5,6 +5,7 @@ import {
   DEFAULT_VIEWPORT,
   GENERATION_PROFILES,
 } from '@/features/canvas/data'
+import { translate } from '@/shared/i18n'
 import {
   clampZoom,
   findOpenCanvasPosition,
@@ -128,12 +129,14 @@ function findGenerator(nodes: CanvasNode[], id: string | null): GeneratorNode | 
 }
 
 function generatorStatusLabel(status: GeneratorNode['status']): string {
-  return status === 'generated' ? '已生成' : '草稿'
+  return translate(status === 'generated' ? 'canvas.generation.status.generated' : 'canvas.generation.status.draft')
 }
 
 function generatorTitle(mode: GenerationMode, status: GeneratorNode['status']): string {
-  const suffix = status === 'generated' ? '结果' : '草稿'
-  return `${GENERATION_PROFILES[mode].label} · ${suffix}`
+  const suffix = translate(
+    status === 'generated' ? 'canvas.generation.title.result' : 'canvas.generation.title.draft',
+  )
+  return `${translate(GENERATION_PROFILES[mode].labelKey)} · ${suffix}`
 }
 
 function generatorSummary(prompt: string): string {
@@ -144,7 +147,10 @@ function generatorSummary(prompt: string): string {
 function getParameterSummary(node: GeneratorNode): string {
   const profile = GENERATION_PROFILES[node.generationMode]
   return profile.groups
-    .map((group, index) => group.values[node.parameterIndexes[index] ?? 0] ?? group.values[0])
+    .map((group, index) => {
+      const value = group.values[node.parameterIndexes[index] ?? 0] ?? group.values[0]
+      return translate(value)
+    })
     .join(' · ')
 }
 
@@ -170,7 +176,7 @@ function initializeGeneratorNode(
     status: 'draft',
     title: generatorTitle(mode, 'draft'),
     copy: generatorSummary(prompt),
-    meta: `${profile.capabilities[0]} · ${generatorStatusLabel('draft')}`,
+    meta: `${translate(profile.capabilities[0])} · ${generatorStatusLabel('draft')}`,
   }
 }
 
@@ -280,10 +286,13 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
     case 'set-library-filter':
       return withToast(
         { ...state, libraryFilter: action.filter },
-        action.filter === 'all' ? '正在展示全部画布' : '画布筛选已更新',
+        translate(action.filter === 'all' ? 'canvas.toast.library.all' : 'canvas.toast.library.filterUpdated'),
       )
     case 'set-selected-template':
-      return withToast({ ...state, selectedTemplate: action.template }, `已选择「${action.template}」模板`)
+      return withToast(
+        { ...state, selectedTemplate: action.template },
+        translate('canvas.toast.templateSelected', { template: action.template }),
+      )
     case 'set-idea':
       return { ...state, idea: action.idea }
     case 'set-toast':
@@ -335,7 +344,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
       }
       return withToast(
         next,
-        action.tool === 'hand' ? '手形工具：拖动空白区域平移画布' : '选择工具：拖动空白区域框选对象',
+        translate(action.tool === 'hand' ? 'canvas.toast.tool.hand' : 'canvas.toast.tool.select'),
       )
     }
     case 'set-viewport': {
@@ -406,7 +415,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
         links: state.links.filter((link) => !selected.has(link.source) && !selected.has(link.target)),
         selectedIds: [],
         activeGeneratorId: selected.has(state.activeGeneratorId ?? '') ? null : state.activeGeneratorId,
-      }, `已删除 ${selected.size} 个对象`))
+      }, translate('canvas.toast.selection.deleted', { count: selected.size })))
     }
     case 'activate-generator': {
       if (!action.id) {
@@ -441,7 +450,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
           capability: action.capability,
           status: 'draft',
           title: generatorTitle(node.generationMode, 'draft'),
-          meta: `${action.capability} · ${generatorStatusLabel('draft')}`,
+          meta: `${translate(action.capability)} · ${generatorStatusLabel('draft')}`,
         })),
       })
     }
@@ -464,7 +473,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
             parameterIndexes: nextIndexes,
             status: 'draft',
             title: generatorTitle(node.generationMode, 'draft'),
-            meta: `${node.capability} · ${generatorStatusLabel('draft')}`,
+            meta: `${translate(node.capability)} · ${generatorStatusLabel('draft')}`,
           }
         }),
       })
@@ -505,7 +514,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
         threadOpen: false,
         viewport,
         focusGenerationPromptToken: state.focusGenerationPromptToken + 1,
-      }, `已创建${profile.label}节点`))
+      }, translate('canvas.toast.generation.created', { label: translate(profile.labelKey) })))
     }
     case 'submit-generation': {
       const node = findGenerator(state.nodes, state.activeGeneratorId)
@@ -514,7 +523,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
         return state
       }
       if (!prompt) {
-        return withToast(state, '请先描述要生成的内容')
+        return withToast(state, translate('canvas.toast.generation.promptRequired'))
       }
       const profile = GENERATION_PROFILES[node.generationMode]
       const updated = {
@@ -535,10 +544,10 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
             kind: 'generation',
             mode: node.generationMode,
             parameters: updated.meta,
-            text: `${profile.label}完成，已原地更新生成节点。`,
+            text: translate('canvas.toast.generation.completedMessage', { label: translate(profile.labelKey) }),
           },
         ],
-      }, `${profile.label}完成，生成节点已原地更新`))
+      }, translate('canvas.toast.generation.completed', { label: translate(profile.labelKey) })))
     }
     case 'handle-add-action': {
       if (action.action === 'text' || action.action === 'image' || action.action === 'video') {
@@ -547,8 +556,8 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
       return withToast(
         { ...state, addMenuOpen: false },
         action.action === 'file'
-          ? '文件导入将在完整产品中打开（原型模拟）'
-          : 'Frame 创建将在完整产品中提供（原型模拟）',
+          ? translate('canvas.toast.add.file')
+          : translate('canvas.toast.add.frame'),
       )
     }
     case 'create-text-node': {
@@ -572,20 +581,24 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
         nodes: [...state.nodes, node],
         selectedIds: [node.id],
         activeGeneratorId: null,
-      }, '已在当前视口中心创建文本对象'))
+      }, translate('canvas.toast.text.created')))
     }
     case 'send-agent-message': {
       const text = state.agentPrompt.trim()
       if (!text) {
-        return withToast(state, '请输入要交给 Agent 的任务')
+        return withToast(state, translate('canvas.toast.agent.promptRequired'))
       }
       const run = findRun(state.nodes)
       if (!run) {
-        return withToast(state, 'Agent Run 已被删除；请重置演示后再发起任务')
+        return withToast(state, translate('canvas.toast.agent.runMissing'))
       }
       if (run.status === 'running' || run.status === 'paused') {
-        const status = run.status === 'running' ? '正在运行' : '已暂停'
-        return withToast(state, `当前任务${status}，请完成、继续或重试后再发起新任务`)
+        const status = translate(
+          run.status === 'running'
+            ? 'canvas.agent.run.status.running'
+            : 'canvas.agent.run.status.paused',
+        )
+        return withToast(state, translate('canvas.toast.agent.busy', { status }))
       }
       const cleaned = removeGeneratedResults(state.nodes, state.links)
       const nextRun: AgentRunNode = {
@@ -691,17 +704,17 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
       return withToast({
         ...createInitialCanvasState(),
         view: 'editor',
-      }, '演示和 Agent 消息已重置')
+      }, translate('canvas.toast.demo.reset'))
     case 'consume-thread-scroll':
       return { ...state, forceThreadScroll: false }
     case 'open-editor-from-idea': {
       const idea = state.idea.trim()
       if (!idea) {
-        return withToast(state, '请先描述想完成的工作')
+        return withToast(state, translate('canvas.toast.idea.required'))
       }
       return withToast(
         { ...state, view: 'editor' },
-        `已根据目标创建「${state.selectedTemplate}」画布`,
+        translate('canvas.toast.idea.created', { template: state.selectedTemplate }),
       )
     }
     case 'mark-generator-draft-from-prompt': {
@@ -717,7 +730,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
           status: 'draft',
           title: generatorTitle(node.generationMode, 'draft'),
           copy: generatorSummary(prompt),
-          meta: `${node.capability} · ${generatorStatusLabel('draft')}`,
+          meta: `${translate(node.capability)} · ${generatorStatusLabel('draft')}`,
         })),
       })
     }
@@ -738,21 +751,24 @@ export function getActiveGenerator(state: CanvasDocumentState): GeneratorNode | 
   return findGenerator(state.nodes, state.activeGeneratorId)
 }
 
-export function getContextDescription(state: CanvasDocumentState): { count: number; description: string } {
+export function getContextDescription(
+  state: CanvasDocumentState,
+  t: typeof translate = translate,
+): { count: number; description: string } {
   if (state.contextMode === 'whole') {
     return {
       count: state.nodes.length,
-      description: '整张画布中的对象将作为本次输入。',
+      description: t('canvas.context.whole'),
     }
   }
   if (state.selectedIds.length > 0) {
     return {
       count: state.selectedIds.length,
-      description: `${state.selectedIds.length} 个选中对象将作为本次输入，并保留来源关系。`,
+      description: t('canvas.context.selection', { count: state.selectedIds.length }),
     }
   }
   return {
     count: DEFAULT_CONTEXT_IDS.length,
-    description: '网页、截图和研究资料将作为本次输入。',
+    description: t('canvas.context.default'),
   }
 }

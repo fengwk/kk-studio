@@ -6,9 +6,11 @@ import {
 } from '@/shared/api/studio-service'
 import type { CanvasDocumentDTO } from '@/shared/api/contracts/studio'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n } from '@/shared/i18n'
 
 export function CanvasLibraryView() {
   const { openEditor, setResearchOpen, setToast } = useCanvasRuntime()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
 
   const canvasesQuery = useQuery({
@@ -20,11 +22,11 @@ export function CanvasLibraryView() {
     mutationFn: (title: string) => createCanvas(title),
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvases })
-      setToast(`已创建画布「${created.title}」`)
+      setToast(t('canvas.toast.library.created', { title: created.title }))
       openEditor()
     },
     onError: (error: Error) => {
-      setToast(error.message || '创建画布失败')
+      setToast(error.message || t('canvas.toast.library.createError'))
     },
   })
 
@@ -35,23 +37,23 @@ export function CanvasLibraryView() {
       <div className="library-content">
         <div className="eyebrow">
           <span className="status-dot" />
-          Agent 原生工作区
+          {t('canvas.library.eyebrow')}
         </div>
         <div className="library-heading">
           <div>
             <h1 id="libraryTitle">
-              把想法、资料和结果
+              {t('canvas.library.headingLine1')}
               <br />
-              放在同一个空间。
+              {t('canvas.library.headingLine2')}
             </h1>
-            <p>创建画布，组织资源，调用 Function 与 Agent。</p>
+            <p>{t('canvas.library.description')}</p>
           </div>
           <button
             className="text-button"
             type="button"
             onClick={(event) => setResearchOpen(true, event.currentTarget)}
           >
-            查看调研结论
+            {t('canvas.library.researchLink')}
             {' '}
             <span>↗</span>
           </button>
@@ -60,17 +62,16 @@ export function CanvasLibraryView() {
         <section className="canvas-library" aria-labelledby="canvasTitle">
           <div className="section-heading library-toolbar">
             <div>
-              <h2 id="canvasTitle">你的画布</h2>
+              <h2 id="canvasTitle">{t('canvas.library.title')}</h2>
             </div>
           </div>
 
           {canvasesQuery.isLoading ? (
-            <div className="state-block" role="status">正在加载画布</div>
+            <div className="state-block" role="status">{t('canvas.library.loading')}</div>
           ) : null}
           {canvasesQuery.isError ? (
             <div className="state-block danger" role="alert">
-              画布列表加载失败：
-              {(canvasesQuery.error as Error).message}
+              {t('canvas.library.loadError', { message: (canvasesQuery.error as Error).message })}
             </div>
           ) : null}
 
@@ -78,15 +79,15 @@ export function CanvasLibraryView() {
             <button
               type="button"
               className="project-card create-card"
-              aria-label="创建新画布"
+              aria-label={t('canvas.library.createAria')}
               disabled={createMutation.isPending}
               onClick={() => createMutation.mutate('未命名画布')}
             >
               <div className="project-preview create-preview">
                 <span className="create-plus">+</span>
               </div>
-              <strong>创建新画布</strong>
-              <small>空白画布 · 立即开始</small>
+              <strong>{t('canvas.library.createTitle')}</strong>
+              <small>{t('canvas.library.createSubtitle')}</small>
             </button>
 
             {canvases.map((canvas) => (
@@ -95,7 +96,7 @@ export function CanvasLibraryView() {
                 type="button"
                 className="project-card"
                 onClick={() => {
-                  setToast(`打开「${canvas.title}」`)
+                  setToast(t('canvas.toast.library.open', { title: canvas.title }))
                   openEditor()
                 }}
               >
@@ -106,12 +107,12 @@ export function CanvasLibraryView() {
                 </div>
                 <strong>{canvas.title}</strong>
                 <small>
-                  revision
+                  {t('canvas.library.revision')}
                   {' '}
                   {canvas.revision}
                 </small>
                 <div className="project-footer">
-                  <span>真实画布</span>
+                  <span>{t('canvas.library.realCanvas')}</span>
                   <span>
                     #
                     {shortId(canvas)}

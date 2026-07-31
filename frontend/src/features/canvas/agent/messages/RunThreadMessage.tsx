@@ -1,5 +1,6 @@
 import { RUN_STEPS } from '@/features/canvas/data'
 import type { AgentRunNode } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 
 /** Pure presentation for an Agent Run card with step progress and controls. */
 export function RunThreadMessage({
@@ -9,15 +10,29 @@ export function RunThreadMessage({
   run: AgentRunNode
   onAction: (action: 'pause' | 'resume' | 'retry') => void
 }) {
+  const { t } = useI18n()
   const running = run.status === 'running'
   const paused = run.status === 'paused'
-  const control = running ? '暂停' : paused ? '继续' : '重试'
+  const control = t(
+    running
+      ? 'canvas.agent.run.control.pause'
+      : paused
+        ? 'canvas.agent.run.control.resume'
+        : 'canvas.agent.run.control.retry',
+  )
+  const status = t(
+    running
+      ? 'canvas.agent.run.status.running'
+      : paused
+        ? 'canvas.agent.run.status.paused'
+        : 'canvas.agent.run.status.completed',
+  )
   const action = running ? 'pause' : paused ? 'resume' : 'retry'
 
   return (
     <div className="thread-message run">
       <strong>
-        Agent Run ·
+        {t('canvas.agent.run.label')} ·
         {' '}
         {run.title}
       </strong>
@@ -28,19 +43,17 @@ export function RunThreadMessage({
           return (
             <div key={step} className={`run-step ${done ? 'done' : ''} ${current ? 'current' : ''}`}>
               <b>{done ? '✓' : current ? '●' : '○'}</b>
-              {step}
+              {t(step)}
             </div>
           )
         })}
       </div>
       <small>
-        {running ? '运行中' : paused ? '已暂停' : '已完成'}
-        {' '}
-        ·
-        {' '}
-        {run.progress}
-        /
-        {run.total}
+        {t('canvas.agent.run.status.withProgress', {
+          status,
+          progress: run.progress,
+          total: run.total,
+        })}
       </small>
       <div className="run-controls">
         <button type="button" onClick={() => onAction(action)}>{control}</button>

@@ -65,10 +65,10 @@ interface ParameterGroup {
 }
 
 export interface GenerationProfile {
-  label: string
+  labelKey: string
   icon: string
   prompt: string
-  cost: string
+  cost: number
   size: CanvasSize
   capabilities: string[]
   groups: ParameterGroup[]

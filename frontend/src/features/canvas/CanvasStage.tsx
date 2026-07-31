@@ -20,9 +20,11 @@ import { computeSelectionToolbarPosition, selectionBounds, viewportsEqual } from
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
+import { useI18n } from '@/shared/i18n'
 
 function StageInner() {
   const runtime = useCanvasRuntime()
+  const { t } = useI18n()
   const {
     state,
     stageMetrics,
@@ -178,7 +180,7 @@ function StageInner() {
       className={stageClass}
       id="canvasStage"
       tabIndex={0}
-      aria-label="无限画布。拖动对象，普通滚轮平移，Ctrl 或 ⌘ + 滚轮缩放，按空格或中键平移。"
+      aria-label={t('canvas.stage.ariaLabel')}
       ref={(node) => {
         containerRef.current = node
         stageElementRef.current = node
@@ -251,7 +253,7 @@ function StageInner() {
             className="canvas-minimap"
             pannable
             zoomable
-            ariaLabel="画布小地图"
+            ariaLabel={t('canvas.stage.minimap')}
             maskColor="rgba(13,15,14,0.55)"
             nodeColor={CANVAS_THEME.minimapNode}
             style={{ width: 120, height: 78 }}
@@ -263,10 +265,10 @@ function StageInner() {
         <div
           className="selection-toolbar"
           role="toolbar"
-          aria-label="所选画布对象操作"
+          aria-label={t('canvas.stage.selectionToolbar')}
           style={{ left: toolbarPosition.left, top: toolbarPosition.top }}
         >
-          <button type="button" onClick={() => setToast('编辑模式已准备就绪（原型模拟）')}>✎ 编辑</button>
+          <button type="button" onClick={() => setToast(t('canvas.toast.stage.edit'))}>{t('canvas.stage.edit')}</button>
           <button
             type="button"
             onClick={() => {
@@ -275,22 +277,28 @@ function StageInner() {
                 openThread()
               }
               focusAgentDock()
-              setToast('Agent 已读取当前选区')
+              setToast(t('canvas.toast.stage.agent'))
             }}
           >
-            ✦ 让 Agent 处理
+            {t('canvas.stage.agent')}
           </button>
           <button
             type="button"
             onClick={() => {
               setContextMode('selection')
-              setToast(`已将 ${state.selectedIds.length} 个对象加入当前上下文`)
+              setToast(t('canvas.toast.stage.addContext', { count: state.selectedIds.length }))
             }}
           >
-            ⊙ 加入上下文
+            {t('canvas.stage.addContext')}
           </button>
           <span />
-          <button type="button" aria-label="更多对象操作" onClick={() => setToast('更多对象操作将在检查器中提供（原型模拟）')}>···</button>
+          <button
+            type="button"
+            aria-label={t('canvas.stage.moreObjects')}
+            onClick={() => setToast(t('canvas.toast.stage.moreObjects'))}
+          >
+            ···
+          </button>
         </div>
       ) : null}
 
@@ -299,23 +307,27 @@ function StageInner() {
       <div className="canvas-hint">
         <kbd>Space</kbd>
         {' '}
-        平移 ·
+        {t('canvas.stage.hint.pan')}
+        {' '}
+        ·
         {' '}
         <kbd>V / H / T</kbd>
         {' '}
-        工具 ·
+        {t('canvas.stage.hint.tools')}
+        {' '}
+        ·
         {' '}
         <kbd>⌘ K</kbd>
         {' '}
-        唤起 Agent
+        {t('canvas.stage.hint.invokeAgent')}
       </div>
 
       <div className="canvas-controls">
-        <div className="zoom-controls" role="group" aria-label="画布缩放控制">
-          <button type="button" aria-label="缩小" onClick={() => zoomRef.current?.(Math.max(MIN_ZOOM, state.viewport.scale / 1.15))}>−</button>
-          <button type="button" aria-label="适应全部内容" title="适应视图 (0)" onClick={() => fitViewRef.current?.()}>⊙</button>
-          <button type="button" title="100% (1)" onClick={() => zoomRef.current?.(1)}>100%</button>
-          <button type="button" aria-label="放大" onClick={() => zoomRef.current?.(Math.min(MAX_ZOOM, state.viewport.scale * 1.15))}>＋</button>
+        <div className="zoom-controls" role="group" aria-label={t('canvas.stage.zoomControls')}>
+          <button type="button" aria-label={t('canvas.stage.zoomOut')} onClick={() => zoomRef.current?.(Math.max(MIN_ZOOM, state.viewport.scale / 1.15))}>−</button>
+          <button type="button" aria-label={t('canvas.stage.fitAll')} title={t('canvas.stage.fitTitle')} onClick={() => fitViewRef.current?.()}>⊙</button>
+          <button type="button" title={t('canvas.stage.zoom100Title')} onClick={() => zoomRef.current?.(1)}>100%</button>
+          <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_ZOOM, state.viewport.scale * 1.15))}>＋</button>
         </div>
       </div>
 

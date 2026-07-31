@@ -6,6 +6,7 @@ import { CanvasRuntimeProvider } from '@/features/canvas/CanvasRuntimeContext'
 import { createInitialNodes, GENERATION_PROFILES } from '@/features/canvas/data'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasNode, GeneratorNode } from '@/features/canvas/types'
+import { translate } from '@/shared/i18n'
 
 function renderDomain(domain: CanvasNode) {
   const Component = canvasNodeTypes[domain.type]
@@ -58,7 +59,7 @@ describe('canvas node renderers', () => {
         y: 0,
         width: GENERATION_PROFILES[mode].size.width,
         height: GENERATION_PROFILES[mode].size.height,
-        title: `${GENERATION_PROFILES[mode].label} · 草稿`,
+        title: `${translate(GENERATION_PROFILES[mode].labelKey)} · ${translate('canvas.generation.title.draft')}`,
         generationMode: mode,
         prompt: GENERATION_PROFILES[mode].prompt,
         parameterIndexes: [0, 0, 0, 0],
@@ -71,7 +72,11 @@ describe('canvas node renderers', () => {
       const { unmount } = renderDomain(draft)
       expect(screen.getByLabelText(/打开生成操作台/)).toBeInTheDocument()
       unmount()
-      const generated = renderDomain({ ...draft, status: 'generated', title: `${GENERATION_PROFILES[mode].label} · 结果` })
+      const generated = renderDomain({
+        ...draft,
+        status: 'generated',
+        title: `${translate(GENERATION_PROFILES[mode].labelKey)} · ${translate('canvas.generation.title.result')}`,
+      })
       expect(screen.getByText('已生成')).toBeInTheDocument()
       generated.unmount()
     }

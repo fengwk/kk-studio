@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { ADD_MENU_ITEMS } from '@/features/canvas/data'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { useI18n } from '@/shared/i18n'
 
 /** Upward add menu with keyboard navigation, composed by the agent dock. */
 export function CanvasAddMenu({ menuId }: { menuId: string }) {
@@ -10,6 +11,7 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
     setAddMenuIndex,
     handleAddAction,
   } = useCanvasRuntime()
+  const { t } = useI18n()
 
   const menuRef = useRef<HTMLDivElement>(null)
   const menuButtons = ADD_MENU_ITEMS
@@ -61,7 +63,7 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
       inert={!state.addMenuOpen}
       aria-hidden={!state.addMenuOpen}
       role="menu"
-      aria-label="添加内容"
+      aria-label={t('canvas.add.ariaLabel')}
       onKeyDown={handleMenuKeyDown}
     >
       {menuButtons.map((item, index) => (
@@ -75,7 +77,7 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
           onMouseEnter={() => setAddMenuIndex(index)}
         >
           <span className="add-menu-icon">{item.icon}</span>
-          <span>{item.label}</span>
+          <span>{t(item.labelKey)}</span>
         </button>
       ))}
     </div>
