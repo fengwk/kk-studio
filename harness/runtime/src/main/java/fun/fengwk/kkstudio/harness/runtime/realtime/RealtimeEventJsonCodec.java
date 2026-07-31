@@ -347,9 +347,18 @@ public final class RealtimeEventJsonCodec {
   }
 
   private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
+    if (name == null) {
+      throw new IllegalArgumentException(
+          context
+              + " must be one of "
+              + kind.getEnumConstants().length
+              + " "
+              + kind.getSimpleName()
+              + " values: null");
+    }
     try {
       return Enum.valueOf(kind, name);
-    } catch (IllegalArgumentException | NullPointerException error) {
+    } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context
               + " must be one of "

@@ -72,16 +72,13 @@ public class LiveEnvironmentRegistry {
             Objects.requireNonNull(now, "now")));
   }
 
-  /** Marks the bound name READY so gateway workers may dispatch against it. */
+  /**
+   * Marks the bound name READY so gateway workers may dispatch against it. Callers own the
+   * CAPABILITIES-before-READY transition; empty capabilities remain valid.
+   */
   public synchronized void markReady(
       String environmentName, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
-    if (current.capabilities().tools().isEmpty()
-        && current.capabilities().skills().isEmpty()
-        && current.status() == LiveEnvironmentStatus.CONNECTING) {
-      // CAPABILITIES may legitimately be empty; READY still requires that CAPABILITIES ran once.
-      // Callers enforce CAPABILITIES-before-READY; here we only flip status.
-    }
     byName.put(
         current.environmentName(),
         new LiveEnvironment(

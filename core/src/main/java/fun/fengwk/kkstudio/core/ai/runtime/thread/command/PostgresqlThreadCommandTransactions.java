@@ -371,7 +371,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     requireAffected(mapper.fenceAndStopThread(threadId, nextEpoch, timestamp), "fence thread");
     List<ThreadInput> cancelled =
         mapper.listQueuedInputsForUpdate(threadId).stream()
-            .map(row -> toCancelledInput(row, persistedNow))
+            .map(PostgresqlThreadCommandTransactions::toCancelledInput)
             .toList();
     mapper.cancelQueuedInputs(threadId);
     mapper.cancelSafeModelInvocations(threadId, timestamp);
@@ -436,7 +436,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
         row.getAppliedAt() == null ? null : row.getAppliedAt().toInstant());
   }
 
-  private static ThreadInput toCancelledInput(ThreadCommandRow row, Instant cancelledAt) {
+  private static ThreadInput toCancelledInput(ThreadCommandRow row) {
     ThreadInputType type = ThreadInputType.valueOf(row.getInputType());
     return new ThreadInput(
         row.getId(),

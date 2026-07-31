@@ -512,7 +512,7 @@ class RuntimeEntryPayloadJsonCodecTest {
   // ---------- Reject: enum & discriminator ----------
 
   @Test
-  void rejectsUnknownRoleAndStopReason() {
+  void rejectsInvalidRoleAndStopReason() {
     ObjectNode m1 = canonicalNode(MESSAGE_FIXTURE);
     ((ObjectNode) m1.get("message")).put("role", "USER_AGENT");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, m1));
@@ -522,8 +522,16 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, m2));
 
     ObjectNode m3 = canonicalNode(MESSAGE_FIXTURE);
-    ((ObjectNode) m3.get("assistantMetadata")).put("stopReason", "UNKNOWN");
+    ((ObjectNode) m3.get("message")).putNull("role");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, m3));
+
+    ObjectNode m4 = canonicalNode(MESSAGE_FIXTURE);
+    ((ObjectNode) m4.get("assistantMetadata")).put("stopReason", "UNKNOWN");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, m4));
+
+    ObjectNode m5 = canonicalNode(MESSAGE_FIXTURE);
+    ((ObjectNode) m5.get("assistantMetadata")).putNull("stopReason");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(EntryType.MESSAGE, m5));
 
     ObjectNode e = canonicalNode(ASSISTANT_ERROR_FIXTURE);
     ((ObjectNode) e.get("error")).put("kind", "NETWORK");

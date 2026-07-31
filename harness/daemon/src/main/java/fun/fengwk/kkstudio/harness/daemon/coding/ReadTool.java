@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /** Reads bounded text windows or deterministic directory listings. */
@@ -60,7 +61,9 @@ public final class ReadTool extends AbstractCodingTool {
             entries
                 .map(
                     entry ->
-                        entry.getFileName().toString()
+                        Objects.requireNonNull(
+                                    entry.getFileName(), "directory entry must have a file name")
+                                .toString()
                             + (Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS) ? "/" : ""))
                 .sorted(Comparator.naturalOrder())
                 .toList();

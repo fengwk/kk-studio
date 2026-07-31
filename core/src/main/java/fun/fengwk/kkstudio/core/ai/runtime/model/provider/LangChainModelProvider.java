@@ -70,6 +70,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -512,7 +513,7 @@ abstract class LangChainModelProvider implements ModelProvider {
     if (stream.isCancelled()) {
       return ProviderErrorKind.CANCELLED;
     }
-    String message = errorMessages(error).toLowerCase();
+    String message = errorMessages(error).toLowerCase(Locale.ROOT);
     if (message.contains("401") || message.contains("403") || message.contains("auth")) {
       return ProviderErrorKind.AUTHENTICATION;
     }

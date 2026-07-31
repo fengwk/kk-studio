@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -557,7 +558,9 @@ public final class ToolDescriptorJsonCodec {
     }
     if (!node.isObject()) {
       throw new IllegalArgumentException(
-          context + " must be a JSON object but was " + node.getNodeType().name().toLowerCase());
+          context
+              + " must be a JSON object but was "
+              + node.getNodeType().name().toLowerCase(Locale.ROOT));
     }
     return (ObjectNode) node;
   }
