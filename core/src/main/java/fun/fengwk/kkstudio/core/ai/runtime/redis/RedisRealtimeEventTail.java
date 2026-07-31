@@ -74,9 +74,6 @@ public final class RedisRealtimeEventTail implements HarnessRealtimeEventTail {
     for (MapRecord<String, Object, Object> record : records) {
       String id = record.getId().getValue();
       Map<Object, Object> body = record.getValue();
-      if (body == null) {
-        continue;
-      }
       Object payload = body.get(EVENT_FIELD);
       if (payload == null) {
         continue;

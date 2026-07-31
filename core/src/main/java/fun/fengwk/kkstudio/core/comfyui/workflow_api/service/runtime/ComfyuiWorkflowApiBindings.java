@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.runtime;
 
 import fun.fengwk.convention4j.comfyui.workflow.Workflow;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,7 +22,7 @@ public final class ComfyuiWorkflowApiBindings {
   public ComfyuiWorkflowApiBindings(
       Workflow workflow, List<Binding> bindings, String defaultSelector) {
     this.workflow = workflow;
-    this.bindings = bindings == null ? Collections.emptyList() : bindings;
+    this.bindings = bindings == null ? List.of() : List.copyOf(bindings);
     this.defaultSelector = defaultSelector;
   }
 

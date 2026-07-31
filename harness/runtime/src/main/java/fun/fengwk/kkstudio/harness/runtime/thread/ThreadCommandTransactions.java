@@ -57,5 +57,9 @@ public interface ThreadCommandTransactions {
 
   record EnqueueResult(ThreadInput input) {}
 
-  record StopResult(long executionEpoch, List<ThreadInput> cancelledInputs) {}
+  record StopResult(long executionEpoch, List<ThreadInput> cancelledInputs) {
+    public StopResult {
+      cancelledInputs = List.copyOf(Objects.requireNonNull(cancelledInputs, "cancelledInputs"));
+    }
+  }
 }

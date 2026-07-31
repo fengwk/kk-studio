@@ -28,6 +28,17 @@ import java.util.function.Function;
 public class S3StorageServiceTest {
 
   @Test
+  public void testObjectContentDefensivelyCopiesBytes() {
+    byte[] source = new byte[] {1, 2, 3};
+    S3ObjectContent content = new S3ObjectContent(source, "image/png");
+
+    source[0] = 0;
+    assertArrayEquals(new byte[] {1, 2, 3}, content.getBytes());
+    content.getBytes()[1] = 0;
+    assertArrayEquals(new byte[] {1, 2, 3}, content.getBytes());
+  }
+
+  @Test
   public void testGetPublicUrl() {
     TestContext context = newTestContext("https://cdn.example.com/{bucket}");
     try {
@@ -69,6 +80,8 @@ public class S3StorageServiceTest {
     try {
       // 先 HEAD 再读取并复核字节长度，覆盖 ComfyUI 输入文件的大小边界。
       S3ObjectContent content = context.storageService.download("dir/demo.png", 3L);
+      assertArrayEquals(new byte[] {1, 2, 3}, content.getBytes());
+      content.getBytes()[0] = 0;
       assertArrayEquals(new byte[] {1, 2, 3}, content.getBytes());
       assertEquals("image/png", content.getContentType());
     } finally {
