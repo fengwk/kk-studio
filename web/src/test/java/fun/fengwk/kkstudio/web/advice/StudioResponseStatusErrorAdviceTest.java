@@ -57,7 +57,7 @@ class StudioResponseStatusErrorAdviceTest {
     ResponseStatusException error =
         new ResponseStatusException(HttpStatusCode.valueOf(599), "upstream detail");
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<Result<Void>> response = advice.handle(error, null);
 
     assertEquals(599, response.getStatusCode().value());
     Result<Void> body = response.getBody();

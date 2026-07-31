@@ -18,6 +18,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 
 const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
   { id: 'single', label: '1' },
@@ -145,17 +146,20 @@ export function ChatWorkspacePage() {
           </Link>
           <h1>{title}</h1>
         </div>
-        <div className="chat-layout-switch" role="group" aria-label={t('ai.chat.layout')}>
-          {LAYOUTS.map((layout) => (
-            <button
-              key={layout.id}
-              type="button"
-              className={paneState.layout === layout.id ? 'active' : undefined}
-              onClick={() => setLayout(layout.id)}
-            >
-              {layout.label}
-            </button>
-          ))}
+        <div className="chat-workspace-actions">
+          <LocaleSelector />
+          <div className="chat-layout-switch" role="group" aria-label={t('ai.chat.layout')}>
+            {LAYOUTS.map((layout) => (
+              <button
+                key={layout.id}
+                type="button"
+                className={paneState.layout === layout.id ? 'active' : undefined}
+                onClick={() => setLayout(layout.id)}
+              >
+                {layout.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
       <div className={`chat-pane-grid layout-${paneState.layout}`}>

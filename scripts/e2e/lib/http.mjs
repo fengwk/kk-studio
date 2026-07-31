@@ -13,13 +13,24 @@ export function assert(cond, message) {
   if (!cond) throw new Error(message || 'assertion failed')
 }
 
-export async function httpJson(baseUrl, method, requestPath, body, timeoutMs = 60_000) {
+export async function httpJson(
+  baseUrl,
+  method,
+  requestPath,
+  body,
+  timeoutMs = 60_000,
+  requestHeaders = {},
+) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
+    const headers = {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...requestHeaders,
+    }
     const res = await fetch(`${baseUrl.replace(/\/$/, '')}${requestPath}`, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: Object.keys(headers).length === 0 ? undefined : headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     })

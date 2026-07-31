@@ -153,6 +153,11 @@ async function main(argv) {
 
   const browser = await chromium.launch({ headless: !args.headed })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
+  await context.addInitScript(() => {
+    if (!localStorage.getItem('kk-studio.locale')) {
+      localStorage.setItem('kk-studio.locale', 'zh-CN')
+    }
+  })
   const page = await context.newPage()
   const pageErrors = []
   const consoleErrors = []
@@ -212,6 +217,28 @@ async function main(argv) {
       console.error(`FAIL ${id}: ${result.error}`)
     }
   }
+
+  await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
+    await goto('/settings')
+    await expectVisibleText(page, '设置')
+    await page.locator('.topbar-right .locale-selector button', { hasText: 'English' }).click()
+    await expectVisibleText(page, 'Setting')
+    assert(
+      await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
+      'English locale was not persisted',
+    )
+
+    await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
+    await expectVisibleText(page, 'Setting')
+    await page.locator('.topbar-right .locale-selector button', { hasText: '中文' }).click()
+    await expectVisibleText(page, '设置')
+    assert(
+      await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),
+      'Chinese locale was not persisted',
+    )
+    await shot(caseArt, 'language-selector')
+    expectNoFatal(pageErrors, consoleErrors)
+  })
 
   await run('ui.chats.page_loads', 'Chats 页可打开且显示新建入口', async (caseArt) => {
     await goto('/chats')

@@ -9,13 +9,22 @@
 | 工程与发布 | `frontend/` 保持独立 Vite 工程；Maven `distribution` 在 `prepare-package` 构建并嵌入 `web` Fat JAR 的 `classpath:/static` |
 | 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、Harness 设置、ComfyUI |
 | 服务端状态 | React Query |
-| 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId） |
+| 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId）与全局 Locale 偏好 |
 | 资源 API | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents`、`/api/ai/environment` |
 | Chat API | `/api/ai/chat` |
 | Harness API | `/api/ai/runtime/threads`、`/api/ai/runtime/threads/{threadId}/snapshot`、`/api/ai/runtime/sessions`、`/api/ai/runtime/tool-invocations`、`/api/ai/runtime/usage`、`/api/ai/runtime/interactions` |
 | 实时通道 | snapshot-first + durable revision SSE；无 id 的 Redis `realtime` 仅作临时 overlay |
 | 浏览器路由 | `BrowserRouter`；Spring 对非 API/Actuator、无扩展名且不存在的 GET 路径回退到 `index.html` |
 | 视觉实现 | 全局 token 见 [前端设计规范](../product-design/frontend-design-system.md) |
+
+## 国际化
+
+- 支持 `en-US` 与 `zh-CN`，无有效偏好时默认 `en-US`；英文二级导航使用 `Setting`，中文使用 `设置`。
+- `shared/i18n` 维护单一运行时 Locale store、`useI18n()`/`translate()` 和按 Platform、Shared、AI、Canvas、ComfyUI 拆分的双语 catalog。React 展示组件订阅 Locale store，切换后无需刷新即可重渲染；纯 helper 在执行时解析文案，禁止在模块加载时冻结翻译。
+- 右上角 `English` / `中文` 分段选择器写入 `localStorage` 键 `kk-studio.locale`，同步 `document.documentElement.lang`；Chat 沉浸工作区在自身 Header 保留同一选择器。
+- Axios request interceptor 每次请求读取当前 Locale 并发送 `Accept-Language`，因此切换后下一次 API 调用直接使用新语言。
+- 用户输入、Catalog/Workflow/Canvas 数据、模型与工具输出、协议 ID/状态值不翻译。
+- Vitest 全局默认置为 `zh-CN` 以保持既有业务断言稳定；独立 live-switch 测试覆盖默认英文、持久化、`Setting`、Chat/Catalog/Settings/Environment、Canvas 与 ComfyUI。
 
 ## 路由
 
@@ -189,6 +198,10 @@ frontend/src
 │   ├── environment-service.ts
 │   ├── agent-service.ts
 │   └── harness-service.ts
+├── shared/i18n/
+│   ├── index.ts
+│   ├── LocaleSelector.tsx
+│   └── catalogs/{platform,shared,ai,canvas,comfyui}.ts
 ├── shared/lib/query-keys.ts
 └── styles.css
 ```

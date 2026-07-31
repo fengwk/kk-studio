@@ -3736,6 +3736,13 @@ div.is-error {
   flex-shrink: 0;
 }
 
+.chat-workspace-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
 .chat-workspace-title {
   display: flex;
   align-items: center;
