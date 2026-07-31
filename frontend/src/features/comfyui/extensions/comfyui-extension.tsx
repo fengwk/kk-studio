@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { useOptionalComfyui } from '@/features/comfyui/ComfyuiRuntime'
+import { useOptionalComfyui } from '@/features/comfyui/ComfyuiContext'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 
 const ComfyuiPage = lazy(async () => {

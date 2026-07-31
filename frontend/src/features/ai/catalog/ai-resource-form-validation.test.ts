@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import {
-  toUserFacingErrorMessage,
   validateResourceDraft,
 } from '@/features/ai/catalog/ai-resource-form-validation'
 

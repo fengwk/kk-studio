@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
   AgentDraft,
@@ -8,7 +9,6 @@ import type {
 } from '@/features/ai/catalog/ai-console-types'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import {
-  toUserFacingErrorMessage,
   validateResourceDraft,
 } from '@/features/ai/catalog/ai-resource-form-validation'
 
