@@ -28,8 +28,8 @@ import java.util.Optional;
  *   <li>{@link PrimaryWork.CreateModelInvocation}。
  * </ol>
  *
- * <p>只有 {@code primaryWork} 为空时，Reconciler 才会从 {@code queuedInputs} 中 harvest 下一个 TURN_BOUNDARY 或执行
- * quiesce。
+ * <p>只有 {@code primaryWork} 为空时，Reconciler 才会将 {@code queuedInputs} 全部组成一个 turn-start batch 并
+ * harvest，或 执行 quiesce。
  *
  * <p>不可变；构造时强制以下不变量：
  *

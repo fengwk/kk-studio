@@ -373,7 +373,7 @@ head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionE
 - 读取一致 reconcile snapshot
 - apply Model terminal / Tool terminals
 - suspend blocker 并在 Thread lock 下 recheck
-- harvest TURN_BOUNDARY
+- harvest TURN_INPUT_BATCH
 - 创建 ModelInvocation 并释放 Thread
 - quiesce
 - 所有 mutation 校验 thread token + execution epoch
@@ -411,7 +411,7 @@ head 重定位与 enqueue/Stop 都先锁 Thread 行并校验 `expectedExecutionE
 - terminal-unapplied ModelInvocation
 - current Assistant 的 ToolInvocations
 - durable blocker
-- TURN_BOUNDARY 所需 queued Inputs
+- TURN_INPUT_BATCH 所需的 snapshot queued Inputs
 
 不得在 Runtime 中出现逐 Entry JDBC 循环。
 
@@ -452,7 +452,7 @@ THREAD target dispatch
   -> terminal Tool sibling apply
   -> durable blocker suspend
   -> response-debt ModelInvocation create
-  -> one TURN_BOUNDARY harvest
+  -> one TURN_INPUT_BATCH harvest（snapshot 中全部 queued Input 按 sequence 原子物化）
   -> quiesce
 ```
 

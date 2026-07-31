@@ -31,8 +31,8 @@ import java.util.Set;
 /**
  * 从完整 root-to-head Entry path 派生当前 response debt 对应的冻结 ModelInvocation plan。
  *
- * <p>planner 只读取传入值对象。发现 debt 后，请求只使用截至 debt Entry 的路径前缀；head 与 debt 之间的配置或系统消息不能 反向改变该 response
- * boundary。返回 plan 仍以实际 head 作为 source identity，由 Reconciler 在事务中创建 Invocation。
+ * <p>planner 只读取传入值对象。发现 debt 后，请求只使用截至 debt Entry 的路径前缀；head 与 debt 之间的配置或系统消息不能反向改变该 response
+ * debt。返回 plan 仍以实际 head 作为 source identity，由 Reconciler 在事务中创建 Invocation。
  */
 public final class ModelInvocationPlanner {
 

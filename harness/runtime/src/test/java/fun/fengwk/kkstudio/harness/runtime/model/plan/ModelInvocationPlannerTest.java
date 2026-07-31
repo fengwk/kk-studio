@@ -125,6 +125,20 @@ class ModelInvocationPlannerTest {
   }
 
   @Test
+  void projectsConsecutiveUserMessagesIntoOneProviderRequest() {
+    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
+
+    ModelInvocationPlan plan =
+        plan(path(new RootEntryPayload(), config, message(user("first")), message(user("second"))));
+
+    assertEquals(
+        List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER, ProviderMessageRole.USER),
+        roles(plan));
+    assertEquals("first", text(plan.request().messages().get(1)));
+    assertEquals("second", text(plan.request().messages().get(2)));
+  }
+
+  @Test
   void debtBoundaryExcludesLaterConfigurationAndContextEntries() {
     RuntimeConfigSnapshot oldConfig =
         config("model-old", "old-system", List.of(), List.of(), disabled());

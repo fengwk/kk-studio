@@ -17,12 +17,12 @@ public enum ThreadInputType {
   /** 切换 Thread 的 YOLO policy。 */
   SET_YOLO;
 
-  /** 是否为消息类输入（位于 TURN_BOUNDARY 末端）。 */
+  /** 是否为消息类输入。 */
   public boolean isMessage() {
     return this == USER_MESSAGE || this == CUSTOM_MESSAGE;
   }
 
-  /** 是否为配置类输入（位于 TURN_BOUNDARY 前段）。 */
+  /** 是否为配置类输入。 */
   public boolean isConfig() {
     return this == SET_AGENT || this == SET_MODEL || this == SET_YOLO;
   }

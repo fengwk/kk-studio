@@ -59,6 +59,122 @@ registerCase({
 })
 
 registerCase({
+  id: 'real.queued_input_batch',
+  level: 'L2',
+  title: '运行中连续入队消息在下一 turn 合并收割',
+  requires: ['real'],
+  docs:
+    '首轮流式执行期间连续入队两条 USER_MESSAGE；下一 turn 同批 APPLIED，只创建一个 ModelInvocation 和一个 assistant MESSAGE',
+  async run(ctx) {
+    await requireRealMiniMaxM27(ctx)
+    assert(
+      ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
+      'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
+    )
+
+    const initialMarker = `QUEUE-INITIAL-${cid()}`
+    const firstMarker = `QUEUE-FIRST-${cid()}`
+    const secondMarker = `QUEUE-SECOND-${cid()}`
+    const { thread } = await createBootstrappedThread(ctx, {
+      agentDefinitionId: ctx.vars.agent.id,
+      title: `e2e-queue-batch-${cid().slice(0, 8)}`,
+    })
+    const tid = String(thread.threadId)
+    const epoch = Number(thread.executionEpoch)
+    const { signal: firstDelta, startResult } =
+      await waitForModelTextDeltaAfterSseConnected(
+        ctx,
+        tid,
+        () =>
+          ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+            content:
+              `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
+              + '不要总结，不要提前结束。',
+            clientMessageId: cid(),
+            expectedExecutionEpoch: epoch,
+          }),
+        { timeoutMs: 90_000 },
+      )
+    assert(startResult.status === 202, `initial message status ${startResult.status}`)
+    assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
+
+    const firstQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      content: `${firstMarker}\n这是下一 turn 队列批次的第一条消息。`,
+      clientMessageId: cid(),
+      expectedExecutionEpoch: epoch,
+    })
+    const secondQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      content: `${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`,
+      clientMessageId: cid(),
+      expectedExecutionEpoch: epoch,
+    })
+    assert(firstQueued.status === 202, `first queued message status ${firstQueued.status}`)
+    assert(secondQueued.status === 202, `second queued message status ${secondQueued.status}`)
+
+    const finalThread = await waitForQuiescentThread(ctx, tid, {
+      timeoutMs: 180_000,
+      intervalMs: 500,
+    })
+    const snapshot = await getThreadSnapshot(ctx, tid)
+    const entries = snapshot.entries || []
+    const initialUserIndex = findUserEntryIndex(entries, initialMarker)
+    const firstUserIndex = findUserEntryIndex(entries, firstMarker)
+    const secondUserIndex = findUserEntryIndex(entries, secondMarker)
+    const assistants = normalAssistantEntries(entries)
+    assert(
+      assistants.length === 2,
+      `expected initial assistant plus one batched assistant: ${JSON.stringify(entries)}`,
+    )
+    const initialAssistantIndex = entries.findIndex(
+      (entry) => String(entry.entryId) === String(assistants[0].entryId),
+    )
+    const batchedAssistantIndex = entries.findIndex(
+      (entry) => String(entry.entryId) === String(assistants[1].entryId),
+    )
+    assert(
+      initialUserIndex >= 0
+      && initialUserIndex < initialAssistantIndex
+      && initialAssistantIndex < firstUserIndex
+      && firstUserIndex < secondUserIndex
+      && secondUserIndex < batchedAssistantIndex,
+      `expected initial USER -> assistant -> queued USER -> queued USER -> one assistant: ${JSON.stringify(entries)}`,
+    )
+
+    const inputs = snapshot.inputs || []
+    const queuedBatchInputs = inputs.filter((input) => {
+      const payload = String(input.payloadJson || '')
+      return payload.includes(firstMarker) || payload.includes(secondMarker)
+    })
+    assert(
+      queuedBatchInputs.length === 2
+      && queuedBatchInputs.every((input) => input.status === 'APPLIED'),
+      `queued batch inputs were not both APPLIED: ${JSON.stringify(inputs)}`,
+    )
+    const modelInvocations = snapshot.modelInvocations || []
+    assert(
+      modelInvocations.length === 2,
+      `expected one initial and one batched ModelInvocation: ${JSON.stringify(modelInvocations)}`,
+    )
+    const secondUserEntry = entries[secondUserIndex]
+    assert(
+      modelInvocations.some(
+        (invocation) =>
+          String(invocation.sourceHeadEntryId) === String(secondUserEntry.entryId),
+      ),
+      `batched invocation must use the final queued USER as source head: ${JSON.stringify(modelInvocations)}`,
+    )
+    ctx.writeArtifact(
+      'queued-input-batch.json',
+      JSON.stringify(
+        { firstDelta, finalThread, entries, inputs, modelInvocations },
+        null,
+        2,
+      ),
+    )
+  },
+})
+
+registerCase({
   id: 'real.stop_partial_continue',
   level: 'L2',
   title: '真实流式 /stop 持久化 partial 并继续新一轮',

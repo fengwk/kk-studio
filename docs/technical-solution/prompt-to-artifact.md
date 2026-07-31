@@ -29,7 +29,9 @@ flowchart LR
 
 ## Prompt 构建
 
-1. 用户或自定义消息通过 `POST /api/ai/runtime/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 按 TURN_BOUNDARY harvest mailbox，物化 Entry 并推进 head。
+1. 用户或自定义消息通过 `POST /api/ai/runtime/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 在
+   无 primary work 时将 snapshot 中全部 queued Input 按 TURN_INPUT_BATCH 原子 harvest，物化 Entry 并推进 head；snapshot
+   后到达者留给下一 turn。
 2. 有效运行配置来自路径上最近完整 `RUNTIME_CONFIG` Entry，不从 live Definition 补齐历史。`ModelInvocationPlanner` 从 root-to-head path 判定 response debt，投影语义消息、组装 Skill system section 与冻结 Tool definitions，再经 `PromptCacheRequestFinalizer` 得到最终 `ProviderRequest`。
 3. Tool 短名 platform-first，再回退所选 READY Environment。Environment 离线则明确失败。
 4. Provider 执行只回放冻结请求中的 providerType/providerResourceId/model。

@@ -176,8 +176,7 @@ class ThreadReconcilerActivationTest {
     }
 
     @Override
-    public ApplyOutcome harvestBoundary(
-        ThreadOwnership ownership, TurnBoundary boundary, Instant now) {
+    public ApplyOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch, Instant now) {
       throw new UnsupportedOperationException();
     }
 

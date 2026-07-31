@@ -51,7 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnBoundary;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -121,12 +121,21 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertFalse(transactions.renew(recovered, now.plus(Duration.ofMinutes(20)).plusSeconds(2)));
 
     long afterStopEpoch = recovered.executionEpoch() + 1;
-    commands.enqueue(
-        threadId,
-        user("after-stop"),
-        "after-stop",
-        afterStopEpoch,
-        now.plus(Duration.ofMinutes(20)).plusSeconds(3));
+    ThreadInput afterStopInput =
+        commands
+            .enqueue(
+                threadId,
+                user("after-stop"),
+                "after-stop",
+                afterStopEpoch,
+                now.plus(Duration.ofMinutes(20)).plusSeconds(3))
+            .input();
+    assertEquals(
+        ApplyOutcome.LOST_OWNERSHIP,
+        transactions.harvestBatch(
+            recovered,
+            new TurnInputBatch(threadId, List.of(afterStopInput)),
+            now.plus(Duration.ofMinutes(20)).plusSeconds(3)));
     ThreadOwnership afterStop =
         transactions
             .claim(threadId, "after-stop", now.plus(Duration.ofMinutes(20)).plusSeconds(3))
@@ -215,7 +224,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   @Test
-  void snapshotsPlanBeforeLaterQueuedInputThenHarvestsAndCreatesInvocation() {
+  void harvestsCompleteSnapshotBatchBeforeCreatingOneInvocation() {
     Instant now = Instant.now();
     TestThreads.Bootstrapped boot = TestThreads.bootstrap(commands, "snapshot", now);
     long threadId = boot.threadId();
@@ -223,12 +232,16 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     RuntimeConfigInputPayload frozenConfig = config(List.of(platformTool()));
     commands.enqueue(threadId, frozenConfig, "config", epoch, now);
     commands.enqueue(threadId, user("hello"), "user", epoch, now);
+    commands.enqueue(threadId, user("second"), "second-user", epoch, now);
+    commands.enqueue(threadId, config(List.of()), "tail-config", epoch, now);
     ThreadOwnership ownership = transactions.claim(threadId, "snapshot", now).orElseThrow();
 
     ThreadReconcileSnapshot queued = transactions.loadOwnedSnapshot(ownership, now).orElseThrow();
-    assertEquals(2, queued.queuedInputs().size());
+    assertEquals(4, queued.queuedInputs().size());
     assertInstanceOf(RuntimeConfigInputPayload.class, queued.queuedInputs().get(0).payload());
     assertInstanceOf(RuntimeEntryInputPayload.class, queued.queuedInputs().get(1).payload());
+    assertInstanceOf(RuntimeEntryInputPayload.class, queued.queuedInputs().get(2).payload());
+    assertInstanceOf(RuntimeConfigInputPayload.class, queued.queuedInputs().get(3).payload());
     ThreadInput durableMessage = queued.queuedInputs().get(1);
     ThreadInput tamperedMessage =
         new ThreadInput(
@@ -243,36 +256,40 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             durableMessage.appliedAt());
     assertEquals(
         ApplyOutcome.LOST_OWNERSHIP,
-        transactions.harvestBoundary(
+        transactions.harvestBatch(
             ownership,
-            new TurnBoundary(threadId, List.of(queued.queuedInputs().get(0), tamperedMessage)),
+            new TurnInputBatch(
+                threadId,
+                List.of(
+                    queued.queuedInputs().get(0),
+                    tamperedMessage,
+                    queued.queuedInputs().get(2),
+                    queued.queuedInputs().get(3))),
             now));
+    commands.enqueue(threadId, config(List.of()), "after-snapshot", epoch, now.plusSeconds(1));
     assertEquals(
         ApplyOutcome.PROGRESSED,
-        transactions.harvestBoundary(
-            ownership, new TurnBoundary(threadId, queued.queuedInputs()), now));
+        transactions.harvestBatch(
+            ownership, new TurnInputBatch(threadId, queued.queuedInputs()), now));
+    assertEquals(
+        queued.queuedInputs().stream().map(ThreadInput::id).toList(),
+        ids(
+            "select id from harness_thread_input where thread_id = "
+                + threadId
+                + " and status = 'APPLIED' order by sequence"));
 
     ThreadReconcileSnapshot snapshot = transactions.loadOwnedSnapshot(ownership, now).orElseThrow();
+    assertEquals(1, snapshot.queuedInputs().size());
+    assertEquals(5L, snapshot.queuedInputs().get(0).sequence());
+    assertEquals(
+        "QUEUED",
+        scalar(
+            "select status from harness_thread_input where id = "
+                + snapshot.queuedInputs().get(0).id()));
     CreateModelInvocation cmi =
         assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
     ModelInvocationPlan plan = cmi.plan();
     assertEquals(frozenConfig.snapshot(), plan.configSnapshot());
-
-    commands.enqueue(threadId, config(List.of()), "later-config", epoch, now.plusSeconds(1));
-    assertTrue(
-        transactions
-            .loadOwnedSnapshot(ownership, now.plusSeconds(1))
-            .orElseThrow()
-            .primaryWork()
-            .isPresent());
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            transactions.createModelInvocationAndRelease(
-                ownership,
-                new ModelInvocationPlan(
-                    plan.sourceHeadEntryId(), plan.request(), config(List.of()).snapshot()),
-                now.plusSeconds(1)));
     ModelCreationOutcome outcome =
         transactions.createModelInvocationAndRelease(ownership, plan, now.plusSeconds(1));
     ModelCreationOutcome.Created created =
@@ -657,8 +674,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         transactions.loadOwnedSnapshot(quiescentOwner, Instant.now()).orElseThrow().queuedInputs();
     assertEquals(
         ApplyOutcome.PROGRESSED,
-        transactions.harvestBoundary(
-            quiescentOwner, new TurnBoundary(quiescentThread, configOnly), Instant.now()));
+        transactions.harvestBatch(
+            quiescentOwner, new TurnInputBatch(quiescentThread, configOnly), Instant.now()));
     assertEquals(
         QuiesceOutcome.QUIESCENT, transactions.quiesceAndRecheck(quiescentOwner, Instant.now()));
     assertEquals(
@@ -685,7 +702,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             transactions.loadOwnedSnapshot(ownership, now).orElseThrow().queuedInputs();
         assertEquals(
             ApplyOutcome.PROGRESSED,
-            transactions.harvestBoundary(ownership, new TurnBoundary(threadId, inputs), now));
+            transactions.harvestBatch(ownership, new TurnInputBatch(threadId, inputs), now));
 
         CountDownLatch start = new CountDownLatch(1);
         Future<QuiesceOutcome> quiesce =
@@ -739,7 +756,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         transactions.loadOwnedSnapshot(ownership, claimedAt).orElseThrow().queuedInputs();
     assertEquals(
         ApplyOutcome.PROGRESSED,
-        transactions.harvestBoundary(ownership, new TurnBoundary(threadId, inputs), claimedAt));
+        transactions.harvestBatch(ownership, new TurnInputBatch(threadId, inputs), claimedAt));
     return new Prepared(threadId, boot.rootEntryId(), ownership);
   }
 

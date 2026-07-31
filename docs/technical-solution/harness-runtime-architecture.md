@@ -133,15 +133,15 @@ Branch 不是独立实体：从历史 Entry 继续对话，就是把某个 Threa
 
 有序 mailbox，只接收 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_YOLO`。外部 Invocation terminal 不进 mailbox；通过 `runnable` 让 Reconciler 优先收敛 continuation debt。
 
-Mailbox 采用 TURN_BOUNDARY：
+Mailbox 采用 TURN_INPUT_BATCH（turn-start batch）：
 
 ```text
-零到多个连续配置命令
-  + 最多一个 USER/CUSTOM message
-  = 一个 Provider response boundary
+snapshot 中全部 queued Input 按 sequence 原子物化
+  = 一个 turn-start batch
 ```
 
-消息之后到达的配置不能改变该消息对应 ModelInvocation 的冻结快照。
+config 与 USER/CUSTOM message 可以任意交错，允许一个 batch 包含多个 message。batch harvest 后重新读取
+snapshot；最终 head 最多创建一次 ModelInvocation。snapshot 后到达的 Input 保持 QUEUED，进入下一 turn。
 
 ### 3.4 ModelInvocation
 
@@ -226,8 +226,8 @@ command 侧只负责 bootstrap 与 head 重定位；`ThreadReconciler` 是执行
 4. apply terminal sibling ToolInvocations
 5. 有 durable blocker 时 suspend/recheck
 6. planner 计算已有 response debt，并在需要时创建冻结 ProviderRequest 的 ModelInvocation
-7. 无已有 response debt 时按 TURN_BOUNDARY harvest mailbox
-8. reload snapshot，使新消息边界在后续循环创建 ModelInvocation
+7. 无已有 response debt 时按 TURN_INPUT_BATCH harvest snapshot 中的全部 queued mailbox Input
+8. reload snapshot；从最终 head 最多创建一次 ModelInvocation，snapshot 后到达的 Input 留给下一 turn
 9. 无工作则事务性 quiesce 并释放 lease
 
 ```mermaid
@@ -238,7 +238,7 @@ flowchart TD
     D -- Yes --> E[Suspend and release]
     D -- No --> F{Existing response debt?}
     F -- Yes --> G[Create ModelInvocation and release]
-    F -- No --> H{TURN_BOUNDARY available?}
+    F -- No --> H{TURN_INPUT_BATCH available?}
     H -- Yes --> B
     H -- No --> I[Quiesce under Thread lock]
 ```

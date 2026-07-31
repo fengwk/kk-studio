@@ -98,7 +98,7 @@ reports/e2e/LATEST_RUN.txt
 | L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；临时 Agent 显式绑定 `read` 后完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **59** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -185,6 +185,7 @@ API 矩阵注册 **58** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | Case | 开关 | 断言 |
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次成功并记账 |
+| `real.queued_input_batch` | `--real` | 首轮流式执行期间连续入队两条消息；下一 turn 同批 APPLIED，只产生一个 ModelInvocation 和一个 assistant MESSAGE |
 | `real.stop_partial_continue` | `--real` | 首个非空文本 delta 后 stop；durable `ASSISTANT_ABORTED` 仅含安全 text/thinking；follow-up 位于 barrier 后，旧 debt 不重派 |
 | `branch.path_usage` | `--real --with-branch` | 另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀 |
 | `daemon.ready` | `--with-tools` | Daemon Environment READY |
