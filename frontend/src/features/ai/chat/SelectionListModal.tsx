@@ -54,48 +54,52 @@ export function SelectionListModal({
       <div className="modal-card selection-modal" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <ModalHeader title={title} onClose={onClose} />
         <div className="modal-body">
-          {onScopeChange ? (
-            <div className="selection-sort-row">
-              <span>范围</span>
-              <div className="selection-sort-actions">
-                <button
-                  type="button"
-                  className={scope === 'current' ? 'active' : undefined}
-                  onClick={() => onScopeChange('current')}
-                  disabled={selectionPending}
-                >
-                  当前 Chat
-                </button>
-                <button
-                  type="button"
-                  className={scope === 'global' ? 'active' : undefined}
-                  onClick={() => onScopeChange('global')}
-                  disabled={selectionPending}
-                >
-                  全局 Thread
-                </button>
-              </div>
-            </div>
-          ) : null}
-          {showSort ? (
-            <div className="selection-sort-row">
-              <span>排序</span>
-              <div className="selection-sort-actions">
-                <button
-                  type="button"
-                  className={sort === 'recent' ? 'active' : undefined}
-                  onClick={() => onSortChange('recent')}
-                >
-                  最近更新
-                </button>
-                <button
-                  type="button"
-                  className={sort === 'created' ? 'active' : undefined}
-                  onClick={() => onSortChange('created')}
-                >
-                  创建时间
-                </button>
-              </div>
+          {onScopeChange || showSort ? (
+            <div className="selection-controls-row">
+              {onScopeChange ? (
+                <div className="selection-sort-row">
+                  <span>范围</span>
+                  <div className="selection-sort-actions">
+                    <button
+                      type="button"
+                      className={scope === 'current' ? 'active' : undefined}
+                      onClick={() => onScopeChange('current')}
+                      disabled={selectionPending}
+                    >
+                      当前 Chat
+                    </button>
+                    <button
+                      type="button"
+                      className={scope === 'global' ? 'active' : undefined}
+                      onClick={() => onScopeChange('global')}
+                      disabled={selectionPending}
+                    >
+                      全局 Thread
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {showSort ? (
+                <div className="selection-sort-row">
+                  <span>排序</span>
+                  <div className="selection-sort-actions">
+                    <button
+                      type="button"
+                      className={sort === 'recent' ? 'active' : undefined}
+                      onClick={() => onSortChange('recent')}
+                    >
+                      最近更新
+                    </button>
+                    <button
+                      type="button"
+                      className={sort === 'created' ? 'active' : undefined}
+                      onClick={() => onSortChange('created')}
+                    >
+                      创建时间
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <ul className="selection-list" aria-busy={loading || selectionPending}>
