@@ -113,12 +113,6 @@ export interface HarnessThreadMessageCreateDTO extends HarnessThreadEpochGuardDT
   clientMessageId: string
 }
 
-export interface HarnessThreadCustomMessageCreateDTO extends HarnessThreadEpochGuardDTO {
-  role: 'SYSTEM' | 'USER'
-  content: string
-  clientMessageId: string
-}
-
 export interface HarnessThreadYoloSetDTO extends HarnessThreadEpochGuardDTO {
   yoloEnabled: boolean
   clientMessageId: string
