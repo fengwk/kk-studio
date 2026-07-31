@@ -586,12 +586,15 @@ class ModelWorkerTest {
                     response("answer", ProviderStopReason.COMPLETED)));
     completion.start();
     await(fixture.transactions.terminalEntered);
+    // Terminal ownership is not locally released until its fenced mutation has returned.
+    assertTrue(fixture.worker.hasActiveExecution());
     await(fixture.transactions.renewedAfterTerminalStarted);
     fixture.transactions.terminalRelease.countDown();
     completion.join(1000);
 
     assertFalse(completion.isAlive());
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.current.status());
+    assertFalse(fixture.worker.hasActiveExecution());
   }
 
   /**
