@@ -70,6 +70,7 @@ public abstract class WebPostgresTestSupport {
         // suppressClose preserves the caller-managed JDBC connection.
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations("classpath:db/migration", "classpath:db/seed/dev")
+        .outOfOrder(true)
         .validateMigrationNaming(true)
         .load()
         .migrate();

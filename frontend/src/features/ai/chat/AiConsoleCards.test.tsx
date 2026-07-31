@@ -36,7 +36,7 @@ function chat() {
   return {
     id: 'chat-1',
     title: 'Draft',
-    defaultAgentId: null,
+     defaultAgentId: 'missing',
     version: '1',
     createTime: null,
     updateTime: null,

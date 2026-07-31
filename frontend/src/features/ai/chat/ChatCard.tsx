@@ -16,9 +16,7 @@ export function ChatCard({
   const defaultAgent = chat.defaultAgentId
     ? agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
     : undefined
-  const agentLabel = !chat.defaultAgentId
-    ? '（无）'
-    : defaultAgent
+  const agentLabel = defaultAgent
       ? defaultAgent.name
       : '（已删除/缺失）'
 

@@ -181,7 +181,7 @@ dispatcher 在启动、listener 连接或重连、收到 `NOTIFY`、Environment 
 - Event 不用于状态恢复或业务审计
 - Redis 丢失后允许 in-flight 动画缺口；最终 Entry/Invocation 不受影响
 
-SSE adapter 事件名 `realtime`，cursor 为 Redis stream-id。
+SSE adapter 事件名 `realtime`。Redis stream-id 只在一条已打开的服务端 tail 内推进，不作为 SSE id 暴露；浏览器重连只携带 durable Thread revision，并从 Redis live edge 重新开始。
 
 ## 8. Snapshot-first 客户端恢复
 

@@ -7,12 +7,10 @@ import {
 } from '@/features/ai/runtime'
 import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
-import { sortWithRunningFirst, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import {
-  isRunningThread,
-  toThreadSelectionItem,
-} from '@/features/ai/chat/chat-session-picker'
+import { type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
+import { toThreadSelectionItem } from '@/features/ai/chat/chat-session-picker'
 import { performBlankPaneFirstSend } from '@/features/ai/chat/chat-first-send'
+import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
   extractContextWindow,
   modelRef,
@@ -22,7 +20,7 @@ import {
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { agentService } from '@/shared/api/agent-service'
-import { harnessService } from '@/shared/api/harness-service'
+import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { AgentSelectionModal, SelectionListModal } from '@/features/ai/chat/SelectionListModal'
 
@@ -86,12 +84,9 @@ export function BlankComposerPane({
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
+  const [threadAssociationPending, setThreadAssociationPending] = useState(false)
   const queryClient = useQueryClient()
-  const threadsQuery = useQuery({
-    queryKey: queryKeys.threads.list,
-    queryFn: () => harnessService.listThreads(),
-    enabled: threadModalOpen,
-  })
+  const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
   const modelsQuery = useQuery({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
@@ -115,6 +110,7 @@ export function BlankComposerPane({
     setActionError(null)
     try {
       const result = await performBlankPaneFirstSend({
+        chatId: chat?.id ?? '',
         agentDefinitionId: agentId,
         content,
       })
@@ -163,6 +159,22 @@ export function BlankComposerPane({
         return
       default:
         setActionError(command.disabledReason || `当前场景不可用：/${command.id}`)
+    }
+  }
+
+  async function selectThread(selectedThreadId: string) {
+    setThreadAssociationPending(true)
+    try {
+      if (threadPicker.scope === 'global' && chat?.id) {
+        await chatService.associateThread(chat.id, selectedThreadId)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.list })
+      }
+      setThreadModalOpen(false)
+      onThreadChange(selectedThreadId)
+    } catch (error) {
+      setActionError(errorMessage(error, '关联 Thread 失败'))
+    } finally {
+      setThreadAssociationPending(false)
     }
   }
 
@@ -237,17 +249,21 @@ export function BlankComposerPane({
       <SelectionListModal
         open={threadModalOpen}
         title="选择 Thread"
-        items={sortWithRunningFirst(threadsQuery.data ?? [], threadSort, isRunningThread).map(
-          toThreadSelectionItem,
-        )}
+        items={threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))}
         sort={threadSort}
         onSortChange={onThreadSortChange}
+        scope={threadPicker.scope}
+        onScopeChange={threadPicker.setScope}
+        loading={threadPicker.isLoading}
+        hasMore={threadPicker.hasNextPage}
+        loadingMore={threadPicker.isFetchingNextPage}
+        onLoadMore={() => {
+          void threadPicker.loadMore()
+        }}
+        selectionPending={threadAssociationPending}
         emptyText="暂无 Thread"
         onClose={() => setThreadModalOpen(false)}
-        onSelect={(selectedThreadId) => {
-          setThreadModalOpen(false)
-          onThreadChange(selectedThreadId)
-        }}
+        onSelect={selectThread}
       />
     </section>
   )

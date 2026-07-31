@@ -60,7 +60,7 @@ describe('CreateChatModal', () => {
     )
 
     expect(screen.getByText('Name')).toBeInTheDocument()
-    expect(screen.getByText('*')).toBeInTheDocument()
+    expect(screen.getAllByText('*')).toHaveLength(2)
     expect(screen.getByRole('alert')).toHaveTextContent('请填写 Chat 名称')
     expect(screen.getByText('请填写名称')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Chat 名称（可重名）').closest('label')).toHaveClass('is-error')

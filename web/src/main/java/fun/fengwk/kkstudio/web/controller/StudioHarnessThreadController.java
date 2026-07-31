@@ -34,8 +34,8 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloSetDTO;
+import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
@@ -69,10 +69,14 @@ public class StudioHarnessThreadController {
     this.eventStreamExecutor = Objects.requireNonNull(eventStreamExecutor, "eventStreamExecutor");
   }
 
-  /** 查询所有 Thread。 */
+  /** 查询全局 Thread 的 opaque keyset page。 */
   @GetMapping
-  public Result<List<HarnessThreadDTO>> listAllThreads() {
-    return Results.ok(queryService.listAll());
+  public Result<CursorPageDTO<HarnessThreadDTO>> listAllThreads(
+      @RequestParam(defaultValue = "recent") String sort,
+      @RequestParam(required = false) String cursor,
+      @RequestParam(defaultValue = "20") Integer limit) {
+    return Results.ok(
+        withMissingResourceTranslation(() -> queryService.listAll(sort, cursor, limit)));
   }
 
   /** 创建 UNBOUND Thread：无请求体，head 为空，尚未绑定任何 Session。 */

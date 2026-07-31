@@ -491,7 +491,7 @@ Web 只消费 Core application API 与 share DTO；不得直接导入 Harness do
 客户端恢复：
 
 1. REST snapshot
-2. SSE `realtime`（Redis stream-id cursor）
+2. 无 SSE id 的 Redis `realtime` overlay（stream-id 仅在当前服务端 tail 内部推进）
 
 ## 9. 能力装配
 

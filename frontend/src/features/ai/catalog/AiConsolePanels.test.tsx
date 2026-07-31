@@ -54,7 +54,7 @@ describe('AiConsolePanels', () => {
             {
               id: 'c1',
               title: 'One',
-              defaultAgentId: null,
+               defaultAgentId: 'missing',
               version: '1',
               createTime: null,
               updateTime: null,

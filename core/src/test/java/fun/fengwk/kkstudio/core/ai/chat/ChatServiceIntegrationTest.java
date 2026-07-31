@@ -3,12 +3,12 @@ package fun.fengwk.kkstudio.core.ai.chat;
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
@@ -26,6 +26,7 @@ import java.util.List;
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
+  @Autowired private JdbcTemplate jdbc;
 
   @Override
   protected void migrateDatabase(Connection conn) {
@@ -55,6 +56,15 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatCreateDTO blankTitle = new ChatCreateDTO();
       assertThrows(AiValidationException.class, () -> chatService.createChat(blankTitle));
 
+      ChatCreateDTO missingAgent = new ChatCreateDTO();
+      missingAgent.setTitle("missing-agent");
+      assertThrows(AiValidationException.class, () -> chatService.createChat(missingAgent));
+
+      ChatCreateDTO blankAgent = new ChatCreateDTO();
+      blankAgent.setTitle("blank-agent");
+      blankAgent.setDefaultAgentId("  ");
+      assertThrows(AiValidationException.class, () -> chatService.createChat(blankAgent));
+
       ChatCreateDTO unknownAgent = new ChatCreateDTO();
       unknownAgent.setTitle("orphan");
       unknownAgent.setDefaultAgentId("999999999999");
@@ -77,9 +87,16 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       update.setTitle("beta");
       update.setDefaultAgentId("");
       update.setExpectedVersion("0");
-      ChatDTO updated = chatService.updateChat(chatId, update);
+      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, update));
+      assertEquals("alpha", chatService.getChat(chatId).getTitle());
+      assertEquals("1", chatService.getChat(chatId).getDefaultAgentId());
+
+      ChatUpdateDTO titleOnly = new ChatUpdateDTO();
+      titleOnly.setTitle("beta");
+      titleOnly.setExpectedVersion("0");
+      ChatDTO updated = chatService.updateChat(chatId, titleOnly);
       assertEquals("beta", updated.getTitle());
-      assertNull(updated.getDefaultAgentId());
+      assertEquals("1", updated.getDefaultAgentId());
       assertEquals("1", updated.getVersion());
 
       ChatUpdateDTO stale = new ChatUpdateDTO();
@@ -89,6 +106,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatCreateDTO newer = new ChatCreateDTO();
       newer.setTitle("gamma");
+      newer.setDefaultAgentId("1");
       ChatDTO second = chatService.createChat(newer);
       try {
         List<ChatDTO> listed = chatService.listChats();
@@ -100,6 +118,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       } finally {
         chatService.deleteChat(second.getId(), "0");
       }
+
+      jdbc.update("delete from agent_definition where id = 1");
+      ChatDTO staleAgentChat = chatService.getChat(chatId);
+      assertEquals("1", staleAgentChat.getDefaultAgentId());
 
       assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat("999999999999"));
       assertThrows(AiValidationException.class, () -> chatService.getChat("not-a-number"));

@@ -29,11 +29,14 @@ export const queryKeys = {
   threads: {
     all: ['threads'] as const,
     list: ['threads', 'list'] as const,
+    page: (scope: 'current' | 'global', sort: 'recent' | 'created', chatId?: string) =>
+      ['threads', 'list', scope, sort, chatId ?? ''] as const,
     snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
   },
   sessions: {
     all: ['sessions'] as const,
     list: ['sessions', 'list'] as const,
+    threadIndex: (sort: 'recent' | 'created') => ['sessions', 'thread-index', sort] as const,
     detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
     entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
   },

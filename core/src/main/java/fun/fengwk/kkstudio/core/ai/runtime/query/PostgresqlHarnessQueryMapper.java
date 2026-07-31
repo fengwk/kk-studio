@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /** PostgreSQL snapshot-first 查询专用 mapper。 */
@@ -161,12 +162,43 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
   HarnessQueryRow findThreadView(@Param("threadId") long threadId);
 
   @Select(
-      "select "
+      "<script>select "
           + THREAD_VIEW_COLUMNS
           + THREAD_VIEW_SOURCE
-          + " order by t.updated_at desc, t.id desc")
+          + " where 1 = 1"
+          + "<if test=\"chatId != null\">"
+          + " and exists (select 1 from chat_thread ct"
+          + " where ct.chat_id = #{chatId} and ct.thread_id = t.id)"
+          + "</if>"
+          + "<if test=\"cursorTime != null\">"
+          + " and ("
+          + " ("
+          + "  <choose>"
+          + "   <when test=\"sort == 'created'\">t.created_at</when>"
+          + "   <otherwise>t.updated_at</otherwise>"
+          + "  </choose>"
+          + "  &lt; #{cursorTime}"
+          + " ) or ("
+          + "  <choose>"
+          + "   <when test=\"sort == 'created'\">t.created_at</when>"
+          + "   <otherwise>t.updated_at</otherwise>"
+          + "  </choose>"
+          + "  = #{cursorTime} and t.id &lt; #{cursorId}"
+          + " ))"
+          + "</if>"
+          + " order by "
+          + "<choose>"
+          + " <when test=\"sort == 'created'\">t.created_at</when>"
+          + " <otherwise>t.updated_at</otherwise>"
+          + "</choose>"
+          + " desc, t.id desc limit #{limit}</script>")
   @ResultMap("threadViewQueryMap")
-  List<HarnessQueryRow> listAllThreadViews();
+  List<HarnessQueryRow> listThreadViews(
+      @Param("chatId") Long chatId,
+      @Param("sort") String sort,
+      @Param("cursorTime") OffsetDateTime cursorTime,
+      @Param("cursorId") Long cursorId,
+      @Param("limit") int limit);
 
   @Select(
       "select "

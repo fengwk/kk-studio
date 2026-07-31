@@ -16,7 +16,7 @@ export function ChatCardsPanel({
     <div className="cards-grid">
       <CreateCard
         title="新建 Chat"
-        subtitle="创建持久 Chat 工作区（可选默认 Agent）"
+        subtitle="创建持久 Chat 工作区（必须选择默认 Agent）"
         onClick={onCreate}
       />
       {chats.map((chat) => (

@@ -32,23 +32,30 @@ class MemoryStorage implements Storage {
 }
 
 describe('chat-pane-state', () => {
-  it('creates default single layout with one blank pane', () => {
+  it('creates default single layout with eight persistent blank panes', () => {
     const state = loadChatPaneState('chat-1', new MemoryStorage())
     expect(state.layout).toBe('single')
-    expect(state.panes).toHaveLength(1)
+    expect(state.panes).toHaveLength(8)
     expect(state.panes[0].threadId).toBeNull()
     expect(state.focusedPaneId).toBe(state.panes[0].id)
   })
 
   it('retains pane thread bindings when expanding and shrinking layouts', () => {
-    const base = updatePaneThread(loadChatPaneState('chat-1', new MemoryStorage()), 'pane-1', 't1')
-    const expanded = applyChatLayout(base, 'split-3')
-    expect(expanded.panes).toHaveLength(3)
+    const paneOneBound = updatePaneThread(
+      loadChatPaneState('chat-1', new MemoryStorage()),
+      'pane-1',
+      't1',
+    )
+    const base = updatePaneThread(paneOneBound, 'pane-8', 't8')
+    const expanded = applyChatLayout(base, 'grid-8')
+    expect(expanded.panes).toHaveLength(8)
     expect(expanded.panes[0].threadId).toBe('t1')
-    expect(expanded.panes[1].threadId).toBeNull()
+    expect(expanded.panes[7].threadId).toBe('t8')
     const shrunk = applyChatLayout(expanded, 'single')
-    expect(shrunk.panes).toHaveLength(1)
+    expect(shrunk.panes).toHaveLength(8)
     expect(shrunk.panes[0].threadId).toBe('t1')
+    expect(shrunk.panes[7].threadId).toBe('t8')
+    expect(applyChatLayout(shrunk, 'grid-8').panes[7].threadId).toBe('t8')
   })
 
   it('normalizes corrupted storage and persists by chat id', () => {
@@ -59,7 +66,7 @@ describe('chat-pane-state', () => {
     saveChatPaneState('chat-1', state, storage)
     const loaded = loadChatPaneState('chat-1', storage)
     expect(loaded.layout).toBe('grid-6')
-    expect(loaded.panes).toHaveLength(6)
+    expect(loaded.panes).toHaveLength(8)
   })
 
   it('ignores unsupported nested pane bindings', () => {
@@ -86,7 +93,35 @@ describe('chat-pane-state', () => {
         focusedPaneId: 'gone',
         panes: [{ id: 'custom', threadId: null }],
       }))
-    expect(loadChatPaneState('custom', storage).focusedPaneId).toBe('custom')
+    expect(loadChatPaneState('custom', storage).focusedPaneId).toBe('pane-1')
+  })
+
+  it('retains hidden pane bindings and normalizes pane ids to pane-1 through pane-8', () => {
+    const storage = new MemoryStorage()
+    storage.setItem('kk-studio.chat-pane.hidden', JSON.stringify({
+      layout: 'single',
+      focusedPaneId: 'pane-1',
+      panes: [
+        { id: 'old-1', threadId: 't1' },
+        { id: 'old-2', threadId: 't2' },
+        null,
+        null,
+        null,
+        null,
+        null,
+        { id: 'old-8', threadId: 't8' },
+      ],
+    }))
+    const state = loadChatPaneState('hidden', storage)
+    expect(state.panes.map((pane) => pane.id)).toEqual([
+      'pane-1', 'pane-2', 'pane-3', 'pane-4',
+      'pane-5', 'pane-6', 'pane-7', 'pane-8',
+    ])
+    expect(state.panes[1].threadId).toBe('t2')
+    expect(state.panes[7].threadId).toBe('t8')
+    const expanded = applyChatLayout(state, 'grid-8')
+    expect(expanded.panes[1].threadId).toBe('t2')
+    expect(expanded.panes[7].threadId).toBe('t8')
   })
 
   it('sorts running items first then by preferred time', () => {

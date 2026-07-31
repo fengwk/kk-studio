@@ -10,6 +10,7 @@ import {
   listSessionEntries,
   snapshotEntries,
   snapshotInputs,
+  threadPageData,
   updateThreadHead,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -112,7 +113,7 @@ registerCase({
     const thread = await createUnboundThread(ctx)
     assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
     assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
-    const listed = envelopeData((await ctx.call('GET', '/api/ai/runtime/threads')).json) || []
+    const listed = threadPageData((await ctx.call('GET', '/api/ai/runtime/threads')).json).items
     assert(listed.some((t) => t.threadId === thread.threadId), 'created thread missing from global list')
     ctx.vars.unboundThread = thread
   },

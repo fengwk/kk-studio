@@ -13,6 +13,11 @@ export interface PageResult<T> {
   results: T[]
 }
 
+export interface CursorPage<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
 export type BackendDateTime = string | number[] | null
 
 /** Java {@code Instant} timestamp emitted by the backend's Jackson configuration. */

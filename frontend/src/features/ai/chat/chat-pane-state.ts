@@ -34,6 +34,7 @@ const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   'grid-8': 8,
 }
 
+const CHAT_PANE_COUNT = 8
 const STORAGE_PREFIX = 'kk-studio.chat-pane.'
 
 function storageKey(chatId: string): string {
@@ -49,8 +50,7 @@ function createEmptyPane(index: number): ChatPane {
 }
 
 function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneState {
-  const capacity = CHAT_LAYOUT_CAPACITY[layout]
-  const panes = Array.from({ length: capacity }, (_, index) => createEmptyPane(index))
+  const panes = Array.from({ length: CHAT_PANE_COUNT }, (_, index) => createEmptyPane(index))
   return {
     layout,
     focusedPaneId: panes[0]?.id ?? 'pane-1',
@@ -93,9 +93,8 @@ function parsePane(value: unknown, index: number): ChatPane {
   if (!isRecord(value)) {
     return createEmptyPane(index)
   }
-  const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : createPaneId(index)
   const threadId = parseThreadId(value.threadId)
-  return { id, threadId }
+  return { id: createPaneId(index), threadId }
 }
 
 function normalizeChatPaneState(raw: unknown): ChatPaneState {
@@ -104,14 +103,15 @@ function normalizeChatPaneState(raw: unknown): ChatPaneState {
     return defaults
   }
   const layout = parseLayout(raw.layout)
-  const capacity = CHAT_LAYOUT_CAPACITY[layout]
   const rawPanes = Array.isArray(raw.panes) ? raw.panes : []
   const panes: ChatPane[] = []
-  for (let index = 0; index < capacity; index += 1) {
+  for (let index = 0; index < CHAT_PANE_COUNT; index += 1) {
     panes.push(parsePane(rawPanes[index], index))
   }
+  const capacity = CHAT_LAYOUT_CAPACITY[layout]
   const focusedPaneId =
-    typeof raw.focusedPaneId === 'string' && panes.some((pane) => pane.id === raw.focusedPaneId)
+    typeof raw.focusedPaneId === 'string'
+    && panes.slice(0, capacity).some((pane) => pane.id === raw.focusedPaneId)
       ? raw.focusedPaneId
       : panes[0].id
   return {
@@ -123,18 +123,19 @@ function normalizeChatPaneState(raw: unknown): ChatPaneState {
   }
 }
 
-/** Resize panes when layout changes, retaining thread bindings where possible. */
+/** Changes only visibility capacity; all eight persisted pane bindings remain intact. */
 export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatPaneState {
   if (state.layout === layout) {
     return state
   }
-  const capacity = CHAT_LAYOUT_CAPACITY[layout]
-  const panes: ChatPane[] = []
-  for (let index = 0; index < capacity; index += 1) {
+  const panes = Array.from({ length: CHAT_PANE_COUNT }, (_, index) => {
     const existing = state.panes[index]
-    panes.push(existing ? { id: existing.id, threadId: existing.threadId } : createEmptyPane(index))
-  }
-  const focusedPaneId = panes.some((pane) => pane.id === state.focusedPaneId)
+    return existing
+      ? { id: createPaneId(index), threadId: existing.threadId }
+      : createEmptyPane(index)
+  })
+  const capacity = CHAT_LAYOUT_CAPACITY[layout]
+  const focusedPaneId = panes.slice(0, capacity).some((pane) => pane.id === state.focusedPaneId)
     ? state.focusedPaneId
     : panes[0].id
   return {
@@ -160,10 +161,15 @@ export function updatePaneThread(
 }
 
 export function focusPane(state: ChatPaneState, paneId: string): ChatPaneState {
-  if (!state.panes.some((pane) => pane.id === paneId)) {
+  const capacity = CHAT_LAYOUT_CAPACITY[state.layout]
+  if (!state.panes.slice(0, capacity).some((pane) => pane.id === paneId)) {
     return state
   }
   return { ...state, focusedPaneId: paneId }
+}
+
+export function visibleChatPanes(state: ChatPaneState): ChatPane[] {
+  return state.panes.slice(0, CHAT_LAYOUT_CAPACITY[state.layout])
 }
 
 export function loadChatPaneState(chatId: string, storage: Storage = localStorage): ChatPaneState {

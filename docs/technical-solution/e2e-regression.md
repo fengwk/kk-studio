@@ -2,11 +2,11 @@
 
 本文描述 `kk-studio` 当前生效的端到端自动化回归：矩阵分层、入口、报告目录、用例清单与维护方式。
 
-> `e2e` profile 通过 Flyway 对空 PostgreSQL 数据库执行 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 和 [`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。不再使用 H2/MySQL 作为 durable 存储；启动 e2e 前需提供可写空库（可用环境变量 `KK_STUDIO_DB_URL` / `KK_STUDIO_DB_USER` / `KK_STUDIO_DB_PASSWORD`）。`flyway_schema_history` 校验并记录已执行版本。
+> `e2e` profile 通过 Flyway 对空 PostgreSQL 数据库执行 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)、[`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql) 与 [`V3__chat_thread_and_default_agent.sql`](../../core/src/main/resources/db/migration/V3__chat_thread_and_default_agent.sql)。不再使用 H2/MySQL 作为 durable 存储；启动 e2e 前需提供可写空库（可用环境变量 `KK_STUDIO_DB_URL` / `KK_STUDIO_DB_USER` / `KK_STUDIO_DB_PASSWORD`）。`flyway_schema_history` 校验并记录已执行版本。
 
 ## 边界
 
-- **已覆盖**：API 契约、资源 CRUD、Model/Agent 配置校验矩阵、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、usage 语义；可选真模型/分支/tool。
+- **已覆盖**：API 契约、资源 CRUD、Chat↔Thread 历史关联与 opaque cursor 分页、Model/Agent 配置校验矩阵、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、usage 语义；可选真模型/分支/tool。
 - **未覆盖（默认）**：浏览器点击 UI、Canvas/ComfyUI 全流程、配置笛卡尔全组合穷举、SSE 多 Pane 视觉。
 - 真模型与 tool/branch 默认关闭，需显式参数。
 
@@ -67,7 +67,7 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke（L5） |
 | `scripts/e2e/lib/http.mjs` | fetch/断言 |
 | `scripts/e2e/lib/fixtures.mjs` | 合法体与配置矩阵行 |
-| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/重绑、Thread/Session 读取、等待静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
+| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/重绑、Thread page `{items,nextCursor}` 解析、Thread/Session 读取、等待静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/cases/*.mjs` | API 用例 |
 | `core/src/test/resources/.../pi-model-catalog.json` | Pi 0.82.1 有效模型目录快照 |
@@ -98,7 +98,7 @@ reports/e2e/LATEST_RUN.txt
 | L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；临时 Agent 显式绑定 `read` 后完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **59** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**53** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **60** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**54** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -120,7 +120,7 @@ API 矩阵注册 **59** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 | Case | 断言 |
 | --- | --- |
-| `thread.unbound_create` | `POST /api/ai/runtime/threads` 无 body => 201；`status=UNBOUND`，`headEntryId`/`sessionId` 为空，`executionEpoch=0`，无路径 Entry，且出现在 `GET /api/ai/runtime/threads` |
+| `thread.unbound_create` | `POST /api/ai/runtime/threads` 无 body => 201；`status=UNBOUND`，`headEntryId`/`sessionId` 为空，`executionEpoch=0`，无路径 Entry，且出现在 `GET /api/ai/runtime/threads` 的 `{items,nextCursor}` 中 |
 | `thread.unbound_message_rejected` | UNBOUND Thread 入队消息 => 409 thread is unbound；不写入 Input |
 | `thread.bootstrap_binds_session` | `POST /api/ai/runtime/threads/{id}/bootstrap` => 201 `{session, thread}`；复用同一 Thread，epoch+1，head 指向 `RUNTIME_CONFIG`，Session 由 head Entry 派生 |
 | `thread.stale_epoch_rejected` | message 与 `PUT /head` 携带过期 `expectedExecutionEpoch` => 409 stale execution epoch；head、epoch 与 mailbox 均不变 |
@@ -143,7 +143,8 @@ API 矩阵注册 **59** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `crud.agent.lifecycle` | create/update/delete agent（PUT/DELETE 使用版本） |
 | `crud.chat.invalid_agent_id` | 非正整数字符串 defaultAgentId => 400 |
 | `crud.model.delete_unknown_rejected` | 删除不存在 Model（`expectedVersion=0`）=> 404 |
-| `crud.chat.lifecycle` | create/update/delete chat；PUT/DELETE 使用版本；空白 title 更新拒绝；删后 404。Chat 不持有 Session |
+| `crud.chat.lifecycle` | create/update/delete chat；PUT/DELETE 使用版本；空白 title 更新拒绝；删后 404。Chat 不拥有 Thread/Session 生命周期 |
+| `crud.chat.thread_association_pagination` | Chat-scoped 原子创建 Thread；全局 Thread 幂等关联；当前 Chat 与全局列表返回 `{items,nextCursor}`，limit=1 的连续页无重复 |
 
 ### Model config 矩阵
 
@@ -221,7 +222,10 @@ GET|POST /api/ai/catalog/agents
 PUT|DELETE /api/ai/catalog/{providers,models,agents}/{id}            # expectedVersion 必填十进制字符串
 GET|POST /api/ai/chat
 GET|PUT|DELETE /api/ai/chat/{id}                                     # PUT/DELETE 的 expectedVersion 必填
-GET|POST /api/ai/runtime/threads                                    # POST 无 body => 201 UNBOUND Thread
+GET /api/ai/chat/{id}/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
+POST /api/ai/chat/{id}/threads                                     # 原子创建并关联 UNBOUND Thread
+PUT /api/ai/chat/{id}/threads/{threadId}                           # 幂等历史关联
+GET|POST /api/ai/runtime/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
 GET /api/ai/runtime/threads/{id}
 POST /api/ai/runtime/threads/{id}/bootstrap                          # => 201 {session, thread}
 PUT /api/ai/runtime/threads/{id}/head                                # headEntryId 可为 null
@@ -247,6 +251,9 @@ WebSocket /api/ai/environment/daemon/v1
 ```
 
 上述 Thread 写接口的请求体均含必填 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
+
+全局与 Chat-scoped Thread 列表统一返回 `data: {items, nextCursor}`；`recent` 按 `harness_thread.updated_at`、`created` 按
+`harness_thread.created_at` 降序 keyset，cursor 是绑定 sort 的 opaque token，默认 limit 为 20、最大为 100。
 
 Thread snapshot 的 `revision` 是十进制字符串的 durable cursor；SSE 的 `revision` 帧携带同一
 durable id，`resync` 提示客户端重新加载 snapshot。Redis `realtime` 增量无 SSE id，仅用于

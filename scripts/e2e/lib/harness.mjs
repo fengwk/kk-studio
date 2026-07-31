@@ -15,6 +15,22 @@ function executionEpochOf(thread) {
   return epoch
 }
 
+export function threadPageData(json, description = 'Thread page') {
+  const data = envelopeData(json)
+  assert(
+    data && typeof data === 'object' && Array.isArray(data.items),
+    `expected ${description} with items: ${JSON.stringify(json)}`,
+  )
+  assert(
+    data.nextCursor == null || typeof data.nextCursor === 'string',
+    `expected ${description} nextCursor: ${JSON.stringify(json)}`,
+  )
+  return {
+    items: data.items,
+    nextCursor: data.nextCursor ?? null,
+  }
+}
+
 function listData(json, description) {
   const data = envelopeData(json)
   assert(Array.isArray(data), `expected ${description} array: ${JSON.stringify(json)}`)

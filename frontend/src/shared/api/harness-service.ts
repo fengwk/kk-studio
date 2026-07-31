@@ -6,6 +6,7 @@ import type {
   HarnessThreadBootstrapDTO,
   HarnessThreadBootstrapResultDTO,
   HarnessThreadDTO,
+  HarnessThreadPage,
   HarnessThreadHeadUpdateDTO,
   HarnessThreadInputDTO,
   HarnessThreadMessageCreateDTO,
@@ -16,11 +17,27 @@ import type {
   HarnessThreadStopResultDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadYoloSetDTO,
+  ThreadListSort,
 } from '@/shared/api/contracts/ai-runtime'
+
+export interface ThreadListOptions {
+  sort?: ThreadListSort
+  cursor?: string
+  limit?: number
+}
 
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
-    listThreads: (): Promise<HarnessThreadDTO[]> => client.get('/ai/runtime/threads'),
+    listThreads: (options: ThreadListOptions = {}): Promise<HarnessThreadPage> => {
+      const params: Record<string, unknown> = {
+        sort: options.sort ?? 'recent',
+        limit: options.limit ?? 20,
+      }
+      if (options.cursor) {
+        params.cursor = options.cursor
+      }
+      return client.get('/ai/runtime/threads', { params })
+    },
     getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
       client.get(`/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`),
     /** Creates an UNBOUND Thread with no head; bind it via bootstrap or updateThreadHead. */

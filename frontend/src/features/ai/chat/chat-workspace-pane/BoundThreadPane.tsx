@@ -12,10 +12,9 @@ import {
 } from '@/features/ai/runtime'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import { AgentSelectionModal, SelectionListModal } from '@/features/ai/chat/SelectionListModal'
-import { sortWithRunningFirst, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
+import { type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import {
   canRebindThread,
-  isRunningThread,
   toThreadSelectionItem,
 } from '@/features/ai/chat/chat-session-picker'
 import { branchTarget } from '@/features/ai/chat/session-entry-tree'
@@ -23,6 +22,7 @@ import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/comm
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import { toThreadUsageSummary } from '@/features/ai/chat/chat-workspace-pane/usage-adapter'
 import { useChatSessionPicker } from '@/features/ai/chat/useChatSessionPicker'
+import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
   extractDefaultVariantFromModel,
   modelRef,
@@ -32,6 +32,7 @@ import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
+import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 /** 409 = stale executionEpoch or non-quiescent Thread; never swallow it silently. */
@@ -56,6 +57,7 @@ function firstNonEmpty(...values: unknown[]): string {
 }
 
 export function BoundThreadPane({
+  chatId,
   agents,
   paneId,
   threadId,
@@ -67,6 +69,7 @@ export function BoundThreadPane({
   onSessionSortChange,
   onThreadSortChange,
 }: {
+  chatId: string
   agents: AgentDefinitionDTO[]
   paneId: string
   threadId: string
@@ -92,7 +95,9 @@ export function BoundThreadPane({
   const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
+  const [threadAssociationPending, setThreadAssociationPending] = useState(false)
   const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
+  const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
   const rebindable = canRebindThread(controller.thread)
 
   useEffect(() => {
@@ -110,11 +115,6 @@ export function BoundThreadPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchDraft])
 
-  const threadsQuery = useQuery({
-    queryKey: queryKeys.threads.list,
-    queryFn: () => harnessService.listThreads(),
-    enabled: threadModalOpen,
-  })
   const sessionEntriesQuery = useQuery({
     queryKey: queryKeys.sessions.entries(historySessionId ?? ''),
     queryFn: () => harnessService.listSessionEntries(historySessionId!),
@@ -144,11 +144,23 @@ export function BoundThreadPane({
     },
   })
 
-  const threadItems = sortWithRunningFirst(
-    threadsQuery.data ?? [],
-    threadSort,
-    isRunningThread,
-  ).map(toThreadSelectionItem)
+  const threadItems = threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))
+
+  async function selectThread(selectedThreadId: string) {
+    setThreadAssociationPending(true)
+    try {
+      if (threadPicker.scope === 'global') {
+        await chatService.associateThread(chatId, selectedThreadId)
+        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.list })
+      }
+      setThreadModalOpen(false)
+      onThreadChange(selectedThreadId)
+    } catch (error) {
+      setRebindBlockedReason(errorMessage(error, '关联 Thread 失败'))
+    } finally {
+      setThreadAssociationPending(false)
+    }
+  }
 
   /** /session and /tree both relocate the current Thread, so both need a quiescent Thread. */
   function openRebindTarget(open: () => void) {
@@ -306,12 +318,18 @@ export function BoundThreadPane({
         items={threadItems}
         sort={threadSort}
         onSortChange={onThreadSortChange}
+        scope={threadPicker.scope}
+        onScopeChange={threadPicker.setScope}
+        loading={threadPicker.isLoading}
+        hasMore={threadPicker.hasNextPage}
+        loadingMore={threadPicker.isFetchingNextPage}
+        onLoadMore={() => {
+          void threadPicker.loadMore()
+        }}
+        selectionPending={threadAssociationPending}
         emptyText="暂无 Thread"
         onClose={() => setThreadModalOpen(false)}
-        onSelect={(selectedThreadId) => {
-          setThreadModalOpen(false)
-          onThreadChange(selectedThreadId)
-        }}
+        onSelect={selectThread}
       />
       <AgentSelectionModal
         open={agentModalOpen}

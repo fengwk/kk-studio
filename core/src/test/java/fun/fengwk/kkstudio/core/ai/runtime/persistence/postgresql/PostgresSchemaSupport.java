@@ -62,6 +62,9 @@ public abstract class PostgresSchemaSupport {
         // suppressClose preserves the connection lifecycle for the caller.
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations(locations)
+        // Profile seeds retain their V2 filenames; a baseline-only test may already have applied
+        // V3.
+        .outOfOrder(true)
         .validateMigrationNaming(true)
         .load()
         .migrate();

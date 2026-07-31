@@ -4,6 +4,7 @@ import {
   providerCreateBody,
   providerUpdateBody,
 } from '../lib/fixtures.mjs'
+import { createUnboundThread, threadPageData } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -348,5 +349,75 @@ registerCase({
 
     await ctx.call('DELETE', `/api/ai/chat/${chatId}?expectedVersion=${encodeURIComponent(updated.version)}`)
     await expectHttpError(() => ctx.call('GET', `/api/ai/chat/${chatId}`), { status: 404 })
+  },
+})
+
+registerCase({
+  id: 'crud.chat.thread_association_pagination',
+  level: 'L1',
+  title: 'Chat 关联 Thread 并按 opaque cursor 分页',
+  docs: 'Chat-scoped Thread 创建与全局 Thread 关联幂等；当前 Chat 与全局列表均返回 {items,nextCursor}',
+  async run(ctx) {
+    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
+    const agent = pageResults(agentsJson)[0]
+    assert(agent?.id, 'need seeded agent')
+
+    const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
+      title: `e2e-chat-thread-${cid().slice(0, 8)}`,
+      defaultAgentId: String(agent.id),
+    })
+    const chat = envelopeData(chatJson)
+    const chatId = String(chat.id)
+    try {
+      const { json: scopedCreateJson } = await ctx.call(
+        'POST',
+        `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
+      )
+      const scopedThread = envelopeData(scopedCreateJson)
+      assert(scopedThread.status === 'UNBOUND', JSON.stringify(scopedThread))
+
+      const globalThread = await createUnboundThread(ctx)
+      await ctx.call(
+        'PUT',
+        `/api/ai/chat/${encodeURIComponent(chatId)}/threads/${encodeURIComponent(globalThread.threadId)}`,
+      )
+      await ctx.call(
+        'PUT',
+        `/api/ai/chat/${encodeURIComponent(chatId)}/threads/${encodeURIComponent(globalThread.threadId)}`,
+      )
+
+      const { json: scopedPageJson } = await ctx.call(
+        'GET',
+        `/api/ai/chat/${encodeURIComponent(chatId)}/threads?sort=created&limit=100`,
+      )
+      const scopedPage = threadPageData(scopedPageJson, 'Chat Thread page')
+      const scopedIds = new Set(scopedPage.items.map((thread) => String(thread.threadId)))
+      assert(scopedIds.has(String(scopedThread.threadId)), 'Chat-scoped create missing from Chat list')
+      assert(scopedIds.has(String(globalThread.threadId)), 'associated global Thread missing from Chat list')
+      assert(scopedPage.nextCursor == null, 'limit=100 should contain this Chat fixture in one page')
+
+      const { json: firstGlobalJson } = await ctx.call(
+        'GET',
+        '/api/ai/runtime/threads?sort=recent&limit=1',
+      )
+      const firstGlobal = threadPageData(firstGlobalJson)
+      assert(firstGlobal.items.length === 1, JSON.stringify(firstGlobal))
+      assert(firstGlobal.nextCursor, 'global page must expose an opaque cursor when more rows exist')
+      const { json: secondGlobalJson } = await ctx.call(
+        'GET',
+        `/api/ai/runtime/threads?sort=recent&cursor=${encodeURIComponent(firstGlobal.nextCursor)}&limit=1`,
+      )
+      const secondGlobal = threadPageData(secondGlobalJson)
+      const firstIds = new Set(firstGlobal.items.map((thread) => String(thread.threadId)))
+      assert(
+        secondGlobal.items.every((thread) => !firstIds.has(String(thread.threadId))),
+        'keyset pages must be disjoint',
+      )
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chat/${encodeURIComponent(chatId)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
   },
 })

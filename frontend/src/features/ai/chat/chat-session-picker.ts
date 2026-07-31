@@ -1,6 +1,7 @@
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { sortWithRunningFirst } from '@/features/ai/chat/chat-pane-state'
 import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 
 export function isRunningThread(thread: HarnessThreadDTO): boolean {
   return (
@@ -74,12 +75,17 @@ export function toSessionSelectionItemWithRunning(
 }
 
 /** Global Thread picker row; UNBOUND Threads stay selectable so they can be bound later. */
-export function toThreadSelectionItem(thread: HarnessThreadDTO) {
+export function toThreadSelectionItem(
+  thread: HarnessThreadDTO,
+  sort: PaneSortPreference = 'recent',
+) {
   const running = isRunningThread(thread)
+  const time = formatBackendDate(sort === 'created' ? thread.createTime : thread.updateTime)
+  const context = thread.activeAgentName || thread.sessionTitle || thread.sessionId || '未绑定 Session'
   return {
     id: thread.threadId,
     title: thread.threadId,
-    subtitle: thread.activeAgentName || thread.sessionTitle || thread.sessionId || '未绑定 Session',
+    subtitle: time === '-' ? context : `${context} · ${time}`,
     badge: running ? 'RUNNING' : thread.status,
   }
 }

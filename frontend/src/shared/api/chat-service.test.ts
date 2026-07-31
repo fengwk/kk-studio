@@ -42,4 +42,18 @@ describe('chatService', () => {
     expect(service.attachChatSession).toBeUndefined()
     expect(service.detachChatSession).toBeUndefined()
   })
+
+  it('maps Chat-scoped Thread pagination, creation, and idempotent association', async () => {
+    const client = createClient()
+    const service = createChatService(client)
+    await service.listChatThreads('chat /1', { sort: 'created', cursor: 'opaque/cursor', limit: 7 })
+    await service.createChatThread('chat /1')
+    await service.associateThread('chat /1', 'thread /2')
+
+    expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
+      params: { sort: 'created', limit: 7, cursor: 'opaque/cursor' },
+    })
+    expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
+    expect(client.put).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads/thread%20%2F2')
+  })
 })
