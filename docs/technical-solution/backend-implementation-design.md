@@ -51,6 +51,14 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 
 `bootstrap`、`PUT /head`、`stop` 与全部 mailbox 请求体都含必填 `expectedExecutionEpoch`。epoch 过期或 Thread 非静止返回 `409`；未知 Thread/Session/Entry/Agent 返回 `404`。
 
+### HTTP 国际化
+
+- HTTP 用户可见错误支持 `Accept-Language: en-US` 与 `zh-CN`；缺失或不支持语言统一回退英文。成功载荷、HTTP 状态、稳定错误码和结构化上下文不随语言变化。
+- `StudioMessageService` 在 Web 边界使用 convention4j `AggregateResourceBundle.CONTROL` 与 `StringManager` 缓存两套 `string.properties` 资源。starter 自带的单一启动 Locale 只作为进程默认配置，不承担按请求切换。
+- `StudioDomainErrorAdvice` 依据 `DomainErrorCode` 本地化 `message`，保留 `errors.resource`、version conflict 字段，并把原始技术原因放入 `errors.detail`。
+- `StudioResponseStatusErrorAdvice` 本地化 `ResponseStatusException` 的顶层 `message` 与 `errors.title`，保留既有大写 HTTP code、`type=about:blank` 和原始 `detail`；SSE 错误继续由原有流式处理链处理。
+- Core exception、Harness 持久事实、模型/工具内容与日志保持 locale-independent；客户端不得解析本地化 message 做业务分支。
+
 ### Controller 映射
 
 | Controller | 路径前缀 | 职责 |

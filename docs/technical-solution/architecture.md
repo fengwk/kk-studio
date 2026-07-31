@@ -7,7 +7,7 @@
 | **Harness / AI** | 可恢复的 Agent Thread 执行与观测 |
 | **Studio / Canvas** | 全局单实例持久化画布（document / node / link / command-dedup） |
 
-两者共享同一部署与 `web` 入口；React 产物嵌入 Spring Boot Fat JAR 并由 `classpath:/static` 提供，但**领域模型、状态机、存储事实与前端 feature 分离**。
+两者共享同一部署与 `web` 入口；React 产物嵌入 Spring Boot Fat JAR 并由 `classpath:/static` 提供，但**领域模型、状态机、存储事实与前端 feature 分离**。Platform 提供全局 `en-US` / `zh-CN` Locale store，浏览器通过 `Accept-Language` 把当前选择传给 Web；后端仅本地化 HTTP 用户可见错误，不改变领域事实和稳定协议字段。
 
 词汇与映射见 [domain-map.md](domain-map.md)。
 
@@ -120,6 +120,7 @@ frontend/src
 ├── features/ai/         Harness 控制台（Thread 真 API）
 ├── features/canvas/     Studio 画布（真实 Library/Create；editor projection/commands 待完整接入）
 ├── shared/api/          HTTP 客户端（含 studio-service 契约）
+├── shared/i18n/         运行时 Locale store、语言选择器与分域双语 catalog
 └── styles.css           全局设计 token
 ```
 

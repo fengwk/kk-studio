@@ -173,8 +173,13 @@ describe('ChatWorkspacePage', () => {
 
     renderWorkspace()
     expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '语言' })).toBeInTheDocument()
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).toBeTruthy()
     expect(screen.getByText('新对话')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'English' }))
+    expect(screen.getByRole('group', { name: 'Language' })).toBeInTheDocument()
+    expect(screen.getByText('New conversation')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '6' }))
     expect(document.querySelector('.chat-pane-grid.layout-grid-6')).toBeTruthy()

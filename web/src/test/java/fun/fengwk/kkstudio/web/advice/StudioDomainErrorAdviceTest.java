@@ -9,8 +9,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
+import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
@@ -79,5 +84,74 @@ class StudioDomainErrorAdviceTest {
             "detail",
             "agent_model version conflict: expected=3 actual=4 id=2"),
         conflictBody.getErrors());
+  }
+
+  @Test
+  void localizesMethodArgumentTypeMismatchWithoutLosingTheDiagnosticValue() {
+    StudioDomainErrorAdvice advice = new StudioDomainErrorAdvice(new StudioMessageService());
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+
+    ResponseEntity<Result<Void>> response =
+        advice.handleTypeMismatch(
+            new MethodArgumentTypeMismatchException("invalid", Integer.class, "limit", null, null));
+
+    assertEquals(400, response.getStatusCode().value());
+    assertNotNull(response.getBody());
+    Result<Void> body = response.getBody();
+    assertEquals("validation", body.getCode());
+    assertEquals("limit 参数的值无效。", body.getMessage());
+    assertEquals(
+        Map.of("resource", "limit", "detail", "limit has invalid value: invalid"),
+        body.getErrors());
+  }
+
+  @Test
+  void localizesEveryDomainKindAndMissingRequestParameters() {
+    StudioDomainErrorAdvice advice = new StudioDomainErrorAdvice(new StudioMessageService());
+    LocaleContextHolder.setLocale(Locale.US);
+
+    assertError(
+        advice.handleNotFound(new AiResourceNotFoundException("agent", "missing agent")),
+        404,
+        "resource_not_found",
+        "The agent was not found.",
+        "agent",
+        "missing agent");
+    assertError(
+        advice.handleDuplicate(new AiDuplicateException("model", "duplicate model")),
+        409,
+        "duplicate",
+        "The model already exists.",
+        "model",
+        "duplicate model");
+    assertError(
+        advice.handleInUse(new AiInUseException("provider", "provider in use")),
+        409,
+        "in_use",
+        "The provider is still in use.",
+        "provider",
+        "provider in use");
+    assertError(
+        advice.handleMissingParam(new MissingServletRequestParameterException("cursor", "String")),
+        400,
+        "validation",
+        "The cursor parameter is required.",
+        "cursor",
+        "cursor is required");
+  }
+
+  private static void assertError(
+      ResponseEntity<Result<Void>> response,
+      int status,
+      String code,
+      String message,
+      String resource,
+      String detail) {
+    assertEquals(status, response.getStatusCode().value());
+    assertNotNull(response.getBody());
+    Result<Void> body = response.getBody();
+    assertEquals(code, body.getCode());
+    assertEquals(message, body.getMessage());
+    assertEquals(Map.of("resource", resource, "detail", detail), body.getErrors());
   }
 }

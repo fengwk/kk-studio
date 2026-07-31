@@ -36,6 +36,8 @@ class StudioMessageServiceTest {
         "agent_model 已被其他请求修改。",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
+    assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));
+    assertEquals("limit 参数的值无效。", messageService.validationTypeMismatch("limit"));
     assertEquals("请求无效。", messageService.httpMessage(400));
     assertEquals("请求错误", messageService.httpTitle(400));
   }

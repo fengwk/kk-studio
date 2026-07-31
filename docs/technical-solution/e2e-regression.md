@@ -6,7 +6,7 @@
 
 ## 边界
 
-- **已覆盖**：API 契约、资源 CRUD、Chat↔Thread 历史关联与 opaque cursor 分页、Model/Agent 配置校验矩阵、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、usage 语义；可选真模型/分支/tool。
+- **已覆盖**：API 契约、HTTP `Accept-Language` 错误国际化、资源 CRUD、Chat↔Thread 历史关联与 opaque cursor 分页、Model/Agent 配置校验矩阵、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、usage 语义；可选真模型/分支/tool。
 - **未覆盖（默认）**：浏览器点击 UI、Canvas/ComfyUI 全流程、配置笛卡尔全组合穷举、SSE 多 Pane 视觉。
 - 真模型与 tool/branch 默认关闭，需显式参数。
 
@@ -98,7 +98,7 @@ reports/e2e/LATEST_RUN.txt
 | L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；临时 Agent 显式绑定 `read` 后完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
-API 矩阵注册 **60** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**54** 条）。`--ui` 额外 **14** 条 UI smoke（`--real` 时再 +1 真实首发）。
+API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**55** 条）。`--ui` 额外 **15** 条 UI smoke（`--real` 时再 +1 真实首发）。
 
 ## L1 用例清单
 
@@ -108,6 +108,7 @@ API 矩阵注册 **60** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | --- | --- |
 | `seed.structured_model_config` | 19 个模型完整匹配 Pi 快照；xAI 仅 `grok-4.5`；禁止旧 JSON 字段 |
 | `seed.agent_and_provider` | seed agent；七个 Provider 及协议映射 |
+| `i18n.error_response_accept_language` | Domain error 与 ResponseStatusException 按 `en-US`/`zh-CN` 本地化 message/title；status/code/context/detail 稳定，不支持语言回退英文 |
 | `thread.blank_first_send_order` | 首发顺序 `createThread -> bootstrap -> USER_MESSAGE`；bootstrap 的 `RUNTIME_CONFIG` 先在路径上，mailbox 只有 USER_MESSAGE 且被 APPLIED |
 | `thread_snapshot.unknown_thread_404` | 未知 Thread snapshot 404 |
 | `frontend.proxy_model_contract` | 5173 代理契约 |
