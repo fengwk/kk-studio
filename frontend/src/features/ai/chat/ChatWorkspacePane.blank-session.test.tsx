@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
+import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { agentService } from '@/shared/api/agent-service'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
@@ -13,6 +14,13 @@ vi.mock('@/shared/api/agent-service', () => ({
     listAgents: vi.fn(),
     listModels: vi.fn(),
     listProviders: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/chat-service', () => ({
+  chatService: {
+    listChatThreads: vi.fn(),
+    createChatThread: vi.fn(),
+    associateThread: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -73,7 +81,7 @@ const agents = [
 function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onDefaultAgentChange?: (agentId: string) => Promise<void>
-  defaultAgentId?: string | null
+  defaultAgentId?: string
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -146,50 +154,90 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   it('opens the global /thread picker and only switches the pane target', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.listThreads).mockResolvedValue([
-      thread({
-        threadId: 't-idle',
-        sessionId: 's-idle',
-        sessionTitle: 'Idle',
-        headEntryId: 'h1',
-        status: 'IDLE',
-        executionEpoch: 2,
-        updateTime: '2026-07-20T12:00:00Z',
-        createTime: '2026-07-20T12:00:00Z',
-      }),
-      thread({
-        threadId: 't-running',
-        sessionId: 's-running',
-        sessionTitle: 'Running',
-        headEntryId: 'h2',
-        status: 'RUNNING',
-        executionEpoch: 3,
-        processing: true,
-        updateTime: '2026-07-19T12:00:00Z',
-        createTime: '2026-07-19T12:00:00Z',
-      }),
-      thread({ threadId: 't-unbound', updateTime: '2026-07-18T12:00:00Z', createTime: '2026-07-18T12:00:00Z' }),
-    ])
+    const events: string[] = []
+    vi.mocked(harnessService.listThreads).mockResolvedValue({
+      items: [
+        thread({
+          threadId: 't-idle',
+          sessionId: 's-idle',
+          sessionTitle: 'Idle',
+          headEntryId: 'h1',
+          status: 'IDLE',
+          executionEpoch: 2,
+          updateTime: '2026-07-20T12:00:00Z',
+          createTime: '2026-07-20T12:00:00Z',
+        }),
+        thread({
+          threadId: 't-running',
+          sessionId: 's-running',
+          sessionTitle: 'Running',
+          headEntryId: 'h2',
+          status: 'RUNNING',
+          executionEpoch: 3,
+          processing: true,
+          updateTime: '2026-07-19T12:00:00Z',
+          createTime: '2026-07-19T12:00:00Z',
+        }),
+        thread({ threadId: 't-unbound', updateTime: '2026-07-18T12:00:00Z', createTime: '2026-07-18T12:00:00Z' }),
+      ],
+      nextCursor: null,
+    })
 
-    const { onThreadChange } = renderBlankPane()
+    vi.mocked(chatService.associateThread).mockImplementation(async () => {
+      events.push('associate')
+    })
+    const onThreadChange = vi.fn(() => {
+      events.push('bind')
+    })
+    renderBlankPane({ onThreadChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
 
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
-    // Running-first ordering: the older RUNNING Thread outranks the newer IDLE one.
+    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
+    // The API owns ordering; recent mode keeps the newer IDLE Thread first.
     const items = await screen.findAllByRole('button', { name: /^t-/ })
-    expect(items[0]).toHaveTextContent('t-running')
-    expect(items[0]).toHaveTextContent('RUNNING')
+    expect(items[0]).toHaveTextContent('t-idle')
+    expect(items[0]).toHaveTextContent('2026-07-20 12:00')
     // UNBOUND Threads remain selectable so /session or /tree can bind them later.
     expect(items.some((item) => item.textContent?.includes('UNBOUND'))).toBe(true)
 
     await user.click(screen.getByRole('button', { name: /t-running/ }))
     expect(onThreadChange).toHaveBeenCalledWith('t-running')
+    expect(chatService.associateThread).toHaveBeenCalledWith('chat-1', 't-running')
+    expect(events).toEqual(['associate', 'bind'])
     // Selecting a Thread never mutates it and never runs the first-send path.
-    expect(harnessService.createThread).not.toHaveBeenCalled()
+    expect(chatService.createChatThread).not.toHaveBeenCalled()
     expect(harnessService.bootstrapThread).not.toHaveBeenCalled()
     expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not bind a global Thread when Chat association fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.listThreads).mockResolvedValue({
+      items: [thread({
+        threadId: 't-global',
+        sessionId: 's-global',
+        sessionTitle: 'Global',
+        headEntryId: 'h-global',
+        status: 'IDLE',
+        executionEpoch: 1,
+      })],
+      nextCursor: null,
+    })
+    vi.mocked(chatService.associateThread).mockRejectedValue(new Error('association failed'))
+    const { onThreadChange } = renderBlankPane()
+
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
+    await user.click(await screen.findByRole('button', { name: /t-global/ }))
+
+    await waitFor(() => expect(screen.getByText('association failed')).toBeInTheDocument())
+    expect(onThreadChange).not.toHaveBeenCalled()
+    expect(screen.getByText('选择 Thread')).toBeInTheDocument()
   })
 
   it('surfaces rejected default-agent update without unhandled rejection', async () => {
@@ -197,7 +245,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const onDefaultAgentChange = vi.fn(async () => {
       throw new Error('default agent update failed')
     })
-    renderBlankPane({ defaultAgentId: null, onDefaultAgentChange })
+    renderBlankPane({ defaultAgentId: 'missing', onDefaultAgentChange })
 
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello need agent')
@@ -209,12 +257,12 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       expect(screen.getByText('default agent update failed')).toBeInTheDocument()
     })
     expect(onDefaultAgentChange).toHaveBeenCalledWith('a1')
-    expect(harnessService.createThread).not.toHaveBeenCalled()
+    expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
 
   it('restores the draft and reports the failure when bootstrap rejects', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.createThread).mockResolvedValue(thread({ threadId: 't-new' }))
+    vi.mocked(chatService.createChatThread).mockResolvedValue(thread({ threadId: 't-new' }))
     vi.mocked(harnessService.bootstrapThread).mockRejectedValue(new Error('unknown agent definition: a1'))
 
     const { onThreadChange } = renderBlankPane()

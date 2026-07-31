@@ -333,7 +333,7 @@ runnable = false
 | --- | --- | --- |
 | Streams realtime | Model delta / Tool partial 有界投影 | 客户端重新 REST snapshot |
 
-activation 只经 PostgreSQL execution-target dispatcher 完成。客户端顺序：REST snapshot（Thread/Entries/Inputs/Invocations/Interactions）→ SSE 事件名 `realtime`，cursor 为 Redis stream-id。realtime 失败不改变 durable outcome。
+activation 只经 PostgreSQL execution-target dispatcher 完成。客户端先读取 REST snapshot（Thread/Entries/Inputs/Invocations/Interactions），再以 durable Thread revision 打开 SSE。Redis `realtime` 事件没有 SSE id，浏览器重连从 live edge 重新开始；realtime 失败不改变 durable outcome。
 
 ## 10. 并发不变量
 

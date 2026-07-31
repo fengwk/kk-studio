@@ -15,6 +15,8 @@ public class ChatDTO {
 
   private String id;
   private String title;
+
+  /** Always present in persisted Chat state; the referenced Agent may later be stale. */
   private String defaultAgentId;
 
   /** Non-negative decimal string version; clients must echo on every update. */

@@ -14,7 +14,7 @@ public class ChatDO {
   /** 可选标题。 */
   private String title;
 
-  /** 可选默认 Agent definition id；不建立外键，Agent 删除后可保留陈旧值。 */
+  /** 必填默认 Agent definition id；不建立外键，Agent 删除后可保留陈旧值。 */
   private Long defaultAgentId;
 
   /** 乐观锁行版本。 */

@@ -26,8 +26,8 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
 describe('performBlankPaneFirstSend', () => {
   it('creates an UNBOUND Thread, bootstraps it, then enqueues USER_MESSAGE with the bootstrap epoch', async () => {
     const calls: string[] = []
-    const createThread = vi.fn(async () => {
-      calls.push('createThread')
+    const createChatThread = vi.fn(async (chatId: string) => {
+      calls.push(`createChatThread:${chatId}`)
       return thread({ threadId: 't1', executionEpoch: 0, status: 'UNBOUND' })
     })
     const bootstrapThread = vi.fn(async (threadId: string) => {
@@ -70,16 +70,17 @@ describe('performBlankPaneFirstSend', () => {
     )
 
     const result = await performBlankPaneFirstSend({
+      chatId: 'chat-1',
       agentDefinitionId: 'a1',
       content: 'hello',
-      createThread,
+      createChatThread,
       bootstrapThread,
       submitThreadMessage,
       createIds: () => ({ userMessageId: 'cid-user' }),
     })
 
-    // Strict order: create -> bootstrap -> message. No POST /sessions, no chat attach, no SET_AGENT.
-    expect(calls).toEqual(['createThread', 'bootstrap:t1', 'user:t1:cid-user:hello:1'])
+    // Strict order: chat-scoped create -> bootstrap -> message. Association is part of create.
+    expect(calls).toEqual(['createChatThread:chat-1', 'bootstrap:t1', 'user:t1:cid-user:hello:1'])
     // Bootstrap fences against the epoch of the freshly created UNBOUND Thread.
     expect(bootstrapThread).toHaveBeenCalledWith('t1', {
       title: undefined,
@@ -100,7 +101,7 @@ describe('performBlankPaneFirstSend', () => {
   })
 
   it('forwards the requested title and yolo flag into bootstrap', async () => {
-    const createThread = vi.fn(async () => thread({ threadId: 't7', executionEpoch: 5 }))
+    const createChatThread = vi.fn(async () => thread({ threadId: 't7', executionEpoch: 5 }))
     const bootstrapThread = vi.fn(async () => ({
       session: {
         sessionId: 's7',
@@ -123,11 +124,12 @@ describe('performBlankPaneFirstSend', () => {
     }))
 
     await performBlankPaneFirstSend({
+      chatId: 'chat-1',
       agentDefinitionId: 'a2',
       content: 'go',
       title: 'Titled',
       yoloEnabled: true,
-      createThread,
+      createChatThread,
       bootstrapThread,
       submitThreadMessage,
       createIds: () => ({ userMessageId: 'cid' }),
@@ -142,7 +144,7 @@ describe('performBlankPaneFirstSend', () => {
   })
 
   it('surfaces a bootstrap failure without enqueuing the message', async () => {
-    const createThread = vi.fn(async () => thread({ threadId: 't9' }))
+    const createChatThread = vi.fn(async () => thread({ threadId: 't9' }))
     const bootstrapThread = vi.fn(async () => {
       throw new Error('unknown agent definition: 404')
     })
@@ -150,9 +152,10 @@ describe('performBlankPaneFirstSend', () => {
 
     await expect(
       performBlankPaneFirstSend({
+        chatId: 'chat-1',
         agentDefinitionId: 'missing',
         content: 'hello',
-        createThread,
+        createChatThread,
         bootstrapThread,
         submitThreadMessage: submitThreadMessage as never,
       }),

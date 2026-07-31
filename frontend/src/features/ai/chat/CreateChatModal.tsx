@@ -59,15 +59,12 @@ export function CreateChatModal({
             {nameError ? <span className="field-error">{nameError}</span> : null}
           </label>
           <label className="form-group">
-            <FieldLabel>Default Agent</FieldLabel>
+            <FieldLabel required>Default Agent</FieldLabel>
             <FormSelect
               aria-label="Default Agent"
               value={selectedAgentId}
-              placeholder="（无）"
-              options={[
-                { value: '', label: '（无）' },
-                ...agents.map((agent) => ({ value: String(agent.id), label: agent.name })),
-              ]}
+              placeholder="请选择 Agent"
+              options={agents.map((agent) => ({ value: String(agent.id), label: agent.name }))}
               onChange={onSelectAgent}
             />
           </label>

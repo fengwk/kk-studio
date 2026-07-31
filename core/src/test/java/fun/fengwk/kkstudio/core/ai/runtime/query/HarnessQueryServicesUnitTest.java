@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.tool.worker.PostgresqlToolInvocationM
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -83,10 +84,14 @@ class HarnessQueryServicesUnitTest {
     thread.setHasQueuedInput(true);
     when(queryMapper.findThreadView(21L)).thenReturn(thread);
     when(queryMapper.findSession(1L)).thenReturn(session(1L, "root"));
-    when(queryMapper.listAllThreadViews()).thenReturn(List.of(thread));
+    when(queryMapper.listThreadViews(null, "recent", null, null, 21)).thenReturn(List.of(thread));
     HarnessThreadDTO dto = threadQuery.getThread("21");
     assertEquals("WAITING", dto.getStatus());
-    assertEquals(1, threadQuery.listAll().size());
+    CursorPageDTO<HarnessThreadDTO> page = threadQuery.listAll("recent", null, 20);
+    assertEquals(1, page.getItems().size());
+    assertNull(page.getNextCursor());
+    assertThrows(
+        IllegalArgumentException.class, () -> threadQuery.listByChat(0L, "recent", null, 20));
     assertThrows(IllegalArgumentException.class, () -> threadQuery.getThread("999"));
   }
 
@@ -94,13 +99,13 @@ class HarnessQueryServicesUnitTest {
   void unboundThreadIsVisible() {
     HarnessQueryRow unbound = thread(31L, null, null, false, false);
     when(queryMapper.findThreadView(31L)).thenReturn(unbound);
-    when(queryMapper.listAllThreadViews()).thenReturn(List.of(unbound));
+    when(queryMapper.listThreadViews(null, "recent", null, null, 21)).thenReturn(List.of(unbound));
 
     HarnessThreadDTO dto = threadQuery.getThread("31");
     assertEquals("UNBOUND", dto.getStatus());
     assertNull(dto.getSessionId());
     assertNull(dto.getHeadEntryId());
-    assertEquals(1, threadQuery.listAll().size());
+    assertEquals(1, threadQuery.listAll("recent", null, 20).getItems().size());
   }
 
   @Test

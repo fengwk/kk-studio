@@ -18,8 +18,7 @@ public class ChatConverter {
     ChatDTO dto = new ChatDTO();
     dto.setId(ChatIds.format(chat.getId()));
     dto.setTitle(chat.getTitle());
-    dto.setDefaultAgentId(
-        chat.getDefaultAgentId() == null ? null : ChatIds.format(chat.getDefaultAgentId()));
+    dto.setDefaultAgentId(ChatIds.format(chat.getDefaultAgentId()));
     dto.setVersion(CatalogVersions.format(chat.getVersion()));
     dto.setCreateTime(chat.getCreateTime());
     dto.setUpdateTime(chat.getUpdateTime());

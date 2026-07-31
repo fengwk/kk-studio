@@ -2,6 +2,7 @@ import type {
   BackendBigDecimal,
   BackendDateTime,
   BackendLong,
+  CursorPage,
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
 
@@ -85,6 +86,9 @@ export interface HarnessThreadDTO {
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
+
+export type ThreadListSort = 'recent' | 'created'
+export type HarnessThreadPage = CursorPage<HarnessThreadDTO>
 
 /** Every external Thread mutation carries the expected epoch; a stale value yields 409. */
 interface HarnessThreadEpochGuardDTO {

@@ -379,8 +379,19 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/ai/runtime/threads"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[?(@.threadId=='" + threadId + "')]").exists())
-        .andExpect(jsonPath("$.data[?(@.threadId=='" + otherThreadId + "')]").exists());
+        .andExpect(jsonPath("$.data.items[?(@.threadId=='" + threadId + "')]").exists())
+        .andExpect(jsonPath("$.data.items[?(@.threadId=='" + otherThreadId + "')]").exists())
+        .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
+    mockMvc
+        .perform(get("/api/ai/runtime/threads").param("sort", "unsupported"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/ai/runtime/threads").param("sort", "recent").param("limit", "101"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            get("/api/ai/runtime/threads").param("sort", "recent").param("cursor", "not-a-cursor"))
+        .andExpect(status().isBadRequest());
 
     mockMvc
         .perform(post("/api/ai/runtime/threads/{id}/retry", threadId))

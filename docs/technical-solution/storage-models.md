@@ -39,7 +39,8 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 
 | 表 | 职责 | 关键字段 / 约束 |
 | --- | --- | --- |
-| `chat` | 持久 Chat 集合与默认 Agent | `default_agent_id` 可空；不关联 Session/Thread |
+| `chat` | 持久 Chat 集合与默认 Agent 引用 | `default_agent_id` 非空；写入时必须指向现存 Agent，但不设 FK，因此 Agent 删除后允许保留 stale id |
+| `chat_thread` | Chat↔Thread 历史多对多关联 | `(chat_id, thread_id)` 主键；Chat 删除级联关系，Thread 不被删除；`created_at` 仅为关系审计，不参与 Thread 活跃排序 |
 | `harness_session` | Entry Tree 容器 | `id`、`title`、`created_at`；仅与 append-only Entry Tree 关联，存储上不持有 Thread |
 | `harness_entry` | append-only 语义历史 | `session_id`、`parent_entry_id`、`entry_type`、`payload` jsonb；类型为 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED`（`ASSISTANT_ABORTED` 仅承载安全 text/thinking） |
 | `harness_thread` | 可复用 durable runtime process | 可空 `head_entry_id`（单列 FK）、`input_sequence`、`runnable`、`execution_epoch`、`processor_token`/`processor_until` |
@@ -53,7 +54,7 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 | `harness_artifact` | 全局不可变 Tool 输出 | content bytea、media type、size、SHA-256 |
 | `harness_model_usage` | Assistant 用量账本 | 唯一 `assistant_entry_id` |
 
-Chat 不保存 Pane；Pane 仅在浏览器 localStorage。Session **不**保存 Thread、Branch 或完整 Agent 配置副本。Thread 行不保存 `session_id`，也不保存 Agent/model 当前列：当前 Session 由 `head_entry_id` 派生，配置以 `RUNTIME_CONFIG` Entry 为权威。
+Chat 不保存 Pane；Pane 始终在浏览器 localStorage 中保存 `pane-1..pane-8` 八个固定槽位，layout 只决定前 N 个槽位是否渲染。Chat↔Thread 关系是历史聚合，不是 Thread 所有权；一个 Thread 可以被多个 Chat 关联。Session **不**保存 Thread、Branch 或完整 Agent 配置副本。Thread 行不保存 `session_id`，也不保存 Agent/model 当前列：当前 Session 由 `head_entry_id` 派生，配置以 `RUNTIME_CONFIG` Entry 为权威。
 
 Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`harness_model_invocation.source_head_entry_id` 单列 FK 到 `harness_entry(id)`，thread↔session 一致性由上游 Thread 命令通过 head Entry 维护；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与账本/调用属于同一 Session。head 重定位通过递增 `execution_epoch` 隔离旧代际，因此 tool invocation 的来源唯一键含 `execution_epoch`。
 

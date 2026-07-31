@@ -111,7 +111,9 @@ describe('harnessService', () => {
     // A null headEntryId clears the head back to UNBOUND.
     await service.updateThreadHead('thread /1', { headEntryId: null, expectedExecutionEpoch: 2 })
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/runtime/threads')
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/runtime/threads', {
+      params: { sort: 'recent', limit: 20 },
+    })
     // POST /ai/runtime/threads takes no body.
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads')
     expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/bootstrap', {
@@ -161,5 +163,14 @@ describe('harnessService', () => {
     vi.stubGlobal('EventSource', eventSource)
     createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993')
     expect(eventSource).toHaveBeenCalledWith('/api/ai/runtime/threads/1/events/stream?afterRevision=9007199254740993')
+  })
+
+  it('passes opaque keyset pagination parameters without decoding the cursor', async () => {
+    const client = createClient()
+    const service = createHarnessService(client)
+    await service.listThreads({ sort: 'created', cursor: 'opaque/cursor', limit: 3 })
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads', {
+      params: { sort: 'created', limit: 3, cursor: 'opaque/cursor' },
+    })
   })
 })

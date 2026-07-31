@@ -45,13 +45,10 @@ public class ChatGuard {
     return chat;
   }
 
-  /**
-   * Validates a non-null default agent id against the current Agent catalog. Blank/null is allowed
-   * and means "no default". Missing agent raises {@link AiValidationException}.
-   */
-  public void ensureDefaultAgentExistsIfPresent(Long defaultAgentId) {
+  /** Validates a required default Agent id against the current catalog. */
+  public void ensureDefaultAgentExists(Long defaultAgentId) {
     if (defaultAgentId == null) {
-      return;
+      throw new AiValidationException(RESOURCE, "defaultAgentId must not be null");
     }
     if (agentDefinitionRepository.getById(defaultAgentId) == null) {
       throw new AiValidationException(

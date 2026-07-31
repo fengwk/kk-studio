@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
@@ -9,6 +9,7 @@ import {
   loadChatPaneState,
   saveChatPaneState,
   updatePaneThread,
+  visibleChatPanes,
   type ChatLayout,
   type ChatPaneState,
   type PaneSortPreference,
@@ -31,6 +32,7 @@ export function ChatWorkspacePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
+  const migratedChatId = useRef<string | null>(null)
 
   useEffect(() => {
     setPaneState(loadChatPaneState(chatId))
@@ -53,6 +55,27 @@ export function ChatWorkspacePage() {
     queryFn: () => agentService.listAgents(),
   })
   const agents = agentsQuery.data?.results ?? []
+
+  useEffect(() => {
+    if (!chatQuery.data?.id || !chatId || migratedChatId.current === chatId) {
+      return
+    }
+    migratedChatId.current = chatId
+    const persistedState = loadChatPaneState(chatId)
+    const threadIds = [...new Set(persistedState.panes
+      .map((pane) => pane.threadId)
+      .filter((threadId): threadId is string => Boolean(threadId)))]
+    if (threadIds.length === 0) {
+      return
+    }
+    // Old local bindings are historical UI state. Associate each one idempotently, but never
+    // clear a pane when a stale or temporarily unavailable Thread cannot be associated.
+    void Promise.allSettled(
+      threadIds.map((threadId) => chatService.associateThread(chatId, threadId)),
+    ).then(() => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.list })
+    })
+  }, [chatId, chatQuery.data?.id, queryClient])
 
   const updateChatMutation = useMutation({
     mutationFn: ({
@@ -104,6 +127,7 @@ export function ChatWorkspacePage() {
 
   const chat = chatQuery.data
   const title = chat.title || chat.id
+  const visiblePanes = visibleChatPanes(paneState)
 
   return (
     <section className="chat-workspace screen active">
@@ -128,7 +152,7 @@ export function ChatWorkspacePage() {
         </div>
       </header>
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
-        {paneState.panes.map((pane) => (
+        {visiblePanes.map((pane) => (
           <ChatWorkspacePane
             key={pane.id}
             chat={chat}

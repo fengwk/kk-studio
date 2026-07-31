@@ -18,7 +18,7 @@ function resolveChatDefaultAgentId(
   if (selectedAgentId && agents.some((agent) => String(agent.id) === selectedAgentId)) {
     return selectedAgentId
   }
-  return ''
+  return agents[0] ? String(agents[0].id) : ''
 }
 
 export function useChatListController(
@@ -42,7 +42,7 @@ export function useChatListController(
     mutationFn: () =>
       chatService.createChat({
         title: title.trim(),
-        defaultAgentId: selectedAgentId || undefined,
+        defaultAgentId: selectedAgentId,
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
@@ -79,6 +79,10 @@ export function useChatListController(
     if (!title.trim()) {
       setFormError('请填写 Chat 名称')
       setNameError('请填写名称')
+      return
+    }
+    if (!selectedAgentId) {
+      setFormError('请选择 Default Agent')
       return
     }
     setFormError('')

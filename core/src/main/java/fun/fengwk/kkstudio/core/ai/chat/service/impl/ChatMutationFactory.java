@@ -14,9 +14,8 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
  * Normalizes Chat mutable fields and allocates Chat ids.
  *
  * <p>Update semantics: {@code null} fields preserve the current value. Chat title is required when
- * supplied; blank {@code defaultAgentId} clears that optional field. Non-blank {@code
- * defaultAgentId} is parsed as a positive decimal string; catalog existence is validated by {@link
- * ChatGuard}.
+ * supplied; a supplied {@code defaultAgentId} must be non-blank and is parsed as a positive decimal
+ * string. Catalog existence is validated by {@link ChatGuard}.
  */
 @Component
 public class ChatMutationFactory {
@@ -45,7 +44,7 @@ public class ChatMutationFactory {
     }
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
-    chat.setDefaultAgentId(parseOptionalAgentId(createDTO.getDefaultAgentId()));
+    chat.setDefaultAgentId(parseRequiredAgentId(createDTO.getDefaultAgentId()));
     return chat;
   }
 
@@ -65,18 +64,18 @@ public class ChatMutationFactory {
       chat.setTitle(title);
     }
     if (updateDTO.getDefaultAgentId() != null) {
-      chat.setDefaultAgentId(parseOptionalAgentId(updateDTO.getDefaultAgentId()));
+      chat.setDefaultAgentId(parseRequiredAgentId(updateDTO.getDefaultAgentId()));
     }
   }
 
-  /** Parses optional agent id text. {@code null} and blank input both map to {@code null}. */
-  private Long parseOptionalAgentId(String raw) {
+  /** Parses the required Agent id text. */
+  private Long parseRequiredAgentId(String raw) {
     if (raw == null) {
-      return null;
+      throw new AiValidationException(RESOURCE, "defaultAgentId must not be blank");
     }
     String trimmed = raw.trim();
     if (trimmed.isEmpty()) {
-      return null;
+      throw new AiValidationException(RESOURCE, "defaultAgentId must not be blank");
     }
     return ChatIds.parsePositive(trimmed, "defaultAgentId");
   }

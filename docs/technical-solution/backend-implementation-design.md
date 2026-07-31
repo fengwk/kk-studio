@@ -32,9 +32,10 @@ flowchart LR
 | 域 | 接口 | 用途 |
 | --- | --- | --- |
 | Provider / Model / Agent | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents` | 全局 Agent 资源 CRUD |
-| Chat | `/api/ai/chat` | 持久 Chat CRUD；Chat 不持有 Session/Thread |
+| Chat | `/api/ai/chat` | 持久 Chat CRUD；`defaultAgentId` 写入时必填且必须存在，Agent 删除后允许 stale；Chat 通过历史关系聚合 Thread |
+| Chat Thread | `GET/POST /api/ai/chat/{chatId}/threads`、`PUT /api/ai/chat/{chatId}/threads/{threadId}` | Chat 范围 opaque keyset 列表、Chat-scoped 原子创建与幂等关联 |
 | Session | `GET /api/ai/runtime/sessions`、`GET /api/ai/runtime/sessions/{sessionId}`、`/entries` | flat Session 查询与 Session Entry Tree；Session 仅由 Thread bootstrap 创建 |
-| Thread | `GET /api/ai/runtime/threads`、`POST /api/ai/runtime/threads`、`GET /api/ai/runtime/threads/{threadId}`、`GET /api/ai/runtime/threads/{threadId}/snapshot` | 全局 Thread 列表；创建 UNBOUND Thread（201，无 body）；单一 chat-runtime snapshot 含 revision、状态、entries、inputs、invocations、open interactions 和 usage |
+| Thread | `GET /api/ai/runtime/threads?sort&cursor&limit`、`POST /api/ai/runtime/threads`、`GET /api/ai/runtime/threads/{threadId}`、`GET /api/ai/runtime/threads/{threadId}/snapshot` | 全局 opaque keyset Thread 列表（统一返回 `{items,nextCursor}`）；创建 UNBOUND Thread（201，无 body）；单一 chat-runtime snapshot 含 revision、状态、entries、inputs、invocations、open interactions 和 usage |
 | Thread head | `POST /api/ai/runtime/threads/{id}/bootstrap`、`PUT /api/ai/runtime/threads/{id}/head` | bootstrap 创建 Session 并绑定 head（201 `{session, thread}`）；`PUT /head` 做 bind/rebind/unbind |
 | Thread 输入（202） | `POST /api/ai/runtime/threads/{id}/messages`、`/messages/custom`、`PUT .../agent`、`/model`、`/yolo` | mailbox 入队 |
 | Thread realtime | `GET /api/ai/runtime/threads/{id}/events/stream` | durable `revision`/`resync` SSE 加上无 id 的 lossy Redis `realtime`；`afterRevision` 与 `Last-Event-ID` 只表示 revision |
@@ -58,7 +59,7 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 | `StudioHarnessRetryPolicyController` | `/api/ai/runtime/settings/retry-policy` | 自动重试策略 |
 | `StudioHarnessRealtimeStreamPolicyController` | `/api/ai/runtime/settings/realtime-stream-policy` | realtime Stream 最大保留事件数策略 |
 | `StudioHarnessSessionController` | `/api/ai/runtime/sessions` | Session 查询、Session Entries |
-| `StudioChatController` | `/api/ai/chat` | Chat CRUD |
+| `StudioChatController` | `/api/ai/chat` | Chat CRUD、Chat-scoped Thread 列表/创建/关联 |
 | `StudioHarnessObservabilityController` | `/api/ai/runtime` | 单个 tool invocation、artifacts；Thread 集合事实位于 snapshot |
 | `StudioInteractionController` | `/api/ai/runtime/interactions` | Interaction 查询与响应 |
 | `StudioModelUsageController` | `/api/ai/runtime/usage` | 聚合 |
@@ -66,7 +67,7 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 
 ## Thread 与 Session
 
-Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复用的 durable runtime process，当前 Session 由 head Entry 派生。
+Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复用的 durable runtime process，当前 Session 由 head Entry 派生。Chat 通过 `chat_thread(chat_id, thread_id)` 历史聚合 Thread，关系是多对多且不复制 Thread 的 `created_at`/`updated_at`。
 
 `POST /api/ai/runtime/threads` 创建 UNBOUND Thread；`POST /api/ai/runtime/threads/{id}/bootstrap` 在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把该 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry。
 
@@ -76,7 +77,9 @@ Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复�
 work 时将 snapshot 中全部 queued Input 按 TURN_INPUT_BATCH 原子 harvest，追加 `RUNTIME_CONFIG`/消息 Entry；随后从最终
 head 最多创建一次冻结 `ModelInvocation`，snapshot 后到达者留给下一 turn。
 
-查询：`GET /api/ai/runtime/threads` 返回全局 Thread 列表，`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。`GET /api/ai/runtime/threads/{id}/snapshot` 在 REPEATABLE READ 下返回 revision 与 root→head Entries（UNBOUND 为空）、按 `sequence ASC` 的 inputs、invocations、open interactions 和 usage。`createTime` 只用于展示；不得用墙钟重排因果顺序。
+查询：`GET /api/ai/runtime/threads` 与 `GET /api/ai/chat/{chatId}/threads` 都返回 `{items,nextCursor}`。`sort=recent` 使用 `harness_thread.updated_at`，`sort=created` 使用 `harness_thread.created_at`，均按时间、`id` 降序 keyset；`limit` 默认 20、最大 100，cursor 是绑定 sort 的 opaque `v1` token。`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。`GET /api/ai/runtime/threads/{id}/snapshot` 在 REPEATABLE READ 下返回 revision 与 root→head Entries（UNBOUND 为空）、按 `sequence ASC` 的 inputs、invocations、open interactions 和 usage。`createTime` 只用于展示；不得用墙钟重排因果顺序。
+
+`POST /api/ai/chat/{chatId}/threads` 在一个事务中创建 UNBOUND Thread 并写入 Chat 关系；任一侧失败都回滚。`PUT /api/ai/chat/{chatId}/threads/{threadId}` 使用 `(chat_id, thread_id)` 唯一键幂等写入，重复关联不产生新行。
 
 Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 

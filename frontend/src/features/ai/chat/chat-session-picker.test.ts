@@ -121,4 +121,17 @@ describe('chat-session-picker', () => {
       badge: 'UNBOUND',
     })
   })
+
+  it('uses the selected sort timestamp and omits a placeholder time when absent', () => {
+    const item = toThreadSelectionItem(
+      {
+        ...thread('s1', 't-created', 'IDLE'),
+        createTime: '2026-07-21T08:30:00Z',
+        updateTime: null,
+      },
+      'created',
+    )
+    expect(item.subtitle).toContain('2026-07-21 08:30')
+    expect(toThreadSelectionItem(thread(null, 't-no-time', 'UNBOUND')).subtitle).toBe('未绑定 Session')
+  })
 })

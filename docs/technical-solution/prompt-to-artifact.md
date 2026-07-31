@@ -61,7 +61,7 @@ partial 写 Redis realtime；terminal 写 Invocation。当前 Tool batch 全部�
 
 ## 前端投影
 
-前端读取 Thread 路径 Entries 为基线，叠加 QUEUED inputs 与 Redis realtime 覆盖层。SSE 事件名 `realtime`，cursor 为 Redis stream-id。
+前端读取 Thread 路径 Entries 为基线，叠加 QUEUED inputs 与 Redis realtime 覆盖层。SSE `realtime` 事件没有 id；浏览器只用 durable Thread revision 恢复 snapshot，重连后从 Redis live edge 接收新 delta。
 
 Tool Result 中的 artifact 引用投影为 `/api/ai/runtime/artifacts/{artifactId}`。浏览器不接收 Tool Artifact 的 JSON/Base64 副本，也不把 artifact 重新上传到 S3。
 

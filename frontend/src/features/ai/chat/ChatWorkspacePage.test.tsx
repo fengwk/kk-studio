@@ -22,6 +22,9 @@ vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
     updateChat: vi.fn(),
+    associateThread: vi.fn(async () => undefined),
+    createChatThread: vi.fn(),
+    listChatThreads: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -162,7 +165,7 @@ describe('ChatWorkspacePage', () => {
         updateTime: null,
       }),
     )
-    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listThreads).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(harnessService.listSessions).mockResolvedValue([])
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
 
@@ -195,6 +198,127 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
   })
 
+  it('reselects a stale default Agent before creating the first Chat Thread', async () => {
+    const user = userEvent.setup()
+    const events: string[] = []
+    vi.mocked(chatService.getChat).mockResolvedValue({
+      id: 'chat-1',
+      title: 'Workspace',
+      defaultAgentId: 'missing',
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    })
+    vi.mocked(chatService.updateChat).mockImplementation(async () => {
+      events.push('update-agent')
+      return {
+        id: 'chat-1',
+        title: 'Workspace',
+        defaultAgentId: 'a1',
+        version: '2',
+        createTime: null,
+        updateTime: null,
+      }
+    })
+    vi.mocked(chatService.createChatThread).mockImplementation(async () => {
+      events.push('create-thread')
+      return {
+        threadId: 't-stale-agent',
+        sessionId: null,
+        sessionTitle: null,
+        headEntryId: null,
+        executionEpoch: 0,
+        status: 'UNBOUND',
+        inputSequence: 0,
+        activeAgentDefinitionId: null,
+        activeAgentName: null,
+        modelId: null,
+        variant: null,
+        yoloEnabled: false,
+        processing: false,
+        createTime: null,
+        updateTime: null,
+      }
+    })
+    vi.mocked(harnessService.bootstrapThread).mockImplementation(async () => {
+      events.push('bootstrap')
+      return {
+        session: {
+          sessionId: 's-stale-agent',
+          title: null,
+          createTime: null,
+          updateTime: null,
+        },
+        thread: {
+          threadId: 't-stale-agent',
+          sessionId: 's-stale-agent',
+          sessionTitle: null,
+          headEntryId: 'e-config',
+          executionEpoch: 1,
+          status: 'IDLE',
+          inputSequence: 0,
+          activeAgentDefinitionId: 'a1',
+          activeAgentName: 'assistant',
+          modelId: 'm1',
+          variant: 'default',
+          yoloEnabled: false,
+          processing: false,
+          createTime: null,
+          updateTime: null,
+        },
+      }
+    })
+    vi.mocked(harnessService.submitThreadMessage).mockImplementation(async () => {
+      events.push('message')
+      return {
+        inputId: 'i-stale-agent',
+        threadId: 't-stale-agent',
+        sequence: 1,
+        inputType: 'USER_MESSAGE',
+        payloadJson: '{}',
+        clientMessageId: 'client-stale-agent',
+        status: 'QUEUED',
+        resolvedAt: null,
+        createTime: null,
+      }
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot({
+        threadId: 't-stale-agent',
+        sessionId: 's-stale-agent',
+        sessionTitle: null,
+        headEntryId: 'e-config',
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
+        inputSequence: 1,
+        activeAgentDefinitionId: 'a1',
+        activeAgentName: 'assistant',
+        modelId: 'm1',
+        variant: 'default',
+        yoloEnabled: false,
+        processing: false,
+        createTime: null,
+        updateTime: null,
+      }),
+    )
+    vi.mocked(harnessService.listThreads).mockResolvedValue({ items: [], nextCursor: null })
+    vi.mocked(harnessService.listSessions).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+
+    renderWorkspace()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, 'hello after Agent deletion')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await user.click(await screen.findByRole('button', { name: 'assistant' }))
+
+    await waitFor(() => expect(events).toEqual(['update-agent', 'create-thread', 'bootstrap', 'message']))
+    expect(chatService.updateChat).toHaveBeenCalledWith('chat-1', {
+      defaultAgentId: 'a1',
+      expectedVersion: '1',
+    })
+  })
+
   it('detaches a stale persisted thread when its snapshot is not found', async () => {
     const seeded = loadChatPaneState('chat-1')
     seeded.panes[0].threadId = 'missing-thread'
@@ -202,7 +326,7 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockRejectedValue(
       new ApiError('Thread not found', 404, 'NOT_FOUND'),
     )
-    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listThreads).mockResolvedValue({ items: [], nextCursor: null })
 
     renderWorkspace()
 
@@ -230,8 +354,8 @@ describe('ChatWorkspacePage', () => {
   it('performs first-send createThread/bootstrap/message order for blank pane with default agent', async () => {
     const user = userEvent.setup()
     const order: string[] = []
-    vi.mocked(harnessService.createThread).mockImplementation(async () => {
-      order.push('createThread')
+    vi.mocked(chatService.createChatThread).mockImplementation(async () => {
+      order.push('createChatThread')
       return {
         threadId: 't-new',
         sessionId: null,
@@ -311,7 +435,7 @@ describe('ChatWorkspacePage', () => {
         updateTime: null,
       }),
     )
-    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+    vi.mocked(harnessService.listThreads).mockResolvedValue({ items: [], nextCursor: null })
     vi.mocked(harnessService.listSessions).mockResolvedValue([])
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
 
@@ -319,8 +443,9 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    // Strict new order; no POST /sessions, no chat attach and no separate SET_AGENT input.
-    await waitFor(() => expect(order).toEqual(['createThread', 'bootstrap', 'message']))
+    // Strict new order; Chat-scoped creation and bootstrap precede the first message.
+    await waitFor(() => expect(order).toEqual(['createChatThread', 'bootstrap', 'message']))
+    expect(chatService.createChatThread).toHaveBeenCalledWith('chat-1')
     expect(harnessService.bootstrapThread).toHaveBeenCalledWith('t-new', {
       title: undefined,
       agentDefinitionId: 'a1',
@@ -337,5 +462,47 @@ describe('ChatWorkspacePage', () => {
     // The pane binds to the bootstrapped Thread and leaves the blank state behind.
     await waitFor(() => expect(screen.queryByText('新对话')).not.toBeInTheDocument())
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith('t-new'))
+  })
+
+  it('migrates deduplicated persisted Thread bindings once despite layout-only changes', async () => {
+    const user = userEvent.setup()
+    const state = loadChatPaneState('chat-1')
+    state.panes[0].threadId = 'legacy-1'
+    state.panes[1].threadId = 'legacy-1'
+    state.panes[2].threadId = 'legacy-2'
+    saveChatPaneState('chat-1', state)
+    vi.mocked(chatService.associateThread).mockResolvedValue(undefined)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot({
+        threadId: 'legacy-1',
+        sessionId: 's-legacy',
+        sessionTitle: 'Legacy',
+        headEntryId: 'h-legacy',
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
+        inputSequence: 0,
+        activeAgentDefinitionId: 'a1',
+        activeAgentName: 'assistant',
+        modelId: 'm1',
+        variant: 'default',
+        yoloEnabled: false,
+        processing: false,
+        createTime: null,
+        updateTime: null,
+      }),
+    )
+
+    renderWorkspace()
+    await waitFor(() => expect(chatService.associateThread).toHaveBeenCalledTimes(2))
+    expect(chatService.associateThread.mock.calls).toEqual([
+      ['chat-1', 'legacy-1'],
+      ['chat-1', 'legacy-2'],
+    ])
+
+    await user.click(screen.getByRole('button', { name: '6' }))
+    await user.click(screen.getByRole('button', { name: '1' }))
+    await user.click(screen.getByRole('button', { name: '8' }))
+    expect(chatService.associateThread).toHaveBeenCalledTimes(2)
   })
 })

@@ -61,13 +61,13 @@ describe('useChatListController', () => {
 
     act(() => {
       result.current.createChatModal.onTitleChange('Hello')
-      result.current.createChatModal.onSelectAgent('')
+      result.current.createChatModal.onSelectAgent('a1')
     })
     expect(result.current.createChatModal.formError).toBe('')
     expect(result.current.createChatModal.nameError).toBe('')
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
     })
-    await waitFor(() => expect(chatService.createChat).toHaveBeenCalledWith({ title: 'Hello', defaultAgentId: undefined }))
+    await waitFor(() => expect(chatService.createChat).toHaveBeenCalledWith({ title: 'Hello', defaultAgentId: 'a1' }))
   })
 })

@@ -22,11 +22,13 @@ class ChatMutationFactoryTest {
     ChatMutationFactory factory = factory();
     ChatCreateDTO accepted = new ChatCreateDTO();
     accepted.setTitle("t".repeat(256));
+    accepted.setDefaultAgentId("1");
     Chat chat = factory.newChat(accepted);
     assertEquals("t".repeat(256), chat.getTitle());
 
     ChatCreateDTO oversized = new ChatCreateDTO();
     oversized.setTitle("t".repeat(257));
+    oversized.setDefaultAgentId("1");
     assertThrows(AiValidationException.class, () -> factory.newChat(oversized));
 
     ChatUpdateDTO update = new ChatUpdateDTO();

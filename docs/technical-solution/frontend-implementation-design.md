@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | `/` | redirect | 跳转至 `/chats` |
 | `/chats` | Chat 卡片列表 | 创建/进入持久 Chat；默认 Agent 可选 |
-| `/chats/:chatId` | Chat 工作区 | 1/2/3/6 Pane 本地布局 |
+| `/chats/:chatId` | Chat 工作区 | 1/2/3/4/6/8 Pane 本地布局；状态始终保存 8 个 Pane |
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
@@ -35,10 +35,10 @@
 
 ### Chat 卡片
 
-- `GET/POST /api/ai/chat` 列表/创建；title 与 defaultAgent 均可空。
+- `GET/POST /api/ai/chat` 列表/创建；`defaultAgentId` 创建时必填且必须指向现存 Agent。
 - 进入 Chat 打开 `/chats/:chatId`。
-- Chat.defaultAgentId 在 Agent 查询中缺失时前端视为 none。
-- Chat 只提供默认 Agent 与本地 Pane 布局的入口，不持有 Session/Thread。
+- Chat.defaultAgentId 在 Agent 查询中缺失时视为 stale；Chat 仍可读取，只有 Blank Pane 首发或显式使用 Agent 选择器时要求重新选择。
+- Chat 通过服务端 Chat↔Thread 历史多对多关系聚合 Thread；Pane 只保存本地绑定，不拥有 Thread 生命周期。
 
 ### 本地 `ChatPaneState`
 
@@ -46,19 +46,19 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `layout` | `single` / `split-2` / `split-3` / `grid-6` |
+| `layout` | `single` / `split-2` / `split-3` / `grid-4` / `grid-6` / `grid-8`；只控制可见前 N 个 Pane |
 | `focusedPaneId` | 当前聚焦 Pane |
-| `panes[]` | `{ id, threadId }`（`threadId=null` 为空面板；只存可空 threadId，session 由 Thread 反查） |
+| `panes[]` | 永远为 `pane-1..pane-8` 八个 `{ id, threadId }`；`threadId=null` 为空面板，session 由 Thread 反查；布局缩放不清除隐藏槽位 |
 | `sessionSort` / `threadSort` | `recent` 或 `created` |
 
-服务端不存 Pane 状态。
+服务端不存 Pane 状态。进入 Chat 时，旧 localStorage 绑定按 Thread ID 去重后通过幂等关联接口补建 Chat 关系；关联失败不会清除本地 Pane。
 
 ### 空 Pane 与首发
 
 1. Footer 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO。
-2. 无可用 Agent 时打开选择器。
+2. Chat default Agent stale 或无可用 Agent 时打开选择器；选择成功先更新 Chat 默认 Agent。
 3. 首发顺序（`chat-first-send.ts`）：
-   - `POST /api/ai/runtime/threads`（UNBOUND Thread）
+   - `POST /api/ai/chat/{chatId}/threads`（原子创建并归入 Chat 的 UNBOUND Thread）
    - `POST /api/ai/runtime/threads/:id/bootstrap`（默认 Agent + yolo，带 `expectedExecutionEpoch`；返回 `{session, thread}`）
    - `POST /api/ai/runtime/threads/:id/messages`（USER_MESSAGE，带 bootstrap 返回的 `executionEpoch`）
    - 将 `pane.threadId` 设为该 Thread
@@ -68,14 +68,14 @@
 | 命令 | 行为 |
 | --- | --- |
 | `/session` | 列出全部 Session；选中后从其 Entry Tree 选目标 head，`PUT /api/ai/runtime/threads/:id/head` 重定位当前 Thread |
-| `/thread` | 列出全部 Thread；只替换 pane 的 `threadId`，不修改任何 Thread |
+| `/thread` | 在“当前 Chat”与“全局 Thread”两个范围中按 `recent/created` 游标分页；当前范围直接替换 pane，切到全局后先 `PUT /api/ai/chat/{chatId}/threads/{threadId}` 成功再绑定 pane |
 | `/agent` `/model` `/variant` | 入队 SET_AGENT / SET_MODEL |
 | `/tree` | 打开历史面板，把当前 Thread 的 head 重定位到所选 Entry |
 | `/yolo` `/stop` `/new` | 既有语义；无 `/retry` |
 
 `/session` 与 `/tree` 都修改当前 Thread，因此只在 Thread 逻辑静止（`UNBOUND` / `IDLE` 且非 processing）时可用；否则提示先 `/stop`。所有会修改 Thread 的请求都带当前 `executionEpoch`，409 直接展示给用户不吞掉。
 
-同一 Thread 可出现在多个 Pane；React Query 与 SSE 按 threadId 共享。
+同一 Thread 可出现在多个 Pane。Thread snapshot 的 React Query key 按 `threadId` 复用 durable 快照；但每个已挂载的 Bound Pane 都创建自己的 `EventSource`，SSE 连接不在 Pane 之间共享。
 
 ## API 边界
 
@@ -84,8 +84,11 @@
 | Service | HTTP 接口 | 用途 |
 | --- | --- | --- |
 | Chat CRUD | `/api/ai/chat` | Chat 列表与 CRUD |
+| `listChatThreads` | `GET /api/ai/chat/{chatId}/threads?sort&cursor&limit` | 当前 Chat 的 `{items,nextCursor}` 游标分页 |
+| `createChatThread` | `POST /api/ai/chat/{chatId}/threads` | 同事务创建并关联 UNBOUND Thread |
+| `associateThread` | `PUT /api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史 Chat↔Thread 关系 |
 | Environments | `GET /api/ai/environment` | 只读 live registry |
-| `listThreads` | `GET /api/ai/runtime/threads` | 全局 Thread 列表（`/thread` 与 `/session` 的运行态来源） |
+| `listThreads` | `GET /api/ai/runtime/threads?sort&cursor&limit` | 全局 `{items,nextCursor}` Thread 游标分页（`/thread` 与 `/session` 的运行态来源） |
 | `createThread` | `POST /api/ai/runtime/threads` | 创建 UNBOUND Thread（无 body） |
 | `bootstrapThread` | `POST /api/ai/runtime/threads/{id}/bootstrap` | 创建 Session 并绑定 head，返回 `{session, thread}` |
 | `updateThreadHead` | `PUT /api/ai/runtime/threads/{id}/head` | bind / 跨 Session rebind / unbind（`headEntryId` 可为 `null`） |
@@ -99,6 +102,8 @@
 | `getRealtimeStreamPolicy` / `updateRealtimeStreamPolicy` | `GET` / `PUT /api/ai/runtime/settings/realtime-stream-policy` | 全局 Redis realtime Stream 最大保留事件数 |
 
 所有 durable ID 在 TypeScript 中保持十进制字符串。`bootstrapThread`、`updateThreadHead`、`stopThread` 与全部 mailbox 请求体都带必填 `expectedExecutionEpoch`。
+
+Thread 列表默认 `limit=20`、最大 `100`；`recent` 按 `updated_at`、`created` 按 `created_at`，cursor 为 opaque token。关系表不作为排序时间源。
 
 `/settings` 的两张卡片独立加载、校验与保存。实时流容量调整在本实例影响既有和新建 Stream 的下一次写入，其他实例最多一秒刷新；调大不恢复已经裁剪的 event。
 

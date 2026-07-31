@@ -8,6 +8,8 @@ export interface SelectionListItem {
   badge?: string
 }
 
+export type SelectionScope = 'current' | 'global'
+
 export function SelectionListModal({
   open,
   title,
@@ -18,6 +20,13 @@ export function SelectionListModal({
   onSelect,
   onClose,
   emptyText = '暂无选项',
+  scope,
+  onScopeChange,
+  loading = false,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  selectionPending = false,
 }: {
   open: boolean
   title: string
@@ -25,9 +34,16 @@ export function SelectionListModal({
   sort: PaneSortPreference
   onSortChange: (sort: PaneSortPreference) => void
   showSort?: boolean
-  onSelect: (id: string) => void
+  onSelect: (id: string) => void | Promise<void>
   onClose: () => void
   emptyText?: string
+  scope?: SelectionScope
+  onScopeChange?: (scope: SelectionScope) => void
+  loading?: boolean
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
+  selectionPending?: boolean
 }) {
   if (!open) {
     return null
@@ -38,6 +54,29 @@ export function SelectionListModal({
       <div className="modal-card selection-modal" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <ModalHeader title={title} onClose={onClose} />
         <div className="modal-body">
+          {onScopeChange ? (
+            <div className="selection-sort-row">
+              <span>范围</span>
+              <div className="selection-sort-actions">
+                <button
+                  type="button"
+                  className={scope === 'current' ? 'active' : undefined}
+                  onClick={() => onScopeChange('current')}
+                  disabled={selectionPending}
+                >
+                  当前 Chat
+                </button>
+                <button
+                  type="button"
+                  className={scope === 'global' ? 'active' : undefined}
+                  onClick={() => onScopeChange('global')}
+                  disabled={selectionPending}
+                >
+                  全局 Thread
+                </button>
+              </div>
+            </div>
+          ) : null}
           {showSort ? (
             <div className="selection-sort-row">
               <span>排序</span>
@@ -59,11 +98,19 @@ export function SelectionListModal({
               </div>
             </div>
           ) : null}
-          <ul className="selection-list">
-            {items.length === 0 ? <li className="selection-empty">{emptyText}</li> : null}
+          <ul className="selection-list" aria-busy={loading || selectionPending}>
+            {loading ? <li className="selection-empty">加载中…</li> : null}
+            {!loading && items.length === 0 ? (
+              <li className="selection-empty">{emptyText}</li>
+            ) : null}
             {items.map((item) => (
               <li key={item.id}>
-                <button type="button" className="selection-item" onClick={() => onSelect(item.id)}>
+                <button
+                  type="button"
+                  className="selection-item"
+                  disabled={selectionPending}
+                  onClick={() => void onSelect(item.id)}
+                >
                   <span className="selection-item-title">
                     {item.title}
                     {item.badge ? <em>{item.badge}</em> : null}
@@ -73,6 +120,16 @@ export function SelectionListModal({
               </li>
             ))}
           </ul>
+          {hasMore && onLoadMore ? (
+            <button
+              type="button"
+              className="selection-load-more"
+              onClick={onLoadMore}
+              disabled={loadingMore || selectionPending}
+            >
+              {loadingMore ? '加载中…' : '继续加载'}
+            </button>
+          ) : null}
         </div>
       </div>
     </ModalBackdrop>

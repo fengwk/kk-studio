@@ -41,6 +41,7 @@ export function ChatWorkspacePane({
   if (isPaneBound(pane.threadId)) {
     return (
       <BoundThreadPane
+        chatId={chat?.id ?? ''}
         agents={agents}
         paneId={pane.id}
         threadId={pane.threadId}

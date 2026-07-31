@@ -56,12 +56,19 @@ class FlywayAutoConfigurationIntegrationTest {
         ResultSet history =
             st.executeQuery(
                 "select count(*) from flyway_schema_history"
-                    + " where success = true and version in ('1', '2')")) {
+                    + " where success = true and version in ('1', '2', '3')")) {
       assertTrue(history.next());
-      assertEquals(2L, history.getLong(1), "baseline and dev seed must both be recorded");
+      assertEquals(3L, history.getLong(1), "baseline, dev seed, and V3 must all be recorded");
       try (ResultSet seed = st.executeQuery("select count(*) from agent_definition where id = 1")) {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "dev seed must be visible through the multi-data-source");
+      }
+      try (ResultSet chatThread =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public' and table_name = 'chat_thread'")) {
+        assertTrue(chatThread.next());
+        assertEquals(1L, chatThread.getLong(1), "V3 Chat↔Thread table must be migrated");
       }
     }
   }

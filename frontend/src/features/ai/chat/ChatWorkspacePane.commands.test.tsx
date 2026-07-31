@@ -15,6 +15,12 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
   },
 }))
+vi.mock('@/shared/api/chat-service', () => ({
+  chatService: {
+    listChatThreads: vi.fn(),
+    associateThread: vi.fn(),
+  },
+}))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
@@ -211,13 +217,16 @@ describe('ChatWorkspacePane commands', () => {
         sessionId: 's2', title: 'S2', createTime: '2026-01-04T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
       },
     ])
-    vi.mocked(harnessService.listThreads).mockResolvedValue([
-      thread({}),
-      thread({
-        threadId: 't2', status: 'IDLE', inputSequence: 0, executionEpoch: 1,
-        createTime: '2026-01-03T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
-      }),
-    ])
+    vi.mocked(harnessService.listThreads).mockResolvedValue({
+      items: [
+        thread({}),
+        thread({
+          threadId: 't2', status: 'IDLE', inputSequence: 0, executionEpoch: 1,
+          createTime: '2026-01-03T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
+        }),
+      ],
+      nextCursor: null,
+    })
     vi.mocked(harnessService.listSessionEntries).mockImplementation(async (sessionId: string) =>
       sessionEntries(sessionId),
     )
@@ -240,6 +249,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
     await user.click(screen.getByRole('button', { name: '最近更新' }))
     expect(onThreadSortChange).toHaveBeenCalledWith('recent')
     await user.click(screen.getByRole('button', { name: /t2/ }))
@@ -287,6 +297,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
     await user.click(screen.getByRole('button', { name: /t2/ }))
 
     expect(onThreadChange).toHaveBeenCalledWith('t2')

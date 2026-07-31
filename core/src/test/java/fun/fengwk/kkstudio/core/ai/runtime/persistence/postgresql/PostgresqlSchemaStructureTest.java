@@ -41,6 +41,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_link",
           "canvas_command_dedup",
           "chat",
+          "chat_thread",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -157,6 +158,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns("canvas_link", "id", "canvas_id", "source_node_id", "target_node_id");
     assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
     assertColumns("chat", "id", "title", "default_agent_id", "created_at", "updated_at", "version");
+    assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
   }
 
   @Test

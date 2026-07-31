@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -122,5 +123,102 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(delete("/api/ai/chat/999999999999").param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
+  }
+
+  @Test
+  public void shouldCreateAssociateAndPageChatThreads() throws Exception {
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle("thread-picker-chat");
+    create.setDefaultAgentId("1");
+    MvcResult createdChat =
+        mockMvc
+            .perform(
+                post("/api/ai/chat")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(create)))
+            .andExpect(status().isCreated())
+            .andReturn();
+    JsonNode chat = data(createdChat);
+    String chatId = chat.path("id").asText();
+    String chatVersion = chat.path("version").asText();
+
+    try {
+      MvcResult scopedCreate =
+          mockMvc
+              .perform(post("/api/ai/chat/{chatId}/threads", chatId))
+              .andExpect(status().isCreated())
+              .andExpect(jsonPath("$.data.threadId").isString())
+              .andExpect(jsonPath("$.data.status").value("UNBOUND"))
+              .andExpect(jsonPath("$.data.executionEpoch").value("0"))
+              .andReturn();
+      String scopedThreadId = data(scopedCreate).path("threadId").asText();
+
+      MvcResult globalCreate =
+          mockMvc
+              .perform(post("/api/ai/runtime/threads"))
+              .andExpect(status().isCreated())
+              .andExpect(jsonPath("$.data.threadId").isString())
+              .andReturn();
+      String globalThreadId = data(globalCreate).path("threadId").asText();
+
+      mockMvc
+          .perform(put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, globalThreadId))
+          .andExpect(status().isNoContent());
+      // The relation endpoint is idempotent.
+      mockMvc
+          .perform(put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, globalThreadId))
+          .andExpect(status().isNoContent());
+
+      mockMvc
+          .perform(
+              get("/api/ai/chat/{chatId}/threads", chatId)
+                  .param("sort", "created")
+                  .param("limit", "100"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.items").isArray())
+          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + scopedThreadId + "')]").exists())
+          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + globalThreadId + "')]").exists())
+          .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
+
+      MvcResult firstGlobalPage =
+          mockMvc
+              .perform(get("/api/ai/runtime/threads").param("sort", "recent").param("limit", "1"))
+              .andExpect(status().isOk())
+              .andExpect(jsonPath("$.data.items").isArray())
+              .andExpect(jsonPath("$.data.items.length()").value(1))
+              .andExpect(jsonPath("$.data.nextCursor").isString())
+              .andReturn();
+      String nextCursor = data(firstGlobalPage).path("nextCursor").asText();
+      mockMvc
+          .perform(
+              get("/api/ai/runtime/threads")
+                  .param("sort", "recent")
+                  .param("cursor", nextCursor)
+                  .param("limit", "1"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.items.length()").value(1))
+          .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
+
+      mockMvc
+          .perform(
+              get("/api/ai/chat/{chatId}/threads", chatId)
+                  .param("sort", "unsupported")
+                  .param("limit", "20"))
+          .andExpect(status().isBadRequest());
+      mockMvc
+          .perform(
+              get("/api/ai/chat/{chatId}/threads", chatId)
+                  .param("sort", "recent")
+                  .param("limit", "101"))
+          .andExpect(status().isBadRequest());
+    } finally {
+      mockMvc
+          .perform(delete("/api/ai/chat/{chatId}", chatId).param("expectedVersion", chatVersion))
+          .andExpect(status().isNoContent());
+    }
+  }
+
+  private JsonNode data(MvcResult result) throws Exception {
+    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
   }
 }

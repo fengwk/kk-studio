@@ -7,7 +7,7 @@ import {
   toSessionSelectionItemWithRunning,
 } from '@/features/ai/chat/chat-session-picker'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -22,8 +22,8 @@ export function useChatSessionPicker(open: boolean, sessionSort: PaneSortPrefere
     enabled: open,
   })
   const threadsQuery = useQuery({
-    queryKey: queryKeys.threads.list,
-    queryFn: () => harnessService.listThreads(),
+    queryKey: queryKeys.sessions.threadIndex(sessionSort),
+    queryFn: () => listAllThreads(sessionSort),
     enabled: open,
   })
   const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data])
@@ -50,5 +50,24 @@ export function useChatSessionPicker(open: boolean, sessionSort: PaneSortPrefere
     sessionItems,
     threadsBySessionId,
     findSession,
+  }
+}
+
+export async function listAllThreads(sort: PaneSortPreference) {
+  const threads: HarnessThreadDTO[] = []
+  let cursor: string | undefined
+  const seenCursors = new Set<string>()
+  while (true) {
+    const cursorKey = cursor ?? ''
+    if (seenCursors.has(cursorKey)) {
+      throw new Error('Thread pagination cursor loop detected')
+    }
+    seenCursors.add(cursorKey)
+    const page = await harnessService.listThreads({ sort, cursor, limit: 100 })
+    threads.push(...page.items)
+    if (!page.nextCursor) {
+      return threads
+    }
+    cursor = page.nextCursor
   }
 }
