@@ -32,12 +32,6 @@ public final class ToolPermissionInteractionCodec {
     return new InteractionProjection(write(projection, "tool permission projection"));
   }
 
-  /** Resolves a strict request/response pair to a product-specific approval decision. */
-  public ToolPermissionDecision resolve(InteractionRequest request, InteractionResponse response) {
-    parseRequest(request);
-    return parseApproved(response) ? ToolPermissionDecision.APPROVE : ToolPermissionDecision.DENY;
-  }
-
   /**
    * Resolves an Interaction after verifying the audit request names its explicit durable Tool
    * invocation.
