@@ -111,13 +111,10 @@ public class HarnessQueryDtoConverter {
     }
     InteractionDTO dto = new InteractionDTO();
     dto.setId(HarnessIds.format(row.getId()));
-    dto.setOwnerKind(row.getOwnerKind());
-    dto.setOwnerId(HarnessIds.format(row.getOwnerId()));
-    dto.setHandlerType(row.getHandlerType());
+    dto.setToolInvocationId(HarnessIds.format(row.getToolInvocationId()));
     dto.setProjectionJson(row.getRequestJson());
     dto.setStatus(row.getStatus());
     dto.setResponseJson(row.getResponseJson());
-    dto.setExpiresAt(toInstant(row.getExpiresAt()));
     dto.setVersion(row.getVersion() == null ? null : Long.toString(row.getVersion()));
     dto.setCreatedAt(toInstant(row.getCreatedAt()));
     dto.setResolvedAt(toInstant(row.getResolvedAt()));

@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.core.ai.runtime.command;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionHandlerRegistry;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
+import fun.fengwk.kkstudio.harness.runtime.interaction.ToolPermissionInteractionCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 
@@ -27,9 +28,8 @@ public class HarnessCommandConfiguration {
 
   @Bean
   public InteractionCoordinator interactionCoordinator(
-      InteractionTransactions transactions,
-      InteractionHandlerRegistry handlerRegistry,
-      Clock clock) {
-    return new InteractionCoordinator(transactions, handlerRegistry, clock);
+      InteractionTransactions transactions, ObjectMapper objectMapper, Clock clock) {
+    return new InteractionCoordinator(
+        transactions, new ToolPermissionInteractionCodec(objectMapper), clock);
   }
 }

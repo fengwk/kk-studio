@@ -275,43 +275,8 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
         toolId);
 
-    // OPEN Interaction on the Thread blocks rebind
-    long interactionId = insertOpenThreadInteraction(boot.threadId());
-    assertThrows(
-        IllegalStateException.class,
-        () -> transactions.updateHead(boot.threadId(), epoch, boot.rootEntryId(), NOW),
-        "OPEN Interaction must block rebind");
-    jdbc.update(
-        "update harness_interaction set status = 'CANCELLED', resolved_at = ? where id = ?",
-        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
-        interactionId);
-
     // once every blocker is terminal the Thread is rebindable again
     assertNotNull(transactions.updateHead(boot.threadId(), epoch, boot.rootEntryId(), NOW));
-  }
-
-  @Test
-  void stopCancelsOpenInteractionsSoThreadBecomesImmediatelyRebindable() {
-    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "stop-rebind", NOW);
-    long epoch = boot.executionEpoch();
-    long interactionId = insertOpenThreadInteraction(boot.threadId());
-    transactions.enqueue(boot.threadId(), userPayload("pending"), "in-1", epoch, NOW);
-
-    ThreadCommandTransactions.StopResult stopped =
-        transactions.stop(boot.threadId(), epoch, NOW.plusSeconds(1));
-    assertEquals(epoch + 1, stopped.executionEpoch());
-    assertEquals(1, stopped.cancelledInputs().size());
-    assertTrue(stopped.cancelledInputs().stream().allMatch(input -> input.isTerminal()));
-    assertEquals(
-        "CANCELLED",
-        jdbc.queryForObject(
-            "select status from harness_interaction where id = ?", String.class, interactionId));
-
-    HarnessThread rebound =
-        transactions.updateHead(
-            boot.threadId(), stopped.executionEpoch(), boot.rootEntryId(), NOW.plusSeconds(2));
-    assertEquals(boot.rootEntryId(), rebound.headEntryId());
-    assertEquals(stopped.executionEpoch() + 1, rebound.executionEpoch());
   }
 
   @Test
@@ -722,17 +687,6 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
         ordinal,
         "call-" + id,
         epoch,
-        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
-    return id;
-  }
-
-  private long insertOpenThreadInteraction(long threadId) {
-    long id = nextId();
-    jdbc.update(
-        "insert into harness_interaction (id, owner_kind, owner_id, handler_type, request, status,"
-            + " version, created_at) values (?, 'THREAD', ?, 'ASK', '{}'::jsonb, 'OPEN', 0, ?)",
-        id,
-        threadId,
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     return id;
   }

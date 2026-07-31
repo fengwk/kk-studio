@@ -121,7 +121,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolRetry));
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolRunning));
     assertEquals(0L, targetCount("TOOL_INVOCATION", toolWaitingPermission));
-    assertEquals("CANCELLED", interactionStatus(94_001L));
+    assertEquals(null, interactionStatusOrNull(94_001L));
   }
 
   /** Input insert 被数据库拒绝时，先发生的 sequence/runnable 更新必须一起回滚。 */
@@ -291,8 +291,8 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
             connection.prepareStatement(
                 """
                 insert into harness_interaction (
-                    id, owner_kind, owner_id, handler_type, request, status, version, created_at
-                ) values (?, 'TOOL_INVOCATION', ?, 'tool-permission', '{}'::jsonb, 'OPEN', 0, ?)
+                    id, tool_invocation_id, request, status, version, created_at
+                ) values (?, ?, '{}'::jsonb, 'OPEN', 0, ?)
                 """)) {
       statement.setLong(1, interactionId);
       statement.setLong(2, toolInvocationId);
@@ -420,14 +420,13 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     }
   }
 
-  private static String interactionStatus(long interactionId) throws SQLException {
+  private static String interactionStatusOrNull(long interactionId) throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement("select status from harness_interaction where id = ?")) {
       statement.setLong(1, interactionId);
       try (ResultSet result = statement.executeQuery()) {
-        assertTrue(result.next());
-        return result.getString(1);
+        return result.next() ? result.getString(1) : null;
       }
     }
   }

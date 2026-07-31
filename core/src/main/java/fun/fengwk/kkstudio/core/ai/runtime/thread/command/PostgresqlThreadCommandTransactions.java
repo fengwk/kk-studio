@@ -376,9 +376,8 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     mapper.cancelQueuedInputs(threadId);
     mapper.cancelSafeModelInvocations(threadId, timestamp);
     mapper.cancelSafeToolInvocations(threadId, timestamp);
-    // Logical stop must also close open Interactions, otherwise the Thread stays
-    // ineligible for rebind while waiting on a blocker that can never resolve.
-    mapper.cancelOpenInteractions(threadId, timestamp);
+    // A stopped Tool can no longer answer a permission prompt, so discard its OPEN product fact.
+    mapper.deleteOpenToolPermissionInteractions(threadId);
     mapper.deleteExecutionTargetsForStoppedThread(threadId);
     return new StopResult(nextEpoch, cancelled);
   }

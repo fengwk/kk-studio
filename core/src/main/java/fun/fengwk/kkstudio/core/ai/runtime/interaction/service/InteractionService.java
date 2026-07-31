@@ -4,19 +4,19 @@ import fun.fengwk.kkstudio.share.ai.runtime.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 
 /**
- * Generic Interaction query/response application boundary.
+ * Tool permission Interaction query/response application boundary.
  *
  * <p>Implementations own decimal/DTO adaptation. Domain orchestration and durable target mutation
  * are delegated to harness-runtime and its PostgreSQL transaction adapter.
  */
 public interface InteractionService {
 
-  /** Gets one durable Interaction, including its handler-controlled generic projection. */
+  /** Gets one durable Tool permission Interaction, including its safe projection. */
   InteractionDTO get(String interactionId);
 
-  /** Gets the sole OPEN Interaction for an owner, or rejects when that owner has none. */
-  InteractionDTO getOpenByOwner(String ownerKind, String ownerId);
+  /** Gets the sole OPEN Interaction for a Tool invocation, or rejects when it has none. */
+  InteractionDTO getOpenByToolInvocation(String toolInvocationId);
 
-  /** Applies a generic response at its received instant. */
+  /** Applies a Tool permission approval response at its received instant. */
   InteractionDTO respond(String interactionId, InteractionResponseDTO responseDTO);
 }

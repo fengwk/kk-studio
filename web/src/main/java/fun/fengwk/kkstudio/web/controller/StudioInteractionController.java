@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-/** Generic Interaction query and response API. No Tool-specific decision endpoint is retained. */
+/** Tool permission Interaction query and response API. */
 @RestController
 @RequestMapping("/api/ai/runtime/interactions")
 public class StudioInteractionController {
@@ -35,9 +35,9 @@ public class StudioInteractionController {
   }
 
   @GetMapping("/open")
-  public Result<InteractionDTO> getOpenByOwner(
-      @RequestParam String ownerKind, @RequestParam String ownerId) {
-    return Results.ok(translate(() -> interactionService.getOpenByOwner(ownerKind, ownerId)));
+  public Result<InteractionDTO> getOpenByToolInvocation(@RequestParam String toolInvocationId) {
+    return Results.ok(
+        translate(() -> interactionService.getOpenByToolInvocation(toolInvocationId)));
   }
 
   @PostMapping("/{interactionId}/response")
@@ -55,7 +55,7 @@ public class StudioInteractionController {
       String message = error.getMessage();
       if (message != null
           && (message.startsWith("unknown interaction:")
-              || message.startsWith("no open interaction for owner"))) {
+              || message.startsWith("no open interaction for tool invocation"))) {
         throw new ResponseStatusException(HttpStatus.NOT_FOUND, message, error);
       }
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message, error);

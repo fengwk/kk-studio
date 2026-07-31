@@ -459,13 +459,10 @@ export interface ModelInvocationDTO {
 
 export interface InteractionDTO {
   id: string
-  ownerKind: string
-  ownerId: string
-  handlerType: string
+  toolInvocationId: string
   projectionJson: string
   status: string
   responseJson: string | null
-  expiresAt: InstantTimestamp
   version: string
   createdAt: InstantTimestamp
   resolvedAt: InstantTimestamp

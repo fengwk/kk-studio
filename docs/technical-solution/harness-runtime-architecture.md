@@ -191,9 +191,9 @@ RUNNING、RETRY_WAIT 和 WAITING_INTERACTION head 会阻塞后续 sibling。`Pos
 
 ### 3.6 Interaction
 
-对外请求/响应的 durable 事实：owner、handler type、request/response、`OPEN/RESOLVED/CANCELLED/EXPIRED`、deadline/version。
+Tool permission 的 durable 请求/响应事实：明确的 `toolInvocationId`、request/response、`OPEN/RESOLVED`、version。
 
-Approval、clarification、resource selection 与 external callback 都是 InteractionHandler。Tool permission 使用唯一 handler type `tool-permission`：其 request 持久化 preview 与 owner ids，客户端只能提交严格的 `{"approved": true|false}`；handler 决定 `APPROVE_TOOL_PERMISSION` 或 `DENY_TOOL_PERMISSION`，transaction adapter 在 Thread → ToolInvocation → ExecutionTarget 锁序中应用状态和 target 变更。
+Tool permission request 持久化 preview 与审计 ids，客户端只能提交严格的 `{"approved": true|false}`。专用 codec 产生批准或拒绝决定；transaction adapter 在 Thread → ToolInvocation → ExecutionTarget 锁序中应用状态和 target 变更。
 
 ### 3.7 Goal / Usage / Artifact / Retry
 
@@ -285,7 +285,7 @@ sequenceDiagram
     participant O as Owner Invocation
     participant I as Interaction Store
     participant U as User/External
-    participant H as InteractionHandler
+    participant H as ToolPermissionInteractionCodec
     participant T as Thread
 
     O->>I: create OPEN interaction

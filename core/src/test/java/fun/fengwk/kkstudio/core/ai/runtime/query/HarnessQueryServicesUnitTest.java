@@ -116,9 +116,7 @@ class HarnessQueryServicesUnitTest {
     when(modelInvocationMapper.listByThread(21L)).thenReturn(List.of(model));
     InteractionDO open = new InteractionDO();
     open.setId(8L);
-    open.setOwnerKind("THREAD");
-    open.setOwnerId(21L);
-    open.setHandlerType("ASK");
+    open.setToolInvocationId(7L);
     open.setRequestJson("{}");
     open.setStatus("OPEN");
     open.setVersion(0L);

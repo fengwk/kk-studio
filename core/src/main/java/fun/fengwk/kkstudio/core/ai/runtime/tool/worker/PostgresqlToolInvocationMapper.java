@@ -86,7 +86,7 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
         and t.execution_epoch = ti.execution_epoch
         and not exists (
           select 1 from harness_interaction i
-          where i.owner_kind = 'TOOL_INVOCATION' and i.owner_id = ti.id and i.status = 'OPEN'
+          where i.tool_invocation_id = ti.id and i.status = 'OPEN'
         )
         and (
           ti.status = 'QUEUED'

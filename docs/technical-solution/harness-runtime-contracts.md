@@ -225,38 +225,34 @@ public record ToolInvocation(
 - 本地：`ToolWorker -> Tool`；远程：`ToolWorker -> RemoteTool -> transport -> Daemon -> Tool`
 - `PENDING` 只允许在 `QUEUED`/`RUNNING` 或未执行的取消/设置失败终态；`ALLOWED` 必须在任何外部 Tool I/O 前持久化
 - `ASKED` 只允许在无 lease/clock 的 `WAITING_INTERACTION`，且对应一个 OPEN `tool-permission` Interaction 与 parked target
-- `DENIED` 只允许在 `FAILED`；批准恢复 `QUEUED + ALLOWED` 并经 target route FIFO gate 调度，拒绝或过期删除 Tool target 并原子唤醒 Thread
+- `DENIED` 只允许在 `FAILED`；批准恢复 `QUEUED + ALLOWED` 并经 target route FIFO gate 调度，拒绝删除 Tool target 并原子唤醒 Thread
 
 ### 3.6 Interaction
 
 ```java
 public enum InteractionStatus {
   OPEN,
-  RESOLVED,
-  CANCELLED,
-  EXPIRED
+  RESOLVED
 }
 
 public record Interaction(
     long id,
-    ExecutionTarget owner,
-    String handlerType,
+    long toolInvocationId,
     InteractionRequest request,
     InteractionStatus status,
     InteractionResponse response,
-    Instant expiresAt,
     long version,
     Instant createdAt,
     Instant resolvedAt) {}
 ```
 
-Handler 返回 deterministic resolution，由 Interaction transaction adapter 原子应用，不直接控制事务提交。
+`ToolPermissionInteractionCodec` 以严格 request/response 产生 approve/deny 决定，由 Interaction transaction adapter 原子应用。
 
 ### 3.7 Command coordinators
 
 - `ThreadCommandCoordinator` 拥有 UNBOUND Thread 创建、bootstrap、head 重定位、typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
 - Thread `bootstrapThread` 在同一事务内创建 Session / ROOT / `RUNTIME_CONFIG`，并将 Thread head 重定位到 `RUNTIME_CONFIG` Entry。Session / ROOT / `RUNTIME_CONFIG` 三件套仅由 `bootstrapThread` 内部私有 helper 落库，未公开为 Runtime SPI。
-- `InteractionCoordinator` 拥有 handler lookup、projection、expiry 判定和 deterministic resolution。
+- `InteractionCoordinator` 拥有 Tool permission projection 和 deterministic approval resolution。
 
 Thread command 入口：
 

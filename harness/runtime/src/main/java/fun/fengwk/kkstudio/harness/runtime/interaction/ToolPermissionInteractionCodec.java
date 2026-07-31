@@ -1,55 +1,28 @@
-package fun.fengwk.kkstudio.core.ai.runtime.interaction.service;
+package fun.fengwk.kkstudio.harness.runtime.interaction;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.springframework.stereotype.Component;
-
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionHandler;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionOwnerAction;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionOwnerDirective;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionProjection;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionRequest;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResolution;
-import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionInteraction;
 
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.Set;
 
-/**
- * Deterministically projects and resolves the durable user decision for one Tool invocation.
- *
- * <p>The persisted request is strict and internal: it carries the invocation/thread identities and
- * the preview captured by the permission boundary. The client projection deliberately excludes the
- * identities because the generic Interaction DTO already exposes the owner. The only accepted
- * response shape is {@code {"approved": true|false}}; unknown or missing fields are rejected before
- * any durable state mutation.
- */
-@Component
-public class ToolPermissionInteractionHandler implements InteractionHandler {
-
+/** Strict product boundary for persisted Tool permission prompts and user approval responses. */
+public final class ToolPermissionInteractionCodec {
   private static final Set<String> REQUEST_FIELDS =
       Set.of("invocationId", "threadId", "tool", "workdir", "arguments");
   private static final Set<String> RESPONSE_FIELDS = Set.of("approved");
 
   private final ObjectMapper objectMapper;
 
-  public ToolPermissionInteractionHandler(ObjectMapper objectMapper) {
+  public ToolPermissionInteractionCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  @Override
-  public String type() {
-    return ToolPermissionInteraction.HANDLER_TYPE;
-  }
-
-  @Override
+  /** Projects only the safe user-facing Tool preview from a strict persisted request. */
   public InteractionProjection project(InteractionRequest request) {
     PermissionRequest parsed = parseRequest(request);
     ObjectNode projection = objectMapper.createObjectNode();
@@ -59,18 +32,24 @@ public class ToolPermissionInteractionHandler implements InteractionHandler {
     return new InteractionProjection(write(projection, "tool permission projection"));
   }
 
-  @Override
-  public InteractionResolution resolve(InteractionRequest request, InteractionResponse response) {
-    PermissionRequest parsed = parseRequest(request);
-    boolean approved = parseApproved(response);
-    if (approved) {
-      return new InteractionResolution(
-          new InteractionOwnerDirective(InteractionOwnerAction.APPROVE_TOOL_PERMISSION),
-          new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, parsed.invocationId()));
+  /** Resolves a strict request/response pair to a product-specific approval decision. */
+  public ToolPermissionDecision resolve(InteractionRequest request, InteractionResponse response) {
+    parseRequest(request);
+    return parseApproved(response) ? ToolPermissionDecision.APPROVE : ToolPermissionDecision.DENY;
+  }
+
+  /**
+   * Resolves an Interaction after verifying the audit request names its explicit durable Tool
+   * invocation.
+   */
+  public ToolPermissionDecision resolve(Interaction interaction, InteractionResponse response) {
+    Objects.requireNonNull(interaction, "interaction");
+    PermissionRequest request = parseRequest(interaction.request());
+    if (request.invocationId() != interaction.toolInvocationId()) {
+      throw new IllegalArgumentException(
+          "tool permission request invocationId does not match interaction");
     }
-    return new InteractionResolution(
-        new InteractionOwnerDirective(InteractionOwnerAction.DENY_TOOL_PERMISSION),
-        new ExecutionTarget(ExecutionTargetKind.THREAD, parsed.threadId()));
+    return parseApproved(response) ? ToolPermissionDecision.APPROVE : ToolPermissionDecision.DENY;
   }
 
   private PermissionRequest parseRequest(InteractionRequest request) {

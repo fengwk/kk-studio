@@ -43,24 +43,8 @@ public interface PostgresqlHarnessQueryMapper extends BaseMapper {
       ) as has_active_tool,
       exists (
         select 1 from harness_interaction hi
-        where hi.status = 'OPEN'
-          and (
-            (hi.owner_kind = 'THREAD' and hi.owner_id = t.id)
-            or (
-              hi.owner_kind = 'MODEL_INVOCATION'
-              and exists (
-                select 1 from harness_model_invocation mi
-                where mi.id = hi.owner_id and mi.thread_id = t.id
-              )
-            )
-            or (
-              hi.owner_kind = 'TOOL_INVOCATION'
-              and exists (
-                select 1 from harness_tool_invocation ti
-                where ti.id = hi.owner_id and ti.thread_id = t.id
-              )
-            )
-          )
+        join harness_tool_invocation ti on ti.id = hi.tool_invocation_id
+        where hi.status = 'OPEN' and ti.thread_id = t.id
       ) as has_open_interaction
       """;
 

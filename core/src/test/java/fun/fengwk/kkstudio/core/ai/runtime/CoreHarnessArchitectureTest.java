@@ -24,10 +24,7 @@ class CoreHarnessArchitectureTest {
           HARNESS_RUNTIME + "thread." + "ThreadCommandTransactions");
 
   private static final List<String> INTERACTION_BOUNDARY_FORBIDDEN_IMPORTS =
-      List.of(
-          HARNESS_RUNTIME + "interaction." + "InteractionHandler",
-          HARNESS_RUNTIME + "interaction." + "InteractionHandlerRegistry",
-          HARNESS_RUNTIME + "interaction." + "InteractionTransactions");
+      List.of(HARNESS_RUNTIME + "interaction." + "InteractionTransactions");
 
   @Test
   void applicationBoundariesConsumeRuntimeApiWithoutOutboundSpiOrConcreteGatewayCoupling()

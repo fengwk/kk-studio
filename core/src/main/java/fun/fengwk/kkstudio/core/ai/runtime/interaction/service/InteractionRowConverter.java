@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.interaction.service;
 
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.model.InteractionDO;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.interaction.Interaction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionRequest;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
@@ -22,14 +20,10 @@ final class InteractionRowConverter {
     Objects.requireNonNull(row, "row");
     return new Interaction(
         require(row.getId(), "id"),
-        new ExecutionTarget(
-            enumValue(ExecutionTargetKind.class, row.getOwnerKind(), "ownerKind"),
-            require(row.getOwnerId(), "ownerId")),
-        row.getHandlerType(),
+        require(row.getToolInvocationId(), "toolInvocationId"),
         new InteractionRequest(row.getRequestJson()),
         enumValue(InteractionStatus.class, row.getStatus(), "status"),
         row.getResponseJson() == null ? null : new InteractionResponse(row.getResponseJson()),
-        toInstant(row.getExpiresAt()),
         require(row.getVersion(), "version"),
         Objects.requireNonNull(toInstant(row.getCreatedAt()), "createdAt"),
         toInstant(row.getResolvedAt()));

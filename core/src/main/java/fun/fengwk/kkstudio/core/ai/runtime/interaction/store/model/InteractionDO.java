@@ -10,13 +10,10 @@ import java.time.OffsetDateTime;
 @Data
 public class InteractionDO {
   private Long id;
-  private String ownerKind;
-  private Long ownerId;
-  private String handlerType;
+  private Long toolInvocationId;
   private String requestJson;
   private String status;
   private String responseJson;
-  private OffsetDateTime expiresAt;
   private Long version;
   private OffsetDateTime createdAt;
   private OffsetDateTime resolvedAt;
