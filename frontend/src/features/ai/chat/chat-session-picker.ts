@@ -1,7 +1,6 @@
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { sortWithRunningFirst } from '@/features/ai/chat/chat-pane-state'
-import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-chat'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 export function isRunningThread(thread: HarnessThreadDTO): boolean {
   return (

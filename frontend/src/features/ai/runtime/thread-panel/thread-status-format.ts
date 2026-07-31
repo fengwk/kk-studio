@@ -1,11 +1,5 @@
 import type { ThreadUsageSummary } from '@/features/ai/runtime/thread-panel/thread-status-types'
 
-export type {
-  ThreadUsageSummary,
-  ThreadUsageCost,
-  ThreadUsageNumber,
-} from '@/features/ai/runtime/thread-panel/thread-status-types'
-
 export interface ThreadStatusSegment {
   key: 'agent' | 'model' | 'usage'
   className: string

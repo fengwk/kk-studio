@@ -7,11 +7,11 @@ import type {
   ComfyuiWorkflowId,
   ComfyuiWorkflowJobDTO,
   ComfyuiWorkflowRunDTO,
+  ComfyuiWorkflowRunFileDTO,
   ComfyuiWorkflowRunRequestDTO,
 } from '@/shared/api/contracts/comfyui'
 import type { PageResult } from '@/shared/api/contracts/base'
 import type {
-  ComfyuiWorkflowRunFileDTO,
   S3PresignedRequestDTO,
   S3PresignedResponseDTO,
 } from '@/shared/api/contracts/storage'

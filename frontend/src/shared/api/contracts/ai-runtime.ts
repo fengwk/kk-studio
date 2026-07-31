@@ -1,6 +1,48 @@
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-chat'
-import type { BackendDateTime, BackendLong, InstantTimestamp } from '@/shared/api/contracts/base'
+import type {
+  BackendBigDecimal,
+  BackendDateTime,
+  BackendLong,
+  InstantTimestamp,
+} from '@/shared/api/contracts/base'
+
+export interface ModelUsageCostSummaryDTO {
+  currency: string
+  input: BackendBigDecimal
+  output: BackendBigDecimal
+  cacheRead: BackendBigDecimal
+  cacheWrite: BackendBigDecimal
+  cacheWriteLong: BackendBigDecimal
+  reasoning: BackendBigDecimal
+  total: BackendBigDecimal
+}
+
+export interface ModelUsageSummaryDTO {
+  scopeType: 'thread' | 'session' | 'model'
+  scopeId: string
+  recordCount: BackendLong
+  inputTokens: BackendLong
+  outputTokens: BackendLong
+  cacheReadTokens: BackendLong
+  cacheWriteTokens: BackendLong
+  cacheWriteLongTokens: BackendLong
+  reasoningTokens: BackendLong
+  providerTotalTokens: BackendLong
+  cacheEligibleRecordCount: BackendLong
+  cacheHitRecordCount: BackendLong
+  cacheHitRatio: BackendBigDecimal
+  tokenReadRatio: BackendBigDecimal
+  unamortizedCacheWriteTokens: BackendLong
+  costs: ModelUsageCostSummaryDTO[]
+}
+
+/** Flat Session query projection; Sessions are only created as a side effect of Thread bootstrap. */
+export interface HarnessSessionDTO {
+  sessionId: string
+  title: string | null
+  createTime: BackendDateTime
+  /** Observable last-entry time; not a stored column. */
+  updateTime: BackendDateTime
+}
 
 export type EntryType =
   | 'ROOT'

@@ -14,9 +14,3 @@ export interface S3PresignedResponseDTO {
   headers: Record<string, string>
   expiresAt: BackendDateTime
 }
-
-export interface ComfyuiWorkflowRunFileDTO {
-  key: string
-  filename: string
-  contentType: string
-}

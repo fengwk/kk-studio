@@ -3,9 +3,9 @@ import { createClientMessageId } from '@/features/ai/runtime/useAgentThreadMessa
 import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessThreadYoloSetDTO,
+  ModelUsageSummaryDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
 

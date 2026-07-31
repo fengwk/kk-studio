@@ -131,11 +131,3 @@ export function filterThreadCommands(
   )
   return ranked
 }
-
-/** First enabled command in the filtered list (for Enter to confirm). */
-export function firstEnabledThreadCommand(
-  query: string,
-  commands: ThreadCommand[] = THREAD_COMMANDS,
-): ThreadCommand | undefined {
-  return filterThreadCommands(query, commands).find((command) => !command.disabled)
-}

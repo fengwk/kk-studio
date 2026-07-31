@@ -5,12 +5,6 @@ import {
 } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { ThreadStatusSegmentRows } from '@/features/ai/runtime/thread-panel/thread-status-segments'
 
-export type {
-  ThreadUsageCost,
-  ThreadUsageNumber,
-  ThreadUsageSummary,
-} from '@/features/ai/runtime/thread-panel/thread-status-types'
-
 /**
  * Footer：agent | model | usage
  *

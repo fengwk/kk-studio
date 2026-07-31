@@ -8,8 +8,7 @@ import {
   toSessionSelectionItem,
   toThreadSelectionItem,
 } from '@/features/ai/chat/chat-session-picker'
-import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-chat'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 function session(id: string, updateTime: string, createTime = updateTime): HarnessSessionDTO {
   return {

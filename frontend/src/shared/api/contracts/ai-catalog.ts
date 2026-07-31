@@ -1,40 +1,4 @@
-import type {
-  AgentResourceId,
-  BackendBigDecimal,
-  BackendLong,
-  CatalogVersion,
-  InstantTimestamp,
-} from '@/shared/api/contracts/base'
-
-export interface ModelUsageCostSummaryDTO {
-  currency: string
-  input: BackendBigDecimal
-  output: BackendBigDecimal
-  cacheRead: BackendBigDecimal
-  cacheWrite: BackendBigDecimal
-  cacheWriteLong: BackendBigDecimal
-  reasoning: BackendBigDecimal
-  total: BackendBigDecimal
-}
-
-export interface ModelUsageSummaryDTO {
-  scopeType: 'thread' | 'session' | 'model'
-  scopeId: string
-  recordCount: BackendLong
-  inputTokens: BackendLong
-  outputTokens: BackendLong
-  cacheReadTokens: BackendLong
-  cacheWriteTokens: BackendLong
-  cacheWriteLongTokens: BackendLong
-  reasoningTokens: BackendLong
-  providerTotalTokens: BackendLong
-  cacheEligibleRecordCount: BackendLong
-  cacheHitRecordCount: BackendLong
-  cacheHitRatio: BackendBigDecimal
-  tokenReadRatio: BackendBigDecimal
-  unamortizedCacheWriteTokens: BackendLong
-  costs: ModelUsageCostSummaryDTO[]
-}
+import type { AgentResourceId, BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
 export interface AgentProviderDTO {
   id: AgentResourceId
