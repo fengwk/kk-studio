@@ -15,17 +15,17 @@ class ToolPermissionInteractionCodecTest {
 
   @Test
   void projectsSafePreviewAndResolvesBothDecisions() {
-    InteractionRequest request = request();
+    Interaction interaction = interaction();
 
     assertEquals(
         "{\"tool\":\"bash\",\"workdir\":\"/workspace\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}",
-        codec.project(request).json());
+        codec.project(interaction.request()).json());
     assertEquals(
         ToolPermissionDecision.APPROVE,
-        codec.resolve(request, new InteractionResponse("{\"approved\":true}")));
+        codec.resolve(interaction, new InteractionResponse("{\"approved\":true}")));
     assertEquals(
         ToolPermissionDecision.DENY,
-        codec.resolve(request, new InteractionResponse("{\"approved\":false}")));
+        codec.resolve(interaction, new InteractionResponse("{\"approved\":false}")));
   }
 
   @Test
@@ -38,7 +38,9 @@ class ToolPermissionInteractionCodecTest {
                     "{\"invocationId\":41,\"threadId\":7,\"tool\":\"bash\",\"workdir\":\"/workspace\"}")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.resolve(request(), new InteractionResponse("{\"approved\":true,\"extra\":1}")));
+        () ->
+            codec.resolve(
+                interaction(), new InteractionResponse("{\"approved\":true,\"extra\":1}")));
     Interaction mismatched =
         new Interaction(
             1L,
@@ -65,5 +67,17 @@ class ToolPermissionInteractionCodecTest {
           "arguments": "{\\"command\\":\\"pwd\\"}"
         }
         """);
+  }
+
+  private static Interaction interaction() {
+    return new Interaction(
+        1L,
+        41L,
+        request(),
+        InteractionStatus.OPEN,
+        null,
+        0L,
+        Instant.parse("2026-01-01T00:00:00Z"),
+        null);
   }
 }
