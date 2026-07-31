@@ -54,7 +54,7 @@ convention:
     # i18n properties文件名称
     base-name: string
     # 使用语言
-    locale: zh_CN
+    locale: en_US
 
   code:
     i18n:

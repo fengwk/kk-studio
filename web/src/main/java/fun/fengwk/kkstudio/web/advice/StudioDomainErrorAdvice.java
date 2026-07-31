@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.web.advice;
 
 import fun.fengwk.convention4j.api.code.HttpStatus;
-import fun.fengwk.convention4j.api.code.ImmutableConventionErrorCode;
+import fun.fengwk.convention4j.api.code.ImmutableResolvedConventionErrorCode;
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +22,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -43,6 +46,7 @@ import java.util.Map;
  * services wrap {@link org.springframework.dao.DuplicateKeyException} and report the typed error
  * themselves so unrelated controllers are not affected by a global advice.
  */
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
     assignableTypes = {
       StudioAgentProviderController.class,
@@ -51,6 +55,12 @@ import java.util.Map;
       StudioChatController.class
     })
 public class StudioDomainErrorAdvice {
+
+  private final StudioMessageService messageService;
+
+  public StudioDomainErrorAdvice(StudioMessageService messageService) {
+    this.messageService = messageService;
+  }
 
   @ExceptionHandler(AiValidationException.class)
   public ResponseEntity<Result<Void>> handleValidation(AiValidationException error) {
@@ -83,7 +93,10 @@ public class StudioDomainErrorAdvice {
     AiValidationException wrapped =
         new AiValidationException(
             error.getParameterName(), error.getParameterName() + " is required");
-    return build(HttpStatus.BAD_REQUEST, wrapped);
+    return build(
+        HttpStatus.BAD_REQUEST,
+        wrapped,
+        messageService.validationRequired(error.getParameterName()));
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -92,19 +105,29 @@ public class StudioDomainErrorAdvice {
     AiValidationException wrapped =
         new AiValidationException(
             error.getName(), error.getName() + " has invalid value: " + error.getValue());
-    return build(HttpStatus.BAD_REQUEST, wrapped);
+    return build(
+        HttpStatus.BAD_REQUEST, wrapped, messageService.validationTypeMismatch(error.getName()));
   }
 
-  private static ResponseEntity<Result<Void>> build(HttpStatus status, AiDomainException error) {
+  private ResponseEntity<Result<Void>> build(HttpStatus status, AiDomainException error) {
+    return build(
+        status,
+        error,
+        messageService.domainMessage(error.code(), Map.of("resource", error.resource())));
+  }
+
+  private ResponseEntity<Result<Void>> build(
+      HttpStatus status, AiDomainException error, String message) {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("resource", error.resource());
     if (error instanceof AiVersionConflictException versionConflict) {
       errorContext.put("expectedVersion", versionConflict.expectedVersion());
       errorContext.put("actualVersion", versionConflict.actualVersion());
     }
-    ImmutableConventionErrorCode code =
-        new ImmutableConventionErrorCode(
-            status.getStatus(), error.code().code(), error.getMessage(), errorContext);
+    errorContext.put("detail", error.getMessage());
+    ImmutableResolvedConventionErrorCode code =
+        new ImmutableResolvedConventionErrorCode(
+            status.getStatus(), error.code().code(), message, errorContext);
     return ResponseEntity.status(status.getStatus()).body(Results.error(code));
   }
 }
