@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildComfyuiParameters, discoverComfyuiDownloads, filterComfyuiWorkflows, getBindingSummary, initialBindingValues, isComfyuiPollingStatus, isComfyuiTerminalStatus, parseComfyuiBindings, prettyJson, validateComfyuiWorkflowDraft, workflowToDraft } from '@/features/comfyui/comfyui-utils'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
+import { setLocale } from '@/shared/i18n'
 
 describe('comfyui utils', () => {
   it('validates editor JSON and normalizes workflow payloads', () => {
@@ -174,6 +175,26 @@ describe('comfyui utils', () => {
     expect(isComfyuiTerminalStatus('vendor_waiting')).toBe(false)
     expect(prettyJson(undefined)).toBe('-')
     expect(prettyJson({ ok: true })).toContain('"ok": true')
+  })
+
+  it('translates validation and binding errors in English when invoked', () => {
+    setLocale('en-US')
+
+    expect(() => validateComfyuiWorkflowDraft(draft({ workflowJson: '' }))).toThrow(
+      'Workflow JSON is required',
+    )
+    expect(() => validateComfyuiWorkflowDraft(draft({ inputBindingsJson: '{}' }))).toThrow(
+      'Input bindings JSON must be an array',
+    )
+    expect(() => parseComfyuiBindings('[{"name":"x","kind":"unknown","nodeId":"1","inputName":"x"}]')).toThrow(
+      'Binding item #1.kind must be parameter or file',
+    )
+    const bindings = parseComfyuiBindings(
+      '[{"name":"prompt","kind":"parameter","nodeId":"1","inputName":"text","required":true}]',
+    )
+    expect(() => buildComfyuiParameters(bindings, { prompt: '' })).toThrow(
+      'Parameter prompt is required',
+    )
   })
 })
 

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowEditorModal } from '@/features/comfyui/ComfyuiWorkflowEditorModal'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
+import { setLocale } from '@/shared/i18n'
 
 const baseDraft = {
   apiName: 'image-api',
@@ -66,11 +67,11 @@ describe('ComfyuiWorkflowEditorModal', () => {
     expect(screen.getByRole('heading', { name: '新建 ComfyUI Workflow' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '确认创建' })).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('API name'), { target: { value: 'foo' } })
-    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Foo' } })
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'short desc' } })
+    fireEvent.change(screen.getByLabelText('API 名称'), { target: { value: 'foo' } })
+    fireEvent.change(screen.getByLabelText('显示名称'), { target: { value: 'Foo' } })
+    fireEvent.change(screen.getByLabelText('描述'), { target: { value: 'short desc' } })
     fireEvent.change(screen.getByLabelText('API-format workflow JSON'), { target: { value: '{"1":{}}' } })
-    fireEvent.change(screen.getByLabelText('Input bindings JSON'), {
+    fireEvent.change(screen.getByLabelText('输入绑定 JSON'), {
       target: { value: '[{"name":"x","kind":"file","nodeId":"1","inputName":"x"}]' },
     })
     fireEvent.change(screen.getByPlaceholderText('$.outputs'), { target: { value: '$.out' } })
@@ -110,8 +111,8 @@ describe('ComfyuiWorkflowEditorModal', () => {
 
     expect(screen.getByRole('heading', { name: '编辑 ComfyUI Workflow' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存修改' })).toBeInTheDocument()
-    expect(screen.getByLabelText('API name')).toHaveValue('image-api')
-    expect(screen.getByLabelText('Display name')).toHaveValue('Image API')
+    expect(screen.getByLabelText('API 名称')).toHaveValue('image-api')
+    expect(screen.getByLabelText('显示名称')).toHaveValue('Image API')
     expect(screen.getByRole('checkbox')).not.toBeChecked()
   })
 
@@ -151,5 +152,31 @@ describe('ComfyuiWorkflowEditorModal', () => {
     // Click the disabled backdrop - no closure call should happen.
     await user.click(screen.getByText('关闭'))
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('renders the editor catalog in English while preserving API field values', () => {
+    setLocale('en-US')
+    render(
+      <ComfyuiWorkflowEditorModal
+        modal={{ mode: 'create', workflow: null }}
+        draft={baseDraft}
+        pending={false}
+        error={null}
+        onClose={vi.fn()}
+        onDraftChange={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'New ComfyUI Workflow' })).toBeInTheDocument()
+    expect(screen.getByLabelText('API name')).toHaveAttribute('placeholder', 'image-upscale')
+    expect(screen.getByLabelText('Display name')).toHaveAttribute('placeholder', 'Image Upscale')
+    expect(screen.getByLabelText('Description')).toHaveAttribute(
+      'placeholder',
+      "Describe the workflow's purpose",
+    )
+    expect(screen.getByLabelText('Input bindings JSON')).toBeInTheDocument()
+    expect(screen.getByText('Must be an array; each item declares name, kind, nodeId, and inputName.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument()
   })
 })

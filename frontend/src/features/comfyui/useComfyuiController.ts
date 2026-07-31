@@ -14,16 +14,18 @@ import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import { comfyuiService } from '@/shared/api/comfyui-service'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n } from '@/shared/i18n'
 
 type ComfyuiEditorModal =
   | { mode: 'create'; workflow: null }
   | { mode: 'edit'; workflow: ComfyuiWorkflowApiDTO }
 
 export function useComfyuiController() {
+  const { t } = useI18n()
   const [editorModal, setEditorModal] = useState<ComfyuiEditorModal | null>(null)
   const [draft, setDraft] = useState<ComfyuiWorkflowDraft>(emptyComfyuiWorkflowDraft)
   const [editorError, setEditorError] = useState<string | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
+  const [deleteWorkflow, setDeleteWorkflow] = useState<ComfyuiWorkflowApiDTO | null>(null)
   const [runWorkflow, setRunWorkflow] = useState<ComfyuiWorkflowApiDTO | null>(null)
 
   const workflowsQuery = useQuery({
@@ -49,7 +51,7 @@ export function useComfyuiController() {
   const deleteMutation = useInvalidateMutation({
     mutationFn: (workflow: ComfyuiWorkflowApiDTO) => comfyuiService.deleteWorkflow(workflow.id),
     invalidateQueryKeys: [queryKeys.comfyui.workflows],
-    onSuccess: () => setDeleteConfirm(null),
+    onSuccess: () => setDeleteWorkflow(null),
   })
 
   const submitEditor: FormEventHandler<HTMLFormElement> = (event) => {
@@ -83,14 +85,21 @@ export function useComfyuiController() {
   }
 
   function requestDelete(workflow: ComfyuiWorkflowApiDTO) {
-    setDeleteConfirm({
-      title: '删除 ComfyUI Workflow',
-      description: `将删除工作流 ${workflow.name}（${workflow.apiName}）。`,
-      confirmLabel: '确认删除',
-      tone: 'danger',
-      onConfirm: () => deleteMutation.mutate(workflow),
-    })
+    setDeleteWorkflow(workflow)
   }
+
+  const deleteConfirm: ConfirmModalState | null = deleteWorkflow
+    ? {
+      title: t('comfyui.confirm.deleteTitle'),
+      description: t('comfyui.confirm.deleteDescription', {
+        name: deleteWorkflow.name,
+        apiName: deleteWorkflow.apiName,
+      }),
+      confirmLabel: t('comfyui.confirm.delete'),
+      tone: 'danger',
+      onConfirm: () => deleteMutation.mutate(deleteWorkflow),
+    }
+    : null
 
   const editorMutationError = createMutation.error || updateMutation.error
   return {
@@ -114,7 +123,7 @@ export function useComfyuiController() {
     deleteConfirmModal: {
       modal: deleteConfirm,
       pending: deleteMutation.isPending,
-      onClose: () => setDeleteConfirm(null),
+      onClose: () => setDeleteWorkflow(null),
     },
     runModalProps: {
       workflow: runWorkflow,

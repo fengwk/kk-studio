@@ -15,6 +15,7 @@ import type {
   S3PresignedRequestDTO,
   S3PresignedResponseDTO,
 } from '@/shared/api/contracts/storage'
+import { translate } from '@/shared/i18n'
 
 const forbiddenHeaderNames = new Set([
   'connection',
@@ -99,7 +100,7 @@ export function createComfyuiService(client: HttpClient = apiClient, fetchImpl: 
       })
       const method = presigned.method.toUpperCase()
       if (method !== 'PUT') {
-        throw new Error(`预签名上传方法无效：${presigned.method}`)
+        throw new Error(translate('comfyui.upload.invalidMethod', { method: presigned.method }))
       }
       const response = await fetchImpl(presigned.url, {
         method,
@@ -107,7 +108,7 @@ export function createComfyuiService(client: HttpClient = apiClient, fetchImpl: 
         body: file,
       })
       if (!response.ok) {
-        throw new Error(`文件直传失败（HTTP ${response.status}）`)
+        throw new Error(translate('comfyui.upload.directFailure', { status: response.status }))
       }
       return {
         key: presigned.key || requestedKey,

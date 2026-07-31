@@ -1,6 +1,7 @@
 import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ComfyuiWorkflowCard } from '@/features/comfyui/ComfyuiWorkflowCard'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
+import { useI18n } from '@/shared/i18n'
 
 export function ComfyuiWorkflowsPanel({
   workflows,
@@ -17,9 +18,14 @@ export function ComfyuiWorkflowsPanel({
   onEdit: (workflow: ComfyuiWorkflowApiDTO) => void
   onDelete: (workflow: ComfyuiWorkflowApiDTO) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 ComfyUI Workflow" subtitle="配置 API-format workflow、输入绑定与结果选择器" onClick={onCreate} />
+      <CreateCard
+        title={t('comfyui.workflows.createTitle')}
+        subtitle={t('comfyui.workflows.createSubtitle')}
+        onClick={onCreate}
+      />
       {workflows.map((workflow) => (
         <ComfyuiWorkflowCard
           key={workflow.id}

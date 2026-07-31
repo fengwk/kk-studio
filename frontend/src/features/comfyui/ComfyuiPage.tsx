@@ -6,6 +6,7 @@ import { ComfyuiRunModal } from '@/features/comfyui/ComfyuiRunModal'
 import { ComfyuiRuntime } from '@/features/comfyui/ComfyuiRuntime'
 import { ComfyuiWorkflowsPanel } from '@/features/comfyui/ComfyuiWorkflowsPanel'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
 
 export function ComfyuiPage({ children }: ExtensionComponentProps) {
   return (
@@ -21,10 +22,11 @@ function ComfyuiFrame({
   children,
 }: ExtensionComponentProps & { content: ReactNode }) {
   const controller = useComfyui()
+  const { t } = useI18n()
   return (
     <section className="screen active">
       <nav className="subbar">
-        <nav className="subnav" aria-label="Tools">
+        <nav className="subnav" aria-label={t('comfyui.navigation.tools')}>
           <Link className="active" to="/comfyui">
             ComfyUI
           </Link>
@@ -32,13 +34,13 @@ function ComfyuiFrame({
         <SearchField value={controller.search} onChange={controller.setSearch} />
       </nav>
       <div className="screen-body">
-        {controller.busy && <StateBlock title="正在加载 ComfyUI 工作流" />}
+        {controller.busy && <StateBlock title={t('comfyui.page.loading')} />}
         {controller.error && (
           <StateBlock
             title={
               controller.error instanceof Error
                 ? controller.error.message
-                : '工作流加载失败'
+                : t('comfyui.page.workflowLoadFailed')
             }
             tone="danger"
           />
@@ -48,7 +50,7 @@ function ComfyuiFrame({
             title={
               controller.mutationError instanceof Error
                 ? controller.mutationError.message
-                : '工作流操作失败'
+                : t('comfyui.page.workflowOperationFailed')
             }
             tone="danger"
           />

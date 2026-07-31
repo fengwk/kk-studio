@@ -4,6 +4,7 @@ import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import type { ComfyuiWorkflowDraft } from '@/features/comfyui/comfyui-types'
 import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { useI18n } from '@/shared/i18n'
 
 type EditorModal =
   | { mode: 'create'; workflow: null }
@@ -26,10 +27,14 @@ export function ComfyuiWorkflowEditorModal({
   onDraftChange: (draft: ComfyuiWorkflowDraft) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
+  const { t } = useI18n()
   if (!modal) {
     return null
   }
-  const title = modal.mode === 'create' ? '新建 ComfyUI Workflow' : '编辑 ComfyUI Workflow'
+  const title =
+    modal.mode === 'create'
+      ? t('comfyui.editor.createTitle')
+      : t('comfyui.editor.editTitle')
   const update = <K extends keyof ComfyuiWorkflowDraft>(key: K, value: ComfyuiWorkflowDraft[K]) =>
     onDraftChange({ ...draft, [key]: value })
 
@@ -46,29 +51,38 @@ export function ComfyuiWorkflowEditorModal({
           {error && <StateBlock title={error} tone="danger" />}
           <div className="metadata-grid metadata-grid-two">
             <label className="form-group">
-              <FieldLabel required>API name</FieldLabel>
+              <FieldLabel required>{t('comfyui.editor.apiNameLabel')}</FieldLabel>
               <input
-                aria-label="API name"
+                aria-label={t('comfyui.editor.apiNameLabel')}
                 value={draft.apiName}
                 onChange={(event) => update('apiName', event.target.value)}
-                placeholder="image-upscale"
+                placeholder={t('comfyui.editor.apiNamePlaceholder')}
                 autoComplete="off"
               />
-              <span className="inline-hint">小写字母开头，仅允许小写字母、数字和连字符。</span>
+              <span className="inline-hint">{t('comfyui.editor.apiNameHint')}</span>
             </label>
             <label className="form-group">
-              <FieldLabel required>Display name</FieldLabel>
-              <input aria-label="Display name" value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="Image Upscale" />
+              <FieldLabel required>{t('comfyui.editor.displayNameLabel')}</FieldLabel>
+              <input
+                aria-label={t('comfyui.editor.displayNameLabel')}
+                value={draft.name}
+                onChange={(event) => update('name', event.target.value)}
+                placeholder={t('comfyui.editor.displayNamePlaceholder')}
+              />
             </label>
           </div>
           <label className="form-group">
-            <FieldLabel>Description</FieldLabel>
-            <textarea value={draft.description} onChange={(event) => update('description', event.target.value)} placeholder="工作流用途说明" />
+            <FieldLabel>{t('comfyui.editor.descriptionLabel')}</FieldLabel>
+            <textarea
+              value={draft.description}
+              onChange={(event) => update('description', event.target.value)}
+              placeholder={t('comfyui.editor.descriptionPlaceholder')}
+            />
           </label>
           <label className="form-group">
-            <FieldLabel required>API-format workflow JSON</FieldLabel>
+            <FieldLabel required>{t('comfyui.editor.workflowJsonLabel')}</FieldLabel>
             <textarea
-              aria-label="API-format workflow JSON"
+              aria-label={t('comfyui.editor.workflowJsonLabel')}
               className="code-textarea comfyui-workflow-json"
               value={draft.workflowJson}
               onChange={(event) => update('workflowJson', event.target.value)}
@@ -76,32 +90,32 @@ export function ComfyuiWorkflowEditorModal({
             />
           </label>
           <label className="form-group">
-            <FieldLabel required>Input bindings JSON</FieldLabel>
+            <FieldLabel required>{t('comfyui.editor.inputBindingsLabel')}</FieldLabel>
             <textarea
-              aria-label="Input bindings JSON"
+              aria-label={t('comfyui.editor.inputBindingsLabel')}
               className="code-textarea comfyui-bindings-json"
               value={draft.inputBindingsJson}
               onChange={(event) => update('inputBindingsJson', event.target.value)}
               spellCheck={false}
             />
-            <span className="inline-hint">必须是数组；每项声明 name、kind、nodeId 和 inputName。</span>
+            <span className="inline-hint">{t('comfyui.editor.inputBindingsHint')}</span>
           </label>
           <label className="form-group">
-            <FieldLabel>Default JSONPath selector</FieldLabel>
+            <FieldLabel>{t('comfyui.editor.selectorLabel')}</FieldLabel>
             <input
               value={draft.defaultSelector}
               onChange={(event) => update('defaultSelector', event.target.value)}
-              placeholder="$.outputs"
+              placeholder={t('comfyui.editor.selectorPlaceholder')}
             />
           </label>
           <label className="checkbox-field">
             <input type="checkbox" checked={draft.enabled} onChange={(event) => update('enabled', event.target.checked)} />
-            Enabled
+            {t('comfyui.editor.enabledLabel')}
           </label>
         </div>
         <div className="modal-footer">
           <button type="submit" className="btn-primary" disabled={pending}>
-            {modal.mode === 'create' ? '确认创建' : '保存修改'}
+            {modal.mode === 'create' ? t('comfyui.editor.createSubmit') : t('comfyui.editor.saveSubmit')}
           </button>
         </div>
       </form>
