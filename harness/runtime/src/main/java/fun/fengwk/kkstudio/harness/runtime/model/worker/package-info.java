@@ -3,10 +3,11 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker} claims one Invocation
  * through {@link fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationTransactions},
- * delegates external I/O to {@link fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutor},
- * and accepts Provider callbacks without writing Entry/head/Usage. Terminal state is committed only
- * through the transaction port; the port atomically marks the owning Thread runnable and schedules
- * its durable target.
+ * resolves the execution resource, and hands Provider I/O to its package-local {@code
+ * ModelExecutionCallback}. That callback owns listener lifecycle and watchdogs; {@code
+ * ModelStreamAccumulator} reconciles stream deltas; {@code ModelTerminalCompleter} owns terminal
+ * and retry mutations. Terminal state is committed only through the transaction port; the port
+ * atomically marks the owning Thread runnable and schedules its durable target.
  *
  * <p>Delta is a bounded realtime projection only. Worker lease heartbeat and real Provider activity
  * are deliberately separate: only Provider delta is eligible to advance {@code lastActivityAt}. A
