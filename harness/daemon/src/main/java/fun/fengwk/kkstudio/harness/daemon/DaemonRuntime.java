@@ -42,6 +42,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -71,9 +72,11 @@ public final class DaemonRuntime implements AutoCloseable {
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
   private final AtomicBoolean started = new AtomicBoolean();
+  private final AtomicBoolean closed = new AtomicBoolean();
   private final AtomicBoolean connecting = new AtomicBoolean();
   private final AtomicBoolean reconnectScheduled = new AtomicBoolean();
   private final ConcurrentHashMap<String, RunningInvocation> running = new ConcurrentHashMap<>();
+  private final Object lifecycleLock = new Object();
   private final Object reconnectLock = new Object();
 
   private volatile DaemonRuntimeState state = DaemonRuntimeState.STOPPED;
@@ -146,16 +149,18 @@ public final class DaemonRuntime implements AutoCloseable {
 
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
   public void start() {
-    if (!started.compareAndSet(false, true)) {
-      return;
+    synchronized (lifecycleLock) {
+      if (closed.get() || !started.compareAndSet(false, true)) {
+        return;
+      }
+      state = DaemonRuntimeState.DISCONNECTED;
+      scheduler.scheduleWithFixedDelay(
+          this::sendHeartbeat,
+          config.heartbeatInterval().toMillis(),
+          config.heartbeatInterval().toMillis(),
+          TimeUnit.MILLISECONDS);
+      scheduleReconnect(Duration.ZERO);
     }
-    state = DaemonRuntimeState.DISCONNECTED;
-    scheduler.scheduleWithFixedDelay(
-        this::sendHeartbeat,
-        config.heartbeatInterval().toMillis(),
-        config.heartbeatInterval().toMillis(),
-        TimeUnit.MILLISECONDS);
-    scheduleReconnect(Duration.ZERO);
   }
 
   /** 返回当前连接生命周期状态，仅用于运行状态观测。 */
@@ -167,13 +172,17 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get() || !reconnectScheduled.compareAndSet(false, true)) {
       return;
     }
-    scheduler.schedule(
-        () -> {
-          reconnectScheduled.set(false);
-          connect();
-        },
-        delay.toMillis(),
-        TimeUnit.MILLISECONDS);
+    try {
+      scheduler.schedule(
+          () -> {
+            reconnectScheduled.set(false);
+            connect();
+          },
+          delay.toMillis(),
+          TimeUnit.MILLISECONDS);
+    } catch (RejectedExecutionException ignored) {
+      reconnectScheduled.set(false);
+    }
   }
 
   private void connect() {
@@ -289,7 +298,7 @@ public final class DaemonRuntime implements AutoCloseable {
           requireInvocationId(envelope);
           InvokePayload payload = readInvokePayload(envelope);
           connection.acceptInboundEnvelope(identity);
-          processInvoke(envelope, payload);
+          processInvoke(connection, envelope, payload);
         }
         case CANCEL -> {
           requireInvocationId(envelope);
@@ -319,12 +328,17 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void processInvoke(DaemonEnvelope envelope, InvokePayload payload) {
-    sendAck(envelope.sequence());
-    handleInvoke(envelope, payload);
+  private void processInvoke(
+      ActiveConnection connection, DaemonEnvelope envelope, InvokePayload payload) {
+    sendAck(connection, envelope.sequence());
+    handleInvoke(connection, envelope, payload);
   }
 
-  private void handleInvoke(DaemonEnvelope envelope, InvokePayload payload) {
+  private void handleInvoke(
+      ActiveConnection connection, DaemonEnvelope envelope, InvokePayload payload) {
+    if (!started.get()) {
+      return;
+    }
     DaemonInvocationJournalStart start = journal.start(envelope.invocationId());
     if (!start.created()) {
       replay(start.entry(), envelope.invocationId());
@@ -354,11 +368,17 @@ public final class DaemonRuntime implements AutoCloseable {
               timeout);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);
-      if (!isRunning(envelope.invocationId()) || !invocation.begin()) {
+      if (!started.get() || !isRunning(envelope.invocationId()) || !invocation.begin()) {
         running.remove(envelope.invocationId(), invocation);
+        if (!started.get()) {
+          journal.complete(
+              envelope.invocationId(),
+              new DaemonTerminalMessage(
+                  DaemonMessageType.CANCELLED, "{\"reason\":\"daemon stopped\"}"));
+        }
         return;
       }
-      send(DaemonMessageType.STARTED, envelope.invocationId(), "{}");
+      sendOn(connection, DaemonMessageType.STARTED, envelope.invocationId(), "{}");
       ToolExecutionHandle handle = tool.execute(request, new InvocationListener(invocation));
       invocation.setHandle(Objects.requireNonNull(handle, "tool execution handle"));
       scheduleTimeout(invocation, timeout);
@@ -445,20 +465,27 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private void scheduleTimeout(RunningInvocation invocation, Duration timeout) {
-    ScheduledFuture<?> deadline =
-        scheduler.schedule(
-            () ->
-                terminal(
-                    invocation.invocationId(),
-                    new DaemonTerminalMessage(
-                        DaemonMessageType.FAILED,
-                        "{\"message\":\"tool execution timed out after "
-                            + timeout.toMillis()
-                            + "ms\"}"),
-                    true),
-            timeout.toNanos(),
-            TimeUnit.NANOSECONDS);
-    invocation.setDeadline(deadline);
+    if (!isRunning(invocation.invocationId()) || invocation.isTerminal()) {
+      return;
+    }
+    try {
+      ScheduledFuture<?> deadline =
+          scheduler.schedule(
+              () ->
+                  terminal(
+                      invocation.invocationId(),
+                      new DaemonTerminalMessage(
+                          DaemonMessageType.FAILED,
+                          "{\"message\":\"tool execution timed out after "
+                              + timeout.toMillis()
+                              + "ms\"}"),
+                      true),
+              timeout.toNanos(),
+              TimeUnit.NANOSECONDS);
+      invocation.setDeadline(deadline);
+    } catch (RejectedExecutionException ignored) {
+      // close() has already recorded the cancellation and stopped the scheduler.
+    }
   }
 
   /**
@@ -518,6 +545,14 @@ public final class DaemonRuntime implements AutoCloseable {
     send(DaemonMessageType.ACK, null, "{\"acknowledgedSequence\":" + acknowledgedSequence + "}");
   }
 
+  private void sendAck(ActiveConnection connection, long acknowledgedSequence) {
+    sendOn(
+        connection,
+        DaemonMessageType.ACK,
+        null,
+        "{\"acknowledgedSequence\":" + acknowledgedSequence + "}");
+  }
+
   private void send(DaemonMessageType messageType, String invocationId, String payloadJson) {
     ActiveConnection connection = activeConnection.get();
     if (connection == null || !connection.isReady()) {
@@ -531,7 +566,7 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonMessageType messageType,
       String invocationId,
       String payloadJson) {
-    if (!connection.connection().isOpen()) {
+    if (activeConnection.get() != connection || !connection.connection().isOpen()) {
       return;
     }
     DaemonEnvelope envelope = envelope(messageType, invocationId, payloadJson);
@@ -573,15 +608,27 @@ public final class DaemonRuntime implements AutoCloseable {
 
   @Override
   public void close() {
-    if (!started.compareAndSet(true, false)) {
-      return;
+    ActiveConnection connection;
+    synchronized (lifecycleLock) {
+      if (!closed.compareAndSet(false, true)) {
+        return;
+      }
+      started.set(false);
+      state = DaemonRuntimeState.STOPPED;
+      connection = activeConnection.getAndSet(null);
     }
-    state = DaemonRuntimeState.STOPPED;
-    ActiveConnection connection = activeConnection.getAndSet(null);
     if (connection != null) {
       connection.connection().close();
     }
-    running.values().forEach(RunningInvocation::cancel);
+    running
+        .values()
+        .forEach(
+            invocation ->
+                terminal(
+                    invocation.invocationId(),
+                    new DaemonTerminalMessage(
+                        DaemonMessageType.CANCELLED, "{\"reason\":\"daemon stopped\"}"),
+                    true));
     running.clear();
     scheduler.shutdownNow();
     transport.close();
@@ -749,6 +796,10 @@ public final class DaemonRuntime implements AutoCloseable {
         cancel();
       }
       return true;
+    }
+
+    private boolean isTerminal() {
+      return terminal.get();
     }
 
     private void setDeadline(ScheduledFuture<?> value) {

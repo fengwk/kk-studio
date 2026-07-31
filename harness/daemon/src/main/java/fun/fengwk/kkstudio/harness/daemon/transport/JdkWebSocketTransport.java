@@ -32,12 +32,12 @@ public final class JdkWebSocketTransport implements DaemonTransport {
         .thenApply(ConnectionAdapter::new);
   }
 
-  private static final class ConnectionAdapter implements DaemonConnection {
+  static final class ConnectionAdapter implements DaemonConnection {
 
     private final WebSocket webSocket;
     private final AtomicBoolean open = new AtomicBoolean(true);
 
-    private ConnectionAdapter(WebSocket webSocket) {
+    ConnectionAdapter(WebSocket webSocket) {
       this.webSocket = webSocket;
     }
 
@@ -62,13 +62,13 @@ public final class JdkWebSocketTransport implements DaemonTransport {
     }
   }
 
-  private static final class ListenerAdapter implements WebSocket.Listener {
+  static final class ListenerAdapter implements WebSocket.Listener {
 
     private final DaemonTransportListener listener;
     private final StringBuilder text = new StringBuilder();
     private final AtomicBoolean disconnected = new AtomicBoolean();
 
-    private ListenerAdapter(DaemonTransportListener listener) {
+    ListenerAdapter(DaemonTransportListener listener) {
       this.listener = Objects.requireNonNull(listener, "listener");
     }
 
