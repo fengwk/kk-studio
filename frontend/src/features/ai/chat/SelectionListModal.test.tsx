@@ -57,6 +57,27 @@ describe('SelectionListModal', () => {
     expect(onSelect).toHaveBeenCalledWith('s1')
   })
 
+  it('renders scope and sort controls in one left-to-right row', () => {
+    const { container } = render(
+      <SelectionListModal
+        open
+        title="选择 Thread"
+        items={[]}
+        scope="current"
+        onScopeChange={() => undefined}
+        sort="recent"
+        onSortChange={() => undefined}
+        onSelect={() => undefined}
+        onClose={() => undefined}
+      />,
+    )
+    const controls = container.querySelector('.selection-controls-row')
+    expect(controls?.children).toHaveLength(2)
+    expect(controls?.textContent?.replace(/\s+/g, '')).toBe(
+      '范围当前Chat全局Thread排序最近更新创建时间',
+    )
+  })
+
   it('lists agents for selection', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()
