@@ -1,6 +1,6 @@
 import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ComfyuiWorkflowCard } from '@/features/comfyui/ComfyuiWorkflowCard'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 export function ComfyuiWorkflowsPanel({
   workflows,

@@ -26,8 +26,6 @@ export function useAgentThreadQueries(threadId: string) {
   const thread = snapshot?.thread
   const sessionId = thread?.sessionId ?? ''
 
-  // Mirror the console join so the thread panel surfaces the same enriched label without leaking
-  // the join field through the wire contract.
   const providers = providersQuery.data?.results ?? []
   const models: AgentModelView[] = toAgentModelViews(
     modelsQuery.data?.results ?? [],
@@ -41,7 +39,6 @@ export function useAgentThreadQueries(threadId: string) {
     agents: agentsQuery.data?.results ?? [],
     models,
     providers,
-    session: undefined,
     thread,
     sessionId,
     entries: snapshot?.entries ?? [],

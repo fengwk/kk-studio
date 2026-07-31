@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowsPanel } from '@/features/comfyui/ComfyuiWorkflowsPanel'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 function makeWorkflow(id: string, name: string, apiName: string, enabled = true): ComfyuiWorkflowApiDTO {
   return {

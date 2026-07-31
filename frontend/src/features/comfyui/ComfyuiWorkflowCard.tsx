@@ -1,6 +1,6 @@
 import { Pencil, Play, Trash2, Workflow } from 'lucide-react'
 import { getBindingSummary } from '@/features/comfyui/comfyui-utils'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 export function ComfyuiWorkflowCard({
   workflow,

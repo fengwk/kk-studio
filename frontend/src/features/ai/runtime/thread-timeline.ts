@@ -15,7 +15,7 @@ export type {
   ToolAttachmentType,
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import type { HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadTimeline } from '@/features/ai/runtime/thread-timeline-types'
 
 /**

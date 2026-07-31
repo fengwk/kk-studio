@@ -3,7 +3,7 @@ import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 import type { ResourceModal } from '@/features/ai/catalog/ai-console-types'
 
 export function resourceTitle(modal: ResourceModal): string {

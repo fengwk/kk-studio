@@ -1,4 +1,4 @@
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts'
+import type { ModelUsageSummaryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ThreadUsageSummary } from '@/features/ai/runtime'
 
 /**

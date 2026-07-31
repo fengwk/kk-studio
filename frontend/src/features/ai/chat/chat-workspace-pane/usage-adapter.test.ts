@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelUsageSummaryDTO } from '@/shared/api/contracts'
+import type { ModelUsageSummaryDTO } from '@/shared/api/contracts/ai-catalog'
 import { toThreadUsageSummary } from '@/features/ai/chat/chat-workspace-pane/usage-adapter'
 
 describe('toThreadUsageSummary', () => {

@@ -5,7 +5,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiRunModal } from '@/features/comfyui/ComfyuiRunModal'
 import { comfyuiService } from '@/shared/api/comfyui-service'
-import type { ComfyuiWorkflowApiDTO, ComfyuiWorkflowJobDTO, ComfyuiWorkflowRunDTO } from '@/shared/api/contracts'
+import type {
+  ComfyuiWorkflowApiDTO,
+  ComfyuiWorkflowJobDTO,
+  ComfyuiWorkflowRunDTO,
+} from '@/shared/api/contracts/comfyui'
 
 vi.mock('@/shared/api/comfyui-service', () => ({
   comfyuiService: {

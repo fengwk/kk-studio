@@ -1,9 +1,8 @@
 import { includesSearch } from '@/shared/lib/search-utils'
 import type {
-  BackendDateTime,
   ChatDTO,
-  InstantTimestamp,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-chat'
+import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
 
 function backendTimeValue(value: BackendDateTime | unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {

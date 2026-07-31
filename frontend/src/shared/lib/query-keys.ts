@@ -1,4 +1,4 @@
-import type { AgentResourceId } from '@/shared/api/contracts'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export const queryKeys = {
   providers: {
@@ -44,5 +44,8 @@ export const queryKeys = {
   },
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,
+  },
+  studio: {
+    canvases: ['studio', 'canvases'] as const,
   },
 }

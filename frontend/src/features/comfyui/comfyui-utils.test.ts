@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildComfyuiParameters, discoverComfyuiDownloads, filterComfyuiWorkflows, getBindingSummary, initialBindingValues, isComfyuiPollingStatus, isComfyuiTerminalStatus, parseComfyuiBindings, prettyJson, validateComfyuiWorkflowDraft, workflowToDraft } from '@/features/comfyui/comfyui-utils'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 describe('comfyui utils', () => {
   it('validates editor JSON and normalizes workflow payloads', () => {

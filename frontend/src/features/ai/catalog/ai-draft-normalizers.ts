@@ -1,6 +1,6 @@
 import type { AgentDraft, ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import type { AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import {
   resolvePreferredVariant,
   trimValue,

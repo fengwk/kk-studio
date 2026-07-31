@@ -4,7 +4,7 @@ import type {
   ComfyuiInputBinding,
   ComfyuiWorkflowApiDTO,
   ComfyuiWorkflowApiEditablePropertiesDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/comfyui'
 
 const apiNamePattern = /^[a-z][a-z0-9-]{0,63}$/
 const valueTypes = new Set<ComfyuiBindingValueType>(['string', 'integer', 'number', 'boolean', 'json'])

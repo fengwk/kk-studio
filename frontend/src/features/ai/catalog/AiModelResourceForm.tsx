@@ -1,6 +1,6 @@
 import type {
   AgentModelInputModality,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normalizers'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
@@ -8,7 +8,7 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
-import type { AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'TEXT',

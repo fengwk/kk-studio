@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowCard } from '@/features/comfyui/ComfyuiWorkflowCard'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 function makeWorkflow(overrides: Partial<ComfyuiWorkflowApiDTO> = {}): ComfyuiWorkflowApiDTO {
   return {

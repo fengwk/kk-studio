@@ -1,5 +1,5 @@
-import type { AgentModelInputModality } from '@/shared/api/contracts'
-import type { AgentResourceId, CatalogVersion } from '@/shared/api/contracts'
+import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId, CatalogVersion } from '@/shared/api/contracts/base'
 
 export interface ProviderDraft {
   name: string

@@ -16,8 +16,8 @@ import { useChatListController } from '@/features/ai/chat'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-  ChatDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 export type AiConsolePageScope = 'chats' | 'agents' | 'models' | 'providers'
 

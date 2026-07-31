@@ -7,7 +7,7 @@ import {
   toSessionSelectionItemWithRunning,
 } from '@/features/ai/chat/chat-session-picker'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import type { HarnessSessionDTO } from '@/shared/api/contracts'
+import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-chat'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 

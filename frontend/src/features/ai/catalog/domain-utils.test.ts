@@ -33,7 +33,7 @@ import {
 import type {
   AgentModelDTO,
   AgentModelConfigDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {

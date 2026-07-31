@@ -1,7 +1,8 @@
 import { ChevronRight, MessageSquare } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 export function ChatCard({
   chat,

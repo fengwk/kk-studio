@@ -1,4 +1,8 @@
-import type { LiveEnvironmentDTO, LiveEnvironmentSkillDTO, LiveEnvironmentToolDTO } from '@/shared/api/contracts'
+import type {
+  LiveEnvironmentDTO,
+  LiveEnvironmentSkillDTO,
+  LiveEnvironmentToolDTO,
+} from '@/shared/api/contracts/ai-environment'
 
 export const PLATFORM_ENVIRONMENT_NAME = 'platform'
 

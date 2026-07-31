@@ -13,8 +13,8 @@ import type {
   AgentModelInputModality,
   AgentModelPricingDTO,
   AgentModelVariantDTO,
-  AgentResourceId,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
   'TEXT',

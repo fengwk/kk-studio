@@ -4,7 +4,7 @@ import type {
   AgentDefinitionDTO,
   AgentDefinitionEditablePropertiesDTO,
   AgentModelDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
 

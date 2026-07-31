@@ -1,6 +1,5 @@
 import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  HarnessSessionDTO,
   HarnessSessionEntryDTO,
   HarnessThreadAgentSetDTO,
   HarnessThreadBootstrapDTO,
@@ -16,7 +15,8 @@ import type {
   HarnessThreadStopResultDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadYoloSetDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionDTO } from '@/shared/api/contracts/ai-chat'
 
 export function createHarnessService(client: HttpClient = apiClient) {
   return {

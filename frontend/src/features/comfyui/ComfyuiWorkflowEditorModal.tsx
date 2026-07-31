@@ -2,7 +2,7 @@ import type { FormEventHandler } from 'react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import type { ComfyuiWorkflowDraft } from '@/features/comfyui/comfyui-types'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 
 type EditorModal =

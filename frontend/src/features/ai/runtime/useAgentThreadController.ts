@@ -17,12 +17,9 @@ import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThread
 import { useHarnessThreadObservability } from '@/features/ai/runtime/useHarnessThreadObservability'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-  BackendLong,
-  HarnessThreadDTO,
-} from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 function errorMessage(error: unknown): string {
@@ -53,7 +50,6 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     sessionId,
     entries,
     inputs,
-    session,
     snapshotQuery,
     modelInvocations,
     toolInvocations,
@@ -266,7 +262,6 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
   }
 
   return {
-    session,
     sessionId,
     agents,
     agentsById,

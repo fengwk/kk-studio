@@ -2,11 +2,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClientMessageId } from '@/features/ai/runtime/useAgentThreadMessageMutation'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
-  BackendLong,
   HarnessThreadYoloSetDTO,
-  ModelUsageSummaryDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-runtime'
+import type { ModelUsageSummaryDTO } from '@/shared/api/contracts/ai-catalog'
+import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useHarnessThreadObservability(

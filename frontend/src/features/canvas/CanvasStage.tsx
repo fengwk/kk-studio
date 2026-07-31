@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { CanvasAgentDock } from '@/features/canvas/CanvasAgentDock'
+import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
 import { CanvasGenerationWorkbench } from '@/features/canvas/CanvasGenerationWorkbench'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CANVAS_THEME } from '@/features/canvas/canvas-theme'

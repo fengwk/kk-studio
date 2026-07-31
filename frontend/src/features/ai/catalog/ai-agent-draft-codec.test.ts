@@ -8,7 +8,7 @@ import {
   toEditableAgentUpdate,
 } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 
 function model(): AgentModelDTO {
   return {

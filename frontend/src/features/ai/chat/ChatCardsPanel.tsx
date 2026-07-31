@@ -1,6 +1,7 @@
 import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 export function ChatCardsPanel({
   chats,

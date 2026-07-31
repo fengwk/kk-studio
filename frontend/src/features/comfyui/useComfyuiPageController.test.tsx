@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useComfyuiPageController } from '@/features/comfyui/useComfyuiPageController'
 import { comfyuiService } from '@/shared/api/comfyui-service'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

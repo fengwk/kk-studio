@@ -1,4 +1,4 @@
-import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 
 /**
  * Client-side projection of {@link AgentModelDTO} enriched with the display fields the console

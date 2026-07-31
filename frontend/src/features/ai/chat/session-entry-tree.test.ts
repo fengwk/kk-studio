@@ -10,7 +10,7 @@ import {
   sessionEntryKind,
   sessionEntryPreview,
 } from '@/features/ai/chat/session-entry-tree'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 
 const entries: HarnessSessionEntryDTO[] = [
   entry('root', null, 'ROOT', {}),

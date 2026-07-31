@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { ResultEnvelope } from '@/shared/api/contracts'
+import type { ResultEnvelope } from '@/shared/api/contracts/base'
 
 export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown> }): Promise<T>

@@ -28,7 +28,8 @@ import {
   modelRef,
   variantOptionsFromModel,
 } from '@/features/ai/catalog'
-import type { AgentDefinitionDTO, HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
