@@ -276,28 +276,69 @@ registerCase({
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-tool-${cid().slice(0, 8)}`,
-      yoloEnabled: true,
+    const suffix = cid().slice(0, 8)
+    const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+      name: `e2e-tool-agent-${suffix}`,
+      description: 'Temporary E2E agent with the daemon read tool.',
+      systemPrompt:
+        'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
+        + 'When asked to inspect the environment root, call read with path "." and summarize only its result.',
+      modelId: String(ctx.vars.seedModel.id),
+      variant: ctx.vars.seedModel.config.defaultVariant,
+      config: {
+        environmentName: ctx.daemonEnv,
+        tools: ['read'],
+        skills: [],
+      },
     })
-    const tid = thread.threadId
-    await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-      content: '使用 read 工具读取环境根目录，然后用一句话总结文件数量。',
-      clientMessageId: cid(),
-      expectedExecutionEpoch: Number(thread.executionEpoch),
-    })
-    let finalStatus = null
-    for (let i = 0; i < 120; i++) {
-      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
-      const thread = envelopeData(json)
-      finalStatus = thread.status
-      if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
-      await sleep(1000)
+    const toolAgent = envelopeData(agentJson)
+    assert(toolAgent?.id, JSON.stringify(agentJson))
+    try {
+      const { thread } = await createBootstrappedThread(ctx, {
+        agentDefinitionId: toolAgent.id,
+        title: `e2e-tool-${suffix}`,
+        yoloEnabled: true,
+      })
+      const tid = thread.threadId
+      await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+        content:
+          '必须调用 read 工具读取环境根目录。请使用参数 {"path":"."}，不要猜测或跳过工具，'
+          + '然后用一句话总结读取结果。',
+        clientMessageId: cid(),
+        expectedExecutionEpoch: Number(thread.executionEpoch),
+      })
+      let finalStatus = null
+      for (let i = 0; i < 120; i++) {
+        const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
+        const current = envelopeData(json)
+        finalStatus = current.status
+        if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !current.processing) break
+        await sleep(1000)
+      }
+      const snapshot = await getThreadSnapshot(ctx, tid)
+      const invocations = snapshot.toolInvocations || []
+      ctx.writeArtifact('thread-snapshot.json', JSON.stringify(snapshot, null, 2))
+      ctx.writeArtifact('tool-invocations.json', JSON.stringify(invocations, null, 2))
+      const readInvocation = invocations.find((invocation) => invocation.toolName === 'read')
+      assert(readInvocation, `no read tool invocation; status=${finalStatus}`)
+      assert(
+        readInvocation.environmentName === ctx.daemonEnv,
+        `read invocation used unexpected environment: ${JSON.stringify(readInvocation)}`,
+      )
+      assert(
+        readInvocation.status === 'SUCCEEDED',
+        `read invocation did not succeed: ${JSON.stringify(readInvocation)}`,
+      )
+    } finally {
+      try {
+        await ctx.call(
+          'DELETE',
+          `/api/ai/catalog/agents/${toolAgent.id}?expectedVersion=${encodeURIComponent(toolAgent.version)}`,
+        )
+      } catch {
+        // Preserve the primary assertion failure; matrix runs use an isolated E2E database.
+      }
     }
-    const inv = (await getThreadSnapshot(ctx, tid)).toolInvocations || []
-    ctx.writeArtifact('tool-invocations.json', JSON.stringify(inv, null, 2))
-    assert(inv.length > 0, `no tool invocations; status=${finalStatus}`)
   },
 })
 

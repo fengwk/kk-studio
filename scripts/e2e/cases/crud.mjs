@@ -339,7 +339,8 @@ registerCase({
       defaultAgentId: String(agent.id),
       expectedVersion: chat.version,
     })
-    assert(envelopeData(uJson).title === 'e2e-chat-upd', JSON.stringify(uJson))
+    const updated = envelopeData(uJson)
+    assert(updated.title === 'e2e-chat-upd', JSON.stringify(uJson))
     await expectHttpError(
       () => ctx.call('PUT', `/api/ai/chat/${chatId}`, { title: '   ', expectedVersion: updated.version }),
       { status: 400, messageIncludes: /title.*blank/i },
