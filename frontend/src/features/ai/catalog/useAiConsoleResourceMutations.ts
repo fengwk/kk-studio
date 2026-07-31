@@ -5,8 +5,8 @@ import type {
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
-  AgentResourceId,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'

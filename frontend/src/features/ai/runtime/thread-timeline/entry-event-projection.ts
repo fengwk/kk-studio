@@ -1,4 +1,4 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList } from '@/features/ai/runtime/payload-json'
 import type {
   EntryEventDialogueMessage,

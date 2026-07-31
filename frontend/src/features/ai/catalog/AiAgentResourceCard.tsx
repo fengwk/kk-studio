@@ -1,6 +1,6 @@
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
 function formatAgentModelLabel(model: AgentModelView | undefined, modelId: string): string {
   if (!model) {

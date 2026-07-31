@@ -1,5 +1,5 @@
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
-import type { AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 
 function formatMs(value: number | string | null | undefined): string {
   if (value == null || value === '') {

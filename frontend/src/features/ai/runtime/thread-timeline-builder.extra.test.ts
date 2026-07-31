@@ -4,7 +4,7 @@ import type {
   HarnessSessionEntryDTO,
   HarnessThreadInputDTO,
   ThreadInputType,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
 
 describe('thread timeline edge branches', () => {

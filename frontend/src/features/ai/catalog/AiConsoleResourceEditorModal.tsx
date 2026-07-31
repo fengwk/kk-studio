@@ -8,8 +8,8 @@ import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-  LiveEnvironmentDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export function ResourceEditorModal({
   modal,

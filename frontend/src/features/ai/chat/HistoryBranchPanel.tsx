@@ -11,7 +11,7 @@ import {
   type SessionTreeEntry,
   type SessionTreeFilter,
 } from '@/features/ai/chat/session-entry-tree'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 
 const FILTERS: Array<{ value: SessionTreeFilter; label: string }> = [
   { value: 'conversation', label: '对话' },

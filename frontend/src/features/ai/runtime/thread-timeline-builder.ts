@@ -1,4 +1,4 @@
-import type { HarnessSessionEntryDTO, HarnessThreadInputDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO, HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type { RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
 import type {

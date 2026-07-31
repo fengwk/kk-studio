@@ -1,5 +1,5 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
   return {

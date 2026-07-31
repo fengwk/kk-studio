@@ -4,7 +4,7 @@ import type {
   HarnessSessionEntryDTO,
   HarnessThreadInputDTO,
   ThreadInputType,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-runtime'
 import type { RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 

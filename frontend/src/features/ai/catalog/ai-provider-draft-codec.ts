@@ -2,7 +2,7 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderEditablePropertiesDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
 import { numberToNull, trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
 

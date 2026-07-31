@@ -9,7 +9,7 @@ import {
 } from '@/features/ai/runtime/thread-realtime-state'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { ModelInvocationDTO } from '@/shared/api/contracts'
+import type { ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * Snapshot-first realtime subscription.

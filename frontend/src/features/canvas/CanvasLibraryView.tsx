@@ -3,22 +3,23 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import {
   createCanvas,
   listCanvases,
-  type CanvasDocumentDTO,
 } from '@/shared/api/studio-service'
+import type { CanvasDocumentDTO } from '@/shared/api/contracts/studio'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 export function CanvasLibraryView() {
   const { openEditor, setResearchOpen, setToast } = useCanvasRuntime()
   const queryClient = useQueryClient()
 
   const canvasesQuery = useQuery({
-    queryKey: ['studio', 'canvases'],
+    queryKey: queryKeys.studio.canvases,
     queryFn: () => listCanvases(),
   })
 
   const createMutation = useMutation({
     mutationFn: (title: string) => createCanvas(title),
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ['studio', 'canvases'] })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvases })
       setToast(`已创建画布「${created.title}」`)
       openEditor()
     },

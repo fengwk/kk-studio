@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyuiWorkflowEditorModal } from '@/features/comfyui/ComfyuiWorkflowEditorModal'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 
 const baseDraft = {
   apiName: 'image-api',

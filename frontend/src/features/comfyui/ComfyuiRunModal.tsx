@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEventHandler } from 'react'
+import { useMemo, useState, type FormEventHandler } from 'react'
 import { Download, RefreshCw, Square } from 'lucide-react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
@@ -7,22 +7,16 @@ import {
   discoverComfyuiDownloads,
   errorMessage,
   initialBindingValues,
-  isComfyuiPollingStatus,
   isComfyuiTerminalStatus,
   parseComfyuiBindings,
   prettyJson,
 } from '@/features/comfyui/comfyui-utils'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { comfyuiService } from '@/shared/api/comfyui-service'
+import { useComfyuiRunLifecycle } from '@/features/comfyui/useComfyuiRunLifecycle'
 import type {
   ComfyuiInputBinding,
   ComfyuiWorkflowApiDTO,
-  ComfyuiWorkflowJobDTO,
-  ComfyuiWorkflowRunDTO,
-  ComfyuiWorkflowRunFileDTO,
-} from '@/shared/api/contracts'
-
-const pollIntervalMillis = 1500
+} from '@/shared/api/contracts/comfyui'
 
 export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkflowApiDTO; onClose: () => void }) {
   const bindingResult = useMemo(() => {
@@ -34,193 +28,32 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
   }, [workflow.inputBindingsJson])
   const [values, setValues] = useState<Record<string, string>>(() => initialBindingValues(bindingResult.bindings))
   const [files, setFiles] = useState<Record<string, File | undefined>>({})
-  const [selector, setSelector] = useState(workflow.defaultSelector ?? '')
-  const [run, setRun] = useState<ComfyuiWorkflowRunDTO | null>(null)
-  const [job, setJob] = useState<ComfyuiWorkflowJobDTO | null>(null)
-  const [submitPending, setSubmitPending] = useState(false)
-  const [refreshPending, setRefreshPending] = useState(false)
-  const [cancelPending, setCancelPending] = useState(false)
-  const [runError, setRunError] = useState<string | null>(null)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const generationRef = useRef(0)
-  const requestRef = useRef(0)
-  const mountedRef = useRef(true)
-  const operationRef = useRef<'submit' | 'refresh' | 'cancel' | null>(null)
-  const selectorRef = useRef(selector)
-  const runIdRef = useRef(run?.runId ?? null)
-  selectorRef.current = selector
-  runIdRef.current = run?.runId ?? null
+  const lifecycle = useComfyuiRunLifecycle({
+    apiName: workflow.apiName,
+    defaultSelector: workflow.defaultSelector,
+  })
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      operationRef.current = null
-      generationRef.current += 1
-      requestRef.current += 1
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-      }
-    }
-  }, [])
-
-  function stopPolling() {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current)
-      timerRef.current = null
-    }
-  }
-
-  function schedulePoll(runId: string, generation: number) {
-    stopPolling()
-    timerRef.current = setTimeout(() => {
-      void loadJob(runId, generation)
-    }, pollIntervalMillis)
-  }
-
-  async function loadJob(runId: string, generation: number) {
-    const requestId = ++requestRef.current
-    try {
-      const nextJob = await comfyuiService.getRun(runId, selectorRef.current || undefined)
-      if (!mountedRef.current || generation !== generationRef.current || requestId !== requestRef.current) {
-        return
-      }
-      setJob(nextJob)
-      setRun((current) => (current ? { ...current, status: nextJob.status } : current))
-      setRunError(null)
-      if (isComfyuiPollingStatus(nextJob.status)) {
-        schedulePoll(runId, generation)
-      } else {
-        stopPolling()
-      }
-    } catch (error) {
-      if (mountedRef.current && generation === generationRef.current && requestId === requestRef.current) {
-        setRunError(errorMessage(error))
-        stopPolling()
-      }
-    }
-  }
-
-  async function refreshRun() {
-    if (!run || operationRef.current) {
-      return
-    }
-    const generation = generationRef.current
-    const runId = run.runId
-    operationRef.current = 'refresh'
-    requestRef.current += 1
-    stopPolling()
-    setRefreshPending(true)
-    setRunError(null)
-    try {
-      await loadJob(runId, generation)
-    } finally {
-      if (mountedRef.current && generation === generationRef.current && operationRef.current === 'refresh') {
-        operationRef.current = null
-        setRefreshPending(false)
-      }
-    }
-  }
-
-  const submitRun: FormEventHandler<HTMLFormElement> = async (event) => {
+  const submitRun: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
-    if (operationRef.current) {
-      return
-    }
     if (bindingResult.error) {
-      setRunError(`无法运行：${bindingResult.error}`)
+      lifecycle.setError(`无法运行：${bindingResult.error}`)
       return
     }
-    setRunError(null)
+    lifecycle.setError(null)
     let parameters: Record<string, unknown>
     try {
       parameters = buildComfyuiParameters(bindingResult.bindings, values)
       validateRequiredFiles(bindingResult.bindings, files)
     } catch (error) {
-      setRunError(errorMessage(error))
+      lifecycle.setError(errorMessage(error))
       return
     }
-
-    const generation = generationRef.current + 1
-    generationRef.current = generation
-    operationRef.current = 'submit'
-    requestRef.current += 1
-    stopPolling()
-    setSubmitPending(true)
-    setRefreshPending(false)
-    setCancelPending(false)
-    runIdRef.current = null
-    setRun(null)
-    setJob(null)
-    try {
-      const fileEntries = bindingResult.bindings.filter((binding) => binding.kind === 'file' && files[binding.name])
-      const uploadedFiles = await Promise.all(
-        fileEntries.map(async (binding) => [binding.name, await comfyuiService.uploadFile(workflow.apiName, files[binding.name] as File)] as const),
-      )
-      if (!mountedRef.current || generation !== generationRef.current) {
-        return
-      }
-      const fileReferences: Record<string, ComfyuiWorkflowRunFileDTO> = Object.fromEntries(uploadedFiles)
-      const nextRun = await comfyuiService.runWorkflow(workflow.apiName, { parameters, files: fileReferences })
-      if (!mountedRef.current || generation !== generationRef.current) {
-        return
-      }
-      const nextSelector = selectorRef.current.trim() ? selectorRef.current : nextRun.defaultSelector ?? ''
-      setSelector(nextSelector)
-      selectorRef.current = nextSelector
-      setRun(nextRun)
-      runIdRef.current = nextRun.runId
-      await loadJob(nextRun.runId, generation)
-    } catch (error) {
-      if (mountedRef.current && generation === generationRef.current) {
-        setRunError(errorMessage(error))
-      }
-    } finally {
-      if (mountedRef.current && generation === generationRef.current && operationRef.current === 'submit') {
-        operationRef.current = null
-        setSubmitPending(false)
-      }
-    }
+    void lifecycle.submit({ parameters, files })
   }
 
-  async function cancelRun() {
-    if (!run || operationRef.current) {
-      return
-    }
-    const generation = generationRef.current
-    const runId = run.runId
-    operationRef.current = 'cancel'
-    stopPolling()
-    requestRef.current += 1
-    setCancelPending(true)
-    setRunError(null)
-    try {
-      const result = await comfyuiService.cancelRun(runId)
-      if (!mountedRef.current || generation !== generationRef.current || runIdRef.current !== runId) {
-        return
-      }
-      if (result.cancelled) {
-        setRun((current) => (current?.runId === runId ? { ...current, status: 'cancelled' } : current))
-        setJob((current) => (current?.runId === runId ? { ...current, status: 'cancelled' } : current))
-      } else {
-        await loadJob(runId, generation)
-      }
-    } catch (error) {
-      if (mountedRef.current && generation === generationRef.current && runIdRef.current === runId) {
-        setRunError(errorMessage(error))
-      }
-    } finally {
-      if (mountedRef.current && generation === generationRef.current && operationRef.current === 'cancel') {
-        operationRef.current = null
-        setCancelPending(false)
-      }
-    }
-  }
-
-  const currentStatus = job?.status ?? run?.status ?? null
-  const downloads = discoverComfyuiDownloads(job?.result)
-  const canCancel = Boolean(run && currentStatus && !isComfyuiTerminalStatus(currentStatus))
-  const operationPending = submitPending || refreshPending || cancelPending
+  const currentStatus = lifecycle.job?.status ?? lifecycle.run?.status ?? null
+  const downloads = discoverComfyuiDownloads(lifecycle.job?.result)
+  const canCancel = Boolean(lifecycle.run && currentStatus && !isComfyuiTerminalStatus(currentStatus))
 
   return (
     <ModalBackdrop onClose={onClose}>
@@ -234,7 +67,7 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
         <div className="modal-body comfyui-modal-scroll">
           <div className="comfyui-run-endpoint">POST /api/comfyui/workflows/{workflow.apiName}/runs</div>
           {bindingResult.error && <StateBlock title={`输入绑定配置错误：${bindingResult.error}`} tone="danger" />}
-          {runError && <StateBlock title={runError} tone="danger" />}
+          {lifecycle.error && <StateBlock title={lifecycle.error} tone="danger" />}
           {bindingResult.bindings.map((binding) =>
             binding.kind === 'file' ? (
               <FileBindingField
@@ -255,28 +88,28 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
           <div className="comfyui-selector-row">
             <label className="form-group">
               JSONPath selector
-              <input aria-label="JSONPath selector" value={selector} onChange={(event) => setSelector(event.target.value)} placeholder="whole result" />
+              <input aria-label="JSONPath selector" value={lifecycle.selector} onChange={(event) => lifecycle.setSelector(event.target.value)} placeholder="whole result" />
             </label>
             <button
               type="button"
               className="ghost-inline-btn"
-              onClick={() => void refreshRun()}
-              disabled={!run || operationPending}
+              onClick={() => void lifecycle.refresh()}
+              disabled={!lifecycle.run || lifecycle.operationPending}
             >
               <RefreshCw aria-hidden="true" />
               刷新结果
             </button>
           </div>
-          {run && (
+          {lifecycle.run && (
             <section className="comfyui-run-state" aria-label="Run status">
               <div className="metadata-grid metadata-grid-three">
-                <RunMeta label="Run ID" value={run.runId} />
+                <RunMeta label="Run ID" value={lifecycle.run.runId} />
                 <RunMeta label="Status" value={currentStatus || '-'} />
-                <RunMeta label="Outputs" value={job?.outputsCount == null ? '-' : String(job.outputsCount)} />
+                <RunMeta label="Outputs" value={lifecycle.job?.outputsCount == null ? '-' : String(lifecycle.job.outputsCount)} />
               </div>
-              {job?.executionStatus != null && <JsonBlock title="Execution status" value={job.executionStatus} />}
-              {job?.executionError != null && <JsonBlock title="Execution error" value={job.executionError} tone="danger" />}
-              <JsonBlock title="Result" value={job?.result} />
+              {lifecycle.job?.executionStatus != null && <JsonBlock title="Execution status" value={lifecycle.job.executionStatus} />}
+              {lifecycle.job?.executionError != null && <JsonBlock title="Execution error" value={lifecycle.job.executionError} tone="danger" />}
+              <JsonBlock title="Result" value={lifecycle.job?.result} />
               {downloads.length > 0 && (
                 <div className="comfyui-downloads">
                   <strong>Outputs</strong>
@@ -293,13 +126,13 @@ export function ComfyuiRunModal({ workflow, onClose }: { workflow: ComfyuiWorkfl
         </div>
         <div className="modal-footer comfyui-run-actions">
           {canCancel && (
-            <button type="button" className="ghost-btn danger" onClick={() => void cancelRun()} disabled={operationPending}>
+            <button type="button" className="ghost-btn danger" onClick={() => void lifecycle.cancel()} disabled={lifecycle.operationPending}>
               <Square aria-hidden="true" />
               Cancel
             </button>
           )}
-          <button type="submit" className="btn-primary" disabled={operationPending || Boolean(bindingResult.error)}>
-            {submitPending ? '上传并提交中...' : run ? 'Run again' : 'Run workflow'}
+          <button type="submit" className="btn-primary" disabled={lifecycle.operationPending || Boolean(bindingResult.error)}>
+            {lifecycle.submitPending ? '上传并提交中...' : lifecycle.run ? 'Run again' : 'Run workflow'}
           </button>
         </div>
       </form>

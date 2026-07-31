@@ -6,7 +6,7 @@ import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

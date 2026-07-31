@@ -5,7 +5,7 @@ import { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { ModelResourceCard } from '@/features/ai/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/ai/catalog/AiProviderResourceCard'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 
 function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {

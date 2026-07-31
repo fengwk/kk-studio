@@ -12,7 +12,7 @@ import {
 } from '@/features/comfyui/comfyui-utils'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import { comfyuiService } from '@/shared/api/comfyui-service'
-import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts'
+import type { ComfyuiWorkflowApiDTO } from '@/shared/api/contracts/comfyui'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 type ComfyuiEditorModal =

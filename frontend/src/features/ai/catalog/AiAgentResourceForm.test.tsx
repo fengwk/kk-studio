@@ -8,7 +8,7 @@ import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
   AgentModelConfigDTO,
   AgentModelView,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 
 const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },

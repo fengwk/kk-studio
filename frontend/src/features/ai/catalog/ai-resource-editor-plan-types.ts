@@ -6,8 +6,8 @@ import type {
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
-  AgentResourceId,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export type ResourceEditorPlan =
   | {

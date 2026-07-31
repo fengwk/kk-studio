@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { performBlankPaneFirstSend } from '@/features/ai/chat/chat-first-send'
-import type { HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
   return {

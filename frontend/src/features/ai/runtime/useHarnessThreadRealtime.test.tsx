@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
-import type { ModelInvocationDTO } from '@/shared/api/contracts'
+import type { ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 
 vi.mock('@/shared/api/harness-service', () => ({ harnessService: { createThreadRealtimeStream: vi.fn() } }))

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import type { BackendLong, HarnessThreadInputDTO } from '@/shared/api/contracts'
+import type { HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
+import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 /**

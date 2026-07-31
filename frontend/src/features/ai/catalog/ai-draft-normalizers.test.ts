@@ -16,7 +16,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 
 function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelConfigDTO {
   return {

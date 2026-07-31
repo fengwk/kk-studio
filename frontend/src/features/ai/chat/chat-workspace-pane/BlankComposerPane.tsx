@@ -19,7 +19,8 @@ import {
   toAgentModelViews,
   type AgentModelView,
 } from '@/features/ai/catalog'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'

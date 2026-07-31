@@ -13,8 +13,8 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type {
   AgentDefinitionDTO,
-  LiveEnvironmentDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 function toggleName(items: string[], name: string): string[] {
   return items.includes(name) ? items.filter((item) => item !== name) : [...items, name]

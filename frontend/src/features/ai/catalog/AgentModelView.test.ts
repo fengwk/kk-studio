@@ -3,7 +3,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 import { formatModelRef, modelRef, toAgentModelViews } from '@/features/ai/catalog/AgentModelView'
 
 function baseConfig(): AgentModelConfigDTO {

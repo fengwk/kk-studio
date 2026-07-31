@@ -1,5 +1,5 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
-import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contracts'
+import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contracts/ai-chat'
 
 export function createChatService(client: HttpClient = apiClient) {
   return {

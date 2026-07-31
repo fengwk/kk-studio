@@ -1,4 +1,4 @@
-import type { ModelInvocationDTO } from '@/shared/api/contracts'
+import type { ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 
 export interface RealtimeModelDelta {
   threadId: string

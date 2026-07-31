@@ -1,5 +1,5 @@
 import { createClientMessageId } from '@/features/ai/runtime'
-import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts'
+import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 
 export interface FirstSendResult {

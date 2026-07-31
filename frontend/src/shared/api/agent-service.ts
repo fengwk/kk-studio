@@ -9,9 +9,8 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
-  AgentResourceId,
-  PageResult,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId, PageResult } from '@/shared/api/contracts/base'
 
 export function createAgentService(client: HttpClient = apiClient) {
   return {

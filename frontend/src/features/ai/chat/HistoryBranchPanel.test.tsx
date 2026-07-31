@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 
 const branchEntries: HarnessSessionEntryDTO[] = [
   { entryId: 'root', parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: null },

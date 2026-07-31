@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BLANK_PANE_COMMANDS, ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { harnessService } from '@/shared/api/harness-service'
 import { agentService } from '@/shared/api/agent-service'
-import type { HarnessThreadDTO } from '@/shared/api/contracts'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

@@ -6,7 +6,7 @@ import {
   validateResourceDraft,
   type ResourceFieldKey,
 } from '@/features/ai/catalog/ai-resource-form-validation'
-import type { AgentResourceId } from '@/shared/api/contracts'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 import { useAiConsoleResourceEditorState } from '@/features/ai/catalog/useAiConsoleResourceEditorState'
 import { useAiConsoleResourceMutations } from '@/features/ai/catalog/useAiConsoleResourceMutations'
 import {

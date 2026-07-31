@@ -7,7 +7,7 @@ import {
   useAgentThreadMessageMutation,
 } from '@/features/ai/runtime/useAgentThreadMessageMutation'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadInputDTO } from '@/shared/api/contracts'
+import type { HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 vi.mock('@/shared/api/harness-service', () => ({

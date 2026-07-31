@@ -7,7 +7,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessRealtimeStreamPolicyDTO,
   HarnessRetryPolicyDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 

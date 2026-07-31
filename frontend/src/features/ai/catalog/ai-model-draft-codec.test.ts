@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
-import type { AgentModelInputModality } from '@/shared/api/contracts'
+import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
 import {
   buildModelConfig,
   emptyModelDraft,
@@ -12,7 +12,7 @@ import {
   toEditableModelUpdate,
   toModelDraft,
 } from '@/features/ai/catalog/ai-model-draft-codec'
-import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts'
+import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {

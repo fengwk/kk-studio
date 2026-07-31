@@ -12,8 +12,8 @@ import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-  AgentResourceId,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
+import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
   return {

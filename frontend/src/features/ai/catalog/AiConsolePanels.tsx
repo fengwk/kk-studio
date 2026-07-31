@@ -6,7 +6,7 @@ import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts'
+} from '@/shared/api/contracts/ai-catalog'
 
 export function AgentsPanel({
   agents,

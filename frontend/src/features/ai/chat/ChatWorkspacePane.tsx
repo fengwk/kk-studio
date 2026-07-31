@@ -1,5 +1,6 @@
 import { isPaneBound, type ChatPane, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/contracts'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankComposerPane'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
 

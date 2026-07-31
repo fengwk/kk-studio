@@ -1,5 +1,5 @@
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export function filterEnvironments(
   environments: LiveEnvironmentDTO[],

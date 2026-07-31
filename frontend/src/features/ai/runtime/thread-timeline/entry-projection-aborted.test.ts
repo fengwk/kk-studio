@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { projectDurableEntry } from '@/features/ai/runtime/thread-timeline/entry-projection'
 import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
