@@ -1,5 +1,6 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { CodeBlock, CopyableShell } from '@/shared/ui/markdown/CodeBlock'
+import { useI18n } from '@/shared/i18n'
 
 type MermaidApi = {
   initialize: (config: Record<string, unknown>) => void
@@ -138,6 +139,7 @@ function SourceView({ code }: { code: string }) {
  * 闭合 mermaid fence 的稳定渲染节点；相同 code 只成图一次。
  */
 export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
+  const { t } = useI18n()
   const hostRef = useRef<HTMLDivElement>(null)
   const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const doneCodeRef = useRef<string | null>(null)
@@ -204,7 +206,12 @@ export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string 
 
   return (
     <CopyableShell source={code.trim()} className="md-mermaid-shell">
-      <div ref={hostRef} className="md-mermaid" role="img" aria-label="Mermaid diagram" />
+      <div
+        ref={hostRef}
+        className="md-mermaid"
+        role="img"
+        aria-label={t('shared.mermaidDiagram')}
+      />
     </CopyableShell>
   )
 })

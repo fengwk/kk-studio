@@ -1,6 +1,7 @@
 import { Trash2 } from 'lucide-react'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+import { useI18n } from '@/shared/i18n'
 
 export function ConfirmActionModal({
   modal,
@@ -11,6 +12,8 @@ export function ConfirmActionModal({
   pending: boolean
   onClose: () => void
 }) {
+  const { t } = useI18n()
+
   if (!modal) {
     return null
   }
@@ -28,10 +31,10 @@ export function ConfirmActionModal({
         </div>
         <div className="modal-footer">
           <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
-            取消
+            {t('shared.cancel')}
           </button>
           <button type="button" className={`btn-primary ${modal.tone === 'danger' ? 'danger' : ''}`} onClick={modal.onConfirm} disabled={pending}>
-            {modal.confirmLabel || '确认'}
+            {modal.confirmLabel ?? t('shared.confirm')}
           </button>
         </div>
       </div>

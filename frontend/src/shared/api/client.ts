@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
+import { getLocale, translate } from '@/shared/i18n'
 
 export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown> }): Promise<T>
@@ -40,6 +41,18 @@ const axiosClient = axios.create({
   timeout: 60000,
 })
 
+axiosClient.interceptors.request.use((config) => {
+  const locale = getLocale()
+  if (typeof config.headers?.set === 'function') {
+    config.headers.set('Accept-Language', locale)
+  } else {
+    const headers = config.headers ?? {}
+    Object.assign(headers, { 'Accept-Language': locale })
+    config.headers = headers as unknown as typeof config.headers
+  }
+  return config
+})
+
 axiosClient.interceptors.response.use(
   (response) => {
     const envelope = response.data as ResultEnvelope<unknown>
@@ -48,14 +61,19 @@ axiosClient.interceptors.response.use(
     }
     if (envelope.status < 200 || envelope.status >= 300) {
       return Promise.reject(
-        new ApiError(envelope.message || '请求失败', envelope.status, envelope.code, envelope.errors),
+        new ApiError(
+          envelope.message || translate('shared.requestFailed'),
+          envelope.status,
+          envelope.code,
+          envelope.errors,
+        ),
       )
     }
     return envelope.data
   },
   (error) => {
     const envelope = error?.response?.data as Partial<ResultEnvelope<unknown>> | undefined
-    const message = envelope?.message || error?.message || '请求失败'
+    const message = envelope?.message || error?.message || translate('shared.requestFailed')
     return Promise.reject(
       new ApiError(message, error?.response?.status, envelope?.code, envelope?.errors),
     )

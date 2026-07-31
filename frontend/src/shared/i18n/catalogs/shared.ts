@@ -1,0 +1,44 @@
+import type { LocaleCatalog } from '@/shared/i18n/types'
+
+export const sharedCatalog = {
+  'shared.searchResources': {
+    'en-US': 'Search resources...',
+    'zh-CN': '搜索资源...',
+  },
+  'shared.selectPlaceholder': {
+    'en-US': 'Select an option',
+    'zh-CN': '请选择',
+  },
+  'shared.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'shared.confirm': {
+    'en-US': 'Confirm',
+    'zh-CN': '确认',
+  },
+  'shared.close': {
+    'en-US': 'Close',
+    'zh-CN': '关闭',
+  },
+  'shared.copy': {
+    'en-US': 'Copy',
+    'zh-CN': '复制',
+  },
+  'shared.copyCode': {
+    'en-US': 'Copy code',
+    'zh-CN': '复制代码',
+  },
+  'shared.copied': {
+    'en-US': 'Copied',
+    'zh-CN': '已复制',
+  },
+  'shared.mermaidDiagram': {
+    'en-US': 'Mermaid diagram',
+    'zh-CN': 'Mermaid 图表',
+  },
+  'shared.requestFailed': {
+    'en-US': 'Request failed',
+    'zh-CN': '请求失败',
+  },
+} satisfies LocaleCatalog

@@ -1,5 +1,6 @@
 import { Check, Copy } from 'lucide-react'
 import { memo, useCallback, useState, type ReactNode } from 'react'
+import { useI18n } from '@/shared/i18n'
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -36,9 +37,12 @@ export type CopyButtonProps = {
 export const CopyButton = memo(function CopyButton({
   source,
   className,
-  label = '复制',
+  label,
 }: CopyButtonProps) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
+  const effectiveLabel = label ?? t('shared.copy')
+  const copiedLabel = t('shared.copied')
 
   const onCopy = useCallback(async () => {
     const ok = await copyText(source)
@@ -53,8 +57,8 @@ export const CopyButton = memo(function CopyButton({
     <button
       type="button"
       className={['md-code-copy', className].filter(Boolean).join(' ')}
-      aria-label={copied ? '已复制' : label}
-      title={copied ? '已复制' : label}
+      aria-label={copied ? copiedLabel : effectiveLabel}
+      title={copied ? copiedLabel : effectiveLabel}
       onClick={(event) => {
         event.stopPropagation()
         void onCopy()
@@ -77,9 +81,11 @@ export const CopyableShell = memo(function CopyableShell({
   children: ReactNode
   copyLabel?: string
 }) {
+  const { t } = useI18n()
+
   return (
     <div className={['md-code-shell', className].filter(Boolean).join(' ')}>
-      <CopyButton source={source} label={copyLabel ?? '复制代码'} />
+      <CopyButton source={source} label={copyLabel ?? t('shared.copyCode')} />
       {children}
     </div>
   )
@@ -98,7 +104,7 @@ export const CodeBlock = memo(function CodeBlock({
   children: ReactNode
 }) {
   return (
-    <CopyableShell source={source} copyLabel="复制代码">
+    <CopyableShell source={source}>
       <pre className="md-code-block">
         <code className={className}>{children}</code>
       </pre>

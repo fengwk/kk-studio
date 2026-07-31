@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError, apiClient, isConflictError, isNotFoundError } from '@/shared/api/client'
+import { setLocale } from '@/shared/i18n'
 
 const axiosMock = vi.hoisted(() => {
   const client = {
@@ -8,6 +9,9 @@ const axiosMock = vi.hoisted(() => {
     put: vi.fn(),
     delete: vi.fn(),
     interceptors: {
+      request: {
+        use: vi.fn(),
+      },
       response: {
         use: vi.fn(),
       },
@@ -26,6 +30,16 @@ vi.mock('axios', () => ({
 }))
 
 describe('apiClient', () => {
+  it('adds the current locale to every request', () => {
+    const [withLocale] = axiosMock.client.interceptors.request.use.mock.calls[0]
+
+    setLocale('en-US')
+    expect(withLocale({ headers: {} }).headers['Accept-Language']).toBe('en-US')
+
+    setLocale('zh-CN')
+    expect(withLocale({ headers: {} }).headers['Accept-Language']).toBe('zh-CN')
+  })
+
   it('unwraps backend result envelopes and rejects failed envelopes', async () => {
     const [unwrap] = axiosMock.client.interceptors.response.use.mock.calls[0]
 

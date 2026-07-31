@@ -1,6 +1,11 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+import { setLocale } from '@/shared/i18n'
+
+beforeEach(() => {
+  setLocale('zh-CN')
+})
 
 class ResizeObserverStub {
   private readonly callback: ResizeObserverCallback

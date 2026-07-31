@@ -1,10 +1,17 @@
 import { Plus, Search } from 'lucide-react'
+import { useI18n } from '@/shared/i18n'
 
 export function SearchField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useI18n()
+
   return (
     <label className="searchbox">
       <Search aria-hidden="true" />
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="搜索资源..." />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t('shared.searchResources')}
+      />
     </label>
   )
 }
