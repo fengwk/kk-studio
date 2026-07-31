@@ -1,12 +1,12 @@
 import {
-  AgentsPage,
+  AgentsRoute,
   ChatWorkspaceRoute,
   ChatsPage,
   CreateChatDialog,
   EnvironmentsRoute,
   HarnessSettingsRoute,
-  ModelsPage,
-  ProvidersPage,
+  ModelsRoute,
+  ProvidersRoute,
   ResourceDeleteDialog,
   ResourceEditorDialog,
 } from '@/features/ai/extensions/ai-extension'
@@ -18,9 +18,9 @@ export const aiExtension: TrustedReactExtension = {
   pages: [
     { id: 'ai.chats', path: 'chats', component: ChatsPage, priority: 100 },
     { id: 'ai.chat-workspace', path: 'chats/:chatId', component: ChatWorkspaceRoute, priority: 100 },
-    { id: 'ai.agents', path: 'agents', component: AgentsPage, priority: 100 },
-    { id: 'ai.models', path: 'models', component: ModelsPage, priority: 100 },
-    { id: 'ai.providers', path: 'providers', component: ProvidersPage, priority: 100 },
+    { id: 'ai.agents', path: 'agents', component: AgentsRoute, priority: 100 },
+    { id: 'ai.models', path: 'models', component: ModelsRoute, priority: 100 },
+    { id: 'ai.providers', path: 'providers', component: ProvidersRoute, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
     { id: 'ai.settings', path: 'settings', component: HarnessSettingsRoute, priority: 100 },
   ],

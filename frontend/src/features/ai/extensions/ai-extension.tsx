@@ -1,80 +1,45 @@
-import { createContext, useContext, type PropsWithChildren, type ReactNode } from 'react'
-import {
-  AgentsPanel,
-  ModelsPanel,
-  ProvidersPanel,
-  ResourceEditorModal,
-} from '@/features/ai/catalog'
+import { lazy, Suspense } from 'react'
 import {
   ChatCardsPanel,
   ChatWorkspacePage,
   CreateChatModal,
 } from '@/features/ai/chat'
-import { EnvironmentsPage } from '@/features/ai/environment'
-import { HarnessSettingsPage } from '@/features/ai/settings'
 import {
-  SearchField,
-  StateBlock,
-} from '@/shared/ui/console/AiConsoleCommonCards'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-import {
-  useAiConsoleController,
-  type AiConsolePageScope,
-} from '@/features/ai/extensions/useAiConsoleController'
+  AiConsoleFrame,
+  AiConsoleRuntime,
+  useAiConsole,
+  useOptionalAiConsole,
+} from '@/features/ai/extensions/AiConsoleRuntime'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 
-type AiConsoleController = ReturnType<typeof useAiConsoleController>
-const AiConsoleContext = createContext<AiConsoleController | null>(null)
-
-function AiConsoleRuntime({
-  scope,
-  children,
-}: PropsWithChildren<{ scope: AiConsolePageScope }>) {
-  const controller = useAiConsoleController(scope)
-  return <AiConsoleContext.Provider value={controller}>{children}</AiConsoleContext.Provider>
-}
-
-function useAiConsole() {
-  const controller = useContext(AiConsoleContext)
-  if (!controller) {
-    throw new Error('AiConsoleRuntime is required')
-  }
-  return controller
-}
-
-function useOptionalAiConsole() {
-  return useContext(AiConsoleContext)
-}
-
-function AiConsoleFrame({ content, children }: ExtensionComponentProps & { content: ReactNode }) {
-  const controller = useAiConsole()
-  return (
-    <section className="screen active">
-      <nav className="subbar">
-        <NavigationSlot />
-        <SearchField value={controller.search} onChange={controller.setSearch} />
-      </nav>
-      <div className="screen-body">
-        {controller.busy && <StateBlock title="正在加载资源" />}
-        {controller.error && <StateBlock title={controller.error instanceof Error ? controller.error.message : '资源加载失败'} tone="danger" />}
-        {controller.mutationError && (
-          <StateBlock
-            title={
-              controller.mutationError instanceof Error
-                ? // 外层仅展示无模态时的操作错误；文案已在 controller 侧尽量友好
-                  controller.mutationError.message
-                : '操作失败，请稍后重试'
-            }
-            tone="danger"
-          />
-        )}
-        {!controller.busy && !controller.error && content}
-      </div>
-      {children}
-    </section>
-  )
-}
+const AgentsPage = lazy(async () => {
+  const module = await import('@/features/ai/catalog/AgentsPage')
+  return { default: module.AgentsPage }
+})
+const ModelsPage = lazy(async () => {
+  const module = await import('@/features/ai/catalog/ModelsPage')
+  return { default: module.ModelsPage }
+})
+const ProvidersPage = lazy(async () => {
+  const module = await import('@/features/ai/catalog/ProvidersPage')
+  return { default: module.ProvidersPage }
+})
+const EnvironmentsPage = lazy(async () => {
+  const module = await import('@/features/ai/environment/EnvironmentsPage')
+  return { default: module.EnvironmentsPage }
+})
+const HarnessSettingsPage = lazy(async () => {
+  const module = await import('@/features/ai/settings/HarnessSettingsPage')
+  return { default: module.HarnessSettingsPage }
+})
+const ResourceEditorModal = lazy(async () => {
+  const module = await import('@/features/ai/catalog/AiConsoleResourceEditorModal')
+  return { default: module.ResourceEditorModal }
+})
+const ConfirmActionModal = lazy(async () => {
+  const module = await import('@/shared/ui/console/ConfirmActionModal')
+  return { default: module.ConfirmActionModal }
+})
 
 export function ChatsPage({ children }: ExtensionComponentProps) {
   return (
@@ -91,49 +56,28 @@ function ChatsPanel() {
   return <ChatCardsPanel {...controller.chatPanelProps} />
 }
 
-export function AgentsPage({ children }: ExtensionComponentProps) {
+export function AgentsRoute({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime scope="agents">
-      <AiConsoleFrame content={<AgentsResourcePanel />}>
-        {children}
-      </AiConsoleFrame>
-    </AiConsoleRuntime>
+    <Suspense fallback={<div className="state-block" role="status">正在加载 Agent</div>}>
+      <AgentsPage>{children}</AgentsPage>
+    </Suspense>
   )
 }
 
-function AgentsResourcePanel() {
-  const controller = useAiConsole()
-  return <AgentsPanel {...controller.agentPanelProps} />
-}
-
-export function ModelsPage({ children }: ExtensionComponentProps) {
+export function ModelsRoute({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime scope="models">
-      <AiConsoleFrame content={<ModelsResourcePanel />}>
-        {children}
-      </AiConsoleFrame>
-    </AiConsoleRuntime>
+    <Suspense fallback={<div className="state-block" role="status">正在加载 Model</div>}>
+      <ModelsPage>{children}</ModelsPage>
+    </Suspense>
   )
 }
 
-function ModelsResourcePanel() {
-  const controller = useAiConsole()
-  return <ModelsPanel {...controller.modelPanelProps} />
-}
-
-export function ProvidersPage({ children }: ExtensionComponentProps) {
+export function ProvidersRoute({ children }: ExtensionComponentProps) {
   return (
-    <AiConsoleRuntime scope="providers">
-      <AiConsoleFrame content={<ProvidersResourcePanel />}>
-        {children}
-      </AiConsoleFrame>
-    </AiConsoleRuntime>
+    <Suspense fallback={<div className="state-block" role="status">正在加载 Provider</div>}>
+      <ProvidersPage>{children}</ProvidersPage>
+    </Suspense>
   )
-}
-
-function ProvidersResourcePanel() {
-  const controller = useAiConsole()
-  return <ProvidersPanel {...controller.providerPanelProps} />
 }
 
 export function CreateChatDialog() {
@@ -143,29 +87,43 @@ export function CreateChatDialog() {
 
 export function ResourceEditorDialog() {
   const controller = useOptionalAiConsole()
-  return controller ? <ResourceEditorModal {...controller.resourceEditorModal} /> : null
+  if (!controller?.resourceEditorModal.modal) {
+    return null
+  }
+  return (
+    <Suspense fallback={<div className="state-block" role="status">正在加载资源编辑器</div>}>
+      <ResourceEditorModal {...controller.resourceEditorModal} />
+    </Suspense>
+  )
 }
 
 export function ResourceDeleteDialog() {
   const controller = useOptionalAiConsole()
-  return controller ? <ConfirmActionModal {...controller.resourceDeleteConfirmModal} /> : null
+  if (!controller?.resourceDeleteConfirmModal.modal) {
+    return null
+  }
+  return (
+    <Suspense fallback={<div className="state-block" role="status">正在加载确认对话框</div>}>
+      <ConfirmActionModal {...controller.resourceDeleteConfirmModal} />
+    </Suspense>
+  )
 }
 
 export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   return (
-    <>
+    <Suspense fallback={<div className="state-block" role="status">正在加载 Environment</div>}>
       <EnvironmentsPage />
       {children}
-    </>
+    </Suspense>
   )
 }
 
 export function HarnessSettingsRoute({ children }: ExtensionComponentProps) {
   return (
-    <>
+    <Suspense fallback={<div className="state-block" role="status">正在加载设置</div>}>
       <HarnessSettingsPage />
       {children}
-    </>
+    </Suspense>
   )
 }
 
