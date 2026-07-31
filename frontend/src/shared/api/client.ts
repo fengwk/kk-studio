@@ -10,7 +10,7 @@ export interface HttpClient {
 
 export const apiBaseUrl = '/api'
 
-/** Transport/envelope failure carrying the backend HTTP status so callers can branch on 409. */
+/** Transport/envelope failure carrying the backend HTTP status for caller-specific recovery. */
 export class ApiError extends Error {
   readonly status?: number
   readonly code?: string
@@ -28,6 +28,11 @@ export class ApiError extends Error {
 /** Stale executionEpoch or a non-quiescent Thread; the caller must refresh before retrying. */
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
+}
+
+/** The requested resource no longer exists; callers may discard stale local references. */
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
 }
 
 const axiosClient = axios.create({
