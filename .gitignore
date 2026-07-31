@@ -106,6 +106,10 @@ dist
 coverage
 .opencode/
 
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+
 *.pid
 
 # Local agent workspaces
