@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryArtifactSink;
+import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
@@ -66,6 +67,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -858,6 +861,168 @@ class DaemonRuntimeTest {
     assertTrue(failed.message().contains("unknown skill"));
   }
 
+  /** transport 同步抛错和异步返回空连接都必须收敛为下一次重连。 */
+  @Test
+  void reconnectsWhenTransportThrowsOrCompletesWithNullConnection() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    transport.throwNextConnection();
+    transport.returnNullNextConnection();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+
+    transport.awaitConnections(3);
+    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
+  /** close 先于异步 connect 完成时，迟到连接必须立即关闭而不能重新激活 runtime。 */
+  @Test
+  void closesConnectionThatCompletesAfterRuntimeShutdown() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    transport.delayNextConnection();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    runtime.close();
+    transport.completeDelayedConnection();
+
+    assertTrue(transport.connection.awaitClosed(Duration.ofSeconds(ASYNC_TEST_TIMEOUT_SECONDS)));
+    assertFalse(transport.connection.isOpen());
+    assertFalse(transport.hasMessages());
+  }
+
+  /** 上一代连接迟到的消息不得进入当前连接的 sequence 或 invocation 生命周期。 */
+  @Test
+  void ignoresLateMessageFromSupersededConnection() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.disconnect();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+
+    transport.disconnectConnection(0);
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+    transport.receiveFromConnection(0, invoke("stale-invocation", 1));
+    assertFalse(transport.hasMessages());
+    assertEquals(0, tool.executions.get());
+
+    transport.receive(invoke("current-invocation", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertEquals(1, tool.executions.get());
+  }
+
+  /** 未预期 platform 消息、未知取消和非法 skill payload 都必须只产生协议级响应。 */
+  @Test
+  void isolatesUnexpectedAndMalformedProtocolMessagesFromInvocationExecution()
+      throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1, DaemonMessageType.HELLO, "environment", null, 1, "{}"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(cancel("unknown-cancel", 2));
+    assertMessageTypes(transport.takeMessages(1), ACK);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.LOAD_SKILL,
+            "environment",
+            "invalid-skill-payload",
+            3,
+            "{}"));
+    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.ERROR);
+    assertEquals(0, tool.executions.get());
+  }
+
+  /** close 必须取消运行中的 Tool、记录可重放 CANCELLED，并成为不可重启的终态。 */
+  @Test
+  void closeCancelsRunningInvocationAndPreventsRestart() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.receive(invoke("shutdown-invocation", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+
+    runtime.close();
+
+    assertTrue(transport.closed.get());
+    assertEquals(1, tool.handle.cancelCalls.get());
+    assertEquals(
+        DaemonInvocationState.CANCELLED, journal.find("shutdown-invocation").orElseThrow().state());
+    tool.complete(
+        new ToolResult(
+            "shutdown-invocation", List.of(new TextToolContent("late")), false, "{}", false));
+    assertFalse(transport.hasMessages());
+
+    runtime.start();
+    assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
+  }
+
+  /** 未启动的 runtime 仍必须释放其 transport 和 scheduler，且 close 后不能重新启动。 */
+  @Test
+  void closesUnstartedRuntimeWithoutAllowingLaterStart() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.close();
+
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+    assertTrue(transport.closed.get());
+    runtime.start();
+    assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
+  }
+
+  /** shutdown 与 Tool 启动交错时，迟到的 execution handle 也必须收到取消且 journal 不得遗留 RUNNING。 */
+  @Test
+  void closesInvocationThatCompletesToolStartupAfterShutdown() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    BlockingTool tool = new BlockingTool();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    Thread invocationThread =
+        new Thread(
+            () -> transport.receive(invoke("shutdown-race", 1, "blocking")),
+            "invoke-shutdown-race");
+    invocationThread.start();
+    assertTrue(tool.executionStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+
+    runtime.close();
+    tool.allowReturn.countDown();
+    invocationThread.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
+
+    assertFalse(invocationThread.isAlive());
+    assertEquals(1, tool.handle.cancelCalls.get());
+    assertEquals(
+        DaemonInvocationState.CANCELLED, journal.find("shutdown-race").orElseThrow().state());
+    assertFalse(transport.hasMessages());
+  }
+
   private DaemonRuntime runtime(FakeTransport transport, Tool tool) {
     return runtime(transport, tool, Duration.ofMinutes(1));
   }
@@ -868,6 +1033,28 @@ class DaemonRuntimeTest {
 
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, ArtifactSource artifactSource) {
     return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), artifactSource);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, InMemoryDaemonInvocationJournal journal) {
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            "environment",
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            List.of()),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        journal,
+        Executors.newSingleThreadScheduledExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -1012,17 +1199,34 @@ class DaemonRuntimeTest {
     private final LinkedBlockingQueue<String> sent = new LinkedBlockingQueue<>();
     private final AtomicBoolean failNextConnection = new AtomicBoolean();
     private final AtomicBoolean failNextSend = new AtomicBoolean();
+    private final AtomicBoolean throwNextConnection = new AtomicBoolean();
+    private final AtomicBoolean returnNullNextConnection = new AtomicBoolean();
+    private final AtomicBoolean delayNextConnection = new AtomicBoolean();
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private final List<DaemonTransportListener> listeners = new CopyOnWriteArrayList<>();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
+    private volatile CompletableFuture<DaemonConnection> delayedConnection;
 
     @Override
     public CompletionStage<DaemonConnection> connect(DaemonTransportListener listener) {
       this.listener = listener;
+      listeners.add(listener);
       connections.release();
+      if (throwNextConnection.compareAndSet(true, false)) {
+        throw new IllegalStateException("connection threw");
+      }
       if (failNextConnection.compareAndSet(true, false)) {
         return CompletableFuture.failedFuture(new IllegalStateException("connection failed"));
       }
+      if (returnNullNextConnection.compareAndSet(true, false)) {
+        return CompletableFuture.completedFuture(null);
+      }
       connection = new FakeConnection();
+      if (delayNextConnection.compareAndSet(true, false)) {
+        delayedConnection = new CompletableFuture<>();
+        return delayedConnection;
+      }
       return CompletableFuture.completedFuture(connection);
     }
 
@@ -1034,12 +1238,36 @@ class DaemonRuntimeTest {
       failNextSend.set(true);
     }
 
+    private void throwNextConnection() {
+      throwNextConnection.set(true);
+    }
+
+    private void returnNullNextConnection() {
+      returnNullNextConnection.set(true);
+    }
+
+    private void delayNextConnection() {
+      delayNextConnection.set(true);
+    }
+
+    private void completeDelayedConnection() {
+      delayedConnection.complete(connection);
+    }
+
     private void receive(DaemonEnvelope envelope) {
       receiveRaw(codec.encode(envelope));
     }
 
     private void receiveRaw(String message) {
       listener.onMessage(message);
+    }
+
+    private void receiveFromConnection(int connectionIndex, DaemonEnvelope envelope) {
+      listeners.get(connectionIndex).onMessage(codec.encode(envelope));
+    }
+
+    private void disconnectConnection(int connectionIndex) {
+      listeners.get(connectionIndex).onDisconnected(null);
     }
 
     private void disconnect() {
@@ -1049,6 +1277,10 @@ class DaemonRuntimeTest {
 
     private void awaitConnections(int expected) throws InterruptedException {
       assertTrue(connections.tryAcquire(expected, ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+
+    private boolean awaitConnection(Duration timeout) throws InterruptedException {
+      return connections.tryAcquire(timeout.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     private List<DaemonEnvelope> takeMessages(int count) throws InterruptedException {
@@ -1075,9 +1307,15 @@ class DaemonRuntimeTest {
       return sent.poll(timeout.toMillis(), TimeUnit.MILLISECONDS) != null;
     }
 
+    @Override
+    public void close() {
+      closed.set(true);
+    }
+
     private final class FakeConnection implements DaemonConnection {
 
       private volatile boolean open = true;
+      private final CountDownLatch closed = new CountDownLatch(1);
 
       @Override
       public CompletionStage<Void> sendText(String message) {
@@ -1092,11 +1330,16 @@ class DaemonRuntimeTest {
       @Override
       public void close() {
         open = false;
+        closed.countDown();
       }
 
       @Override
       public boolean isOpen() {
         return open;
+      }
+
+      private boolean awaitClosed(Duration timeout) throws InterruptedException {
+        return closed.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
       }
     }
   }
@@ -1228,6 +1471,42 @@ class DaemonRuntimeTest {
 
     private void error(Throwable error) {
       listener.onError(error);
+    }
+  }
+
+  private static final class BlockingTool implements Tool {
+
+    private final ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "blocking",
+            "1.0.0",
+            "blocking tool",
+            null,
+            new ToolParamsSchema("blocking arguments", Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(10));
+    private final CountDownLatch executionStarted = new CountDownLatch(1);
+    private final CountDownLatch allowReturn = new CountDownLatch(1);
+    private final TestHandle handle = new TestHandle();
+
+    @Override
+    public ToolDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        ToolExecutionRequest request, ToolExecutionListener listener) {
+      executionStarted.countDown();
+      try {
+        if (!allowReturn.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("test did not release blocking tool");
+        }
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("blocking tool interrupted", error);
+      }
+      return handle;
     }
   }
 
