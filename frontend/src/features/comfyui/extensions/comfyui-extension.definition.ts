@@ -1,6 +1,6 @@
 import {
+  ComfyuiRoute,
   ComfyuiDeleteDialog,
-  ComfyuiPage,
   ComfyuiWorkflowEditorDialog,
 } from '@/features/comfyui/extensions/comfyui-extension'
 import type { TrustedReactExtension } from '@/platform/extensions/types'
@@ -11,7 +11,7 @@ export const comfyuiExtension: TrustedReactExtension = {
     {
       id: 'ai.comfyui',
       path: 'comfyui',
-      component: ComfyuiPage,
+      component: ComfyuiRoute,
       priority: 100,
     },
   ],
