@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -33,8 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * ThreadReconciler 行为与优先级合约测试：覆盖 precedence、response-debt end-to-end、config-only / config+message
- * 边界、blocker terminal race、enqueue/quiesce race、claim/renew/load/write 所有权 丢失、Model creation
+ * ThreadReconciler 行为与优先级合约测试：覆盖 precedence、response-debt end-to-end、turn-start batch
+ * harvest、blocker terminal race、enqueue/quiesce race、claim/renew/load/write 所有权丢失、Model creation
  * failure、Clock 单调推进与 max-step safety。
  */
 class ThreadReconcilerTest {
@@ -260,10 +259,10 @@ class ThreadReconcilerTest {
     assertEquals(1, txs.quiesceCount.get());
   }
 
-  // --------------------- config-only 与 config+message 路径 ---------------------
+  // --------------------- turn-start batch 路径 ---------------------
 
   @Test
-  void configOnlyBoundaryAdvancesAndThenQuiesces() {
+  void configOnlyBatchAdvancesAndThenQuiesces() {
     FakeTransactions txs = new FakeTransactions();
     txs.queueSnapshot(
         b ->
@@ -279,19 +278,23 @@ class ThreadReconcilerTest {
 
     assertInstanceOf(StepResult.Quiescent.class, result);
     assertEquals(1, txs.harvestCount.get());
-    TurnBoundary harvested = txs.lastHarvestedBoundary.get();
+    TurnInputBatch harvested = txs.lastHarvestedBatch.get();
     assertNotNull(harvested);
-    assertFalse(harvested.hasMessage());
-    assertEquals(2L, harvested.lastSequence());
+    assertEquals(2, harvested.inputs().size());
   }
 
   @Test
-  void configPlusMessageBoundarySelectsUpToOneMessage() {
+  void harvestsCompleteSnapshotBatchAndCreatesOnePlanFromFinalHead() {
     FakeTransactions txs = new FakeTransactions();
     ThreadInput config = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_MODEL);
-    ThreadInput message = ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE);
-    ThreadInput later = ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.USER_MESSAGE);
-    txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(config, message, later)));
+    ThreadInput firstMessage =
+        ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE);
+    ThreadInput secondMessage =
+        ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.CUSTOM_MESSAGE);
+    ThreadInput trailingConfig =
+        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.SET_AGENT);
+    txs.queueSnapshot(
+        b -> b.queuedInputs.addAll(List.of(config, firstMessage, secondMessage, trailingConfig)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
     txs.queueSnapshot(
         b -> {
@@ -299,11 +302,10 @@ class ThreadReconcilerTest {
               Optional.of(
                   new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(
                       new ModelInvocationPlan(
-                          2L,
+                          4L,
                           ReconcileTestSupport.providerRequest(),
                           ReconcileTestSupport.configSnapshot())));
-          b.headEntryId = 2L;
-          b.queuedInputs.add(later);
+          b.headEntryId = 4L;
         });
     txs.createOutcome =
         new ModelCreationOutcome.Created(
@@ -312,10 +314,9 @@ class ThreadReconcilerTest {
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
 
     assertInstanceOf(StepResult.Suspended.class, result);
-    TurnBoundary harvested = txs.lastHarvestedBoundary.get();
+    TurnInputBatch harvested = txs.lastHarvestedBatch.get();
     assertNotNull(harvested);
-    assertTrue(harvested.hasMessage());
-    assertEquals(2L, harvested.lastSequence());
+    assertEquals(List.of(config, firstMessage, secondMessage, trailingConfig), harvested.inputs());
     assertEquals(1, txs.createCount.get());
   }
 
@@ -324,25 +325,28 @@ class ThreadReconcilerTest {
   @Test
   void responseDebtEndToEndCreatesInvocationBeforeNextInputIsHarvested() {
     // 端到端控制流：
-    // snapshot 1 包含 config+message boundary 与一条后续 queued input；
-    // harvest 成功后，snapshot 2 暴露 ModelInvocationPlan 并仍包含后续 input；
-    // create 成功后返回 Suspended；后续 input 不会被 harvest。
+    // snapshot 1 包含完整 turn-start batch；snapshot 之后又有一条 queued input 到达；
+    // harvest 成功后，snapshot 2 暴露最终 head 的 ModelInvocationPlan 并仍包含新 input；
+    // create 成功后返回 Suspended；新 input 不会被当前 batch harvest。
     FakeTransactions txs = new FakeTransactions();
     ThreadInput cfg = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_MODEL);
     ThreadInput msg = ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE);
-    ThreadInput later = ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.USER_MESSAGE);
+    ThreadInput secondMsg = ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.USER_MESSAGE);
+    ThreadInput trailingConfig =
+        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.SET_AGENT);
+    ThreadInput later = ReconcileTestSupport.input(THREAD_ID, 5L, ThreadInputType.USER_MESSAGE);
 
-    txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(cfg, msg, later)));
+    txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(cfg, msg, secondMsg, trailingConfig)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
 
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            2L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            4L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
               Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan));
-          b.headEntryId = 2L;
+          b.headEntryId = 4L;
           b.queuedInputs.add(later);
         });
     txs.createOutcome =
@@ -356,13 +360,11 @@ class ThreadReconcilerTest {
         new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 17L),
         suspended.continuation().blocker());
 
-    assertEquals(1, txs.harvestCount.get(), "exactly one boundary harvested");
-    TurnBoundary harvested = txs.lastHarvestedBoundary.get();
-    assertEquals(2L, harvested.lastSequence(), "boundary ends at the first message sequence");
-    assertEquals(1, harvested.configInputs().size());
-    assertSame(msg, harvested.messageInput().orElseThrow());
+    assertEquals(1, txs.harvestCount.get(), "exactly one batch harvested");
+    TurnInputBatch harvested = txs.lastHarvestedBatch.get();
+    assertEquals(List.of(cfg, msg, secondMsg, trailingConfig), harvested.inputs());
 
-    assertEquals(1, txs.createCount.get(), "ModelInvocation created after the boundary");
+    assertEquals(1, txs.createCount.get(), "ModelInvocation created after the batch");
     assertEquals(0, txs.quiesceCount.get(), "later queued input must not be quiesced");
   }
 
@@ -704,7 +706,7 @@ class ThreadReconcilerTest {
     final AtomicInteger harvestCount = new AtomicInteger();
     final AtomicInteger quiesceCount = new AtomicInteger();
     final AtomicInteger bestEffortReleaseCount = new AtomicInteger();
-    final AtomicReference<TurnBoundary> lastHarvestedBoundary = new AtomicReference<>();
+    final AtomicReference<TurnInputBatch> lastHarvestedBatch = new AtomicReference<>();
     final AtomicReference<ContinuationRef> lastExpectedBlocker = new AtomicReference<>();
 
     void queueSnapshot(SnapshotMutator mutator) {
@@ -776,12 +778,11 @@ class ThreadReconcilerTest {
     }
 
     @Override
-    public ApplyOutcome harvestBoundary(
-        ThreadOwnership ownership, TurnBoundary boundary, Instant now) {
+    public ApplyOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch, Instant now) {
       harvestCount.incrementAndGet();
       instantLog.add(now);
       operationLog.add("harvest");
-      lastHarvestedBoundary.set(boundary);
+      lastHarvestedBatch.set(batch);
       return harvestOutcome;
     }
 

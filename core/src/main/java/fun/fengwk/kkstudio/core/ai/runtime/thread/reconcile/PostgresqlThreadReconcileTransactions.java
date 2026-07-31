@@ -57,7 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnBoundary;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -384,18 +384,17 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public ApplyOutcome harvestBoundary(
-      ThreadOwnership ownership, TurnBoundary boundary, Instant now) {
+  public ApplyOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
     if (thread == null) {
       return ApplyOutcome.LOST_OWNERSHIP;
     }
     List<ThreadInput> durable = toInputs(mapper.listQueuedInputs(thread.getId()));
-    if (!sameBoundary(boundary, durable)) {
+    if (!sameBatchPrefix(batch, durable)) {
       return ApplyOutcome.LOST_OWNERSHIP;
     }
     long parent = thread.getHeadEntryId();
-    for (ThreadInput input : boundary.inputs()) {
+    for (ThreadInput input : batch.inputs()) {
       EntryPayload payload = inputPayload(input);
       long entryId = ids.nextEntryId();
       if (mapper.insertEntry(
@@ -817,7 +816,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         new ExecutionTarget(ExecutionTargetKind.THREAD, threadId), new ExecutionTarget(kind, id));
   }
 
-  private static boolean sameBoundary(TurnBoundary expected, List<ThreadInput> actual) {
+  private static boolean sameBatchPrefix(TurnInputBatch expected, List<ThreadInput> actual) {
     if (expected.threadId() <= 0 || actual.size() < expected.inputs().size()) {
       return false;
     }

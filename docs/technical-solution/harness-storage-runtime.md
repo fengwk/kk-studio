@@ -242,7 +242,7 @@ Thread
 
 ### 13.1 Runtime domain
 
-- 纯单元测试：状态机、TURN_BOUNDARY、response debt、suspend/resume、lease/fencing
+- 纯单元测试：状态机、TURN_INPUT_BATCH、response debt、suspend/resume、lease/fencing
 - 核心路径行覆盖率目标 ≥ 90%
 
 ### 13.2 PostgreSQL Integration

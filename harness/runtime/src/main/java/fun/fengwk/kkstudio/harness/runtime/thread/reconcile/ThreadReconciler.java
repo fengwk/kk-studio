@@ -35,14 +35,15 @@ import java.util.concurrent.RejectedExecutionException;
  *   <li>apply terminal Tool sibling batch；
  *   <li>atomic suspend/recheck snapshot 中记录的 expected durable blocker；
  *   <li>create ModelInvocation-and-release 偿还既有 response debt；
- *   <li>harvest 一个 TURN_BOUNDARY；
+ *   <li>harvest 一个 TURN_INPUT_BATCH；
  *   <li>atomic quiesce/recheck。
  * </ol>
  *
- * <p>消息边界产生的 ModelInvocation 必须在任何后续 queued 配置或 message 被 harvest 之前创建；这是步骤 4 排在步骤 5 之前的不变量。{@link
- * StepResult.Suspended} 仅由 suspend 与 ModelInvocation creation 两个成功路径返回，lease 已在事务内释放。{@link
- * SuspendOutcome#WORK_AVAILABLE} 与 {@link QuiesceOutcome#WORK_AVAILABLE} 在不释放 lease 的前提下继续循环。Typed
- * failure 仅 ModelInvocation creation 保留，其余事务的意外错误经 best-effort release 后重新抛出。
+ * <p>已有 response debt 必须先于 queued Input harvest 处理；一次 batch harvest 后，Reconciler 重新读取 snapshot，并从最终
+ * head 最多创建一次 ModelInvocation。{@link StepResult.Suspended} 仅由 suspend 与 ModelInvocation creation
+ * 两个成功路径返回，lease 已在事务内释放。{@link SuspendOutcome#WORK_AVAILABLE} 与 {@link
+ * QuiesceOutcome#WORK_AVAILABLE} 在不释放 lease 的前提下继续循环。Typed failure 仅 ModelInvocation creation
+ * 保留，其余事务的意外错误经 best-effort release 后重新抛出。
  */
 @Slf4j
 public final class ThreadReconciler {
@@ -256,8 +257,8 @@ public final class ThreadReconciler {
    *   <li>{@link CreateModelInvocation}：当前 Entry Tree 已欠一次模型回复时，冻结请求并创建 ModelInvocation。
    * </ol>
    *
-   * <p>只有没有主要动作时，才可从 {@code queuedInputs} 中接收下一个 TURN_BOUNDARY。这样上一回合产生的 response debt 总会先于更晚的
-   * Input 被处理。
+   * <p>只有没有主要动作时，才可从 {@code queuedInputs} 中接收全部 queued Input 组成一个 TURN_INPUT_BATCH。这样已有 response
+   * debt 总会先于更晚的 Input 被处理；batch 成功后重新读取 snapshot，从最终 head 最多创建一次 ModelInvocation。
    *
    * <p>密封类型 {@link PrimaryWork} 的穷尽 switch 确保新增主要动作时，编译器会强制补齐分派。
    */
@@ -286,11 +287,10 @@ public final class ThreadReconciler {
       };
     }
 
-    // 5. 仅在当前回合没有主工作时，才接收 mailbox 中下一条回合边界。
-    Optional<TurnBoundary> boundary =
-        TurnBoundarySelector.select(ownership, snapshot.queuedInputs());
-    if (boundary.isPresent()) {
-      return harvestBoundary(ownership, boundary.get());
+    // 5. 仅在当前回合没有主工作时，一次接收 snapshot 中全部 queued mailbox input。
+    if (!snapshot.queuedInputs().isEmpty()) {
+      return harvestBatch(
+          ownership, new TurnInputBatch(ownership.threadId(), snapshot.queuedInputs()));
     }
 
     // 6. 空 snapshot 也不能直接认定空闲；事务会在释放 lease 前二次检查并发到达的事实。
@@ -363,13 +363,13 @@ public final class ThreadReconciler {
   }
 
   /**
-   * 将一个 TURN_BOUNDARY 从 mailbox 原子写入 Entry Tree。
+   * 将一个 TURN_INPUT_BATCH 从 mailbox 原子写入 Entry Tree。
    *
-   * <p>一个 boundary 包含连续配置和至多一条 message。成功后必须重新读取 snapshot，使该 message 产生的 response debt 优先于后续 queued
-   * Input。
+   * <p>batch 覆盖 snapshot 中的全部 queued Input，成功后必须重新读取 snapshot，使最终 head 上的 response debt 优先于
+   * snapshot 后到达的 queued Input。
    */
-  private IterationOutcome harvestBoundary(ThreadOwnership ownership, TurnBoundary boundary) {
-    ApplyOutcome outcome = transactions.harvestBoundary(ownership, boundary, clock.instant());
+  private IterationOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch) {
+    ApplyOutcome outcome = transactions.harvestBatch(ownership, batch, clock.instant());
     return reloadOrLostOwnership(outcome);
   }
 

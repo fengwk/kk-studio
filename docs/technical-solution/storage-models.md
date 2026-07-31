@@ -67,6 +67,7 @@ Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`
 
 - 锁序：Thread → owning Invocation → Interaction → Entry/Input append。
 - Assistant Entry 与 Usage Record 原子写入；`assistant_entry_id` 唯一冲突回滚整事务。
-- Harvest 按 TURN_BOUNDARY 应用 Input；每条 Input 仅能从 `QUEUED` 成功迁移一次。
+- Harvest 按 TURN_INPUT_BATCH 将 snapshot 中全部 queued Input 按 sequence 应用；每条 Input 仅能从 `QUEUED` 成功迁移一次，
+  snapshot 后追加的 Input 留给下一 turn。
 - Daemon 断开只移除对应内存 Environment；历史 `harness_tool_invocation.environment_name` 保留冻结路由名。
 - ComfyUI job 是远端系统事实；数据库只保存工作流定义；对象走固定 bucket 预签名边界。

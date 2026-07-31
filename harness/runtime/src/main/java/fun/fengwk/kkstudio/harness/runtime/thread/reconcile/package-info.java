@@ -27,9 +27,10 @@
  *   <li>terminal ModelInvocation apply 优先于 terminal Tool sibling apply；
  *   <li>Tool apply 优先于 durable blocker suspend；
  *   <li>durable blocker suspend 优先于既有 response debt 创建 ModelInvocation；
- *   <li>response debt 优先于 TURN_BOUNDARY harvest；
+ *   <li>response debt 优先于 TURN_INPUT_BATCH harvest；
+ *   <li>一次 snapshot 中的全部 queued Input 按 sequence 原子 harvest，随后最终 head 最多创建一次 ModelInvocation；
+ *   <li>snapshot 后到达的 Input 保持 queued，留给下一 turn；
  *   <li>harvest 优先于 quiesce；
- *   <li>消息边界产生的 ModelInvocation 必须先于下一批 Input 创建；
  *   <li>Suspended/Quiescent 及成功创建 ModelInvocation 时 lease 已释放；
  *   <li>suspend 与 quiesce 的 WORK_AVAILABLE 在不释放 lease 的前提下继续收敛；
  *   <li>apply/harvest 仅返回 PROGRESSED/LOST_OWNERSHIP；typed failure 通道仅保留在 ModelInvocation

@@ -72,7 +72,9 @@ Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复�
 
 `PUT /api/ai/runtime/threads/{id}/head` 是外部修改 head 的唯一入口，可跨 Session 重定位或传 `null` 回到 UNBOUND；不复制 Entry 或 Invocation。它要求 Thread 逻辑静止：无有效 processor lease、`runnable=false`、无 QUEUED Input、当前 epoch 无非终态 Model/Tool Invocation、无相关 OPEN Interaction。满足后 CAS `expectedExecutionEpoch`，成功则 epoch+1 并清 lease/`runnable`，旧 epoch 的执行结果不再能写入。分支就是这样的 head 重定位，没有独立的 Branch 实体。
 
-用户消息与设置变更只进入 `ThreadInput` mailbox，不直接写 Entry；UNBOUND Thread 拒绝入队。`ThreadReconciler` 按 TURN_BOUNDARY harvest、追加 `RUNTIME_CONFIG`/消息 Entry，并在 response debt 时创建冻结 `ModelInvocation`。
+用户消息与设置变更只进入 `ThreadInput` mailbox，不直接写 Entry；UNBOUND Thread 拒绝入队。`ThreadReconciler` 在无 primary
+work 时将 snapshot 中全部 queued Input 按 TURN_INPUT_BATCH 原子 harvest，追加 `RUNTIME_CONFIG`/消息 Entry；随后从最终
+head 最多创建一次冻结 `ModelInvocation`，snapshot 后到达者留给下一 turn。
 
 查询：`GET /api/ai/runtime/threads` 返回全局 Thread 列表，`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。`GET /api/ai/runtime/threads/{id}/snapshot` 在 REPEATABLE READ 下返回 revision 与 root→head Entries（UNBOUND 为空）、按 `sequence ASC` 的 inputs、invocations、open interactions 和 usage。`createTime` 只用于展示；不得用墙钟重排因果顺序。
 

@@ -41,7 +41,7 @@ public interface ThreadReconcileTransactions {
    *
    * <p>Snapshot 包含当前 Thread 上下文、零或一个 {@link ThreadReconcileSnapshot.PrimaryWork} 与有序的 queued
    * Inputs。适配器必须按固定顺序选择主要动作：terminal Model、ready Tool sibling batch、未完成 blocker、response debt 的
-   * ModelInvocationPlan；仅当没有主要动作时，queued Inputs 才可由 Reconciler harvest。
+   * ModelInvocationPlan；仅当没有主要动作时，全部 queued Inputs 才可由 Reconciler 组成一个 turn-start batch 并 harvest。
    *
    * <p>fencing 失败或 Thread 已不存在时返回 empty。
    */
@@ -70,10 +70,10 @@ public interface ThreadReconcileTransactions {
       ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now);
 
   /**
-   * 原子 harvest 一个 {@link TurnBoundary}：连续配置 Input 先于末端 message 应用；CAS {@code APPLIED} 并按需推进
+   * 原子 harvest 一个 {@link TurnInputBatch}：按 snapshot 顺序应用全部 queued Input；CAS {@code APPLIED} 并按需推进
    * head。意外错误以 RuntimeException 抛出。
    */
-  ApplyOutcome harvestBoundary(ThreadOwnership ownership, TurnBoundary boundary, Instant now);
+  ApplyOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch, Instant now);
 
   /**
    * 原子创建 ModelInvocation 并在同事务内释放 Thread lease。plan 的 {@code sourceHeadEntryId} 必须等于 ownership 对应
