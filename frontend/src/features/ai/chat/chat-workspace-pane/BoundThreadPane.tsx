@@ -34,13 +34,16 @@ import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { translate, useI18n } from '@/shared/i18n'
 
 /** 409 = stale executionEpoch or non-quiescent Thread; never swallow it silently. */
 function rebindErrorMessage(error: unknown): string {
   if (isConflictError(error)) {
-    return `无法重定位 Thread：状态已变化（${errorMessage(error, '冲突')}），请刷新后重试`
+    return translate('ai.runtime.action.rebindConflict', {
+      error: errorMessage(error, translate('ai.catalog.validation.conflict')),
+    })
   }
-  return errorMessage(error, '重定位 Thread 失败')
+  return errorMessage(error, translate('ai.runtime.action.rebindFailed'))
 }
 
 function firstNonEmpty(...values: unknown[]): string {
@@ -81,6 +84,7 @@ export function BoundThreadPane({
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
 }) {
+  const { t } = useI18n()
   // sessionId is not persisted on pane; resolve from the Thread head after load.
   const controller = useAgentThreadController(threadId)
   const sessionId = controller.sessionId
@@ -124,10 +128,10 @@ export function BoundThreadPane({
     mutationFn: (entry: HarnessSessionEntryDTO) => {
       const target = branchTarget(entry)
       if (!target.headEntryId) {
-        return Promise.reject(new Error('根节点不能作为可编辑消息分支'))
+        return Promise.reject(new Error(t('ai.runtime.action.rootNotBranchable')))
       }
       if (!controller.thread) {
-        return Promise.reject(new Error('Thread 尚未加载'))
+        return Promise.reject(new Error(t('ai.runtime.action.threadNotLoaded')))
       }
       return harnessService.updateThreadHead(threadId, {
         headEntryId: target.headEntryId,
@@ -156,7 +160,7 @@ export function BoundThreadPane({
       setThreadModalOpen(false)
       onThreadChange(selectedThreadId)
     } catch (error) {
-      setRebindBlockedReason(errorMessage(error, '关联 Thread 失败'))
+      setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.associateThreadFailed')))
     } finally {
       setThreadAssociationPending(false)
     }
@@ -165,7 +169,7 @@ export function BoundThreadPane({
   /** /session and /tree both relocate the current Thread, so both need a quiescent Thread. */
   function openRebindTarget(open: () => void) {
     if (!rebindable) {
-      setRebindBlockedReason('当前 Thread 正在运行，无法重定位；请先 /stop')
+      setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
       return
     }
     setRebindBlockedReason(null)
@@ -297,11 +301,11 @@ export function BoundThreadPane({
       {/* /session picks the target Session, then its Entry Tree supplies the new head. */}
       <SelectionListModal
         open={sessionModalOpen}
-        title="选择 Session"
+        title={t('ai.chat.selectSession')}
         items={sessionPicker.sessionItems}
         sort={sessionSort}
         onSortChange={onSessionSortChange}
-        emptyText="暂无 Session"
+        emptyText={t('ai.chat.noSessions')}
         onClose={() => setSessionModalOpen(false)}
         onSelect={(selectedSessionId) => {
           if (!sessionPicker.findSession(selectedSessionId)) {
@@ -314,7 +318,7 @@ export function BoundThreadPane({
       {/* /thread only switches which Thread this pane shows; no Thread is mutated. */}
       <SelectionListModal
         open={threadModalOpen}
-        title="选择 Thread"
+        title={t('ai.chat.selectThread')}
         items={threadItems}
         sort={threadSort}
         onSortChange={onThreadSortChange}
@@ -327,7 +331,7 @@ export function BoundThreadPane({
           void threadPicker.loadMore()
         }}
         selectionPending={threadAssociationPending}
-        emptyText="暂无 Thread"
+        emptyText={t('ai.chat.noThreads')}
         onClose={() => setThreadModalOpen(false)}
         onSelect={selectThread}
       />
@@ -348,7 +352,7 @@ export function BoundThreadPane({
       />
       <SelectionListModal
         open={modelModalOpen}
-        title="选择 Model"
+        title={t('ai.chat.selectModel')}
         items={controller.models.map((model) => ({
           id: String(model.id),
           title: modelRef(model),
@@ -357,7 +361,7 @@ export function BoundThreadPane({
         sort="recent"
         onSortChange={() => undefined}
         showSort={false}
-        emptyText="暂无可用 Model"
+        emptyText={t('ai.chat.noModels')}
         onClose={() => setModelModalOpen(false)}
         onSelect={(modelId) => {
           setModelModalOpen(false)
@@ -374,7 +378,7 @@ export function BoundThreadPane({
       />
       <SelectionListModal
         open={variantModalOpen}
-        title="选择 Variant"
+        title={t('ai.chat.selectVariant')}
         items={currentVariantOptions.map((variant) => ({
           id: variant,
           title: variant,
@@ -383,7 +387,11 @@ export function BoundThreadPane({
         sort="recent"
         onSortChange={() => undefined}
         showSort={false}
-        emptyText={currentModel ? '当前 Model 暂无 Variant' : '请先设置 Model'}
+        emptyText={
+          currentModel
+            ? t('ai.chat.noVariantsForModel')
+            : t('ai.chat.setModelFirst')
+        }
         onClose={() => setVariantModalOpen(false)}
         onSelect={(variant) => {
           setVariantModalOpen(false)

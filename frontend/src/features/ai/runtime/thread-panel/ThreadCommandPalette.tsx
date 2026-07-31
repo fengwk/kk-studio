@@ -4,6 +4,7 @@ import {
   THREAD_COMMANDS,
   type ThreadCommand,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { useI18n } from '@/shared/i18n'
 
 export function ThreadCommandPalette({
   open,
@@ -21,6 +22,7 @@ export function ThreadCommandPalette({
   onActiveIndexChange: (index: number) => void
   onSelect: (command: ThreadCommand) => void
 }) {
+  const { t } = useI18n()
   const commands = useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
   const listRef = useRef<HTMLUListElement>(null)
   const enabledCount = useMemo(
@@ -42,16 +44,25 @@ export function ThreadCommandPalette({
   }
 
   return (
-    <div className="thread-command-palette" role="listbox" aria-label="命令表">
+    <div className="thread-command-palette" role="listbox" aria-label={t('ai.runtime.command.palette')}>
       <div className="thread-command-search">
         <span>/</span>
-        <span className="thread-command-query">{query || '搜索命令…'}</span>
+        <span className="thread-command-query">{query || t('ai.runtime.command.search')}</span>
       </div>
       <ul ref={listRef} className="thread-command-list">
-        {commands.length === 0 ? <li className="thread-command-empty">无匹配命令</li> : null}
+        {commands.length === 0 ? (
+          <li className="thread-command-empty">{t('ai.runtime.command.noMatch')}</li>
+        ) : null}
         {commands.map((command, commandIndex) => {
           const disabled = Boolean(command.disabled)
           const active = commandIndex === activeIndex
+          const label = command.labelKey ? t(command.labelKey) : command.label
+          const description = command.descriptionKey
+            ? t(command.descriptionKey)
+            : command.description
+          const disabledReason = command.disabledReasonKey
+            ? t(command.disabledReasonKey)
+            : command.disabledReason
           return (
             <li key={command.id}>
               <button
@@ -60,7 +71,7 @@ export function ThreadCommandPalette({
                 aria-selected={active}
                 aria-disabled={disabled}
                 disabled={disabled}
-                title={disabled ? command.disabledReason || '当前不可用' : command.description}
+                title={disabled ? disabledReason || t('ai.runtime.command.unavailable') : description}
                 className={
                   [active ? 'active' : '', disabled ? 'is-disabled' : ''].filter(Boolean).join(' ') || undefined
                 }
@@ -75,11 +86,11 @@ export function ThreadCommandPalette({
                   }
                 }}
               >
-                <span className="thread-command-label">{command.label}</span>
+                <span className="thread-command-label">{label}</span>
                 <span className="thread-command-desc">
-                  {disabled && command.disabledReason
-                    ? `${command.description} · ${command.disabledReason}`
-                    : command.description}
+                  {disabled && disabledReason
+                    ? `${description} · ${disabledReason}`
+                    : description}
                 </span>
               </button>
             </li>
@@ -87,9 +98,9 @@ export function ThreadCommandPalette({
         })}
       </ul>
       <div className="thread-command-meta">
-        可用 {enabledCount} / 共 {totalCount}
-        {query.trim() ? ` · 匹配 ${commands.length}` : ''}
-        {' · ↑↓ 选择 · Enter 确认'}
+        {t('ai.runtime.command.meta', { enabled: enabledCount, total: totalCount })}
+        {query.trim() ? t('ai.runtime.command.matches', { count: commands.length }) : ''}
+        {t('ai.runtime.command.hint')}
       </div>
     </div>
   )

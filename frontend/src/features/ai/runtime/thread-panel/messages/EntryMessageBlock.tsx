@@ -1,11 +1,13 @@
 import { CircleDot, FileWarning, Settings2 } from 'lucide-react'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import { useI18n } from '@/shared/i18n'
 
 /**
  * Portable durable-Entry audit block. It receives the stable timeline contract rather than
  * Harness DTOs, controllers, or query state.
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
+  const { t } = useI18n()
   return (
     <section
       className={`thread-block thread-block-entry kind-${message.kind}`}
@@ -19,7 +21,7 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
           <div className="thread-entry-title">{message.title}</div>
           <div className="thread-block-body thread-entry-text">{message.text}</div>
           <details className="thread-entry-payload">
-            <summary>查看原始 Entry</summary>
+            <summary>{t('ai.runtime.message.rawEntry')}</summary>
             <pre>{message.rawPayloadJson}</pre>
           </details>
         </div>

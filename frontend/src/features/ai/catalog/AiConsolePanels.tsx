@@ -7,6 +7,7 @@ import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
+import { useI18n } from '@/shared/i18n'
 
 export function AgentsPanel({
   agents,
@@ -23,9 +24,14 @@ export function AgentsPanel({
   onEdit: (agent: AgentDefinitionDTO) => void
   onDelete: (agent: AgentDefinitionDTO) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Agent" subtitle="配置聚合：Model / Environment / tools / skills / policy" onClick={onCreate} />
+      <CreateCard
+        title={t('ai.catalog.createAgent')}
+        subtitle={t('ai.catalog.createAgentDescription')}
+        onClick={onCreate}
+      />
       {agents.map((agent) => (
         <AgentResourceCard
           key={agent.id}
@@ -53,9 +59,14 @@ export function ModelsPanel({
   onEdit: (model: AgentModelView) => void
   onDelete: (model: AgentModelView) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Model" subtitle="定义模型信息与 variants" onClick={onCreate} />
+      <CreateCard
+        title={t('ai.catalog.createModel')}
+        subtitle={t('ai.catalog.createModelDescription')}
+        onClick={onCreate}
+      />
       {models.map((model) => (
         <ModelResourceCard
           key={model.id}
@@ -82,9 +93,14 @@ export function ProvidersPanel({
   onEdit: (provider: AgentProviderDTO) => void
   onDelete: (provider: AgentProviderDTO) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="cards-grid">
-      <CreateCard title="新建 Provider" subtitle="配置供应商与凭据" onClick={onCreate} />
+      <CreateCard
+        title={t('ai.catalog.createProvider')}
+        subtitle={t('ai.catalog.createProviderDescription')}
+        onClick={onCreate}
+      />
       {providers.map((provider) => (
         <ProviderResourceCard
           key={provider.id}

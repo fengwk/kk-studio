@@ -10,6 +10,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
 import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -98,6 +99,7 @@ describe('ChatWorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
+    setLocale('zh-CN')
     vi.mocked(agentService.listAgents).mockResolvedValue(
       page([
         {

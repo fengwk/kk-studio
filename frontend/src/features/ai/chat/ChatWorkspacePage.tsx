@@ -17,6 +17,7 @@ import {
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n } from '@/shared/i18n'
 
 const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
   { id: 'single', label: '1' },
@@ -30,6 +31,7 @@ const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
 export function ChatWorkspacePage() {
   const { chatId = '' } = useParams()
   const navigate = useNavigate()
+  const { t } = useI18n()
   const queryClient = useQueryClient()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
   const migratedChatId = useRef<string | null>(null)
@@ -112,14 +114,14 @@ export function ChatWorkspacePage() {
   }
 
   if (chatQuery.isLoading) {
-    return <div className="thread-state">正在加载 Chat…</div>
+    return <div className="thread-state">{t('ai.chat.loading')}</div>
   }
   if (chatQuery.error || !chatQuery.data) {
     return (
       <div className="thread-state danger">
-        Chat 加载失败
+        {t('ai.chat.loadFailed')}
         <button type="button" onClick={() => navigate('/chats')}>
-          返回列表
+          {t('ai.chat.backToList')}
         </button>
       </div>
     )
@@ -133,12 +135,17 @@ export function ChatWorkspacePage() {
     <section className="chat-workspace screen active">
       <header className="chat-workspace-header">
         <div className="chat-workspace-title">
-          <Link className="sidebar-icon-btn" to="/chats" title="返回 Chat 列表" aria-label="返回 Chat 列表">
+          <Link
+            className="sidebar-icon-btn"
+            to="/chats"
+            title={t('ai.chat.backToChatList')}
+            aria-label={t('ai.chat.backToChatList')}
+          >
             <ArrowLeft aria-hidden="true" />
           </Link>
           <h1>{title}</h1>
         </div>
-        <div className="chat-layout-switch" role="group" aria-label="布局">
+        <div className="chat-layout-switch" role="group" aria-label={t('ai.chat.layout')}>
           {LAYOUTS.map((layout) => (
             <button
               key={layout.id}

@@ -3,6 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/features/ai/catalog/ai-number-input'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'
+import { useI18n } from '@/shared/i18n'
 
 export function VariantListEditor({
   label,
@@ -20,6 +21,8 @@ export function VariantListEditor({
   effortError?: boolean
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
+  const { t } = useI18n()
+
   function updateVariant(index: number, patch: Partial<VariantDraft>) {
     const currentVariant = variants[index]
     const nextVariants = variants.map((variant, variantIndex) =>
@@ -54,24 +57,24 @@ export function VariantListEditor({
         <div className="structured-section-actions">
           <button className="ghost-inline-btn" type="button" onClick={addVariant}>
             <Plus aria-hidden="true" />
-            添加 Variant
+            {t('ai.catalog.form.addVariant')}
           </button>
         </div>
       </div>
       <p className="inline-hint">
-        Variant 是命名参数预设；id 唯一，Default Variant 必须指向其中一项。
+        {t('ai.catalog.form.variantHint')}
         {reasoning
-          ? ' 思考强度为自由字符串（写入 reasoning_effort）。'
-          : ' 若需配置思考强度，请先勾选上方 Reasoning。'}
+          ? t('ai.catalog.form.reasoningHint')
+          : t('ai.catalog.form.reasoningDisabledHint')}
       </p>
       <div className="variant-stack">
         {variants.map((variant, index) => (
           <div className="variant-editor" key={variant.draftId}>
             <div className={`editor-grid${reasoning ? ' editor-grid-3' : ' editor-grid-2'}`}>
               <label className="form-group">
-                <FieldLabel required>Variant ID</FieldLabel>
+                <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
                 <input
-                  aria-label={`Variant ID ${index + 1}`}
+                  aria-label={`${t('ai.catalog.form.variantId')} ${index + 1}`}
                   value={variant.id}
                   onChange={(event) => updateVariant(index, { id: event.target.value })}
                   placeholder="medium"
@@ -84,9 +87,9 @@ export function VariantListEditor({
                     effortError && !variant.reasoningEffort.trim() ? ' is-error' : ''
                   }`}
                 >
-                  <FieldLabel required>思考强度</FieldLabel>
+                  <FieldLabel required>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
                   <input
-                    aria-label={`Reasoning Effort ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
                     value={variant.reasoningEffort}
                     onChange={(event) =>
                       updateVariant(index, { reasoningEffort: event.target.value })
@@ -96,14 +99,14 @@ export function VariantListEditor({
                     spellCheck={false}
                   />
                   {effortError && !variant.reasoningEffort.trim() ? (
-                    <span className="field-error">请填写思考强度</span>
+                    <span className="field-error">{t('ai.catalog.form.reasoningEffortError')}</span>
                   ) : null}
                 </label>
               ) : null}
               <label className="form-group">
-                <FieldLabel>Max Output</FieldLabel>
+                <FieldLabel>{t('ai.catalog.form.maxOutput')}</FieldLabel>
                 <input
-                  aria-label={`Variant Max Output Tokens ${index + 1}`}
+                  aria-label={`${t('ai.catalog.form.maxOutputAria')} ${index + 1}`}
                   type="number"
                   inputMode="numeric"
                   min={1}
@@ -114,19 +117,19 @@ export function VariantListEditor({
                       maxOutputTokens: sanitizeIntegerInput(event.target.value),
                     })
                   }
-                  placeholder="空=模型上限"
+                  placeholder={t('ai.catalog.form.maxOutputPlaceholder')}
                 />
               </label>
             </div>
 
             <details className="variant-advanced-options">
-              <summary>高级选项</summary>
-              <p className="inline-hint">一般无需配置，留空=厂商默认。</p>
+              <summary>{t('ai.catalog.form.advancedOptions')}</summary>
+              <p className="inline-hint">{t('ai.catalog.form.advancedHint')}</p>
               <div className="editor-grid editor-grid-3">
                 <label className="form-group">
-                  <FieldLabel>Temperature</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.temperature')}</FieldLabel>
                   <input
-                    aria-label={`Temperature ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.temperature')} ${index + 1}`}
                     type="number"
                     inputMode="decimal"
                     min={0}
@@ -137,13 +140,13 @@ export function VariantListEditor({
                         temperature: sanitizeDecimalInput(event.target.value),
                       })
                     }
-                    placeholder="空"
+                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
                   />
                 </label>
                 <label className="form-group">
-                  <FieldLabel>Top P</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.topP')}</FieldLabel>
                   <input
-                    aria-label={`Top P ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.topP')} ${index + 1}`}
                     type="number"
                     inputMode="decimal"
                     min={0}
@@ -153,13 +156,13 @@ export function VariantListEditor({
                     onChange={(event) =>
                       updateVariant(index, { topP: sanitizeDecimalInput(event.target.value) })
                     }
-                    placeholder="空"
+                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
                   />
                 </label>
                 <label className="form-group">
-                  <FieldLabel>Top K</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.topK')}</FieldLabel>
                   <input
-                    aria-label={`Top K ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.topK')} ${index + 1}`}
                     type="number"
                     inputMode="numeric"
                     min={1}
@@ -168,13 +171,13 @@ export function VariantListEditor({
                     onChange={(event) =>
                       updateVariant(index, { topK: sanitizeIntegerInput(event.target.value) })
                     }
-                    placeholder="空"
+                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
                   />
                 </label>
                 <label className="form-group">
-                  <FieldLabel>Freq Penalty</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.frequencyPenalty')}</FieldLabel>
                   <input
-                    aria-label={`Frequency Penalty ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.frequencyPenalty')} ${index + 1}`}
                     type="number"
                     inputMode="decimal"
                     step="any"
@@ -184,13 +187,13 @@ export function VariantListEditor({
                         frequencyPenalty: sanitizeDecimalInput(event.target.value),
                       })
                     }
-                    placeholder="空"
+                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
                   />
                 </label>
                 <label className="form-group">
-                  <FieldLabel>Pres Penalty</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.presencePenalty')}</FieldLabel>
                   <input
-                    aria-label={`Presence Penalty ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.presencePenalty')} ${index + 1}`}
                     type="number"
                     inputMode="decimal"
                     step="any"
@@ -200,16 +203,16 @@ export function VariantListEditor({
                         presencePenalty: sanitizeDecimalInput(event.target.value),
                       })
                     }
-                    placeholder="空"
+                    placeholder={t('ai.catalog.form.emptyPlaceholder')}
                   />
                 </label>
                 <label className="form-group">
-                  <FieldLabel>Stop</FieldLabel>
+                  <FieldLabel>{t('ai.catalog.form.stop')}</FieldLabel>
                   <input
-                    aria-label={`Stop Sequences ${index + 1}`}
+                    aria-label={`${t('ai.catalog.form.stopAria')} ${index + 1}`}
                     value={variant.stopSequences}
                     onChange={(event) => updateVariant(index, { stopSequences: event.target.value })}
-                    placeholder="END,STOP"
+                    placeholder={t('ai.catalog.form.stopPlaceholder')}
                   />
                 </label>
               </div>
@@ -223,7 +226,7 @@ export function VariantListEditor({
                 disabled={variants.length <= 1}
               >
                 <Trash2 aria-hidden="true" />
-                删除 Variant
+                {t('ai.catalog.form.deleteVariant')}
               </button>
             </div>
           </div>

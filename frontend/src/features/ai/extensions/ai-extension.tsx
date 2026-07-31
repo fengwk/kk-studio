@@ -12,6 +12,7 @@ import {
 import { useOptionalCatalogRuntime } from '@/features/ai/catalog/CatalogRuntimeContext'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
 
 const AgentsPage = lazy(async () => {
   const module = await import('@/features/ai/catalog/AgentsPage')
@@ -72,24 +73,27 @@ function ChatsFrame({ children }: ExtensionComponentProps) {
 }
 
 export function AgentsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载 Agent</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingAgent')}</div>}>
       <AgentsPage>{children}</AgentsPage>
     </Suspense>
   )
 }
 
 export function ModelsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载 Model</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingModel')}</div>}>
       <ModelsPage>{children}</ModelsPage>
     </Suspense>
   )
 }
 
 export function ProvidersRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载 Provider</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingProvider')}</div>}>
       <ProvidersPage>{children}</ProvidersPage>
     </Suspense>
   )
@@ -101,32 +105,35 @@ export function CreateChatDialog() {
 }
 
 export function ResourceEditorDialog() {
+  const { t } = useI18n()
   const controller = useOptionalCatalogRuntime()
   if (!controller?.resourceEditorModal.modal) {
     return null
   }
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载资源编辑器</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingResourceEditor')}</div>}>
       <ResourceEditorModal {...controller.resourceEditorModal} />
     </Suspense>
   )
 }
 
 export function ResourceDeleteDialog() {
+  const { t } = useI18n()
   const controller = useOptionalCatalogRuntime()
   if (!controller?.resourceDeleteConfirmModal.modal) {
     return null
   }
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载确认对话框</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingConfirmDialog')}</div>}>
       <ConfirmActionModal {...controller.resourceDeleteConfirmModal} />
     </Suspense>
   )
 }
 
 export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载 Environment</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingEnvironment')}</div>}>
       <EnvironmentsPage />
       {children}
     </Suspense>
@@ -134,8 +141,9 @@ export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
 }
 
 export function HarnessSettingsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
-    <Suspense fallback={<div className="state-block" role="status">正在加载设置</div>}>
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingSettings')}</div>}>
       <HarnessSettingsPage />
       {children}
     </Suspense>

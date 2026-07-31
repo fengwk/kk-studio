@@ -2,6 +2,7 @@ import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { sortWithRunningFirst } from '@/features/ai/chat/chat-pane-state'
 import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
+import { translate } from '@/shared/i18n'
 
 export function isRunningThread(thread: HarnessThreadDTO): boolean {
   return (
@@ -59,7 +60,7 @@ function toSessionSelectionItem(session: HarnessSessionDTO) {
   return {
     id: session.sessionId,
     title: session.title || session.sessionId,
-    subtitle: `Session ${session.sessionId}`,
+    subtitle: translate('ai.chat.sessionSubtitle', { id: session.sessionId }),
     badge: undefined as string | undefined,
   }
 }
@@ -81,7 +82,11 @@ export function toThreadSelectionItem(
 ) {
   const running = isRunningThread(thread)
   const time = formatBackendDate(sort === 'created' ? thread.createTime : thread.updateTime)
-  const context = thread.activeAgentName || thread.sessionTitle || thread.sessionId || '未绑定 Session'
+  const context =
+    thread.activeAgentName
+    || thread.sessionTitle
+    || thread.sessionId
+    || translate('ai.chat.unboundSession')
   return {
     id: thread.threadId,
     title: thread.threadId,

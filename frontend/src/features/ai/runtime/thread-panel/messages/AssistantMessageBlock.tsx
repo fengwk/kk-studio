@@ -3,6 +3,7 @@ import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/Think
 import type { TextDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
+import { useI18n } from '@/shared/i18n'
 
 /**
  * Assistant：thinking 纯文本 + 正文 Markdown。
@@ -13,6 +14,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
 }: {
   message: TextDialogueMessage
 }) {
+  const { t } = useI18n()
   const thinking = message.thinking ?? ''
   const text = message.text.trim()
   const streaming = message.status === 'streaming'
@@ -28,13 +30,17 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
     >
       {aborted ? (
         <div className="thread-block thread-block-assistant thread-assistant-aborted-tag">
-          <div className="thread-block-body">已停止</div>
+          <div className="thread-block-body">{t('ai.runtime.message.stopped')}</div>
         </div>
       ) : null}
       <ThinkingBlock thinking={thinking} streaming={streaming} />
       {hasText ? (
         <section className="thread-block thread-block-assistant thread-assistant-shell">
-          <CopyButton source={text} className="thread-assistant-copy" label="复制全文" />
+          <CopyButton
+            source={text}
+            className="thread-assistant-copy"
+            label={t('ai.runtime.message.copyAll')}
+          />
           <div className="thread-block-body thread-assistant-text">
             {message.status === 'error' ? (
               // Provider failures must stay raw (JSON/HTML bodies). Markdown would escape or reformat them.
@@ -52,7 +58,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
       ) : null}
       {!hasText && !hasThinking && message.status === 'error' ? (
         <section className="thread-block thread-block-assistant error">
-          <div className="thread-block-body">助手回复失败</div>
+          <div className="thread-block-body">{t('ai.runtime.message.assistantFailed')}</div>
         </section>
       ) : null}
     </div>

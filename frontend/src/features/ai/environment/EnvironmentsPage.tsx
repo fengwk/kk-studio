@@ -5,9 +5,10 @@ import { StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { environmentService } from '@/shared/api/environment-service'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n, type AppLocale } from '@/shared/i18n'
 
-function formatDateTime24(date: Date): string {
-  return date.toLocaleString('zh-CN', {
+function formatDateTime24(date: Date, locale: AppLocale): string {
+  return date.toLocaleString(locale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -18,13 +19,13 @@ function formatDateTime24(date: Date): string {
   })
 }
 
-function formatLastSeen(value: string | number | null | undefined): string {
+function formatLastSeen(value: string | number | null | undefined, locale: AppLocale): string {
   if (value == null || value === '') {
     return ''
   }
   if (typeof value === 'number' && Number.isFinite(value)) {
     const ms = value < 1e12 ? value * 1000 : value
-    return formatDateTime24(new Date(ms))
+    return formatDateTime24(new Date(ms), locale)
   }
   const raw = String(value).trim()
   if (!raw) {
@@ -35,12 +36,12 @@ function formatLastSeen(value: string | number | null | undefined): string {
     const n = Number(raw)
     if (Number.isFinite(n)) {
       const ms = n < 1e12 ? n * 1000 : n
-      return formatDateTime24(new Date(ms))
+      return formatDateTime24(new Date(ms), locale)
     }
   }
   const parsed = Date.parse(raw)
   if (Number.isFinite(parsed)) {
-    return formatDateTime24(new Date(parsed))
+    return formatDateTime24(new Date(parsed), locale)
   }
   return raw
 }
@@ -70,6 +71,7 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
 }
 
 export function EnvironmentsPage() {
+  const { t, locale } = useI18n()
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
@@ -88,24 +90,28 @@ export function EnvironmentsPage() {
         <NavigationSlot />
       </nav>
       <div className="screen-body">
-        {environmentsQuery.isLoading && <StateBlock title="正在加载 Environments" />}
+        {environmentsQuery.isLoading && <StateBlock title={t('ai.environment.loading')} />}
         {environmentsQuery.error && (
           <StateBlock
-            title={environmentsQuery.error instanceof Error ? environmentsQuery.error.message : '加载失败'}
+            title={
+              environmentsQuery.error instanceof Error
+                ? environmentsQuery.error.message
+                : t('ai.environment.loadFailed')
+            }
             tone="danger"
           />
         )}
         {!environmentsQuery.isLoading && !environmentsQuery.error && (
           <div className="cards-grid environment-list">
             {environments.length === 0 ? (
-              <StateBlock title="当前没有 live Environment" />
+              <StateBlock title={t('ai.environment.empty')} />
             ) : (
               environments.map((environment) => {
                 const status = String(environment.status).toUpperCase()
                 const ready = status === 'READY'
                 const toolNames = (environment.tools ?? []).map((tool) => tool.name).filter(Boolean)
                 const skillNames = (environment.skills ?? []).map((skill) => skill.name).filter(Boolean)
-                const lastSeen = formatLastSeen(environment.lastSeen)
+                const lastSeen = formatLastSeen(environment.lastSeen, locale)
                 return (
                   <article key={environment.name} className="info-card environment-card">
                     <div className="head">
@@ -113,15 +119,17 @@ export function EnvironmentsPage() {
                         <div className="text-content">
                           <h3 title={environment.name}>{environment.name}</h3>
                           <p title={lastSeen || undefined}>
-                            {lastSeen ? `Last seen · ${lastSeen}` : 'Last seen'}
+                            {lastSeen
+                              ? `${t('ai.environment.lastSeen')} · ${lastSeen}`
+                              : t('ai.environment.lastSeen')}
                           </p>
                         </div>
                         <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>{status}</span>
                       </div>
                     </div>
                     <div className="meta-block">
-                      <TagRow label="Tools" names={toolNames} />
-                      <TagRow label="Skills" names={skillNames} />
+                      <TagRow label={t('ai.environment.tools')} names={toolNames} />
+                      <TagRow label={t('ai.environment.skills')} names={skillNames} />
                     </div>
                   </article>
                 )

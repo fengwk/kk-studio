@@ -4,10 +4,13 @@ export interface ThreadCommand {
   id: string
   label: string
   description: string
+  labelKey?: string
+  descriptionKey?: string
   keywords?: string[]
   /** Scene-disabled commands stay visible but grayed out. */
   disabled?: boolean
   disabledReason?: string
+  disabledReasonKey?: string
 }
 
 /**
@@ -18,55 +21,73 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   {
     id: 'session',
     label: 'session',
-    description: '把当前 Thread 重定位到所选 Session 的历史位置',
+    description: '',
+    labelKey: 'ai.runtime.command.sessionLabel',
+    descriptionKey: 'ai.runtime.command.session',
     keywords: ['chat', 'switch', 'rebind', 'head'],
   },
   {
     id: 'thread',
     label: 'thread',
-    description: '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
+    description: '',
+    labelKey: 'ai.runtime.command.threadLabel',
+    descriptionKey: 'ai.runtime.command.thread',
     keywords: ['branch', 'switch', 'pane'],
   },
   {
     id: 'agent',
     label: 'agent',
-    description: '切换 Agent（空白页改默认 Agent；对话中入队 SET_AGENT）',
+    description: '',
+    labelKey: 'ai.runtime.command.agentLabel',
+    descriptionKey: 'ai.runtime.command.agent',
     keywords: ['set', 'switch', 'definition'],
   },
   {
     id: 'model',
     label: 'model',
-    description: '切换 Model（入队 SET_MODEL）',
+    description: '',
+    labelKey: 'ai.runtime.command.modelLabel',
+    descriptionKey: 'ai.runtime.command.model',
     keywords: ['set', 'switch', 'provider'],
   },
   {
     id: 'variant',
     label: 'variant',
-    description: '切换 Variant（入队 SET_MODEL）',
+    description: '',
+    labelKey: 'ai.runtime.command.variantLabel',
+    descriptionKey: 'ai.runtime.command.variant',
     keywords: ['set', 'switch', 'reasoning'],
   },
   {
     id: 'yolo',
     label: 'yolo',
-    description: '切换 YOLO 自动批准工具调用',
+    description: '',
+    labelKey: 'ai.runtime.command.yoloLabel',
+    descriptionKey: 'ai.runtime.command.yolo',
     keywords: ['auto', 'approve', 'tool'],
   },
   {
     id: 'tree',
     label: 'tree',
-    description: '打开历史面板，把当前 Thread 重定位到所选 Entry',
+    description: '',
+    labelKey: 'ai.runtime.command.treeLabel',
+    descriptionKey: 'ai.runtime.command.tree',
     keywords: ['history', 'branch', 'rebind', 'head'],
   },
   {
     id: 'stop',
     label: 'stop',
-    description: '停止当前 Thread 并恢复尚未处理的消息',
+    description: '',
+    labelKey: 'ai.runtime.command.stopLabel',
+    descriptionKey: 'ai.runtime.command.stop',
     keywords: ['cancel', 'interrupt', 'thread'],
   },
   {
     id: 'new',
     label: 'new',
-    description: '回到空面板；发送后创建新的 Session / Thread',
+    description: '',
+    labelKey: 'ai.runtime.command.newLabel',
+    descriptionKey: 'ai.runtime.command.new',
     keywords: ['blank', 'fresh', 'create', 'session'],
   },
 ]
@@ -81,12 +102,18 @@ const BLANK_SCENE_ENABLED = new Set(['thread', 'agent'])
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
   return THREAD_COMMANDS.map((command) => {
     if (scene === 'bound' || BLANK_SCENE_ENABLED.has(command.id)) {
-      return { ...command, disabled: false, disabledReason: undefined }
+      return {
+        ...command,
+        disabled: false,
+        disabledReason: undefined,
+        disabledReasonKey: undefined,
+      }
     }
     return {
       ...command,
       disabled: true,
-      disabledReason: '选择或创建 Thread 后可用',
+      disabledReason: undefined,
+      disabledReasonKey: 'ai.runtime.command.disabledReason',
     }
   })
 }

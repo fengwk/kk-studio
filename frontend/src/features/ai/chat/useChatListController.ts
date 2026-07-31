@@ -6,6 +6,7 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery } from '@tanstack/react-query'
+import { useI18n } from '@/shared/i18n'
 
 function resolveChatDefaultAgentId(
   agentId: string | undefined,
@@ -26,6 +27,7 @@ export function useChatListController(
   enabled: boolean,
 ) {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [title, setTitle] = useState('')
@@ -77,12 +79,12 @@ export function useChatListController(
   const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault()
     if (!title.trim()) {
-      setFormError('请填写 Chat 名称')
-      setNameError('请填写名称')
+      setFormError(t('ai.chat.nameRequired'))
+      setNameError(t('ai.chat.nameFieldRequired'))
       return
     }
     if (!selectedAgentId) {
-      setFormError('请选择 Default Agent')
+      setFormError(t('ai.chat.agentRequired'))
       return
     }
     setFormError('')

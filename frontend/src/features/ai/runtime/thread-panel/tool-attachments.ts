@@ -1,7 +1,12 @@
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
+import { translate } from '@/shared/i18n'
 
 export function getToolAttachmentLabel(attachment: ToolAttachment): string {
-  return attachment.name || attachment.mime || `${attachment.type} attachment`
+  return (
+    attachment.name
+    || attachment.mime
+    || translate('ai.runtime.message.attachment', { type: attachment.type })
+  )
 }
 
 export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
@@ -17,6 +22,6 @@ export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
 }
 
 export function formatToolAttachmentFallback(attachment: ToolAttachment): string {
-  const suffix = attachment.name || attachment.mime || 'binary payload'
+  const suffix = attachment.name || attachment.mime || translate('ai.runtime.message.binaryPayload')
   return `[${attachment.type}] ${suffix}`
 }

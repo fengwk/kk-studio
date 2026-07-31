@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import { useI18n } from '@/shared/i18n'
 
 export function ChatCard({
   chat,
@@ -12,13 +13,14 @@ export function ChatCard({
   agents: AgentDefinitionDTO[]
 }) {
   const navigate = useNavigate()
+  const { t } = useI18n()
   const label = chat.title || chat.id
   const defaultAgent = chat.defaultAgentId
     ? agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
     : undefined
   const agentLabel = defaultAgent
       ? defaultAgent.name
-      : '（已删除/缺失）'
+      : t('ai.chat.missingAgent')
 
   return (
     <article className="info-card">
@@ -28,24 +30,24 @@ export function ChatCard({
             <MessageSquare aria-hidden="true" />
           </div>
           <div className="text-content">
-            <h3>{chat.title || 'Untitled Chat'}</h3>
-            <p>Chat</p>
+            <h3>{chat.title || t('ai.chat.untitled')}</h3>
+            <p>{t('ai.chat.chatLabel')}</p>
           </div>
         </div>
       </div>
       <div className="meta-block">
-        <MetaRow label="Default Agent" value={agentLabel} />
-        <MetaRow label="Updated" value={formatBackendDate(chat.updateTime)} />
+        <MetaRow label={t('ai.chat.defaultAgent')} value={agentLabel} />
+        <MetaRow label={t('ai.chat.updated')} value={formatBackendDate(chat.updateTime)} />
       </div>
       <div className="chat-card-foot split">
         <button
           className="action-enter-btn green"
           type="button"
-          aria-label={`进入 Chat ${label}`}
+          aria-label={t('ai.chat.enterAria', { label })}
           onClick={() => navigate(`/chats/${encodeURIComponent(chat.id)}`)}
         >
           <ChevronRight aria-hidden="true" />
-          进入对话
+          {t('ai.catalog.action.enterConversation')}
         </button>
       </div>
     </article>

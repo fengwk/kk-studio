@@ -1,4 +1,5 @@
 import { Bot, ChevronRight, Cpu, Pencil, ServerCog, Trash2 } from 'lucide-react'
+import { useI18n } from '@/shared/i18n'
 
 type ResourceIcon = 'agent' | 'model' | 'provider'
 
@@ -78,6 +79,7 @@ export function ResourceCardLayout({
   onDelete: () => void
   deletePending: boolean
 }) {
+  const { t } = useI18n()
   const Icon = icon === 'agent' ? Bot : icon === 'model' ? Cpu : ServerCog
 
   return (
@@ -125,24 +127,34 @@ export function ResourceCardLayout({
       </div>
       <div className="chat-card-foot split">
         {onStart && (
-          <button className="action-enter-btn green" type="button" aria-label={`创建会话 ${title}`} onClick={onStart}>
+          <button
+            className="action-enter-btn green"
+            type="button"
+            aria-label={`${t('ai.catalog.action.createSession')} ${title}`}
+            onClick={onStart}
+          >
             <ChevronRight aria-hidden="true" />
-            创建会话
+            {t('ai.catalog.action.createSession')}
           </button>
         )}
-        <button className="action-enter-btn" type="button" aria-label={`编辑 ${title}`} onClick={onEdit}>
+        <button
+          className="action-enter-btn"
+          type="button"
+          aria-label={`${t('ai.catalog.action.edit')} ${title}`}
+          onClick={onEdit}
+        >
           <Pencil aria-hidden="true" />
-          编辑
+          {t('ai.catalog.action.edit')}
         </button>
         <button
           className="action-enter-btn danger"
           type="button"
-          aria-label={`删除 ${title}`}
+          aria-label={`${t('ai.catalog.action.delete')} ${title}`}
           onClick={onDelete}
           disabled={deletePending}
         >
           <Trash2 aria-hidden="true" />
-          删除
+          {t('ai.catalog.action.delete')}
         </button>
       </div>
     </article>

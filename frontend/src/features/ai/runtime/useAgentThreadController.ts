@@ -21,6 +21,7 @@ import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contract
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { translate, useI18n } from '@/shared/i18n'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -29,10 +30,11 @@ function errorMessage(error: unknown): string {
   if (typeof error === 'string' && error.trim()) {
     return error
   }
-  return '请求失败'
+  return translate('ai.runtime.action.requestFailed')
 }
 
 export function useAgentThreadController(threadId: string, initialDraft = '') {
+  const { t } = useI18n()
   const [draft, setDraftState] = useState(initialDraft)
   const [actionError, setActionError] = useState<string | null>(null)
   // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
@@ -122,9 +124,14 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
    * A 409 means the local epoch is stale or the Thread is not quiescent. Surface an explicit
    * message and refetch the Thread so the next attempt carries the current epoch.
    */
-  function reportMutationError(error: unknown, fallbackPrefix: string) {
+  function reportMutationError(error: unknown, fallbackKey: string) {
     if (isConflictError(error)) {
-      setActionError(`${fallbackPrefix}：Thread 状态已变化（${errorMessage(error)}），已刷新，请重试`)
+      setActionError(
+        t('ai.runtime.action.threadStateChanged', {
+          action: t(fallbackKey),
+          error: errorMessage(error),
+        }),
+      )
       void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
       return
     }
@@ -147,7 +154,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       return Promise.resolve()
     }
     if (!bound) {
-      setActionError('当前 Thread 未绑定 Session，请先用 /session 或 /tree 选择位置')
+      setActionError(t('ai.runtime.action.unboundThread'))
       return Promise.resolve()
     }
     setActionError(null)
@@ -172,7 +179,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
         }
       })
       .catch((error: unknown) => {
-        reportMutationError(error, '发送消息失败')
+        reportMutationError(error, 'ai.runtime.action.sendFailed')
         // Restore only when the composer is empty so an in-progress next draft is preserved.
         setDraftState((current) => {
           if (current.trim() === '') {
@@ -192,7 +199,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     setActionError(null)
     switch (command.id) {
       case 'yolo': {
-        if (!requireBoundThread('切换 YOLO 失败')) {
+        if (!requireBoundThread('ai.runtime.action.switchYoloFailed')) {
           return
         }
         const enabled = !(thread?.yoloEnabled ?? false)
@@ -203,21 +210,21 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
         void stopThread()
         return
       default:
-        setActionError(`未知命令：${command.id}`)
+        setActionError(t('ai.runtime.action.unknownCommand', { command: command.id }))
     }
   }
 
   /** UNBOUND Threads reject every mailbox Input; block the request before it reaches the server. */
-  function requireBoundThread(action: string): boolean {
+  function requireBoundThread(actionKey: string): boolean {
     if (bound) {
       return true
     }
-    setActionError(`${action}：当前 Thread 未绑定 Session`)
+    setActionError(t('ai.runtime.action.unboundAction', { action: t(actionKey) }))
     return false
   }
 
   function stopThread(): Promise<void> {
-    if (!thread || !requireBoundThread('停止失败')) {
+    if (!thread || !requireBoundThread('ai.runtime.action.stopFailed')) {
       return Promise.resolve()
     }
     setActionError(null)
@@ -232,11 +239,11 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
         ])
       })
-      .catch((error: unknown) => reportMutationError(error, '停止失败'))
+      .catch((error: unknown) => reportMutationError(error, 'ai.runtime.action.stopFailed'))
   }
 
   function setThreadAgent(agentDefinitionId: string): Promise<void> {
-    if (!thread || !requireBoundThread('切换 Agent 失败')) {
+    if (!thread || !requireBoundThread('ai.runtime.action.switchAgentFailed')) {
       return Promise.resolve()
     }
     setActionError(null)
@@ -244,12 +251,12 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       .mutateAsync({ agentDefinitionId, expectedExecutionEpoch: thread.executionEpoch })
       .then(() => undefined)
       .catch((error: unknown) => {
-        reportMutationError(error, '切换 Agent 失败')
+        reportMutationError(error, 'ai.runtime.action.switchAgentFailed')
       })
   }
 
   function setThreadModel(modelId: string, variant: string): Promise<void> {
-    if (!thread || !requireBoundThread('切换 Model 失败')) {
+    if (!thread || !requireBoundThread('ai.runtime.action.switchModelFailed')) {
       return Promise.resolve()
     }
     setActionError(null)
@@ -257,7 +264,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       .mutateAsync({ modelId, variant, expectedExecutionEpoch: thread.executionEpoch })
       .then(() => undefined)
       .catch((error: unknown) => {
-        reportMutationError(error, '切换 Model 失败')
+        reportMutationError(error, 'ai.runtime.action.switchModelFailed')
       })
   }
 
@@ -269,7 +276,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     providers,
     thread,
     bound,
-    title: thread?.sessionTitle || thread?.threadId || 'Chat',
+    title: thread?.sessionTitle || thread?.threadId || t('ai.chat.chatLabel'),
     agent: currentAgent,
     timeline,
     runtimeLabels,
@@ -313,7 +320,12 @@ function resolveRuntimeLabels(
   const providerName = firstNonEmpty(provider?.name, model?.providerName)
   const bareModelName = firstNonEmpty(model?.name, modelId)
   return {
-    agentName: firstNonEmpty(thread?.activeAgentName, agent?.name, thread?.activeAgentDefinitionId, '（无 Agent）'),
+    agentName: firstNonEmpty(
+      thread?.activeAgentName,
+      agent?.name,
+      thread?.activeAgentDefinitionId,
+      translate('ai.runtime.action.blankAgent'),
+    ),
     providerName,
     // Canonical display identity is provider/model.
     modelName: formatModelRef(providerName, bareModelName),

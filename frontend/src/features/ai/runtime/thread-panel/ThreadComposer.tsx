@@ -9,6 +9,7 @@ import {
   useFilteredThreadCommands,
 } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
+import { useI18n } from '@/shared/i18n'
 
 const TEXTAREA_MIN_HEIGHT = 28
 const TEXTAREA_LINE_HEIGHT = 18
@@ -37,6 +38,7 @@ export function ThreadComposer({
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
 }) {
+  const { t } = useI18n()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const focusTimerRef = useRef<number | null>(null)
   const wasPendingRef = useRef(false)
@@ -177,15 +179,15 @@ export function ThreadComposer({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="输入任务（/打开命令）"
+          placeholder={t('ai.runtime.composer.placeholder')}
           disabled={disabled}
           rows={1}
-          aria-label="给 AI 发送消息"
+          aria-label={t('ai.runtime.composer.ariaLabel')}
         />
         <button
           className="thread-dock-send"
           type="button"
-          aria-label="发送消息"
+          aria-label={t('ai.runtime.composer.send')}
           onClick={() => {
             onSubmit()
             focusComposer()

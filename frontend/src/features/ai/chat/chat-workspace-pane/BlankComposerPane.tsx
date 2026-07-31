@@ -23,6 +23,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { AgentSelectionModal, SelectionListModal } from '@/features/ai/chat/SelectionListModal'
+import { translate, useI18n } from '@/shared/i18n'
 
 function resolveDefaultAgent(
   chat: ChatDTO | undefined,
@@ -41,7 +42,7 @@ function resolveBlankPaneFooterLabels(
 ) {
   if (!agent) {
     return {
-      agentName: '（无 Agent）',
+      agentName: translate('ai.runtime.action.blankAgent'),
       providerName: undefined as string | undefined,
       modelName: undefined as string | undefined,
       variantName: undefined as string | undefined,
@@ -51,7 +52,7 @@ function resolveBlankPaneFooterLabels(
   const modelId = agent.modelId ? String(agent.modelId) : ''
   const model = models.find((item) => String(item.id) === modelId)
   return {
-    agentName: agent.name || '（无 Agent）',
+    agentName: agent.name || translate('ai.runtime.action.blankAgent'),
     providerName: model?.providerName || undefined,
     modelName: model ? modelRef(model) : modelId || undefined,
     variantName: agent.variant || undefined,
@@ -78,6 +79,7 @@ export function BlankComposerPane({
   onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
 }) {
+  const { t } = useI18n()
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -103,7 +105,10 @@ export function BlankComposerPane({
   const defaultAgent = resolveDefaultAgent(chat, agents)
   const footerLabels = resolveBlankPaneFooterLabels(defaultAgent, models)
   const agentLabel =
-    defaultAgent?.name || (chat?.defaultAgentId ? '（Agent 已删除/缺失）' : '（无 Agent）')
+    defaultAgent?.name
+    || (chat?.defaultAgentId
+      ? t('ai.runtime.action.agentMissing')
+      : t('ai.runtime.action.blankAgent'))
 
   async function runFirstSend(agentId: string, content: string) {
     setPending(true)
@@ -124,7 +129,7 @@ export function BlankComposerPane({
       setPendingContent(null)
       onThreadChange(result.thread.threadId)
     } catch (error) {
-      setActionError(errorMessage(error, '首发失败'))
+      setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
       setDraft(content)
     } finally {
       setPending(false)
@@ -158,7 +163,10 @@ export function BlankComposerPane({
         setAgentModalOpen(true)
         return
       default:
-        setActionError(command.disabledReason || `当前场景不可用：/${command.id}`)
+        setActionError(
+          command.disabledReason
+          || t('ai.runtime.action.unavailableScene', { command: command.id }),
+        )
     }
   }
 
@@ -172,7 +180,7 @@ export function BlankComposerPane({
       setThreadModalOpen(false)
       onThreadChange(selectedThreadId)
     } catch (error) {
-      setActionError(errorMessage(error, '关联 Thread 失败'))
+      setActionError(errorMessage(error, t('ai.runtime.action.associateThreadFailed')))
     } finally {
       setThreadAssociationPending(false)
     }
@@ -188,7 +196,7 @@ export function BlankComposerPane({
         await runFirstSend(agentId, content)
       }
     } catch (error) {
-      setActionError(errorMessage(error, '更新默认 Agent 失败'))
+      setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
       if (content) {
         setDraft(content)
       }
@@ -201,8 +209,8 @@ export function BlankComposerPane({
       <section className="chat-shell thread-panel blank-pane">
         <main className="chat-main thread-panel-main">
           <div className="blank-pane-body">
-            <h2>新对话</h2>
-            <p>输入后创建并 bootstrap 新 Thread；/agent 选默认 Agent，/thread 复用已有 Thread。</p>
+            <h2>{t('ai.chat.blankTitle')}</h2>
+            <p>{t('ai.chat.blankDescription')}</p>
             {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
           </div>
           <ThreadComposer
@@ -248,7 +256,7 @@ export function BlankComposerPane({
       {/* /thread only rebinds the pane; no Thread is mutated. */}
       <SelectionListModal
         open={threadModalOpen}
-        title="选择 Thread"
+        title={t('ai.chat.selectThread')}
         items={threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))}
         sort={threadSort}
         onSortChange={onThreadSortChange}
@@ -261,7 +269,7 @@ export function BlankComposerPane({
           void threadPicker.loadMore()
         }}
         selectionPending={threadAssociationPending}
-        emptyText="暂无 Thread"
+        emptyText={t('ai.chat.noThreads')}
         onClose={() => setThreadModalOpen(false)}
         onSelect={selectThread}
       />

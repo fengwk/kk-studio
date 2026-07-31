@@ -1,4 +1,5 @@
 import type { ThreadUsageSummary } from '@/features/ai/runtime/thread-panel/thread-status-types'
+import { translate } from '@/shared/i18n'
 
 export interface ThreadStatusSegment {
   key: 'agent' | 'model' | 'usage'
@@ -95,10 +96,10 @@ function resolveCacheHitPercent(
 
 /** Build the stable text-only status model from panel inputs. No layout, no DOM. */
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
-  const agentLabel = clean(input.agentName) || 'agent'
+  const agentLabel = clean(input.agentName) || translate('ai.runtime.status.agentFallback')
   const provider = clean(input.providerName)
-  const model = clean(input.modelName) || 'unknown-model'
-  const variant = clean(input.variantName) || 'unknown-variant'
+  const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
+  const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
   const yoloOn = Boolean(input.yoloEnabled)
 
   const tokensIn = asInt(input.usage?.inputTokens)
@@ -114,8 +115,13 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   // modelName may already be the canonical provider/model ref from callers.
   const composedModelRef =
     provider && model && !model.startsWith(`${provider}/`) ? `${provider}/${model}` : model
-  const modelText = `${composedModelRef} · ${variant}`
-  const agentText = yoloOn ? `agent:${agentLabel} · YOLO` : `agent:${agentLabel}`
+  const modelText = translate('ai.runtime.status.modelText', {
+    model: composedModelRef,
+    variant,
+  })
+  const agentText = yoloOn
+    ? translate('ai.runtime.status.agentYoloText', { name: agentLabel })
+    : translate('ai.runtime.status.agentText', { name: agentLabel })
   // 未开对话 / 零用量也展示，便于看到 context 上限与费用位（与 pi/opencode 一致）
   const usageText = [
     `↑${formatTokens(tokensIn)}`,
@@ -132,7 +138,9 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       key: 'agent',
       className: 'thread-status-agent',
       text: agentText,
-      title: input.onAgentClick ? `${agentText} · 点击切换 Agent` : agentText,
+      title: input.onAgentClick
+        ? `${agentText} · ${translate('ai.runtime.status.agentSwitchTitle')}`
+        : agentText,
       onClick: input.onAgentClick,
     },
     {
@@ -141,7 +149,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       text: modelText,
       title:
         input.onModelClick || input.onVariantClick
-          ? `${modelText} · 点击切换 Model，右键切换 Variant`
+          ? `${modelText} · ${translate('ai.runtime.status.modelSwitchTitle')}`
           : modelText,
       onClick: input.onModelClick,
       onSecondaryClick: input.onVariantClick,

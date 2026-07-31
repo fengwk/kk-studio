@@ -10,6 +10,7 @@ import type {
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+import { useI18n } from '@/shared/i18n'
 
 export function ResourceEditorModal({
   modal,
@@ -46,6 +47,7 @@ export function ResourceEditorModal({
   onAgentDraftChange: (draft: AgentDraft) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
+  const { t } = useI18n()
   if (!modal) {
     return null
   }
@@ -97,7 +99,9 @@ export function ResourceEditorModal({
         </div>
         <div className="modal-footer">
           <button type="submit" className="btn-primary" disabled={pending}>
-            {modal.mode === 'create' ? '确认创建' : '保存修改'}
+            {modal.mode === 'create'
+              ? t('ai.catalog.action.confirmCreate')
+              : t('ai.catalog.action.saveChanges')}
           </button>
         </div>
       </form>
