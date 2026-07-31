@@ -28,7 +28,6 @@ describe('comfyuiService', () => {
     await service.updateWorkflow('workflow/1', body)
     await service.deleteWorkflow('workflow/1')
     await service.createPresignedUpload({ key: 'inputs/a.png', contentType: 'image/png' })
-    await service.createPresignedDownload({ key: 'outputs/a.png' })
     await service.runWorkflow('image/upscale', { parameters: { scale: 2 }, files: {} })
     await service.getRun('run/1', '$.outputs[?(@.type=="image")]')
     await service.getRun('run-2')
@@ -39,8 +38,7 @@ describe('comfyuiService', () => {
     expect(client.put).toHaveBeenCalledWith('/comfyui/workflows/workflow%2F1', body)
     expect(client.delete).toHaveBeenCalledWith('/comfyui/workflows/workflow%2F1')
     expect(client.post).toHaveBeenNthCalledWith(2, '/s3/presigned-uploads', { key: 'inputs/a.png', contentType: 'image/png' })
-    expect(client.post).toHaveBeenNthCalledWith(3, '/s3/presigned-downloads', { key: 'outputs/a.png' })
-    expect(client.post).toHaveBeenNthCalledWith(4, '/comfyui/workflows/image%2Fupscale/runs', {
+    expect(client.post).toHaveBeenNthCalledWith(3, '/comfyui/workflows/image%2Fupscale/runs', {
       parameters: { scale: 2 },
       files: {},
     })
@@ -48,7 +46,7 @@ describe('comfyuiService', () => {
       params: { select: '$.outputs[?(@.type=="image")]' },
     })
     expect(client.get).toHaveBeenNthCalledWith(3, '/comfyui/runs/run-2', { params: undefined })
-    expect(client.post).toHaveBeenNthCalledWith(5, '/comfyui/runs/run%2F1/cancel')
+    expect(client.post).toHaveBeenNthCalledWith(4, '/comfyui/runs/run%2F1/cancel')
   })
 
   it('requests a presigned upload, PUTs the File directly, and returns only the key reference', async () => {

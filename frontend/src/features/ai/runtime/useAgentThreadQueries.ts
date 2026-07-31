@@ -48,7 +48,6 @@ export function useAgentThreadQueries(threadId: string) {
     inputs: snapshot?.inputs ?? [],
     modelInvocations: snapshot?.modelInvocations ?? [],
     toolInvocations: snapshot?.toolInvocations ?? [],
-    openInteractions: snapshot?.openInteractions ?? [],
     usage: snapshot?.usage,
   }
 }

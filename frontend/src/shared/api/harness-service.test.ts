@@ -12,7 +12,6 @@ describe('harnessService', () => {
   it('exposes flat Session read endpoints and the snapshot-first Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
-    await service.getSession('session /1')
     await service.listSessions()
     await service.listSessionEntries('session /1')
     await service.submitThreadMessage('thread /1', {
@@ -57,7 +56,6 @@ describe('harnessService', () => {
     // stop is no longer a bodyless POST: it carries the epoch fencing token too.
     expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
     expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions')
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions/session%20%2F1')
     expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions/session%20%2F1/entries')
     expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/snapshot')
     expect(client.put).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/model', {
@@ -150,7 +148,6 @@ describe('harnessService', () => {
     expect(service.getRealtimeStreamPolicy).toBeTypeOf('function')
     expect(service.updateRealtimeStreamPolicy).toBeTypeOf('function')
     expect(service.listSessions).toBeTypeOf('function')
-    expect(service.getSession).toBeTypeOf('function')
     expect(service.listSessionEntries).toBeTypeOf('function')
     expect(service.createThreadRealtimeStream).toBeTypeOf('function')
 
