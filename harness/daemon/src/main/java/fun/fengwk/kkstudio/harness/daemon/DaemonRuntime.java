@@ -154,12 +154,22 @@ public final class DaemonRuntime implements AutoCloseable {
         return;
       }
       state = DaemonRuntimeState.DISCONNECTED;
-      scheduler.scheduleWithFixedDelay(
-          this::sendHeartbeat,
-          config.heartbeatInterval().toMillis(),
-          config.heartbeatInterval().toMillis(),
-          TimeUnit.MILLISECONDS);
-      scheduleReconnect(Duration.ZERO);
+      try {
+        ScheduledFuture<?> heartbeat =
+            scheduler.scheduleWithFixedDelay(
+                this::sendHeartbeat,
+                config.heartbeatInterval().toMillis(),
+                config.heartbeatInterval().toMillis(),
+                TimeUnit.MILLISECONDS);
+        if (!scheduleReconnect(Duration.ZERO)) {
+          heartbeat.cancel(false);
+          started.set(false);
+          state = DaemonRuntimeState.STOPPED;
+        }
+      } catch (RejectedExecutionException ignored) {
+        started.set(false);
+        state = DaemonRuntimeState.STOPPED;
+      }
     }
   }
 
@@ -168,9 +178,9 @@ public final class DaemonRuntime implements AutoCloseable {
     return state;
   }
 
-  private void scheduleReconnect(Duration delay) {
+  private boolean scheduleReconnect(Duration delay) {
     if (!started.get() || !reconnectScheduled.compareAndSet(false, true)) {
-      return;
+      return started.get();
     }
     try {
       scheduler.schedule(
@@ -180,8 +190,10 @@ public final class DaemonRuntime implements AutoCloseable {
           },
           delay.toMillis(),
           TimeUnit.MILLISECONDS);
+      return true;
     } catch (RejectedExecutionException ignored) {
       reconnectScheduled.set(false);
+      return false;
     }
   }
 
@@ -303,12 +315,12 @@ public final class DaemonRuntime implements AutoCloseable {
         case CANCEL -> {
           requireInvocationId(envelope);
           connection.acceptInboundEnvelope(identity);
-          processCancel(envelope);
+          processCancel(connection, envelope);
         }
         case LOAD_SKILL -> {
           requireInvocationId(envelope);
           connection.acceptInboundEnvelope(identity);
-          processLoadSkill(envelope);
+          processLoadSkill(connection, envelope);
         }
         case WELCOME, ACK, ERROR -> {
           connection.acceptInboundEnvelope(identity);
@@ -318,7 +330,7 @@ public final class DaemonRuntime implements AutoCloseable {
             "unexpected inbound messageType: " + envelope.messageType());
       }
     } catch (IllegalArgumentException error) {
-      send(DaemonMessageType.ERROR, null, errorPayload(error));
+      sendOn(connection, DaemonMessageType.ERROR, null, errorPayload(error));
     }
   }
 
@@ -390,27 +402,28 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void processCancel(DaemonEnvelope envelope) {
-    sendAck(envelope.sequence());
+  private void processCancel(ActiveConnection connection, DaemonEnvelope envelope) {
+    sendAck(connection, envelope.sequence());
     handleCancel(envelope);
   }
 
-  private void processLoadSkill(DaemonEnvelope envelope) {
-    sendAck(envelope.sequence());
-    handleLoadSkill(envelope);
+  private void processLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
+    sendAck(connection, envelope.sequence());
+    handleLoadSkill(connection, envelope);
   }
 
-  private void handleLoadSkill(DaemonEnvelope envelope) {
+  private void handleLoadSkill(ActiveConnection connection, DaemonEnvelope envelope) {
     DaemonSkillLoadCodec.LoadSkillRequest request;
     try {
       request = skillLoadCodec.decodeRequest(envelope.payloadJson());
     } catch (DaemonProtocolException error) {
-      send(DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
+      sendOn(connection, DaemonMessageType.ERROR, envelope.invocationId(), errorPayload(error));
       return;
     }
     Optional<DaemonSkill> skill = skillRegistry.find(request.name());
     if (skill.isEmpty()) {
-      send(
+      sendOn(
+          connection,
           DaemonMessageType.SKILL_LOAD_FAILED,
           envelope.invocationId(),
           skillLoadCodec.encodeFailed(
@@ -418,7 +431,8 @@ public final class DaemonRuntime implements AutoCloseable {
                   request.name(), "unknown skill: " + request.name())));
       return;
     }
-    send(
+    sendOn(
+        connection,
         DaemonMessageType.SKILL_LOADED,
         envelope.invocationId(),
         skillLoadCodec.encodeLoaded(
@@ -539,10 +553,6 @@ public final class DaemonRuntime implements AutoCloseable {
           "INVOKE payload." + fieldName + " must be a non-blank string");
     }
     return value.textValue();
-  }
-
-  private void sendAck(long acknowledgedSequence) {
-    send(DaemonMessageType.ACK, null, "{\"acknowledgedSequence\":" + acknowledgedSequence + "}");
   }
 
   private void sendAck(ActiveConnection connection, long acknowledgedSequence) {

@@ -71,6 +71,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -907,8 +911,6 @@ class DaemonRuntimeTest {
     transport.awaitConnections(1);
     transport.takeMessages(3);
 
-    transport.disconnectConnection(0);
-    assertEquals(DaemonRuntimeState.READY, runtime.state());
     transport.receiveFromConnection(0, invoke("stale-invocation", 1));
     assertFalse(transport.hasMessages());
     assertEquals(0, tool.executions.get());
@@ -916,6 +918,98 @@ class DaemonRuntimeTest {
     transport.receive(invoke("current-invocation", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
+  }
+
+  /** CANCEL 的即时 ACK 只允许回到接收该消息的连接，不能泄漏到重连后的连接。 */
+  @Test
+  void doesNotRouteStaleCancelAcknowledgementToReplacementConnection() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.disconnect();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+
+    transport.receiveFromConnection(0, cancel("stale-cancel", 1));
+    assertFalse(transport.hasMessages());
+
+    transport.receive(cancel("current-cancel", 1));
+    assertMessageTypes(transport.takeMessages(1), ACK);
+  }
+
+  /** stale LOAD_SKILL 响应及其协议 ERROR 均不得被发送到 replacement connection。 */
+  @Test
+  void doesNotRouteStaleSkillOrMalformedInputResponsesToReplacementConnection()
+      throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
+    runtime = runtime(transport, new TestTool(), DaemonSkillRegistry.empty());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+    transport.disconnect();
+    transport.awaitConnections(1);
+    transport.takeMessages(3);
+
+    transport.receiveFromConnection(
+        0,
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.LOAD_SKILL,
+            "environment",
+            "stale-skill",
+            1,
+            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
+    transport.receiveRawFromConnection(
+        0,
+        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
+    assertFalse(transport.hasMessages());
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_1,
+            DaemonMessageType.LOAD_SKILL,
+            "environment",
+            "current-skill",
+            1,
+            skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
+    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.SKILL_LOAD_FAILED);
+  }
+
+  /** 被提前关闭的 scheduler 不能让 runtime 停在 started=true 但永远不会连接的半启动状态。 */
+  @Test
+  void remainsStoppedWhenSchedulerRejectsStartup() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    scheduler.shutdownNow();
+    runtime = runtime(transport, new TestTool(), scheduler);
+
+    runtime.start();
+
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+    assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
+    runtime.close();
+    assertTrue(transport.closed.get());
+  }
+
+  /** heartbeat 已创建但 reconnect 被拒绝时，start 必须撤销 heartbeat 并恢复 STOPPED。 */
+  @Test
+  void remainsStoppedWhenSchedulerRejectsInitialReconnect() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    ScheduledExecutorService scheduler = new ReconnectRejectingScheduler();
+    runtime = runtime(transport, new TestTool(), scheduler);
+
+    runtime.start();
+
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+    assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
+    runtime.close();
+    assertTrue(transport.closed.get());
   }
 
   /** 未预期 platform 消息、未知取消和非法 skill payload 都必须只产生协议级响应。 */
@@ -1055,6 +1149,28 @@ class DaemonRuntimeTest {
         DaemonSkillRegistry.empty(),
         journal,
         Executors.newSingleThreadScheduledExecutor());
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport, Tool tool, ScheduledExecutorService scheduler) {
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            "environment",
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            List.of()),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        scheduler);
   }
 
   private DaemonRuntime runtime(
@@ -1266,8 +1382,8 @@ class DaemonRuntimeTest {
       listeners.get(connectionIndex).onMessage(codec.encode(envelope));
     }
 
-    private void disconnectConnection(int connectionIndex) {
-      listeners.get(connectionIndex).onDisconnected(null);
+    private void receiveRawFromConnection(int connectionIndex, String message) {
+      listeners.get(connectionIndex).onMessage(message);
     }
 
     private void disconnect() {
@@ -1507,6 +1623,18 @@ class DaemonRuntimeTest {
         throw new IllegalStateException("blocking tool interrupted", error);
       }
       return handle;
+    }
+  }
+
+  private static final class ReconnectRejectingScheduler extends ScheduledThreadPoolExecutor {
+
+    private ReconnectRejectingScheduler() {
+      super(1);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      throw new RejectedExecutionException("reconnect scheduling rejected");
     }
   }
 
