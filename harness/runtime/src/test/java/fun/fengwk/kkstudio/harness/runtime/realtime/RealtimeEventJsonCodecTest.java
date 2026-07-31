@@ -198,10 +198,18 @@ class RealtimeEventJsonCodecTest {
   }
 
   @Test
-  void rejectsUnknownType() {
+  void rejectsInvalidTypeAndNullSubjectKind() {
     ObjectNode node = canonicalTextDeltaNode();
     node.put("type", "OTHER");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
+
+    ObjectNode nullType = canonicalTextDeltaNode();
+    nullType.putNull("type");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(nullType));
+
+    ObjectNode nullSubjectKind = canonicalTextDeltaNode();
+    nullSubjectKind.putNull("subjectKind");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(nullSubjectKind));
   }
 
   @Test

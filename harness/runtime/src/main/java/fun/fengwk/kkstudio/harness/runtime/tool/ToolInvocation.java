@@ -151,14 +151,11 @@ public record ToolInvocation(
     if (lastActivityAt != null && (startedAt == null || lastActivityAt.isBefore(startedAt))) {
       throw new IllegalArgumentException("lastActivityAt must be >= startedAt");
     }
-    if (finishedAt != null) {
-      Instant floor = startedAt == null ? createdAt : startedAt;
-      if (finishedAt.isBefore(floor)) {
-        throw new IllegalArgumentException("finishedAt must be >= startedAt or createdAt");
-      }
-      if (lastActivityAt != null && lastActivityAt.isAfter(finishedAt)) {
-        throw new IllegalArgumentException("lastActivityAt must be <= finishedAt");
-      }
+    if (finishedAt != null && finishedAt.isBefore(startedAt == null ? createdAt : startedAt)) {
+      throw new IllegalArgumentException("finishedAt must be >= startedAt or createdAt");
+    }
+    if (finishedAt != null && lastActivityAt != null && lastActivityAt.isAfter(finishedAt)) {
+      throw new IllegalArgumentException("lastActivityAt must be <= finishedAt");
     }
     if (nextAttemptAt != null) {
       if (deadlineAt == null || lastActivityAt == null) {
@@ -169,11 +166,10 @@ public record ToolInvocation(
             "nextAttemptAt must be after lastActivityAt and before deadlineAt");
       }
     }
-    if (appliedAt != null) {
-      if (!status.isTerminal() || finishedAt == null || appliedAt.isBefore(finishedAt)) {
-        throw new IllegalArgumentException(
-            "appliedAt requires terminal status and must be >= finishedAt");
-      }
+    if (appliedAt != null
+        && (!status.isTerminal() || finishedAt == null || appliedAt.isBefore(finishedAt))) {
+      throw new IllegalArgumentException(
+          "appliedAt requires terminal status and must be >= finishedAt");
     }
 
     switch (status) {

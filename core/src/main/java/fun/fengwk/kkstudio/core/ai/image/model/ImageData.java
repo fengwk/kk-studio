@@ -93,10 +93,11 @@ public class ImageData {
       return mimeType;
     }
 
-    String fileName =
-        path.getFileName() == null ? "" : path.getFileName().toString().toLowerCase(Locale.ROOT);
+    Path fileName = path.getFileName();
+    String normalizedFileName =
+        fileName == null ? "" : fileName.toString().toLowerCase(Locale.ROOT);
     for (Map.Entry<String, String> entry : EXTENSION_TO_MIME_TYPE.entrySet()) {
-      if (fileName.endsWith(entry.getKey())) {
+      if (normalizedFileName.endsWith(entry.getKey())) {
         return entry.getValue();
       }
     }

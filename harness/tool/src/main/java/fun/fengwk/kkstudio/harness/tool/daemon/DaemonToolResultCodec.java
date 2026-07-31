@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -318,7 +319,9 @@ public final class DaemonToolResultCodec {
     }
     if (!node.isObject()) {
       throw new DaemonProtocolException(
-          context + " must be a JSON object but was " + node.getNodeType().name().toLowerCase());
+          context
+              + " must be a JSON object but was "
+              + node.getNodeType().name().toLowerCase(Locale.ROOT));
     }
     return (ObjectNode) node;
   }

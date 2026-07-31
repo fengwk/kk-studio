@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.permission;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -173,7 +174,8 @@ public final class BashSurfaceAnalyzer {
     }
 
     if (quote != null) {
-      return Analysis.unsupported("unclosed_" + quote.name().toLowerCase() + "_quote", segments);
+      return Analysis.unsupported(
+          "unclosed_" + quote.name().toLowerCase(Locale.ROOT) + "_quote", segments);
     }
     if (parenDepth > 0) {
       return Analysis.unsupported("unclosed_paren", segments);

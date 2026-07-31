@@ -166,36 +166,37 @@ public class ComfyuiWorkflowApiBindingsParser {
       // 未声明 valueType 时，使用 JsonNode 原值；后续使用方负责再次校验。
       return defaultNode;
     }
-    switch (valueType) {
-      case STRING:
+    return switch (valueType) {
+      case STRING -> {
         if (!defaultNode.isTextual()) {
           throw new IllegalArgumentException(
               position + ".defaultValue must be a string when valueType=string");
         }
-        return defaultNode.asText();
-      case INTEGER:
+        yield defaultNode.asText();
+      }
+      case INTEGER -> {
         if (!defaultNode.isIntegralNumber()) {
           throw new IllegalArgumentException(
               position + ".defaultValue must be an integer when valueType=integer");
         }
-        return defaultNode.asLong();
-      case NUMBER:
+        yield defaultNode.asLong();
+      }
+      case NUMBER -> {
         if (!defaultNode.isNumber()) {
           throw new IllegalArgumentException(
               position + ".defaultValue must be a number when valueType=number");
         }
-        return defaultNode.asDouble();
-      case BOOLEAN:
+        yield defaultNode.asDouble();
+      }
+      case BOOLEAN -> {
         if (!defaultNode.isBoolean()) {
           throw new IllegalArgumentException(
               position + ".defaultValue must be a boolean when valueType=boolean");
         }
-        return defaultNode.asBoolean();
-      case JSON:
-        return defaultNode;
-      default:
-        return defaultNode;
-    }
+        yield defaultNode.asBoolean();
+      }
+      case JSON -> defaultNode;
+    };
   }
 
   private void validateFileBinding(String position, JsonNode element) {

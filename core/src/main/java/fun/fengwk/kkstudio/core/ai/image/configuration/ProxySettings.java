@@ -84,7 +84,6 @@ public final class ProxySettings {
         ProxyEnvironmentParser.isBlank(scheme) ? "" : scheme.trim().toLowerCase(Locale.ROOT);
     return switch (normalizedScheme) {
       case "http", "ws" -> httpProxy;
-      case "https", "wss" -> httpsProxy != null ? httpsProxy : httpProxy;
       default -> httpsProxy != null ? httpsProxy : httpProxy;
     };
   }

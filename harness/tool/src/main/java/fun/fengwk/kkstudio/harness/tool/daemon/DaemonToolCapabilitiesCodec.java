@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -602,14 +603,6 @@ public final class DaemonToolCapabilitiesCodec {
     }
   }
 
-  private static JsonNode requiredField(JsonNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value == null || value.isNull()) {
-      throw new DaemonProtocolException(context + " must declare '" + field + "'");
-    }
-    return value;
-  }
-
   private static String requiredText(JsonNode node, String field, String context) {
     String value = optionalText(node, field, context);
     if (value == null || value.isBlank()) {
@@ -661,7 +654,9 @@ public final class DaemonToolCapabilitiesCodec {
     }
     if (!node.isObject()) {
       throw new DaemonProtocolException(
-          context + " must be a JSON object but was " + node.getNodeType().name().toLowerCase());
+          context
+              + " must be a JSON object but was "
+              + node.getNodeType().name().toLowerCase(Locale.ROOT));
     }
     return (ObjectNode) node;
   }

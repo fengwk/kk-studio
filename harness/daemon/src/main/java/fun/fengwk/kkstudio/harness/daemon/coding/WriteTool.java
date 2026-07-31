@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -57,7 +58,8 @@ public final class WriteTool extends AbstractCodingTool {
           existed
               ? TextFileCodec.decode(Files.readAllBytes(path))
               : new TextFileCodec.Decoded("", StandardCharsets.UTF_8, 0);
-      Files.createDirectories(path.getParent());
+      Path parent = Objects.requireNonNull(path.getParent(), "writable path must have a parent");
+      Files.createDirectories(parent);
       if (execution.isCancelled()) {
         throw new InterruptedException();
       }

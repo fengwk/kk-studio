@@ -112,7 +112,7 @@ final class NoProxyRules {
       if (prefixLength < 0 || prefixLength > 32) {
         return Optional.empty();
       }
-      int subnetMask = prefixLength == 0 ? 0 : -1 << (32 - prefixLength);
+      int subnetMask = prefixLength == 0 ? 0 : -1 << 32 - prefixLength;
       int expectedAddress = ipv4ToInt(address) & subnetMask;
       return Optional.of(
           host -> isValidIpv4(host) && (ipv4ToInt(host) & subnetMask) == expectedAddress);
@@ -160,7 +160,7 @@ final class NoProxyRules {
         if (!Character.isDigit(ch)) {
           return null;
         }
-        octet = octet * 10 + (ch - '0');
+        octet = octet * 10 + ch - '0';
         if (octet > 255) {
           return null;
         }

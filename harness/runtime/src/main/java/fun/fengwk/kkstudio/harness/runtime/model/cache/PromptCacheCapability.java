@@ -122,15 +122,10 @@ public record PromptCacheCapability(
       throw new IllegalArgumentException(
           mode + " capability requires at least one non-NONE retention");
     }
-    if (mode == PromptCacheMode.AFFINITY) {
-      if (!breakpoints.isEmpty()) {
-        throw new IllegalArgumentException("AFFINITY capability must not declare breakpoints");
-      }
-    } else if (mode == PromptCacheMode.BREAKPOINTS) {
-      if (breakpoints.isEmpty()) {
-        throw new IllegalArgumentException(
-            "BREAKPOINTS capability requires at least one breakpoint");
-      }
+    if (mode == PromptCacheMode.AFFINITY && !breakpoints.isEmpty()) {
+      throw new IllegalArgumentException("AFFINITY capability must not declare breakpoints");
+    } else if (mode == PromptCacheMode.BREAKPOINTS && breakpoints.isEmpty()) {
+      throw new IllegalArgumentException("BREAKPOINTS capability requires at least one breakpoint");
     }
   }
 }

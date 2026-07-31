@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -46,9 +45,8 @@ import java.util.TreeSet;
  * layer also requires an exact field set and rejects unknown/missing/wrong-type values.
  *
  * <p>Raw JSON strings ({@code json}, {@code argumentsJson}, {@code detailsJson}, {@code
- * inputSchemaJson}) are preserved verbatim; {@link BigDecimal} values are emitted as {@code
- * toPlainString()} strings; enum {@code Set} fields are sorted by enum name so output is
- * deterministic across JVMs.
+ * inputSchemaJson}) are preserved verbatim; enum {@code Set} fields are sorted by enum name so
+ * output is deterministic across JVMs.
  */
 public final class ProviderRequestJsonCodec {
 
@@ -413,72 +411,6 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  private static long positiveLong(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new IllegalArgumentException(field + " must be an integer");
-    }
-    long parsed = value.longValue();
-    if (parsed <= 0) {
-      throw new IllegalArgumentException(field + " must be positive");
-    }
-    return parsed;
-  }
-
-  private static void encodeNullableInt(ObjectNode node, String field, Integer value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value);
-    }
-  }
-
-  private static void encodeNullableDouble(ObjectNode node, String field, Double value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value);
-    }
-  }
-
-  private static Integer decodeNullableInt(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToInt()) {
-      throw new IllegalArgumentException(field + " must be integer or null");
-    }
-    return value.intValue();
-  }
-
-  private static Double decodeNullableDouble(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
-    }
-    if (!value.isNumber()) {
-      throw new IllegalArgumentException(field + " must be number or null");
-    }
-    double parsed = value.doubleValue();
-    if (!Double.isFinite(parsed)) {
-      throw new IllegalArgumentException(field + " must be finite");
-    }
-    return parsed;
-  }
-
-  private static BigDecimal decimal(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    try {
-      return new BigDecimal(value.textValue());
-    } catch (NumberFormatException exception) {
-      throw new IllegalArgumentException(field + " must be a decimal", exception);
-    }
   }
 
   private static String jsonText(ObjectNode node, String field) {

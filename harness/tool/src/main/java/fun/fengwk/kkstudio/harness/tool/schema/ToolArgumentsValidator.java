@@ -61,7 +61,7 @@ public final class ToolArgumentsValidator {
       Map<String, ToolSchemaElement> properties,
       Iterable<String> required,
       boolean additionalProperties) {
-    requireType(path, node, node.isObject(), "object");
+    requireType(path, node.isObject(), "object");
     for (String requiredProperty : required) {
       if (!node.has(requiredProperty)) {
         throw mismatch(path + "." + requiredProperty, "is required");
@@ -85,20 +85,20 @@ public final class ToolArgumentsValidator {
 
   private static void validateElement(String path, JsonNode node, ToolSchemaElement schema) {
     if (schema instanceof ToolStringSchema) {
-      requireType(path, node, node.isTextual(), "string");
+      requireType(path, node.isTextual(), "string");
     } else if (schema instanceof ToolIntegerSchema) {
-      requireType(path, node, node.isIntegralNumber(), "integer");
+      requireType(path, node.isIntegralNumber(), "integer");
     } else if (schema instanceof ToolNumberSchema) {
-      requireType(path, node, node.isNumber(), "number");
+      requireType(path, node.isNumber(), "number");
     } else if (schema instanceof ToolBooleanSchema) {
-      requireType(path, node, node.isBoolean(), "boolean");
+      requireType(path, node.isBoolean(), "boolean");
     } else if (schema instanceof ToolEnumSchema enumSchema) {
-      requireType(path, node, node.isTextual(), "string enum");
+      requireType(path, node.isTextual(), "string enum");
       if (!enumSchema.values().contains(node.asText())) {
         throw mismatch(path, "must be one of " + enumSchema.values());
       }
     } else if (schema instanceof ToolArraySchema arraySchema) {
-      requireType(path, node, node.isArray(), "array");
+      requireType(path, node.isArray(), "array");
       for (int index = 0; index < node.size(); index++) {
         validateElement(path + "[" + index + "]", node.get(index), arraySchema.items());
       }
@@ -114,7 +114,7 @@ public final class ToolArgumentsValidator {
     }
   }
 
-  private static void requireType(String path, JsonNode node, boolean valid, String expected) {
+  private static void requireType(String path, boolean valid, String expected) {
     if (!valid) {
       throw mismatch(path, "must be " + expected);
     }

@@ -201,8 +201,12 @@ final class LspBridge {
         }
       }
       if (Files.isRegularFile(classFile)) {
-        String fileName = classFile.getFileName().toString();
-        String simple = fileName.substring(0, fileName.length() - ".class".length());
+        Path fileName = classFile.getFileName();
+        if (fileName == null) {
+          return null;
+        }
+        String fileNameText = fileName.toString();
+        String simple = fileNameText.substring(0, fileNameText.length() - ".class".length());
         Path parent = classFile.getParent();
         return new ResolvedClass(simple, parent == null ? "." : parent.toString());
       }
