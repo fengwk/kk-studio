@@ -432,7 +432,7 @@ Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PL
 | Ledger persistence | PostgreSQL MyBatis | [`PostgresqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/PostgresqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/mapper/ModelUsageRecordMapper.java) |
 | Schema | PostgreSQL DDL | [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) |
 | Aggregation/API | scope 聚合、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ModelUsageSummaryDTO.java) |
-| Frontend contract | Thread snapshot API client 与 usage 展示适配 | [`contracts.ts`](../../frontend/src/shared/api/contracts.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`usage-adapter.ts`](../../frontend/src/features/ai/chat/chat-workspace-pane/usage-adapter.ts) |
+| Frontend contract | Thread snapshot API client 与 usage 展示适配 | [`ai-runtime.ts`](../../frontend/src/shared/api/contracts/ai-runtime.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`usage-adapter.ts`](../../frontend/src/features/ai/chat/chat-workspace-pane/usage-adapter.ts) |
 
 ## 验证面
 

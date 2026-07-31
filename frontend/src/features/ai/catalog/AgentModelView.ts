@@ -5,9 +5,9 @@ import type { AgentModelDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-
  * needs but the wire format deliberately omits. The only enriched field today is
  * {@link AgentModelView.providerName}, joined by {@link AgentModelDTO.providerId}.
  *
- * <p>This view is intentionally not exported through {@code shared/api/contracts.ts}; backend DTOs
- * stay minimal and discoverable, while feature-local projections stay close to the consumers that
- * actually use them.
+ * <p>This view is intentionally not exported through {@code shared/api/contracts/ai-catalog.ts};
+ * backend DTOs stay minimal and discoverable, while feature-local projections stay close to the
+ * consumers that actually use them.
  */
 export interface AgentModelView extends AgentModelDTO {
   /** Display label for the model's provider; {@code null} when the provider was deleted. */

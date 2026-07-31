@@ -164,22 +164,26 @@ Timeline 以单一 Thread snapshot 的 Entries/Inputs 为权威基线。
 frontend/src
 ├── app/
 ├── platform/
-├── features/ai
+├── features/ai/
+│   ├── catalog/
+│   ├── chat/
+│   ├── environment/
 │   ├── extensions/
-│   ├── chat-pane-state.ts
-│   ├── chat-first-send.ts
-│   ├── chat-session-picker.ts
-│   ├── ChatWorkspacePage.tsx
-│   ├── ChatWorkspacePane.tsx
-│   ├── HistoryBranchPanel.tsx
-│   ├── thread-panel/
-│   └── thread-timeline/
-├── shared/api
+│   ├── runtime/
+│   └── settings/
+├── shared/api/
+│   ├── contracts/
+│   │   ├── ai-catalog.ts
+│   │   ├── ai-chat.ts
+│   │   ├── ai-environment.ts
+│   │   ├── ai-runtime.ts
+│   │   ├── comfyui.ts
+│   │   ├── storage.ts
+│   │   └── studio.ts
 │   ├── chat-service.ts
 │   ├── environment-service.ts
 │   ├── agent-service.ts
-│   ├── harness-service.ts
-│   └── contracts.ts
+│   └── harness-service.ts
 ├── shared/lib/query-keys.ts
 └── styles.css
 ```
