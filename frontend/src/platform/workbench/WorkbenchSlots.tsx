@@ -1,13 +1,15 @@
 import { Link, useLocation } from 'react-router'
 import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { WorkbenchSlotName } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
 
 export function NavigationSlot() {
   const host = useExtensionHostSnapshot()
   const location = useLocation()
+  const { t } = useI18n()
 
   return (
-    <nav className="subnav" aria-label="AI resources">
+    <nav className="subnav" aria-label={t('platform.aiResources')}>
       {host.navigation.list().map((item) => {
         const href = `/${item.path}`
         const active =
@@ -15,7 +17,7 @@ export function NavigationSlot() {
           || (href !== '/' && location.pathname.startsWith(`${href}/`))
         return (
           <Link key={item.id} className={active ? 'active' : undefined} to={href}>
-            {item.label}
+            {item.labelKey ? t(item.labelKey) : item.label}
           </Link>
         )
       })}

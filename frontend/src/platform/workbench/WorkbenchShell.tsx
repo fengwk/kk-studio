@@ -3,12 +3,18 @@ import type { PageContribution } from '@/platform/extensions/types'
 import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import { AppShell } from '@/platform/shell/AppShell'
 import { OverlayHost, WorkbenchSlot } from '@/platform/workbench/WorkbenchSlots'
+import { useI18n } from '@/shared/i18n'
 
 function UnknownContributionFallback() {
+  const { t } = useI18n()
+
   return (
     <section className="screen active">
-      <div className="screen-body"><h1>页面不可用</h1><p>该页面扩展不存在或已卸载。</p></div>
-      <Link to="/chats">返回 Chat</Link>
+      <div className="screen-body">
+        <h1>{t('platform.pageUnavailable')}</h1>
+        <p>{t('platform.pageExtensionMissing')}</p>
+      </div>
+      <Link to="/chats">{t('platform.backToChat')}</Link>
     </section>
   )
 }

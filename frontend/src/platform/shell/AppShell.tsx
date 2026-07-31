@@ -1,6 +1,8 @@
 import { Bot, Grid2X2, Menu, UserRound, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router'
+import { useI18n } from '@/shared/i18n'
+import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 
 function isAiRoute(pathname: string) {
   return (
@@ -25,6 +27,7 @@ function isChatWorkspaceRoute(pathname: string) {
 
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
+  const { t } = useI18n()
   const canvasMode = location.pathname.startsWith('/canvas')
   const toolsMode = isToolsRoute(location.pathname)
   const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
@@ -74,7 +77,7 @@ export function AppShell({ children }: PropsWithChildren) {
             ref={navToggleRef}
             type="button"
             className="nav-toggle"
-            aria-label={navOpen ? '关闭导航' : '打开导航'}
+            aria-label={navOpen ? t('platform.nav.close') : t('platform.nav.open')}
             aria-expanded={navOpen}
             aria-controls="primary-navigation"
             onClick={() => setNavOpen((open) => !open)}
@@ -82,48 +85,58 @@ export function AppShell({ children }: PropsWithChildren) {
             {navOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
           </button>
           <div className="topbar-center">
-            <nav id="primary-navigation" className="topnav" aria-label="Primary">
+            <nav id="primary-navigation" className="topnav" aria-label={t('platform.primaryNavigation')}>
               <Link
                 className={aiActive ? 'active' : undefined}
                 to="/chats"
-                aria-label="智能 AI"
+                aria-label={t('platform.nav.aiAria')}
                 onClick={() => setNavOpen(false)}
               >
                 <Bot aria-hidden="true" />
-                <span>智能</span>
+                <span>{t('platform.nav.ai')}</span>
                 <small aria-hidden="true">AI</small>
               </Link>
               <Link
                 className={canvasMode ? 'active' : undefined}
                 to="/canvas"
-                aria-label="画布 Canvas"
+                aria-label={t('platform.nav.canvasAria')}
                 onClick={() => setNavOpen(false)}
               >
                 <Grid2X2 aria-hidden="true" />
-                <span>画布</span>
+                <span>{t('platform.nav.canvas')}</span>
                 <small aria-hidden="true">Canvas</small>
               </Link>
               <Link
                 className={toolsMode ? 'active' : undefined}
                 to="/comfyui"
-                aria-label="工具 Tools"
+                aria-label={t('platform.nav.toolsAria')}
                 onClick={() => setNavOpen(false)}
               >
                 <Wrench aria-hidden="true" />
-                <span>工具</span>
+                <span>{t('platform.nav.tools')}</span>
                 <small aria-hidden="true">Tools</small>
               </Link>
+              <LocaleSelector />
               {/* 移动端收起后并入汉堡面板；桌面由 .topbar-right 展示 */}
-              <div className="topnav-user" title="当前工作区" aria-label="当前工作区">
+              <div
+                className="topnav-user"
+                title={t('platform.workspace')}
+                aria-label={t('platform.workspace')}
+              >
                 <div className="avatar" aria-hidden="true">
                   <UserRound aria-hidden="true" />
                 </div>
-                <span>工作区</span>
+                <span>{t('platform.workspace')}</span>
               </div>
             </nav>
           </div>
           <div className="topbar-right">
-            <div className="avatar" title="当前工作区" aria-label="当前工作区">
+            <LocaleSelector />
+            <div
+              className="avatar"
+              title={t('platform.workspace')}
+              aria-label={t('platform.workspace')}
+            >
               <UserRound aria-hidden="true" />
             </div>
           </div>

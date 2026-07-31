@@ -1,4 +1,5 @@
 import { ChevronDown } from 'lucide-react'
+import { useI18n } from '@/shared/i18n'
 
 export interface FormSelectOption {
   value: string
@@ -12,7 +13,7 @@ export function FormSelect({
   onChange,
   disabled = false,
   required = false,
-  placeholder = '请选择',
+  placeholder,
   'aria-label': ariaLabel,
 }: {
   value: string
@@ -23,7 +24,9 @@ export function FormSelect({
   placeholder?: string
   'aria-label'?: string
 }) {
+  const { t } = useI18n()
   const selected = options.some((option) => option.value === value)
+  const effectivePlaceholder = placeholder ?? t('shared.selectPlaceholder')
   // 仅渲染一个 labelable 表单控件（原生 <select>），外部 <label> 包裹的重复关联问题由此收敛。
   return (
     <div
@@ -37,9 +40,9 @@ export function FormSelect({
         aria-label={ariaLabel}
         onChange={(event) => onChange(event.target.value)}
       >
-        {!selected && placeholder ? (
+        {!selected && effectivePlaceholder ? (
           <option value="" disabled hidden>
-            {placeholder}
+            {effectivePlaceholder}
           </option>
         ) : null}
         {options.map((option) => (

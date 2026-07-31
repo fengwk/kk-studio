@@ -30,7 +30,13 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.nav.models', label: 'Model', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', path: 'providers', priority: 100 },
     { id: 'ai.nav.environments', label: 'Environment', path: 'environments', priority: 90 },
-    { id: 'ai.nav.settings', label: '设置', path: 'settings', priority: 80 },
+    {
+      id: 'ai.nav.settings',
+      label: '设置',
+      labelKey: 'ai.nav.setting',
+      path: 'settings',
+      priority: 80,
+    },
   ],
   dialogs: [
     { id: 'ai.create-chat', component: CreateChatDialog },

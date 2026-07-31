@@ -226,6 +226,7 @@ a {
   min-width: 0;
   display: flex;
   align-items: center;
+  gap: 10px;
   justify-content: flex-end;
 }
 
@@ -4262,5 +4263,67 @@ div.is-error {
 
   .form-grid-2 {
     grid-template-columns: 1fr;
+  }
+}
+
+.locale-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.locale-selector button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.locale-selector button:hover {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.locale-selector button[aria-pressed='true'] {
+  color: var(--green-on);
+  background: var(--green-gradient);
+  font-weight: 600;
+}
+
+.topnav .locale-selector {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .topbar-right .locale-selector {
+    display: none;
+  }
+
+  .topnav .locale-selector {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 42px;
+    margin-top: 4px;
+    padding: 7px 9px;
+    border: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0 0 7px 7px;
+    background: transparent;
+  }
+
+  .topnav .locale-selector button {
+    min-height: 32px;
+    padding: 0 12px;
+    font-size: 14px;
   }
 }

@@ -28,6 +28,7 @@ export interface PageContribution extends Contribution {
 
 export interface NavigationContribution extends Contribution {
   label: string
+  labelKey?: string
   path: string
 }
 
