@@ -134,6 +134,43 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals(afterStopEpoch, afterStop.executionEpoch());
   }
 
+  @Test
+  void claimAndRenewRequireTheDurableThreadWatchdogTarget() {
+    Instant now = Instant.now();
+    TestThreads.Bootstrapped claimFixture = TestThreads.bootstrap(commands, "missing-target", now);
+    commands.enqueue(
+        claimFixture.threadId(), user("claim"), "claim", claimFixture.executionEpoch(), now);
+    execute(
+        "delete from harness_execution_target where target_kind = 'THREAD' and target_id = ?",
+        claimFixture.threadId());
+
+    assertFalse(
+        transactions.claim(claimFixture.threadId(), "claim", now).isPresent(),
+        "a runnable Thread without its durable target must not be claimed");
+    assertEquals(
+        1L,
+        longScalar(
+            "select case when runnable then 1 else 0 end from harness_thread where id = "
+                + claimFixture.threadId()));
+
+    TestThreads.Bootstrapped renewFixture =
+        TestThreads.bootstrap(commands, "missing-watchdog", now);
+    commands.enqueue(
+        renewFixture.threadId(), user("renew"), "renew", renewFixture.executionEpoch(), now);
+    ThreadOwnership ownership =
+        transactions.claim(renewFixture.threadId(), "owner", now).orElseThrow();
+    execute(
+        "delete from harness_execution_target where target_kind = 'THREAD' and target_id = ?",
+        renewFixture.threadId());
+
+    assertThrows(
+        IllegalStateException.class, () -> transactions.renew(ownership, now.plusSeconds(1)));
+    assertEquals(
+        "owner",
+        scalar("select processor_token from harness_thread where id = " + renewFixture.threadId()));
+    assertEquals(0, targetCount("THREAD", renewFixture.threadId()));
+  }
+
   /** stop + rebind 之后旧 epoch 的 ownership 不能 renew/claim，也不能再 apply 结果。 */
   @Test
   void rebindInvalidatesStaleOwnershipRenewClaimAndApply() {
@@ -474,6 +511,75 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertThrows(
         IllegalStateException.class,
         () -> transactions.loadOwnedSnapshot(partialOwner, Instant.now()));
+    long partialAssistantId =
+        longScalar("select head_entry_id from harness_thread where id = " + partial.threadId());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.applyTerminalToolResults(partialOwner, partialAssistantId, Instant.now()));
+    assertEquals(
+        1,
+        count(
+            "select count(*) from harness_tool_invocation where thread_id = "
+                + partial.threadId()
+                + " and applied_at is not null"));
+    assertTrue(toolResultPayloads(partialAssistantId).isEmpty());
+  }
+
+  @Test
+  void invalidLaterToolResultRollsBackEarlierSiblingEntryWrites() {
+    Instant now = Instant.now();
+    Prepared prepared = prepareDebt(now, List.of(platformTool()));
+    long modelId = createInvocation(prepared, now);
+    completeModel(
+        modelId,
+        "SUCCEEDED",
+        response(
+            List.of(
+                new ProviderToolCall("first", "platformTool", "{}"),
+                new ProviderToolCall("second", "platformTool", "{}"))),
+        null);
+    wake(prepared.threadId());
+    ThreadOwnership owner =
+        transactions
+            .claim(prepared.threadId(), "apply-invalid-tool-result", Instant.now())
+            .orElseThrow();
+    assertEquals(
+        ApplyOutcome.PROGRESSED, transactions.applyTerminalModel(owner, modelId, Instant.now()));
+    long assistantId =
+        longScalar("select head_entry_id from harness_thread where id = " + prepared.threadId());
+    List<Long> tools =
+        ids(
+            "select id from harness_tool_invocation where thread_id = "
+                + prepared.threadId()
+                + " order by ordinal");
+    completeTool(
+        tools.get(0),
+        "SUCCEEDED",
+        ToolResultJsonCodec.encode(
+            new ToolResult("first", List.of(new TextToolContent("first")), false, "{}", false)),
+        null);
+    completeTool(
+        tools.get(1),
+        "SUCCEEDED",
+        ToolResultJsonCodec.encode(
+            new ToolResult(
+                "wrong-call-id", List.of(new TextToolContent("second")), false, "{}", false)),
+        null);
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> transactions.applyTerminalToolResults(owner, assistantId, Instant.now()));
+    assertTrue(toolResultPayloads(assistantId).isEmpty());
+    assertEquals(
+        0,
+        count(
+            "select count(*) from harness_tool_invocation where thread_id = "
+                + prepared.threadId()
+                + " and applied_at is not null"));
+    assertEquals(
+        assistantId,
+        longScalar("select head_entry_id from harness_thread where id = " + prepared.threadId()));
   }
 
   @Test

@@ -630,6 +630,27 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   }
 
   @Test
+  void persistPermissionAllowedRejectsRouteChangesWithoutMutatingTheInvocation() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "env-owner", BASE, LONG_LEASE);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.persistPermissionAllowed(
+                claimed, ToolBinding.of(fixture.descriptor), "{\"changed\":true}", BASE));
+
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("RUNNING", row.getStatus());
+    assertEquals("PENDING", row.getPermissionState());
+    assertEquals("env-a", row.getEnvironmentName());
+    assertEquals("{}", row.getArgumentsJson());
+    assertEquals(
+        claimed.invocation().workerLease().until(), targetFor(fixture.invocationId).availableAt());
+  }
+
+  @Test
   void awaitPermissionCreatesOpenInteractionAndParksTarget() throws Exception {
     Fixture fixture =
         newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
@@ -755,6 +776,73 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     ExecutionTargetRow nextTarget = targetFor(second.invocationId);
     assertTrue(nextTarget.dispatchEnabled(), "deny must activate the next environment head");
     assertEquals("env-a", nextTarget.routeKey());
+  }
+
+  @Test
+  void denyPermissionRollsBackWhenItCannotWakeTheOwningThread() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    suppressRunnableUpdates();
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> transactions.denyPermission(claimed, BASE.plusSeconds(1)));
+
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("RUNNING", row.getStatus());
+    assertEquals("PENDING", row.getPermissionState());
+    assertEquals("worker-a", row.getWorkerToken());
+    assertFalse(threadRunnable(fixture.threadId));
+    assertFalse(toolTargetAbsent(fixture.invocationId), "target delete must roll back with denial");
+  }
+
+  @Test
+  void concurrentPermissionRequestsHaveOneWinnerAndOneDurableOpenInteraction() throws Exception {
+    Fixture fixture =
+        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
+    PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<ToolInvocationUpdateOutcome> first =
+          pool.submit(
+              () -> {
+                start.await();
+                return transactions.awaitPermission(
+                    claimed, ToolBinding.of(fixture.descriptor), "{}", prompt, BASE.plusSeconds(1));
+              });
+      Future<ToolInvocationUpdateOutcome> second =
+          pool.submit(
+              () -> {
+                start.await();
+                return transactions.awaitPermission(
+                    claimed, ToolBinding.of(fixture.descriptor), "{}", prompt, BASE.plusSeconds(1));
+              });
+      start.countDown();
+
+      List<ToolInvocationUpdateOutcome> outcomes =
+          List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+      assertEquals(
+          1,
+          outcomes.stream()
+              .filter(outcome -> outcome == ToolInvocationUpdateOutcome.APPLIED)
+              .count());
+      assertEquals(
+          1,
+          outcomes.stream()
+              .filter(outcome -> outcome == ToolInvocationUpdateOutcome.LOST_OWNERSHIP)
+              .count());
+    } finally {
+      pool.shutdownNow();
+    }
+
+    ToolInvocationDO row = rowFor(fixture.invocationId);
+    assertEquals("WAITING_INTERACTION", row.getStatus());
+    assertEquals("ASKED", row.getPermissionState());
+    assertEquals(1, countOpenInteractionsForTool(fixture.invocationId));
+    assertFalse(targetFor(fixture.invocationId).dispatchEnabled());
   }
 
   @Test

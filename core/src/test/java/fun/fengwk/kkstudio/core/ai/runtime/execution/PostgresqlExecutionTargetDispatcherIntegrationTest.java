@@ -360,6 +360,50 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     }
   }
 
+  @Test
+  void handlerFailureDoesNotDiscardOtherDueWorkOrTheFailedTarget() throws Exception {
+    store.schedule(ExecutionTargetKind.THREAD, 300L, null, BASE.minus(Duration.ofMinutes(1)));
+    store.schedule(
+        ExecutionTargetKind.MODEL_INVOCATION, 301L, null, BASE.minus(Duration.ofMinutes(2)));
+
+    AtomicInteger failingAttempts = new AtomicInteger();
+    CountDownLatch completed = new CountDownLatch(2);
+    TransactionTemplate tx = new TransactionTemplate(txm);
+    ExecutionTargetHandler handler =
+        row -> {
+          if (row.targetId() == 300L && failingAttempts.getAndIncrement() == 0) {
+            throw new IllegalStateException("transient handler failure");
+          }
+          boolean claimed = claimAndDelete(tx, store, row);
+          if (claimed) {
+            completed.countDown();
+          }
+          return claimed;
+        };
+    ScheduledExecutorService drain = singleThread("dispatcher-handler-failure-drain");
+    ScheduledExecutorService wake = singleThread("dispatcher-handler-failure-wake");
+    PostgresqlExecutionTargetDispatcher dispatcher =
+        new PostgresqlExecutionTargetDispatcher(
+            store,
+            ExecutionTargetRouteEligibility.empty(),
+            handler,
+            Clock.fixed(BASE, ZoneOffset.UTC),
+            drain,
+            wake);
+    try {
+      dispatcher.start();
+      assertTrue(
+          completed.await(5, TimeUnit.SECONDS),
+          "a failed handler must leave its target durable while later due work still proceeds");
+      assertEquals(2, failingAttempts.get(), "the failed target must be retried by the timer");
+      assertTrue(store.findAll().isEmpty(), "both targets must eventually be claimed exactly once");
+    } finally {
+      dispatcher.stop();
+      shutdown(drain);
+      shutdown(wake);
+    }
+  }
+
   private static ScheduledExecutorService singleThread(String name) {
     return Executors.newSingleThreadScheduledExecutor(
         r -> {
