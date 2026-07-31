@@ -189,7 +189,12 @@ public final class PostgresqlExecutionTargetDispatcher {
     long delayMillis = delayMillis(next.get());
     ScheduledFuture<?> scheduled =
         wakeExecutor.schedule(this::wake, delayMillis, TimeUnit.MILLISECONDS);
-    wakeTimer.set(scheduled);
+    // stop() may clear the timer between schedule() and publication. Do not
+    // leave that late timer alive after the dispatcher has stopped.
+    if (!wakeTimer.compareAndSet(null, scheduled) || stopping.get()) {
+      wakeTimer.compareAndSet(scheduled, null);
+      scheduled.cancel(false);
+    }
   }
 
   private long delayMillis(Instant target) {
