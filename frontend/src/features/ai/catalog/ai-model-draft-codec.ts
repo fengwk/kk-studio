@@ -251,7 +251,7 @@ function serializeVariants(
   })
 }
 
-export function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
+function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
   const contextWindow = requirePositiveInt(draft.contextWindow, 'config.limit.context')
   const maxOutputTokens = requirePositiveInt(
     draft.maxOutputTokens,

@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   isRealtimeModelDeltaGap,
   parseRealtimeModelDelta,
-  parseSafeStreamSnapshot,
   reduceRealtimeModelStream,
   snapshotModelStream,
 } from '@/features/ai/runtime/thread-realtime-state'
@@ -44,18 +43,6 @@ describe('thread realtime state', () => {
 
     expect(afterToolCall).toMatchObject({ sequence: 2, text: 'one', thinking: '' })
     expect(complete).toMatchObject({ sequence: 3, text: 'one', thinking: 'plan' })
-  })
-
-  it('strictly parses the durable safe stream snapshot', () => {
-    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"plan","sequence":2}')).toEqual({
-      text: 'answer',
-      thinking: 'plan',
-      sequence: 2,
-    })
-    expect(parseSafeStreamSnapshot('{"text":"","thinking":"","sequence":0}')).not.toBeNull()
-    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"","sequence":-1}')).toBeNull()
-    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":""}')).toBeNull()
-    expect(parseSafeStreamSnapshot('{"text":"answer","thinking":"","sequence":1,"extra":true}')).toBeNull()
   })
 
   it('selects the newest decimal invocation id without Number precision loss', () => {

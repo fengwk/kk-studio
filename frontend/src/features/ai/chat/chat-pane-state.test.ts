@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyChatLayout,
-  createDefaultChatPaneState,
   focusPane,
   isPaneBound,
   loadChatPaneState,
-  normalizeChatPaneState,
   saveChatPaneState,
   sortWithRunningFirst,
   updatePaneThread,
@@ -35,7 +33,7 @@ class MemoryStorage implements Storage {
 
 describe('chat-pane-state', () => {
   it('creates default single layout with one blank pane', () => {
-    const state = createDefaultChatPaneState()
+    const state = loadChatPaneState('chat-1', new MemoryStorage())
     expect(state.layout).toBe('single')
     expect(state.panes).toHaveLength(1)
     expect(state.panes[0].threadId).toBeNull()
@@ -43,7 +41,7 @@ describe('chat-pane-state', () => {
   })
 
   it('retains pane thread bindings when expanding and shrinking layouts', () => {
-    const base = updatePaneThread(createDefaultChatPaneState(), 'pane-1', 't1')
+    const base = updatePaneThread(loadChatPaneState('chat-1', new MemoryStorage()), 'pane-1', 't1')
     const expanded = applyChatLayout(base, 'split-3')
     expect(expanded.panes).toHaveLength(3)
     expect(expanded.panes[0].threadId).toBe('t1')
@@ -55,8 +53,9 @@ describe('chat-pane-state', () => {
 
   it('normalizes corrupted storage and persists by chat id', () => {
     const storage = new MemoryStorage()
-    expect(normalizeChatPaneState({ layout: 'nope', panes: 'x' }).layout).toBe('single')
-    const state = applyChatLayout(createDefaultChatPaneState(), 'grid-6')
+    storage.setItem('kk-studio.chat-pane.corrupted', JSON.stringify({ layout: 'nope', panes: 'x' }))
+    expect(loadChatPaneState('corrupted', storage).layout).toBe('single')
+    const state = applyChatLayout(loadChatPaneState('chat-1', storage), 'grid-6')
     saveChatPaneState('chat-1', state, storage)
     const loaded = loadChatPaneState('chat-1', storage)
     expect(loaded.layout).toBe('grid-6')
@@ -64,28 +63,30 @@ describe('chat-pane-state', () => {
   })
 
   it('ignores unsupported nested pane bindings', () => {
-    const normalized = normalizeChatPaneState({
+    const storage = new MemoryStorage()
+    storage.setItem('kk-studio.chat-pane.chat-1', JSON.stringify({
       layout: 'single',
       focusedPaneId: 'pane-1',
       panes: [{ id: 'pane-1', target: { sessionId: 's1', threadId: 't9' } }],
-    })
+    }))
+    const normalized = loadChatPaneState('chat-1', storage)
     expect(normalized.panes[0].threadId).toBeNull()
   })
 
   it('focuses panes and detects bound thread ids', () => {
-    const state = createDefaultChatPaneState('split-2')
+    const storage = new MemoryStorage()
+    const state = applyChatLayout(loadChatPaneState('chat-1', storage), 'split-2')
     expect(focusPane(state, 'missing').focusedPaneId).toBe(state.focusedPaneId)
     expect(focusPane(state, state.panes[1].id).focusedPaneId).toBe(state.panes[1].id)
     expect(isPaneBound(null)).toBe(false)
     expect(isPaneBound('t')).toBe(true)
-    expect(loadChatPaneState('')).toEqual(createDefaultChatPaneState())
-    expect(
-      normalizeChatPaneState({
+    expect(loadChatPaneState('', storage)).toEqual(loadChatPaneState('another', storage))
+    storage.setItem('kk-studio.chat-pane.custom', JSON.stringify({
         layout: 'split-2',
         focusedPaneId: 'gone',
         panes: [{ id: 'custom', threadId: null }],
-      }).focusedPaneId,
-    ).toBe('custom')
+      }))
+    expect(loadChatPaneState('custom', storage).focusedPaneId).toBe('custom')
   })
 
   it('sorts running items first then by preferred time', () => {

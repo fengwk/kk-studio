@@ -47,12 +47,12 @@ export interface ThreadPanelActivityInput {
  * after the composer. They are intentionally raw ReactNodes so callers can compose any
  * presentation contract (status, history shortcut, etc.) without altering this surface.
  */
-export interface ThreadPanelSlots {
+interface ThreadPanelSlots {
   sidebar?: ReactNode
   footer?: ReactNode
 }
 
-export interface ThreadPanelProps {
+interface ThreadPanelProps {
   transcript: ThreadPanelTranscriptInput
   composer: ThreadPanelComposerInput
   activity: ThreadPanelActivityInput

@@ -25,7 +25,7 @@ export interface ChatPaneState {
   threadSort: PaneSortPreference
 }
 
-export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
+const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
   'split-2': 2,
   'split-3': 3,
@@ -44,11 +44,11 @@ function createPaneId(index: number): string {
   return `pane-${index + 1}`
 }
 
-export function createEmptyPane(index: number): ChatPane {
+function createEmptyPane(index: number): ChatPane {
   return { id: createPaneId(index), threadId: null }
 }
 
-export function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneState {
+function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneState {
   const capacity = CHAT_LAYOUT_CAPACITY[layout]
   const panes = Array.from({ length: capacity }, (_, index) => createEmptyPane(index))
   return {
@@ -98,7 +98,7 @@ function parsePane(value: unknown, index: number): ChatPane {
   return { id, threadId }
 }
 
-export function normalizeChatPaneState(raw: unknown): ChatPaneState {
+function normalizeChatPaneState(raw: unknown): ChatPaneState {
   const defaults = createDefaultChatPaneState()
   if (!isRecord(raw)) {
     return defaults

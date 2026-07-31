@@ -23,7 +23,7 @@ export interface SessionTreeEntry {
   parentId: string | null
 }
 
-export interface SessionTreeConnector {
+interface SessionTreeConnector {
   /** True when the branch line continues below this row at the indentation level. */
   continues: boolean
 }
@@ -35,7 +35,7 @@ export interface BranchTarget {
 }
 
 /** Upper bound for the projected preview rendered in each tree row. */
-export const PROJECTED_PREVIEW_LIMIT = 220
+const PROJECTED_PREVIEW_LIMIT = 220
 
 /**
  * Builds the compact, filtered visual projection of the immutable Session Entry Tree.
@@ -185,7 +185,7 @@ function matchesSessionTreeEntrySearch(
   return tokens.every((token) => haystack.includes(token))
 }
 
-export function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKind {
+function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKind {
   const entryType = entry.entryType
   if (entryType === 'CUSTOM_MESSAGE') {
     return 'custom'
@@ -206,7 +206,7 @@ export function sessionEntryKind(entry: HarnessSessionEntryDTO): SessionEntryKin
   return 'other'
 }
 
-export function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFilter): boolean {
+function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFilter): boolean {
   switch (filter) {
     case 'conversation':
       return kind === 'user' || kind === 'assistant' || kind === 'custom'
@@ -229,18 +229,18 @@ export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
 
 /** Full text body for branching drafts. This intentionally keeps thinking blocks: USER/CUSTOM
  * drafts must retain every editable text block, while previews use sessionEntryVisibleText(). */
-export function sessionEntryText(entry: HarnessSessionEntryDTO): string {
+function sessionEntryText(entry: HarnessSessionEntryDTO): string {
   return collectMessageText(messageContents(entry), true).join('\n')
 }
 
 /** Single-line preview used by the tree row. Explicit `thinking` blocks are excluded. */
-export function sessionEntryPreview(entry: HarnessSessionEntryDTO, limit: number = PROJECTED_PREVIEW_LIMIT): string {
+function sessionEntryPreview(entry: HarnessSessionEntryDTO, limit: number = PROJECTED_PREVIEW_LIMIT): string {
   const flat = flattenVisibleText(sessionEntryVisibleText(entry))
   return flat ? truncatePreview(flat, limit) : '无正文'
 }
 
 /** Lower-cased visible text used for keyword matching. Preview limits never apply to search. */
-export function sessionEntrySearchText(entry: HarnessSessionEntryDTO): string {
+function sessionEntrySearchText(entry: HarnessSessionEntryDTO): string {
   return flattenVisibleText(sessionEntryVisibleText(entry)).toLowerCase()
 }
 

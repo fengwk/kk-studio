@@ -47,9 +47,3 @@ export const AGENT_FUNCTION_REF = {
   functionId: 'system.agent.execute',
   version: '1',
 } as const
-
-/**
- * Presentation links are visibility edges only.
- * ResourceReference (actual dependency) is not modeled in the local demo yet.
- */
-export const PRESENTATION_LINK_ROLE = 'visibility' as const

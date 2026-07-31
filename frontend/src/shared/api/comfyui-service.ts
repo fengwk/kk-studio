@@ -58,7 +58,7 @@ function randomUploadSegment(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
 
-export function createComfyuiUploadKey(apiName: string, filename: string): string {
+function createComfyuiUploadKey(apiName: string, filename: string): string {
   return `comfyui-inputs/${safePathSegment(apiName, 'workflow')}/${randomUploadSegment()}/${safePathSegment(filename, 'input.bin')}`
 }
 

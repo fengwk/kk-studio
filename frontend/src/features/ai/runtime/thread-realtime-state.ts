@@ -153,7 +153,7 @@ export function snapshotModelStream(
   }
 }
 
-export function parseSafeStreamSnapshot(
+function parseSafeStreamSnapshot(
   json: string | null,
 ): { text: string; thinking: string; sequence: number } | null {
   if (json == null) {

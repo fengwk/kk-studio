@@ -2,7 +2,7 @@ import type { BackendDateTime } from '@/shared/api/contracts/base'
 
 export type ComfyuiWorkflowId = string
 
-export type ComfyuiBindingKind = 'parameter' | 'file'
+type ComfyuiBindingKind = 'parameter' | 'file'
 
 export type ComfyuiBindingValueType = 'string' | 'integer' | 'number' | 'boolean' | 'json'
 

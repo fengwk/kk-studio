@@ -4,8 +4,6 @@ import type {
   CanvasViewport,
   GenerationMode,
   GenerationProfile,
-  LibraryCard,
-  TemplateCard,
 } from '@/features/canvas/types'
 
 export const MIN_ZOOM = 0.25
@@ -66,62 +64,6 @@ export const GENERATION_PROFILES: Record<GenerationMode, GenerationProfile> = {
     ],
   },
 }
-
-export const TEMPLATES: TemplateCard[] = [
-  { id: 'blank', name: '空白画布', description: '从任意内容开始', icon: '＋', iconTone: 'blank' },
-  { id: 'research', name: '研究与归纳', description: '资料 → 洞察 → 方案', icon: '⌘', iconTone: 'research' },
-  { id: 'visual', name: '视觉方向探索', description: '参考 → 变体 → 精修', icon: '◒', iconTone: 'visual' },
-  { id: 'story', name: '故事与分镜', description: '大纲 → 镜头 → 资产', icon: '↗', iconTone: 'story' },
-  { id: 'tech', name: '技术方案', description: '问题 → 架构 → 计划', icon: '⌗', iconTone: 'tech' },
-]
-
-export const LIBRARY_CARDS: LibraryCard[] = [
-  {
-    id: 'research-canvas',
-    title: '竞品研究与产品方案',
-    owner: 'collab',
-    objectsLabel: '18 个对象',
-    editedLabel: '刚刚编辑',
-    footerLeft: 'FL · KK',
-    footerRight: '↗',
-    preview: 'research',
-    featured: true,
-    runState: 'completed',
-    runStateLabel: '✓ 最近任务已完成',
-    previewBadge: '竞品研究',
-  },
-  {
-    id: 'visual-canvas',
-    title: '产品视觉方向探索',
-    owner: 'mine',
-    objectsLabel: '24 个对象',
-    editedLabel: '昨天',
-    footerLeft: 'FL',
-    footerRight: '···',
-    preview: 'visual',
-  },
-  {
-    id: 'agent-tools',
-    title: 'Agent 工具设计',
-    owner: 'collab',
-    objectsLabel: '42 个对象',
-    editedLabel: '2 天前',
-    footerLeft: 'FL · YQ',
-    footerRight: '···',
-    preview: 'technical',
-  },
-  {
-    id: 'story-draft',
-    title: '短片概念草案',
-    owner: 'mine',
-    objectsLabel: '26 个对象',
-    editedLabel: '5 天前',
-    footerLeft: 'FL',
-    footerRight: '···',
-    preview: 'story',
-    muted: true,
-  },
-]
 
 export const ADD_MENU_ITEMS: Array<{ action: 'text' | 'image' | 'video' | 'file' | 'frame'; label: string; icon: string }> = [
   { action: 'text', label: '文本生成', icon: 'T' },

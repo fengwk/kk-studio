@@ -68,21 +68,6 @@ export function buildCapabilityCandidates(
   return options
 }
 
-export function markInvalidSelections(
-  selected: string[],
-  candidates: CapabilityOption[],
-): Array<{ name: string; invalid: boolean; offline: boolean }> {
-  const byName = new Map(candidates.map((item) => [item.name, item]))
-  return selected.map((name) => {
-    const candidate = byName.get(name)
-    return {
-      name,
-      invalid: !candidate || Boolean(candidate.missing),
-      offline: Boolean(candidate?.offline),
-    }
-  })
-}
-
 /**
  * 把已勾选但不在候选中的项并入列表（置灰展示），避免「暂无候选」时直接消失。
  * 不自动清理；用户可取消勾选后保存。

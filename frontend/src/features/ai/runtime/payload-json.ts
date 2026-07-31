@@ -1,5 +1,3 @@
-import type { ToolAttachmentType } from '@/features/ai/runtime/thread-timeline-types'
-
 export function parsePayload(payloadJson: string | null): Record<string, unknown> {
   if (!payloadJson) {
     return {}
@@ -25,15 +23,4 @@ export function getRecordList(value: unknown): Record<string, unknown>[] {
 
 export function getString(value: unknown): string {
   return typeof value === 'string' ? value : ''
-}
-
-export function getInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) ? value : null
-}
-
-export function getToolContentType(value: unknown): 'text' | ToolAttachmentType | null {
-  if (value === 'text' || value === 'image' || value === 'audio' || value === 'video') {
-    return value
-  }
-  return null
 }

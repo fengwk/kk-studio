@@ -40,14 +40,14 @@ export type AgentModelInputModality =
   | 'VIDEO'
   | 'DOCUMENT'
 
-export interface AgentModelLimitDTO {
+interface AgentModelLimitDTO {
   /** Positive integer count of model context window tokens. */
   context: number
   /** Positive integer {@code <= context}. */
   output: number
 }
 
-export interface AgentModelAbilitiesDTO {
+interface AgentModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
   /** Non-empty subset of {@link AgentModelInputModality}. */

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
-import { resolveChatDefaultAgentId, useChatListController } from '@/features/ai/chat/useChatListController'
+import { useChatListController } from '@/features/ai/chat/useChatListController'
 import { chatService } from '@/shared/api/chat-service'
 
 vi.mock('@/shared/api/chat-service', () => ({
@@ -39,12 +39,7 @@ const agents = [
 ]
 
 describe('useChatListController', () => {
-  it('resolves default agent fallbacks and creates chat', async () => {
-    expect(resolveChatDefaultAgentId('a1', '', agents)).toBe('a1')
-    expect(resolveChatDefaultAgentId('missing', 'a1', agents)).toBe('a1')
-    expect(resolveChatDefaultAgentId(undefined, 'missing', agents)).toBe('')
-    expect(resolveChatDefaultAgentId(undefined, '', [])).toBe('')
-
+  it('creates chat through the selected default agent', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>

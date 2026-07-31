@@ -1,20 +1,4 @@
 export { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
-export type {
-  DialogueMessage,
-  DialogueRole,
-  DialogueStatus,
-  DialogueTimestamp,
-  EntryEventDialogueMessage,
-  EntryEventKind,
-  MetaDialogueMessage,
-  MetaMessageKind,
-  QueuedThreadMessage,
-  TextDialogueMessage,
-  ThreadTimeline,
-  ToolAttachment,
-  ToolAttachmentType,
-  ToolDialogueMessage,
-} from '@/features/ai/runtime/thread-timeline-types'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadTimeline } from '@/features/ai/runtime/thread-timeline-types'
 

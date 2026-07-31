@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildCapabilityCandidates,
-  markInvalidSelections,
 } from '@/features/ai/catalog/agent-capability-candidates'
 
 describe('agent-capability-candidates', () => {
-  it('prefers platform tools/skills and marks offline/invalid selections', () => {
+  it('prefers platform tools/skills and retains selected environment availability', () => {
     const environments = [
       {
         name: 'platform',
@@ -29,13 +28,6 @@ describe('agent-capability-candidates', () => {
     expect(tools.map((item) => item.name)).toEqual(['bash', 'lsp'])
     expect(tools.find((item) => item.name === 'bash')?.source).toBe('platform')
     expect(tools.find((item) => item.name === 'lsp')?.offline).toBe(true)
-
-    const marks = markInvalidSelections(['bash', 'missing', 'lsp'], tools)
-    expect(marks).toEqual([
-      { name: 'bash', invalid: false, offline: false },
-      { name: 'missing', invalid: true, offline: false },
-      { name: 'lsp', invalid: false, offline: true },
-    ])
 
     // no selected environment and non-ready platform should yield empty candidates
     expect(buildCapabilityCandidates([{ ...environments[0], status: 'DISCONNECTED' }], '', 'skills')).toEqual([])

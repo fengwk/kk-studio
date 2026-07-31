@@ -9,18 +9,15 @@ import {
   revealNodeViewportShift,
   selectionBounds,
   viewportsEqual,
-  zoomAtPoint,
 } from '@/features/canvas/geometry'
 
 describe('canvas geometry', () => {
-  it('clamps zoom to design contract and zooms around a stage point', () => {
+  it('clamps zoom to the design contract', () => {
     expect(MIN_ZOOM).toBe(0.25)
     expect(MAX_ZOOM).toBe(1.45)
     expect(clampZoom(0.01)).toBe(0.25)
     expect(clampZoom(8)).toBe(1.45)
-    const next = zoomAtPoint({ x: 80, y: 20, scale: 0.6 }, 200, 100, 0, 0, 1.2)
-    expect(next.scale).toBe(1.2)
-    expect(viewportsEqual(next, next)).toBe(true)
+    expect(viewportsEqual({ x: 80, y: 20, scale: 0.6 }, { x: 80, y: 20, scale: 0.6 })).toBe(true)
   })
 
   it('finds non-overlapping placement and keeps generators above the dock', () => {

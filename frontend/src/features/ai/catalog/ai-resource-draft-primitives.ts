@@ -1,18 +1,10 @@
-import type { KeyValueDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 
 let draftIdSeed = 0
 
 function nextDraftId(prefix: string): string {
   draftIdSeed += 1
   return `${prefix}-${draftIdSeed}`
-}
-
-export function newKeyValueDraft(key = '', value = ''): KeyValueDraft {
-  return {
-    id: nextDraftId('kv'),
-    key,
-    value,
-  }
 }
 
 export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'draftId'>>): VariantDraft {

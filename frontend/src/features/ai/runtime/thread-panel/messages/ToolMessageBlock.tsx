@@ -3,13 +3,19 @@ import {
   getToolAttachmentLabel,
   toToolAttachmentSrc,
 } from '@/features/ai/runtime/thread-panel/tool-attachments'
-import { getToolRenderer, type ToolRenderContext } from '@/features/ai/runtime/thread-panel/tool-renderers'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
-/**
- * Tool turn as separate full-width call/result blocks.
- * Custom tools may override via registerToolRenderer(name, { renderCall, renderResult }).
- */
+interface ToolRenderContext {
+  toolName: string
+  toolCallId: string
+  arguments: string
+  text: string
+  attachments: ToolAttachment[]
+  status?: ToolDialogueMessage['status']
+  errorMessage?: string
+}
+
+/** Tool turn as separate full-width call/result blocks. */
 export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) {
   const context: ToolRenderContext = {
     toolName: message.toolName || 'Tool',
@@ -20,9 +26,6 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
     status: message.status,
     errorMessage: message.errorMessage,
   }
-  const renderer = getToolRenderer(context.toolName)
-  const callNode = renderer?.renderCall?.(context)
-  const resultNode = renderer?.renderResult?.(context)
   const call = message.phase === 'call'
 
   return (
@@ -37,7 +40,7 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
               {formatToolStatus(message.status)}
             </span>
           </div>
-          <div className="thread-block-body">{callNode ?? <DefaultToolCall context={context} />}</div>
+          <div className="thread-block-body"><DefaultToolCall context={context} /></div>
         </section>
       ) : (
         <section className="thread-block thread-block-tool-result">
@@ -49,7 +52,7 @@ export function ToolMessageBlock({ message }: { message: ToolDialogueMessage }) 
               {formatToolStatus(message.status)}
             </span>
           </div>
-          <div className="thread-block-body">{resultNode ?? <DefaultToolResult context={context} />}</div>
+          <div className="thread-block-body"><DefaultToolResult context={context} /></div>
         </section>
       )}
     </div>

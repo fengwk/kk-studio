@@ -5,7 +5,7 @@ import {
   isRunningThread,
   isSessionRunning,
   sortChatSessionsWithRunningFirst,
-  toSessionSelectionItem,
+  toSessionSelectionItemWithRunning,
   toThreadSelectionItem,
 } from '@/features/ai/chat/chat-session-picker'
 import type { HarnessSessionDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
@@ -101,7 +101,7 @@ describe('chat-session-picker', () => {
   })
 
   it('projects Session rows without a main Thread reference', () => {
-    const item = toSessionSelectionItem(session('s1', '2026-07-20T12:00:00Z'))
+    const item = toSessionSelectionItemWithRunning(session('s1', '2026-07-20T12:00:00Z'), false)
     expect(item).toEqual({ id: 's1', title: 's1', subtitle: 'Session s1', badge: undefined })
     expect(item.subtitle).not.toContain('Main')
   })

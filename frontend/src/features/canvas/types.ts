@@ -11,9 +11,9 @@ export type StudioNodeKind = 'RESOURCE' | 'FUNCTION' | 'GROUP'
 
 export type GenerationMode = 'text' | 'image' | 'video'
 
-export type GeneratorStatus = 'draft' | 'generated'
+type GeneratorStatus = 'draft' | 'generated'
 
-export type AgentRunStatus = 'running' | 'paused' | 'succeeded'
+type AgentRunStatus = 'running' | 'paused' | 'succeeded'
 
 /** UI renderer key — finer than StudioNodeKind. */
 export type CanvasNodeType =
@@ -39,7 +39,7 @@ export type ResearchTab = 'research' | 'architecture' | 'roadmap'
 
 export type AddMenuAction = GenerationMode | 'file' | 'frame'
 
-export type ResultVariant = 'A' | 'B' | 'C'
+type ResultVariant = 'A' | 'B' | 'C'
 
 export interface CanvasPoint {
   x: number
@@ -59,7 +59,7 @@ export interface CanvasViewport {
 
 export interface CanvasRect extends CanvasPoint, CanvasSize {}
 
-export interface ParameterGroup {
+interface ParameterGroup {
   key: string
   values: string[]
 }
@@ -74,7 +74,7 @@ export interface GenerationProfile {
   groups: ParameterGroup[]
 }
 
-export interface CanvasNodeBase extends CanvasRect {
+interface CanvasNodeBase extends CanvasRect {
   id: string
   /** UI renderer / presentation subtype. */
   type: CanvasNodeType
@@ -139,30 +139,6 @@ export type ThreadMessage =
   | { kind: 'agent'; text: string }
   | { kind: 'run'; runId: string }
   | { kind: 'generation'; mode: GenerationMode; parameters: string; text: string }
-
-export interface LibraryCard {
-  id: string
-  title: string
-  owner: Exclude<LibraryFilter, 'all'>
-  objectsLabel: string
-  editedLabel: string
-  footerLeft: string
-  footerRight: string
-  preview: 'research' | 'visual' | 'technical' | 'story'
-  featured?: boolean
-  muted?: boolean
-  runState?: 'completed' | 'paused' | 'removed'
-  runStateLabel?: string
-  previewBadge?: string
-}
-
-export interface TemplateCard {
-  id: string
-  name: string
-  description: string
-  icon: string
-  iconTone: 'blank' | 'research' | 'visual' | 'story' | 'tech'
-}
 
 export interface CanvasDocumentState {
   nodes: CanvasNode[]

@@ -7,7 +7,7 @@ import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery } from '@tanstack/react-query'
 
-export function resolveChatDefaultAgentId(
+function resolveChatDefaultAgentId(
   agentId: string | undefined,
   selectedAgentId: string,
   agents: AgentDefinitionDTO[],

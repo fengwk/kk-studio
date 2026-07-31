@@ -1,9 +1,9 @@
-export type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta' | 'entry'
-export type DialogueStatus = 'streaming' | 'done' | 'error'
-export type DialogueTimestamp = string | readonly number[] | null
+type DialogueRole = 'user' | 'assistant' | 'system' | 'tool' | 'meta' | 'entry'
+type DialogueStatus = 'streaming' | 'done' | 'error'
+type DialogueTimestamp = string | readonly number[] | null
 export type ToolAttachmentType = 'image' | 'audio' | 'video' | 'file'
 /** 控制面/回合摘要等特殊消息，与 user/assistant/tool 正文区分 */
-export type MetaMessageKind = 'turn_usage'
+type MetaMessageKind = 'turn_usage'
 /** Durable Entry 的非对话审计事件；未知值也必须留在时间线中。 */
 export type EntryEventKind =
   | 'root'

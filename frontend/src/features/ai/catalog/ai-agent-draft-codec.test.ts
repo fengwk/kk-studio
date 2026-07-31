@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   emptyAgentDraft,
-  normalizeCapabilityShortNames,
-  stripCapabilityPrefix,
   toAgentDraft,
   toEditableAgent,
   toEditableAgentUpdate,
@@ -61,16 +59,12 @@ describe('ai-agent-draft-codec', () => {
     expect(emptyAgentDraft()).toMatchObject({ modelId: '', variant: '' })
   })
 
-  it('normalizes short capability names and rejects collisions', () => {
-    expect(stripCapabilityPrefix('')).toBe('')
-    expect(stripCapabilityPrefix(' read ')).toBe('read')
-    expect(stripCapabilityPrefix('local/bash')).toBe('bash')
-    expect(normalizeCapabilityShortNames(null, 'tools')).toEqual([])
-    expect(normalizeCapabilityShortNames(['platform/read', ' local/bash ', ''], 'tools')).toEqual([
-      'read',
-      'bash',
-    ])
-    expect(() => normalizeCapabilityShortNames(['a/read', 'b/read'], 'tools')).toThrow(/重名/)
+  it('normalizes short capability names and rejects collisions in create payloads', () => {
+    expect(toEditableAgent(draft()).config).toMatchObject({
+      tools: ['read', 'bash'],
+      skills: ['dev'],
+    })
+    expect(() => toEditableAgent(draft({ tools: ['a/read', 'b/read'] }))).toThrow(/重名/)
   })
 
   it('projects persisted definitions and normalizes nullable values', () => {
