@@ -30,7 +30,7 @@ import {
 } from '@/features/ai/catalog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
-import { isConflictError } from '@/shared/api/client'
+import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
@@ -94,6 +94,12 @@ export function BoundThreadPane({
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
   const rebindable = canRebindThread(controller.thread)
+
+  useEffect(() => {
+    if (isNotFoundError(controller.messagesError)) {
+      onThreadChange(null)
+    }
+  }, [controller.messagesError, onThreadChange])
 
   useEffect(() => {
     if (branchDraft) {

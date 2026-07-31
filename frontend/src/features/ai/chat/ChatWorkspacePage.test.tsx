@@ -8,6 +8,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
+import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -192,6 +193,38 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'hello world')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
+  })
+
+  it('detaches a stale persisted thread when its snapshot is not found', async () => {
+    const seeded = loadChatPaneState('chat-1')
+    seeded.panes[0].threadId = 'missing-thread'
+    saveChatPaneState('chat-1', seeded)
+    vi.mocked(harnessService.getThreadSnapshot).mockRejectedValue(
+      new ApiError('Thread not found', 404, 'NOT_FOUND'),
+    )
+    vi.mocked(harnessService.listThreads).mockResolvedValue([])
+
+    renderWorkspace()
+
+    expect(await screen.findByText('新对话')).toBeInTheDocument()
+    expect(screen.queryByText('会话加载失败')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(loadChatPaneState('chat-1').panes[0].threadId).toBeNull()
+    })
+  })
+
+  it('keeps a persisted thread bound when its snapshot fails for a non-404 reason', async () => {
+    const seeded = loadChatPaneState('chat-1')
+    seeded.panes[0].threadId = 'temporarily-unavailable'
+    saveChatPaneState('chat-1', seeded)
+    vi.mocked(harnessService.getThreadSnapshot).mockRejectedValue(
+      new ApiError('Service unavailable', 503, 'SERVICE_UNAVAILABLE'),
+    )
+
+    renderWorkspace()
+
+    expect(await screen.findByText('会话加载失败')).toBeInTheDocument()
+    expect(loadChatPaneState('chat-1').panes[0].threadId).toBe('temporarily-unavailable')
   })
 
   it('performs first-send createThread/bootstrap/message order for blank pane with default agent', async () => {
