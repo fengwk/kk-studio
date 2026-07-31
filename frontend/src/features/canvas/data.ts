@@ -12,65 +12,165 @@ export const DEFAULT_VIEWPORT: CanvasViewport = { x: 80, y: 20, scale: 0.6 }
 export const SAVE_SETTLE_MS = 650
 
 export const RUN_STEPS = [
-  '提取定位与目标用户',
-  '归纳交互与对象',
-  '生成能力矩阵',
-  '形成 MVP 页面方向',
+  'canvas.agent.run.step.locateGoals',
+  'canvas.agent.run.step.interaction',
+  'canvas.agent.run.step.matrix',
+  'canvas.agent.run.step.mvp',
 ] as const
 
 export const DEFAULT_CONTEXT_IDS = ['web', 'image', 'file'] as const
 
 export const GENERATION_PROFILES: Record<GenerationMode, GenerationProfile> = {
   text: {
-    label: '文本生成',
+    labelKey: 'canvas.generation.mode.text',
     icon: 'T',
     prompt: '将画布中的竞品观察整理为一段清晰、有判断力的产品定位说明。',
-    cost: '≈ 3 积分',
+    cost: 3,
     size: { width: 300, height: 196 },
-    capabilities: ['自由写作', '参考改写', '结构提炼', '继续扩写'],
+    capabilities: [
+      'canvas.generation.capability.freeWriting',
+      'canvas.generation.capability.referenceRewrite',
+      'canvas.generation.capability.structure',
+      'canvas.generation.capability.continue',
+    ],
     groups: [
-      { key: '模型', values: ['Claude · Sonnet', 'GPT · 4.1', 'Gemini · Pro'] },
-      { key: '长度', values: ['精炼', '标准', '详细'] },
-      { key: '语气', values: ['专业', '叙事', '直接'] },
-      { key: '格式', values: ['段落', '要点', '大纲'] },
+      {
+        key: 'canvas.generation.parameter.model',
+        values: [
+          'canvas.generation.model.claudeSonnet',
+          'canvas.generation.model.gpt41',
+          'canvas.generation.model.geminiPro',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.length',
+        values: [
+          'canvas.generation.option.concise',
+          'canvas.generation.option.standard',
+          'canvas.generation.option.detailed',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.tone',
+        values: [
+          'canvas.generation.option.professional',
+          'canvas.generation.option.narrative',
+          'canvas.generation.option.direct',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.format',
+        values: [
+          'canvas.generation.option.paragraph',
+          'canvas.generation.option.bullets',
+          'canvas.generation.option.outline',
+        ],
+      },
     ],
   },
   image: {
-    label: '图片生成',
+    labelKey: 'canvas.generation.mode.image',
     icon: '◒',
     prompt: '低饱和黑白产品视觉，留出清晰的编辑空间。',
-    cost: '≈ 8 积分',
+    cost: 8,
     size: { width: 240, height: 224 },
-    capabilities: ['文生图', '多图参考', '风格迁移', '局部重绘'],
+    capabilities: [
+      'canvas.generation.capability.textToImage',
+      'canvas.generation.capability.multiReference',
+      'canvas.generation.capability.styleTransfer',
+      'canvas.generation.capability.inpaint',
+    ],
     groups: [
-      { key: '模型', values: ['Flux · Pro', 'SDXL · Turbo', 'Ideogram · V3'] },
-      { key: '比例', values: ['1:1', '4:3', '16:9'] },
-      { key: '数量', values: ['4 张', '2 张', '1 张'] },
-      { key: '风格', values: ['电影感', '编辑感', '极简'] },
+      {
+        key: 'canvas.generation.parameter.model',
+        values: [
+          'canvas.generation.model.fluxPro',
+          'canvas.generation.model.sdxlTurbo',
+          'canvas.generation.model.ideogramV3',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.ratio',
+        values: ['canvas.generation.option.ratio11', 'canvas.generation.option.ratio43', 'canvas.generation.option.ratio169'],
+      },
+      {
+        key: 'canvas.generation.parameter.count',
+        values: [
+          'canvas.generation.option.fourImages',
+          'canvas.generation.option.twoImages',
+          'canvas.generation.option.oneImage',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.style',
+        values: [
+          'canvas.generation.option.cinematic',
+          'canvas.generation.option.editorial',
+          'canvas.generation.option.minimal',
+        ],
+      },
     ],
   },
   video: {
-    label: '视频生成',
+    labelKey: 'canvas.generation.mode.video',
     icon: '▻',
     prompt: '黑灰创作工作台缓慢推镜，抽象素材在画布中展开，保持克制的镜头运动。',
-    cost: '≈ 28 积分',
+    cost: 28,
     size: { width: 286, height: 214 },
-    capabilities: ['首尾帧', '多图参考', '动作模仿', '全能参考', '视频编辑'],
+    capabilities: [
+      'canvas.generation.capability.firstLastFrame',
+      'canvas.generation.capability.multiReference',
+      'canvas.generation.capability.motionTransfer',
+      'canvas.generation.capability.anyReference',
+      'canvas.generation.capability.videoEdit',
+    ],
     groups: [
-      { key: '模型', values: ['Kling · 1.6', 'Runway · Gen-3', 'Luma · Ray 2'] },
-      { key: '规格', values: ['16:9 · 1080p', '9:16 · 1080p', '1:1 · 720p'] },
-      { key: '时长', values: ['6 秒', '4 秒', '10 秒'] },
-      { key: '镜头', values: ['缓慢推镜', '固定镜头', '横向移动'] },
+      {
+        key: 'canvas.generation.parameter.model',
+        values: [
+          'canvas.generation.model.kling16',
+          'canvas.generation.model.runwayGen3',
+          'canvas.generation.model.lumaRay2',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.spec',
+        values: [
+          'canvas.generation.option.spec169',
+          'canvas.generation.option.spec916',
+          'canvas.generation.option.spec11',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.duration',
+        values: [
+          'canvas.generation.option.sixSeconds',
+          'canvas.generation.option.fourSeconds',
+          'canvas.generation.option.tenSeconds',
+        ],
+      },
+      {
+        key: 'canvas.generation.parameter.shot',
+        values: [
+          'canvas.generation.option.slowPush',
+          'canvas.generation.option.static',
+          'canvas.generation.option.horizontal',
+        ],
+      },
     ],
   },
 }
 
-export const ADD_MENU_ITEMS: Array<{ action: 'text' | 'image' | 'video' | 'file' | 'frame'; label: string; icon: string }> = [
-  { action: 'text', label: '文本生成', icon: 'T' },
-  { action: 'image', label: '图片生成', icon: '◒' },
-  { action: 'video', label: '视频生成', icon: '▻' },
-  { action: 'file', label: '文件', icon: '▤' },
-  { action: 'frame', label: 'Frame', icon: '□' },
+export const ADD_MENU_ITEMS: Array<{
+  action: 'text' | 'image' | 'video' | 'file' | 'frame'
+  labelKey: string
+  icon: string
+}> = [
+  { action: 'text', labelKey: 'canvas.add.text', icon: 'T' },
+  { action: 'image', labelKey: 'canvas.add.image', icon: '◒' },
+  { action: 'video', labelKey: 'canvas.add.video', icon: '▻' },
+  { action: 'file', labelKey: 'canvas.add.file', icon: '▤' },
+  { action: 'frame', labelKey: 'canvas.add.frame', icon: '□' },
 ]
 
 export const RESEARCH_CONTENT: Record<'research' | 'architecture' | 'roadmap', Array<{ title: string; body: string; phase?: string }>> = {

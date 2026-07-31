@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { lazy, Suspense } from 'react'
 import type { ExtensionComponentProps, TrustedReactExtension } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
 
 const CanvasPage = lazy(async () => {
   const module = await import('@/features/canvas/CanvasPage')
@@ -8,9 +9,10 @@ const CanvasPage = lazy(async () => {
 })
 
 function CanvasRoutePage({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
   return (
     <>
-      <Suspense fallback={<div className="state-block" role="status">正在加载画布</div>}>
+      <Suspense fallback={<div className="state-block" role="status">{t('canvas.loading')}</div>}>
         <CanvasPage />
       </Suspense>
       {children}

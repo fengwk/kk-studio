@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
@@ -8,7 +8,7 @@ import { AppProviders } from '@/app/providers'
 import { CanvasPage } from '@/features/canvas/CanvasPage'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { AppShell } from '@/platform/shell/AppShell'
-
+import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/studio-service', () => ({
   listCanvases: vi.fn(async () => ([
@@ -73,6 +73,59 @@ describe('Canvas feature vertical slice', () => {
     await user.click(card)
     expect(screen.getByLabelText(/无限画布/)).toBeInTheDocument()
     expect(screen.getByText('已保存')).toBeInTheDocument()
+  })
+
+  it('switches library and editor UI live between Chinese and English', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
+    await act(async () => {
+      setLocale('en-US')
+    })
+    expect(await screen.findByRole('heading', { name: /Put ideas, references, and results/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create a new canvas' })).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
+    expect(await screen.findByLabelText(/Infinite canvas/)).toBeInTheDocument()
+    expect(screen.getByText('Saved')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument()
+
+    await act(async () => {
+      setLocale('zh-CN')
+    })
+    expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
+    expect(screen.getByText('已保存')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '分享' })).toBeInTheDocument()
+  })
+
+  it('switches an interactive Agent run control and status live', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <CanvasPage />
+      </MemoryRouter>,
+    )
+    await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
+
+    await act(async () => {
+      setLocale('en-US')
+    })
+    const prompt = screen.getByLabelText('Describe a task for Agent')
+    await user.type(prompt, 'Continue organizing the matrix')
+    await user.click(screen.getByRole('button', { name: 'Send to Agent' }))
+    expect((await screen.findAllByRole('button', { name: 'Pause' })).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Running ·/)).toBeInTheDocument()
+
+    await act(async () => {
+      setLocale('zh-CN')
+    })
+    expect((await screen.findAllByRole('button', { name: '暂停' })).length).toBeGreaterThan(0)
+    expect(screen.getByText(/运行中 ·/)).toBeInTheDocument()
   })
 
   it('supports add menu keyboard navigation and fixed generator creation', async () => {

@@ -11,6 +11,7 @@ import type {
   GeneratorNode,
   ResultNode,
 } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 
 type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
 
@@ -76,12 +77,13 @@ function FrameNodeView({ data }: { data: FrameNode }) {
 }
 
 function WebNodeView({ data }: { data: ContentNode }) {
+  const { t } = useI18n()
   return (
     <div className="canvas-node node-web">
       <NodeHandles />
       <div className="web-strip" />
       <div className="node-content">
-        <NodeLabel icon="⌁" text="Web reference" />
+        <NodeLabel icon="⌁" text={t('canvas.node.webReference')} />
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="node-footer">
           <span>{data.meta}</span>
@@ -93,12 +95,13 @@ function WebNodeView({ data }: { data: ContentNode }) {
 }
 
 function ImageNodeView({ data }: { data: ContentNode }) {
+  const { t } = useI18n()
   return (
     <div className="canvas-node node-image">
       <NodeHandles />
       <div className="node-content">
         <div className="image-preview" />
-        <NodeLabel icon="◒" text="Image reference" />
+        <NodeLabel icon="◒" text={t('canvas.node.imageReference')} />
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="node-footer">
           <span>{data.meta}</span>
@@ -110,12 +113,13 @@ function ImageNodeView({ data }: { data: ContentNode }) {
 }
 
 function FileNodeView({ data }: { data: ContentNode }) {
+  const { t } = useI18n()
   return (
     <div className="canvas-node node-file">
       <NodeHandles />
       <div className="node-content">
         <span className="file-thumb">PDF</span>
-        <NodeLabel icon="▤" text="File" />
+        <NodeLabel icon="▤" text={t('canvas.node.file')} />
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="node-footer">
           <span>{data.meta}</span>
@@ -127,21 +131,26 @@ function FileNodeView({ data }: { data: ContentNode }) {
 }
 
 function TextNodeView({ data }: { data: ContentNode }) {
+  const { t } = useI18n()
   return (
     <div className="canvas-node node-text">
       <NodeHandles />
       <div className="node-content">
-        <NodeLabel icon="T" text={data.meta || 'Text'} />
+        <NodeLabel icon="T" text={data.meta || t('canvas.node.text')} />
         <NodeDetails title={data.title} copy={data.copy} />
       </div>
     </div>
   )
 }
 
-function GeneratorPreview({ node }: { node: GeneratorNode }) {
+function GeneratorPreview({ node, statusLabel }: { node: GeneratorNode; statusLabel: string }) {
+  const draftBadge = node.status === 'draft'
+    ? <span className="generator-preview-status">{statusLabel}</span>
+    : null
   if (node.generationMode === 'text') {
     return (
       <div className={`generator-preview generator-preview-text ${node.status}`}>
+        {draftBadge}
         {node.status === 'generated' ? (
           <>
             <p>{node.copy}</p>
@@ -161,6 +170,7 @@ function GeneratorPreview({ node }: { node: GeneratorNode }) {
   if (node.generationMode === 'image') {
     return (
       <div className={`generator-preview generator-preview-image ${node.status}`}>
+        {draftBadge}
         <i />
         <i />
         <span>✦</span>
@@ -169,6 +179,7 @@ function GeneratorPreview({ node }: { node: GeneratorNode }) {
   }
   return (
     <div className={`generator-preview generator-preview-video ${node.status}`}>
+      {draftBadge}
       <i />
       <span className="generator-play">▶</span>
       <small>00:06</small>
@@ -178,8 +189,14 @@ function GeneratorPreview({ node }: { node: GeneratorNode }) {
 
 function GeneratorNodeView({ data }: { data: GeneratorNode }) {
   const { activateGenerator } = useCanvasRuntime()
+  const { t } = useI18n()
   const profile = GENERATION_PROFILES[data.generationMode]
-  const status = data.status === 'generated' ? '已生成' : '草稿'
+  const profileLabel = t(profile.labelKey)
+  const status = t(
+    data.status === 'generated'
+      ? 'canvas.generation.status.generated'
+      : 'canvas.generation.status.draft',
+  )
   return (
     <div
       className={`canvas-node node-generator ${data.generationMode}`}
@@ -187,7 +204,7 @@ function GeneratorNodeView({ data }: { data: GeneratorNode }) {
       role="button"
       data-generation-mode={data.generationMode}
       data-generation-status={data.status}
-      aria-label={`${data.title}，打开生成操作台`}
+      aria-label={t('canvas.node.openWorkbench', { title: data.title })}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
@@ -198,14 +215,14 @@ function GeneratorNodeView({ data }: { data: GeneratorNode }) {
     >
       <NodeHandles />
       <div className="node-content">
-        <GeneratorPreview node={data} />
+        <GeneratorPreview node={data} statusLabel={status} />
         <div className="generator-node-head">
-          <NodeLabel icon={profile.icon} text={profile.label} />
+          <NodeLabel icon={profile.icon} text={profileLabel} />
           <span className={`generator-state ${data.status}`}>{status}</span>
         </div>
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="node-footer">
-          <span>{data.status === 'generated' ? data.meta : data.capability}</span>
+          <span>{data.status === 'generated' ? data.meta : t(data.capability)}</span>
           <span>{data.status === 'generated' ? '✓' : '↗'}</span>
         </div>
       </div>
@@ -215,21 +232,35 @@ function GeneratorNodeView({ data }: { data: GeneratorNode }) {
 
 function RunNodeView({ data }: { data: AgentRunNode }) {
   const { runAction } = useCanvasRuntime()
+  const { t } = useI18n()
   const running = data.status === 'running'
   const paused = data.status === 'paused'
-  const statusText = running
-    ? `运行中 · ${data.progress}/${data.total}`
-    : paused
-      ? `已暂停 · ${data.progress}/${data.total}`
-      : `已完成 · ${data.progress}/${data.total}`
-  const control = running ? '暂停' : paused ? '继续' : '重试'
+  const status = t(
+    running
+      ? 'canvas.agent.run.status.running'
+      : paused
+        ? 'canvas.agent.run.status.paused'
+        : 'canvas.agent.run.status.completed',
+  )
+  const statusText = t('canvas.agent.run.status.withProgress', {
+    status,
+    progress: data.progress,
+    total: data.total,
+  })
+  const control = t(
+    running
+      ? 'canvas.agent.run.control.pause'
+      : paused
+        ? 'canvas.agent.run.control.resume'
+        : 'canvas.agent.run.control.retry',
+  )
   const action = running ? 'pause' : paused ? 'resume' : 'retry'
   return (
     <div className="canvas-node node-run">
       <NodeHandles />
       <div className="node-content">
         <div className="run-header">
-          <NodeLabel icon="✦" text="Agent Run" />
+          <NodeLabel icon="✦" text={t('canvas.agent.run.label')} />
           <span className="run-status">{statusText}</span>
         </div>
         <div className="node-title">{data.title}</div>
@@ -241,7 +272,7 @@ function RunNodeView({ data }: { data: AgentRunNode }) {
             return (
               <div key={step} className={`run-step ${done ? 'done' : ''} ${current ? 'current' : ''}`}>
                 <b>{marker}</b>
-                {step}
+                {t(step)}
               </div>
             )
           })}
@@ -249,7 +280,7 @@ function RunNodeView({ data }: { data: AgentRunNode }) {
         <div
           className="run-progress"
           role="progressbar"
-          aria-label="Agent 运行进度"
+          aria-label={t('canvas.agent.run.progress')}
           aria-valuemin={0}
           aria-valuemax={data.total}
           aria-valuenow={data.progress}
@@ -274,16 +305,32 @@ function RunNodeView({ data }: { data: AgentRunNode }) {
 }
 
 function MatrixNodeView({ data }: { data: ContentNode }) {
-  const cells = ['能力', '参考', '目标', '整图上下文', '—', '✓', '过程可见', '△', '✓', '结果落位', '△', '✓']
+  const { t } = useI18n()
+  const cells = [
+    'canvas.matrix.capability',
+    'canvas.matrix.reference',
+    'canvas.matrix.target',
+    'canvas.matrix.wholeCanvas',
+    '—',
+    '✓',
+    'canvas.matrix.visibleProcess',
+    '△',
+    '✓',
+    'canvas.matrix.resultPlacement',
+    '△',
+    '✓',
+  ]
   return (
     <div className="canvas-node node-matrix">
       <NodeHandles />
       <div className="node-content">
-        <NodeLabel icon="▦" text="Structured result" />
+        <NodeLabel icon="▦" text={t('canvas.node.structuredResult')} />
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="matrix-table">
           {cells.map((cell, index) => (
-            <span key={`${cell}-${index}`} className={cell === '✓' ? 'yes' : undefined}>{cell}</span>
+            <span key={`${cell}-${index}`} className={cell === '✓' ? 'yes' : undefined}>
+              {cell.startsWith('canvas.') ? t(cell) : cell}
+            </span>
           ))}
         </div>
       </div>
@@ -292,7 +339,8 @@ function MatrixNodeView({ data }: { data: ContentNode }) {
 }
 
 function ResultNodeView({ data }: { data: ResultNode }) {
-  const label = data.variant === 'C' ? 'Result 新' : `Result ${data.variant}`
+  const { t } = useI18n()
+  const label = data.variant === 'C' ? t('canvas.node.resultNew') : `${t('canvas.node.result')} ${data.variant}`
   return (
     <div className={`canvas-node node-result variant-${data.variant}`}>
       <NodeHandles />
@@ -300,7 +348,7 @@ function ResultNodeView({ data }: { data: ResultNode }) {
         <NodeLabel icon="◎" text={label} />
         <NodeDetails title={data.title} copy={data.copy} />
         <div className="node-footer">
-          <span>可编辑结果</span>
+          <span>{t('canvas.node.editableResult')}</span>
           <span>✓</span>
         </div>
       </div>

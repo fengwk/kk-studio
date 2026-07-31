@@ -1907,7 +1907,7 @@ Color tokens come from global product design tokens in styles.css. */
   filter:saturate(.72);
 }
 
-.canvas-feature .generator-preview.draft::before {
+.canvas-feature .generator-preview-status {
   position:absolute;
   top:7px;
   left:7px;
@@ -1917,7 +1917,6 @@ Color tokens come from global product design tokens in styles.css. */
   color:var(--fg-muted);
   background: color-mix(in srgb, var(--surface) 72%, transparent);
   font-size:8px;
-  content:"草稿";
 }
 
 .canvas-feature .generator-preview.generated {

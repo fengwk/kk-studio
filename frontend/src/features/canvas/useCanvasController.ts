@@ -7,6 +7,7 @@ import {
 } from '@/features/canvas/reducer'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import { useCanvasTimers } from '@/features/canvas/useCanvasTimers'
+import { useI18n } from '@/shared/i18n'
 import type {
   AddMenuAction,
   AgentContextMode,
@@ -22,6 +23,7 @@ const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
 
 export function useCanvasController() {
   const [state, dispatch] = useReducer(canvasReducer, undefined, createInitialCanvasState)
+  const { t } = useI18n()
   const [stageMetrics, setStageMetricsState] = useState<StageMetrics>(DEFAULT_STAGE)
   const stageMetricsRef = useRef<StageMetrics>(DEFAULT_STAGE)
   const fitViewRef = useRef<(() => void) | null>(null)
@@ -65,7 +67,7 @@ export function useCanvasController() {
     const node = state.nodes.find((item) => item.type === 'run')
     return node && node.type === 'run' ? node : undefined
   }, [state.nodes])
-  const context = useMemo(() => getContextDescription(state), [state])
+  const context = getContextDescription(state, t)
 
   const setStageMetrics = useCallback((metrics: StageMetrics) => {
     stageMetricsRef.current = metrics

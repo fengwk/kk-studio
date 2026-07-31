@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
+import { useI18n } from '@/shared/i18n'
 
 /** Dock composer: add trigger + prompt + send. Mirrors ChatComposer boundary. */
 export function CanvasAgentComposer({ menuId }: { menuId: string }) {
@@ -12,6 +13,7 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
     sendAgent,
     toggleAddMenu,
   } = useCanvasRuntime()
+  const { t } = useI18n()
 
   useEffect(() => {
     const el = agentPromptRef.current
@@ -33,7 +35,7 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
         className="dock-add"
         type="button"
         ref={dockAddRef}
-        aria-label="添加内容"
+        aria-label={t('canvas.add.ariaLabel')}
         aria-expanded={state.addMenuOpen}
         aria-controls={menuId}
         onClick={toggleAddMenu}
@@ -43,8 +45,8 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
       <textarea
         ref={agentPromptRef}
         rows={1}
-        aria-label="向 Agent 描述任务"
-        placeholder="告诉 Agent 下一步要完成什么…"
+        aria-label={t('canvas.agent.prompt.ariaLabel')}
+        placeholder={t('canvas.agent.prompt.placeholder')}
         value={state.agentPrompt}
         onChange={(event) => setAgentPrompt(event.target.value)}
         onKeyDown={(event) => {
@@ -54,7 +56,7 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
           }
         }}
       />
-      <button className="dock-send" type="button" aria-label="发送给 Agent" onClick={sendAgent}>
+      <button className="dock-send" type="button" aria-label={t('canvas.agent.send')} onClick={sendAgent}>
         <SendIcon />
       </button>
     </div>

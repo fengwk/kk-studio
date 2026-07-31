@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { CanvasAgentMessage } from '@/features/canvas/agent/messages/CanvasAgentMessage'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { useI18n } from '@/shared/i18n'
 
 /** Thread container: context switcher + scrollable message list. */
 export function CanvasAgentThread() {
@@ -15,6 +16,7 @@ export function CanvasAgentThread() {
     runAction,
     consumeThreadScroll,
   } = useCanvasRuntime()
+  const { t } = useI18n()
 
   const messagesRef = useRef<HTMLDivElement>(null)
 
@@ -33,17 +35,17 @@ export function CanvasAgentThread() {
       hidden={!state.threadOpen}
       inert={!state.threadOpen}
       aria-hidden={!state.threadOpen}
-      aria-label="Agent 消息与运行状态"
+      aria-label={t('canvas.agent.thread.ariaLabel')}
     >
       <div className="thread-head">
-        <div className="context-switch" role="group" aria-label="Agent 上下文">
+        <div className="context-switch" role="group" aria-label={t('canvas.agent.context.ariaLabel')}>
           <button
             type="button"
             className={state.contextMode === 'selection' ? 'active' : undefined}
             aria-pressed={state.contextMode === 'selection'}
             onClick={() => setContextMode('selection')}
           >
-            当前选区
+            {t('canvas.agent.context.selection')}
             {' '}
             <span>{contextCount}</span>
           </button>
@@ -53,12 +55,12 @@ export function CanvasAgentThread() {
             aria-pressed={state.contextMode === 'whole'}
             onClick={() => setContextMode('whole')}
           >
-            整张画布
+            {t('canvas.agent.context.whole')}
           </button>
         </div>
         <div className="thread-actions">
-          <button className="thread-reset" type="button" onClick={resetDemo}>重置</button>
-          <button className="collapse-thread" type="button" aria-label="收起 Agent 消息" onClick={collapseThread}>⌄</button>
+          <button className="thread-reset" type="button" onClick={resetDemo}>{t('canvas.agent.reset')}</button>
+          <button className="collapse-thread" type="button" aria-label={t('canvas.agent.collapse')} onClick={collapseThread}>⌄</button>
         </div>
       </div>
       <p className="context-description">{contextDescription}</p>

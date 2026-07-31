@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { RESEARCH_CONTENT } from '@/features/canvas/data'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { ResearchTab } from '@/features/canvas/types'
+import { useI18n } from '@/shared/i18n'
 
 export function CanvasOverlays() {
   const {
@@ -13,6 +14,7 @@ export function CanvasOverlays() {
     helpCloseRef,
     researchCloseRef,
   } = useCanvasRuntime()
+  const { t } = useI18n()
 
   const content = RESEARCH_CONTENT[state.researchTab]
 
@@ -35,33 +37,33 @@ export function CanvasOverlays() {
         className={`side-panel ${state.researchOpen ? '' : 'hidden'}`}
         id="researchPanel"
         role="dialog"
-        aria-label="调研与架构说明"
+        aria-label={t('canvas.research.ariaLabel')}
         aria-hidden={!state.researchOpen}
         inert={!state.researchOpen}
       >
         <div className="panel-header">
           <div>
-            <span className="eyebrow">产品研究</span>
-            <h2>为什么这样设计？</h2>
+            <span className="eyebrow">{t('canvas.research.eyebrow')}</span>
+            <h2>{t('canvas.research.title')}</h2>
           </div>
           <button
             className="icon-button"
             type="button"
-            aria-label="关闭说明"
+            aria-label={t('canvas.research.close')}
             ref={researchCloseRef}
             onClick={() => setResearchOpen(false)}
           >
             ×
           </button>
         </div>
-        <div className="panel-tabs" role="group" aria-label="调研内容">
+        <div className="panel-tabs" role="group" aria-label={t('canvas.research.tabs')}>
           {(
             [
-              ['research', '竞品洞察'],
-              ['architecture', '方案基座'],
-              ['roadmap', '分期计划'],
+              ['research', 'canvas.research.tab.research'],
+              ['architecture', 'canvas.research.tab.architecture'],
+              ['roadmap', 'canvas.research.tab.roadmap'],
             ] as const
-          ).map(([tab, label]) => (
+          ).map(([tab, labelKey]) => (
             <button
               key={tab}
               type="button"
@@ -69,21 +71,21 @@ export function CanvasOverlays() {
               aria-pressed={state.researchTab === tab}
               onClick={() => setResearchTab(tab as ResearchTab)}
             >
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </div>
         <div className="panel-content" id="panelContent">
           {state.researchTab === 'architecture' ? (
             <>
-              <p className="panel-section-title">产品定位</p>
+              <p className="panel-section-title">{t('canvas.research.section.positioning')}</p>
               {content.slice(0, 1).map((item) => (
                 <article key={item.title} className="insight-card">
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
                 </article>
               ))}
-              <p className="panel-section-title">对象模型</p>
+              <p className="panel-section-title">{t('canvas.research.section.objectModel')}</p>
               <div className="model-flow">
                 CanvasDocument
                 <span>→</span>
@@ -98,7 +100,7 @@ export function CanvasOverlays() {
             </>
           ) : state.researchTab === 'roadmap' ? (
             <>
-              <p className="panel-section-title">从验证到生态</p>
+              <p className="panel-section-title">{t('canvas.research.section.roadmap')}</p>
               {content.map((item) => (
                 <article key={item.title} className="insight-card phase">
                   <span className="phase-index">{item.phase}</span>
@@ -111,7 +113,7 @@ export function CanvasOverlays() {
             </>
           ) : (
             <>
-              <p className="panel-section-title">关键竞品结论</p>
+              <p className="panel-section-title">{t('canvas.research.section.insights')}</p>
               {content.map((item) => (
                 <article key={item.title} className="insight-card">
                   <h3>{item.title}</h3>
@@ -131,13 +133,13 @@ export function CanvasOverlays() {
       >
         <div className="dialog-header">
           <div>
-            <span className="eyebrow">快捷操作</span>
-            <h2 id="helpDialogTitle">在画布中保持专注</h2>
+            <span className="eyebrow">{t('canvas.help.eyebrow')}</span>
+            <h2 id="helpDialogTitle">{t('canvas.help.title')}</h2>
           </div>
           <button
             className="icon-button"
             type="button"
-            aria-label="关闭快捷操作"
+            aria-label={t('canvas.help.close')}
             ref={helpCloseRef}
             onClick={() => setHelpOpen(false)}
           >
@@ -145,12 +147,12 @@ export function CanvasOverlays() {
           </button>
         </div>
         <div className="shortcut-grid">
-          <div><kbd>Esc</kbd><span>关闭浮层或清除选择</span></div>
-          <div><kbd>Delete</kbd><span>删除选中的对象</span></div>
-          <div><kbd>V / H / T</kbd><span>选择、平移或创建文本</span></div>
-          <div><kbd>0 / 1 / F</kbd><span>适应、100%、聚焦选区</span></div>
-          <div><kbd>⌘ / Ctrl K</kbd><span>聚焦底部 Agent Dock</span></div>
-          <div><kbd>Enter / Shift Enter</kbd><span>发送任务 / 换行</span></div>
+          <div><kbd>Esc</kbd><span>{t('canvas.help.shortcut.dismiss')}</span></div>
+          <div><kbd>Delete</kbd><span>{t('canvas.help.shortcut.delete')}</span></div>
+          <div><kbd>V / H / T</kbd><span>{t('canvas.help.shortcut.tools')}</span></div>
+          <div><kbd>0 / 1 / F</kbd><span>{t('canvas.help.shortcut.zoom')}</span></div>
+          <div><kbd>⌘ / Ctrl K</kbd><span>{t('canvas.help.shortcut.focusDock')}</span></div>
+          <div><kbd>Enter / Shift Enter</kbd><span>{t('canvas.help.shortcut.send')}</span></div>
         </div>
       </dialog>
 
