@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, apiClient, isConflictError, isVersionConflictError } from '@/shared/api/client'
+import { ApiError, apiClient, isConflictError } from '@/shared/api/client'
 
 const axiosMock = vi.hoisted(() => {
   const client = {
@@ -65,7 +65,6 @@ describe('apiClient', () => {
       errors: { resource: 'agent_model', expectedVersion: '2', actualVersion: '3' },
     })
     expect(isConflictError(envelopeError)).toBe(true)
-    expect(isVersionConflictError(envelopeError)).toBe(true)
 
     let transportError: ApiError | undefined
     try {
@@ -84,7 +83,6 @@ describe('apiClient', () => {
       errors: { resource: 'agent_model' },
     })
     expect(isConflictError(new ApiError('thread conflict', 409))).toBe(true)
-    expect(isVersionConflictError(transportError)).toBe(false)
   })
 
   it('delegates http requests to axios instance', async () => {

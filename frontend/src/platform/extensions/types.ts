@@ -16,7 +16,7 @@ export interface ExtensionComponentProps {
   children?: ReactNode
 }
 
-export interface Contribution {
+interface Contribution {
   id: string
   priority?: number
 }

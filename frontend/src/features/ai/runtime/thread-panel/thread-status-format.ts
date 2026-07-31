@@ -35,7 +35,7 @@ export interface ThreadStatusModelInput {
 }
 
 /** Normalize blank placeholder strings; returns "" for null/undefined/'undefined'/'null'/'-'. */
-export function clean(value?: string | null): string {
+function clean(value?: string | null): string {
   const text = (value ?? '').trim()
   if (!text || text === '-' || text === 'undefined' || text === 'null') {
     return ''
@@ -43,7 +43,7 @@ export function clean(value?: string | null): string {
   return text
 }
 
-export function formatTokens(count: number): string {
+function formatTokens(count: number): string {
   if (!Number.isFinite(count) || count <= 0) {
     return '0'
   }
@@ -62,12 +62,12 @@ export function formatTokens(count: number): string {
   return `${Math.round(count / 1_000_000)}M`
 }
 
-export function asInt(value: unknown): number {
+function asInt(value: unknown): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0
 }
 
-export function asNumber(value: unknown): number {
+function asNumber(value: unknown): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
 }

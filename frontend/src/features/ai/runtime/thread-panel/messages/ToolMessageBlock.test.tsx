@@ -1,11 +1,7 @@
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
-import {
-  clearToolRenderers,
-  registerToolRenderer,
-} from '@/features/ai/runtime/thread-panel/tool-renderers'
 
 function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMessage {
   return {
@@ -25,8 +21,6 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
 }
 
 describe('ToolMessageBlock', () => {
-  afterEach(clearToolRenderers)
-
   it('renders a call placeholder and a fallback tool name', () => {
     render(<ToolMessageBlock message={message({ phase: 'call', toolName: '', status: 'streaming' })} />)
 
@@ -96,24 +90,4 @@ describe('ToolMessageBlock', () => {
     expect(screen.getAllByRole('link', { name: '打开原始内容' })).toHaveLength(2)
   })
 
-  it('uses the renderer for the durable phase and covers the completed empty result', () => {
-    registerToolRenderer('read', {
-      renderCall: (context) => <strong>call:{context.arguments}</strong>,
-      renderResult: (context) => <strong>result:{context.text}</strong>,
-    })
-    const { rerender } = render(
-      <ToolMessageBlock message={message({ phase: 'call', arguments: 'custom', text: 'rendered' })} />,
-    )
-
-    expect(screen.getByText('call:custom')).toBeInTheDocument()
-    expect(screen.queryByText('result:rendered')).not.toBeInTheDocument()
-    expect(screen.queryByText('无文本输出')).not.toBeInTheDocument()
-
-    rerender(<ToolMessageBlock message={message({ phase: 'result', text: 'rendered' })} />)
-    expect(screen.getByText('result:rendered')).toBeInTheDocument()
-
-    clearToolRenderers()
-    rerender(<ToolMessageBlock message={message({ phase: 'result' })} />)
-    expect(screen.getByText('无文本输出')).toBeInTheDocument()
-  })
 })

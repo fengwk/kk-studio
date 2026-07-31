@@ -5,7 +5,7 @@ import type {
   InstantTimestamp,
 } from '@/shared/api/contracts/base'
 
-export interface ModelUsageCostSummaryDTO {
+interface ModelUsageCostSummaryDTO {
   currency: string
   input: BackendBigDecimal
   output: BackendBigDecimal
@@ -87,7 +87,7 @@ export interface HarnessThreadDTO {
 }
 
 /** Every external Thread mutation carries the expected epoch; a stale value yields 409. */
-export interface HarnessThreadEpochGuardDTO {
+interface HarnessThreadEpochGuardDTO {
   expectedExecutionEpoch: BackendLong
 }
 
@@ -141,7 +141,7 @@ export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO
  * Query-derived Thread status only. Invocation retry waits are projected as WAITING.
  * UNBOUND means the Thread has no head Entry yet and accepts bind/bootstrap only.
  */
-export type ThreadStatus = 'UNBOUND' | 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
+type ThreadStatus = 'UNBOUND' | 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
 
 /** Global automatic retry policy; PUT bodies are complete replacements. */
 export interface HarnessRetryPolicyDTO {
@@ -164,7 +164,7 @@ export type ThreadInputType =
   | 'SET_MODEL'
   | 'SET_YOLO'
 
-export type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
+type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
 
 export interface HarnessThreadInputDTO {
   inputId: string
@@ -231,7 +231,7 @@ export interface ModelInvocationDTO {
   safeStreamSnapshotJson: string | null
 }
 
-export interface InteractionDTO {
+interface InteractionDTO {
   id: string
   toolInvocationId: string
   projectionJson: string

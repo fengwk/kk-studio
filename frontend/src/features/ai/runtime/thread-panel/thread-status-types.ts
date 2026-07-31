@@ -1,6 +1,6 @@
-export type ThreadUsageNumber = number | string
+type ThreadUsageNumber = number | string
 
-export interface ThreadUsageCost {
+interface ThreadUsageCost {
   total: ThreadUsageNumber
 }
 

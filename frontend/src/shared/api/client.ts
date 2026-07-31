@@ -30,11 +30,6 @@ export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }
 
-/** Catalog CAS conflicts are a specific subset of generic HTTP 409 conflicts. */
-export function isVersionConflictError(error: unknown): boolean {
-  return error instanceof ApiError && error.code === 'version_conflict'
-}
-
 const axiosClient = axios.create({
   baseURL: apiBaseUrl,
   timeout: 60000,

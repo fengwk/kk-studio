@@ -13,7 +13,7 @@ export function contentText(content: Record<string, unknown>): string {
 }
 
 /** Canonical Tool delta: stringify object/array json values instead of dropping them. */
-export function stringifyJsonContent(value: unknown): string {
+function stringifyJsonContent(value: unknown): string {
   if (typeof value === 'string') {
     return value
   }
@@ -43,7 +43,7 @@ export function toArtifactAttachment(content: Record<string, unknown>): ToolAtta
   return [{ type, name: artifactId, mime: mediaType, data: `/api/ai/runtime/artifacts/${encodeURIComponent(artifactId)}` }]
 }
 
-export function artifactType(mediaType: string): ToolAttachmentType {
+function artifactType(mediaType: string): ToolAttachmentType {
   if (mediaType.startsWith('image/')) {
     return 'image'
   }

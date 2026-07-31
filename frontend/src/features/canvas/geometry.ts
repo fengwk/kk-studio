@@ -42,29 +42,6 @@ export function selectionBounds(nodes: CanvasNode[]): CanvasRect | null {
   }
 }
 
-export function zoomAtPoint(
-  viewport: CanvasViewport,
-  clientX: number,
-  clientY: number,
-  stageLeft: number,
-  stageTop: number,
-  nextScale: number,
-): CanvasViewport {
-  const scale = clampZoom(nextScale)
-  if (scale === viewport.scale) {
-    return viewport
-  }
-  const pointX = clientX - stageLeft
-  const pointY = clientY - stageTop
-  const worldX = (pointX - viewport.x) / viewport.scale
-  const worldY = (pointY - viewport.y) / viewport.scale
-  return {
-    scale,
-    x: pointX - worldX * scale,
-    y: pointY - worldY * scale,
-  }
-}
-
 export function findOpenCanvasPosition(
   nodes: CanvasNode[],
   size: CanvasSize,

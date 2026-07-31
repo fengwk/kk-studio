@@ -1,9 +1,5 @@
-import type { KeyValueDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
-import { newKeyValueDraft, newVariantDraft } from '@/features/ai/catalog/ai-resource-draft-primitives'
-
-export function createKeyValueDraft(key = '', value = ''): KeyValueDraft {
-  return newKeyValueDraft(key, value)
-}
+import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import { newVariantDraft } from '@/features/ai/catalog/ai-resource-draft-primitives'
 
 export function blankVariant(id = 'medium', reasoningEffort = ''): VariantDraft {
   return newVariantDraft({

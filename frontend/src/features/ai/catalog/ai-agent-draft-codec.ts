@@ -16,7 +16,7 @@ function normalizeNames(items: string[] | null | undefined): string[] {
 }
 
 /** UI 可展示为 env/name；持久化给 Agent 时去掉前缀，只保留短名。 */
-export function stripCapabilityPrefix(raw: string): string {
+function stripCapabilityPrefix(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) {
     return ''
@@ -33,7 +33,7 @@ export function stripCapabilityPrefix(raw: string): string {
  * 保存时去掉 env 前缀，并校验短名唯一。
  * 最终写入 Agent config 的永远是无前缀短名。
  */
-export function normalizeCapabilityShortNames(
+function normalizeCapabilityShortNames(
   items: string[] | null | undefined,
   kind: 'tools' | 'skills',
 ): string[] {

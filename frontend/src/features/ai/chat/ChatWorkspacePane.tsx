@@ -4,8 +4,6 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankComposerPane'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
 
-export { BLANK_PANE_COMMANDS, BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
-
 /**
  * Scene dispatcher for a single chat-workspace pane.
  *

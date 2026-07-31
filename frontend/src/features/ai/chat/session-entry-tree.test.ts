@@ -4,11 +4,8 @@ import {
   branchTarget,
   buildSessionEntryTree,
   isOnActivePath,
-  matchesSessionTreeFilter,
   parseHistorySearchTokens,
   resolveSelection,
-  sessionEntryKind,
-  sessionEntryPreview,
 } from '@/features/ai/chat/session-entry-tree'
 import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 
@@ -133,12 +130,10 @@ describe('Session Entry Tree', () => {
   })
 
   it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {
-    expect(sessionEntryKind(entry('unknown', null, 'MESSAGE', { message: { role: 'OTHER' } }))).toBe('other')
-    expect(sessionEntryKind(entry('custom', null, 'CUSTOM_MESSAGE', {}))).toBe('custom')
-    expect(matchesSessionTreeFilter('user', 'conversation')).toBe(true)
-    expect(matchesSessionTreeFilter('tool', 'conversation')).toBe(false)
-    expect(matchesSessionTreeFilter('other', 'conversation')).toBe(false)
-    expect(matchesSessionTreeFilter('other', 'all')).toBe(true)
+    const unknown = entry('unknown', null, 'MESSAGE', { message: { role: 'OTHER' } })
+    const custom = entry('custom', null, 'CUSTOM_MESSAGE', {})
+    expect(buildSessionEntryTree([unknown, custom], 'all').map((row) => row.kind)).toEqual(['other', 'custom'])
+    expect(buildSessionEntryTree([unknown, custom], 'conversation').map((row) => row.entry.entryId)).toEqual(['custom'])
   })
 
   it('excludes explicit thinking content from previews and search without truncating editable drafts', () => {
@@ -154,18 +149,18 @@ describe('Session Entry Tree', () => {
     const fullDraft = '用户原始内容 '.repeat(40)
     const custom = entry('custom-draft', 'root', 'CUSTOM_MESSAGE', message('SYSTEM', fullDraft))
 
-    expect(sessionEntryPreview(assistant)).toBe('面向用户的正文')
+    expect(buildSessionEntryTree([assistant], 'all')[0]?.preview).toBe('面向用户的正文')
     expect(buildSessionEntryTree([assistant], 'all', parseHistorySearchTokens('内部计划'))).toEqual([])
     expect(branchTarget(custom).draft).toBe(fullDraft)
-    expect(sessionEntryPreview(custom)).toHaveLength(220)
+    expect(buildSessionEntryTree([custom], 'all')[0]?.preview).toHaveLength(220)
   })
 
   it('flattens whitespace and truncates the projected preview to the configured limit', () => {
     const long = 'a'.repeat(500)
     const assistant = entry('long', null, 'MESSAGE', message('ASSISTANT', long))
-    expect(sessionEntryPreview(assistant)).toHaveLength(220)
+    expect(buildSessionEntryTree([assistant], 'all')[0]?.preview).toHaveLength(220)
     const compact = entry('compact', null, 'MESSAGE', message('ASSISTANT', 'line one\n\nline two'))
-    expect(sessionEntryPreview(compact)).toBe('line one line two')
+    expect(buildSessionEntryTree([compact], 'all')[0]?.preview).toBe('line one line two')
   })
 
   it('returns the active ancestry chain from a target back to the root in raw parent order', () => {

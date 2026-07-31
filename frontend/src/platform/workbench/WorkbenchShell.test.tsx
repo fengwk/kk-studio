@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider, useExtensionHost } from '@/platform/extensions/ExtensionHostContext'
+import { ExtensionHostProvider, useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { NavigationSlot, WorkbenchSlot } from '@/platform/workbench/WorkbenchSlots'
 
@@ -77,7 +77,7 @@ describe('WorkbenchShell', () => {
 })
 
 function MissingProviderProbe() {
-  useExtensionHost()
+  useExtensionHostSnapshot()
   return null
 }
 

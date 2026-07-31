@@ -7,7 +7,7 @@ import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
-import { applyChatLayout, createDefaultChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
+import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -137,7 +137,7 @@ describe('ChatWorkspacePage', () => {
 
   it('renders blank pane with chat default agent and switches layouts while retaining targets', async () => {
     const user = userEvent.setup()
-    const seeded = applyChatLayout(createDefaultChatPaneState(), 'split-2')
+    const seeded = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
     seeded.panes[0].threadId = 't1'
     saveChatPaneState('chat-1', seeded)
 

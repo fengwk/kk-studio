@@ -54,7 +54,7 @@ export function sortChatSessionsWithRunningFirst(
   )
 }
 
-export function toSessionSelectionItem(session: HarnessSessionDTO) {
+function toSessionSelectionItem(session: HarnessSessionDTO) {
   return {
     id: session.sessionId,
     title: session.title || session.sessionId,

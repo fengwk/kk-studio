@@ -11,12 +11,6 @@ export interface ProviderDraft {
   modelCallIdleTimeoutMillis: string
 }
 
-export interface KeyValueDraft {
-  id: string
-  key: string
-  value: string
-}
-
 /**
  * One Agent model variant. Form inputs are string-typed so empty fields map cleanly to
  * {@code null}/{@code undefined} on the wire {@link AgentModelVariantDTO}.

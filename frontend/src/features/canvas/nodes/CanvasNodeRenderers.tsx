@@ -12,7 +12,7 @@ import type {
   ResultNode,
 } from '@/features/canvas/types'
 
-export type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
+type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
 
 /** Invisible connection anchors so React Flow can draw domain Links (error #008 fix). */
 function NodeHandles() {

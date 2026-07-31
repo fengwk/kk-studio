@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
 import {
-  buildModelConfig,
   emptyModelDraft,
   extractContextWindow,
   extractDefaultVariantFromModel,
@@ -21,6 +20,10 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
     name: 'model-a',
     ...overrides,
   }
+}
+
+function buildModelConfig(input: ModelDraft): AgentModelConfigDTO {
+  return toEditableModel(input).config
 }
 
 function fullConfig(): AgentModelConfigDTO {

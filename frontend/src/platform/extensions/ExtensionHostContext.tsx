@@ -8,7 +8,7 @@ export function ExtensionHostProvider({ host, children }: PropsWithChildren<{ ho
   return <ExtensionHostContext.Provider value={host}>{children}</ExtensionHostContext.Provider>
 }
 
-export function useExtensionHost(): ExtensionHost {
+function useExtensionHost(): ExtensionHost {
   const host = useContext(ExtensionHostContext)
   if (!host) {
     throw new Error('ExtensionHostProvider is required')

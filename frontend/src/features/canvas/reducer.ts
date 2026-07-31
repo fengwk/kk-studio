@@ -756,11 +756,3 @@ export function getContextDescription(state: CanvasDocumentState): { count: numb
     description: '网页、截图和研究资料将作为本次输入。',
   }
 }
-
-export function getLibraryFilterCounts(cards: Array<{ owner: 'mine' | 'collab' }>) {
-  return {
-    all: cards.length,
-    mine: cards.filter((card) => card.owner === 'mine').length,
-    collab: cards.filter((card) => card.owner === 'collab').length,
-  }
-}
