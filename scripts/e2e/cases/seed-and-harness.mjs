@@ -467,6 +467,88 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread.commands_environment',
+  level: 'L1',
+  title: 'Thread SET_ENVIRONMENT set/clear、epoch fencing 与幂等',
+  docs: 'PUT /environment 支持 set/clear；重复 clientMessageId 返回原 input；过期 expectedExecutionEpoch => 409 且不入队',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    const { thread } = await createBootstrappedThread(ctx, {
+      agentDefinitionId: ctx.vars.agent.id,
+      title: `e2e-environment-command-${cid().slice(0, 8)}`,
+    })
+    const tid = String(thread.threadId)
+    const epoch = Number(thread.executionEpoch)
+    const environmentName = `e2e-thread-env-${cid().slice(0, 8)}`
+    const clientMessageId = cid()
+
+    const { status: setStatus, json: setJson } = await ctx.call(
+      'PUT',
+      `/api/ai/runtime/threads/${tid}/environment`,
+      {
+        environmentName,
+        clientMessageId,
+        expectedExecutionEpoch: epoch,
+      },
+    )
+    assert(setStatus === 202, JSON.stringify(setJson))
+    const setInput = envelopeData(setJson)
+    assert(setInput.inputType === 'SET_ENVIRONMENT', JSON.stringify(setInput))
+    const afterSet = await waitForEnvironmentInput(ctx, tid, setInput.inputId, environmentName)
+    assert(afterSet.thread.activeEnvironmentName === environmentName, JSON.stringify(afterSet))
+
+    const { json: replayJson } = await ctx.call(
+      'PUT',
+      `/api/ai/runtime/threads/${tid}/environment`,
+      {
+        environmentName: `ignored-${cid().slice(0, 8)}`,
+        clientMessageId,
+        expectedExecutionEpoch: epoch,
+      },
+    )
+    const replay = envelopeData(replayJson)
+    assert(String(replay.inputId) === String(setInput.inputId), JSON.stringify({ setInput, replay }))
+    assert(replay.payloadJson === setInput.payloadJson, JSON.stringify({ setInput, replay }))
+
+    const staleClientMessageId = cid()
+    await expectHttpError(
+      () =>
+        ctx.call('PUT', `/api/ai/runtime/threads/${tid}/environment`, {
+          environmentName: `stale-${cid().slice(0, 8)}`,
+          clientMessageId: staleClientMessageId,
+          expectedExecutionEpoch: epoch - 1,
+        }),
+      { status: 409, messageIncludes: /stale execution epoch/i },
+    )
+    const afterStale = await getThread(ctx, tid)
+    assert(afterStale.activeEnvironmentName === environmentName, JSON.stringify(afterStale))
+    const inputsAfterStale = await snapshotInputs(ctx, tid)
+    assert(
+      !inputsAfterStale.some((input) => input.clientMessageId === staleClientMessageId),
+      JSON.stringify(inputsAfterStale),
+    )
+
+    const { json: clearJson } = await ctx.call(
+      'PUT',
+      `/api/ai/runtime/threads/${tid}/environment`,
+      {
+        environmentName: null,
+        clientMessageId: cid(),
+        expectedExecutionEpoch: epoch,
+      },
+    )
+    const clearInput = envelopeData(clearJson)
+    assert(clearInput.inputType === 'SET_ENVIRONMENT', JSON.stringify(clearInput))
+    const afterClear = await waitForEnvironmentInput(ctx, tid, clearInput.inputId, null)
+    assert(afterClear.thread.activeEnvironmentName == null, JSON.stringify(afterClear))
+    ctx.writeArtifact(
+      'environment-command.json',
+      JSON.stringify({ setInput, replay, afterSet, afterStale, clearInput, afterClear }, null, 2),
+    )
+  },
+})
+
+registerCase({
   id: 'thread.commands_model_invalid_variant_rejected',
   level: 'L1',
   title: 'Thread SET_MODEL 非法 Variant 在入队前拒绝',
@@ -576,3 +658,22 @@ registerCase({
     }
   },
 })
+
+async function waitForEnvironmentInput(ctx, threadId, inputId, expectedEnvironmentName) {
+  let last = null
+  for (let i = 0; i < 60; i++) {
+    const inputs = await snapshotInputs(ctx, threadId)
+    const input = inputs.find((candidate) => String(candidate.inputId) === String(inputId))
+    const thread = await getThread(ctx, threadId)
+    last = { input, thread, inputs }
+    const environmentMatches =
+      expectedEnvironmentName == null
+        ? thread.activeEnvironmentName == null
+        : thread.activeEnvironmentName === expectedEnvironmentName
+    if (input?.status === 'APPLIED' && environmentMatches && !thread.processing) {
+      return last
+    }
+    await sleep(250)
+  }
+  throw new Error(`Environment input did not apply: ${JSON.stringify(last)}`)
+}

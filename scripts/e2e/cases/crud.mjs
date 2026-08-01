@@ -278,7 +278,7 @@ registerCase({
         && updatedConfig.tools.length === 0
         && Array.isArray(updatedConfig.skills)
         && updatedConfig.skills.length === 0
-        && updatedConfig.environmentName == null
+        && Object.keys(updatedConfig).sort().join(',') === 'skills,tools'
         && !('allowedSubagents' in updatedConfig)
         && !('executionPolicy' in updatedConfig),
       JSON.stringify(updatedConfig),
@@ -305,6 +305,69 @@ registerCase({
         }),
       { status: 400, messageIncludes: /defaultAgentId|positive|blank|invalid/i },
     )
+  },
+})
+
+registerCase({
+  id: 'crud.chat.default_environment',
+  level: 'L1',
+  title: 'Chat defaultEnvironmentName 创建/更新/清除',
+  docs: 'create/update 只接受 canonical Environment name；显式 null 清除；空白或带首尾空格 => 400',
+  async run(ctx) {
+    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
+    const agent = pageResults(agentsJson)[0]
+    assert(agent?.id, 'need seeded agent')
+    const suffix = cid().slice(0, 8)
+    const initialEnvironment = `e2e-chat-env-${suffix}`
+    const updatedEnvironment = `e2e-chat-env-updated-${suffix}`
+
+    await expectHttpError(
+      () =>
+        ctx.call('POST', '/api/ai/chat', {
+          title: `e2e-invalid-chat-env-${suffix}`,
+          defaultAgentId: String(agent.id),
+          defaultEnvironmentName: ` invalid-${suffix} `,
+        }),
+      { status: 400, messageIncludes: /defaultEnvironmentName|whitespace|canonical/i },
+    )
+
+    const { json: createJson } = await ctx.call('POST', '/api/ai/chat', {
+      title: `e2e-chat-env-${suffix}`,
+      defaultAgentId: String(agent.id),
+      defaultEnvironmentName: initialEnvironment,
+    })
+    let chat = envelopeData(createJson)
+    const chatId = String(chat.id)
+    assert(chat.defaultEnvironmentName === initialEnvironment, JSON.stringify(chat))
+    try {
+      await expectHttpError(
+        () =>
+          ctx.call('PUT', `/api/ai/chat/${chatId}`, {
+            defaultEnvironmentName: ' ',
+            expectedVersion: chat.version,
+          }),
+        { status: 400, messageIncludes: /defaultEnvironmentName|blank/i },
+      )
+
+      const { json: updateJson } = await ctx.call('PUT', `/api/ai/chat/${chatId}`, {
+        defaultEnvironmentName: updatedEnvironment,
+        expectedVersion: chat.version,
+      })
+      chat = envelopeData(updateJson)
+      assert(chat.defaultEnvironmentName === updatedEnvironment, JSON.stringify(chat))
+
+      const { json: clearJson } = await ctx.call('PUT', `/api/ai/chat/${chatId}`, {
+        defaultEnvironmentName: null,
+        expectedVersion: chat.version,
+      })
+      chat = envelopeData(clearJson)
+      assert(chat.defaultEnvironmentName == null, JSON.stringify(chat))
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chat/${chatId}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
   },
 })
 
@@ -356,15 +419,17 @@ registerCase({
   id: 'crud.chat.thread_association_pagination',
   level: 'L1',
   title: 'Chat 关联 Thread 并按 opaque cursor 分页',
-  docs: 'Chat-scoped Thread 创建与全局 Thread 关联幂等；当前 Chat 与全局列表均返回 {items,nextCursor}',
+  docs: 'Chat-scoped POST 原子创建/关联/bootstrap 并返回绑定 Thread；全局 Thread 关联幂等；列表返回 {items,nextCursor}',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
     const agent = pageResults(agentsJson)[0]
     assert(agent?.id, 'need seeded agent')
+    const defaultEnvironmentName = `e2e-chat-thread-env-${cid().slice(0, 8)}`
 
     const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
       title: `e2e-chat-thread-${cid().slice(0, 8)}`,
       defaultAgentId: String(agent.id),
+      defaultEnvironmentName,
     })
     const chat = envelopeData(chatJson)
     const chatId = String(chat.id)
@@ -374,7 +439,10 @@ registerCase({
         `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
       )
       const scopedThread = envelopeData(scopedCreateJson)
-      assert(scopedThread.status === 'UNBOUND', JSON.stringify(scopedThread))
+      assert(scopedThread.status === 'IDLE', JSON.stringify(scopedThread))
+      assert(Number(scopedThread.executionEpoch) === 1, JSON.stringify(scopedThread))
+      assert(scopedThread.sessionId && scopedThread.headEntryId, JSON.stringify(scopedThread))
+      assert(scopedThread.activeEnvironmentName === defaultEnvironmentName, JSON.stringify(scopedThread))
 
       const globalThread = await createUnboundThread(ctx)
       await ctx.call(
