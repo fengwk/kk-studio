@@ -206,7 +206,7 @@ function writeSummaryAndReport(runDir, runId, args, results, startedAt, finished
     lines.push('')
     lines.push('1. `reports/e2e/latest/report.md` + `summary.json`')
     lines.push('2. `cases/<id>.json` + `artifacts/<id>/`')
-    lines.push('3. `logs/` or `target/e2e/`')
+    lines.push('3. `logs/` or `runtime/e2e/`')
     lines.push('4. Re-run: `./scripts/e2e.sh --only <caseId>`')
     lines.push('')
   } else {
@@ -228,7 +228,7 @@ function publishLatest(reportRoot, runDir) {
 }
 
 function maybeCopyRuntimeLogs(runDir) {
-  const candidates = [path.join(REPO_ROOT, 'target', 'e2e'), path.join(REPO_ROOT, 'target', 'dev')]
+  const candidates = [path.join(REPO_ROOT, 'runtime', 'e2e'), path.join(REPO_ROOT, 'runtime', 'dev')]
   const dest = path.join(runDir, 'logs')
   for (const base of candidates) {
     if (!existsSync(base)) continue

@@ -1,4 +1,4 @@
-"""Permanent guards for clean dev and E2E package commands."""
+"""Permanent guards for clean package and runtime work-directory contracts."""
 
 import re
 import unittest
@@ -35,6 +35,16 @@ class TestBuildScripts(unittest.TestCase):
 
     def test_dev_backend_start_uses_clean_package(self):
         self.assert_clean_package("scripts/dev.sh", "package_backend")
+
+    def test_runtime_work_directories_survive_maven_clean(self):
+        e2e_lib = (REPOSITORY_ROOT / "scripts/e2e/lib.sh").read_text()
+        dev_script = (REPOSITORY_ROOT / "scripts/dev.sh").read_text()
+        matrix = (REPOSITORY_ROOT / "scripts/e2e/run-matrix.mjs").read_text()
+
+        self.assertIn('WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}', e2e_lib)
+        self.assertIn('WORK_DIR=${DEV_WORK_DIR:-"$APP_HOME/runtime/dev"}', dev_script)
+        self.assertIn("path.join(REPO_ROOT, 'runtime', 'e2e')", matrix)
+        self.assertIn("path.join(REPO_ROOT, 'runtime', 'dev')", matrix)
 
 
 if __name__ == "__main__":
