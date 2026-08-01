@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -15,8 +16,9 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -57,7 +59,7 @@ public class EnvironmentDaemonGateway
   private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final DaemonToolCapabilitiesCodec capabilitiesCodec;
+  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
@@ -71,12 +73,10 @@ public class EnvironmentDaemonGateway
 
   public EnvironmentDaemonGateway(
       LiveEnvironmentRegistry environmentRegistry,
-      DaemonToolCapabilitiesCodec capabilitiesCodec,
       EnvironmentGatewayProperties properties,
       Clock clock,
       EnvironmentReadyListener environmentReadyListener) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.environmentReadyListener =
@@ -108,9 +108,11 @@ public class EnvironmentDaemonGateway
     }
     List<Runnable> deferred = new ArrayList<>();
     RuntimeException protocolError = null;
+    String receivedEnvironmentName = null;
     synchronized (state) {
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
+        receivedEnvironmentName = envelope.environmentName();
         if (!state.acceptInbound(envelope, envelopeCodec.readPayload(envelope))) {
           return;
         }
@@ -120,7 +122,7 @@ public class EnvironmentDaemonGateway
       }
     }
     if (protocolError != null) {
-      protocolFailure(state, protocolError);
+      protocolFailure(state, protocolError, receivedEnvironmentName);
       return;
     }
     runDeferred(deferred);
@@ -158,16 +160,8 @@ public class EnvironmentDaemonGateway
             name + " already has an active remote tool invocation");
       }
       ToolDescriptor capability =
-          environmentRegistry
-              .find(name)
-              .flatMap(
-                  env ->
-                      env.tools().stream()
-                          .filter(
-                              tool ->
-                                  tool.name().equals(request.call().toolName())
-                                      && tool.version().equals(request.descriptor().version()))
-                          .findFirst())
+          EnvironmentToolCatalog.find(request.call().toolName())
+              .filter(tool -> tool.version().equals(request.descriptor().version()))
               .orElse(null);
       if (capability == null || !capability.equals(request.descriptor())) {
         throw new RemoteToolUnavailableException(
@@ -275,7 +269,6 @@ public class EnvironmentDaemonGateway
     }
     switch (envelope.messageType()) {
       case HELLO -> handleHello(state, envelope);
-      case CAPABILITIES -> handleCapabilities(state, envelope);
       case READY -> handleReady(state, envelope, deferred);
       case HEARTBEAT -> handleHeartbeat(state, envelope);
       case STARTED -> handleStarted(state, envelope);
@@ -299,10 +292,16 @@ public class EnvironmentDaemonGateway
     requireNoInvocationId(envelope);
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     rejectUnexpectedFields(
-        payload, Set.of("daemonId", "protocolVersion", "gatewayToken"), "HELLO payload");
+        payload,
+        Set.of("daemonId", "protocolVersion", "gatewayToken", "toolCatalogVersion"),
+        "HELLO payload");
     requiredText(payload, "daemonId", "HELLO payload");
     if (requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION_1) {
       throw new DaemonProtocolException("HELLO payload.protocolVersion must be 1");
+    }
+    if (!EnvironmentToolCatalog.version()
+        .equals(requiredText(payload, "toolCatalogVersion", "HELLO payload"))) {
+      throw new DaemonProtocolException("HELLO toolCatalogVersion does not match server catalog");
     }
     verifyGatewayToken(requiredText(payload, "gatewayToken", "HELLO payload"));
     String environmentName = requireNonBlank(envelope.environmentName(), "environmentName");
@@ -319,28 +318,16 @@ public class EnvironmentDaemonGateway
     send(state, DaemonMessageType.WELCOME, null, "{}");
   }
 
-  private void handleCapabilities(ConnectionState state, DaemonEnvelope envelope) {
-    requireHello(state);
-    requireNoInvocationId(envelope);
-    var capabilities = capabilitiesCodec.decode(envelope.payloadJson());
-    environmentRegistry.updateCapabilities(
-        state.environmentName, state.connection, capabilities, clock.instant());
-    state.capabilitiesReceived = true;
-  }
-
   private void handleReady(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireHello(state);
     requireNoInvocationId(envelope);
-    if (!state.capabilitiesReceived) {
-      throw new DaemonProtocolException("CAPABILITIES must precede READY");
+    if (state.ready) {
+      throw new DaemonProtocolException("READY may only be sent once per connection");
     }
-    ObjectNode payload = envelopeCodec.readPayload(envelope);
-    rejectUnexpectedFields(payload, Set.of("pull"), "READY payload");
-    JsonNode pull = payload.get("pull");
-    if (pull == null || !pull.isBoolean() || !pull.booleanValue()) {
-      throw new DaemonProtocolException("READY payload.pull must be true");
-    }
+    List<DaemonSkillDescriptor> skills = skillsCodec.decode(envelope.payloadJson());
+    environmentRegistry.updateSkills(
+        state.environmentName, state.connection, skills, clock.instant());
     Instant now = clock.instant();
     environmentRegistry.markReady(state.environmentName, state.connection, now);
     state.ready = true;
@@ -536,11 +523,32 @@ public class EnvironmentDaemonGateway
     }
   }
 
-  private void protocolFailure(ConnectionState state, RuntimeException error) {
+  private void protocolFailure(
+      ConnectionState state, RuntimeException error, String receivedEnvironmentName) {
     String message = errorMessage(error, "invalid daemon protocol message");
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("message", message);
-    send(state, DaemonMessageType.ERROR, null, envelopeCodec.writeJson(payload));
+    if (state.environmentName == null && receivedEnvironmentName != null) {
+      synchronized (state) {
+        if (!state.cleaned && !state.sendFailed && state.connection.isOpen()) {
+          DaemonEnvelope envelope =
+              new DaemonEnvelope(
+                  DaemonProtocol.VERSION_1,
+                  DaemonMessageType.ERROR,
+                  receivedEnvironmentName,
+                  null,
+                  state.outboundSequence++,
+                  envelopeCodec.writeJson(payload));
+          try {
+            state.connection.sendText(envelopeCodec.encode(envelope));
+          } catch (RuntimeException ignored) {
+            state.sendFailed = true;
+          }
+        }
+      }
+    } else {
+      send(state, DaemonMessageType.ERROR, null, envelopeCodec.writeJson(payload));
+    }
     close(state.connection.connectionId());
   }
 
@@ -815,7 +823,6 @@ public class EnvironmentDaemonGateway
     private final EnvironmentDaemonConnection connection;
     private volatile String environmentName;
     private volatile boolean helloReceived;
-    private volatile boolean capabilitiesReceived;
     private volatile boolean ready;
 
     /** Transport is unusable for further sends (failed send or cleanup started). */

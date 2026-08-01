@@ -10,4 +10,7 @@ public class ChatCreateDTO {
 
   /** Required existing Agent definition id. */
   private String defaultAgentId;
+
+  /** Optional live Environment identity; it is validated only as a canonical name. */
+  private String defaultEnvironmentName;
 }

@@ -19,62 +19,35 @@ import java.util.Set;
 class ToolDomainContractsTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-  /** ToolInvocation 快照保存单 bigint id、冻结 descriptor 与统一 Invocation 状态。 */
   @Test
-  void validatesToolInvocationSnapshot() {
-    ToolInvocation invocation =
-        invocation(1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null);
-    assertEquals(InvocationStatus.QUEUED, invocation.status());
+  void validatesToolInvocationSnapshotAndBoundTarget() {
+    ToolInvocation platform = invocation(1L, 2L, 3L, 0, "call", "tool", "1", null);
+    ToolInvocation environment = invocation(1L, 2L, 3L, 0, "call", "tool", "1", "env-9");
+    assertEquals(InvocationStatus.QUEUED, platform.status());
+    assertEquals(null, platform.environmentName());
+    assertEquals("env-9", environment.environmentName());
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(0L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null));
+        IllegalArgumentException.class, () -> invocation(0L, 2L, 3L, 0, "call", "tool", "1", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> invocation(1L, 0L, 3L, 0, "call", "tool", "1", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> invocation(1L, 2L, 0L, 0, "call", "tool", "1", null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(1L, 0L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null));
+        () -> invocation(1L, 2L, 3L, -1, "call", "tool", "1", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, " ", "tool", "1", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", " "));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 0L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null));
+        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", "e".repeat(129)));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            invocation(1L, 2L, 3L, -1, "call", "tool", "1", ToolExecutionLocation.PLATFORM, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 3L, 0, " ", "tool", "1", ToolExecutionLocation.PLATFORM, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            invocation(
-                1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.PLATFORM, "env-9"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            invocation(
-                1L, 2L, 3L, 0, "call", "tool", "1", ToolExecutionLocation.ENVIRONMENT, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            invocation(
-                1L,
-                2L,
-                3L,
-                0,
-                "call",
-                "tool",
-                "1",
-                ToolExecutionLocation.ENVIRONMENT,
-                "e".repeat(129)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            invocation(
-                1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", ToolExecutionLocation.PLATFORM, null));
+        () -> invocation(1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", null));
   }
 
-  /**
-   * FAILED must accept PENDING (setup failure), ALLOWED (post-allow execution failure), and DENIED.
-   */
   @Test
   void failedAcceptsPendingAllowedAndDenied() {
     assertEquals(InvocationStatus.FAILED, failed(ToolPermissionState.PENDING).status());
@@ -87,10 +60,27 @@ class ToolDomainContractsTest {
     assertEquals(ToolPermissionState.DENIED, failed(ToolPermissionState.DENIED).permissionState());
   }
 
-  /** FAILED must reject ASKED (only pairs with WAITING_INTERACTION). */
   @Test
   void failedRejectsAsked() {
     assertThrows(IllegalArgumentException.class, () -> failed(ToolPermissionState.ASKED));
+  }
+
+  @Test
+  void validatesFrozenToolBinding() {
+    ToolBinding platform = ToolBinding.of(descriptor("tool"));
+    assertEquals(null, platform.environmentName());
+    ToolBinding environment = ToolBinding.of(descriptor("environment"), "env-9");
+    assertEquals("env-9", environment.environmentName());
+
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), " "));
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), "\tenv"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ToolBinding.of(descriptor("environment"), "e".repeat(129)));
+    assertThrows(
+        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("tool", "v".repeat(129))));
   }
 
   private static ToolInvocation failed(ToolPermissionState permissionState) {
@@ -98,11 +88,11 @@ class ToolDomainContractsTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor("tool"),
         "{}",
-        ToolExecutionLocation.PLATFORM,
         null,
         0L,
         InvocationStatus.FAILED,
@@ -121,33 +111,6 @@ class ToolDomainContractsTest {
         false);
   }
 
-  /** Binding 拥有 location；environmentName 只属于 ENVIRONMENT。 */
-  @Test
-  void validatesFrozenToolBinding() {
-    ToolBinding platform = ToolBinding.of(descriptor("tool"));
-    assertEquals(ToolExecutionLocation.PLATFORM, platform.location());
-    assertEquals(null, platform.environmentName());
-    ToolBinding environment = ToolBinding.of(descriptor("environment"), "env-9");
-    assertEquals("env-9", environment.environmentName());
-    assertEquals(ToolExecutionLocation.ENVIRONMENT, environment.location());
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(descriptor("tool"), ToolExecutionLocation.PLATFORM, "env-1"));
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), " "));
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("environment"), "e".repeat(129)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(descriptor("environment"), ToolExecutionLocation.ENVIRONMENT, null));
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("tool", "v".repeat(129))));
-  }
-
   private static ToolInvocation invocation(
       long id,
       long threadId,
@@ -156,17 +119,16 @@ class ToolDomainContractsTest {
       String toolCallId,
       String toolName,
       String toolVersion,
-      ToolExecutionLocation location,
       String environmentName) {
     return new ToolInvocation(
         id,
         threadId,
         assistantEntryId,
+        assistantEntryId + 1,
         ordinal,
         toolCallId,
         descriptor(toolName, toolVersion),
         "{}",
-        location,
         environmentName,
         0L,
         InvocationStatus.QUEUED,

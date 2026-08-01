@@ -24,11 +24,10 @@ import java.util.List;
 public class AgentDefinitionMutationFactoryTest {
 
   @Test
-  public void shouldPersistCanonicalCapabilityListsAndEnvironmentName() throws Exception {
+  public void shouldPersistCanonicalCapabilityLists() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setEnvironmentName("local-dev");
     config.setTools(List.of("browser"));
     config.setSkills(List.of("java", "dev"));
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
@@ -40,7 +39,6 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
 
-    assertEquals("local-dev", stored.getEnvironmentName());
     assertEquals(List.of("browser"), stored.getTools());
     assertEquals(List.of("java", "dev"), stored.getSkills());
   }
@@ -95,7 +93,6 @@ public class AgentDefinitionMutationFactoryTest {
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of(), stored.getTools());
     assertEquals(List.of(), stored.getSkills());
-    assertNull(stored.getEnvironmentName());
   }
 
   @Test
@@ -119,42 +116,6 @@ public class AgentDefinitionMutationFactoryTest {
     // Variant override is optional; null means use model.defaultVariant at apply/runtime.
     AgentDefinition allowedBlankVariant = factory.newAgent(2L, incomplete);
     assertNull(allowedBlankVariant.getVariant());
-  }
-
-  @Test
-  public void shouldRejectBlankOrWhitespaceEnvironmentName() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setConfig(config);
-
-    config.setEnvironmentName(" ");
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
-
-    config.setEnvironmentName(" local ");
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
-  }
-
-  @Test
-  public void shouldPersistNullEnvironmentNameWithProjectJacksonConvention() throws Exception {
-    ObjectMapper objectMapper = new ObjectMapper();
-    AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setVariant("default");
-    create.setConfig(config);
-
-    AgentDefinition definition = factory.newAgent(2L, create);
-
-    AgentDefinitionConfigDTO stored =
-        objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-    assertNull(stored.getEnvironmentName());
   }
 
   @Test

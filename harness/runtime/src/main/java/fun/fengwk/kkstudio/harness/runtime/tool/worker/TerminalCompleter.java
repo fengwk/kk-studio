@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
@@ -35,12 +34,6 @@ import java.util.Objects;
  * captured as a {@link TerminalResultPreparationException} so the caller can converge to a
  * deterministic {@code FAILED} row with the matching error kind and never run the persisted-success
  * path.
- *
- * <p>{@link #releaseUnstarted} owns the conservative re-queue path for a successful claim whose
- * post-claim work was rejected before any external Tool I/O. The previous-status precondition is
- * preserved: {@code QUEUED} releases return to the durable head; {@code RETRY_WAIT} releases use
- * the {@link ToolWorkerConfig#unavailableRetryDelay() configured retry delay} so a transient
- * environment outage cannot starve siblings.
  */
 final class TerminalCompleter {
 
@@ -116,34 +109,6 @@ final class TerminalCompleter {
     Instant now = clock.instant();
     return transactions.completeUnknown(claimed, error, lastObservedActivityAt, now)
         == ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  /**
-   * Release a successful claim whose post-claim work never produced external Tool I/O. Pre-claim
-   * state comes from {@link ClaimedToolInvocation#previousStatus()}; {@code QUEUED} returns to
-   * immediate dispatch, {@code RETRY_WAIT} reschedules at {@link
-   * ToolWorkerConfig#unavailableRetryDelay()} so the next due scan re-attempts. {@code RETRY_WAIT}
-   * releases whose next attempt would land past the deadline converge to a terminal {@code FAILED +
-   * EXECUTION_FAILED}.
-   */
-  void releaseUnstarted(ClaimedToolInvocation claimed, Instant now) {
-    InvocationStatus previousStatus = claimed.previousStatus();
-    Instant nextAttemptAt = null;
-    if (previousStatus == InvocationStatus.RETRY_WAIT) {
-      nextAttemptAt = now.plus(config.unavailableRetryDelay());
-      if (!nextAttemptAt.isBefore(claimed.invocation().deadlineAt())) {
-        completeFailure(
-            claimed,
-            new ToolInvocationError(
-                "EXECUTION_FAILED", "Environment was unavailable before the Tool deadline."),
-            claimed.invocation().lastActivityAt());
-        return;
-      }
-    } else if (previousStatus != InvocationStatus.QUEUED) {
-      throw new IllegalStateException(
-          "unstarted release requires a QUEUED or RETRY_WAIT claim, but was " + previousStatus);
-    }
-    transactions.releaseUnstarted(claimed, nextAttemptAt, now);
   }
 
   /**

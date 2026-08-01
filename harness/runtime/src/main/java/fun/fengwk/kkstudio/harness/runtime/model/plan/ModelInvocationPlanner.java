@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 import java.util.ArrayList;
@@ -39,21 +41,25 @@ public final class ModelInvocationPlanner {
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
+  private final RuntimeCapabilityResolver capabilityResolver;
 
-  public ModelInvocationPlanner() {
+  public ModelInvocationPlanner(RuntimeCapabilityResolver capabilityResolver) {
     this(
         new ProviderMessageProjector(),
         new ToolDescriptorJsonCodec(),
-        new PromptCacheAffinityKeyFactory());
+        new PromptCacheAffinityKeyFactory(),
+        capabilityResolver);
   }
 
   ModelInvocationPlanner(
       ProviderMessageProjector messageProjector,
       ToolDescriptorJsonCodec toolDescriptorCodec,
-      PromptCacheAffinityKeyFactory cacheKeyFactory) {
+      PromptCacheAffinityKeyFactory cacheKeyFactory,
+      RuntimeCapabilityResolver capabilityResolver) {
     this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
     this.toolDescriptorCodec = Objects.requireNonNull(toolDescriptorCodec, "toolDescriptorCodec");
     this.cacheKeyFactory = Objects.requireNonNull(cacheKeyFactory, "cacheKeyFactory");
+    this.capabilityResolver = Objects.requireNonNull(capabilityResolver, "capabilityResolver");
   }
 
   /**
@@ -77,9 +83,12 @@ public final class ModelInvocationPlanner {
 
     List<SessionEntry> debtPrefix = List.copyOf(path.subList(0, debtIndex + 1));
     RuntimeConfigSnapshot config = latestConfig(debtPrefix);
-    List<AgentMessage> semanticMessages = projectSemanticMessages(debtPrefix, config);
+    RuntimeCapabilityResolver.ResolvedCapabilities capabilities =
+        capabilityResolver.resolve(config);
+    List<AgentMessage> semanticMessages =
+        projectSemanticMessages(debtPrefix, config, capabilities.skillSnapshots());
     List<ProviderMessage> providerMessages = messageProjector.project(semanticMessages);
-    List<ProviderToolDefinition> providerTools = providerTools(config);
+    List<ProviderToolDefinition> providerTools = providerTools(capabilities.toolBindings());
     ProviderRequest baseRequest =
         new ProviderRequest(
             config.model().descriptor(),
@@ -89,7 +98,15 @@ public final class ModelInvocationPlanner {
             ProviderCacheControl.none());
     ProviderRequest request =
         new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).apply(baseRequest);
-    return Optional.of(new ModelInvocationPlan(sourceHeadEntryId, request, config));
+    return Optional.of(
+        new ModelInvocationPlan(
+            sourceHeadEntryId,
+            new ModelInvocationRequest(
+                request,
+                capabilities.toolBindings(),
+                capabilities.skillSnapshots(),
+                config.yoloEnabled()),
+            config));
   }
 
   private static List<SessionEntry> validatePath(
@@ -189,9 +206,11 @@ public final class ModelInvocationPlanner {
   }
 
   private static List<AgentMessage> projectSemanticMessages(
-      List<SessionEntry> debtPrefix, RuntimeConfigSnapshot config) {
+      List<SessionEntry> debtPrefix,
+      RuntimeConfigSnapshot config,
+      List<SkillSnapshot> skillSnapshots) {
     List<AgentMessage> messages = new ArrayList<>();
-    String systemPrompt = composeSystemPrompt(config);
+    String systemPrompt = composeSystemPrompt(config, skillSnapshots);
     if (!systemPrompt.isBlank()) {
       messages.add(AgentMessage.system(systemPrompt));
     }
@@ -209,8 +228,8 @@ public final class ModelInvocationPlanner {
     return List.copyOf(messages);
   }
 
-  private List<ProviderToolDefinition> providerTools(RuntimeConfigSnapshot config) {
-    return config.tools().stream()
+  private List<ProviderToolDefinition> providerTools(List<ToolBinding> bindings) {
+    return bindings.stream()
         .map(
             binding ->
                 new ProviderToolDefinition(
@@ -220,9 +239,10 @@ public final class ModelInvocationPlanner {
         .toList();
   }
 
-  private static String composeSystemPrompt(RuntimeConfigSnapshot config) {
+  private static String composeSystemPrompt(
+      RuntimeConfigSnapshot config, List<SkillSnapshot> skillSnapshots) {
     String base = config.agent().systemPrompt();
-    if (config.skills().isEmpty()) {
+    if (skillSnapshots.isEmpty()) {
       return base;
     }
     StringBuilder section = new StringBuilder();
@@ -231,7 +251,7 @@ public final class ModelInvocationPlanner {
     section.append(
         "Use a skill by its exact name from <available_skills> when the task matches its description.\n");
     section.append("\n<available_skills>\n");
-    for (SkillSnapshot skill : config.skills()) {
+    for (SkillSnapshot skill : skillSnapshots) {
       section.append("  <skill>\n");
       section.append("    <name>").append(escapeXml(skill.name())).append("</name>\n");
       section

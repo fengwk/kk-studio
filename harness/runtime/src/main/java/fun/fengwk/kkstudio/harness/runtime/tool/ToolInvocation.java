@@ -30,11 +30,11 @@ public record ToolInvocation(
     long id,
     long threadId,
     long assistantEntryId,
+    long modelInvocationId,
     int ordinal,
     String toolCallId,
     ToolDescriptor descriptor,
     String argumentsJson,
-    ToolExecutionLocation location,
     String environmentName,
     long executionEpoch,
     InvocationStatus status,
@@ -53,7 +53,7 @@ public record ToolInvocation(
     boolean yoloEnabled) {
 
   public ToolInvocation {
-    if (id <= 0 || threadId <= 0 || assistantEntryId <= 0) {
+    if (id <= 0 || threadId <= 0 || assistantEntryId <= 0 || modelInvocationId <= 0) {
       throw new IllegalArgumentException("invocation ids must be positive");
     }
     if (ordinal < 0) {
@@ -65,8 +65,7 @@ public record ToolInvocation(
     }
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
-    location = Objects.requireNonNull(location, "location");
-    validateLocation(location, environmentName);
+    validateEnvironmentName(environmentName);
     if (executionEpoch < 0) {
       throw new IllegalArgumentException("executionEpoch must be non-negative");
     }
@@ -114,15 +113,9 @@ public record ToolInvocation(
     return descriptor.version();
   }
 
-  private static void validateLocation(ToolExecutionLocation location, String environmentName) {
+  private static void validateEnvironmentName(String environmentName) {
     if (environmentName != null && (environmentName.isBlank() || environmentName.length() > 128)) {
       throw new IllegalArgumentException("environmentName must be non-blank and <= 128 chars");
-    }
-    if (location == ToolExecutionLocation.ENVIRONMENT && environmentName == null) {
-      throw new IllegalArgumentException("ENVIRONMENT invocations require environmentName");
-    }
-    if (location == ToolExecutionLocation.PLATFORM && environmentName != null) {
-      throw new IllegalArgumentException("PLATFORM invocations must not have environmentName");
     }
   }
 
@@ -182,9 +175,8 @@ public record ToolInvocation(
         requireNull("QUEUED", "finishedAt", finishedAt);
         requireNull("QUEUED", "result", result);
         requireNull("QUEUED", "error", error);
-        // QUEUED may be re-entered from ALLOWED after releaseUnstarted (no external I/O occurred)
-        // and from ALLOWED after next-phase approval. ASKED and DENIED are not legal because
-        // ASKED only pairs with WAITING_INTERACTION and DENIED is terminal-only.
+        // QUEUED may be re-entered from ALLOWED after next-phase approval. ASKED and DENIED are not
+        // legal because ASKED only pairs with WAITING_INTERACTION and DENIED is terminal-only.
         if (permissionState != ToolPermissionState.PENDING
             && permissionState != ToolPermissionState.ALLOWED) {
           throw new IllegalArgumentException(

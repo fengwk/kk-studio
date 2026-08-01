@@ -21,7 +21,7 @@ class RuntimeConfigSnapshotYoloTest {
     assertFalse(disabled.yoloEnabled());
     assertEquals(current.agent(), enabled.agent());
     assertEquals(current.model(), enabled.model());
-    assertEquals(current.tools(), enabled.tools());
-    assertEquals(current.skills(), enabled.skills());
+    assertEquals(current.toolNames(), enabled.toolNames());
+    assertEquals(current.skillNames(), enabled.skillNames());
   }
 }

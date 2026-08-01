@@ -19,7 +19,7 @@ import java.util.List;
 public interface ChatMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, title, default_agent_id, version, "
+      "id, title, default_agent_id, default_environment_name, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select " + COLUMNS + " from chat order by updated_at desc, id desc")
@@ -29,6 +29,7 @@ public interface ChatMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
         @Result(column = "default_agent_id", property = "defaultAgentId"),
+        @Result(column = "default_environment_name", property = "defaultEnvironmentName"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -42,10 +43,10 @@ public interface ChatMapper extends BaseMapper {
   @Insert(
       """
       insert into chat (
-          id, title, default_agent_id,
+          id, title, default_agent_id, default_environment_name,
           created_at, updated_at, version
       ) values (
-          #{id}, #{title}, #{defaultAgentId},
+          #{id}, #{title}, #{defaultAgentId}, #{defaultEnvironmentName},
           current_timestamp, current_timestamp, 0
       )
       """)
@@ -55,6 +56,7 @@ public interface ChatMapper extends BaseMapper {
       """
       update chat
       set title = #{chat.title}, default_agent_id = #{chat.defaultAgentId},
+          default_environment_name = #{chat.defaultEnvironmentName},
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{chat.id} and version = #{expectedVersion}
       """)

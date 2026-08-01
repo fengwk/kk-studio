@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -121,7 +120,7 @@ final class PermissionResolver {
   private PermissionResolution resolveAllowed(
       ToolBinding binding, ToolCall originalCall, ToolInvocation invocation) {
     // Already approved: skip the chain and use the persisted final plan (descriptor, arguments,
-    // location, environment name are all already in the row). The ToolCall is reconstructed from
+    // route, and environment name are all already in the row). The ToolCall is reconstructed from
     // the persisted arguments, not the original frozen provider call.
     ToolCall call =
         new ToolCall(originalCall.id(), binding.descriptor().name(), invocation.argumentsJson());
@@ -163,19 +162,14 @@ final class PermissionResolver {
     }
     // Route stability: the permission boundary must not silently move an active target across
     // ENVIRONMENT routes. PLATFORM (null route) is preserved. Descriptor/arguments may change.
-    if (decision.binding().location() != binding.location()
-        || !Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
+    if (!Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
       return terminalFailure(
           claimed,
           new ToolInvocationError(
               "PERMISSION_BOUNDARY_MISSING",
               "Tool permission boundary attempted to change execution route from "
-                  + binding.location()
-                  + "/"
                   + binding.environmentName()
                   + " to "
-                  + decision.binding().location()
-                  + "/"
                   + decision.binding().environmentName()),
           claimed.invocation().lastActivityAt());
     }
@@ -257,28 +251,20 @@ final class PermissionResolver {
   }
 
   /**
-   * Resolve the {@link Tool} that will execute the persisted final plan. The registry lookup and
-   * {@link RemoteTool} construction MUST use the {@link ToolBinding#descriptor() final binding
-   * descriptor} (which is what {@code transactions.persistPermissionAllowed} wrote to the row)
-   * rather than the {@code invocation.descriptor()} (which is the original frozen provider call).
-   * The persisted final plan and the actually executed plan must be identical.
-   *
-   * <p>For PLATFORM routes the registry lookup is required; for ENVIRONMENT routes a {@link
-   * RemoteTool} is constructed against the injected transport. Returns {@link Optional#empty()}
-   * only when the frozen descriptor is missing or has drifted, with the canonical failure message
-   * available via {@link #toolMissingFailure(ToolBinding)}.
+   * Resolves the Tool that executes the persisted final plan. A non-null Environment target always
+   * routes remotely, even when a local registry contains a same-named descriptor.
    */
   Optional<Tool> resolveTool(ToolBinding binding) {
-    if (binding.location() == ToolExecutionLocation.PLATFORM) {
-      Optional<Tool> resolved =
-          registry.find(binding.descriptor().name(), binding.descriptor().version());
-      if (resolved.isEmpty() || !descriptorMatches(binding, resolved.get())) {
-        return Optional.empty();
-      }
-      return resolved;
+    if (binding.environmentName() != null) {
+      return Optional.of(
+          new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport));
     }
-    return Optional.of(
-        new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport));
+    Optional<Tool> local =
+        registry.find(binding.descriptor().name(), binding.descriptor().version());
+    if (local.isPresent() && descriptorMatches(binding, local.get())) {
+      return local;
+    }
+    return Optional.empty();
   }
 
   /**
@@ -312,10 +298,7 @@ final class PermissionResolver {
   }
 
   private static ToolBinding bindingFor(ToolInvocation invocation) {
-    if (invocation.location() == ToolExecutionLocation.ENVIRONMENT) {
-      return ToolBinding.of(invocation.descriptor(), invocation.environmentName());
-    }
-    return ToolBinding.of(invocation.descriptor());
+    return ToolBinding.of(invocation.descriptor(), invocation.environmentName());
   }
 
   private static boolean descriptorMatches(ToolBinding binding, Tool tool) {

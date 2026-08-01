@@ -78,6 +78,14 @@ public interface ThreadCommandMapper extends BaseMapper {
       })
   ThreadCommandRow findThreadForUpdate(@Param("threadId") long threadId);
 
+  @Select(
+      "select mi.request::text from harness_tool_invocation ti "
+          + "join harness_model_invocation mi "
+          + "on mi.id = ti.model_invocation_id and mi.thread_id = ti.thread_id "
+          + "where ti.id = #{invocationId} and ti.thread_id = #{threadId}")
+  String findModelInvocationRequest(
+      @Param("invocationId") long invocationId, @Param("threadId") long threadId);
+
   /** 当前 epoch 是否仍有可向 Entry Tree 提交结果的执行事实：非终态 Model/Tool Invocation。这些状态下禁止外部 rebind。 */
   @Select(
       """
@@ -127,7 +135,7 @@ public interface ThreadCommandMapper extends BaseMapper {
         select i.payload from harness_thread_input i
         where i.thread_id = #{threadId}
           and i.status = 'QUEUED'
-          and i.input_type in ('SET_AGENT', 'SET_MODEL', 'SET_YOLO')
+          and i.input_type in ('SET_AGENT', 'SET_MODEL', 'SET_ENVIRONMENT', 'SET_YOLO')
         order by i.sequence desc
         limit 1
       ), path_config as (

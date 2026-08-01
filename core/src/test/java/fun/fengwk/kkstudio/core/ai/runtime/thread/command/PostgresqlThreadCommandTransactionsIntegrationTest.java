@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -265,7 +266,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
     // non-terminal Tool invocation in the current epoch blocks rebind
     long assistantEntryId = appendMessage(boot.sessionId(), boot.rootEntryId());
-    long toolId = insertTool(boot, epoch, assistantEntryId, 0);
+    long toolId = insertTool(boot, modelId, epoch, assistantEntryId, 0);
     assertThrows(
         IllegalStateException.class,
         () -> transactions.updateHead(boot.threadId(), epoch, boot.rootEntryId(), NOW),
@@ -415,7 +416,12 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "epoch-key", NOW);
     long firstEpoch = boot.executionEpoch();
     long assistantEntryId = appendMessage(boot.sessionId(), boot.rootEntryId());
-    long firstTool = insertTool(boot, firstEpoch, assistantEntryId, 0);
+    long modelId = insertModel(boot, firstEpoch, boot.rootEntryId(), "QUEUED");
+    jdbc.update(
+        "update harness_model_invocation set status = 'CANCELLED', finished_at = ? where id = ?",
+        OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
+        modelId);
+    long firstTool = insertTool(boot, modelId, firstEpoch, assistantEntryId, 0);
     jdbc.update(
         "update harness_tool_invocation set status = 'CANCELLED', finished_at = ? where id = ?",
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
@@ -423,12 +429,13 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
     // same (thread, assistant entry, ordinal) inside the same epoch still collides
     assertThrows(
-        DuplicateKeyException.class, () -> insertTool(boot, firstEpoch, assistantEntryId, 0));
+        DuplicateKeyException.class,
+        () -> insertTool(boot, modelId, firstEpoch, assistantEntryId, 0));
 
     HarnessThread rebound =
         transactions.updateHead(boot.threadId(), firstEpoch, boot.rootEntryId(), NOW);
     long secondEpoch = rebound.executionEpoch();
-    long secondTool = insertTool(boot, secondEpoch, assistantEntryId, 0);
+    long secondTool = insertTool(boot, modelId, secondEpoch, assistantEntryId, 0);
     assertNotEquals(firstTool, secondTool);
     assertEquals(
         2,
@@ -595,7 +602,9 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     // runtime would see when the reconciler next picks up the thread.
     List<SessionEntry> path = loadEntryPathAsSessionEntries(boot.sessionId(), secondUserId);
 
-    ModelInvocationPlanner planner = new ModelInvocationPlanner();
+    ModelInvocationPlanner planner =
+        new ModelInvocationPlanner(
+            config -> new RuntimeCapabilityResolver.ResolvedCapabilities(List.of(), List.of()));
     ModelInvocationPlan followupPlan =
         planner.plan(boot.sessionId(), secondUserId, path).orElseThrow();
 
@@ -603,10 +612,11 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     // USER, the partial ASSISTANT turn, and the follow-up USER. A regression that re-derives the
     // first USER as a fresh assistant debt would surface here as either a missing partial reply
     // or a duplicated USER message.
-    ProviderMessage systemMsg = followupPlan.request().messages().get(0);
-    ProviderMessage firstUserMsg = followupPlan.request().messages().get(1);
-    ProviderMessage partialAssistantMsg = followupPlan.request().messages().get(2);
-    ProviderMessage followupUserMsg = followupPlan.request().messages().get(3);
+    ProviderMessage systemMsg = followupPlan.request().providerRequest().messages().get(0);
+    ProviderMessage firstUserMsg = followupPlan.request().providerRequest().messages().get(1);
+    ProviderMessage partialAssistantMsg =
+        followupPlan.request().providerRequest().messages().get(2);
+    ProviderMessage followupUserMsg = followupPlan.request().providerRequest().messages().get(3);
 
     assertEquals(ProviderMessageRole.SYSTEM, systemMsg.role());
     assertEquals(ProviderMessageRole.USER, firstUserMsg.role());
@@ -673,17 +683,22 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   }
 
   private long insertTool(
-      TestThreads.Bootstrapped boot, long epoch, long assistantEntryId, int ordinal) {
+      TestThreads.Bootstrapped boot,
+      long modelInvocationId,
+      long epoch,
+      long assistantEntryId,
+      int ordinal) {
     long id = nextId();
     jdbc.update(
         "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id,"
-            + " ordinal, tool_call_id, descriptor, arguments, location, execution_epoch, status,"
-            + " attempt, created_at) values (?, ?, ?, ?, ?, ?, '{}'::jsonb, '{}'::jsonb,"
-            + " 'PLATFORM', ?, 'QUEUED', 1, ?)",
+            + " model_invocation_id, ordinal, tool_call_id, descriptor, arguments, environment_name, execution_epoch,"
+            + " status, attempt, created_at) values (?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, '{}'::jsonb,"
+            + " null, ?, 'QUEUED', 1, ?)",
         id,
         boot.threadId(),
         boot.sessionId(),
         assistantEntryId,
+        modelInvocationId,
         ordinal,
         "call-" + id,
         epoch,

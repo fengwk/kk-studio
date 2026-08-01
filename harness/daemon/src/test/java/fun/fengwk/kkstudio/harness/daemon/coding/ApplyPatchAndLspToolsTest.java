@@ -90,7 +90,7 @@ class ApplyPatchAndLspToolsTest {
 
     Tool decompile = registry.find("lsp_java_decompile").orElseThrow();
     assertEquals(Set.of("path", "target"), decompile.descriptor().inputSchema().required());
-    assertTrue(CodingToolPrompts.load("lsp_java_decompile").contains("jdtls"));
+    assertTrue(decompile.descriptor().description().contains("jdtls"));
   }
 
   @Test

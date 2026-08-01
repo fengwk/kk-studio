@@ -82,11 +82,14 @@ class ThreadCommandCoordinatorTest {
     ThreadInput custom = rememberExisting(ThreadInputType.CUSTOM_MESSAGE, "custom-key");
     ThreadInput yolo = rememberExisting(ThreadInputType.SET_YOLO, "yolo-key");
     ThreadInput model = rememberExisting(ThreadInputType.SET_MODEL, "model-key");
+    ThreadInput environment = rememberExisting(ThreadInputType.SET_ENVIRONMENT, "environment-key");
 
     assertSame(user, coordinator.submitUserMessage(1L, " ", "user-key", 0L).input());
     assertSame(custom, coordinator.submitCustomMessage(1L, null, " ", "custom-key", 0L).input());
     assertSame(yolo, coordinator.queueYolo(1L, true, "yolo-key", 0L).input());
     assertSame(model, coordinator.queueModel(1L, 99L, "deleted", "model-key", 0L).input());
+    assertSame(
+        environment, coordinator.queueEnvironment(1L, " invalid ", "environment-key", 0L).input());
     assertEquals(0, transactions.lockCalls);
     assertEquals(0, transactions.enqueueCalls);
     assertEquals(0, configSource.replaceCalls);
@@ -103,12 +106,13 @@ class ThreadCommandCoordinatorTest {
   @Test
   void bootstrapsThreadAndMapsTransactionResult() {
     ThreadCommandCoordinator.BootstrapResult result =
-        coordinator.bootstrapThread(1L, 4L, "session", 7L, true);
+        coordinator.bootstrapThread(1L, 4L, "session", 7L, "env-a", true);
 
     assertEquals(1L, transactions.lastBootstrapThreadId);
     assertEquals(4L, transactions.lastExpectedEpoch);
     assertEquals("session", transactions.lastBootstrapTitle);
-    assertSame(configSource.resolved, transactions.lastBootstrapConfig);
+    assertEquals(
+        configSource.resolved.withEnvironmentName("env-a"), transactions.lastBootstrapConfig);
     assertEquals(NOW, transactions.lastBootstrapNow);
     assertSame(transactions.bootstrapSession, result.session());
     assertSame(transactions.bootstrapRoot, result.rootEntry());
@@ -196,7 +200,8 @@ class ThreadCommandCoordinatorTest {
   /** SET_AGENT reuses current yolo when present; otherwise product defaultYolo is applied. */
   @Test
   void queueAgentPreservesCurrentYoloAndResolvesLiveAgent() {
-    RuntimeConfigSnapshot current = ReconcileTestSupport.configSnapshot().withYoloEnabled(true);
+    RuntimeConfigSnapshot current =
+        ReconcileTestSupport.configSnapshot().withEnvironmentName("env-a").withYoloEnabled(true);
     transactions.currentConfig = Optional.of(current);
     configSource.resolved = ReconcileTestSupport.configSnapshot().withYoloEnabled(true);
 
@@ -206,6 +211,11 @@ class ThreadCommandCoordinatorTest {
     assertEquals(7L, configSource.lastDefinitionId);
     assertTrue(configSource.lastYolo);
     assertEquals(ThreadInputType.SET_AGENT, transactions.lastPayload.type());
+    assertEquals(
+        "env-a",
+        transactions.lastPayload instanceof RuntimeConfigInputPayload payload
+            ? payload.snapshot().environmentName()
+            : null);
   }
 
   @Test
@@ -235,6 +245,28 @@ class ThreadCommandCoordinatorTest {
     assertEquals(ThreadInputType.SET_MODEL, transactions.lastPayload.type());
   }
 
+  @Test
+  void queueEnvironmentReplacesOnlyEnvironmentAndSupportsClear() {
+    RuntimeConfigSnapshot current =
+        ReconcileTestSupport.configSnapshot().withEnvironmentName("env-a").withYoloEnabled(true);
+    transactions.currentConfig = Optional.of(current);
+
+    coordinator.queueEnvironment(1L, "env-b", "env-1", 0L);
+    RuntimeConfigSnapshot replaced =
+        ((RuntimeConfigInputPayload) transactions.lastPayload).snapshot();
+    assertEquals(ThreadInputType.SET_ENVIRONMENT, transactions.lastPayload.type());
+    assertEquals("env-b", replaced.environmentName());
+    assertEquals(current.agent(), replaced.agent());
+    assertEquals(current.model(), replaced.model());
+    assertEquals(current.toolNames(), replaced.toolNames());
+    assertEquals(current.skillNames(), replaced.skillNames());
+    assertEquals(current.yoloEnabled(), replaced.yoloEnabled());
+
+    coordinator.queueEnvironment(1L, null, "env-2", 0L);
+    assertEquals(
+        null, ((RuntimeConfigInputPayload) transactions.lastPayload).snapshot().environmentName());
+  }
+
   /** Config replacement commands require an existing frozen runtime config. */
   @Test
   void configReplacementRejectsThreadWithoutRuntimeConfig() {
@@ -243,6 +275,9 @@ class ThreadCommandCoordinatorTest {
     assertThrows(
         IllegalStateException.class,
         () -> coordinator.queueModel(1L, 3L, "fast", "model-missing", 0L));
+    assertThrows(
+        IllegalStateException.class,
+        () -> coordinator.queueEnvironment(1L, "env-a", "environment-missing", 0L));
     assertEquals(0, transactions.enqueueCalls);
     assertEquals(0, configSource.replaceCalls);
   }

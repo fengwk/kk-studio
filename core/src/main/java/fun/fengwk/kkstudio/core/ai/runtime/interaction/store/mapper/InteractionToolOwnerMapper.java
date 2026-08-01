@@ -18,7 +18,7 @@ import java.time.OffsetDateTime;
 public interface InteractionToolOwnerMapper extends BaseMapper {
   @Select(
       """
-      select id, thread_id, execution_epoch, status, permission_state, location, environment_name,
+      select id, thread_id, execution_epoch, status, permission_state, environment_name,
              created_at
       from harness_tool_invocation
       where id = #{id}
@@ -31,7 +31,6 @@ public interface InteractionToolOwnerMapper extends BaseMapper {
         @Result(column = "execution_epoch", property = "executionEpoch"),
         @Result(column = "status", property = "status"),
         @Result(column = "permission_state", property = "permissionState"),
-        @Result(column = "location", property = "location"),
         @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "created_at", property = "createdAt")
       })
@@ -39,7 +38,7 @@ public interface InteractionToolOwnerMapper extends BaseMapper {
 
   @Select(
       """
-      select id, thread_id, execution_epoch, status, permission_state, location, environment_name,
+      select id, thread_id, execution_epoch, status, permission_state, environment_name,
              created_at
       from harness_tool_invocation
       where id = #{id} and thread_id = #{threadId}

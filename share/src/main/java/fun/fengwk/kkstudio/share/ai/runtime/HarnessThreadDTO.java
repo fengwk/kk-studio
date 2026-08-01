@@ -37,6 +37,9 @@ public class HarnessThreadDTO {
   /** 当前 Agent 名称（可空）。 */
   private String activeAgentName;
 
+  /** 当前 Environment target（可空）。 */
+  private String activeEnvironmentName;
+
   /** Thread 级 model id（可空）。 */
   private String modelId;
 

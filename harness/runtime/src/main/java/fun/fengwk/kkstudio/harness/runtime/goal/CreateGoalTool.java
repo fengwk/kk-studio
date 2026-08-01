@@ -59,18 +59,17 @@ public final class CreateGoalTool implements Tool {
 
   @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
-    return PlatformToolSupport.complete(request, listener, this::run);
+    return RuntimeToolSupport.complete(request, listener, this::run);
   }
 
   private ToolResult run(ToolExecutionRequest request) {
-    JsonNode args = PlatformToolSupport.requireObjectArgs(request.call().argumentsJson());
-    PlatformToolSupport.rejectUnknownFields(args, Set.of("objective", "tokenBudget"));
-    String objective = PlatformToolSupport.requireNonBlankString(args, "objective");
-    Long tokenBudget = PlatformToolSupport.optionalPositiveLong(args, "tokenBudget");
+    JsonNode args = RuntimeToolSupport.requireObjectArgs(request.call().argumentsJson());
+    RuntimeToolSupport.rejectUnknownFields(args, Set.of("objective", "tokenBudget"));
+    String objective = RuntimeToolSupport.requireNonBlankString(args, "objective");
+    Long tokenBudget = RuntimeToolSupport.optionalPositiveLong(args, "tokenBudget");
     ThreadGoal goal =
         store.createOrReplace(
             request.context().threadId(), objective, tokenBudget, clock.instant());
-    return PlatformToolSupport.success(
-        request.call().id(), PlatformToolSupport.formatGoalJson(goal));
+    return RuntimeToolSupport.success(request.call().id(), RuntimeToolSupport.formatGoalJson(goal));
   }
 }

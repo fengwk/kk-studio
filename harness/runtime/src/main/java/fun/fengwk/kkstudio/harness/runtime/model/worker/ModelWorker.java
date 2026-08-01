@@ -130,7 +130,7 @@ public final class ModelWorker {
     RuntimeException resolutionFailure = null;
     if (candidate.status() != InvocationStatus.RUNNING) {
       try {
-        resource = executionResolver.resolve(candidate.request());
+        resource = executionResolver.resolve(candidate.request().providerRequest());
       } catch (RuntimeException error) {
         resolutionFailure = error;
       }

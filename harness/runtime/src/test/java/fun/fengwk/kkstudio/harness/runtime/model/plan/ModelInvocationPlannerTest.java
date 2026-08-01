@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -54,12 +56,21 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 class ModelInvocationPlannerTest {
 
   private static final long SESSION_ID = 41L;
-  private static final ModelInvocationPlanner PLANNER = new ModelInvocationPlanner();
+  private static final TestRuntimeCapabilityResolver CAPABILITY_RESOLVER =
+      new TestRuntimeCapabilityResolver();
+  private static final ModelInvocationPlanner PLANNER =
+      new ModelInvocationPlanner(
+          new ProviderMessageProjector(),
+          new ToolDescriptorJsonCodec(),
+          new PromptCacheAffinityKeyFactory(),
+          CAPABILITY_RESOLVER);
 
   @Test
   void returnsEmptyWithoutDebtOrAfterTerminalResponseBarrier() {
@@ -109,7 +120,7 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlan userPlan =
         plan(path(new RootEntryPayload(), config, message(user("question"))));
     assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(userPlan));
-    assertEquals("question", text(userPlan.request().messages().get(1)));
+    assertEquals("question", text(userPlan.request().providerRequest().messages().get(1)));
 
     ModelInvocationPlan toolPlan =
         plan(
@@ -134,8 +145,8 @@ class ModelInvocationPlannerTest {
     assertEquals(
         List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER, ProviderMessageRole.USER),
         roles(plan));
-    assertEquals("first", text(plan.request().messages().get(1)));
-    assertEquals("second", text(plan.request().messages().get(2)));
+    assertEquals("first", text(plan.request().providerRequest().messages().get(1)));
+    assertEquals("second", text(plan.request().providerRequest().messages().get(2)));
   }
 
   @Test
@@ -156,10 +167,10 @@ class ModelInvocationPlannerTest {
 
     assertEquals(5, plan.sourceHeadEntryId());
     assertEquals(oldConfig, plan.configSnapshot());
-    assertEquals("model-old", plan.request().model().modelId());
+    assertEquals("model-old", plan.request().providerRequest().model().modelId());
     assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
-    assertEquals("old-system", text(plan.request().messages().get(0)));
-    assertEquals("question", text(plan.request().messages().get(1)));
+    assertEquals("old-system", text(plan.request().providerRequest().messages().get(0)));
+    assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
   }
 
   @Test
@@ -180,18 +191,20 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlan plan =
         plan(path(new RootEntryPayload(), first, latest, message(user("question"))));
 
-    assertEquals("model-latest", plan.request().model().modelId());
+    assertEquals("model-latest", plan.request().providerRequest().model().modelId());
     assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
-    String system = text(plan.request().messages().get(0));
+    String system = text(plan.request().providerRequest().messages().get(0));
     assertTrue(system.startsWith("base\n\nThe following skills"));
     assertTrue(system.indexOf("<name>a&lt;</name>") < system.indexOf("<name>z&amp;</name>"));
     assertTrue(system.contains("<description>angle &gt;</description>"));
     assertTrue(system.contains("<description>quote &quot; and &apos;</description>"));
     assertEquals(
-        List.of("alpha", "zeta"), plan.request().tools().stream().map(t -> t.name()).toList());
+        List.of("alpha", "zeta"),
+        plan.request().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
     assertEquals(
-        new ToolDescriptorJsonCodec().encodeInputSchema(alpha.inputSchema()),
-        plan.request().tools().get(0).inputSchemaJson());
+        alpha.inputSchema(), plan.request().toolBindings().get(0).descriptor().inputSchema());
   }
 
   @Test
@@ -214,7 +227,8 @@ class ModelInvocationPlannerTest {
         roles(plan));
     ProviderToolResultBlock result =
         assertInstanceOf(
-            ProviderToolResultBlock.class, plan.request().messages().get(2).contents().get(0));
+            ProviderToolResultBlock.class,
+            plan.request().providerRequest().messages().get(2).contents().get(0));
     assertTrue(result.error());
     assertEquals("No result provided", ((ProviderTextBlock) result.contents().get(0)).text());
   }
@@ -225,8 +239,10 @@ class ModelInvocationPlannerTest {
         config("disabled", "system", List.of(), List.of(), disabled());
     ModelInvocationPlan disabledPlan =
         plan(path(new RootEntryPayload(), disabledConfig, message(user("question"))));
-    assertEquals(PromptCacheRetention.NONE, disabledPlan.request().cacheControl().retention());
-    assertEquals(null, disabledPlan.request().cacheControl().affinityKey());
+    assertEquals(
+        PromptCacheRetention.NONE,
+        disabledPlan.request().providerRequest().cacheControl().retention());
+    assertEquals(null, disabledPlan.request().providerRequest().cacheControl().affinityKey());
 
     PromptCachePolicy affinity =
         PromptCachePolicy.affinityShort(
@@ -234,15 +250,18 @@ class ModelInvocationPlannerTest {
     RuntimeConfigSnapshot affinityConfig = config("affinity", "", List.of(), List.of(), affinity);
     ModelInvocationPlan affinityPlan =
         plan(path(new RootEntryPayload(), affinityConfig, message(user("question"))));
-    assertEquals(PromptCacheRetention.SHORT, affinityPlan.request().cacheControl().retention());
-    assertTrue(affinityPlan.request().cacheControl().affinityKey().startsWith("pc1-"));
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        affinityPlan.request().providerRequest().cacheControl().retention());
+    assertTrue(
+        affinityPlan.request().providerRequest().cacheControl().affinityKey().startsWith("pc1-"));
     ModelInvocationPlan otherSessionPlan =
         PLANNER
             .plan(42, 3, path(new RootEntryPayload(), affinityConfig, message(user("question"))))
             .orElseThrow();
     assertNotEquals(
-        affinityPlan.request().cacheControl().affinityKey(),
-        otherSessionPlan.request().cacheControl().affinityKey());
+        affinityPlan.request().providerRequest().cacheControl().affinityKey(),
+        otherSessionPlan.request().providerRequest().cacheControl().affinityKey());
 
     PromptCachePolicy breakpoints =
         PromptCachePolicy.breakpointsShort(
@@ -260,7 +279,7 @@ class ModelInvocationPlannerTest {
         plan(path(new RootEntryPayload(), breakpointConfig, message(user("question"))));
     assertEquals(
         EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
-        breakpointPlan.request().cacheControl().breakpoints());
+        breakpointPlan.request().providerRequest().cacheControl().breakpoints());
   }
 
   @Test
@@ -311,7 +330,7 @@ class ModelInvocationPlannerTest {
 
     assertEquals(before, mutable);
     mutable.clear();
-    assertEquals("question", text(plan.request().messages().get(1)));
+    assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
   }
 
   // ---------- ASSISTANT_ABORTED barrier ----------
@@ -337,7 +356,7 @@ class ModelInvocationPlannerTest {
             ProviderMessageRole.ASSISTANT,
             ProviderMessageRole.USER),
         roles(followup));
-    assertEquals("hi", text(followup.request().messages().get(2)));
+    assertEquals("hi", text(followup.request().providerRequest().messages().get(2)));
   }
 
   @Test
@@ -357,7 +376,7 @@ class ModelInvocationPlannerTest {
                     aborted,
                     message(user("continue"))))
             .orElseThrow();
-    ProviderMessage assistantMsg = plan.request().messages().get(2);
+    ProviderMessage assistantMsg = plan.request().providerRequest().messages().get(2);
     assertEquals(ProviderMessageRole.ASSISTANT, assistantMsg.role());
     assertEquals(2, assistantMsg.contents().size());
     assertEquals("answer", ((ProviderTextBlock) assistantMsg.contents().get(0)).text());
@@ -386,9 +405,9 @@ class ModelInvocationPlannerTest {
             AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""),
             message(user("second")));
     ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 5, followup).orElseThrow();
-    assertEquals("first", text(plan.request().messages().get(1)));
-    assertEquals("partial", text(plan.request().messages().get(2)));
-    assertEquals("second", text(plan.request().messages().get(3)));
+    assertEquals("first", text(plan.request().providerRequest().messages().get(1)));
+    assertEquals("partial", text(plan.request().providerRequest().messages().get(2)));
+    assertEquals("second", text(plan.request().providerRequest().messages().get(3)));
   }
 
   private static ModelInvocationPlan plan(List<SessionEntry> path) {
@@ -396,7 +415,7 @@ class ModelInvocationPlannerTest {
   }
 
   private static List<ProviderMessageRole> roles(ModelInvocationPlan plan) {
-    return plan.request().messages().stream().map(ProviderMessage::role).toList();
+    return plan.request().providerRequest().messages().stream().map(ProviderMessage::role).toList();
   }
 
   private static String text(ProviderMessage message) {
@@ -460,12 +479,16 @@ class ModelInvocationPlannerTest {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             11, 12, ProviderType.OPENAI, modelId, true, false, zeroPricing(), promptCachePolicy);
-    return new RuntimeConfigSnapshot(
-        new AgentSnapshot(10, "agent", systemPrompt),
-        new ModelSnapshot(descriptor, variant),
-        tools,
-        skills,
-        false);
+    RuntimeConfigSnapshot config =
+        new RuntimeConfigSnapshot(
+            new AgentSnapshot(10, "agent", systemPrompt),
+            new ModelSnapshot(descriptor, variant),
+            null,
+            tools.stream().map(binding -> binding.descriptor().name()).toList(),
+            skills.stream().map(SkillSnapshot::name).toList(),
+            false);
+    CAPABILITY_RESOLVER.register(tools, skills);
+    return config;
   }
 
   private static ModelPricing zeroPricing() {
@@ -500,6 +523,32 @@ class ModelInvocationPlannerTest {
 
   private static PromptCachePolicy disabled() {
     return PromptCachePolicy.disabled();
+  }
+
+  private static final class TestRuntimeCapabilityResolver implements RuntimeCapabilityResolver {
+
+    private final Map<String, ToolBinding> toolBindings = new ConcurrentHashMap<>();
+    private final Map<String, SkillSnapshot> skillSnapshots = new ConcurrentHashMap<>();
+
+    void register(List<ToolBinding> tools, List<SkillSnapshot> skills) {
+      tools.forEach(binding -> toolBindings.put(binding.descriptor().name(), binding));
+      skills.forEach(skill -> skillSnapshots.put(skill.name(), skill));
+    }
+
+    @Override
+    public ResolvedCapabilities resolve(RuntimeConfigSnapshot config) {
+      return new ResolvedCapabilities(
+          config.toolNames().stream()
+              .map(name -> requireCapability(toolBindings, name, "tool"))
+              .toList(),
+          config.skillNames().stream()
+              .map(name -> requireCapability(skillSnapshots, name, "skill"))
+              .toList());
+    }
+
+    private static <T> T requireCapability(Map<String, T> capabilities, String name, String type) {
+      return Objects.requireNonNull(capabilities.get(name), () -> "unknown " + type + ": " + name);
+    }
   }
 
   private record UnknownMessagePayload() implements EntryPayload {

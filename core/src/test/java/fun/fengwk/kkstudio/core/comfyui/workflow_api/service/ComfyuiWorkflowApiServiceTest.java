@@ -10,6 +10,7 @@ import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiCreateDTO;
@@ -47,6 +48,7 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
           + "\"defaultValue\":7}]";
 
   @Autowired private ComfyuiWorkflowApiService comfyuiWorkflowApiService;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   @Test
   public void shouldCreateUpdateAndDeleteWorkflowRoundTrip() {
@@ -74,6 +76,12 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
     assertTrue(created.getEnabled());
     assertNotNull(created.getCreateTime());
     assertNotNull(created.getUpdateTime());
+    assertEquals(
+        0L,
+        jdbcTemplate.queryForObject(
+            "select version from comfyui_workflow_api where id = ?",
+            Long.class,
+            Long.parseLong(created.getId())));
 
     ComfyuiWorkflowApiUpdateDTO updateDTO = new ComfyuiWorkflowApiUpdateDTO();
     updateDTO.setName("Demo-renamed");
@@ -91,6 +99,12 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
     assertNull(updated.getDescription());
     assertEquals(Boolean.FALSE, updated.getEnabled());
     assertNull(updated.getDefaultSelector());
+    assertEquals(
+        1L,
+        jdbcTemplate.queryForObject(
+            "select version from comfyui_workflow_api where id = ?",
+            Long.class,
+            Long.parseLong(created.getId())));
 
     comfyuiWorkflowApiService.deleteWorkflow(created.getId());
     Page<ComfyuiWorkflowApiDTO> after =

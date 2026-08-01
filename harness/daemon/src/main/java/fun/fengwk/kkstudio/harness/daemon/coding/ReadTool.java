@@ -2,24 +2,17 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /** Reads bounded text windows or deterministic directory listings. */
 public final class ReadTool extends AbstractCodingTool {
@@ -28,24 +21,7 @@ public final class ReadTool extends AbstractCodingTool {
   private static final int MAX_LIMIT = 2000;
 
   public ReadTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "read",
-            "1",
-            CodingToolPrompts.load("read"),
-            null,
-            new ToolParamsSchema(
-                "Read parameters",
-                Map.of(
-                    "path", new ToolStringSchema("File or directory path"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "offset", new ToolIntegerSchema("One-based line offset"),
-                    "limit", new ToolIntegerSchema("Maximum number of lines")),
-                Set.of("path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(1)));
+    super(config, EnvironmentToolCatalog.require("read"));
   }
 
   @Override

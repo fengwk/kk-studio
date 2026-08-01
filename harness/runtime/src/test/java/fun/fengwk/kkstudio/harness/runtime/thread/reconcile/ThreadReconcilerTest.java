@@ -216,7 +216,9 @@ class ThreadReconcilerTest {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            1L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
@@ -303,7 +305,7 @@ class ThreadReconcilerTest {
                   new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(
                       new ModelInvocationPlan(
                           4L,
-                          ReconcileTestSupport.providerRequest(),
+                          ReconcileTestSupport.modelInvocationRequest(),
                           ReconcileTestSupport.configSnapshot())));
           b.headEntryId = 4L;
         });
@@ -341,7 +343,9 @@ class ThreadReconcilerTest {
 
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            4L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            4L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
@@ -468,7 +472,9 @@ class ThreadReconcilerTest {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            1L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     txs.queueSnapshot(
         b ->
             b.primaryWork =
@@ -530,7 +536,9 @@ class ThreadReconcilerTest {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            1L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     Failure failure = new Failure("CREATE_FAIL", "boom");
     txs.queueSnapshot(
         b ->

@@ -37,7 +37,7 @@ import java.util.TreeSet;
 /**
  * 严格、deterministic 的 {@link ToolDescriptor} 与 tool input schema JSON 编解码。
  *
- * <p>Descriptor 是 location-neutral 的功能描述；执行位置属于 binding/invocation。编解码复用同一个底层 {@link
+ * <p>Descriptor 是 route-neutral 的功能描述；执行目标属于 binding/invocation。编解码复用同一个底层 {@link
  * ObjectMapper}，后者启用了 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} 与 {@link
  * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}，从而在边界拒绝 trailing token 与 duplicate field。
  *

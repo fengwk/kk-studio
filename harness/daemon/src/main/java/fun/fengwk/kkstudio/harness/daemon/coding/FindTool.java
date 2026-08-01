@@ -3,15 +3,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -23,9 +19,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /** Finds gitignore-respecting environment-root-relative paths through configurable fd or fdfind. */
@@ -34,25 +28,7 @@ public final class FindTool extends AbstractCodingTool {
   static final int MAX_TIMEOUT_SECONDS = 3600;
 
   public FindTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "find",
-            "1",
-            CodingToolPrompts.load("find"),
-            null,
-            new ToolParamsSchema(
-                "Find parameters",
-                Map.of(
-                    "pattern", new ToolStringSchema("Glob pattern"),
-                    "path", new ToolStringSchema("Search directory"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "limit", new ToolIntegerSchema("Maximum results"),
-                    "timeout_seconds", new ToolIntegerSchema("Search timeout in seconds")),
-                Set.of("pattern", "path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofHours(1)));
+    super(config, EnvironmentToolCatalog.require("find"));
   }
 
   @Override

@@ -13,7 +13,7 @@ import java.util.Objects;
  * the row; the {@code binding} carries the route the worker must dispatch on, both of which must
  * stay aligned with the durable plan for the rest of the invocation's lifecycle.
  *
- * @param binding final route (location + optional environment name + frozen descriptor)
+ * @param binding final route (optional environment name + frozen descriptor)
  * @param call tool call (id + name + arguments) reconstructed from the persisted final plan
  */
 record ExecutablePlan(ToolBinding binding, ToolCall call) {

@@ -14,6 +14,8 @@ public enum ThreadInputType {
   SET_AGENT,
   /** 切换 Model/variant。 */
   SET_MODEL,
+  /** 切换 Thread 的 Environment target。 */
+  SET_ENVIRONMENT,
   /** 切换 Thread 的 YOLO policy。 */
   SET_YOLO;
 
@@ -24,6 +26,6 @@ public enum ThreadInputType {
 
   /** 是否为配置类输入。 */
   public boolean isConfig() {
-    return this == SET_AGENT || this == SET_MODEL || this == SET_YOLO;
+    return this == SET_AGENT || this == SET_MODEL || this == SET_ENVIRONMENT || this == SET_YOLO;
   }
 }

@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -26,9 +27,8 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -66,6 +65,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final ArtifactSource artifactSource;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
+  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final AtomicLong outboundSequence = new AtomicLong();
@@ -92,7 +92,8 @@ public final class DaemonRuntime implements AutoCloseable {
         skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        null);
+        null,
+        true);
   }
 
   /**
@@ -114,22 +115,23 @@ public final class DaemonRuntime implements AutoCloseable {
         skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        artifactSource);
+        artifactSource,
+        true);
   }
 
   /** 使用可替换 transport 和 journal 创建运行时，便于协议集成测试或持久化替换。 */
-  public DaemonRuntime(
+  DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler) {
-    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, null);
+    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, null, false);
   }
 
   /** 全参数运行时；{@code artifactSource} 可为 {@code null} 以强制对所有 artifact 工具结果返回 FAILED。 */
-  public DaemonRuntime(
+  DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
@@ -137,6 +139,18 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ArtifactSource artifactSource) {
+    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, artifactSource, false);
+  }
+
+  private DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonToolRegistry toolRegistry,
+      DaemonSkillRegistry skillRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      ArtifactSource artifactSource,
+      boolean requireFixedToolCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
@@ -145,6 +159,11 @@ public final class DaemonRuntime implements AutoCloseable {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.artifactSource = artifactSource;
     this.nextReconnectDelay = config.initialReconnectDelay();
+    if (requireFixedToolCatalog
+        && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {
+      throw new IllegalStateException("daemon tool registry does not match EnvironmentToolCatalog");
+    }
+    toolRegistry.freeze();
   }
 
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
@@ -219,14 +238,12 @@ public final class DaemonRuntime implements AutoCloseable {
                   return;
                 }
                 ActiveConnection active = new ActiveConnection(generation, connection);
-                activeConnection.set(active);
-                nextReconnectDelay = config.initialReconnectDelay();
-                sendHello(active);
-                sendCapabilities(active);
-                sendReady(active);
-                if (activeConnection.get() == active) {
-                  active.markReady();
-                  state = DaemonRuntimeState.READY;
+                synchronized (active) {
+                  activeConnection.set(active);
+                  nextReconnectDelay = config.initialReconnectDelay();
+                  if (sendHello(active)) {
+                    active.markHelloSent();
+                  }
                 }
               });
     } catch (RuntimeException error) {
@@ -266,27 +283,21 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void sendHello(ActiveConnection connection) {
+  private boolean sendHello(ActiveConnection connection) {
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("daemonId", config.daemonId());
     payload.put("protocolVersion", DaemonProtocol.VERSION_1);
+    payload.put("toolCatalogVersion", EnvironmentToolCatalog.version());
     payload.put("gatewayToken", config.gatewayToken());
-    sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
+    return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
-  private void sendCapabilities(ActiveConnection connection) {
-    DaemonToolCapabilitiesCodec capabilitiesCodec = new DaemonToolCapabilitiesCodec();
-    List<ToolDescriptor> tools = new ArrayList<>(toolRegistry.descriptors());
-    List<DaemonSkillDescriptor> skills = new ArrayList<>(skillRegistry.descriptors());
-    String payloadJson =
-        capabilitiesCodec.encode(
-            new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(
-                List.copyOf(tools), List.copyOf(skills)));
-    sendOn(connection, DaemonMessageType.CAPABILITIES, null, payloadJson);
-  }
-
-  private void sendReady(ActiveConnection connection) {
-    sendOn(connection, DaemonMessageType.READY, null, "{\"pull\":true}");
+  private boolean sendReady(ActiveConnection connection) {
+    return sendOn(
+        connection,
+        DaemonMessageType.READY,
+        null,
+        skillsCodec.encode(List.copyOf(skillRegistry.descriptors())));
   }
 
   private void sendHeartbeat() {
@@ -322,7 +333,11 @@ public final class DaemonRuntime implements AutoCloseable {
           connection.acceptInboundEnvelope(identity);
           processLoadSkill(connection, envelope);
         }
-        case WELCOME, ACK, ERROR -> {
+        case WELCOME -> {
+          connection.acceptInboundEnvelope(identity);
+          handleWelcome(connection, envelope);
+        }
+        case ACK, ERROR -> {
           connection.acceptInboundEnvelope(identity);
           // Gateway protocol messages do not alter Daemon invocation facts.
         }
@@ -331,6 +346,24 @@ public final class DaemonRuntime implements AutoCloseable {
       }
     } catch (IllegalArgumentException error) {
       sendOn(connection, DaemonMessageType.ERROR, null, errorPayload(error));
+    }
+  }
+
+  private void handleWelcome(ActiveConnection connection, DaemonEnvelope envelope) {
+    synchronized (connection) {
+      if (!connection.helloSent()) {
+        throw new DaemonProtocolException("WELCOME requires a preceding HELLO");
+      }
+      if (!connection.markWelcomed()) {
+        throw new DaemonProtocolException("WELCOME may only be received once per connection");
+      }
+      if (!envelopeCodec.readPayload(envelope).isEmpty()) {
+        throw new DaemonProtocolException("WELCOME payload must be empty");
+      }
+      if (sendReady(connection) && activeConnection.get() == connection) {
+        connection.markReady();
+        state = DaemonRuntimeState.READY;
+      }
     }
   }
 
@@ -571,13 +604,13 @@ public final class DaemonRuntime implements AutoCloseable {
     sendOn(connection, messageType, invocationId, payloadJson);
   }
 
-  private void sendOn(
+  private boolean sendOn(
       ActiveConnection connection,
       DaemonMessageType messageType,
       String invocationId,
       String payloadJson) {
     if (activeConnection.get() != connection || !connection.connection().isOpen()) {
-      return;
+      return false;
     }
     DaemonEnvelope envelope = envelope(messageType, invocationId, payloadJson);
     connection
@@ -589,6 +622,7 @@ public final class DaemonRuntime implements AutoCloseable {
                 handleDisconnected(connection.generation());
               }
             });
+    return true;
   }
 
   private DaemonEnvelope envelope(
@@ -832,6 +866,8 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private final long generation;
     private final DaemonConnection connection;
+    private final AtomicBoolean helloSent = new AtomicBoolean();
+    private final AtomicBoolean welcomed = new AtomicBoolean();
     private final AtomicBoolean ready = new AtomicBoolean();
     private InboundEnvelopeIdentity lastInboundIdentity;
 
@@ -850,6 +886,18 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private void markReady() {
       ready.set(true);
+    }
+
+    private void markHelloSent() {
+      helloSent.set(true);
+    }
+
+    private boolean helloSent() {
+      return helloSent.get();
+    }
+
+    private boolean markWelcomed() {
+      return welcomed.compareAndSet(false, true);
     }
 
     private boolean isReady() {

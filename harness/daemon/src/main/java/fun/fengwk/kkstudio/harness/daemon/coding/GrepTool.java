@@ -3,16 +3,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -22,9 +17,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,29 +33,7 @@ public final class GrepTool extends AbstractCodingTool {
   private static final Pattern LOCATION_PATTERN = Pattern.compile("^(.*?):(\\d+):(.*)$");
 
   public GrepTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "grep",
-            "1",
-            CodingToolPrompts.load("grep"),
-            null,
-            new ToolParamsSchema(
-                "Grep parameters",
-                Map.of(
-                    "pattern", new ToolStringSchema("Regular expression or literal"),
-                    "path", new ToolStringSchema("Search file or directory"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "include", new ToolStringSchema("Optional glob"),
-                    "ignore_case", new ToolBooleanSchema("Ignore case"),
-                    "literal", new ToolBooleanSchema("Treat pattern literally"),
-                    "multiline", new ToolBooleanSchema("Enable multiline pattern"),
-                    "limit", new ToolIntegerSchema("Maximum reported matches"),
-                    "timeout_seconds", new ToolIntegerSchema("Search timeout in seconds")),
-                Set.of("pattern", "path"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofHours(1)));
+    super(config, EnvironmentToolCatalog.require("grep"));
   }
 
   @Override

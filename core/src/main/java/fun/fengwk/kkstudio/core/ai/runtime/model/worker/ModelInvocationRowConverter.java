@@ -5,11 +5,11 @@ import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 
 import java.time.Instant;
@@ -24,7 +24,8 @@ import java.util.Objects;
  */
 final class ModelInvocationRowConverter {
 
-  private static final ProviderRequestJsonCodec REQUEST_CODEC = new ProviderRequestJsonCodec();
+  private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
+      new ModelInvocationRequestJsonCodec();
   private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
   private static final ModelInvocationErrorJsonCodec ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
@@ -42,7 +43,7 @@ final class ModelInvocationRowConverter {
       lease =
           new Lease(row.getWorkerToken(), Objects.requireNonNull(row.getWorkerUntil()).toInstant());
     }
-    ProviderRequest request = REQUEST_CODEC.decode(row.getRequestJson());
+    ModelInvocationRequest request = REQUEST_CODEC.decode(row.getRequestJson());
     ProviderResponse result =
         row.getResultJson() == null ? null : RESPONSE_CODEC.decode(row.getResultJson());
     ModelInvocationError error =
@@ -86,7 +87,7 @@ final class ModelInvocationRowConverter {
     return value == null ? null : value.toInstant();
   }
 
-  static String encodeRequest(ProviderRequest request) {
+  static String encodeRequest(ModelInvocationRequest request) {
     return REQUEST_CODEC.encode(Objects.requireNonNull(request, "request"));
   }
 

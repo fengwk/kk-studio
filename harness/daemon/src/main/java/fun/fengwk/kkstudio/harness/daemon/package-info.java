@@ -6,7 +6,7 @@
  * sequence 的重复， 重连后基线重置。
  *
  * <p>Environment 作用域使用实时唯一 {@code environmentName}（CLI {@code --environment-name}）。Skills 由 CLI
- * {@code --skill-dir} 或默认 {@code ~/.agents/skills} 本地发现；CAPABILITIES 上报 tools 与 skills 摘要，正文经
- * {@code LOAD_SKILL} 按需加载。
+ * {@code --skill-dir} 或默认 {@code ~/.agents/skills} 本地发现；READY 上报 skills 摘要，正文经 {@code LOAD_SKILL}
+ * 按需加载。
  */
 package fun.fengwk.kkstudio.harness.daemon;

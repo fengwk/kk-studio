@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -42,12 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolSchemaElement;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -55,12 +48,9 @@ import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -915,24 +905,13 @@ class RuntimeEntryPayloadJsonCodecTest {
   }
 
   private static RuntimeConfigSnapshot canonicalConfig() {
-    Map<String, ToolSchemaElement> properties = new LinkedHashMap<>();
-    properties.put("query", new ToolStringSchema("search query"));
-    ToolDescriptor tool =
-        new ToolDescriptor(
-            "search",
-            "v1",
-            "search helper",
-            "search",
-            new ToolParamsSchema("params", properties, Set.of("query"), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMillis(1000));
-    ToolBinding binding = ToolBinding.of(tool);
     RuntimeConfigSnapshot snapshot =
         new RuntimeConfigSnapshot(
             new AgentSnapshot(1001L, "primary-agent", "You are a careful assistant."),
             new ModelSnapshot(canonicalModelDescriptor(), canonicalModelVariant()),
-            List.of(binding),
-            List.of(new SkillSnapshot("code-review", "code review skill", "sandbox")),
+            "sandbox",
+            List.of("search"),
+            List.of("code-review"),
             false);
     assertNotNull(snapshot);
     return snapshot;

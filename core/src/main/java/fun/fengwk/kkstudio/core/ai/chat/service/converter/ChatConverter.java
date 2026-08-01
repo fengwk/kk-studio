@@ -19,6 +19,7 @@ public class ChatConverter {
     dto.setId(ChatIds.format(chat.getId()));
     dto.setTitle(chat.getTitle());
     dto.setDefaultAgentId(ChatIds.format(chat.getDefaultAgentId()));
+    dto.setDefaultEnvironmentName(chat.getDefaultEnvironmentName());
     dto.setVersion(CatalogVersions.format(chat.getVersion()));
     dto.setCreateTime(chat.getCreateTime());
     dto.setUpdateTime(chat.getUpdateTime());

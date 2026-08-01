@@ -47,7 +47,6 @@ final class InvocationFixture {
       long assistantEntryId,
       int ordinal,
       String toolCallId,
-      String location,
       String environmentName,
       long executionEpoch)
       throws SQLException {
@@ -60,7 +59,6 @@ final class InvocationFixture {
           assistantEntryId,
           ordinal,
           toolCallId,
-          location,
           environmentName,
           executionEpoch);
     }
@@ -74,23 +72,50 @@ final class InvocationFixture {
       long assistantEntryId,
       int ordinal,
       String toolCallId,
-      String location,
       String environmentName,
       long executionEpoch)
       throws SQLException {
+    long candidateModelInvocationId = PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet();
+    try (PreparedStatement model =
+        conn.prepareStatement(
+            "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+                + " execution_epoch, request, status, attempt) values"
+                + " (?, ?, ?, ?, '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1)"
+                + " on conflict (thread_id, source_head_entry_id, execution_epoch) do nothing")) {
+      model.setLong(1, candidateModelInvocationId);
+      model.setLong(2, thread.threadId);
+      model.setLong(3, thread.rootEntryId);
+      model.setLong(4, executionEpoch);
+      model.executeUpdate();
+    }
+    long modelInvocationId;
+    try (PreparedStatement model =
+        conn.prepareStatement(
+            "select id from harness_model_invocation where thread_id = ?"
+                + " and source_head_entry_id = ? and execution_epoch = ?")) {
+      model.setLong(1, thread.threadId);
+      model.setLong(2, thread.rootEntryId);
+      model.setLong(3, executionEpoch);
+      try (var result = model.executeQuery()) {
+        if (!result.next()) {
+          throw new SQLException("model invocation fixture row was not created");
+        }
+        modelInvocationId = result.getLong(1);
+      }
+    }
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into harness_tool_invocation (id, thread_id, session_id,"
-                + " assistant_entry_id, ordinal, tool_call_id, descriptor, arguments,"
-                + " location, environment_name, execution_epoch, status, attempt) values"
-                + " (?, ?, ?, ?, ?, ?, '{}'::jsonb, '{}'::jsonb, ?, ?, ?, 'QUEUED', 1)")) {
+                + " assistant_entry_id, model_invocation_id, ordinal, tool_call_id, descriptor, arguments,"
+                + " environment_name, execution_epoch, status, attempt) values"
+                + " (?, ?, ?, ?, ?, ?, ?, '{}'::jsonb, '{}'::jsonb, ?, ?, 'QUEUED', 1)")) {
       ps.setLong(1, invocationId);
       ps.setLong(2, thread.threadId);
       ps.setLong(3, thread.sessionId);
       ps.setLong(4, assistantEntryId);
-      ps.setInt(5, ordinal);
-      ps.setString(6, toolCallId);
-      ps.setString(7, location);
+      ps.setLong(5, modelInvocationId);
+      ps.setInt(6, ordinal);
+      ps.setString(7, toolCallId);
       ps.setString(8, environmentName);
       ps.setLong(9, executionEpoch);
       assertEquals(1, ps.executeUpdate());

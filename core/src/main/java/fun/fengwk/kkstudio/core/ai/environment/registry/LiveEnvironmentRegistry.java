@@ -3,9 +3,7 @@ package fun.fengwk.kkstudio.core.ai.environment.registry;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEmptyCapabilities;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -24,15 +22,9 @@ import java.util.Optional;
 @Component
 public class LiveEnvironmentRegistry {
 
-  /** Reserved Environment name for the built-in platform Skills provider. */
-  public static final String PLATFORM_ENVIRONMENT_NAME = "platform";
-
-  private final DaemonToolCapabilitiesCodec capabilitiesCodec;
   private final Map<String, LiveEnvironment> byName = new LinkedHashMap<>();
 
-  public LiveEnvironmentRegistry(DaemonToolCapabilitiesCodec capabilitiesCodec) {
-    this.capabilitiesCodec = Objects.requireNonNull(capabilitiesCodec, "capabilitiesCodec");
-  }
+  public LiveEnvironmentRegistry() {}
 
   /**
    * Attempts to bind {@code environmentName} to {@code connection} after HELLO authentication.
@@ -50,16 +42,15 @@ public class LiveEnvironmentRegistry {
     }
     byName.put(
         name,
-        new LiveEnvironment(
-            name, LiveEnvironmentStatus.CONNECTING, connection, emptyCapabilities(), now));
+        new LiveEnvironment(name, LiveEnvironmentStatus.CONNECTING, connection, List.of(), now));
     return true;
   }
 
-  /** Replaces canonical capabilities for a bound name owned by {@code connection}. */
-  public synchronized void updateCapabilities(
+  /** Replaces the daemon's advertised skills for a bound name owned by {@code connection}. */
+  public synchronized void updateSkills(
       String environmentName,
       EnvironmentDaemonConnection connection,
-      DaemonToolCapabilities capabilities,
+      List<DaemonSkillDescriptor> skills,
       Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
     byName.put(
@@ -68,13 +59,13 @@ public class LiveEnvironmentRegistry {
             current.environmentName(),
             current.status(),
             current.connection(),
-            Objects.requireNonNull(capabilities, "capabilities"),
+            List.copyOf(Objects.requireNonNull(skills, "skills")),
             Objects.requireNonNull(now, "now")));
   }
 
   /**
    * Marks the bound name READY so gateway workers may dispatch against it. Callers own the
-   * CAPABILITIES-before-READY transition; empty capabilities remain valid.
+   * skills-before-READY transition; an empty skills list remains valid.
    */
   public synchronized void markReady(
       String environmentName, EnvironmentDaemonConnection connection, Instant now) {
@@ -85,7 +76,7 @@ public class LiveEnvironmentRegistry {
             current.environmentName(),
             LiveEnvironmentStatus.READY,
             current.connection(),
-            current.capabilities(),
+            current.skills(),
             Objects.requireNonNull(now, "now")));
   }
 
@@ -99,7 +90,7 @@ public class LiveEnvironmentRegistry {
             current.environmentName(),
             current.status(),
             current.connection(),
-            current.capabilities(),
+            current.skills(),
             Objects.requireNonNull(now, "now")));
   }
 
@@ -147,10 +138,6 @@ public class LiveEnvironmentRegistry {
       throw new IllegalStateException("environment is not bound to this connection: " + name);
     }
     return current;
-  }
-
-  private DaemonToolCapabilities emptyCapabilities() {
-    return capabilitiesCodec.decode(DaemonEmptyCapabilities.JSON);
   }
 
   private static String requireNonBlank(String value, String name) {

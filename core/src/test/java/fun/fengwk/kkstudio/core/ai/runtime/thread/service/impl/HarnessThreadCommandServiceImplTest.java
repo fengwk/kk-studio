@@ -83,7 +83,7 @@ class HarnessThreadCommandServiceImplTest {
         new BootstrapResult(session, mock(SessionEntry.class), mock(SessionEntry.class), thread);
     HarnessSessionDTO sessionDTO = new HarnessSessionDTO();
     HarnessThreadDTO threadDTO = new HarnessThreadDTO();
-    when(coordinator.bootstrapThread(5L, 7L, "title", 11L, true)).thenReturn(result);
+    when(coordinator.bootstrapThread(5L, 7L, "title", 11L, "env-a", true)).thenReturn(result);
     when(sessionConverter.convert(session)).thenReturn(sessionDTO);
     when(converter.convert(thread)).thenReturn(threadDTO);
     HarnessThreadCommandServiceImpl service =
@@ -92,8 +92,10 @@ class HarnessThreadCommandServiceImplTest {
     HarnessThreadBootstrapDTO request = new HarnessThreadBootstrapDTO();
     request.setTitle("title");
     request.setAgentDefinitionId("11");
+    request.setEnvironmentName("env-a");
     request.setYoloEnabled(true);
     request.setExpectedExecutionEpoch(7L);
+    when(converter.convert(thread, null)).thenReturn(threadDTO);
 
     HarnessThreadBootstrapResultDTO response = service.bootstrapThread("5", request);
 
@@ -277,6 +279,6 @@ class HarnessThreadCommandServiceImplTest {
     badAgent.setExpectedExecutionEpoch(0L);
     assertThrows(IllegalArgumentException.class, () -> service.bootstrapThread("1", badAgent));
     verify(coordinator, never())
-        .bootstrapThread(anyLong(), anyLong(), anyString(), anyLong(), anyBoolean());
+        .bootstrapThread(anyLong(), anyLong(), anyString(), anyLong(), anyString(), anyBoolean());
   }
 }

@@ -2,12 +2,10 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -43,7 +41,7 @@ import java.util.function.Supplier;
  *       {@link ExecutablePlan} that must match the row.
  *   <li>{@link TerminalCompleter} owns {@code SUCCEEDED} result preparation (after interceptor +
  *       {@link ArtifactStore} externalization) plus the four terminal transitions ({@code SUCCEEDED
- *       / FAILED / CANCELLED / UNKNOWN}) and the unstarted-claim release path.
+ *       / FAILED / CANCELLED / UNKNOWN}).
  *   <li>{@link ExecutionCallback} owns in-flight {@link
  *       fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener} callbacks, the heartbeat
  *       / deadline / partial-flush watchdogs, partial-result batching, and the per-callback release
@@ -185,11 +183,9 @@ public final class ToolWorker {
   }
 
   /**
-   * Conservatively durably converges a successful claim whose post-claim execution was rejected by
-   * the executor (typically a closed / shutting-down executor). No external Tool execution
-   * occurred, so the only safe durable action is to release the unstarted lease back to the queue;
-   * existing target/lease recovery (heartbeat, deadline, re-dispatch) then re-routes the work
-   * without ever leaving it stranded as RUNNING.
+   * Converges a successful claim whose post-claim execution was rejected by the executor (typically
+   * a closed / shutting-down executor) to a terminal failure. No external Tool execution occurred,
+   * but the claim must not be requeued indefinitely.
    */
   private void handleSubmissionRejection(
       ClaimedToolInvocation ownership, RejectedExecutionException rejected) {
@@ -197,28 +193,18 @@ public final class ToolWorker {
         "Tool dispatch executor rejected submission for invocation {}; releasing unstarted claim",
         ownership.invocation().id(),
         rejected);
-    InvocationStatus previousStatus = ownership.previousStatus();
-    if (previousStatus != InvocationStatus.QUEUED
-        && previousStatus != InvocationStatus.RETRY_WAIT) {
-      // Invariant breach: a successful claim should always carry QUEUED/RETRY_WAIT as the
-      // pre-flip status. Do not attempt a second terminal mutation with unknown ownership; the
-      // existing heartbeat/deadline/re-dispatch recovery will fence and re-route the row.
-      log.error(
-          "Cannot release unstarted tool invocation {} after executor rejection: unexpected previous status {}",
-          ownership.invocation().id(),
-          previousStatus);
-      return;
-    }
     try {
-      terminalCompleter.releaseUnstarted(ownership, clock.instant());
-    } catch (RuntimeException releaseError) {
-      // Do not attempt a second terminal mutation with potentially unknown ownership; the existing
-      // heartbeat/deadline/re-dispatch recovery will fence and re-route the row once the lease
-      // expires or the durable target becomes due again.
+      terminalCompleter.completeFailure(
+          ownership,
+          new ToolInvocationError(
+              "EXECUTION_REJECTED",
+              failureMessage(rejected, "Tool execution was rejected before it started.")),
+          ownership.invocation().lastActivityAt());
+    } catch (RuntimeException terminalError) {
       log.error(
-          "Failed to release unstarted tool invocation {} after executor rejection; relying on lease/target recovery",
+          "Failed to terminally fail tool invocation {} after executor rejection; relying on lease recovery",
           ownership.invocation().id(),
-          releaseError);
+          terminalError);
     }
   }
 
@@ -229,17 +215,14 @@ public final class ToolWorker {
 
   /**
    * Process-local gate: an in-flight handle for the given ENVIRONMENT name. PLATFORM handles are
-   * matched by location instead.
+   * matched by its bound environment name.
    */
   public boolean hasActiveExecution(String environmentName) {
     if (environmentName == null || environmentName.isBlank()) {
       return false;
     }
     return executions.values().stream()
-        .anyMatch(
-            execution ->
-                execution.binding().location() == ToolExecutionLocation.ENVIRONMENT
-                    && environmentName.equals(execution.binding().environmentName()));
+        .anyMatch(execution -> environmentName.equals(execution.binding().environmentName()));
   }
 
   /**
@@ -321,10 +304,17 @@ public final class ToolWorker {
                   execution);
       execution.setHandle(handle);
     } catch (RemoteToolUnavailableException unavailable) {
-      // The synchronous send failed before any external Tool side effect. Free the slot and
-      // release the claim without invoking any Tool execution.
-      execution.forceTerminal();
-      terminalCompleter.releaseUnstarted(claimed, clock.instant());
+      // The Environment went offline after planning. This is terminal, not an unbounded retry.
+      try {
+        terminalCompleter.completeFailure(
+            claimed,
+            new ToolInvocationError(
+                "ENVIRONMENT_UNAVAILABLE",
+                failureMessage(unavailable, "Environment is unavailable.")),
+            claimed.invocation().lastActivityAt());
+      } finally {
+        execution.forceTerminal();
+      }
     } catch (RemoteToolSendUncertainException uncertain) {
       // Synchronous send uncertainty: side effects may have begun; converge immediately to UNKNOWN.
       try {

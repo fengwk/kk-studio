@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -117,32 +116,33 @@ class RuntimeConfigSnapshotResolverTest {
   }
 
   @Test
-  void freezesAgentModelPlatformAndEnvironmentResourcesWithoutProviderCreation() {
+  void freezesAgentModelLocalAndEnvironmentResourcesWithoutProviderCreation() {
     AgentDefinitionDO definition = definition(1, 2, "quality");
-    AgentDefinitionConfigDTO config = config("dev", List.of("read", "shell"), List.of("git"));
+    AgentDefinitionConfigDTO config = config("dev", List.of("read", "bash"), List.of("git"));
     when(definitions.getById(1)).thenReturn(definition);
     when(configs.decode("definition-config")).thenReturn(config);
     model(2, true, "quality");
-    ToolDescriptor read = tool("read", ToolExecutionLocation.PLATFORM);
-    ToolDescriptor shell = tool("shell", ToolExecutionLocation.ENVIRONMENT);
-    ToolDescriptor createGoal = tool("create_goal", ToolExecutionLocation.PLATFORM);
-    ToolDescriptor loadSkill = tool("load_skill", ToolExecutionLocation.PLATFORM);
-    withTools(read, createGoal, loadSkill);
+    ToolDescriptor createGoal = tool("create_goal");
+    ToolDescriptor loadSkill = tool("load_skill");
+    withTools(createGoal, loadSkill);
     LiveEnvironment environment = mock(LiveEnvironment.class);
     when(environment.isReady()).thenReturn(true);
     when(environment.environmentName()).thenReturn("dev");
-    when(environment.tools()).thenReturn(List.of(shell));
     when(environment.skills()).thenReturn(List.of(new DaemonSkillDescriptor("git", "Git rules")));
     when(environments.find("dev")).thenReturn(Optional.of(environment));
 
-    RuntimeConfigSnapshot snapshot = resolver.resolveAgent(1, true);
+    RuntimeConfigSnapshot snapshot = resolver.resolveAgent(1, "dev", true);
 
     assertEquals("agent", snapshot.agent().name());
     assertEquals("quality", snapshot.model().variant().id());
+    assertEquals(Set.of("bash", "read"), Set.copyOf(snapshot.toolNames()));
+    assertEquals(List.of("git"), snapshot.skillNames());
+    assertEquals("dev", snapshot.environmentName());
+    var capabilities = resolver.resolve(snapshot);
     assertEquals(
-        Set.of("read", "shell", "create_goal", "load_skill"),
-        Set.copyOf(snapshot.tools().stream().map(b -> b.descriptor().name()).toList()));
-    assertEquals("dev", snapshot.skills().getFirst().sourceEnvironment());
+        Set.of("read", "bash", "load_skill"),
+        Set.copyOf(capabilities.toolBindings().stream().map(b -> b.descriptor().name()).toList()));
+    assertEquals("dev", capabilities.skillSnapshots().getFirst().sourceEnvironment());
     assertEquals(true, snapshot.yoloEnabled());
     verify(providerFactory, never()).create(anyString(), anyString());
   }
@@ -152,30 +152,71 @@ class RuntimeConfigSnapshotResolverTest {
     AgentDefinitionDO definition = definition(1, 2, "quality");
     when(definitions.getById(1)).thenReturn(definition);
     when(configs.decode("definition-config")).thenReturn(config(null, List.of("read"), List.of()));
-    ToolDescriptor read = tool("read", ToolExecutionLocation.PLATFORM);
-    withTools(read);
+    withTools();
     model(2, true, "quality");
-    RuntimeConfigSnapshot current = resolver.resolveAgent(1, false);
+    RuntimeConfigSnapshot current = resolver.resolveAgent(1, "env-a", false);
     model(3, true, "fast");
 
     RuntimeConfigSnapshot replaced = resolver.replaceModel(current, 3, "fast");
     RuntimeConfigSnapshot yolo = replaced.withYoloEnabled(true);
     assertEquals(current.agent(), replaced.agent());
-    assertEquals(current.tools(), replaced.tools());
+    assertEquals(current.toolNames(), replaced.toolNames());
+    assertEquals("env-a", replaced.environmentName());
     assertEquals("fast", replaced.model().variant().id());
     assertEquals(replaced.model(), yolo.model());
     assertEquals(true, yolo.yoloEnabled());
 
     model(4, false, "plain");
     assertThrows(IllegalArgumentException.class, () -> resolver.replaceModel(current, 4, "plain"));
+
+    when(configs.decode("definition-config")).thenReturn(config(null, List.of(), List.of("git")));
+    RuntimeConfigSnapshot skillOnly = resolver.resolveAgent(1, false);
+    assertThrows(
+        IllegalArgumentException.class, () -> resolver.replaceModel(skillOnly, 4, "plain"));
+  }
+
+  @Test
+  void requiresTheRuntimeManagedLoadSkillToolWhenSelectedSkillsAreAvailable() {
+    when(definitions.getById(1)).thenReturn(definition(1, 2, "quality"));
+    when(configs.decode("definition-config")).thenReturn(config("dev", List.of(), List.of("git")));
+    model(2, true, "quality");
+    withTools();
+    LiveEnvironment environment = mock(LiveEnvironment.class);
+    when(environment.isReady()).thenReturn(true);
+    when(environment.skills()).thenReturn(List.of(new DaemonSkillDescriptor("git", "Git rules")));
+    when(environments.find("dev")).thenReturn(Optional.of(environment));
+
+    RuntimeConfigSnapshot snapshot = resolver.resolveAgent(1, "dev", false);
+
+    assertThrows(IllegalStateException.class, () -> resolver.resolve(snapshot));
+  }
+
+  @Test
+  void replacesAgentWithoutDroppingEnvironmentOrYolo() {
+    AgentDefinitionDO definition = definition(1, 2, "quality");
+    when(definitions.getById(1)).thenReturn(definition);
+    when(configs.decode("definition-config")).thenReturn(config(null, List.of(), List.of()));
+    model(2, true, "quality");
+
+    RuntimeConfigSnapshot current = resolver.resolveAgent(1, "env-a", true);
+    RuntimeConfigSnapshot replaced = resolver.replaceAgent(current, 1);
+
+    assertEquals("env-a", replaced.environmentName());
+    assertTrue(replaced.yoloEnabled());
+    assertEquals(current.model(), replaced.model());
+    assertEquals(current.toolNames(), replaced.toolNames());
+    assertEquals(current.skillNames(), replaced.skillNames());
   }
 
   @Test
   void rejectsOfflineUnknownAndAmbiguousResourcesAndInvalidModels() {
     when(definitions.getById(1)).thenReturn(definition(1, 2, "quality"));
+    model(2, true, "quality");
     when(configs.decode("definition-config")).thenReturn(config("offline", List.of(), List.of()));
     when(environments.find("offline")).thenReturn(Optional.empty());
-    assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
+    RuntimeConfigSnapshot offline = resolver.resolveAgent(1, "offline", false);
+    assertTrue(resolver.resolve(offline).toolBindings().isEmpty());
+    assertTrue(resolver.resolve(offline).skillSnapshots().isEmpty());
 
     when(configs.decode("definition-config"))
         .thenReturn(config(null, List.of("missing"), List.of()));
@@ -184,7 +225,8 @@ class RuntimeConfigSnapshotResolverTest {
 
     when(configs.decode("definition-config"))
         .thenReturn(config(null, List.of(), List.of("missing")));
-    assertThrows(IllegalArgumentException.class, () -> resolver.resolveAgent(1, false));
+    RuntimeConfigSnapshot missingSkill = resolver.resolveAgent(1, false);
+    assertTrue(resolver.resolve(missingSkill).skillSnapshots().isEmpty());
 
     RuntimeConfigSnapshot current = emptySnapshot();
     when(models.getById(2)).thenReturn(null);
@@ -266,7 +308,7 @@ class RuntimeConfigSnapshotResolverTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> {
-              ToolDescriptor descriptor = tool("dup", ToolExecutionLocation.PLATFORM);
+              ToolDescriptor descriptor = tool("dup");
               List<ToolFactory> factories =
                   List.of(staticFactory(descriptor), staticFactory(descriptor));
               new ToolFactories(factories);
@@ -326,13 +368,12 @@ class RuntimeConfigSnapshotResolverTest {
   private static AgentDefinitionConfigDTO config(
       String environment, List<String> tools, List<String> skills) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setEnvironmentName(environment);
     config.setTools(tools);
     config.setSkills(skills);
     return config;
   }
 
-  private static ToolDescriptor tool(String name, ToolExecutionLocation location) {
+  private static ToolDescriptor tool(String name) {
     ToolDescriptor descriptor = mock(ToolDescriptor.class);
     when(descriptor.name()).thenReturn(name);
     when(descriptor.version()).thenReturn("v1");

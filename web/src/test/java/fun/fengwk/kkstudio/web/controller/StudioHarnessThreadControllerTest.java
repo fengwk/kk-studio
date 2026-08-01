@@ -73,6 +73,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         "{\"title\":\"web-session\",\"agentDefinitionId\":\"1\","
+                            + "\"environmentName\":\"bootstrap-env\","
                             + "\"yoloEnabled\":false,\"expectedExecutionEpoch\":0}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.session.sessionId").isString())
@@ -106,6 +107,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sessionId").value(sessionId))
         .andExpect(jsonPath("$.data.headEntryId").value(configEntryId))
         .andExpect(jsonPath("$.data.status").value("IDLE"))
+        .andExpect(jsonPath("$.data.activeEnvironmentName").value("bootstrap-env"))
         .andExpect(jsonPath("$.data.inputSequence").value(0));
     JsonNode entries = readData(get("/api/ai/runtime/sessions/{id}/entries", sessionId));
     assertEquals(2, entries.size());
@@ -190,6 +192,15 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.inputType").value("SET_YOLO"));
     mockMvc
         .perform(
+            put("/api/ai/runtime/threads/{id}/environment", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"environmentName\":\"env-b\",\"clientMessageId\":\"environment-1\","
+                        + "\"expectedExecutionEpoch\":1}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.inputType").value("SET_ENVIRONMENT"));
+    mockMvc
+        .perform(
             put("/api/ai/runtime/threads/{id}/agent", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
@@ -218,6 +229,15 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isConflict());
     mockMvc
         .perform(
+            put("/api/ai/runtime/threads/{id}/environment", threadId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"environmentName\":\"stale\","
+                        + "\"clientMessageId\":\"stale-environment\","
+                        + "\"expectedExecutionEpoch\":99}"))
+        .andExpect(status().isConflict());
+    mockMvc
+        .perform(
             post("/api/ai/runtime/threads/{id}/stop", threadId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedExecutionEpoch\":99}"))
@@ -232,7 +252,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
             .andExpect(status().isOk())
             // Long fields are stringified by convention4j for JS-safe wire form.
             .andExpect(jsonPath("$.data.executionEpoch").isString())
-            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(5))
+            .andExpect(jsonPath("$.data.cancelledInputs.length()").value(6))
             .andReturn();
     String firstEpoch = data(stop).path("executionEpoch").asText();
     assertEquals("2", firstEpoch);
@@ -402,7 +422,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isNotFound());
   }
 
-  /** 与 agent/model 有关的入队错误映射：非法字段 400，未知资源 404。 */
+  /** 配置命令的入队错误映射：非法字段 400，未知资源 404。 */
   @Test
   void mapsInvalidAndUnknownMailboxResourcesToBadRequestOrNotFound() throws Exception {
     Bound bound = bootstrapThread("mapping");
@@ -413,6 +433,17 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"clientMessageId\":\"invalid-yolo\",\"expectedExecutionEpoch\":"
+                        + bound.epoch()
+                        + "}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            put("/api/ai/runtime/threads/{id}/environment", bound.threadId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"environmentName\":\" invalid \","
+                        + "\"clientMessageId\":\"invalid-environment\","
+                        + "\"expectedExecutionEpoch\":"
                         + bound.epoch()
                         + "}"))
         .andExpect(status().isBadRequest());

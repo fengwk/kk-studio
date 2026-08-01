@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionStatus;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransition;
 import fun.fengwk.kkstudio.harness.runtime.interaction.ToolPermissionDecision;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 
@@ -216,10 +215,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
       throw new IllegalStateException(
           "tool permission target must be parked while interaction is open: " + tool.getId());
     }
-    String expectedRoute =
-        ToolExecutionLocation.ENVIRONMENT.name().equals(tool.getLocation())
-            ? tool.getEnvironmentName()
-            : null;
+    String expectedRoute = tool.getEnvironmentName();
     if (!Objects.equals(expectedRoute, target.routeKey())) {
       throw new IllegalStateException(
           "tool permission target route does not match invocation: " + tool.getId());

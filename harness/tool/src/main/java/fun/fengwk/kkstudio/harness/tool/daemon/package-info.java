@@ -4,9 +4,10 @@
  * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为实时唯一 {@code
  * environmentName}，不再使用持久数值 environment id。
  *
- * <p>v1 {@code CAPABILITIES} payload 由 {@link
- * fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec} 编解码，形状为 {@code
- * {"tools":[...],"skills":[{"name","description"}]}}。skills 只暴露短摘要，不包含本地路径或正文。
+ * <p>v1 {@code READY} payload 由 {@link
+ * fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec} 编解码，形状为 {@code
+ * {"skills":[{"name","description"}]}。Environment tools are fixed by EnvironmentToolCatalog and
+ * are not negotiated per connection.
  *
  * <p>v1 Skill 加载消息：
  *

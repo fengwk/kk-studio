@@ -71,17 +71,6 @@ public class AgentDefinitionConfigCodec {
     if (config == null) {
       throw new IllegalArgumentException("agent definition config is required");
     }
-    String environmentName = config.getEnvironmentName();
-    if (environmentName != null) {
-      if (environmentName.isBlank()) {
-        throw new IllegalArgumentException(
-            "agent definition config environmentName must not be blank when present");
-      }
-      if (!environmentName.equals(environmentName.trim())) {
-        throw new IllegalArgumentException(
-            "agent definition config environmentName must not contain surrounding whitespace");
-      }
-    }
     validateNames(config.getTools(), "tools");
     validateNames(config.getSkills(), "skills");
   }
@@ -99,6 +88,14 @@ public class AgentDefinitionConfigCodec {
       if (!value.equals(value.trim())) {
         throw new IllegalArgumentException(
             "agent definition config " + field + " must not contain surrounding whitespace");
+      }
+      if (value.length() > 128
+          || value.indexOf(':') >= 0
+          || value.indexOf('/') >= 0
+          || value.indexOf('@') >= 0
+          || value.indexOf('\\') >= 0) {
+        throw new IllegalArgumentException(
+            "agent definition config " + field + " must contain short names only: " + value);
       }
       if (!seen.add(value)) {
         throw new IllegalArgumentException(

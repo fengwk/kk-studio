@@ -47,6 +47,7 @@ public final class TestRuntimeConfigs {
     return new RuntimeConfigSnapshot(
         new AgentSnapshot(1, name, "prompt"),
         new ModelSnapshot(descriptor, variant),
+        null,
         List.of(),
         List.of(),
         yolo);

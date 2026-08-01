@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.assertTransactionConstraintViolation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,30 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           conn,
           "fk_agent_definition_model",
           () -> insertDefinition(conn, FIXTURE_IDS.incrementAndGet(), modelId + 1_000_000L));
+    }
+  }
+
+  @Test
+  void chatDefaultEnvironmentNameRequiresCanonicalValue() throws SQLException {
+    try (Connection conn = newConnection()) {
+      insertChat(conn, FIXTURE_IDS.incrementAndGet(), null);
+      insertChat(conn, FIXTURE_IDS.incrementAndGet(), "prod");
+    }
+
+    for (String invalid : new String[] {"", "   ", "\t", "\n", "\tprod\t"}) {
+      try (Connection conn = newConnection()) {
+        assertTransactionConstraintViolation(
+            conn,
+            "ck_chat_default_environment_name",
+            () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), invalid));
+      }
+    }
+    try (Connection conn = newConnection()) {
+      SQLException tooLong =
+          assertThrows(
+              SQLException.class,
+              () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), "x".repeat(129)));
+      assertEquals("22001", tooLong.getSQLState());
     }
   }
 
@@ -216,6 +241,18 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       ps.setLong(1, id);
       ps.setString(2, "agent-" + id);
       ps.setLong(3, modelId);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertChat(Connection conn, long id, String defaultEnvironmentName)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into chat (id, title, default_agent_id, default_environment_name)"
+                + " values (?, 'schema-test', 1, ?)")) {
+      ps.setLong(1, id);
+      ps.setString(2, defaultEnvironmentName);
       assertEquals(1, ps.executeUpdate());
     }
   }

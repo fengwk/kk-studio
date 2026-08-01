@@ -2,42 +2,21 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Applies OpenCode-style multi-file patches inside the environment root. */
 public final class ApplyPatchTool extends AbstractCodingTool {
 
   public ApplyPatchTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "apply_patch",
-            "1",
-            CodingToolPrompts.load("apply_patch"),
-            null,
-            new ToolParamsSchema(
-                "ApplyPatch parameters",
-                Map.of(
-                    "patchText",
-                    new ToolStringSchema(
-                        "Complete apply_patch protocol text from *** Begin Patch through *** End Patch. Optional first directive: *** Workdir: <path>.")),
-                Set.of("patchText"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(2)));
+    super(config, EnvironmentToolCatalog.require("apply_patch"));
   }
 
   @Override

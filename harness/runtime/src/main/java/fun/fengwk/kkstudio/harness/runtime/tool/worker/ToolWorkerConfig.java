@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Bounded persistence cadence for the location-agnostic ToolWorker. */
+/** Bounded persistence cadence for the route-neutral ToolWorker. */
 public record ToolWorkerConfig(
     Duration leaseDuration,
     Duration heartbeatInterval,

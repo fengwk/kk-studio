@@ -22,6 +22,7 @@ public class ChatMutationFactory {
 
   private static final String RESOURCE = "chat";
   private static final int TITLE_MAX_LENGTH = 256;
+  private static final int ENVIRONMENT_NAME_MAX_LENGTH = 128;
 
   private final AgentEditableSupport editableSupport;
   private final PostgresqlSequenceIdGenerator idGenerator;
@@ -45,6 +46,7 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setDefaultAgentId(parseRequiredAgentId(createDTO.getDefaultAgentId()));
+    chat.setDefaultEnvironmentName(canonicalEnvironmentName(createDTO.getDefaultEnvironmentName()));
     return chat;
   }
 
@@ -66,6 +68,10 @@ public class ChatMutationFactory {
     if (updateDTO.getDefaultAgentId() != null) {
       chat.setDefaultAgentId(parseRequiredAgentId(updateDTO.getDefaultAgentId()));
     }
+    if (updateDTO.isDefaultEnvironmentNameProvided()) {
+      chat.setDefaultEnvironmentName(
+          canonicalEnvironmentName(updateDTO.getDefaultEnvironmentName()));
+    }
   }
 
   /** Parses the required Agent id text. */
@@ -78,5 +84,25 @@ public class ChatMutationFactory {
       throw new AiValidationException(RESOURCE, "defaultAgentId must not be blank");
     }
     return ChatIds.parsePositive(trimmed, "defaultAgentId");
+  }
+
+  private String canonicalEnvironmentName(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    String trimmed = raw.trim();
+    if (trimmed.isEmpty()) {
+      throw new AiValidationException(RESOURCE, "defaultEnvironmentName must not be blank");
+    }
+    if (!raw.equals(trimmed)) {
+      throw new AiValidationException(
+          RESOURCE, "defaultEnvironmentName must not contain surrounding whitespace");
+    }
+    if (trimmed.length() > ENVIRONMENT_NAME_MAX_LENGTH) {
+      throw new AiValidationException(
+          RESOURCE,
+          "defaultEnvironmentName must be <= " + ENVIRONMENT_NAME_MAX_LENGTH + " characters");
+    }
+    return trimmed;
   }
 }

@@ -26,7 +26,7 @@ class LoadSkillToolTest {
   @Test
   void loadsSelectedSkillBodyFromResolvedSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        threadId ->
+        (invocationId, threadId) ->
             List.of(
                 new SelectedSkillMetadata("dev", "Developer rules", "platform"),
                 new SelectedSkillMetadata("project", "Project skill", "local-dev"));
@@ -45,7 +45,8 @@ class LoadSkillToolTest {
   @Test
   void rejectsUnselectedSkillAndOfflineSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        threadId -> List.of(new SelectedSkillMetadata("dev", "Developer rules", "platform"));
+        (invocationId, threadId) ->
+            List.of(new SelectedSkillMetadata("dev", "Developer rules", "platform"));
     RecordingBodyLoader loader = new RecordingBodyLoader();
     loader.result =
         new SkillBodyLoader.SkillBodyLoadResult.Failed(
@@ -65,7 +66,8 @@ class LoadSkillToolTest {
   void requiresDurableContextAndStrictName() throws Exception {
     LoadSkillTool tool =
         new LoadSkillTool(
-            threadId -> List.of(), (env, name, timeout) -> CompletableFuture.completedFuture(null));
+            (invocationId, threadId) -> List.of(),
+            (env, name, timeout) -> CompletableFuture.completedFuture(null));
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
     tool.execute(

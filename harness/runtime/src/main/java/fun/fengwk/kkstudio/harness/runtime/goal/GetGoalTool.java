@@ -44,14 +44,13 @@ public final class GetGoalTool implements Tool {
 
   @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
-    return PlatformToolSupport.complete(request, listener, this::run);
+    return RuntimeToolSupport.complete(request, listener, this::run);
   }
 
   private ToolResult run(ToolExecutionRequest request) {
-    JsonNode args = PlatformToolSupport.requireObjectArgs(request.call().argumentsJson());
-    PlatformToolSupport.rejectUnknownFields(args, Set.of());
+    JsonNode args = RuntimeToolSupport.requireObjectArgs(request.call().argumentsJson());
+    RuntimeToolSupport.rejectUnknownFields(args, Set.of());
     ThreadGoal goal = store.find(request.context().threadId()).orElse(null);
-    return PlatformToolSupport.success(
-        request.call().id(), PlatformToolSupport.formatGetGoal(goal));
+    return RuntimeToolSupport.success(request.call().id(), RuntimeToolSupport.formatGetGoal(goal));
   }
 }

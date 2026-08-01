@@ -2,18 +2,15 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -21,9 +18,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
@@ -53,24 +48,7 @@ public final class BashTool implements Tool {
   public BashTool(CodingToolsConfig config) {
     this.config = Objects.requireNonNull(config, "config");
     boundary = new EnvironmentPathBoundary(config);
-    descriptor =
-        new ToolDescriptor(
-            "bash",
-            "1",
-            CodingToolPrompts.load("bash"),
-            null,
-            new ToolParamsSchema(
-                "Bash parameters",
-                Map.of(
-                    "command", new ToolStringSchema("Platform-authorized shell command"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "timeout_seconds",
-                        new ToolIntegerSchema(
-                            "Optional timeout in seconds; defaults to 120 and must not exceed 3600")),
-                Set.of("command"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofHours(1));
+    descriptor = EnvironmentToolCatalog.require("bash");
   }
 
   @Override

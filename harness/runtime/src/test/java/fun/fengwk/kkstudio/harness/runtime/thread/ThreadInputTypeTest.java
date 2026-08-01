@@ -15,6 +15,7 @@ class ThreadInputTypeTest {
     assertFalse(ThreadInputType.SET_AGENT.isMessage());
     assertFalse(ThreadInputType.SET_MODEL.isMessage());
     assertFalse(ThreadInputType.SET_YOLO.isMessage());
+    assertFalse(ThreadInputType.SET_ENVIRONMENT.isMessage());
   }
 
   @Test
@@ -22,6 +23,7 @@ class ThreadInputTypeTest {
     assertTrue(ThreadInputType.SET_AGENT.isConfig());
     assertTrue(ThreadInputType.SET_MODEL.isConfig());
     assertTrue(ThreadInputType.SET_YOLO.isConfig());
+    assertTrue(ThreadInputType.SET_ENVIRONMENT.isConfig());
     assertFalse(ThreadInputType.USER_MESSAGE.isConfig());
     assertFalse(ThreadInputType.CUSTOM_MESSAGE.isConfig());
   }

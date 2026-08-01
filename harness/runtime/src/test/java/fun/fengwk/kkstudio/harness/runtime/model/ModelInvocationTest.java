@@ -37,7 +37,8 @@ class ModelInvocationTest {
   private static final Instant LEASE_UNTIL = Instant.parse("2026-01-01T00:00:05Z");
   private static final Instant APPLIED = Instant.parse("2026-01-01T00:00:06Z");
   private static final Instant DEADLINE = Instant.parse("2026-01-01T00:00:10Z");
-  private static final ProviderRequest REQUEST = request();
+  private static final ModelInvocationRequest REQUEST =
+      new ModelInvocationRequest(request(), List.of(), List.of(), false);
   private static final ProviderResponse RESPONSE = response();
   private static final ModelInvocationError ERROR =
       new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable");
@@ -432,7 +433,7 @@ class ModelInvocationTest {
     private long threadId = 22;
     private long sourceHeadEntryId = 33;
     private long executionEpoch;
-    private ProviderRequest request = REQUEST;
+    private ModelInvocationRequest request = REQUEST;
     private InvocationStatus status = InvocationStatus.QUEUED;
     private int attempt = 1;
     private Instant nextAttemptAt;

@@ -19,6 +19,9 @@ public class ChatDTO {
   /** Always present in persisted Chat state; the referenced Agent may later be stale. */
   private String defaultAgentId;
 
+  /** Optional live Environment identity; it may be stale or offline. */
+  private String defaultEnvironmentName;
+
   /** Non-negative decimal string version; clients must echo on every update. */
   private String version;
 

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
@@ -79,7 +80,7 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> queryService.listAll(sort, cursor, limit)));
   }
 
-  /** 创建 UNBOUND Thread：无请求体，head 为空，尚未绑定任何 Session。 */
+  /** 创建未绑定 Thread：无请求体，head 为空，尚未绑定任何 Session。 */
   @PostMapping
   public Result<HarnessThreadDTO> createThread() {
     return Results.created(withMissingResourceTranslation(commandService::createThread));
@@ -153,6 +154,14 @@ public class StudioHarnessThreadController {
       @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
     return Results.accepted(
         withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
+  }
+
+  /** 异步切换 Thread 的 Environment target；null 清除 target。 */
+  @PutMapping("/{threadId}/environment")
+  public Result<HarnessThreadInputDTO> queueEnvironment(
+      @PathVariable String threadId, @RequestBody HarnessThreadEnvironmentSetDTO request) {
+    return Results.accepted(
+        withMissingResourceTranslation(() -> commandService.queueEnvironment(threadId, request)));
   }
 
   /**

@@ -2,10 +2,8 @@ package fun.fengwk.kkstudio.core.ai.catalog.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -26,6 +24,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
@@ -41,9 +40,8 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
     AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
     AgentModelDefaultVariantResolver variantResolver = mock(AgentModelDefaultVariantResolver.class);
-    AgentDefinitionLiveCapabilityValidator validator =
-        mock(AgentDefinitionLiveCapabilityValidator.class);
-    doNothing().when(validator).validate(any());
+    AgentDefinitionConfigValidator validator =
+        new AgentDefinitionConfigValidator(mock(ToolCatalog.class));
     AgentDefinitionServiceImpl service =
         new AgentDefinitionServiceImpl(
             repository,
@@ -115,8 +113,8 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
     AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
     AgentModelDefaultVariantResolver variantResolver = mock(AgentModelDefaultVariantResolver.class);
-    AgentDefinitionLiveCapabilityValidator validator =
-        mock(AgentDefinitionLiveCapabilityValidator.class);
+    AgentDefinitionConfigValidator validator =
+        new AgentDefinitionConfigValidator(mock(ToolCatalog.class));
     AgentDefinitionServiceImpl service =
         new AgentDefinitionServiceImpl(
             repository,

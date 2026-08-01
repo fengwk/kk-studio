@@ -7,7 +7,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -19,12 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -59,7 +59,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
@@ -92,7 +91,8 @@ import java.util.Optional;
 @Service
 public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTransactions {
 
-  private static final ProviderRequestJsonCodec REQUEST_CODEC = new ProviderRequestJsonCodec();
+  private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
+      new ModelInvocationRequestJsonCodec();
   private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
   private static final ModelInvocationErrorJsonCodec MODEL_ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
@@ -115,11 +115,12 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       ThreadReconcileMapper mapper,
       HarnessIdGenerator ids,
       HarnessRuntimeProperties properties,
-      ExecutionTargetStore executionTargetStore) {
+      ExecutionTargetStore executionTargetStore,
+      RuntimeCapabilityResolver capabilityResolver) {
     this(
         mapper,
         ids,
-        new ModelInvocationPlanner(),
+        new ModelInvocationPlanner(capabilityResolver),
         properties.getThreadReconcileLeaseDuration(),
         executionTargetStore);
   }
@@ -267,24 +268,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     long sourceHeadEntryId = invocation.getSourceHeadEntryId();
     long entryId;
     if ("SUCCEEDED".equals(invocation.getStatus())) {
-      ProviderRequest request = REQUEST_CODEC.decode(invocation.getRequestJson());
-      Optional<ModelInvocationPlan> replanned = planAt(thread, sourceHeadEntryId);
-      if (replanned.isEmpty() || !request.equals(replanned.get().request())) {
-        throw new IllegalStateException(
-            "terminal model request no longer matches immutable source-head plan");
-      }
+      ModelInvocationRequest request = REQUEST_CODEC.decode(invocation.getRequestJson());
       ProviderResponse response = RESPONSE_CODEC.decode(invocation.getResultJson());
       payload = assistantPayload(response);
       entryId = ids.nextEntryId();
       insertEntry(thread, entryId, payload, now);
-      insertUsage(thread, entryId, ModelUsageDraft.from(request, response), now);
+      insertUsage(thread, entryId, ModelUsageDraft.from(request.providerRequest(), response), now);
       materializeTools(
-          thread,
-          entryId,
-          ownership.executionEpoch(),
-          response,
-          replanned.get().configSnapshot(),
-          now);
+          thread, entryId, modelInvocationId, ownership.executionEpoch(), response, request, now);
       advance(thread, ownership, entryId, now);
     } else {
       payload = new AssistantErrorEntryPayload(modelError(invocation));
@@ -548,16 +539,17 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private void materializeTools(
       OwnedThreadRow thread,
       long assistantEntryId,
+      long modelInvocationId,
       long epoch,
       ProviderResponse response,
-      RuntimeConfigSnapshot config,
+      ModelInvocationRequest request,
       Instant now) {
     Instant persistedNow = persisted(now);
     LinkedHashSet<String> environmentRoutes = new LinkedHashSet<>();
     for (int ordinal = 0; ordinal < response.toolCalls().size(); ordinal++) {
       var call = response.toolCalls().get(ordinal);
       ToolBinding binding =
-          config.tools().stream()
+          request.toolBindings().stream()
               .filter(candidate -> candidate.descriptor().name().equals(call.name()))
               .findFirst()
               .orElseThrow(
@@ -568,19 +560,19 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
               thread.getId(),
               thread.getSessionId(),
               assistantEntryId,
+              modelInvocationId,
               ordinal,
               call.id(),
               TOOL_DESCRIPTOR_CODEC.encode(binding.descriptor()),
               call.argumentsJson(),
-              binding.location().name(),
               binding.environmentName(),
               epoch,
-              config.yoloEnabled(),
+              request.yoloEnabled(),
               timestamp(now))
           != 1) {
         throw new IllegalStateException("cannot materialize tool invocation");
       }
-      if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
+      if (binding.environmentName() != null) {
         requireTargetAffected(
             executionTargetStore.park(
                 ExecutionTargetKind.TOOL_INVOCATION,

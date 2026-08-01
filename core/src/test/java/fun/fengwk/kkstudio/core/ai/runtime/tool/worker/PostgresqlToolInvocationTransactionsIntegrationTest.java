@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
@@ -81,7 +80,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void claimQueuedEstablishesRunningClocksAndReschedulesTarget() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
 
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
 
@@ -111,8 +110,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void claimRoutesEnvironmentTargetByEnvironmentName() throws Exception {
-    Fixture fixture =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
 
     ClaimedToolInvocation claimed = claim(fixture, "env-owner", BASE, LONG_LEASE);
 
@@ -124,7 +122,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void claimRequiresDueTarget() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     setTargetAvailableAt(fixture.invocationId, BASE.plus(Duration.ofMinutes(10)));
 
     assertTrue(transactions.claim(fixture.invocationId, "worker-a", LONG_LEASE, BASE).isEmpty());
@@ -133,7 +131,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void claimReturnsEmptyWhenTargetRowIsAbsent() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     deleteTarget(fixture.invocationId);
 
     assertTrue(transactions.claim(fixture.invocationId, "worker-a", LONG_LEASE, BASE).isEmpty());
@@ -142,7 +140,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void openInteractionBlocksClaimUntilInteractionIsResolved() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     long interactionId = insertOpenInteraction(fixture.invocationId);
 
     assertTrue(transactions.claim(fixture.invocationId, "worker-a", LONG_LEASE, BASE).isEmpty());
@@ -153,9 +151,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void activeRunningAndFutureRetryAreNotClaimable() throws Exception {
-    Fixture active = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture futureRetry =
-        newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.IDEMPOTENT, 1L);
+    Fixture active = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture futureRetry = newQueued(null, ToolSideEffect.IDEMPOTENT, 1L);
     claim(active, "active-owner", BASE, LONG_LEASE);
     ClaimedToolInvocation retryClaim = claim(futureRetry, "retry-owner", BASE, LONG_LEASE);
     transactions.scheduleRetry(
@@ -178,7 +175,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void expiredRunningRecoveryPreservesAttemptAndExecutionClocks() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation first = claim(fixture, "old-owner", BASE, SHORT_LEASE);
 
     ClaimedToolInvocation recovered =
@@ -195,54 +192,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   }
 
   @Test
-  void releaseUnstartedRestoresQueuedAndRetryWaitReschedulesTarget() throws Exception {
-    Fixture queued =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
-    ClaimedToolInvocation queuedClaim = claim(queued, "env-owner", BASE, LONG_LEASE);
-    assertEquals(
-        ToolInvocationUpdateOutcome.APPLIED,
-        transactions.releaseUnstarted(queuedClaim, null, BASE));
-    ToolInvocationDO queuedRow = rowFor(queued.invocationId);
-    assertEquals("QUEUED", queuedRow.getStatus());
-    assertNull(queuedRow.getWorkerToken());
-    assertNull(queuedRow.getStartedAt());
-    assertNull(queuedRow.getDeadlineAt());
-    assertNull(queuedRow.getLastActivityAt());
-    assertFalse(threadRunnable(queued.threadId));
-    ExecutionTargetRow queuedTarget = targetFor(queued.invocationId);
-    assertEquals(BASE, queuedTarget.availableAt());
-    assertEquals("env-a", queuedTarget.routeKey());
-
-    Fixture retry =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.IDEMPOTENT, 1L);
-    ClaimedToolInvocation first = claim(retry, "retry-owner", BASE, LONG_LEASE);
-    assertEquals(
-        ToolInvocationUpdateOutcome.APPLIED,
-        transactions.scheduleRetry(
-            first, BASE.plusSeconds(2), BASE.plusSeconds(1), BASE.plusSeconds(1)));
-    ClaimedToolInvocation second =
-        transactions
-            .claim(retry.invocationId, "retry-owner-2", LONG_LEASE, BASE.plusSeconds(3))
-            .orElseThrow();
-    assertEquals(2, second.invocation().attempt());
-    assertEquals(
-        ToolInvocationUpdateOutcome.APPLIED,
-        transactions.releaseUnstarted(second, BASE.plusSeconds(4), BASE.plusSeconds(3)));
-    ToolInvocationDO retryRow = rowFor(retry.invocationId);
-    assertEquals("RETRY_WAIT", retryRow.getStatus());
-    assertEquals(1, retryRow.getAttempt());
-    assertEquals(BASE.plusSeconds(4), retryRow.getNextAttemptAt().toInstant());
-    assertNull(retryRow.getWorkerToken());
-    assertFalse(threadRunnable(retry.threadId));
-    ExecutionTargetRow retryTarget = targetFor(retry.invocationId);
-    assertEquals(BASE.plusSeconds(4), retryTarget.availableAt());
-    assertEquals("env-a", retryTarget.routeKey());
-  }
-
-  @Test
   void retryClaimIncrementsAttemptAndPreservesDeadline() throws Exception {
-    Fixture fixture =
-        newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.IDEMPOTENT, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.IDEMPOTENT, 1L);
     ClaimedToolInvocation first = claim(fixture, "worker-a", BASE, LONG_LEASE);
     Instant deadline = first.invocation().deadlineAt();
     assertEquals(
@@ -266,7 +217,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void concurrentClaimHasExactlyOneWinner() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ExecutorService pool = Executors.newFixedThreadPool(2);
     CountDownLatch start = new CountDownLatch(1);
     try {
@@ -296,7 +247,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void renewNeverShortensLeaseAndReschedulesTarget() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     Instant originalUntil = claimed.invocation().workerLease().until();
     setTargetAvailableAt(fixture.invocationId, BASE.plus(Duration.ofHours(1)));
@@ -318,7 +269,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void activityIsMonotonicAndFencedByLeaseOwnership() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
 
     assertEquals(
@@ -339,8 +290,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void scheduleRetryReschedulesTargetWithoutWakingThread() throws Exception {
-    Fixture fixture =
-        newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.IDEMPOTENT, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.IDEMPOTENT, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
 
     assertEquals(
@@ -361,7 +311,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   @Test
   void successfulTerminalPersistsResultDeletesToolTargetAndMarksThreadRunnableAtomically()
       throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     ToolResult result = result(fixture.toolCallId, "done");
 
@@ -386,10 +336,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void terminalEnvironmentToolActivatesNextRouteHead() throws Exception {
-    Fixture first =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
-    Fixture second =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture first = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture second = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
     setInvocationCreatedAt(first.invocationId, BASE);
     setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
     setTargetDispatchEnabled(second.invocationId, false);
@@ -409,10 +357,9 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void failureUnknownAndCancellationPersistTheirStrictPayloadShapes() throws Exception {
-    Fixture failure = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture unknown = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture cancelled =
-        newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture failure = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture unknown = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture cancelled = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation failureClaim = claim(failure, "failure-owner", BASE, LONG_LEASE);
     ClaimedToolInvocation unknownClaim = claim(unknown, "unknown-owner", BASE, LONG_LEASE);
     ClaimedToolInvocation cancelledClaim = claim(cancelled, "cancel-owner", BASE, LONG_LEASE);
@@ -457,7 +404,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void terminalMutationWithoutOwnedTargetRollsBack() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     deleteTarget(fixture.invocationId);
 
@@ -472,7 +419,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void renewMutationWithoutOwnedTargetRollsBack() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     deleteTarget(fixture.invocationId);
 
@@ -483,10 +430,10 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void tokenAttemptEpochAndExpiredLeaseAllFenceTerminalWrites() throws Exception {
-    Fixture token = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture attempt = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture epoch = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
-    Fixture expired = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture token = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture attempt = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture epoch = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture expired = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation tokenClaim = claim(token, "token-owner", BASE, LONG_LEASE);
     ClaimedToolInvocation attemptClaim = claim(attempt, "attempt-owner", BASE, LONG_LEASE);
     ClaimedToolInvocation epochClaim = claim(epoch, "epoch-owner", BASE, LONG_LEASE);
@@ -520,7 +467,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void lostOwnershipDoesNotEvaluateLazyTerminalResult() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     setWorkerToken(fixture.invocationId, "other-worker");
     AtomicInteger supplierCalls = new AtomicInteger();
@@ -540,7 +487,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void executionEpochMismatchPreventsClaim() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     setThreadEpoch(fixture.threadId, 2L);
 
     assertTrue(transactions.claim(fixture.invocationId, "worker-a", LONG_LEASE, BASE).isEmpty());
@@ -549,7 +496,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void successfulResultMustMatchFrozenToolCallId() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
 
     assertThrows(
@@ -564,7 +511,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void terminalUpdateRollsBackWhenOwningThreadCannotBeMarkedRunnable() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     suppressRunnableUpdates();
     AtomicReference<ArtifactRef> artifact = new AtomicReference<>();
@@ -596,7 +543,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void validatesWorkerArgumentsBeforeSqlMutation() throws Exception {
-    Fixture fixture = newQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -611,8 +558,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void persistPermissionAllowedFlipsStateAndOverwritesFinalPlan() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     ToolBinding finalBinding = ToolBinding.of(fixture.descriptor);
     String finalArgs = "{\"rewritten\":true}";
@@ -631,8 +577,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void persistPermissionAllowedRejectsRouteChangesWithoutMutatingTheInvocation() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "env-owner", BASE, LONG_LEASE);
 
     assertThrows(
@@ -652,8 +597,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void awaitPermissionCreatesOpenInteractionAndParksTarget() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     PermissionPromptPreview prompt =
         new PermissionPromptPreview("platformTool", "/work", "{\"k\":\"v\"}");
@@ -695,8 +639,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void awaitPermissionMissingTargetRollsBackAndLeavesNoOpenInteraction() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     deleteTarget(fixture.invocationId);
     PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
@@ -715,8 +658,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void awaitPermissionOnPlatformTargetWithNullRouteParks() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
 
@@ -732,11 +674,10 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void awaitPermissionRejectsRouteChange() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "env-worker", BASE, LONG_LEASE);
     PermissionPromptPreview prompt = new PermissionPromptPreview("environmentTool", "/work", "{}");
-    // The final binding changes the location, which is rejected.
+    // The final binding changes the environment, which is rejected.
     ToolBinding badBinding = ToolBinding.of(fixture.descriptor);
 
     assertThrows(
@@ -746,10 +687,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void denyPermissionTerminatesWakesThreadAndActivatesNextEnvironmentHead() throws Exception {
-    Fixture first =
-        newPendingQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
-    Fixture second =
-        newQueued(ToolExecutionLocation.ENVIRONMENT, "env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture first = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture second = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
     setInvocationCreatedAt(first.invocationId, BASE);
     setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
     setTargetDispatchEnabled(second.invocationId, false);
@@ -780,8 +719,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void denyPermissionRollsBackWhenItCannotWakeTheOwningThread() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     suppressRunnableUpdates();
 
@@ -799,8 +737,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void concurrentPermissionRequestsHaveOneWinnerAndOneDurableOpenInteraction() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     PermissionPromptPreview prompt = new PermissionPromptPreview("platformTool", "/work", "{}");
     ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -847,8 +784,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void pendingExpiredLeaseRecoverResetsRowToQueuedAndReschedulesTarget() throws Exception {
-    Fixture fixture =
-        newPendingQueued(ToolExecutionLocation.PLATFORM, null, ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(null, ToolSideEffect.READ_ONLY, 1L);
     // First claim with a very short lease, then a second claim after it expires.
     ClaimedToolInvocation first = claim(fixture, "old-worker", BASE, SHORT_LEASE);
     Instant before = BASE.plusMillis(100);
@@ -873,28 +809,17 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     return transactions.claim(fixture.invocationId, token, leaseDuration, now).orElseThrow();
   }
 
-  private Fixture newQueued(
-      ToolExecutionLocation location,
-      String environmentName,
-      ToolSideEffect sideEffect,
-      long executionEpoch)
+  private Fixture newQueued(String environmentName, ToolSideEffect sideEffect, long executionEpoch)
       throws SQLException {
-    return newQueued(
-        location, environmentName, sideEffect, executionEpoch, ToolPermissionState.ALLOWED);
+    return newQueued(environmentName, sideEffect, executionEpoch, ToolPermissionState.ALLOWED);
   }
 
   private Fixture newPendingQueued(
-      ToolExecutionLocation location,
-      String environmentName,
-      ToolSideEffect sideEffect,
-      long executionEpoch)
-      throws SQLException {
-    return newQueued(
-        location, environmentName, sideEffect, executionEpoch, ToolPermissionState.PENDING);
+      String environmentName, ToolSideEffect sideEffect, long executionEpoch) throws SQLException {
+    return newQueued(environmentName, sideEffect, executionEpoch, ToolPermissionState.PENDING);
   }
 
   private Fixture newQueued(
-      ToolExecutionLocation location,
       String environmentName,
       ToolSideEffect sideEffect,
       long executionEpoch,
@@ -904,9 +829,10 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     long threadId = ids.incrementAndGet();
     long rootEntryId = ids.incrementAndGet();
     long assistantEntryId = ids.incrementAndGet();
+    long modelInvocationId = ids.incrementAndGet();
     long invocationId = ids.incrementAndGet();
     String toolCallId = "call-" + invocationId;
-    ToolDescriptor descriptor = descriptor(location, sideEffect);
+    ToolDescriptor descriptor = descriptor(environmentName, sideEffect);
 
     try (Connection connection = newConnection()) {
       boolean previousAutoCommit = connection.getAutoCommit();
@@ -948,19 +874,30 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         }
         try (PreparedStatement statement =
             connection.prepareStatement(
+                "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+                    + " execution_epoch, request, status, attempt)"
+                    + " values (?, ?, ?, ?, '{\"model\":\"stub\"}'::jsonb, 'QUEUED', 1)")) {
+          statement.setLong(1, modelInvocationId);
+          statement.setLong(2, threadId);
+          statement.setLong(3, rootEntryId);
+          statement.setLong(4, executionEpoch);
+          statement.executeUpdate();
+        }
+        try (PreparedStatement statement =
+            connection.prepareStatement(
                 "insert into harness_tool_invocation (id, thread_id, session_id,"
-                    + " assistant_entry_id, ordinal, tool_call_id, descriptor, arguments, location,"
+                    + " assistant_entry_id, model_invocation_id, ordinal, tool_call_id, descriptor, arguments,"
                     + " environment_name, execution_epoch, status, attempt, permission_state,"
                     + " yolo_enabled, created_at)"
-                    + " values (?, ?, ?, ?, 0, ?, cast(? as jsonb), '{}'::jsonb, ?, ?, ?,"
+                    + " values (?, ?, ?, ?, ?, 0, ?, cast(? as jsonb), '{}'::jsonb, ?, ?,"
                     + " 'QUEUED', 1, ?, false, ?)")) {
           statement.setLong(1, invocationId);
           statement.setLong(2, threadId);
           statement.setLong(3, sessionId);
           statement.setLong(4, assistantEntryId);
-          statement.setString(5, toolCallId);
-          statement.setString(6, DESCRIPTOR_CODEC.encode(descriptor));
-          statement.setString(7, location.name());
+          statement.setLong(5, modelInvocationId);
+          statement.setString(6, toolCallId);
+          statement.setString(7, DESCRIPTOR_CODEC.encode(descriptor));
           statement.setString(8, environmentName);
           statement.setLong(9, executionEpoch);
           statement.setString(10, permissionState.name());
@@ -991,16 +928,16 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         threadId,
         rootEntryId,
         assistantEntryId,
+        modelInvocationId,
         invocationId,
         toolCallId,
         executionEpoch,
         descriptor);
   }
 
-  private static ToolDescriptor descriptor(
-      ToolExecutionLocation location, ToolSideEffect sideEffect) {
+  private static ToolDescriptor descriptor(String environmentName, ToolSideEffect sideEffect) {
     return new ToolDescriptor(
-        location == ToolExecutionLocation.PLATFORM ? "platformTool" : "environmentTool",
+        environmentName == null ? "platformTool" : "environmentTool",
         "1",
         "test tool",
         null,
@@ -1178,9 +1115,10 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select id, thread_id, session_id, assistant_entry_id, ordinal, tool_call_id,"
+                "select id, thread_id, session_id, assistant_entry_id, model_invocation_id,"
+                    + " ordinal, tool_call_id,"
                     + " descriptor::text as descriptor_json, arguments::text as arguments_json,"
-                    + " location, environment_name, execution_epoch, status, attempt,"
+                    + " environment_name, execution_epoch, status, attempt,"
                     + " next_attempt_at, worker_token, worker_until, deadline_at, last_activity_at,"
                     + " result::text as result_json, error::text as error_json, applied_at,"
                     + " created_at, started_at, finished_at, permission_state, yolo_enabled"
@@ -1195,11 +1133,11 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         row.setThreadId(resultSet.getLong("thread_id"));
         row.setSessionId(resultSet.getLong("session_id"));
         row.setAssistantEntryId(resultSet.getLong("assistant_entry_id"));
+        row.setModelInvocationId(resultSet.getLong("model_invocation_id"));
         row.setOrdinal(resultSet.getInt("ordinal"));
         row.setToolCallId(resultSet.getString("tool_call_id"));
         row.setDescriptorJson(resultSet.getString("descriptor_json"));
         row.setArgumentsJson(resultSet.getString("arguments_json"));
-        row.setLocation(resultSet.getString("location"));
         row.setEnvironmentName(resultSet.getString("environment_name"));
         row.setExecutionEpoch(resultSet.getLong("execution_epoch"));
         row.setStatus(resultSet.getString("status"));
@@ -1313,6 +1251,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
       long threadId,
       long rootEntryId,
       long assistantEntryId,
+      long modelInvocationId,
       long invocationId,
       String toolCallId,
       long executionEpoch,

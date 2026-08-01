@@ -38,7 +38,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   private final AgentDefinitionMutationFactory definitionMutationFactory;
   private final AgentDefinitionReferenceResolver referenceResolver;
   private final AgentModelDefaultVariantResolver variantResolver;
-  private final AgentDefinitionLiveCapabilityValidator liveCapabilityValidator;
+  private final AgentDefinitionConfigValidator configValidator;
   private final AgentDefinitionConfigCodec configCodec;
 
   @Override
@@ -54,7 +54,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     AgentDefinition definition = definitionMutationFactory.newAgent(modelId, createDTO);
     referenceResolver.ensureNameAvailable(definition.getName());
     validateVariant(modelId, definition.getVariant());
-    validateLiveCapabilities(configCodec.decode(definition.getConfigJson()));
+    validateConfig(configCodec.decode(definition.getConfigJson()));
     try {
       if (!agentDefinitionRepository.create(definition)) {
         throw new IllegalStateException("create agent definition failed");
@@ -90,7 +90,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     definition.setModelId(modelId);
     referenceResolver.ensureNameAvailable(currentName, definition.getName());
     validateVariant(modelId, definition.getVariant());
-    validateLiveCapabilities(configCodec.decode(definition.getConfigJson()));
+    validateConfig(configCodec.decode(definition.getConfigJson()));
     try {
       if (!agentDefinitionRepository.updateById(definition, expected)) {
         AgentDefinition reread = agentDefinitionRepository.getById(id);
@@ -171,9 +171,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
   }
 
-  private void validateLiveCapabilities(AgentDefinitionConfigDTO config) {
+  private void validateConfig(AgentDefinitionConfigDTO config) {
     try {
-      liveCapabilityValidator.validate(config);
+      configValidator.validate(config);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }

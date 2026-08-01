@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallContext;
 import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
 import fun.fengwk.kkstudio.harness.runtime.tool.PermissionBoundaryInterceptor;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -93,7 +92,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void environmentUnavailableBeforeSendReleasesClaimWithoutFailure() {
+  void environmentUnavailableBeforeSendConvergesToTerminalFailed() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
     fixture.transactions.descriptor = environmentDescriptor();
@@ -104,13 +103,15 @@ class ToolWorkerFinalTest {
 
     assertTrue(fixture.worker.dispatch(1));
     assertEquals(1, fixture.transactions.claimCalls);
-    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
-    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("ENVIRONMENT_UNAVAILABLE", fixture.transactions.error.kind());
+    assertEquals(0, fixture.transactions.retryCalls);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
     assertEquals(0, fixture.tool.executions);
   }
 
   @Test
-  void dueEnvironmentRetryWaitUnavailabilityReschedulesSameInvocationTarget() {
+  void dueEnvironmentRetryWaitUnavailabilityConvergesToTerminalFailed() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
     fixture.transactions.descriptor = environmentDescriptor();
@@ -122,12 +123,11 @@ class ToolWorkerFinalTest {
     assertTrue(fixture.transactions.candidate.isDispatchableAt(NOW));
     assertTrue(fixture.worker.dispatch(fixture.transactions.candidate.id()));
 
-    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
-    assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.releasedStatus);
-    assertEquals(
-        NOW.plus(ToolWorkerConfig.DEFAULT.unavailableRetryDelay()),
-        fixture.transactions.releasedNextAttemptAt);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("ENVIRONMENT_UNAVAILABLE", fixture.transactions.error.kind());
     assertEquals(0, fixture.transactions.retryCalls);
+    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertEquals(0, fixture.tool.executions);
   }
 
   @Test
@@ -142,7 +142,6 @@ class ToolWorkerFinalTest {
 
     assertTrue(fixture.worker.dispatch(1));
     assertEquals(1, fixture.transactions.claimCalls);
-    assertEquals(0, fixture.transactions.releaseUnstartedCalls);
     assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
     assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
     assertFalse(fixture.worker.hasActiveExecution("env-a"));
@@ -172,6 +171,7 @@ class ToolWorkerFinalTest {
         });
 
     assertTrue(fixture.worker.dispatch(1));
+    assertNotNull(remoteListener.get(), "transport listener must be set during dispatch");
     remoteListener
         .get()
         .onError(new RemoteToolSendUncertainException("connection lost mid-flight"));
@@ -592,7 +592,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void submissionRejectionReleasesClaimWithoutExternalToolExecution() {
+  void submissionRejectionConvergesToTerminalFailed() {
     Executor rejecting =
         command -> {
           throw new RejectedExecutionException("test executor is shut down");
@@ -602,16 +602,15 @@ class ToolWorkerFinalTest {
 
     assertTrue(fixture.worker.dispatch(1));
     assertEquals(1, fixture.transactions.claimCalls);
-    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
-    assertEquals(InvocationStatus.QUEUED, fixture.transactions.releasedStatus);
-    assertNull(fixture.transactions.releasedNextAttemptAt);
-    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("EXECUTION_REJECTED", fixture.transactions.error.kind());
+    assertEquals(0, fixture.transactions.retryCalls);
     assertEquals(0, fixture.tool.executions);
     assertFalse(fixture.worker.hasActiveExecution());
   }
 
   @Test
-  void submissionRejectionOnRetryWaitReschedulesAtUnavailableRetryDelay() {
+  void submissionRejectionOnRetryWaitConvergesToTerminalFailed() {
     Executor rejecting =
         command -> {
           throw new RejectedExecutionException("test executor is shut down");
@@ -622,13 +621,11 @@ class ToolWorkerFinalTest {
     fixture.rebuildWorkerWithExecutor(rejecting);
 
     assertTrue(fixture.worker.dispatch(1));
-    assertEquals(1, fixture.transactions.releaseUnstartedCalls);
-    assertEquals(InvocationStatus.RETRY_WAIT, fixture.transactions.releasedStatus);
-    assertEquals(
-        NOW.plus(ToolWorkerConfig.DEFAULT.unavailableRetryDelay()),
-        fixture.transactions.releasedNextAttemptAt);
-    assertNull(fixture.transactions.terminalStatus);
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("EXECUTION_REJECTED", fixture.transactions.error.kind());
+    assertEquals(0, fixture.transactions.retryCalls);
     assertEquals(0, fixture.tool.executions);
+    assertFalse(fixture.worker.hasActiveExecution());
   }
 
   @Test
@@ -654,9 +651,8 @@ class ToolWorkerFinalTest {
     // No external tool execution occurred.
     assertEquals(0, fixture.tool.executions);
     // No terminal persistence (no completeSuccess / completeFailure / completeUnknown /
-    // scheduleRetry / releaseUnstarted calls beyond the initial claim).
+    // scheduleRetry calls beyond the initial claim).
     assertNull(fixture.transactions.terminalStatus);
-    assertEquals(0, fixture.transactions.releaseUnstartedCalls);
     assertEquals(0, fixture.transactions.retryCalls);
     // The execution map is gated only on actual handles, never on pending tickets.
     assertFalse(fixture.worker.hasActiveExecution());
@@ -1516,13 +1512,11 @@ class ToolWorkerFinalTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        environmentName == null
-            ? ToolExecutionLocation.PLATFORM
-            : ToolExecutionLocation.ENVIRONMENT,
         environmentName,
         7L,
         InvocationStatus.RUNNING,
@@ -1543,19 +1537,16 @@ class ToolWorkerFinalTest {
 
   private static ToolInvocation allowed(
       ToolDescriptor descriptor, String environmentName, String token) {
-    String resolvedEnv = environmentName;
-    ToolExecutionLocation location =
-        resolvedEnv == null ? ToolExecutionLocation.PLATFORM : ToolExecutionLocation.ENVIRONMENT;
     return new ToolInvocation(
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        location,
-        resolvedEnv,
+        environmentName,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -1578,13 +1569,11 @@ class ToolWorkerFinalTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        environmentName == null
-            ? ToolExecutionLocation.PLATFORM
-            : ToolExecutionLocation.ENVIRONMENT,
         environmentName,
         7L,
         InvocationStatus.WAITING_INTERACTION,
@@ -1686,13 +1675,11 @@ class ToolWorkerFinalTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        environmentName == null
-            ? ToolExecutionLocation.PLATFORM
-            : ToolExecutionLocation.ENVIRONMENT,
         environmentName,
         7L,
         InvocationStatus.QUEUED,
@@ -1716,11 +1703,11 @@ class ToolWorkerFinalTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        ToolExecutionLocation.ENVIRONMENT,
         environmentName,
         7L,
         InvocationStatus.RETRY_WAIT,
@@ -1745,19 +1732,15 @@ class ToolWorkerFinalTest {
 
   private static ToolInvocation running(
       ToolDescriptor descriptor, String token, String environmentName) {
-    ToolExecutionLocation location =
-        environmentName == null
-            ? ToolExecutionLocation.PLATFORM
-            : ToolExecutionLocation.ENVIRONMENT;
     return new ToolInvocation(
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        location,
         environmentName,
         7L,
         InvocationStatus.RUNNING,
@@ -1783,10 +1766,6 @@ class ToolWorkerFinalTest {
 
   private static ToolInvocation runningWithPastDeadline(
       ToolDescriptor descriptor, String token, String environmentName) {
-    ToolExecutionLocation location =
-        environmentName == null
-            ? ToolExecutionLocation.PLATFORM
-            : ToolExecutionLocation.ENVIRONMENT;
     Instant createdAt = NOW.minusSeconds(10);
     Instant startedAt = NOW.minusSeconds(5);
     Instant pastDeadline = NOW.minusSeconds(3);
@@ -1796,11 +1775,11 @@ class ToolWorkerFinalTest {
         1L,
         2L,
         3L,
+        4L,
         0,
         "call-1",
         descriptor,
         "{}",
-        location,
         environmentName,
         7L,
         InvocationStatus.RUNNING,
@@ -1910,12 +1889,9 @@ class ToolWorkerFinalTest {
     private int recordActivityCalls;
     private int retryCalls;
     private int terminalMutationCalls;
-    private int releaseUnstartedCalls;
     private int persistedAllowCalls;
     private int awaitCalls;
     private int denyCalls;
-    private InvocationStatus releasedStatus;
-    private Instant releasedNextAttemptAt;
     private Instant nextAttemptAt;
     private InvocationStatus terminalStatus;
     private ToolResult result;
@@ -1972,15 +1948,6 @@ class ToolWorkerFinalTest {
       recordActivityCalls++;
       recordActivityed.countDown();
       return activityOutcome;
-    }
-
-    @Override
-    public ToolInvocationUpdateOutcome releaseUnstarted(
-        ClaimedToolInvocation claimed, Instant nextAttemptAt, Instant now) {
-      releaseUnstartedCalls++;
-      releasedStatus = claimed.previousStatus();
-      releasedNextAttemptAt = nextAttemptAt;
-      return ToolInvocationUpdateOutcome.APPLIED;
     }
 
     @Override

@@ -53,8 +53,10 @@ public final class ThreadCommandCoordinator {
       long expectedExecutionEpoch,
       String title,
       long agentDefinitionId,
+      String environmentName,
       boolean yoloEnabled) {
-    RuntimeConfigSnapshot initial = configSource.resolveAgent(agentDefinitionId, yoloEnabled);
+    RuntimeConfigSnapshot initial =
+        configSource.resolveAgent(agentDefinitionId, environmentName, yoloEnabled);
     ThreadCommandTransactions.BootstrapResult result =
         transactions.bootstrapThread(
             threadId, expectedExecutionEpoch, title, initial, clock.instant());
@@ -155,12 +157,12 @@ public final class ThreadCommandCoordinator {
     if (existing.isPresent()) {
       return existing.get();
     }
-    boolean yolo =
-        transactions
-            .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
-            .map(RuntimeConfigSnapshot::yoloEnabled)
-            .orElse(defaultYolo);
-    RuntimeConfigSnapshot frozen = configSource.resolveAgent(definitionId, yolo);
+    Optional<RuntimeConfigSnapshot> current =
+        transactions.lockAndFindCurrentConfig(threadId, expectedExecutionEpoch);
+    RuntimeConfigSnapshot frozen =
+        current.isPresent()
+            ? configSource.replaceAgent(current.get(), definitionId)
+            : configSource.resolveAgent(definitionId, null, defaultYolo);
     return enqueue(
         threadId,
         new RuntimeConfigInputPayload(ThreadInputType.SET_AGENT, frozen),
@@ -193,6 +195,26 @@ public final class ThreadCommandCoordinator {
     return enqueue(
         threadId,
         new RuntimeConfigInputPayload(ThreadInputType.SET_MODEL, frozen),
+        idempotencyKey,
+        expectedExecutionEpoch);
+  }
+
+  /** Replaces only the Environment target on the current runtime snapshot and enqueues it. */
+  public EnqueueResult queueEnvironment(
+      long threadId, String environmentName, String idempotencyKey, long expectedExecutionEpoch) {
+    Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+    RuntimeConfigSnapshot current =
+        transactions
+            .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
+            .orElseThrow(
+                () -> new IllegalStateException("thread has no runtime config: " + threadId));
+    RuntimeConfigSnapshot frozen = current.withEnvironmentName(environmentName);
+    return enqueue(
+        threadId,
+        new RuntimeConfigInputPayload(ThreadInputType.SET_ENVIRONMENT, frozen),
         idempotencyKey,
         expectedExecutionEpoch);
   }

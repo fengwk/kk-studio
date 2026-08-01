@@ -462,23 +462,7 @@ class ToolDescriptorJsonCodecTest {
     assertTrue(error.getMessage().contains("properties"));
   }
 
-  /** 未知字段（含历史 executionLocation）必须拒绝。 */
-  @Test
-  void rejectsUnknownExecutionLocationField() {
-    String json =
-        "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
-            + "\"executionLocation\":\"REMOTE\",\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
-            + emptySchema()
-            + "}";
-
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> codec.decode(json));
-    assertTrue(error.getMessage().toLowerCase().contains("unknown"));
-  }
-
-  /** ENVIRONMENT descriptor 必须原样可编解码（不强制 Daemon-only ENVIRONMENT）。 */
+  /** Tool descriptor 必须原样可编解码。 */
   @Test
   void environmentDescriptorRoundTrips() {
     ToolDescriptor descriptor =
@@ -496,8 +480,6 @@ class ToolDescriptorJsonCodecTest {
 
     assertEquals(descriptor, decoded);
   }
-
-  /** 非 PLATFORM/ENVIRONMENT 不允许，因此负向枚举测试已覆盖在 rejectsUnknownExecutionLocation。 */
 
   /** tool name 不符合 {@code [A-Za-z][A-Za-z0-9_-]*} 必须拒绝（由 ToolDescriptor record 触发）。 */
   @Test

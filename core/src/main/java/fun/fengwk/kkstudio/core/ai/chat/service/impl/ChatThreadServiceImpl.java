@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.runtime.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadQueryService;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
@@ -23,16 +25,19 @@ public class ChatThreadServiceImpl implements ChatThreadService {
   private final ChatThreadRepository chatThreadRepository;
   private final HarnessThreadCommandService threadCommandService;
   private final HarnessThreadQueryService threadQueryService;
+  private final ToolSettingsProvider toolSettingsProvider;
 
   public ChatThreadServiceImpl(
       ChatGuard chatGuard,
       ChatThreadRepository chatThreadRepository,
       HarnessThreadCommandService threadCommandService,
-      HarnessThreadQueryService threadQueryService) {
+      HarnessThreadQueryService threadQueryService,
+      ToolSettingsProvider toolSettingsProvider) {
     this.chatGuard = chatGuard;
     this.chatThreadRepository = chatThreadRepository;
     this.threadCommandService = threadCommandService;
     this.threadQueryService = threadQueryService;
+    this.toolSettingsProvider = toolSettingsProvider;
   }
 
   @Override
@@ -47,12 +52,19 @@ public class ChatThreadServiceImpl implements ChatThreadService {
   @Transactional
   public HarnessThreadDTO createThread(String chatId) {
     Chat chat = chatGuard.requireChat(chatId);
-    HarnessThreadDTO thread = threadCommandService.createThread();
-    long threadId = HarnessIds.parsePositive(thread.getThreadId(), "threadId");
+    HarnessThreadDTO created = threadCommandService.createThread();
+    long threadId = HarnessIds.parsePositive(created.getThreadId(), "threadId");
     if (!chatThreadRepository.associate(chat.getId(), threadId)) {
       throw new IllegalStateException("new Thread association was not inserted: " + threadId);
     }
-    return thread;
+    HarnessThreadBootstrapDTO bootstrap = new HarnessThreadBootstrapDTO();
+    bootstrap.setTitle(chat.getTitle());
+    bootstrap.setAgentDefinitionId(Long.toString(chat.getDefaultAgentId()));
+    bootstrap.setEnvironmentName(chat.getDefaultEnvironmentName());
+    bootstrap.setYoloEnabled(toolSettingsProvider.get().defaultYolo());
+    bootstrap.setExpectedExecutionEpoch(created.getExecutionEpoch());
+    threadCommandService.bootstrapThread(Long.toString(threadId), bootstrap);
+    return threadQueryService.getThread(Long.toString(threadId));
   }
 
   @Override

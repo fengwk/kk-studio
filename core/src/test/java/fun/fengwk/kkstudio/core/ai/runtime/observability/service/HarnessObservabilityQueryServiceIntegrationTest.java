@@ -88,7 +88,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(1))));
     row.setArgumentsJson("{}");
-    row.setLocation("PLATFORM");
+    row.setEnvironmentName(null);
     row.setExecutionEpoch(0L);
     row.setStatus("QUEUED");
     row.setAttempt(1);

@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
@@ -34,18 +33,17 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
@@ -56,9 +54,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
@@ -78,8 +74,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   private static final String DAEMON_TOKEN = "test-daemon-token";
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
-  private static final DaemonToolCapabilitiesCodec CAPABILITIES_CODEC =
-      new DaemonToolCapabilitiesCodec();
+  private static final DaemonSkillsCodec SKILLS_CODEC = new DaemonSkillsCodec();
   private static final DaemonToolResultCodec RESULT_CODEC = new DaemonToolResultCodec();
 
   @LocalServerPort private int port;
@@ -210,14 +205,7 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   }
 
   private static ToolDescriptor descriptor() {
-    return new ToolDescriptor(
-        "echo",
-        "1",
-        "echo",
-        "echo",
-        new ToolParamsSchema(null, Map.of(), Set.of(), false),
-        ToolSideEffect.READ_ONLY,
-        Duration.ofSeconds(10));
+    return EnvironmentToolCatalog.require("read");
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String workerToken) {
@@ -226,11 +214,11 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         INVOCATION_ID,
         101L,
         102L,
+        103L,
         0,
         "provider-call",
         descriptor,
-        "{}",
-        ToolExecutionLocation.ENVIRONMENT,
+        "{\"path\":\"README.md\"}",
         ENVIRONMENT_NAME,
         1L,
         InvocationStatus.RUNNING,
@@ -252,7 +240,8 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
   /**
    * Minimal daemon-side peer for the v1 WebSocket protocol used by EnvironmentDaemonGateway.
    *
-   * <p>Only implements HELLO/CAPABILITIES/READY plus one INVOKE response path needed by this test.
+   * <p>Only implements HELLO/WELCOME/READY/HEARTBEAT plus one INVOKE response path needed by this
+   * test.
    */
   private static final class FakeDaemonClient implements AutoCloseable {
     private final String environmentName;
@@ -283,16 +272,20 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
           "{"
               + "\"daemonId\":\"websocket-integration-daemon\","
               + "\"protocolVersion\":1,"
+              + "\"toolCatalogVersion\":\""
+              + EnvironmentToolCatalog.version()
+              + "\","
               + "\"gatewayToken\":\""
               + DAEMON_TOKEN
               + "\"}");
       String welcome = listener.awaitText(5_000);
       assertEquals("WELCOME", messageType(welcome));
 
-      String capabilities =
-          CAPABILITIES_CODEC.encode(new DaemonToolCapabilities(List.of(descriptor), List.of()));
-      send(DaemonMessageType.CAPABILITIES, null, capabilities);
-      send(DaemonMessageType.READY, null, "{\"pull\":true}");
+      String skills =
+          SKILLS_CODEC.encode(
+              List.of(new DaemonSkillDescriptor(descriptor.name(), descriptor.description())));
+      send(DaemonMessageType.READY, null, skills);
+      send(DaemonMessageType.HEARTBEAT, null, "{}");
     }
 
     void awaitInvokeAndCompleteText(String text) throws Exception {
@@ -337,6 +330,10 @@ class EnvironmentDaemonWebSocketFinalIntegrationTest extends WebPostgresTestSupp
         DaemonEnvelope envelope = ENVELOPE_CODEC.decode(raw);
         if (envelope.messageType() == DaemonMessageType.INVOKE) {
           return envelope;
+        }
+        if (envelope.messageType() == DaemonMessageType.ERROR) {
+          throw new AssertionError(
+              "gateway rejected fake daemon exchange: " + envelope.payloadJson());
         }
       }
       throw new AssertionError("timed out waiting for INVOKE");
