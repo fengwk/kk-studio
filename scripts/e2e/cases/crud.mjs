@@ -419,15 +419,112 @@ registerCase({
   id: 'crud.chat.thread_association_pagination',
   level: 'L1',
   title: 'Chat 关联 Thread 并按 opaque cursor 分页',
-  docs: 'Chat-scoped POST 原子创建/关联/bootstrap 并返回绑定 Thread；全局 Thread 关联幂等；列表返回 {items,nextCursor}',
+  docs: 'Chat-scoped POST 原子创建/关联/bootstrap 并返回绑定 Thread；stale Agent 失败无全局/Chat Thread 残留；全局 Thread 关联幂等；列表返回 {items,nextCursor}',
   async run(ctx) {
     const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
     const agent = pageResults(agentsJson)[0]
     assert(agent?.id, 'need seeded agent')
-    const defaultEnvironmentName = `e2e-chat-thread-env-${cid().slice(0, 8)}`
+    const { json: modelsJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')
+    const model = pageResults(modelsJson)[0]
+    assert(model?.id, 'need seeded model')
+    const suffix = cid().slice(0, 8)
+    const defaultEnvironmentName = `e2e-chat-thread-env-${suffix}`
+
+    let staleAgent = null
+    let staleChat = null
+    let staleAgentDeleted = false
+    try {
+      const { json: staleAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+        name: `e2e-stale-agent-${suffix}`,
+        description: 'Temporary Agent for Chat-scoped bootstrap rollback coverage.',
+        systemPrompt: 'Temporary stale Agent for E2E rollback coverage.',
+        modelId: String(model.id),
+        variant: model.config.defaultVariant,
+        config: {
+          tools: [],
+          skills: [],
+        },
+      })
+      staleAgent = envelopeData(staleAgentJson)
+      assert(staleAgent?.id, JSON.stringify(staleAgentJson))
+
+      const { json: staleChatJson } = await ctx.call('POST', '/api/ai/chat', {
+        title: `e2e-stale-chat-${suffix}`,
+        defaultAgentId: String(staleAgent.id),
+      })
+      staleChat = envelopeData(staleChatJson)
+      assert(staleChat?.id, JSON.stringify(staleChatJson))
+
+      const beforeGlobalThreadIds = await listAllThreadIds(ctx, '/api/ai/runtime/threads')
+      const beforeChatThreadIds = await listAllThreadIds(
+        ctx,
+        `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
+      )
+      assert(beforeChatThreadIds.length === 0, JSON.stringify(beforeChatThreadIds))
+
+      try {
+        await ctx.call(
+          'DELETE',
+          `/api/ai/catalog/agents/${staleAgent.id}?expectedVersion=${encodeURIComponent(staleAgent.version)}`,
+        )
+        staleAgentDeleted = true
+      } catch (error) {
+        throw new Error(`stale Agent rollback probe could not delete temporary Agent: ${error.message}`)
+      }
+
+      await expectHttpError(
+        () =>
+          ctx.call(
+            'POST',
+            `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
+          ),
+        {},
+      )
+
+      const afterGlobalThreadIds = await listAllThreadIds(ctx, '/api/ai/runtime/threads')
+      const afterChatThreadIds = await listAllThreadIds(
+        ctx,
+        `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
+      )
+      assert(
+        JSON.stringify(afterGlobalThreadIds) === JSON.stringify(beforeGlobalThreadIds),
+        `stale bootstrap changed global Thread list: ${JSON.stringify({
+          before: beforeGlobalThreadIds,
+          after: afterGlobalThreadIds,
+        })}`,
+      )
+      assert(
+        JSON.stringify(afterChatThreadIds) === JSON.stringify(beforeChatThreadIds),
+        `stale bootstrap changed Chat Thread list: ${JSON.stringify({
+          before: beforeChatThreadIds,
+          after: afterChatThreadIds,
+        })}`,
+      )
+    } finally {
+      if (staleChat?.id) {
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/chat/${staleChat.id}?expectedVersion=${encodeURIComponent(staleChat.version)}`,
+          )
+        } catch {
+          // Preserve the primary assertion failure.
+        }
+      }
+      if (staleAgent?.id && !staleAgentDeleted) {
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/catalog/agents/${staleAgent.id}?expectedVersion=${encodeURIComponent(staleAgent.version)}`,
+          )
+        } catch {
+          // Preserve the primary assertion failure.
+        }
+      }
+    }
 
     const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
-      title: `e2e-chat-thread-${cid().slice(0, 8)}`,
+      title: `e2e-chat-thread-${suffix}`,
       defaultAgentId: String(agent.id),
       defaultEnvironmentName,
     })
@@ -442,7 +539,10 @@ registerCase({
       assert(scopedThread.status === 'IDLE', JSON.stringify(scopedThread))
       assert(Number(scopedThread.executionEpoch) === 1, JSON.stringify(scopedThread))
       assert(scopedThread.sessionId && scopedThread.headEntryId, JSON.stringify(scopedThread))
-      assert(scopedThread.activeEnvironmentName === defaultEnvironmentName, JSON.stringify(scopedThread))
+      assert(
+        scopedThread.activeEnvironmentName === defaultEnvironmentName,
+        JSON.stringify(scopedThread),
+      )
 
       const globalThread = await createUnboundThread(ctx)
       await ctx.call(
@@ -489,3 +589,23 @@ registerCase({
     }
   },
 })
+
+async function listAllThreadIds(ctx, basePath) {
+  const ids = []
+  const cursors = new Set()
+  let cursor = null
+  while (true) {
+    const separator = basePath.includes('?') ? '&' : '?'
+    const cursorQuery = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+    const { json } = await ctx.call(
+      'GET',
+      `${basePath}${separator}sort=created&limit=100${cursorQuery}`,
+    )
+    const page = threadPageData(json, `Thread list ${basePath}`)
+    ids.push(...page.items.map((thread) => String(thread.threadId)))
+    if (!page.nextCursor) return ids
+    assert(!cursors.has(page.nextCursor), `repeated Thread list cursor: ${page.nextCursor}`)
+    cursors.add(page.nextCursor)
+    cursor = page.nextCursor
+  }
+}

@@ -373,9 +373,9 @@ registerCase({
 registerCase({
   id: 'daemon.ready',
   level: 'L4',
-  title: 'Daemon Environment READY',
+  title: 'Environment GET projection',
   requires: ['tools'],
-  docs: 'READY 只上报 skills；GET /api/ai/environment 投影固定 Environment tool catalog + skills',
+  docs: 'Environment READY；GET /api/ai/environment 投影固定10个 tools（version=1）+ skills',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/ai/environment')
     const match = (envelopeData(json) || []).find((e) => e.name === ctx.daemonEnv)
@@ -409,7 +409,7 @@ registerCase({
   level: 'L4',
   title: 'YOLO 下 tool invocation',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：临时 Agent 只选择 read；Chat defaultEnvironmentName 路由；断言 invocation.environmentName 且 SUCCEEDED',
+  docs: '仅 minimax/MiniMax-M2.7：临时 Agent config exact tools=[read], skills=[]；Chat defaultEnvironmentName 路由；断言 invocation.environmentName 且 SUCCEEDED',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -431,6 +431,14 @@ registerCase({
     assert(toolAgent?.id, JSON.stringify(agentJson))
     let chat = null
     try {
+      const agentConfig = toolAgent.config
+      assert(
+        agentConfig
+          && Object.keys(agentConfig).sort().join(',') === 'skills,tools'
+          && JSON.stringify(agentConfig.tools) === JSON.stringify(['read'])
+          && JSON.stringify(agentConfig.skills) === JSON.stringify([]),
+        `temporary tool Agent config must be exactly tools=[read], skills=[]: ${JSON.stringify(toolAgent)}`,
+      )
       const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
         title: `e2e-tool-chat-${suffix}`,
         defaultAgentId: String(toolAgent.id),

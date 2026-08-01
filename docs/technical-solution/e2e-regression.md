@@ -97,7 +97,7 @@ reports/e2e/LATEST_RUN.txt
 | L1 | 默认 | 免费 | seed 契约、CRUD、Chat Environment 默认值、Chat-scoped 原子 bootstrap、配置校验、Thread 生命周期与 head 重定位、SET_ENVIRONMENT、Thread snapshot 404、proxy |
 | L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账；流式 `/stop` 持久化 partial assistant barrier，并在其后继续 follow-up |
 | L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
-| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | READY 仅上报 skills，Environment 查询投影固定工具目录；临时 Agent 只选择 `read`，通过 Chat default Environment 路由并完成 YOLO tool invocation |
+| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；GET `/api/ai/environment` 投影固定 10 个 tools + skills；临时 Agent 只选择 `read`，通过 Chat default Environment 路由并完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
 API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**55** 条）。`--ui` 额外 **15** 条 UI smoke（`--real` 时再 +1 真实首发）。
@@ -149,7 +149,7 @@ API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `crud.chat.default_environment` | `defaultEnvironmentName` canonical create/update；显式 null clear；空白或首尾空格 => 400 |
 | `crud.model.delete_unknown_rejected` | 删除不存在 Model（`expectedVersion=0`）=> 404 |
 | `crud.chat.lifecycle` | create/update/delete chat；PUT/DELETE 使用版本；空白 title 更新拒绝；删后 404。Chat 不拥有 Thread/Session 生命周期 |
-| `crud.chat.thread_association_pagination` | Chat-scoped POST 原子 create+associate+bootstrap 并返回绑定 Thread（断言 `activeEnvironmentName`）；全局 Thread 幂等关联；当前 Chat 与全局列表返回 `{items,nextCursor}`，limit=1 的连续页无重复 |
+| `crud.chat.thread_association_pagination` | Chat-scoped POST 原子 create+associate+bootstrap 并返回绑定 Thread（断言 `activeEnvironmentName`）；stale Agent 失败后全局/Chat Thread 列表 count 与 ID 不变；全局 Thread 幂等关联；当前 Chat 与全局列表返回 `{items,nextCursor}`，limit=1 的连续页无重复 |
 
 ### Model config 矩阵
 
@@ -195,8 +195,8 @@ Agent config 只包含 `tools` 与 `skills`；Environment target 不属于 Agent
 | `real.queued_input_batch` | `--real` | 首轮流式执行期间连续入队两条消息；下一 turn 同批 APPLIED，只产生一个 ModelInvocation 和一个 assistant MESSAGE |
 | `real.stop_partial_continue` | `--real` | 首个非空文本 delta 后 stop；durable `ASSISTANT_ABORTED` 仅含安全 text/thinking；follow-up 位于 barrier 后，旧 debt 不重派 |
 | `branch.path_usage` | `--real --with-branch` | 另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀 |
-| `daemon.ready` | `--with-tools` | Daemon READY 只上报 skills；GET `/api/ai/environment` 仍返回固定 Environment tool catalog + skills |
-| `tool.read_turn` | `--real --with-tools` | 创建只选择 `read` 的临时 MiniMax Agent；Chat `defaultEnvironmentName` 路由 Chat-scoped 原子 Thread；YOLO 调用 `read({"path":"."})`，断言 `invocation.environmentName` 且 `SUCCEEDED` |
+| `daemon.ready` | `--with-tools` | Environment READY；HTTP GET `/api/ai/environment` 投影固定 10 个 tools（version=1）+ skills |
+| `tool.read_turn` | `--real --with-tools` | 创建 config 恰为 `tools=["read"]`、`skills=[]` 的临时 MiniMax Agent；Chat `defaultEnvironmentName` 路由 Chat-scoped 原子 Thread；YOLO 调用 `read({"path":"."})`，断言 `invocation.environmentName` 且 `SUCCEEDED` |
 
 ## UI smoke（L5）
 
@@ -264,9 +264,11 @@ target；`PUT /environment` 产生 `SET_ENVIRONMENT` mailbox input，`null` 清�
 `clientMessageId` 幂等并以 `expectedExecutionEpoch` 做 fencing。上述 Thread 写接口的请求体均含必填
 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
 
-Daemon 的 `READY` frame 只携带 skills 摘要；`GET /api/ai/environment` 由服务端投影固定
-Environment tool catalog 与 READY skills。`ToolInvocationDTO` 不暴露 `location`，工具目标快照
-只通过 `environmentName` 表示；真实 tool case 必须断言该字段。
+Daemon `READY` frame 的 skills-only 协议由后端 codec/gateway tests 覆盖；E2E
+`daemon.ready` 不解析 READY frame，只验证 Environment 为 `READY` 时，HTTP
+`GET /api/ai/environment` 投影固定 10 个 Environment tools（`version=1`）与 skills。
+`ToolInvocationDTO` 不暴露 `location`，工具目标快照只通过 `environmentName` 表示；真实 tool
+case 必须断言该字段。
 
 全局与 Chat-scoped Thread 列表统一返回 `data: {items, nextCursor}`；`recent` 按 `harness_thread.updated_at`、`created` 按
 `harness_thread.created_at` 降序 keyset，cursor 是绑定 sort 的 opaque token，默认 limit 为 20、最大为 100。
