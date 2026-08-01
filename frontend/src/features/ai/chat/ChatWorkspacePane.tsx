@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { isPaneBound, type ChatPane, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankComposerPane'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
+import type { FirstSendReplay } from '@/features/ai/chat/chat-first-send'
 
 /**
  * Scene dispatcher for a single chat-workspace pane.
@@ -43,6 +45,20 @@ export function ChatWorkspacePane({
   onDefaultAgentChange: (agentId: string) => Promise<void>
   onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
 }) {
+  const [firstSendReplay, setFirstSendReplay] = useState<FirstSendReplay | null>(null)
+
+  function handleThreadChange(threadId: string | null) {
+    setFirstSendReplay((current) => (
+      current?.threadId === threadId ? current : null
+    ))
+    onThreadChange(threadId)
+  }
+
+  function recoverFirstSend(replay: FirstSendReplay) {
+    setFirstSendReplay(replay)
+    onThreadChange(replay.threadId)
+  }
+
   if (isPaneBound(pane.threadId)) {
     return (
       <BoundThreadPane
@@ -55,9 +71,15 @@ export function ChatWorkspacePane({
         sessionSort={sessionSort}
         threadSort={threadSort}
         onFocus={onFocus}
-        onThreadChange={onThreadChange}
+        onThreadChange={handleThreadChange}
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
+        initialReplay={
+          firstSendReplay?.threadId === pane.threadId
+            ? firstSendReplay
+            : undefined
+        }
+        onReplayInitialized={() => setFirstSendReplay(null)}
       />
     )
   }
@@ -70,10 +92,11 @@ export function ChatWorkspacePane({
       focused={focused}
       threadSort={threadSort}
       onFocus={onFocus}
-      onThreadChange={onThreadChange}
+      onThreadChange={handleThreadChange}
       onThreadSortChange={onThreadSortChange}
       onDefaultAgentChange={onDefaultAgentChange}
       onDefaultEnvironmentChange={onDefaultEnvironmentChange}
+      onFirstSendRecovery={recoverFirstSend}
     />
   )
 }

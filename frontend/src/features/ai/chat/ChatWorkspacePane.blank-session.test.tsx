@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
@@ -162,6 +162,48 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'session')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
+  })
+
+  it('sets and clears the Chat default Environment from the blank command and footer', async () => {
+    const user = userEvent.setup()
+    const onDefaultEnvironmentChange = vi.fn(async () => undefined)
+    renderBlankPane({ onDefaultEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'local' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'local' }))
+    await waitFor(() => expect(onDefaultEnvironmentChange).toHaveBeenCalledWith('local'))
+
+    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    await user.click(
+      within(screen.getByLabelText('选择 Environment')).getByRole('button', {
+        name: /（无）/,
+      }),
+    )
+    await waitFor(() => expect(onDefaultEnvironmentChange).toHaveBeenLastCalledWith(null))
+  })
+
+  it('keeps the blank Environment selector open and shows the callback error', async () => {
+    const user = userEvent.setup()
+    const onDefaultEnvironmentChange = vi.fn(async () => {
+      throw new Error('default environment update failed')
+    })
+    renderBlankPane({ onDefaultEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    await user.click(screen.getByRole('button', { name: 'local' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('default environment update failed')).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
   })
 
   it('opens the global /thread picker and only switches the pane target', async () => {

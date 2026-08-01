@@ -33,7 +33,16 @@ function errorMessage(error: unknown): string {
   return translate('ai.runtime.action.requestFailed')
 }
 
-export function useAgentThreadController(threadId: string, initialDraft = '') {
+export interface ThreadMessageReplay {
+  content: string
+  clientMessageId: string
+}
+
+export function useAgentThreadController(
+  threadId: string,
+  initialDraft = '',
+  initialReplay?: ThreadMessageReplay,
+) {
   const { t } = useI18n()
   const [draft, setDraftState] = useState(initialDraft)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -41,6 +50,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   const clientMessageIdRef = useRef<string | null>(null)
   const replayContentRef = useRef<string | null>(null)
+  const initializedReplayThreadRef = useRef<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
@@ -83,10 +93,14 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
   )
 
   useEffect(() => {
+    if (initializedReplayThreadRef.current === threadId) {
+      return
+    }
     setDraftState(initialDraft)
-    clientMessageIdRef.current = null
-    replayContentRef.current = null
-  }, [initialDraft, threadId])
+    clientMessageIdRef.current = initialReplay?.clientMessageId ?? null
+    replayContentRef.current = initialReplay?.content ?? null
+    initializedReplayThreadRef.current = threadId
+  }, [initialDraft, initialReplay?.clientMessageId, initialReplay?.content, threadId])
 
   const stopMutation = useMutation({
     mutationFn: (expectedExecutionEpoch: BackendLong) =>
@@ -282,16 +296,17 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       })
   }
 
-  function setThreadEnvironment(environmentName: string | null): Promise<void> {
+  function setThreadEnvironment(environmentName: string | null): Promise<boolean> {
     if (!thread || !requireBoundThread('ai.runtime.action.switchEnvironmentFailed')) {
-      return Promise.resolve()
+      return Promise.resolve(false)
     }
     setActionError(null)
     return setEnvironmentMutation
       .mutateAsync({ environmentName, expectedExecutionEpoch: thread.executionEpoch })
-      .then(() => undefined)
+      .then(() => true)
       .catch((error: unknown) => {
         reportMutationError(error, 'ai.runtime.action.switchEnvironmentFailed')
+        return false
       })
   }
 

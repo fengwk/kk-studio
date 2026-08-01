@@ -7,6 +7,7 @@ import {
   type ChatPanelFooterInput,
   type ChatPanelLabels,
   type ChatPanelTranscriptInput,
+  type ThreadMessageReplay,
   type ThreadCommand,
   useAgentThreadController,
 } from '@/features/ai/runtime'
@@ -77,6 +78,8 @@ export function BoundThreadPane({
   onThreadChange,
   onSessionSortChange,
   onThreadSortChange,
+  initialReplay,
+  onReplayInitialized,
 }: {
   chatId: string
   agents: AgentDefinitionDTO[]
@@ -90,10 +93,16 @@ export function BoundThreadPane({
   onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
+  initialReplay?: ThreadMessageReplay
+  onReplayInitialized?: () => void
 }) {
   const { t } = useI18n()
   // sessionId is not persisted on pane; resolve from the Thread head after load.
-  const controller = useAgentThreadController(threadId)
+  const controller = useAgentThreadController(
+    threadId,
+    initialReplay?.content ?? '',
+    initialReplay,
+  )
   const sessionId = controller.sessionId
   const queryClient = useQueryClient()
   // Session whose Entry Tree the history panel is browsing: current Session for /tree, the
@@ -112,6 +121,12 @@ export function BoundThreadPane({
   const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
   const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
   const rebindable = canRebindThread(controller.thread)
+
+  useEffect(() => {
+    if (initialReplay) {
+      onReplayInitialized?.()
+    }
+  }, [initialReplay, onReplayInitialized])
 
   useEffect(() => {
     if (isNotFoundError(controller.messagesError)) {
@@ -175,11 +190,14 @@ export function BoundThreadPane({
     }
   }
 
-  async function selectEnvironment(environmentName: string | null) {
+  async function selectEnvironment(environmentName: string | null): Promise<boolean> {
     setEnvironmentPending(true)
     try {
-      await controller.setThreadEnvironment(environmentName)
-      setEnvironmentModalOpen(false)
+      const success = await controller.setThreadEnvironment(environmentName)
+      if (success) {
+        setEnvironmentModalOpen(false)
+      }
+      return success
     } finally {
       setEnvironmentPending(false)
     }
