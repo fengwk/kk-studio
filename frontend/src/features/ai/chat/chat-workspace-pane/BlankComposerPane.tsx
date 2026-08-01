@@ -9,7 +9,11 @@ import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/comm
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import { type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { toThreadSelectionItem } from '@/features/ai/chat/chat-session-picker'
-import { performBlankPaneFirstSend } from '@/features/ai/chat/chat-first-send'
+import {
+  FirstSendMessageError,
+  type FirstSendReplay,
+  performBlankPaneFirstSend,
+} from '@/features/ai/chat/chat-first-send'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
   extractContextWindow,
@@ -76,6 +80,7 @@ export function BlankComposerPane({
   onThreadSortChange,
   onDefaultAgentChange,
   onDefaultEnvironmentChange = async () => undefined,
+  onFirstSendRecovery,
 }: {
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
@@ -87,6 +92,7 @@ export function BlankComposerPane({
   onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
   onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onFirstSendRecovery: (replay: FirstSendReplay) => void
 }) {
   const { t } = useI18n()
   const [draft, setDraft] = useState('')
@@ -139,6 +145,10 @@ export function BlankComposerPane({
       setPendingContent(null)
       onThreadChange(result.thread.threadId)
     } catch (error) {
+      if (error instanceof FirstSendMessageError) {
+        onFirstSendRecovery(error.replay)
+        return
+      }
       setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
       setDraft(content)
     } finally {

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { performBlankPaneFirstSend } from '@/features/ai/chat/chat-first-send'
+import {
+  FirstSendMessageError,
+  performBlankPaneFirstSend,
+} from '@/features/ai/chat/chat-first-send'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
@@ -98,6 +101,49 @@ describe('performBlankPaneFirstSend', () => {
       }),
     ).rejects.toThrow('创建 Chat Thread 未返回 Session')
     expect(submitThreadMessage).not.toHaveBeenCalled()
+  })
+
+  it('returns the created Thread and replay identity when the first message fails', async () => {
+    const createChatThread = vi.fn(async () =>
+      thread({
+        threadId: 't-replay',
+        sessionId: 's-replay',
+        headEntryId: 'e-config',
+        executionEpoch: 2,
+        status: 'IDLE',
+      }),
+    )
+    const submitThreadMessage = vi.fn(async () => {
+      throw new Error('message temporarily unavailable')
+    })
+
+    const error = await performBlankPaneFirstSend({
+      chatId: 'chat-1',
+      content: 'retry me',
+      createChatThread,
+      submitThreadMessage,
+      createIds: () => ({ userMessageId: 'cid-replay' }),
+    }).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(FirstSendMessageError)
+    expect(error).toMatchObject({
+      message: 'message temporarily unavailable',
+      replay: {
+        threadId: 't-replay',
+        content: 'retry me',
+        clientMessageId: 'cid-replay',
+      },
+      thread: {
+        threadId: 't-replay',
+        sessionId: 's-replay',
+      },
+    })
+    expect(createChatThread).toHaveBeenCalledOnce()
+    expect(submitThreadMessage).toHaveBeenCalledWith('t-replay', {
+      content: 'retry me',
+      clientMessageId: 'cid-replay',
+      expectedExecutionEpoch: 2,
+    })
   })
 
   it('does not enqueue a message when the atomic Thread creation fails', async () => {

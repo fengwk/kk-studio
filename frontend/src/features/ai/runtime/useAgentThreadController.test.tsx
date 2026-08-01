@@ -224,6 +224,58 @@ describe('useAgentThreadController', () => {
     expect(result.current.actionError).toBeNull()
   })
 
+  it('retries a recovered first-send message on the same Thread with the same clientMessageId', async () => {
+    vi.mocked(harnessService.submitThreadMessage)
+      .mockRejectedValueOnce(new Error('first message failed'))
+      .mockResolvedValueOnce({
+        inputId: 'retry-input',
+        threadId: '1',
+        sequence: 2,
+        inputType: 'USER_MESSAGE',
+        payloadJson: '{}',
+        clientMessageId: 'cid-first-send',
+        status: 'QUEUED',
+        resolvedAt: null,
+        createTime: null,
+      })
+
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController('1', 'retry me', {
+          content: 'retry me',
+          clientMessageId: 'cid-first-send',
+        }),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    await waitFor(() => expect(result.current.draft).toBe('retry me'))
+
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    expect(result.current.draft).toBe('retry me')
+    expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(
+      1,
+      '1',
+      expect.objectContaining({
+        content: 'retry me',
+        clientMessageId: 'cid-first-send',
+      }),
+    )
+
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(
+      2,
+      '1',
+      expect.objectContaining({
+        content: 'retry me',
+        clientMessageId: 'cid-first-send',
+      }),
+    )
+  })
+
   it('allows concurrent submits with distinct clientMessageIds and tracks pending across overlap', async () => {
     let resolveA: (value: unknown) => void = () => {}
     let resolveB: (value: unknown) => void = () => {}
@@ -717,6 +769,29 @@ describe('useAgentThreadController', () => {
       expect.objectContaining({ agentDefinitionId: 'agent-1', expectedExecutionEpoch: 7 }),
     )
     expect(result.current.actionError).toContain('切换 Agent 失败')
+    expect(result.current.actionError).toContain('thread is not idle')
+  })
+
+  it('returns false for a failed Environment mutation so the selector can stay open', async () => {
+    vi.mocked(harnessService.setThreadEnvironment).mockRejectedValueOnce(
+      new ApiError('thread is not idle', 409),
+    )
+    const { result } = renderHook(() => useAgentThreadController('1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    let success = true
+    await act(async () => {
+      success = await result.current.setThreadEnvironment('remote')
+    })
+    expect(success).toBe(false)
+    expect(harnessService.setThreadEnvironment).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({
+        environmentName: 'remote',
+        expectedExecutionEpoch: 7,
+      }),
+    )
+    expect(result.current.actionError).toContain('切换 Environment 失败')
     expect(result.current.actionError).toContain('thread is not idle')
   })
 

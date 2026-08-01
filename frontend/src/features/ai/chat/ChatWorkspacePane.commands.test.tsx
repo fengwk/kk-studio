@@ -332,6 +332,22 @@ describe('ChatWorkspacePane commands', () => {
     )
   })
 
+  it('keeps the Environment selector open when a bound mutation fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.setThreadEnvironment).mockRejectedValueOnce(
+      new ApiError('thread is not idle', 409),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    await user.click(screen.getByRole('button', { name: 'remote' }))
+
+    await waitFor(() => expect(screen.getByText(/切换 Environment 失败/)).toBeInTheDocument())
+    expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
+  })
+
   it('/thread only switches the pane target and never mutates a Thread', async () => {
     const user = userEvent.setup()
     const { onThreadChange } = renderBoundPane()

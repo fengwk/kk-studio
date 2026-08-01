@@ -14,4 +14,7 @@ export {
   type ChatPanelTranscriptInput,
 } from '@/features/ai/runtime/ChatPanel'
 export { createClientMessageId } from '@/features/ai/runtime/useAgentThreadMessageMutation'
-export { useAgentThreadController } from '@/features/ai/runtime/useAgentThreadController'
+export {
+  useAgentThreadController,
+  type ThreadMessageReplay,
+} from '@/features/ai/runtime/useAgentThreadController'

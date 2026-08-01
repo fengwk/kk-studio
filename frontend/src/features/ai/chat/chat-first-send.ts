@@ -10,6 +10,36 @@ export interface FirstSendResult {
   userMessageInput: HarnessThreadInputDTO
 }
 
+export interface FirstSendReplay {
+  threadId: string
+  content: string
+  clientMessageId: string
+}
+
+/** Carries the atomically created Thread across a failed first-message request. */
+export class FirstSendMessageError extends Error {
+  readonly replay: FirstSendReplay
+  readonly thread: HarnessThreadDTO
+  readonly cause: unknown
+
+  constructor(
+    thread: HarnessThreadDTO,
+    content: string,
+    clientMessageId: string,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'FirstSendMessageError'
+    this.replay = {
+      threadId: thread.threadId,
+      content,
+      clientMessageId,
+    }
+    this.thread = thread
+    this.cause = cause
+  }
+}
+
 /**
  * Blank pane first send order:
  * 1) create a fully bound Thread atomically associated with the Chat
@@ -30,11 +60,21 @@ export async function performBlankPaneFirstSend(options: {
   if (!created.sessionId) {
     throw new Error(translate('ai.runtime.action.firstSendMissingSession'))
   }
-  const userMessageInput = await submitThreadMessage(created.threadId, {
-    content: options.content,
-    clientMessageId: ids.userMessageId,
-    expectedExecutionEpoch: created.executionEpoch,
-  })
+  let userMessageInput: HarnessThreadInputDTO
+  try {
+    userMessageInput = await submitThreadMessage(created.threadId, {
+      content: options.content,
+      clientMessageId: ids.userMessageId,
+      expectedExecutionEpoch: created.executionEpoch,
+    })
+  } catch (error) {
+    throw new FirstSendMessageError(
+      created,
+      options.content,
+      ids.userMessageId,
+      error,
+    )
+  }
 
   return {
     sessionId: created.sessionId,

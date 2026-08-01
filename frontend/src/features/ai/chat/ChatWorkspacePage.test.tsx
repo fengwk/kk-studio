@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
 import { ApiError } from '@/shared/api/client'
@@ -26,6 +27,11 @@ vi.mock('@/shared/api/chat-service', () => ({
     associateThread: vi.fn(async () => undefined),
     createChatThread: vi.fn(),
     listChatThreads: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -121,6 +127,9 @@ describe('ChatWorkspacePage', () => {
     )
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
+    ])
     vi.mocked(chatService.getChat).mockResolvedValue({
       id: 'chat-1',
       title: 'Workspace',
@@ -206,6 +215,34 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'hello world')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
+  })
+
+  it('updates the Chat default Environment with the exact nullable request shape', async () => {
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    await screen.findByLabelText('给 AI 发送消息')
+    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
+    await user.click(screen.getByRole('button', { name: 'local' }))
+    await waitFor(() =>
+      expect(chatService.updateChat).toHaveBeenCalledWith('chat-1', {
+        defaultEnvironmentName: 'local',
+        expectedVersion: '1',
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
+    await user.click(
+      within(screen.getByLabelText('选择 Environment')).getByRole('button', {
+        name: /（无）/,
+      }),
+    )
+    await waitFor(() =>
+      expect(chatService.updateChat).toHaveBeenLastCalledWith('chat-1', {
+        defaultEnvironmentName: null,
+        expectedVersion: '1',
+      }),
+    )
   })
 
   it('reselects a stale default Agent before creating the first Chat Thread', async () => {
@@ -420,6 +457,67 @@ describe('ChatWorkspacePage', () => {
     // The pane binds to the atomically created Thread and leaves the blank state behind.
     await waitFor(() => expect(screen.queryByText('新对话')).not.toBeInTheDocument())
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith('t-new'))
+  })
+
+  it('moves a failed first send to the created Thread and retries with the same clientMessageId', async () => {
+    const user = userEvent.setup()
+    const createdThread = {
+      threadId: 't-replay',
+      sessionId: 's-replay',
+      sessionTitle: null,
+      headEntryId: 'e-config',
+      executionEpoch: 1,
+      revision: '0',
+      status: 'IDLE' as const,
+      inputSequence: 0,
+      activeAgentDefinitionId: 'a1',
+      activeAgentName: 'assistant',
+      activeEnvironmentName: null,
+      modelId: 'm1',
+      variant: 'default',
+      yoloEnabled: false,
+      processing: false,
+      createTime: null,
+      updateTime: null,
+    }
+    vi.mocked(chatService.createChatThread).mockResolvedValue(createdThread)
+    vi.mocked(harnessService.submitThreadMessage)
+      .mockRejectedValueOnce(new Error('first message failed'))
+      .mockResolvedValueOnce({
+        inputId: 'retry-input',
+        threadId: 't-replay',
+        sequence: 2,
+        inputType: 'USER_MESSAGE',
+        payloadJson: '{}',
+        clientMessageId: 'cid-replay',
+        status: 'QUEUED',
+        resolvedAt: null,
+        createTime: null,
+      })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(createdThread),
+    )
+    vi.mocked(harnessService.listThreads).mockResolvedValue({ items: [], nextCursor: null })
+    vi.mocked(harnessService.listSessions).mockResolvedValue([])
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
+
+    renderWorkspace()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, 'retry me')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(screen.queryByText('新对话')).not.toBeInTheDocument())
+    expect(chatService.createChatThread).toHaveBeenCalledOnce()
+    expect(await screen.findByDisplayValue('retry me')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(harnessService.submitThreadMessage).toHaveBeenCalledTimes(2))
+    const calls = vi.mocked(harnessService.submitThreadMessage).mock.calls
+    expect(calls[0][0]).toBe('t-replay')
+    expect(calls[1][0]).toBe('t-replay')
+    expect(calls[1][1].clientMessageId).toBe(calls[0][1].clientMessageId)
+    expect(calls[1][1].content).toBe('retry me')
+    expect(chatService.createChatThread).toHaveBeenCalledOnce()
   })
 
   it('migrates deduplicated persisted Thread bindings once despite layout-only changes', async () => {
