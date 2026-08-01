@@ -12,7 +12,7 @@ set -euo pipefail
 
 E2E_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$E2E_ROOT/../.." && pwd)
-WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/target/e2e"}
+WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-18081}

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_HOME=$(cd "$SCRIPT_HOME/.." && pwd)
-WORK_DIR=${DEV_WORK_DIR:-"$APP_HOME/target/dev"}
+WORK_DIR=${DEV_WORK_DIR:-"$APP_HOME/runtime/dev"}
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-18080}
@@ -50,7 +50,7 @@ Environment:
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
   DEV_SKIP_NPM_INSTALL=false
-  DEV_WORK_DIR=$APP_HOME/target/dev
+  DEV_WORK_DIR=$APP_HOME/runtime/dev
 EOF
 }
 

@@ -72,6 +72,7 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/Chat-scoped 原子创建、重绑、Thread page `{items,nextCursor}` 解析、Thread/Session 读取、等待 mailbox 应用与静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/cases/*.mjs` | API 用例 |
+| `runtime/e2e/` | 当前 backend/frontend/daemon PID 与运行日志；独立于 Maven `target`，`clean` 不删除 |
 | `core/src/test/resources/.../pi-model-catalog.json` | Pi 0.82.1 有效模型目录快照 |
 | `reports/e2e/` | 报告与产物（gitignore） |
 
