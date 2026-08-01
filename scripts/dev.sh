@@ -33,7 +33,7 @@ usage() {
 Usage: $0 {start|stop|restart|status|logs|tail}
 
 Commands:
-  start    Package backend, optionally sync the MiniMax E2E credential pair, then start backend and frontend.
+  start    Clean-package backend, optionally sync the MiniMax E2E credential pair, then start backend and frontend.
   stop     Stop managed dev servers and, by default, listeners on dev ports.
   restart  Stop then start.
   status   Print process status and URLs.
@@ -176,9 +176,9 @@ package_backend() {
     step "Skipping backend package"
     return
   fi
-  step "Packaging backend"
+  step "Clean packaging backend"
   cd "$APP_HOME"
-  env JAVA_HOME="$java_home" mvn -pl web -am -DskipTests package
+  env JAVA_HOME="$java_home" mvn -pl web -am -DskipTests clean package
 }
 
 stop_all() {

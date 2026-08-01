@@ -3,7 +3,7 @@
 #
 # 快速开始：
 #   ./scripts/e2e.sh                  # 复用已启动服务，跑 L1（免费）
-#   ./scripts/e2e.sh --rebuild        # 强制 Java 21 重打包并重启 backend/frontend
+#   ./scripts/e2e.sh --rebuild        # 强制 Java 21 clean package 并重启 backend/frontend
 #   ./scripts/e2e.sh --real           # + 真 MiniMax 文本轮次（需 TEST_MINIMAX_*）
 #   ./scripts/e2e.sh --real --with-branch
 #   ./scripts/e2e.sh --real --with-tools
@@ -45,7 +45,7 @@ usage() {
 Usage: ./scripts/e2e.sh [options]
 
 Options:
-  --rebuild         Force package backend + restart backend/frontend (+daemon if tools)
+  --rebuild         Force clean package backend + restart backend/frontend (+daemon if tools)
   --real            Enable real provider cases (requires TEST_MINIMAX_BASE_URL/API_KEY)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
