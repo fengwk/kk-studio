@@ -29,11 +29,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
-  public AgentDefinition getById(long id) {
-    return convert(agentDefinitionMapper.getById(id));
-  }
-
-  @Override
   public AgentDefinition getByName(String name) {
     return convert(agentDefinitionMapper.getByName(name));
   }
@@ -44,13 +39,13 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
-  public boolean updateById(AgentDefinition agentDefinition, long expectedVersion) {
-    return agentDefinitionMapper.updateById(convert(agentDefinition), expectedVersion) == 1;
+  public boolean updateByName(AgentDefinition agentDefinition, long expectedVersion) {
+    return agentDefinitionMapper.updateByName(convert(agentDefinition), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id, long expectedVersion) {
-    return agentDefinitionMapper.deleteById(id, expectedVersion) == 1;
+  public boolean deleteByName(String name, long expectedVersion) {
+    return agentDefinitionMapper.deleteByName(name, expectedVersion) == 1;
   }
 
   private AgentDefinitionDO convert(AgentDefinition definition) {
@@ -58,11 +53,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
       return null;
     }
     AgentDefinitionDO result = new AgentDefinitionDO();
-    result.setId(definition.getId());
     result.setName(definition.getName());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
-    result.setModelId(definition.getModelId());
+    result.setModelProviderName(definition.getModelProviderName());
+    result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());
     return result;
@@ -73,11 +68,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
       return null;
     }
     AgentDefinition result = new AgentDefinition();
-    result.setId(definition.getId());
     result.setName(definition.getName());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
-    result.setModelId(definition.getModelId());
+    result.setModelProviderName(definition.getModelProviderName());
+    result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());
     result.setVersion(definition.getVersion());

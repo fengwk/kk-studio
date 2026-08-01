@@ -111,13 +111,13 @@ class DatabaseModelExecutionResolverTest {
       assertEquals(Long.toString(PROVIDER_ID), factory.lastDescriptor.providerId());
       assertEquals(ProviderType.OPENAI, factory.lastDescriptor.type());
       assertEquals("https://provider.test/v1", factory.lastDescriptor.endpoint());
-      verify(fixture.providers, atLeastOnce()).getById(PROVIDER_ID);
+      verify(fixture.providers, atLeastOnce()).getByName("provider");
       // Other AgentProviderRepository methods must never be called from this slice.
       verify(fixture.providers, never()).page(any());
       verify(fixture.providers, never()).create(any());
-      verify(fixture.providers, never()).updateById(any(), anyLong());
-      verify(fixture.providers, never()).deleteById(anyLong(), anyLong());
-      verify(fixture.providers, never()).hasModels(anyLong());
+      verify(fixture.providers, never()).updateByName(any(), anyLong());
+      verify(fixture.providers, never()).deleteByName(any(), anyLong());
+      verify(fixture.providers, never()).hasModels(any());
     }
   }
 
@@ -362,7 +362,6 @@ class DatabaseModelExecutionResolverTest {
 
   private static AgentProvider provider(long id, AgentProviderType type) {
     AgentProvider provider = new AgentProvider();
-    provider.setId(id);
     provider.setName("provider");
     provider.setProviderType(type);
     provider.setBaseUrl("https://provider.test/v1");
@@ -427,7 +426,7 @@ class DatabaseModelExecutionResolverTest {
     }
 
     private void provider(AgentProvider provider) {
-      when(providers.getById(provider.getId())).thenReturn(provider);
+      when(providers.getByName(provider.getName())).thenReturn(provider);
     }
 
     @Override

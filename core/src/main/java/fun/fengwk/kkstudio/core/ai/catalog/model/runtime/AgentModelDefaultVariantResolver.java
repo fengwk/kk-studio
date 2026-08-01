@@ -26,13 +26,16 @@ public class AgentModelDefaultVariantResolver {
     this.configParser = Objects.requireNonNull(configParser, "configParser");
   }
 
-  public String resolve(long modelId, String overrideVariant) {
-    if (modelId <= 0) {
-      throw new IllegalArgumentException("modelId must be positive");
+  public String resolve(String providerName, String modelName, String overrideVariant) {
+    if (providerName == null || providerName.isBlank()) {
+      throw new IllegalArgumentException("providerName must not be blank");
     }
-    AgentModelDO model = agentModelMapper.getById(modelId);
+    if (modelName == null || modelName.isBlank()) {
+      throw new IllegalArgumentException("modelName must not be blank");
+    }
+    AgentModelDO model = agentModelMapper.getByProviderNameAndName(providerName, modelName);
     if (model == null) {
-      throw new IllegalArgumentException("unknown agent model: " + modelId);
+      throw new IllegalArgumentException("unknown agent model: " + providerName + "/" + modelName);
     }
     AgentModelConfigDTO config = configParser.decode(model.getConfigJson());
     String variant = trimToNull(overrideVariant);
@@ -40,7 +43,8 @@ public class AgentModelDefaultVariantResolver {
       variant = config.getDefaultVariant();
     }
     if (variant == null || variant.isBlank()) {
-      throw new IllegalStateException("model defaultVariant missing: " + modelId);
+      throw new IllegalStateException(
+          "model defaultVariant missing: " + providerName + "/" + modelName);
     }
     String effectiveVariant = variant.trim();
     boolean declared =
@@ -48,7 +52,12 @@ public class AgentModelDefaultVariantResolver {
             .anyMatch(candidate -> effectiveVariant.equals(candidate.getId()));
     if (!declared) {
       throw new IllegalArgumentException(
-          "unknown agent model variant: modelId=" + modelId + ", variant=" + effectiveVariant);
+          "unknown agent model variant: model="
+              + providerName
+              + "/"
+              + modelName
+              + ", variant="
+              + effectiveVariant);
     }
     return effectiveVariant;
   }

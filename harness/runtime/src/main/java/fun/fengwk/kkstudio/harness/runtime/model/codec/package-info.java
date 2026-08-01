@@ -6,7 +6,7 @@
  *
  * <p>codec 边界拒绝：未知字段、缺失字段、错误类型、trailing token、duplicate field；{@code BigDecimal} 以 {@code
  * toPlainString} 字符串输出；{@code Set<Enum>} 字段按枚举名排序输出，确保跨 JVM deterministic。{@code
- * ModelDescriptor.providerResourceId} 是 PostgreSQL durable resource id 与稳定 credential reference，不写入
- * secret value。
+ * ModelDescriptor.providerName} / {@code modelName} are catalog name references; no database
+ * resource IDs or secrets enter this boundary.
  */
 package fun.fengwk.kkstudio.harness.runtime.model.codec;

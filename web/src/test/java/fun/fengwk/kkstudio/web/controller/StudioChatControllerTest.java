@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 /**
  * {@link StudioChatController} end-to-end tests.
  *
- * <p>验证 Chat CRUD、未知 id 失败以及 defaultAgent 校验。Chat 不再持有 Session 成员关系。
+ * <p>验证 Chat CRUD、未知 id 失败以及 Agent name 校验。Chat 不再持有 Session 成员关系。
  */
 @AutoConfigureMockMvc
 public class StudioChatControllerTest extends WebPostgresTestSupport {
@@ -36,7 +36,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
   public void shouldCreateListUpdateAndDeleteChat() throws Exception {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("web-chat");
-    create.setDefaultAgentId("1");
+    create.setAgentName("default-assistant");
 
     MvcResult createResult =
         mockMvc
@@ -47,7 +47,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.title").value("web-chat"))
-            .andExpect(jsonPath("$.data.defaultAgentId").value("1"))
+            .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
             .andExpect(jsonPath("$.data.version").value("0"))
             .andReturn();
 
@@ -87,7 +87,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
                   .content(objectMapper.writeValueAsString(update)))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.title").value("web-chat-renamed"))
-          .andExpect(jsonPath("$.data.defaultAgentId").value("1"));
+          .andExpect(jsonPath("$.data.agentName").value("default-assistant"));
 
       // Chat↔Session membership routes no longer exist.
       mockMvc.perform(get("/api/ai/chat/" + chatId + "/sessions")).andExpect(status().isNotFound());
@@ -99,12 +99,12 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  public void shouldRejectUnknownIdsAndInvalidDefaultAgent() throws Exception {
+  public void shouldRejectUnknownIdsAndInvalidAgentName() throws Exception {
     mockMvc.perform(get("/api/ai/chat/999999999999")).andExpect(status().isNotFound());
     mockMvc.perform(get("/api/ai/chat/not-a-number")).andExpect(status().isBadRequest());
 
     ChatCreateDTO unknownAgent = new ChatCreateDTO();
-    unknownAgent.setDefaultAgentId("999999999999");
+    unknownAgent.setAgentName("missing-agent");
     mockMvc
         .perform(
             post("/api/ai/chat")
@@ -129,7 +129,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
   public void shouldCreateAssociateAndPageChatThreads() throws Exception {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("thread-picker-chat");
-    create.setDefaultAgentId("1");
+    create.setAgentName("default-assistant");
     MvcResult createdChat =
         mockMvc
             .perform(

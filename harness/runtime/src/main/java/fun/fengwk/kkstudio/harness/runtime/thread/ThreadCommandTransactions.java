@@ -1,9 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -11,20 +7,10 @@ import java.util.Optional;
 
 /** Thread command 用例的原子持久化端口。 */
 public interface ThreadCommandTransactions {
-  HarnessThread createThread(Instant now);
-
-  BootstrapResult bootstrapThread(
-      long threadId,
-      long expectedExecutionEpoch,
-      String title,
-      RuntimeConfigSnapshot initialConfig,
-      Instant now);
+  HarnessThread createThread(String title, Instant now);
 
   HarnessThread updateHead(
-      long threadId, long expectedExecutionEpoch, Long headEntryId, Instant now);
-
-  Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(
-      long threadId, long expectedExecutionEpoch);
+      long threadId, long expectedExecutionEpoch, long headEntryId, Instant now);
 
   Optional<EnqueueResult> findExistingInput(long threadId, String idempotencyKey);
 
@@ -45,17 +31,11 @@ public interface ThreadCommandTransactions {
    */
   StopResult stop(long threadId, long expectedExecutionEpoch, Instant now);
 
-  record BootstrapResult(
-      Session session, SessionEntry rootEntry, SessionEntry configEntry, HarnessThread thread) {
-    public BootstrapResult {
-      Objects.requireNonNull(session, "session");
-      Objects.requireNonNull(rootEntry, "rootEntry");
-      Objects.requireNonNull(configEntry, "configEntry");
-      Objects.requireNonNull(thread, "thread");
+  record EnqueueResult(ThreadInput input) {
+    public EnqueueResult {
+      Objects.requireNonNull(input, "input");
     }
   }
-
-  record EnqueueResult(ThreadInput input) {}
 
   record StopResult(long executionEpoch, List<ThreadInput> cancelledInputs) {
     public StopResult {

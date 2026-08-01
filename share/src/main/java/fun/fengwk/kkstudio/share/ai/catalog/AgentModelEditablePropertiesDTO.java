@@ -6,7 +6,6 @@ import lombok.Data;
 @Data
 public class AgentModelEditablePropertiesDTO {
 
-  private String name;
   private String description;
   private AgentModelConfigDTO config;
 }

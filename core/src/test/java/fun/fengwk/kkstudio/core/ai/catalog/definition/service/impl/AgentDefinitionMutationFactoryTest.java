@@ -3,17 +3,14 @@ package fun.fengwk.kkstudio.core.ai.catalog.definition.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
@@ -24,138 +21,97 @@ import java.util.List;
 public class AgentDefinitionMutationFactoryTest {
 
   @Test
-  public void shouldPersistCanonicalCapabilityLists() throws Exception {
+  public void shouldPersistCanonicalCapabilityListsAndKeepIdentity() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of("browser"));
-    config.setSkills(List.of("java", "dev"));
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setVariant("default");
-    create.setConfig(config);
+    AgentDefinitionConfigDTO config = config(List.of("browser"), List.of("java", "dev"));
+    AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
 
-    AgentDefinition definition = factory.newAgent(2L, create);
+    AgentDefinition definition = factory.newAgent("agent", "provider", "model", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-
     assertEquals(List.of("browser"), stored.getTools());
     assertEquals(List.of("java", "dev"), stored.getSkills());
+    assertEquals("provider", definition.getModelProviderName());
+    assertEquals("model", definition.getModelName());
+
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setDescription("updated");
+    update.setVariant("quality");
+    update.setConfig(config(List.of(), List.of()));
+    factory.update(definition, update);
+    assertEquals("agent", definition.getName());
+    assertEquals("provider", definition.getModelProviderName());
+    assertEquals("model", definition.getModelName());
   }
 
   @Test
   public void shouldRejectNonCanonicalCapabilityNames() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of("java", "java"));
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setVariant("default");
-    create.setConfig(config);
+    AgentDefinitionCreateDTO create =
+        create("agent", "provider/model", config(List.of(), List.of("java", "java")), "default");
     AiValidationException error =
-        assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
+        assertThrows(
+            AiValidationException.class,
+            () -> factory.newAgent("agent", "provider", "model", create));
     assertEquals(
         "agent definition config skills must not contain duplicates: java", error.getMessage());
 
-    config.setSkills(List.of());
-    config.setTools(List.of(" read "));
-    error = assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
+    create.setConfig(config(List.of(" read "), List.of()));
+    error =
+        assertThrows(
+            AiValidationException.class,
+            () -> factory.newAgent("agent", "provider", "model", create));
     assertEquals(
         "agent definition config tools must not contain surrounding whitespace",
         error.getMessage());
   }
 
   @Test
-  public void shouldRequireAndReplaceCompleteDefinitionConfiguration() throws Exception {
-    ObjectMapper objectMapper = new ObjectMapper();
-    AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
-    create.setName("agent");
-    create.setVariant("quality");
-    create.setConfig(config);
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, create));
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    AgentDefinition definition = factory.newAgent(2L, create);
-    assertEquals("quality", definition.getVariant());
-
-    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
-    update.setName("agent");
-    update.setDescription("updated");
-    update.setVariant("quality");
-    update.setConfig(config);
-    factory.update(definition, update);
-    assertEquals("agent", definition.getName());
-    assertEquals("quality", definition.getVariant());
-    AgentDefinitionConfigDTO stored =
-        objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-    assertEquals(List.of(), stored.getTools());
-    assertEquals(List.of(), stored.getSkills());
-  }
-
-  @Test
-  public void shouldRejectInvalidDefinitionConfiguration() {
+  public void shouldRequireCompleteConfigurationAndEnforceLimits() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     assertThrows(
-        AiValidationException.class, () -> factory.newAgent(0L, new AgentDefinitionCreateDTO()));
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, null));
+        AiValidationException.class,
+        () -> factory.newAgent(" ", "provider", "model", new AgentDefinitionCreateDTO()));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent("agent", " ", "model", new AgentDefinitionCreateDTO()));
 
-    AgentDefinitionCreateDTO blank = new AgentDefinitionCreateDTO();
-    blank.setName(" ");
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, blank));
-
-    AgentDefinitionCreateDTO incomplete = new AgentDefinitionCreateDTO();
-    incomplete.setName("agent");
-    assertThrows(AiValidationException.class, () -> factory.newAgent(2L, incomplete));
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    incomplete.setConfig(config);
-    // Variant override is optional; null means use model.defaultVariant at apply/runtime.
-    AgentDefinition allowedBlankVariant = factory.newAgent(2L, incomplete);
+    AgentDefinitionCreateDTO incomplete = create("agent", "provider/model", null, null);
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent("agent", "provider", "model", incomplete));
+    incomplete.setConfig(config(List.of(), List.of()));
+    AgentDefinition allowedBlankVariant =
+        factory.newAgent("agent", "provider", "model", incomplete);
     assertNull(allowedBlankVariant.getVariant());
+
+    AgentDefinitionCreateDTO oversized =
+        create("n".repeat(65), "provider/model", config(List.of(), List.of()), null);
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent(oversized.getName(), "provider", "model", oversized));
   }
 
-  @Test
-  public void shouldEnforceAgentSchemaStringLimitsAfterNormalization() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
-    AgentDefinitionCreateDTO accepted = create("n".repeat(64), "d".repeat(512), "v".repeat(64));
-    AgentDefinition persisted = factory.newAgent(2L, accepted);
-    assertEquals("n".repeat(64), persisted.getName());
-    assertEquals("d".repeat(512), persisted.getDescription());
-    assertEquals("v".repeat(64), persisted.getVariant());
-
-    assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(2L, create("n".repeat(65), null, null)));
-    assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(2L, create("agent", "d".repeat(513), null)));
-    assertThrows(
-        AiValidationException.class,
-        () -> factory.newAgent(2L, create("agent", null, "v".repeat(65))));
-  }
-
-  private static AgentDefinitionCreateDTO create(String name, String description, String variant) {
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
+  private static AgentDefinitionCreateDTO create(
+      String name, String model, AgentDefinitionConfigDTO config, String variant) {
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName(name);
-    create.setDescription(description);
+    create.setModel(model);
     create.setVariant(variant);
     create.setConfig(config);
     return create;
   }
 
+  private static AgentDefinitionConfigDTO config(List<String> tools, List<String> skills) {
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(tools);
+    config.setSkills(skills);
+    return config;
+  }
+
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {
-    PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
-    when(idGenerator.next()).thenReturn(303L);
     return new AgentDefinitionMutationFactory(
-        new AgentEditableSupport(objectMapper),
-        new AgentDefinitionConfigCodec(objectMapper),
-        idGenerator);
+        new AgentEditableSupport(objectMapper), new AgentDefinitionConfigCodec(objectMapper));
   }
 }

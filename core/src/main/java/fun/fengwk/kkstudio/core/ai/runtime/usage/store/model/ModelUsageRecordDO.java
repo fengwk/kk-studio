@@ -20,17 +20,14 @@ public class ModelUsageRecordDO {
   /** 产生账本的 Assistant Entry。 */
   private Long assistantEntryId;
 
-  /** 冻结的 provider 资源 id。 */
-  private Long providerResourceId;
+  /** 冻结的 Provider 名称。 */
+  private String providerName;
 
-  /** 冻结的 model 资源 id。 */
-  private Long modelResourceId;
+  /** 冻结的 Model 名称。 */
+  private String modelName;
 
   /** 冻结的 Provider 类型。 */
   private String providerType;
-
-  /** 冻结的 Provider 模型 id。 */
-  private String providerModelId;
 
   /** 冻结的 PromptCacheMode。 */
   private String promptCacheMode;

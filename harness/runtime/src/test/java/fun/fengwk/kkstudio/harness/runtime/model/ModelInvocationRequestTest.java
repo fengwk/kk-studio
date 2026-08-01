@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ReconcileTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -36,6 +38,15 @@ class ModelInvocationRequestTest {
         request,
         new ModelInvocationRequestJsonCodec()
             .decode(new ModelInvocationRequestJsonCodec().encode(request)));
+    assertEquals(
+        request.providerRequest(),
+        new ProviderRequestJsonCodec()
+            .decode(new ProviderRequestJsonCodec().encode(request.providerRequest())));
+    assertEquals("environment-tools", request.toolBindings().getFirst().environmentName());
+    assertEquals(
+        new SkillBinding("research", "Research facts", "environment-skills"),
+        request.skillBindings().getFirst());
+    assertEquals(true, request.yoloEnabled());
   }
 
   @Test
@@ -77,9 +88,11 @@ class ModelInvocationRequestTest {
   }
 
   private static ModelInvocationRequest request() {
-    ToolBinding binding = binding("lookup", "Look up facts");
+    ToolBinding binding =
+        ToolBinding.of(binding("lookup", "Look up facts").descriptor(), "environment-tools");
+    SkillBinding skill = new SkillBinding("research", "Research facts", "environment-skills");
     return new ModelInvocationRequest(
-        providerRequest(List.of(providerTool(binding))), List.of(binding), List.of(), false);
+        providerRequest(List.of(providerTool(binding))), List.of(binding), List.of(skill), true);
   }
 
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {

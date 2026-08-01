@@ -33,9 +33,8 @@ import java.util.Objects;
  *   <li>digest 输入采用 {@code (type, nameLen:4B, name, valueLen:4B, value)} 的长度前缀帧； 每个复合对象的每个
  *       字段必须单独成帧，绝不依赖分隔字符或 NUL 拼接，因此字段值包含 NUL 也不会与跨字段拼接碰撞。
  *   <li>版本字段独立标记，用于将来在不破坏旧 key 的前提下增量调整算法。
- *   <li>输入：版本、sessionId、provider/model resource ID、providerType、Provider modelId、连续 leading SYSTEM
- *       messages 的完整合法 typed contents（每个 content 独立成帧），以及按请求顺序的 tool
- *       name/description/inputSchemaJson。
+ *   <li>输入：版本、sessionId、providerName、modelName、providerType、连续 leading SYSTEM messages 的完整合法 typed
+ *       contents（每个 content 独立成帧），以及按请求顺序的 tool name/description/inputSchemaJson。
  * </ul>
  */
 public final class PromptCacheAffinityKeyFactory {
@@ -70,10 +69,9 @@ public final class PromptCacheAffinityKeyFactory {
     MessageDigest md = newMessageDigest();
     writeField(md, 'V', "version", VERSION);
     writeField(md, 'S', "sessionId", Long.toString(sessionId));
-    writeField(md, 'P', "providerResourceId", Long.toString(model.providerResourceId()));
-    writeField(md, 'M', "modelResourceId", Long.toString(model.modelResourceId()));
+    writeField(md, 'P', "providerName", model.providerName());
+    writeField(md, 'M', "modelName", model.modelName());
     writeField(md, 'T', "providerType", model.providerType().name());
-    writeField(md, 'I', "modelId", model.modelId());
     writeLeadingSystemMessages(md, messages);
     writeTools(md, tools);
     return md.digest();

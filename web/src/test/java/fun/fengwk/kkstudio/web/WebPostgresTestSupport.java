@@ -57,9 +57,12 @@ public abstract class WebPostgresTestSupport {
       }
       migrateDevDatabase(conn);
       try (Statement st = conn.createStatement();
-          ResultSet rs = st.executeQuery("select count(*) from agent_definition where id = 1")) {
+          ResultSet rs =
+              st.executeQuery(
+                  "select count(*) from agent_definition where name = 'default-assistant'")) {
         if (!rs.next() || rs.getLong(1) != 1L) {
-          throw new IllegalStateException("dev seed did not insert agent_definition id=1");
+          throw new IllegalStateException(
+              "dev seed did not insert agent_definition default-assistant");
         }
       }
     }

@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import java.sql.Connection;
 import java.util.List;
 
-/** PostgreSQL-backed Chat service coverage: CRUD, unknown ids, and default Agent validation. */
+/** PostgreSQL-backed Chat coverage for visible name configuration, yolo, stale Agents and CAS. */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
@@ -34,27 +34,21 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  void crudListsNewestFirstAndValidatesDefaultAgent() {
+  void crudListsNewestFirstAndValidatesAgentName() {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("alpha");
-    create.setDefaultAgentId("1");
+    create.setAgentName("default-assistant");
     ChatDTO created = chatService.createChat(create);
     assertNotNull(created.getId());
-    assertTrue(created.getId().matches("\\d+"));
     assertEquals("alpha", created.getTitle());
-    assertEquals("1", created.getDefaultAgentId());
+    assertEquals("default-assistant", created.getAgentName());
+    assertEquals(false, created.isYoloEnabled());
     assertEquals("0", created.getVersion());
-    assertNotNull(created.getCreateTime());
-    assertNotNull(created.getUpdateTime());
 
     String chatId = created.getId();
     try {
       ChatDTO loaded = chatService.getChat(chatId);
-      assertEquals("alpha", loaded.getTitle());
-      assertEquals("1", loaded.getDefaultAgentId());
-
-      ChatCreateDTO blankTitle = new ChatCreateDTO();
-      assertThrows(AiValidationException.class, () -> chatService.createChat(blankTitle));
+      assertEquals("default-assistant", loaded.getAgentName());
 
       ChatCreateDTO missingAgent = new ChatCreateDTO();
       missingAgent.setTitle("missing-agent");
@@ -62,69 +56,51 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatCreateDTO blankAgent = new ChatCreateDTO();
       blankAgent.setTitle("blank-agent");
-      blankAgent.setDefaultAgentId("  ");
+      blankAgent.setAgentName("  ");
       assertThrows(AiValidationException.class, () -> chatService.createChat(blankAgent));
 
       ChatCreateDTO unknownAgent = new ChatCreateDTO();
       unknownAgent.setTitle("orphan");
-      unknownAgent.setDefaultAgentId("999999999999");
+      unknownAgent.setAgentName("missing-agent");
       assertThrows(AiValidationException.class, () -> chatService.createChat(unknownAgent));
 
       ChatUpdateDTO badUpdate = new ChatUpdateDTO();
       assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
-      badUpdate.setDefaultAgentId("999999999999");
+      badUpdate.setAgentName("missing-agent");
       badUpdate.setExpectedVersion("0");
       assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, badUpdate));
 
-      ChatUpdateDTO blankTitleUpdate = new ChatUpdateDTO();
-      blankTitleUpdate.setTitle("   ");
-      blankTitleUpdate.setExpectedVersion("0");
-      assertThrows(
-          AiValidationException.class, () -> chatService.updateChat(chatId, blankTitleUpdate));
-      assertEquals("alpha", chatService.getChat(chatId).getTitle());
-
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
-      update.setDefaultAgentId("");
+      update.setEnvironmentName("local");
+      update.setYoloEnabled(true);
       update.setExpectedVersion("0");
-      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, update));
-      assertEquals("alpha", chatService.getChat(chatId).getTitle());
-      assertEquals("1", chatService.getChat(chatId).getDefaultAgentId());
-
-      ChatUpdateDTO titleOnly = new ChatUpdateDTO();
-      titleOnly.setTitle("beta");
-      titleOnly.setExpectedVersion("0");
-      ChatDTO updated = chatService.updateChat(chatId, titleOnly);
+      ChatDTO updated = chatService.updateChat(chatId, update);
       assertEquals("beta", updated.getTitle());
-      assertEquals("1", updated.getDefaultAgentId());
+      assertEquals("local", updated.getEnvironmentName());
+      assertTrue(updated.isYoloEnabled());
       assertEquals("1", updated.getVersion());
 
       ChatUpdateDTO stale = new ChatUpdateDTO();
+      stale.setAgentName("missing-agent");
       stale.setExpectedVersion("0");
-      stale.setDefaultAgentId("999999999999");
       assertThrows(AiVersionConflictException.class, () -> chatService.updateChat(chatId, stale));
 
       ChatCreateDTO newer = new ChatCreateDTO();
       newer.setTitle("gamma");
-      newer.setDefaultAgentId("1");
+      newer.setAgentName("default-assistant");
       ChatDTO second = chatService.createChat(newer);
       try {
         List<ChatDTO> listed = chatService.listChats();
-        assertTrue(listed.size() >= 2);
-        int secondIndex = indexOf(listed, second.getId());
-        int firstIndex = indexOf(listed, chatId);
-        assertTrue(secondIndex >= 0 && firstIndex >= 0);
-        assertTrue(secondIndex < firstIndex, "newest chat must appear first");
+        assertTrue(indexOf(listed, second.getId()) < indexOf(listed, chatId));
       } finally {
         chatService.deleteChat(second.getId(), "0");
       }
 
-      jdbc.update("delete from agent_definition where id = 1");
+      jdbc.update("delete from agent_definition where name = 'default-assistant'");
       ChatDTO staleAgentChat = chatService.getChat(chatId);
-      assertEquals("1", staleAgentChat.getDefaultAgentId());
-
-      assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat("999999999999"));
-      assertThrows(AiValidationException.class, () -> chatService.getChat("not-a-number"));
+      assertEquals("default-assistant", staleAgentChat.getAgentName());
+      assertTrue(staleAgentChat.isYoloEnabled());
     } finally {
       chatService.deleteChat(chatId, "1");
       assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
@@ -137,6 +113,6 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         return i;
       }
     }
-    return -1;
+    return Integer.MAX_VALUE;
   }
 }

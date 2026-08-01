@@ -11,15 +11,14 @@ import java.util.Optional;
  */
 public interface ThreadSelectedSkillLookup {
 
-  /** Resolved skills persisted with the claimed Model invocation. */
-  List<SelectedSkillMetadata> selectedSkills(long invocationId, long threadId);
+  /** Skill bindings persisted with the claimed Model invocation. */
+  List<SkillBinding> selectedSkills(long invocationId, long threadId);
 
-  default Optional<SelectedSkillMetadata> findSelected(
-      long invocationId, long threadId, String skillName) {
+  default Optional<SkillBinding> findSelected(long invocationId, long threadId, String skillName) {
     if (skillName == null || skillName.isBlank()) {
       return Optional.empty();
     }
-    for (SelectedSkillMetadata skill : selectedSkills(invocationId, threadId)) {
+    for (SkillBinding skill : selectedSkills(invocationId, threadId)) {
       if (skill.name().equals(skillName)) {
         return Optional.of(skill);
       }

@@ -9,23 +9,10 @@ public enum ThreadInputType {
   /** 用户消息。 */
   USER_MESSAGE,
   /** 业务扩展注入的消息。 */
-  CUSTOM_MESSAGE,
-  /** 切换 Agent identity。 */
-  SET_AGENT,
-  /** 切换 Model/variant。 */
-  SET_MODEL,
-  /** 切换 Thread 的 Environment target。 */
-  SET_ENVIRONMENT,
-  /** 切换 Thread 的 YOLO policy。 */
-  SET_YOLO;
+  CUSTOM_MESSAGE;
 
   /** 是否为消息类输入。 */
   public boolean isMessage() {
     return this == USER_MESSAGE || this == CUSTOM_MESSAGE;
-  }
-
-  /** 是否为配置类输入。 */
-  public boolean isConfig() {
-    return this == SET_AGENT || this == SET_MODEL || this == SET_ENVIRONMENT || this == SET_YOLO;
   }
 }

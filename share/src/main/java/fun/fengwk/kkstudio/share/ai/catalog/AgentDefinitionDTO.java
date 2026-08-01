@@ -8,11 +8,10 @@ import java.time.Instant;
 @Data
 public class AgentDefinitionDTO {
 
-  private String id;
   private String name;
   private String description;
   private String systemPrompt;
-  private String modelId;
+  private String model;
   private String variant;
   private AgentDefinitionConfigDTO config;
 

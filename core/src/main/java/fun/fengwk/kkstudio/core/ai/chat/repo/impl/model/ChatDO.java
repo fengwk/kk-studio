@@ -14,11 +14,14 @@ public class ChatDO {
   /** 可选标题。 */
   private String title;
 
-  /** 必填默认 Agent definition id；不建立外键，Agent 删除后可保留陈旧值。 */
-  private Long defaultAgentId;
+  /** 必填 Agent definition name；不建立外键，Agent 删除后可保留陈旧值。 */
+  private String agentName;
 
   /** 可选默认 Environment 名称；不建立外键，Environment 是 live runtime 身份。 */
-  private String defaultEnvironmentName;
+  private String environmentName;
+
+  /** 可见发送权限模式。 */
+  private boolean yoloEnabled;
 
   /** 乐观锁行版本。 */
   private Long version;

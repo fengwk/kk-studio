@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinit
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 
@@ -25,31 +24,28 @@ final class AgentDefinitionMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final AgentDefinitionConfigCodec configCodec;
-  private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentDefinitionMutationFactory(
-      AgentEditableSupport editableSupport,
-      AgentDefinitionConfigCodec configCodec,
-      PostgresqlSequenceIdGenerator idGenerator) {
+      AgentEditableSupport editableSupport, AgentDefinitionConfigCodec configCodec) {
     this.editableSupport = editableSupport;
     this.configCodec = configCodec;
-    this.idGenerator = idGenerator;
   }
 
-  AgentDefinition newAgent(long modelId, AgentDefinitionEditablePropertiesDTO properties) {
-    if (modelId <= 0) {
-      throw new AiValidationException(RESOURCE, "modelId must be positive");
-    }
-    Mutation mutation = newMutation(properties);
+  AgentDefinition newAgent(
+      String name,
+      String modelProviderName,
+      String modelName,
+      AgentDefinitionEditablePropertiesDTO properties) {
+    Mutation mutation = newMutation(name, properties);
     AgentDefinition definition = new AgentDefinition();
-    definition.setId(idGenerator.next());
-    definition.setModelId(modelId);
+    definition.setModelProviderName(modelProviderName);
+    definition.setModelName(modelName);
     apply(definition, mutation);
     return definition;
   }
 
   void update(AgentDefinition definition, AgentDefinitionEditablePropertiesDTO properties) {
-    apply(definition, newMutation(properties));
+    apply(definition, newMutation(definition.getName(), properties));
   }
 
   private void apply(AgentDefinition definition, Mutation mutation) {
@@ -60,19 +56,19 @@ final class AgentDefinitionMutationFactory {
     definition.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(AgentDefinitionEditablePropertiesDTO properties) {
+  private Mutation newMutation(String name, AgentDefinitionEditablePropertiesDTO properties) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = editableSupport.trimToNull(properties.getName());
-    if (name == null) {
+    String normalizedName = editableSupport.trimToNull(name);
+    if (normalizedName == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
     String variant = editableSupport.trimToNull(properties.getVariant());
-    editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "variant", variant, VARIANT_MAX_LENGTH);
     AgentDefinitionConfigDTO config = properties.getConfig();
@@ -85,7 +81,7 @@ final class AgentDefinitionMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(name, description, systemPrompt, variant, configJson);
+    return new Mutation(normalizedName, description, systemPrompt, variant, configJson);
   }
 
   record Mutation(

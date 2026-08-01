@@ -1,9 +1,8 @@
 {
   "model": {
-    "providerResourceId": 1001,
-    "modelResourceId": 2002,
+    "providerName": "openai",
+    "modelName": "gpt-5-mini",
     "providerType": "OPENAI",
-    "modelId": "gpt-5-mini",
     "tools": true,
     "reasoning": true,
     "pricing": {

@@ -29,11 +29,6 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
   }
 
   @Override
-  public AgentProvider getById(long id) {
-    return convert(agentProviderMapper.getById(id));
-  }
-
-  @Override
   public AgentProvider getByName(String name) {
     return convert(agentProviderMapper.getByName(name));
   }
@@ -44,18 +39,18 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
   }
 
   @Override
-  public boolean updateById(AgentProvider provider, long expectedVersion) {
-    return agentProviderMapper.updateById(convert(provider), expectedVersion) == 1;
+  public boolean updateByName(AgentProvider provider, long expectedVersion) {
+    return agentProviderMapper.updateByName(convert(provider), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id, long expectedVersion) {
-    return agentProviderMapper.deleteById(id, expectedVersion) == 1;
+  public boolean deleteByName(String name, long expectedVersion) {
+    return agentProviderMapper.deleteByName(name, expectedVersion) == 1;
   }
 
   @Override
-  public boolean hasModels(long providerId) {
-    return agentProviderMapper.countModelsByProviderId(providerId) > 0;
+  public boolean hasModels(String providerName) {
+    return agentProviderMapper.countModelsByProviderName(providerName) > 0;
   }
 
   private AgentProviderDO convert(AgentProvider provider) {
@@ -63,7 +58,6 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
       return null;
     }
     AgentProviderDO result = new AgentProviderDO();
-    result.setId(provider.getId());
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
     result.setProviderType(provider.getProviderType());
@@ -78,7 +72,6 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
       return null;
     }
     AgentProvider result = new AgentProvider();
-    result.setId(provider.getId());
     result.setName(provider.getName());
     result.setDescription(provider.getDescription());
     result.setProviderType(provider.getProviderType());

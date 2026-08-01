@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfig
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 
@@ -20,31 +19,27 @@ final class AgentModelMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
-  private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentModelMutationFactory(
-      AgentEditableSupport editableSupport,
-      AgentModelRuntimeConfigParser runtimeConfigParser,
-      PostgresqlSequenceIdGenerator idGenerator) {
+      AgentEditableSupport editableSupport, AgentModelRuntimeConfigParser runtimeConfigParser) {
     this.editableSupport = editableSupport;
     this.runtimeConfigParser = runtimeConfigParser;
-    this.idGenerator = idGenerator;
   }
 
-  AgentModel newModel(long providerId, AgentModelEditablePropertiesDTO properties) {
-    if (providerId <= 0) {
-      throw new AiValidationException(RESOURCE, "providerId must be positive");
+  AgentModel newModel(
+      String providerName, String name, AgentModelEditablePropertiesDTO properties) {
+    if (providerName == null || providerName.isBlank()) {
+      throw new AiValidationException(RESOURCE, "providerName must not be blank");
     }
-    Mutation mutation = newMutation(properties);
+    Mutation mutation = newMutation(name, properties);
     AgentModel model = new AgentModel();
-    model.setId(idGenerator.next());
-    model.setProviderId(providerId);
+    model.setProviderName(providerName);
     apply(model, mutation);
     return model;
   }
 
   void update(AgentModel model, AgentModelEditablePropertiesDTO properties) {
-    apply(model, newMutation(properties));
+    apply(model, newMutation(model.getName(), properties));
   }
 
   private void apply(AgentModel model, Mutation mutation) {
@@ -53,16 +48,16 @@ final class AgentModelMutationFactory {
     model.setConfigJson(mutation.configJson());
   }
 
-  private Mutation newMutation(AgentModelEditablePropertiesDTO properties) {
+  private Mutation newMutation(String name, AgentModelEditablePropertiesDTO properties) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = editableSupport.trimToNull(properties.getName());
-    if (name == null) {
+    String normalizedName = editableSupport.trimToNull(name);
+    if (normalizedName == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
     String description = editableSupport.trimToNull(properties.getDescription());
-    editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
+    editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
@@ -74,7 +69,7 @@ final class AgentModelMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(name, description, configJson);
+    return new Mutation(normalizedName, description, configJson);
   }
 
   record Mutation(String name, String description, String configJson) {}

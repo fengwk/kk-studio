@@ -8,41 +8,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
-import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -53,457 +48,281 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
+/** Pure planner coverage for stateless turn resolution and durable request materialization. */
 class ModelInvocationPlannerTest {
 
   private static final long SESSION_ID = 41L;
-  private static final TestRuntimeCapabilityResolver CAPABILITY_RESOLVER =
-      new TestRuntimeCapabilityResolver();
-  private static final ModelInvocationPlanner PLANNER =
-      new ModelInvocationPlanner(
-          new ProviderMessageProjector(),
-          new ToolDescriptorJsonCodec(),
-          new PromptCacheAffinityKeyFactory(),
-          CAPABILITY_RESOLVER);
+  private static final TurnSettings USER_SETTINGS =
+      new TurnSettings("agent-user", "env-user", false);
+  private static final TurnSettings CUSTOM_SETTINGS =
+      new TurnSettings("agent-custom", "env-custom", true);
 
   @Test
-  void returnsEmptyWithoutDebtOrAfterTerminalResponseBarrier() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-
-    assertTrue(PLANNER.plan(SESSION_ID, 2, path(new RootEntryPayload(), config)).isEmpty());
-    assertTrue(
-        PLANNER
-            .plan(
-                SESSION_ID,
-                3,
-                path(
-                    new RootEntryPayload(),
-                    config,
-                    custom(new AgentMessage(AgentMessageRole.SYSTEM, text("context")))))
-            .isEmpty());
-    assertTrue(
-        PLANNER
-            .plan(
-                SESSION_ID,
-                4,
-                path(
-                    new RootEntryPayload(),
-                    config,
-                    message(user("question")),
-                    custom(assistant("answer"))))
-            .isEmpty());
-    assertTrue(
-        PLANNER
-            .plan(
-                SESSION_ID,
-                4,
-                path(
-                    new RootEntryPayload(),
-                    config,
-                    message(user("question")),
-                    new AssistantErrorEntryPayload(
-                        new ModelInvocationError(
-                            ProviderErrorKind.INVALID_REQUEST, "bad request"))))
-            .isEmpty());
-  }
-
-  @Test
-  void plansUserAndToolDebt() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-
-    ModelInvocationPlan userPlan =
-        plan(path(new RootEntryPayload(), config, message(user("question"))));
-    assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(userPlan));
-    assertEquals("question", text(userPlan.request().providerRequest().messages().get(1)));
-
-    ModelInvocationPlan toolPlan =
-        plan(
-            path(
-                new RootEntryPayload(),
-                config,
-                custom(assistantToolCall("call-1")),
-                custom(toolResult("call-1"))));
-    assertEquals(
-        List.of(
-            ProviderMessageRole.SYSTEM, ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
-        roles(toolPlan));
-  }
-
-  @Test
-  void projectsConsecutiveUserMessagesIntoOneProviderRequest() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-
-    ModelInvocationPlan plan =
-        plan(path(new RootEntryPayload(), config, message(user("first")), message(user("second"))));
-
-    assertEquals(
-        List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER, ProviderMessageRole.USER),
-        roles(plan));
-    assertEquals("first", text(plan.request().providerRequest().messages().get(1)));
-    assertEquals("second", text(plan.request().providerRequest().messages().get(2)));
-  }
-
-  @Test
-  void debtBoundaryExcludesLaterConfigurationAndContextEntries() {
-    RuntimeConfigSnapshot oldConfig =
-        config("model-old", "old-system", List.of(), List.of(), disabled());
-    RuntimeConfigSnapshot newConfig =
-        config("model-new", "new-system", List.of(), List.of(), disabled());
-    List<SessionEntry> path =
-        path(
-            new RootEntryPayload(),
-            oldConfig,
-            message(user("question")),
-            newConfig,
-            custom(new AgentMessage(AgentMessageRole.SYSTEM, text("late-system"))));
-
-    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 5, path).orElseThrow();
-
-    assertEquals(5, plan.sourceHeadEntryId());
-    assertEquals(oldConfig, plan.configSnapshot());
-    assertEquals("model-old", plan.request().providerRequest().model().modelId());
-    assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
-    assertEquals("old-system", text(plan.request().providerRequest().messages().get(0)));
-    assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
-  }
-
-  @Test
-  void usesLatestEarlierConfigAndProjectsCanonicalSkillsAndTools() {
-    ToolDescriptor zeta = tool("zeta", "z input");
-    ToolDescriptor alpha = tool("alpha", "a input");
-    RuntimeConfigSnapshot first = config("model-first", "first", List.of(), List.of(), disabled());
-    RuntimeConfigSnapshot latest =
-        config(
-            "model-latest",
-            "base",
+  void callsLatestResolverForEverySeparatePlanCall() {
+    RecordingResolver resolver =
+        new RecordingResolver(
             List.of(
-                new SkillSnapshot("z&", "quote \" and '", "env"),
-                new SkillSnapshot("a<", "angle >", "env")),
-            List.of(ToolBinding.of(zeta), ToolBinding.of(alpha)),
-            disabled());
+                execution("model-first", "first", List.of(), List.of(), false),
+                execution("model-second", "second", List.of(), List.of(), true)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+    List<SessionEntry> path = path(new RootEntryPayload(), user("question", USER_SETTINGS));
 
-    ModelInvocationPlan plan =
-        plan(path(new RootEntryPayload(), first, latest, message(user("question"))));
+    ModelInvocationPlan first = planned(planner.plan(SESSION_ID, 2L, path));
+    ModelInvocationPlan second = planned(planner.plan(SESSION_ID, 2L, path));
 
-    assertEquals("model-latest", plan.request().providerRequest().model().modelId());
-    assertEquals(List.of(ProviderMessageRole.SYSTEM, ProviderMessageRole.USER), roles(plan));
-    String system = text(plan.request().providerRequest().messages().get(0));
-    assertTrue(system.startsWith("base\n\nThe following skills"));
-    assertTrue(system.indexOf("<name>a&lt;</name>") < system.indexOf("<name>z&amp;</name>"));
-    assertTrue(system.contains("<description>angle &gt;</description>"));
-    assertTrue(system.contains("<description>quote &quot; and &apos;</description>"));
-    assertEquals(
-        List.of("alpha", "zeta"),
-        plan.request().toolBindings().stream()
-            .map(binding -> binding.descriptor().name())
-            .toList());
-    assertEquals(
-        alpha.inputSchema(), plan.request().toolBindings().get(0).descriptor().inputSchema());
+    assertEquals(2, resolver.settings.size());
+    assertEquals(USER_SETTINGS, resolver.settings.get(0));
+    assertEquals(USER_SETTINGS, resolver.settings.get(1));
+    assertEquals("model-first", first.request().providerRequest().model().modelName());
+    assertEquals("model-second", second.request().providerRequest().model().modelName());
+    assertNotEquals(first.request(), second.request());
   }
 
   @Test
-  void repairsOrphanToolCallBeforeDebtMessage() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    ModelInvocationPlan plan =
-        plan(
+  void selectsNearestUserOrCustomTurnSettings() {
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(
+                execution("user-model", "user-system", List.of(), List.of(), false),
+                execution("custom-model", "custom-system", List.of(), List.of(), true)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+
+    planned(
+        planner.plan(SESSION_ID, 2L, path(new RootEntryPayload(), user("nearest", USER_SETTINGS))));
+    planned(
+        planner.plan(
+            SESSION_ID,
+            4L,
             path(
                 new RootEntryPayload(),
-                config,
-                custom(assistantToolCall("call-1")),
-                message(user("continue"))));
+                user("first", USER_SETTINGS),
+                custom(AgentMessageRole.SYSTEM, "context", CUSTOM_SETTINGS),
+                toolResult("call-1"))));
 
-    assertEquals(
-        List.of(
-            ProviderMessageRole.SYSTEM,
-            ProviderMessageRole.ASSISTANT,
-            ProviderMessageRole.TOOL,
-            ProviderMessageRole.USER),
-        roles(plan));
-    ProviderToolResultBlock result =
-        assertInstanceOf(
-            ProviderToolResultBlock.class,
-            plan.request().providerRequest().messages().get(2).contents().get(0));
-    assertTrue(result.error());
-    assertEquals("No result provided", ((ProviderTextBlock) result.contents().get(0)).text());
+    assertEquals(List.of(USER_SETTINGS, CUSTOM_SETTINGS), resolver.settings);
   }
 
   @Test
-  void finalizesDisabledAffinityAndBreakpointCachePolicies() {
-    RuntimeConfigSnapshot disabledConfig =
-        config("disabled", "system", List.of(), List.of(), disabled());
-    ModelInvocationPlan disabledPlan =
-        plan(path(new RootEntryPayload(), disabledConfig, message(user("question"))));
-    assertEquals(
-        PromptCacheRetention.NONE,
-        disabledPlan.request().providerRequest().cacheControl().retention());
-    assertEquals(null, disabledPlan.request().providerRequest().cacheControl().affinityKey());
+  void postToolResultDebtFindsTheOriginatingTurnSettings() {
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(execution("tool-model", "system", List.of(), List.of(), false)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
 
-    PromptCachePolicy affinity =
-        PromptCachePolicy.affinityShort(
-            PromptCacheCapability.affinity(EnumSet.of(PromptCacheRetention.SHORT)));
-    RuntimeConfigSnapshot affinityConfig = config("affinity", "", List.of(), List.of(), affinity);
-    ModelInvocationPlan affinityPlan =
-        plan(path(new RootEntryPayload(), affinityConfig, message(user("question"))));
-    assertEquals(
-        PromptCacheRetention.SHORT,
-        affinityPlan.request().providerRequest().cacheControl().retention());
-    assertTrue(
-        affinityPlan.request().providerRequest().cacheControl().affinityKey().startsWith("pc1-"));
-    ModelInvocationPlan otherSessionPlan =
-        PLANNER
-            .plan(42, 3, path(new RootEntryPayload(), affinityConfig, message(user("question"))))
-            .orElseThrow();
-    assertNotEquals(
-        affinityPlan.request().providerRequest().cacheControl().affinityKey(),
-        otherSessionPlan.request().providerRequest().cacheControl().affinityKey());
+    ModelInvocationPlan plan =
+        planned(
+            planner.plan(
+                SESSION_ID,
+                4L,
+                path(
+                    new RootEntryPayload(),
+                    user("question", USER_SETTINGS),
+                    assistantToolCall("call-1"),
+                    toolResult("call-1"))));
 
-    PromptCachePolicy breakpoints =
-        PromptCachePolicy.breakpointsShort(
-            PromptCacheCapability.breakpoints(
-                EnumSet.of(PromptCacheRetention.SHORT),
-                EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)));
-    RuntimeConfigSnapshot breakpointConfig =
-        config(
-            "breakpoints",
-            "system",
-            List.of(),
-            List.of(ToolBinding.of(tool("lookup", "query"))),
-            breakpoints);
-    ModelInvocationPlan breakpointPlan =
-        plan(path(new RootEntryPayload(), breakpointConfig, message(user("question"))));
-    assertEquals(
-        EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
-        breakpointPlan.request().providerRequest().cacheControl().breakpoints());
-  }
-
-  @Test
-  void rejectsMissingConfigAndMalformedPaths() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    List<SessionEntry> valid = path(new RootEntryPayload(), config, message(user("question")));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PLANNER.plan(SESSION_ID, 2, path(new RootEntryPayload(), message(user("question")))));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(0, 3, valid));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 0, valid));
-    assertThrows(NullPointerException.class, () -> PLANNER.plan(SESSION_ID, 3, null));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 1, List.of()));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 2, valid));
-
-    List<SessionEntry> wrongFirst = List.of(valid.get(1), valid.get(2));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, wrongFirst));
-
-    List<SessionEntry> broken = new ArrayList<>(valid);
-    broken.set(2, entry(3, 1L, message(user("question"))));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, broken));
-
-    List<SessionEntry> duplicate = new ArrayList<>(valid);
-    duplicate.set(2, entry(2, 2L, message(user("question"))));
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 2, duplicate));
-  }
-
-  @Test
-  void rejectsUnknownPayloadImplementation() {
-    List<SessionEntry> path =
-        path(
-            new RootEntryPayload(),
-            config("model-a", "system", List.of(), List.of(), disabled()),
-            new UnknownMessagePayload());
-
-    assertThrows(IllegalArgumentException.class, () -> PLANNER.plan(SESSION_ID, 3, path));
-  }
-
-  @Test
-  void doesNotMutateCallerPath() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    ArrayList<SessionEntry> mutable =
-        new ArrayList<>(path(new RootEntryPayload(), config, message(user("question"))));
-    List<SessionEntry> before = List.copyOf(mutable);
-
-    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 3, mutable).orElseThrow();
-
-    assertEquals(before, mutable);
-    mutable.clear();
-    assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
-  }
-
-  // ---------- ASSISTANT_ABORTED barrier ----------
-
-  @Test
-  void assistantAbortedClosesDebt() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    AssistantAbortedEntryPayload aborted = AssistantAbortedEntryPayload.ofTextAndThinking("hi", "");
-    // debt was already closed; further USER inputs must re-open debt and use the aborted text
-    // as prior semantic assistant turn context, not as a fresh assistant turn.
-    ModelInvocationPlan followup =
-        plan(
-            path(
-                new RootEntryPayload(),
-                config,
-                message(user("question")),
-                aborted,
-                message(user("continue"))));
+    assertEquals(List.of(USER_SETTINGS), resolver.settings);
     assertEquals(
         List.of(
             ProviderMessageRole.SYSTEM,
             ProviderMessageRole.USER,
             ProviderMessageRole.ASSISTANT,
-            ProviderMessageRole.USER),
-        roles(followup));
-    assertEquals("hi", text(followup.request().providerRequest().messages().get(2)));
+            ProviderMessageRole.TOOL),
+        roles(plan.request().providerRequest().messages()));
   }
 
   @Test
-  void assistantAbortedWithThinkingKeepsBothContents() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    AssistantAbortedEntryPayload aborted =
-        AssistantAbortedEntryPayload.ofTextAndThinking("answer", "reason");
+  void materializesResolvedPromptModelVariantToolsSkillsAndYoloExactly() {
+    ToolBinding tool = ToolBinding.of(tool("lookup", "look up facts"), "environment-tools");
+    SkillBinding skill = new SkillBinding("research", "Research facts", "environment-skills");
+    ResolvedTurnExecution execution =
+        execution("model-live", "resolved system", List.of(tool), List.of(skill), true);
+    RecordingResolver resolver = new RecordingResolver(List.of(execution));
+
+    ModelInvocationRequest request =
+        planned(
+                new ModelInvocationPlanner(resolver)
+                    .plan(
+                        SESSION_ID,
+                        2L,
+                        path(new RootEntryPayload(), user("question", USER_SETTINGS))))
+            .request();
+
+    assertEquals(execution.model(), request.providerRequest().model());
+    assertEquals(execution.variant(), request.providerRequest().variant());
+    assertEquals(execution.toolBindings(), request.toolBindings());
+    assertEquals(execution.skillBindings(), request.skillBindings());
+    assertTrue(request.yoloEnabled());
+    String systemPrompt = text(request.providerRequest().messages().get(0));
+    assertTrue(systemPrompt.startsWith("resolved system\n\nThe following skills"));
+    assertTrue(systemPrompt.contains("<name>research</name>"));
+    assertEquals(
+        List.of(
+            new ProviderToolDefinition(
+                "lookup",
+                "lookup description",
+                new ToolDescriptorJsonCodec().encodeInputSchema(tool.descriptor().inputSchema()))),
+        request.providerRequest().tools());
+  }
+
+  @Test
+  void noDebtDoesNotCallResolver() {
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(execution("never-used", "never-used", List.of(), List.of(), false)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+
+    assertInstanceOf(
+        PlanningResult.NoDebt.class, planner.plan(SESSION_ID, 1L, path(new RootEntryPayload())));
+    assertInstanceOf(
+        PlanningResult.NoDebt.class,
+        planner.plan(
+            SESSION_ID,
+            3L,
+            path(new RootEntryPayload(), user("question", USER_SETTINGS), assistant("answer"))));
+    assertInstanceOf(
+        PlanningResult.NoDebt.class,
+        planner.plan(
+            SESSION_ID,
+            3L,
+            path(
+                new RootEntryPayload(),
+                user("question", USER_SETTINGS),
+                new AssistantErrorEntryPayload(
+                    new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad request")))));
+    assertInstanceOf(
+        PlanningResult.NoDebt.class,
+        planner.plan(
+            SESSION_ID,
+            3L,
+            path(
+                new RootEntryPayload(),
+                user("question", USER_SETTINGS),
+                AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""))));
+
+    assertEquals(List.of(), resolver.settings);
+  }
+
+  @Test
+  void resolverFailureIsTypedPlanningFailure() {
+    PlanningFailure failure =
+        new PlanningFailure(PlanningFailureKind.MODEL_NOT_FOUND, "model was deleted");
+    RecordingResolver resolver = new RecordingResolver(failure);
+
+    PlanningResult.Failed result =
+        assertInstanceOf(
+            PlanningResult.Failed.class,
+            new ModelInvocationPlanner(resolver)
+                .plan(
+                    SESSION_ID, 2L, path(new RootEntryPayload(), user("question", USER_SETTINGS))));
+
+    assertEquals(failure, result.failure());
+  }
+
+  @Test
+  void missingTurnSettingsIsTypedFailure() {
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(execution("never-used", "never-used", List.of(), List.of(), false)));
+
+    PlanningResult.Failed result =
+        assertInstanceOf(
+            PlanningResult.Failed.class,
+            new ModelInvocationPlanner(resolver)
+                .plan(SESSION_ID, 2L, path(new RootEntryPayload(), toolResult("call-1"))));
+
+    assertEquals(PlanningFailureKind.MISSING_TURN_SETTINGS, result.failure().kind());
+    assertEquals(List.of(), resolver.settings);
+  }
+
+  @Test
+  void semanticHistoryAndSkillXmlEscapingRemainCorrect() {
+    SkillBinding ampersand = new SkillBinding("z&", "quote \" and '", "env");
+    SkillBinding lessThan = new SkillBinding("a<", "angle >", "env");
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(
+                execution(
+                    "semantic-model", "base", List.of(), List.of(ampersand, lessThan), false)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+
     ModelInvocationPlan plan =
-        PLANNER
-            .plan(
+        planned(
+            planner.plan(
                 SESSION_ID,
-                5,
+                6L,
                 path(
                     new RootEntryPayload(),
-                    config,
-                    message(user("question")),
-                    aborted,
-                    message(user("continue"))))
-            .orElseThrow();
-    ProviderMessage assistantMsg = plan.request().providerRequest().messages().get(2);
-    assertEquals(ProviderMessageRole.ASSISTANT, assistantMsg.role());
-    assertEquals(2, assistantMsg.contents().size());
-    assertEquals("answer", ((ProviderTextBlock) assistantMsg.contents().get(0)).text());
-    assertEquals("reason", ((ProviderThinkingBlock) assistantMsg.contents().get(1)).thinking());
+                    custom(AgentMessageRole.SYSTEM, "late context", CUSTOM_SETTINGS),
+                    user("question", USER_SETTINGS),
+                    assistantToolCall("call-1"),
+                    toolResult("call-1"),
+                    user("continue", USER_SETTINGS))));
+
+    assertEquals(
+        List.of(
+            ProviderMessageRole.SYSTEM,
+            ProviderMessageRole.SYSTEM,
+            ProviderMessageRole.USER,
+            ProviderMessageRole.ASSISTANT,
+            ProviderMessageRole.TOOL,
+            ProviderMessageRole.USER),
+        roles(plan.request().providerRequest().messages()));
+    String system = text(plan.request().providerRequest().messages().get(0));
+    assertTrue(system.startsWith("base\n\nThe following skills"));
+    assertTrue(system.contains("<name>z&amp;</name>"));
+    assertTrue(system.contains("<name>a&lt;</name>"));
+    assertTrue(system.contains("<description>quote &quot; and &apos;</description>"));
+    assertTrue(system.contains("<description>angle &gt;</description>"));
+    assertEquals("late context", text(plan.request().providerRequest().messages().get(1)));
+    assertEquals("question", text(plan.request().providerRequest().messages().get(2)));
+    assertEquals("continue", text(plan.request().providerRequest().messages().get(5)));
   }
 
   @Test
-  void assistantAbortedIsBarrierAndDoesNotRevisitEarlierUserDebt() {
-    RuntimeConfigSnapshot config = config("model-a", "system", List.of(), List.of(), disabled());
-    // The first USER was already covered by the partial aborted turn.
-    List<SessionEntry> entries =
-        path(
-            new RootEntryPayload(),
-            config,
-            message(user("first")),
-            AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""));
-    assertTrue(PLANNER.plan(SESSION_ID, 4, entries).isEmpty());
+  void validatesPathAndDoesNotMutateCallerList() {
+    RecordingResolver resolver =
+        new RecordingResolver(List.of(execution("model", "system", List.of(), List.of(), false)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+    ArrayList<SessionEntry> mutable =
+        new ArrayList<>(path(new RootEntryPayload(), user("question", USER_SETTINGS)));
+    List<SessionEntry> before = List.copyOf(mutable);
 
-    // Continuing after the barrier must rebuild debt for the second USER and prepend the aborted
-    // assistant turn + first USER verbatim in Provider context.
-    List<SessionEntry> followup =
-        path(
-            new RootEntryPayload(),
-            config,
-            message(user("first")),
-            AssistantAbortedEntryPayload.ofTextAndThinking("partial", ""),
-            message(user("second")));
-    ModelInvocationPlan plan = PLANNER.plan(SESSION_ID, 5, followup).orElseThrow();
-    assertEquals("first", text(plan.request().providerRequest().messages().get(1)));
-    assertEquals("partial", text(plan.request().providerRequest().messages().get(2)));
-    assertEquals("second", text(plan.request().providerRequest().messages().get(3)));
+    ModelInvocationPlan plan = planned(planner.plan(SESSION_ID, 2L, mutable));
+
+    assertEquals(before, mutable);
+    mutable.clear();
+    assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
+    assertThrows(IllegalArgumentException.class, () -> planner.plan(0L, 2L, before));
+    assertThrows(IllegalArgumentException.class, () -> planner.plan(SESSION_ID, 1L, before));
+    assertThrows(NullPointerException.class, () -> planner.plan(SESSION_ID, 2L, null));
   }
 
-  private static ModelInvocationPlan plan(List<SessionEntry> path) {
-    return PLANNER.plan(SESSION_ID, path.get(path.size() - 1).id(), path).orElseThrow();
+  private static ModelInvocationPlan planned(PlanningResult result) {
+    return assertInstanceOf(PlanningResult.Planned.class, result).plan();
   }
 
-  private static List<ProviderMessageRole> roles(ModelInvocationPlan plan) {
-    return plan.request().providerRequest().messages().stream().map(ProviderMessage::role).toList();
-  }
-
-  private static String text(ProviderMessage message) {
-    return ((ProviderTextBlock) message.contents().get(0)).text();
-  }
-
-  private static MessageEntryPayload message(AgentMessage message) {
-    return new MessageEntryPayload(message);
-  }
-
-  private static CustomMessageEntryPayload custom(AgentMessage message) {
-    return new CustomMessageEntryPayload(message);
-  }
-
-  private static AgentMessage user(String value) {
-    return new AgentMessage(AgentMessageRole.USER, text(value));
-  }
-
-  private static AgentMessage assistant(String value) {
-    return new AgentMessage(AgentMessageRole.ASSISTANT, text(value));
-  }
-
-  private static AgentMessage assistantToolCall(String callId) {
-    return new AgentMessage(
-        AgentMessageRole.ASSISTANT, List.of(new ToolCallMessageContent(callId, "lookup", "{}")));
-  }
-
-  private static AgentMessage toolResult(String callId) {
-    return new AgentMessage(
-        AgentMessageRole.TOOL,
-        List.of(
-            new ToolResultMessageContent(
-                callId, "lookup", List.of(new TextMessageContent("result")), false, "{}")));
-  }
-
-  private static List<AgentMessageContent> text(String value) {
-    return List.of(new TextMessageContent(value));
-  }
-
-  private static List<SessionEntry> path(EntryPayload... payloads) {
-    List<SessionEntry> entries = new ArrayList<>(payloads.length);
-    for (int index = 0; index < payloads.length; index++) {
-      long id = index + 1L;
-      entries.add(entry(id, index == 0 ? null : id - 1, payloads[index]));
-    }
-    return List.copyOf(entries);
-  }
-
-  private static SessionEntry entry(long id, Long parentId, EntryPayload payload) {
-    return new SessionEntry(id, parentId, payload);
-  }
-
-  private static RuntimeConfigSnapshot config(
-      String modelId,
+  private static ResolvedTurnExecution execution(
+      String modelName,
       String systemPrompt,
-      List<SkillSnapshot> skills,
       List<ToolBinding> tools,
-      PromptCachePolicy promptCachePolicy) {
-    ModelVariant variant =
-        new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
-    ModelDescriptor descriptor =
+      List<SkillBinding> skills,
+      boolean yoloEnabled) {
+    ModelDescriptor model =
         new ModelDescriptor(
-            11, 12, ProviderType.OPENAI, modelId, true, false, zeroPricing(), promptCachePolicy);
-    RuntimeConfigSnapshot config =
-        new RuntimeConfigSnapshot(
-            new AgentSnapshot(10, "agent", systemPrompt),
-            new ModelSnapshot(descriptor, variant),
-            null,
-            tools.stream().map(binding -> binding.descriptor().name()).toList(),
-            skills.stream().map(SkillSnapshot::name).toList(),
-            false);
-    CAPABILITY_RESOLVER.register(tools, skills);
-    return config;
-  }
-
-  private static ModelPricing zeroPricing() {
-    return new ModelPricing(
-        "USD",
-        "default",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
+            "provider",
+            modelName,
+            ProviderType.OPENAI,
+            !tools.isEmpty() || !skills.isEmpty(),
+            true,
+            zeroPricing(),
+            PromptCachePolicy.disabled());
+    ModelVariant variant =
+        new ModelVariant("variant", 512, 0.2, 0.9, null, null, null, List.of(), "medium");
+    return new ResolvedTurnExecution(systemPrompt, model, variant, tools, skills, yoloEnabled);
   }
 
   private static ToolDescriptor tool(String name, String parameterDescription) {
@@ -521,40 +340,128 @@ class ModelInvocationPlannerTest {
         Duration.ofSeconds(1));
   }
 
-  private static PromptCachePolicy disabled() {
-    return PromptCachePolicy.disabled();
+  private static ModelPricing zeroPricing() {
+    return new ModelPricing(
+        "USD",
+        "default",
+        "default",
+        BigDecimal.ONE,
+        "v1",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
   }
 
-  private static final class TestRuntimeCapabilityResolver implements RuntimeCapabilityResolver {
+  private static List<ProviderMessageRole> roles(List<ProviderMessage> messages) {
+    return messages.stream().map(ProviderMessage::role).toList();
+  }
 
-    private final Map<String, ToolBinding> toolBindings = new ConcurrentHashMap<>();
-    private final Map<String, SkillSnapshot> skillSnapshots = new ConcurrentHashMap<>();
+  private static String text(ProviderMessage message) {
+    return ((ProviderTextBlock) message.contents().getFirst()).text();
+  }
 
-    void register(List<ToolBinding> tools, List<SkillSnapshot> skills) {
-      tools.forEach(binding -> toolBindings.put(binding.descriptor().name(), binding));
-      skills.forEach(skill -> skillSnapshots.put(skill.name(), skill));
+  private static MessageEntryPayload user(String content, TurnSettings settings) {
+    return new MessageEntryPayload(message(AgentMessageRole.USER, content), settings, null);
+  }
+
+  private static CustomMessageEntryPayload custom(
+      AgentMessageRole role, String content, TurnSettings settings) {
+    return new CustomMessageEntryPayload(message(role, content), settings);
+  }
+
+  private static MessageEntryPayload assistant(String content) {
+    return new MessageEntryPayload(message(AgentMessageRole.ASSISTANT, content), null, metadata());
+  }
+
+  private static MessageEntryPayload assistantToolCall(String callId) {
+    return new MessageEntryPayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent(callId, "lookup", "{}"))),
+        null,
+        toolCallMetadata());
+  }
+
+  private static MessageEntryPayload toolResult(String callId) {
+    return new MessageEntryPayload(
+        new AgentMessage(
+            AgentMessageRole.TOOL,
+            List.of(
+                new ToolResultMessageContent(
+                    callId, "lookup", List.of(new TextMessageContent("result")), false, "{}"))),
+        null,
+        null);
+  }
+
+  private static AgentMessage message(AgentMessageRole role, String content) {
+    return new AgentMessage(role, List.of(new TextMessageContent(content)));
+  }
+
+  private static AssistantMessageMetadata metadata() {
+    return new AssistantMessageMetadata(
+        ProviderStopReason.COMPLETED,
+        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO));
+  }
+
+  private static AssistantMessageMetadata toolCallMetadata() {
+    return new AssistantMessageMetadata(
+        ProviderStopReason.TOOL_CALLS,
+        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO));
+  }
+
+  private static List<SessionEntry> path(EntryPayload... payloads) {
+    List<SessionEntry> entries = new ArrayList<>(payloads.length);
+    for (int index = 0; index < payloads.length; index++) {
+      long id = index + 1L;
+      entries.add(new SessionEntry(id, index == 0 ? null : id - 1L, payloads[index]));
+    }
+    return List.copyOf(entries);
+  }
+
+  private static final class RecordingResolver implements TurnExecutionResolver {
+    private final List<TurnSettings> settings = new ArrayList<>();
+    private final List<ResolvedTurnExecution> executions;
+    private final PlanningFailure failure;
+
+    private RecordingResolver(List<ResolvedTurnExecution> executions) {
+      this.executions = List.copyOf(executions);
+      this.failure = null;
+    }
+
+    private RecordingResolver(PlanningFailure failure) {
+      this.executions = List.of();
+      this.failure = failure;
     }
 
     @Override
-    public ResolvedCapabilities resolve(RuntimeConfigSnapshot config) {
-      return new ResolvedCapabilities(
-          config.toolNames().stream()
-              .map(name -> requireCapability(toolBindings, name, "tool"))
-              .toList(),
-          config.skillNames().stream()
-              .map(name -> requireCapability(skillSnapshots, name, "skill"))
-              .toList());
-    }
-
-    private static <T> T requireCapability(Map<String, T> capabilities, String name, String type) {
-      return Objects.requireNonNull(capabilities.get(name), () -> "unknown " + type + ": " + name);
-    }
-  }
-
-  private record UnknownMessagePayload() implements EntryPayload {
-    @Override
-    public EntryType type() {
-      return EntryType.MESSAGE;
+    public Resolution resolve(TurnSettings turnSettings) {
+      settings.add(turnSettings);
+      if (failure != null) {
+        return new Resolution.Failed(failure);
+      }
+      int index = Math.min(settings.size() - 1, executions.size() - 1);
+      return new Resolution.Resolved(executions.get(index));
     }
   }
 }

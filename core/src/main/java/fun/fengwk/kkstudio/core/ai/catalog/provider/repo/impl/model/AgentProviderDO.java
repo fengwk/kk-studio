@@ -10,9 +10,6 @@ import java.time.Instant;
 @Data
 public class AgentProviderDO {
 
-  /** 业务主键。 */
-  private Long id;
-
   /** Provider 唯一名称。 */
   private String name;
 

@@ -57,7 +57,7 @@ public class ChatServiceImpl implements ChatService {
   @Transactional
   public ChatDTO createChat(ChatCreateDTO createDTO) {
     Chat chat = mutationFactory.newChat(createDTO);
-    guard.ensureDefaultAgentExists(chat.getDefaultAgentId());
+    guard.ensureAgentExists(chat.getAgentName());
     if (!repository.create(chat)) {
       throw new IllegalStateException("create chat failed");
     }
@@ -75,9 +75,7 @@ public class ChatServiceImpl implements ChatService {
     Chat existing = guard.requireChat(id);
     ensureExpectedVersion(existing, id, rawExpected, expected);
     mutationFactory.apply(existing, updateDTO);
-    if (updateDTO.getDefaultAgentId() != null) {
-      guard.ensureDefaultAgentExists(existing.getDefaultAgentId());
-    }
+    guard.ensureAgentExists(existing.getAgentName());
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {

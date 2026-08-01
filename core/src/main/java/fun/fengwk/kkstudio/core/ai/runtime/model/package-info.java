@@ -6,11 +6,10 @@
  * implementation of {@link
  * fun.fengwk.kkstudio.harness.runtime.model.worker.ModelExecutionResolver}: it resolves a frozen
  * {@link fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest} to a private,
- * short-lived Provider adapter resource purely by {@code
- * ProviderRequest.model().providerResourceId()} (an {@link
- * fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider} primary key). It must
- * never consult {@link fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository}, agent
- * definitions, threads or session stores.
+ * short-lived Provider adapter resource purely by {@code ProviderRequest.model().providerName()}
+ * (the {@link fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider} name). It
+ * must never consult {@link fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository},
+ * agent definitions, threads or session stores.
  *
  * <p>The returned per-attempt executor delegates blocking Provider I/O to a virtual-thread {@link
  * java.util.concurrent.ExecutorService}, bridges the SDK's {@link

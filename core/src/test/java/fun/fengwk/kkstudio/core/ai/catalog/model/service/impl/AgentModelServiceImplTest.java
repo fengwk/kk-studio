@@ -40,13 +40,13 @@ public class AgentModelServiceImplTest {
         new AgentModelServiceImpl(repository, converter, factory, resolver);
 
     AgentModel model = new AgentModel();
-    model.setId(2L);
-    model.setProviderId(1L);
+    model.setProviderName("provider");
     model.setName("model");
     model.setVersion(0L);
     AgentModelCreateDTO create = new AgentModelCreateDTO();
-    create.setProviderId("1");
-    when(factory.newModel(1L, create)).thenReturn(model);
+    create.setProviderName("provider");
+    create.setName("model");
+    when(factory.newModel("provider", "model", create)).thenReturn(model);
     when(repository.create(model)).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createModel(create));
 
@@ -58,31 +58,38 @@ public class AgentModelServiceImplTest {
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setExpectedVersion("0");
     AgentModelUpdateDTO missing = new AgentModelUpdateDTO();
-    assertThrows(AiValidationException.class, () -> service.updateModel(2L, missing));
-    when(resolver.requireModel(2L)).thenReturn(model);
-    when(repository.updateById(model, 0L)).thenReturn(false);
-    when(repository.getById(2L)).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.updateModel(2L, update));
+    assertThrows(
+        AiValidationException.class, () -> service.updateModel("provider", "model", missing));
+    when(resolver.requireModel("provider", "model")).thenReturn(model);
+    when(repository.updateByName(model, 0L)).thenReturn(false);
+    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class, () -> service.updateModel("provider", "model", update));
 
     AgentModel reread = new AgentModel();
-    reread.setId(2L);
+    reread.setProviderName("provider");
+    reread.setName("model");
     reread.setVersion(3L);
-    when(repository.updateById(model, 0L)).thenReturn(false);
-    when(repository.getById(2L)).thenReturn(reread);
-    assertThrows(AiVersionConflictException.class, () -> service.updateModel(2L, update));
+    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
+    assertThrows(
+        AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
 
-    when(repository.updateById(model, 0L)).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(AiDuplicateException.class, () -> service.updateModel(2L, update));
+    when(repository.updateByName(model, 0L)).thenThrow(new DuplicateKeyException("dup"));
+    assertThrows(
+        AiDuplicateException.class, () -> service.updateModel("provider", "model", update));
 
-    when(repository.deleteById(eq(2L), anyLong())).thenReturn(false);
-    when(repository.getById(2L)).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> service.deleteModel(2L, "0"));
-    when(repository.getById(2L)).thenReturn(reread);
-    assertThrows(AiVersionConflictException.class, () -> service.deleteModel(2L, "0"));
+    when(repository.deleteByName(eq("provider"), eq("model"), anyLong())).thenReturn(false);
+    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class, () -> service.deleteModel("provider", "model", "0"));
+    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
+    assertThrows(
+        AiVersionConflictException.class, () -> service.deleteModel("provider", "model", "0"));
 
     model.setVersion(0L);
-    when(repository.deleteById(eq(2L), anyLong())).thenThrow(integrityFailure("23503"));
-    assertThrows(AiInUseException.class, () -> service.deleteModel(2L, "0"));
+    when(repository.deleteByName(eq("provider"), eq("model"), anyLong()))
+        .thenThrow(integrityFailure("23503"));
+    assertThrows(AiInUseException.class, () -> service.deleteModel("provider", "model", "0"));
 
     DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
     doThrow(nonForeignKey).when(repository).create(model);
@@ -92,7 +99,7 @@ public class AgentModelServiceImplTest {
   }
 
   @Test
-  public void shouldPrioritizeStaleVersionOverDuplicateAndInUseChecks() {
+  public void shouldPrioritizeStaleVersionOverDeletionChecks() {
     AgentModelRepository repository = mock(AgentModelRepository.class);
     AgentModelConverter converter = mock(AgentModelConverter.class);
     AgentModelMutationFactory factory = mock(AgentModelMutationFactory.class);
@@ -100,23 +107,23 @@ public class AgentModelServiceImplTest {
     AgentModelServiceImpl service =
         new AgentModelServiceImpl(repository, converter, factory, resolver);
     AgentModel model = new AgentModel();
-    model.setId(2L);
-    model.setProviderId(1L);
+    model.setProviderName("provider");
     model.setName("model");
     model.setVersion(1L);
-    when(resolver.requireModel(2L)).thenReturn(model);
+    when(resolver.requireModel("provider", "model")).thenReturn(model);
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setExpectedVersion("0");
-    doThrow(new AiDuplicateException("agent_model", "duplicate"))
-        .when(resolver)
-        .ensureNameAvailable(1L, "model", "model");
-    assertThrows(AiVersionConflictException.class, () -> service.updateModel(2L, update));
+    assertThrows(
+        AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
     verify(factory, never()).update(model, update);
 
-    doThrow(new AiInUseException("agent_model", "in use")).when(resolver).ensureDeletable(2L);
-    assertThrows(AiVersionConflictException.class, () -> service.deleteModel(2L, "0"));
-    verify(resolver, never()).ensureDeletable(2L);
+    doThrow(new AiInUseException("agent_model", "in use"))
+        .when(resolver)
+        .ensureDeletable("provider", "model");
+    assertThrows(
+        AiVersionConflictException.class, () -> service.deleteModel("provider", "model", "0"));
+    verify(resolver, never()).ensureDeletable("provider", "model");
   }
 
   private static DataIntegrityViolationException integrityFailure(String sqlState) {

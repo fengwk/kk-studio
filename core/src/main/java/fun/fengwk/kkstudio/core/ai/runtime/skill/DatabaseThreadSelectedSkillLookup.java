@@ -5,18 +5,16 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.ai.runtime.query.HarnessQueryRow;
 import fun.fengwk.kkstudio.core.ai.runtime.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.command.ThreadCommandMapper;
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.skill.SelectedSkillMetadata;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Resolves selected skills from the Thread's effective {@code RUNTIME_CONFIG} snapshot on final
- * schema.
+ * Resolves selected skills from the immutable request persisted with the claimed Model invocation.
  */
 @Component
 public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSkillLookup {
@@ -33,7 +31,7 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
   }
 
   @Override
-  public List<SelectedSkillMetadata> selectedSkills(long invocationId, long threadId) {
+  public List<SkillBinding> selectedSkills(long invocationId, long threadId) {
     if (invocationId <= 0) {
       throw new IllegalArgumentException("invocationId must be positive");
     }
@@ -49,12 +47,6 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
       return List.of();
     }
     ModelInvocationRequest request = REQUEST_CODEC.decode(requestJson);
-    return request.skillSnapshots().stream()
-        .map(DatabaseThreadSelectedSkillLookup::toMetadata)
-        .toList();
-  }
-
-  private static SelectedSkillMetadata toMetadata(SkillSnapshot skill) {
-    return new SelectedSkillMetadata(skill.name(), skill.description(), skill.sourceEnvironment());
+    return request.skillBindings();
   }
 }

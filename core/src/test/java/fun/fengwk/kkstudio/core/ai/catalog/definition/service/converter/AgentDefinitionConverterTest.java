@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.catalog.definition.service.converter;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -19,13 +20,18 @@ public class AgentDefinitionConverterTest {
     assertNull(converter.convert(null));
 
     AgentDefinition invalid = new AgentDefinition();
-    invalid.setId(1L);
-    invalid.setModelId(2L);
+    invalid.setModelProviderName("provider");
+    invalid.setModelName("model");
     invalid.setConfigJson("not-json");
     assertThrows(IllegalStateException.class, () -> converter.convert(invalid));
     invalid.setConfigJson("null");
     assertThrows(IllegalStateException.class, () -> converter.convert(invalid));
     invalid.setConfigJson("{}");
     assertThrows(IllegalStateException.class, () -> converter.convert(invalid));
+
+    invalid.setName("agent");
+    invalid.setVersion(0L);
+    invalid.setConfigJson("{\"tools\":[],\"skills\":[]}");
+    assertEquals("provider/model", converter.convert(invalid).getModel());
   }
 }

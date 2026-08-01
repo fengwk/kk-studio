@@ -58,9 +58,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   private static final Set<String> SEQUENCE_BACKED_TABLES =
       Set.of(
-          "agent_provider",
-          "agent_model",
-          "agent_definition",
           "comfyui_workflow_api",
           "canvas_document",
           "canvas_node",
@@ -97,7 +94,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void nonHarnessBusinessTablesExposeCompleteColumnContracts() throws SQLException {
     assertColumns(
         "agent_provider",
-        "id",
         "name",
         "description",
         "provider_type",
@@ -109,8 +105,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version");
     assertColumns(
         "agent_model",
-        "id",
-        "provider_id",
+        "provider_name",
         "name",
         "description",
         "config",
@@ -119,11 +114,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version");
     assertColumns(
         "agent_definition",
-        "id",
         "name",
         "description",
         "system_prompt",
-        "model_id",
+        "model_provider_name",
+        "model_name",
         "variant",
         "config",
         "created_at",
@@ -161,8 +156,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "chat",
         "id",
         "title",
-        "default_agent_id",
-        "default_environment_name",
+        "agent_name",
+        "environment_name",
+        "yolo_enabled",
         "created_at",
         "updated_at",
         "version");
@@ -285,7 +281,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void globalSequenceBacksPrimaryKeyDefaults() throws SQLException {
+  void catalogNamePrimaryKeysDoNotConsumeGeneratedIds() throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
@@ -293,6 +289,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " '{}'::jsonb)")) {
       ps.setString(1, "sequence-fixture-" + System.nanoTime());
       assertEquals(1, ps.executeUpdate());
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select column_default from information_schema.columns"
+                    + " where table_schema = 'public' and table_name = 'agent_provider'"
+                    + " and column_name = 'name'")) {
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next());
+        assertEquals(null, rs.getString(1));
+      }
     }
   }
 
@@ -365,9 +372,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     assertEquals(
         Set.of(
-            "uk_agent_provider_name",
-            "uk_agent_model_provider_name",
-            "uk_agent_definition_name",
             "uk_comfyui_workflow_api_api_name",
             "uk_canvas_node_canvas_id",
             "uk_canvas_link",
@@ -415,14 +419,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void updatedAtIsApplicationManagedNotAuto() throws SQLException {
     // Set explicit created_at/updated_at; later UPDATE the description and ensure updated_at does
     // NOT change unless explicitly rewritten (no MySQL ON UPDATE emulation).
-    long id = FIXTURE_IDS.incrementAndGet();
+    String name = "auto-update-probe-" + FIXTURE_IDS.incrementAndGet();
     Timestamp fixedTimestamp = Timestamp.from(Instant.parse("2024-01-01T00:00:00Z"));
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "insert into agent_provider (id, name, provider_type, config, created_at,"
-                    + " updated_at) values (?, 'auto-update-probe', 'openai', '{}'::jsonb, ?, ?)")) {
-      ps.setLong(1, id);
+                "insert into agent_provider (name, provider_type, config, created_at,"
+                    + " updated_at) values (?, 'openai', '{}'::jsonb, ?, ?)")) {
+      ps.setString(1, name);
       ps.setTimestamp(2, fixedTimestamp);
       ps.setTimestamp(3, fixedTimestamp);
       ps.executeUpdate();
@@ -430,15 +434,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "update agent_provider set description = 'touched' where id = ?")) {
-      ps.setLong(1, id);
+                "update agent_provider set description = 'touched' where name = ?")) {
+      ps.setString(1, name);
       assertEquals(1, ps.executeUpdate());
     }
     Timestamp postUpdate;
     try (Connection conn = newConnection();
         PreparedStatement ps =
-            conn.prepareStatement("select updated_at from agent_provider where id = ?")) {
-      ps.setLong(1, id);
+            conn.prepareStatement("select updated_at from agent_provider where name = ?")) {
+      ps.setString(1, name);
       try (ResultSet rs = ps.executeQuery()) {
         assertTrue(rs.next());
         postUpdate = rs.getTimestamp(1);

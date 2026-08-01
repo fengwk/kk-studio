@@ -10,18 +10,16 @@ public interface AgentModelRepository {
 
   Page<AgentModel> page(PageQuery pageQuery);
 
-  AgentModel getById(long id);
-
   /** Model names are unique within a provider, not globally. */
-  AgentModel getByProviderIdAndName(long providerId, String name);
+  AgentModel getByProviderNameAndName(String providerName, String name);
 
   boolean create(AgentModel model);
 
-  /** Atomic CAS update on (id, expectedVersion). */
-  boolean updateById(AgentModel model, long expectedVersion);
+  /** Atomic CAS update on (providerName, name, expectedVersion). */
+  boolean updateByName(AgentModel model, long expectedVersion);
 
-  /** Atomic CAS delete on (id, expectedVersion). */
-  boolean deleteById(long id, long expectedVersion);
+  /** Atomic CAS delete on (providerName, name, expectedVersion). */
+  boolean deleteByName(String providerName, String name, long expectedVersion);
 
-  boolean hasAgents(long modelId);
+  boolean hasAgents(String providerName, String name);
 }

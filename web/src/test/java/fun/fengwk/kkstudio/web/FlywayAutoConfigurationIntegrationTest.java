@@ -59,7 +59,9 @@ class FlywayAutoConfigurationIntegrationTest {
                     + " where success = true and version in ('1', '2')")) {
       assertTrue(history.next());
       assertEquals(2L, history.getLong(1), "baseline and dev seed must be recorded");
-      try (ResultSet seed = st.executeQuery("select count(*) from agent_definition where id = 1")) {
+      try (ResultSet seed =
+          st.executeQuery(
+              "select count(*) from agent_definition where name = 'default-assistant'")) {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "dev seed must be visible through the multi-data-source");
       }

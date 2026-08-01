@@ -8,8 +8,7 @@ import java.time.Instant;
 @Data
 public class AgentModel {
 
-  private Long id;
-  private Long providerId;
+  private String providerName;
   private String name;
   private String description;
   private String configJson;

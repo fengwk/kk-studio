@@ -19,7 +19,7 @@ import java.util.List;
 public interface ChatMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, title, default_agent_id, default_environment_name, version, "
+      "id, title, agent_name, environment_name, yolo_enabled, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select " + COLUMNS + " from chat order by updated_at desc, id desc")
@@ -28,8 +28,9 @@ public interface ChatMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "default_agent_id", property = "defaultAgentId"),
-        @Result(column = "default_environment_name", property = "defaultEnvironmentName"),
+        @Result(column = "agent_name", property = "agentName"),
+        @Result(column = "environment_name", property = "environmentName"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -43,10 +44,10 @@ public interface ChatMapper extends BaseMapper {
   @Insert(
       """
       insert into chat (
-          id, title, default_agent_id, default_environment_name,
+          id, title, agent_name, environment_name, yolo_enabled,
           created_at, updated_at, version
       ) values (
-          #{id}, #{title}, #{defaultAgentId}, #{defaultEnvironmentName},
+          #{id}, #{title}, #{agentName}, #{environmentName}, #{yoloEnabled},
           current_timestamp, current_timestamp, 0
       )
       """)
@@ -55,8 +56,8 @@ public interface ChatMapper extends BaseMapper {
   @Update(
       """
       update chat
-      set title = #{chat.title}, default_agent_id = #{chat.defaultAgentId},
-          default_environment_name = #{chat.defaultEnvironmentName},
+      set title = #{chat.title}, agent_name = #{chat.agentName},
+          environment_name = #{chat.environmentName}, yolo_enabled = #{chat.yoloEnabled},
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where id = #{chat.id} and version = #{expectedVersion}
       """)

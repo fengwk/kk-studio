@@ -22,7 +22,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningResult;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.TurnExecutionResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
@@ -40,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
-import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayloadJsonCodec;
@@ -52,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.SuspendOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
@@ -85,8 +87,8 @@ import java.util.Optional;
 /**
  * PostgreSQL final-schema {@link ThreadReconcileTransactions} implementation.
  *
- * <p>每个 mutation 先锁 Thread，再读取/修改 Invocation；完整 epoch/token lease fence 在 SQL 中重验。配置仅来自 Entry/Input
- * 快照，terminal model apply 会从 immutable source-head path 重算并比对冻结 request。
+ * <p>每个 mutation 先锁 Thread，再读取/修改 Invocation；完整 epoch/token lease fence 在 SQL 中重验。ModelInvocation
+ * 创建前按 turn 携带的名称引用解析 live definitions，并把结果冻结为 durable request。
  */
 @Service
 public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTransactions {
@@ -116,11 +118,11 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       HarnessIdGenerator ids,
       HarnessRuntimeProperties properties,
       ExecutionTargetStore executionTargetStore,
-      RuntimeCapabilityResolver capabilityResolver) {
+      TurnExecutionResolver executionResolver) {
     this(
         mapper,
         ids,
-        new ModelInvocationPlanner(capabilityResolver),
+        new ModelInvocationPlanner(executionResolver),
         properties.getThreadReconcileLeaseDuration(),
         executionTargetStore);
   }
@@ -247,7 +249,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (blocker.isPresent()) {
       return Optional.of(new SuspendForBlocker(blocker.get()));
     }
-    return plan(thread).map(CreateModelInvocation::new);
+    return primaryWork(plan(thread));
   }
 
   @Override
@@ -326,7 +328,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       ToolResultMessageContent content = toolResult(tool, descriptor);
       long entryId = ids.nextEntryId();
       EntryPayload payload =
-          new MessageEntryPayload(new AgentMessage(AgentMessageRole.TOOL, List.of(content)));
+          new MessageEntryPayload(
+              new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, null);
       if (mapper.insertEntry(
               entryId,
               thread.getSessionId(),
@@ -350,6 +353,26 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != tools.size()) {
       throw new IllegalStateException("terminal tool siblings changed while applying");
     }
+    return ApplyOutcome.PROGRESSED;
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public ApplyOutcome applyPlanningFailure(
+      ThreadOwnership ownership, PlanningFailure failure, Instant now) {
+    Objects.requireNonNull(failure, "failure");
+    OwnedThreadRow thread = owned(ownership, now);
+    if (thread == null) {
+      return ApplyOutcome.LOST_OWNERSHIP;
+    }
+    long entryId = ids.nextEntryId();
+    EntryPayload payload =
+        new AssistantErrorEntryPayload(
+            new ModelInvocationError(
+                ProviderErrorKind.INVALID_REQUEST,
+                failure.kind().name() + ": " + failure.message()));
+    insertEntry(thread, entryId, payload, now);
+    advance(thread, ownership, entryId, now);
     return ApplyOutcome.PROGRESSED;
   }
 
@@ -419,13 +442,6 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (thread == null || thread.getHeadEntryId() != plan.sourceHeadEntryId()) {
       return new ModelCreationOutcome.LostOwnership();
     }
-    ModelInvocationPlan durablePlan =
-        plan(thread)
-            .orElseThrow(
-                () -> new IllegalStateException("current thread head has no response debt"));
-    if (!durablePlan.equals(plan)) {
-      throw new IllegalStateException("model invocation plan does not match durable thread path");
-    }
     long id = ids.nextModelInvocationId();
     if (mapper.insertModelInvocation(
             id,
@@ -452,7 +468,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (thread == null) {
       return QuiesceOutcome.LOST_OWNERSHIP;
     }
-    if (hasAnyWork(thread) || plan(thread).isPresent()) {
+    if (hasAnyWork(thread) || !(plan(thread) instanceof PlanningResult.NoDebt)) {
       return QuiesceOutcome.WORK_AVAILABLE;
     }
     return release(ownership, false, now)
@@ -473,13 +489,21 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return ownedBy(thread, ownership, observedAt) ? thread : null;
   }
 
-  private Optional<ModelInvocationPlan> plan(OwnedThreadRow thread) {
+  private PlanningResult plan(OwnedThreadRow thread) {
     return planAt(thread, thread.getHeadEntryId());
   }
 
-  private Optional<ModelInvocationPlan> planAt(OwnedThreadRow thread, long headEntryId) {
+  private PlanningResult planAt(OwnedThreadRow thread, long headEntryId) {
     return planner.plan(
         thread.getSessionId(), headEntryId, path(thread.getSessionId(), headEntryId));
+  }
+
+  private static Optional<PrimaryWork> primaryWork(PlanningResult result) {
+    return switch (result) {
+      case PlanningResult.NoDebt ignored -> Optional.empty();
+      case PlanningResult.Planned planned -> Optional.of(new CreateModelInvocation(planned.plan()));
+      case PlanningResult.Failed failed -> Optional.of(new ApplyPlanningFailure(failed.failure()));
+    };
   }
 
   private List<SessionEntry> path(long sessionId, long headEntryId) {
@@ -612,6 +636,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     }
     return new MessageEntryPayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
+        null,
         new AssistantMessageMetadata(response.stopReason(), response.usage(), response.cost()));
   }
 
@@ -687,9 +712,6 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   private static EntryPayload inputPayload(ThreadInput input) {
-    if (input.payload() instanceof RuntimeConfigInputPayload config) {
-      return config.snapshot();
-    }
     if (input.payload() instanceof RuntimeEntryInputPayload entry) {
       return entry.payload();
     }

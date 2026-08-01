@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.ai.runtime.thread.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayloadJsonCodec;
@@ -24,25 +23,12 @@ public class HarnessThreadDtoConverter {
     dto.setThreadId(Long.toString(thread.id()));
     dto.setExecutionEpoch(thread.executionEpoch());
     dto.setRevision(Long.toString(thread.revision()));
-    dto.setHeadEntryId(thread.headEntryId() == null ? null : Long.toString(thread.headEntryId()));
+    dto.setHeadEntryId(Long.toString(thread.headEntryId()));
     dto.setStatus(status(thread));
     dto.setInputSequence(thread.inputSequence());
     dto.setProcessing(thread.hasActiveProcessorAt(Instant.now()));
     dto.setCreateTime(LocalDateTime.ofInstant(thread.createdAt(), ZoneOffset.UTC));
     dto.setUpdateTime(LocalDateTime.ofInstant(thread.updatedAt(), ZoneOffset.UTC));
-    return dto;
-  }
-
-  public HarnessThreadDTO convert(HarnessThread thread, RuntimeConfigSnapshot config) {
-    HarnessThreadDTO dto = convert(thread);
-    if (config != null) {
-      dto.setActiveAgentDefinitionId(Long.toString(config.agent().definitionId()));
-      dto.setActiveAgentName(config.agent().name());
-      dto.setActiveEnvironmentName(config.environmentName());
-      dto.setModelId(Long.toString(config.model().descriptor().modelResourceId()));
-      dto.setVariant(config.model().variant().id());
-      dto.setYoloEnabled(config.yoloEnabled());
-    }
     return dto;
   }
 
@@ -67,6 +53,6 @@ public class HarnessThreadDtoConverter {
     if (thread.runnable()) {
       return "RUNNABLE";
     }
-    return thread.headEntryId() == null ? "UNBOUND" : "IDLE";
+    return "IDLE";
   }
 }

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
@@ -14,20 +14,20 @@ import java.util.Set;
 /**
  * Durable request snapshot for one model attempt.
  *
- * <p>The provider request is the exact transport payload. Tool bindings and skill snapshots are
- * persisted beside it so later tool routing and {@code load_skill} execution never re-resolve a
- * changed Agent or Environment.
+ * <p>The provider request is the exact transport payload. Tool and skill bindings are persisted
+ * beside it so later tool routing and {@code load_skill} execution never re-resolve a changed Agent
+ * or Environment.
  */
 public record ModelInvocationRequest(
     ProviderRequest providerRequest,
     List<ToolBinding> toolBindings,
-    List<SkillSnapshot> skillSnapshots,
+    List<SkillBinding> skillBindings,
     boolean yoloEnabled) {
 
   public ModelInvocationRequest {
     providerRequest = Objects.requireNonNull(providerRequest, "providerRequest");
     toolBindings = copyUniqueTools(toolBindings);
-    skillSnapshots = copyUniqueSkills(skillSnapshots);
+    skillBindings = copyUniqueSkills(skillBindings);
     validateProviderTools(providerRequest, toolBindings);
   }
 
@@ -71,14 +71,14 @@ public record ModelInvocationRequest(
     return List.copyOf(source);
   }
 
-  private static List<SkillSnapshot> copyUniqueSkills(List<SkillSnapshot> source) {
-    Objects.requireNonNull(source, "skillSnapshots");
+  private static List<SkillBinding> copyUniqueSkills(List<SkillBinding> source) {
+    Objects.requireNonNull(source, "skillBindings");
     Set<String> names = new HashSet<>();
-    for (SkillSnapshot skill : source) {
-      Objects.requireNonNull(skill, "skillSnapshots[]");
+    for (SkillBinding skill : source) {
+      Objects.requireNonNull(skill, "skillBindings[]");
       if (!names.add(skill.name())) {
         throw new IllegalArgumentException(
-            "skillSnapshots contains duplicate name: " + skill.name());
+            "skillBindings contains duplicate name: " + skill.name());
       }
     }
     return List.copyOf(source);

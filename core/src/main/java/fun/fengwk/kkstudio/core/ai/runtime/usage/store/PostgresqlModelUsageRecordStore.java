@@ -56,8 +56,8 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
   }
 
   @Override
-  public List<ModelUsageRecord> listByModelResourceId(long modelResourceId) {
-    return mapper.listByModelResourceId(modelResourceId).stream().map(this::toRecord).toList();
+  public List<ModelUsageRecord> listByModel(String providerName, String modelName) {
+    return mapper.listByModel(providerName, modelName).stream().map(this::toRecord).toList();
   }
 
   static ModelUsageRecordDO toDO(ModelUsageRecord record) {
@@ -70,10 +70,9 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
     target.setSessionId(record.sessionId());
     target.setThreadId(record.threadId());
     target.setAssistantEntryId(record.assistantEntryId());
-    target.setProviderResourceId(draft.providerResourceId());
-    target.setModelResourceId(draft.modelResourceId());
+    target.setProviderName(draft.providerName());
+    target.setModelName(draft.modelName());
     target.setProviderType(draft.providerType().name());
-    target.setProviderModelId(draft.providerModelId());
     target.setPromptCacheMode(draft.promptCacheMode().name());
     target.setPromptCacheRetention(draft.promptCacheRetention().name());
     target.setCacheEligible(draft.cacheEligible());
@@ -130,10 +129,9 @@ public class PostgresqlModelUsageRecordStore implements ModelUsageRecordStore {
     ModelCost cost = ModelCost.calculate(pricing, usage);
     ModelUsageDraft draft =
         new ModelUsageDraft(
-            source.getProviderResourceId(),
-            source.getModelResourceId(),
+            source.getProviderName(),
+            source.getModelName(),
             ProviderType.valueOf(source.getProviderType()),
-            source.getProviderModelId(),
             PromptCacheMode.valueOf(source.getPromptCacheMode()),
             PromptCacheRetention.valueOf(source.getPromptCacheRetention()),
             source.getCacheEligible(),

@@ -45,14 +45,14 @@ public class ChatGuard {
     return chat;
   }
 
-  /** Validates a required default Agent id against the current catalog. */
-  public void ensureDefaultAgentExists(Long defaultAgentId) {
-    if (defaultAgentId == null) {
-      throw new AiValidationException(RESOURCE, "defaultAgentId must not be null");
+  /** Validates the visible Agent name against the current catalog. */
+  public void ensureAgentExists(String agentName) {
+    if (agentName == null || agentName.isBlank()) {
+      throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
-    if (agentDefinitionRepository.getById(defaultAgentId) == null) {
+    if (agentDefinitionRepository.getByName(agentName) == null) {
       throw new AiValidationException(
-          AGENT_RESOURCE, "unknown " + AGENT_RESOURCE + ": " + defaultAgentId);
+          AGENT_RESOURCE, "unknown " + AGENT_RESOURCE + ": " + agentName);
     }
   }
 }

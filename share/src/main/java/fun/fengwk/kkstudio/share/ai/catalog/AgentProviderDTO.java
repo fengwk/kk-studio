@@ -8,7 +8,6 @@ import java.time.Instant;
 @Data
 public class AgentProviderDTO {
 
-  private String id;
   private String name;
   private String description;
   private String providerType;

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -64,10 +65,6 @@ public record ThreadReconcileSnapshot(
     if (this.thread.id() != this.ownership.threadId()) {
       throw new IllegalArgumentException("thread.id must equal ownership.threadId");
     }
-    if (!this.thread.isBound()) {
-      throw new IllegalArgumentException("reconcile snapshot requires a bound thread");
-    }
-    this.thread.requireHeadEntryId();
     if (this.thread.executionEpoch() != this.ownership.executionEpoch()) {
       throw new IllegalArgumentException(
           "thread.executionEpoch must equal ownership.executionEpoch");
@@ -108,11 +105,12 @@ public record ThreadReconcileSnapshot(
       }
       case PrimaryWork.CreateModelInvocation creation -> {
         ModelInvocationPlan plan = creation.plan();
-        if (plan.sourceHeadEntryId() != thread.requireHeadEntryId()) {
+        if (plan.sourceHeadEntryId() != thread.headEntryId()) {
           throw new IllegalArgumentException(
               "modelInvocationPlan.sourceHeadEntryId must equal thread.headEntryId");
         }
       }
+      case PrimaryWork.ApplyPlanningFailure ignored -> {}
     }
   }
 
@@ -188,6 +186,13 @@ public record ThreadReconcileSnapshot(
     record CreateModelInvocation(ModelInvocationPlan plan) implements PrimaryWork {
       public CreateModelInvocation {
         Objects.requireNonNull(plan, "plan");
+      }
+    }
+
+    /** 将无法解析当前 turn 的 typed planning failure 追加为 AssistantError barrier。 */
+    record ApplyPlanningFailure(PlanningFailure failure) implements PrimaryWork {
+      public ApplyPlanningFailure {
+        Objects.requireNonNull(failure, "failure");
       }
     }
   }

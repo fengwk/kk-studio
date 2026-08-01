@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
-/** Model names are unique per provider; providers remain globally unique by name. */
+/** Model names are immutable within a provider and are addressed by a composite name. */
 public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -35,60 +35,57 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     AgentProviderDTO otherProvider = provider("model-provider-other-" + suffix);
     String modelName = "MiniMax-M2.7-" + suffix;
 
-    AgentModelDTO model = agentModelService.createModel(model(provider.getId(), modelName));
-    assertEquals(provider.getId(), model.getProviderId());
+    AgentModelDTO model = agentModelService.createModel(model(provider.getName(), modelName));
+    assertEquals(provider.getName(), model.getProviderName());
     assertEquals("0", model.getVersion());
-    // same provider + same name is rejected
     assertThrows(
         AiDuplicateException.class,
-        () -> agentModelService.createModel(model(provider.getId(), modelName)));
-    // different providers may reuse the same model name
+        () -> agentModelService.createModel(model(provider.getName(), modelName)));
+
     AgentModelDTO sameNameOtherProvider =
-        agentModelService.createModel(model(otherProvider.getId(), modelName));
-    assertEquals(otherProvider.getId(), sameNameOtherProvider.getProviderId());
+        agentModelService.createModel(model(otherProvider.getName(), modelName));
+    assertEquals(otherProvider.getName(), sameNameOtherProvider.getProviderName());
     assertEquals(modelName, sameNameOtherProvider.getName());
 
     assertThrows(
         AiResourceNotFoundException.class,
-        () ->
-            agentModelService.createModel(
-                model(Long.toString(Long.MAX_VALUE), "missing-" + suffix)));
+        () -> agentModelService.createModel(model("missing-" + suffix, "missing-" + suffix)));
     assertThrows(
         AiValidationException.class,
-        () -> agentModelService.createModel(model("0", "invalid-" + suffix)));
+        () -> agentModelService.createModel(model(" ", "invalid-" + suffix)));
     assertThrows(
         AiInUseException.class,
-        () -> agentProviderService.deleteProvider(id(provider.getId()), provider.getVersion()));
+        () -> agentProviderService.deleteProvider(provider.getName(), provider.getVersion()));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-    update.setName(model.getName());
     update.setDescription("updated");
     update.setConfig(model.getConfig());
     update.setExpectedVersion(model.getVersion());
-    AgentModelDTO updated = agentModelService.updateModel(id(model.getId()), update);
+    AgentModelDTO updated = agentModelService.updateModel(provider.getName(), modelName, update);
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
         agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(candidate -> candidate.getId().equals(model.getId())));
+            .anyMatch(
+                candidate ->
+                    candidate.getProviderName().equals(provider.getName())
+                        && candidate.getName().equals(modelName)));
 
-    // stale version conflict
     AgentModelUpdateDTO stale = new AgentModelUpdateDTO();
-    stale.setName(model.getName());
     stale.setDescription("stale");
     stale.setConfig(model.getConfig());
     stale.setExpectedVersion(model.getVersion());
     assertThrows(
         AiVersionConflictException.class,
-        () -> agentModelService.updateModel(id(model.getId()), stale));
+        () -> agentModelService.updateModel(provider.getName(), modelName, stale));
 
-    agentModelService.deleteModel(id(model.getId()), updated.getVersion());
-    agentModelService.deleteModel(id(sameNameOtherProvider.getId()), "0");
+    agentModelService.deleteModel(provider.getName(), modelName, updated.getVersion());
+    agentModelService.deleteModel(otherProvider.getName(), modelName, "0");
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> agentModelService.deleteModel(id(model.getId()), "0"));
-    agentProviderService.deleteProvider(id(provider.getId()), "0");
-    agentProviderService.deleteProvider(id(otherProvider.getId()), "0");
+        () -> agentModelService.deleteModel(provider.getName(), modelName, "0"));
+    agentProviderService.deleteProvider(provider.getName(), "0");
+    agentProviderService.deleteProvider(otherProvider.getName(), "0");
   }
 
   private AgentProviderDTO provider(String name) {
@@ -98,15 +95,11 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     return agentProviderService.createProvider(dto);
   }
 
-  private AgentModelCreateDTO model(String providerId, String name) {
+  private AgentModelCreateDTO model(String providerName, String name) {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
-    dto.setProviderId(providerId);
+    dto.setProviderName(providerName);
     dto.setName(name);
     executable(dto);
     return dto;
-  }
-
-  private long id(String value) {
-    return Long.parseLong(value);
   }
 }

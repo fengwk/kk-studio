@@ -8,11 +8,11 @@ import java.time.Instant;
 @Data
 public class AgentDefinition {
 
-  private Long id;
   private String name;
   private String description;
   private String systemPrompt;
-  private Long modelId;
+  private String modelProviderName;
+  private String modelName;
   private String variant;
   private String configJson;
   private Long version;

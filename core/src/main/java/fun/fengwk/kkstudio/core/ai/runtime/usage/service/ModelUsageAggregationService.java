@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.usage.service;
 
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
 public interface ModelUsageAggregationService {
@@ -13,5 +14,5 @@ public interface ModelUsageAggregationService {
 
   ModelUsageSummaryDTO summarizeSession(long sessionId);
 
-  ModelUsageSummaryDTO summarizeModel(long modelResourceId);
+  ModelUsageSummaryDTO summarizeModel(ModelRef model);
 }

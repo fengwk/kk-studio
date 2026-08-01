@@ -29,13 +29,8 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public AgentModel getById(long id) {
-    return convert(agentModelMapper.getById(id));
-  }
-
-  @Override
-  public AgentModel getByProviderIdAndName(long providerId, String name) {
-    return convert(agentModelMapper.getByProviderIdAndName(providerId, name));
+  public AgentModel getByProviderNameAndName(String providerName, String name) {
+    return convert(agentModelMapper.getByProviderNameAndName(providerName, name));
   }
 
   @Override
@@ -44,18 +39,18 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public boolean updateById(AgentModel model, long expectedVersion) {
-    return agentModelMapper.updateById(convert(model), expectedVersion) == 1;
+  public boolean updateByName(AgentModel model, long expectedVersion) {
+    return agentModelMapper.updateByName(convert(model), expectedVersion) == 1;
   }
 
   @Override
-  public boolean deleteById(long id, long expectedVersion) {
-    return agentModelMapper.deleteById(id, expectedVersion) == 1;
+  public boolean deleteByName(String providerName, String name, long expectedVersion) {
+    return agentModelMapper.deleteByName(providerName, name, expectedVersion) == 1;
   }
 
   @Override
-  public boolean hasAgents(long modelId) {
-    return agentModelMapper.countAgentsByModelId(modelId) > 0;
+  public boolean hasAgents(String providerName, String name) {
+    return agentModelMapper.countAgentsByModelName(providerName, name) > 0;
   }
 
   private AgentModelDO convert(AgentModel model) {
@@ -63,8 +58,7 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
       return null;
     }
     AgentModelDO result = new AgentModelDO();
-    result.setId(model.getId());
-    result.setProviderId(model.getProviderId());
+    result.setProviderName(model.getProviderName());
     result.setName(model.getName());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
@@ -76,8 +70,7 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
       return null;
     }
     AgentModel result = new AgentModel();
-    result.setId(model.getId());
-    result.setProviderId(model.getProviderId());
+    result.setProviderName(model.getProviderName());
     result.setName(model.getName());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());

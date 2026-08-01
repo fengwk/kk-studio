@@ -1462,10 +1462,9 @@ class ModelWorkerTest {
             BigDecimal.ZERO);
     ModelDescriptor model =
         new ModelDescriptor(
-            1L,
-            2L,
-            ProviderType.OPENAI,
+            "provider",
             "model",
+            ProviderType.OPENAI,
             false,
             false,
             pricing,

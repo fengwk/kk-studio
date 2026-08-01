@@ -32,8 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * PLATFORM tool that loads full SKILL.md text for a skill selected by the current Thread Agent.
  *
- * <p>Resolves only selected skills; source Environment comes from runtime selected skill metadata
- * (platform-first). Does not expose local paths.
+ * <p>Resolves only selected skills; source Environment comes from the binding persisted with the
+ * invocation (platform-first). Does not expose local paths.
  */
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";
@@ -91,14 +91,14 @@ public final class LoadSkillTool implements Tool {
         throw new IllegalArgumentException("load_skill requires a durable execution context");
       }
       String skillName = parseName(request.call().argumentsJson());
-      Optional<SelectedSkillMetadata> selected =
+      Optional<SkillBinding> selected =
           skillLookup.findSelected(
               request.context().invocationId(), request.context().threadId(), skillName);
       if (selected.isEmpty()) {
         complete(handle, error(callId, "unknown or unselected skill: " + skillName));
         return handle;
       }
-      SelectedSkillMetadata skill = selected.get();
+      SkillBinding skill = selected.get();
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =
           skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout);
       handle.future.set(future);

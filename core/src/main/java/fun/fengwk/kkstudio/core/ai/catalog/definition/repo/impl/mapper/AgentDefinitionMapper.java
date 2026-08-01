@@ -19,7 +19,7 @@ import java.util.List;
 public interface AgentDefinitionMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, name, description, system_prompt, model_id, variant, config, version, "
+      "name, description, system_prompt, model_provider_name, model_name, variant, config, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_definition")
@@ -28,15 +28,15 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from agent_definition order by id asc limit #{limit} offset #{offset}")
+          + " from agent_definition order by name asc limit #{limit} offset #{offset}")
   @Results(
       id = "agentDefinitionResultMap",
       value = {
-        @Result(column = "id", property = "id"),
         @Result(column = "name", property = "name"),
         @Result(column = "description", property = "description"),
         @Result(column = "system_prompt", property = "systemPrompt"),
-        @Result(column = "model_id", property = "modelId"),
+        @Result(column = "model_provider_name", property = "modelProviderName"),
+        @Result(column = "model_name", property = "modelName"),
         @Result(column = "variant", property = "variant"),
         @Result(column = "config", property = "configJson"),
         @Result(column = "version", property = "version"),
@@ -45,10 +45,6 @@ public interface AgentDefinitionMapper extends BaseMapper {
       })
   List<AgentDefinitionDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
-  @Select("select " + COLUMNS + " from agent_definition where id = #{id}")
-  @ResultMap("agentDefinitionResultMap")
-  AgentDefinitionDO getById(@Param("id") long id);
-
   @Select("select " + COLUMNS + " from agent_definition where name = #{name}")
   @ResultMap("agentDefinitionResultMap")
   AgentDefinitionDO getByName(@Param("name") String name);
@@ -56,10 +52,10 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_definition (
-          id, name, description, system_prompt, model_id, variant, config,
+          name, description, system_prompt, model_provider_name, model_name, variant, config,
           created_at, updated_at, version
       ) values (
-          #{id}, #{name}, #{description}, #{systemPrompt}, #{modelId}, #{variant},
+          #{name}, #{description}, #{systemPrompt}, #{modelProviderName}, #{modelName}, #{variant},
           cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
@@ -68,15 +64,14 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @Update(
       """
       update agent_definition
-      set name = #{agent.name}, description = #{agent.description},
-          system_prompt = #{agent.systemPrompt}, model_id = #{agent.modelId},
+      set description = #{agent.description}, system_prompt = #{agent.systemPrompt},
           variant = #{agent.variant}, config = cast(#{agent.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
-      where id = #{agent.id} and version = #{expectedVersion}
+      where name = #{agent.name} and version = #{expectedVersion}
       """)
-  int updateById(
+  int updateByName(
       @Param("agent") AgentDefinitionDO agent, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_definition where id = #{id} and version = #{expectedVersion}")
-  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
+  @Delete("delete from agent_definition where name = #{name} and version = #{expectedVersion}")
+  int deleteByName(@Param("name") String name, @Param("expectedVersion") long expectedVersion);
 }

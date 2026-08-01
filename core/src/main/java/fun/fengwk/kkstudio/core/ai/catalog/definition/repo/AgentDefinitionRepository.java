@@ -10,15 +10,13 @@ public interface AgentDefinitionRepository {
 
   Page<AgentDefinition> page(PageQuery pageQuery);
 
-  AgentDefinition getById(long id);
-
   AgentDefinition getByName(String name);
 
   boolean create(AgentDefinition agentDefinition);
 
-  /** Atomic CAS update on (id, expectedVersion). */
-  boolean updateById(AgentDefinition agentDefinition, long expectedVersion);
+  /** Atomic CAS update on (name, expectedVersion). */
+  boolean updateByName(AgentDefinition agentDefinition, long expectedVersion);
 
-  /** Atomic CAS delete on (id, expectedVersion). */
-  boolean deleteById(long id, long expectedVersion);
+  /** Atomic CAS delete on (name, expectedVersion). */
+  boolean deleteByName(String name, long expectedVersion);
 }

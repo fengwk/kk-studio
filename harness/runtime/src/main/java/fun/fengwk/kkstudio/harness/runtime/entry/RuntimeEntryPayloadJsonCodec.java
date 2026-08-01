@@ -9,8 +9,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
@@ -28,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -38,10 +37,9 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 6 类 Runtime Entry payload 的严格、确定性 JSON codec：{@link RootEntryPayload} / {@link
- * RuntimeConfigSnapshot} / {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link
- * AssistantErrorEntryPayload} / {@link AssistantAbortedEntryPayload}。直接对应 {@link EntryType}； 其它
- * {@link EntryPayload} 实现显式拒绝。
+ * 最终 5 类 Runtime Entry payload 的严格、确定性 JSON codec：{@link RootEntryPayload} / {@link
+ * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link AssistantErrorEntryPayload} /
+ * {@link AssistantAbortedEntryPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -51,16 +49,17 @@ import java.util.Set;
  * text/thinking content 且不能全为空，否则进入取消 barrier 而非空 aborted turn。字段顺序固定；{@link BigDecimal} 字段以 {@code
  * toPlainString()} 字符串输出；list 顺序保留。
  *
- * <p>{@link RuntimeConfigSnapshot} 子树直接委派 {@link RuntimeConfigJsonCodec} 的 node API；{@code
- * ASSISTANT_ERROR} 的 {@code error} 子树直接委派 {@link ModelInvocationErrorJsonCodec} 的 node API。
+ * <p>{@code ASSISTANT_ERROR} 的 {@code error} 子树直接委派 {@link ModelInvocationErrorJsonCodec} 的 node
+ * API。
  */
 public final class RuntimeEntryPayloadJsonCodec {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> MESSAGE_FIELDS = orderedSet("message", "assistantMetadata");
-  private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
+  private static final Set<String> MESSAGE_FIELDS =
+      orderedSet("message", "turnSettings", "assistantMetadata");
+  private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message", "turnSettings");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> ROOT_FIELDS = orderedSet();
@@ -78,6 +77,8 @@ public final class RuntimeEntryPayloadJsonCodec {
       orderedSet("type", "artifactId", "mediaType", "preview");
 
   private static final Set<String> MESSAGE_INNER_FIELDS = orderedSet("role", "contents");
+  private static final Set<String> TURN_SETTINGS_FIELDS =
+      orderedSet("agentName", "environmentName", "yoloEnabled");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
@@ -99,7 +100,6 @@ public final class RuntimeEntryPayloadJsonCodec {
           "reasoning",
           "total");
 
-  private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
   private static final ModelInvocationErrorJsonCodec ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
 
@@ -110,11 +110,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   public RuntimeEntryPayloadJsonCodec() {}
 
-  /**
-   * 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 6 类（{@link RootEntryPayload} / {@link
-   * RuntimeConfigSnapshot} / {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} /
-   * {@link AssistantErrorEntryPayload} / {@link AssistantAbortedEntryPayload}），其它实现显式拒绝。
-   */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 5 类 Runtime Entry payload， 其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -125,9 +121,6 @@ public final class RuntimeEntryPayloadJsonCodec {
     Objects.requireNonNull(payload, "payload");
     if (payload instanceof RootEntryPayload) {
       return NODES.objectNode();
-    }
-    if (payload instanceof RuntimeConfigSnapshot snapshot) {
-      return CONFIG_CODEC.encodeNode(snapshot);
     }
     if (payload instanceof MessageEntryPayload value) {
       return encodeMessagePayload(value);
@@ -167,7 +160,6 @@ public final class RuntimeEntryPayloadJsonCodec {
     Objects.requireNonNull(value, "value");
     return switch (type) {
       case ROOT -> decodeRoot(value);
-      case RUNTIME_CONFIG -> CONFIG_CODEC.decodeNode(value);
       case MESSAGE -> decodeMessagePayload(value);
       case CUSTOM_MESSAGE -> decodeCustomMessagePayload(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
@@ -180,6 +172,11 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static ObjectNode encodeMessagePayload(MessageEntryPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("message", encodeMessage(value.message()));
+    if (value.turnSettings() == null) {
+      node.putNull("turnSettings");
+    } else {
+      node.set("turnSettings", encodeTurnSettings(value.turnSettings()));
+    }
     if (value.assistantMetadata() == null) {
       node.putNull("assistantMetadata");
     } else {
@@ -191,6 +188,7 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static ObjectNode encodeCustomMessagePayload(CustomMessageEntryPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("message", encodeMessage(value.message()));
+    node.set("turnSettings", encodeTurnSettings(value.turnSettings()));
     return node;
   }
 
@@ -218,18 +216,20 @@ public final class RuntimeEntryPayloadJsonCodec {
     ObjectNode node = requireObject(value, "MESSAGE");
     requireExactFields(node, MESSAGE_FIELDS, "MESSAGE");
     AgentMessage message = decodeMessage(node.get("message"));
+    TurnSettings turnSettings = decodeNullableTurnSettings(node.get("turnSettings"));
     JsonNode metadataNode = node.get("assistantMetadata");
     if (metadataNode.isNull()) {
-      return new MessageEntryPayload(message, null);
+      return new MessageEntryPayload(message, turnSettings, null);
     }
     AssistantMessageMetadata metadata = decodeAssistantMetadata(metadataNode);
-    return new MessageEntryPayload(message, metadata);
+    return new MessageEntryPayload(message, turnSettings, metadata);
   }
 
   private static CustomMessageEntryPayload decodeCustomMessagePayload(JsonNode value) {
     ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
     requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
-    return new CustomMessageEntryPayload(decodeMessage(node.get("message")));
+    return new CustomMessageEntryPayload(
+        decodeMessage(node.get("message")), decodeTurnSettings(node.get("turnSettings")));
   }
 
   private static AssistantErrorEntryPayload decodeAssistantError(JsonNode value) {
@@ -244,6 +244,36 @@ public final class RuntimeEntryPayloadJsonCodec {
     requireExactFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
     AgentMessage message = decodeMessage(node.get("message"));
     return new AssistantAbortedEntryPayload(message);
+  }
+
+  private static ObjectNode encodeTurnSettings(TurnSettings settings) {
+    ObjectNode node = NODES.objectNode();
+    node.put("agentName", settings.agentName());
+    if (settings.environmentName() == null) {
+      node.putNull("environmentName");
+    } else {
+      node.put("environmentName", settings.environmentName());
+    }
+    node.put("yoloEnabled", settings.yoloEnabled());
+    return node;
+  }
+
+  private static TurnSettings decodeTurnSettings(JsonNode value) {
+    ObjectNode node = requireObject(value, "turnSettings");
+    requireExactFields(node, TURN_SETTINGS_FIELDS, "turnSettings");
+    JsonNode environmentNode = node.get("environmentName");
+    String environmentName =
+        environmentNode.isNull()
+            ? null
+            : requiredText(environmentNode, "environmentName", "turnSettings");
+    return new TurnSettings(
+        requiredText(node, "agentName", "turnSettings"),
+        environmentName,
+        requiredBoolean(node, "yoloEnabled", "turnSettings"));
+  }
+
+  private static TurnSettings decodeNullableTurnSettings(JsonNode value) {
+    return value == null || value.isNull() ? null : decodeTurnSettings(value);
   }
 
   // ---------- AgentMessage / content encoders & decoders ----------
@@ -533,6 +563,10 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
+    return requiredText(value, field, context);
+  }
+
+  private static String requiredText(JsonNode value, String field, String context) {
     if (!value.isTextual()) {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }

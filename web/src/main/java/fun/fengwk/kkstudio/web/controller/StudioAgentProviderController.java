@@ -40,16 +40,16 @@ public class StudioAgentProviderController {
     return Results.created(agentProviderService.createProvider(createDTO));
   }
 
-  @PutMapping("/{id}")
+  @PutMapping("/{name}")
   public Result<AgentProviderDTO> updateProvider(
-      @PathVariable long id, @RequestBody AgentProviderUpdateDTO updateDTO) {
-    return Results.ok(agentProviderService.updateProvider(id, updateDTO));
+      @PathVariable String name, @RequestBody AgentProviderUpdateDTO updateDTO) {
+    return Results.ok(agentProviderService.updateProvider(name, updateDTO));
   }
 
-  @DeleteMapping("/{id}")
+  @DeleteMapping("/{name}")
   public Result<Void> deleteProvider(
-      @PathVariable long id, @RequestParam("expectedVersion") String expectedVersion) {
-    agentProviderService.deleteProvider(id, expectedVersion);
+      @PathVariable String name, @RequestParam("expectedVersion") String expectedVersion) {
+    agentProviderService.deleteProvider(name, expectedVersion);
     return Results.noContent();
   }
 }

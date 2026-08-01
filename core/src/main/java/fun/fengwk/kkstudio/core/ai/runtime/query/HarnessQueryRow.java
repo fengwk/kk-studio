@@ -22,7 +22,6 @@ public class HarnessQueryRow {
   private String processorToken;
   private OffsetDateTime processorUntil;
   private String sessionTitle;
-  private String runtimeConfigJson;
   private Boolean hasQueuedInput;
   private Boolean hasActiveModel;
   private Boolean hasActiveTool;

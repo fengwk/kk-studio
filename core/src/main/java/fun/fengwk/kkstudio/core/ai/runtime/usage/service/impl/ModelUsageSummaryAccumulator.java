@@ -37,9 +37,9 @@ final class ModelUsageSummaryAccumulator {
   private long eligibleCacheReadTokens;
   private long eligibleReadDenominatorTokens;
 
-  ModelUsageSummaryAccumulator(String scopeType, long scopeId) {
+  ModelUsageSummaryAccumulator(String scopeType, String scopeId) {
     this.scopeType = Objects.requireNonNull(scopeType, "scopeType");
-    this.scopeId = Long.toString(scopeId);
+    this.scopeId = Objects.requireNonNull(scopeId, "scopeId");
   }
 
   void add(ModelUsageRecord record) {

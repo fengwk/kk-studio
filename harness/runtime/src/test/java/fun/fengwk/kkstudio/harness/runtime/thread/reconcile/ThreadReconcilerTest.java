@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
@@ -215,10 +217,7 @@ class ThreadReconcilerTest {
   void createModelInvocationRunsBeforeHarvest() {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            1L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
@@ -244,12 +243,34 @@ class ThreadReconcilerTest {
   }
 
   @Test
+  void planningFailureIsAppliedAsAssistantErrorBarrierWithoutModelCreation() {
+    FakeTransactions txs = new FakeTransactions();
+    PlanningFailure failure =
+        new PlanningFailure(PlanningFailureKind.SKILL_NOT_FOUND, "skill is unavailable");
+    txs.queueSnapshot(
+        b ->
+            b.primaryWork =
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure(failure)));
+    txs.queueSnapshot(b -> {});
+    txs.applyPlanningFailureOutcome = ApplyOutcome.PROGRESSED;
+    txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
+
+    StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
+
+    assertInstanceOf(StepResult.Quiescent.class, result);
+    assertEquals(1, txs.applyPlanningFailureCount.get());
+    assertSame(failure, txs.lastPlanningFailure.get());
+    assertEquals(0, txs.createCount.get(), "a planning failure must not create a fake invocation");
+    assertEquals(List.of("apply-planning-failure", "quiesce"), txs.operationLog);
+  }
+
+  @Test
   void harvestRunsBeforeQuiesce() {
     FakeTransactions txs = new FakeTransactions();
     txs.queueSnapshot(
         b ->
             b.queuedInputs.add(
-                ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_YOLO)));
+                ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.CUSTOM_MESSAGE)));
     txs.queueSnapshot(b -> {});
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
@@ -264,14 +285,14 @@ class ThreadReconcilerTest {
   // --------------------- turn-start batch 路径 ---------------------
 
   @Test
-  void configOnlyBatchAdvancesAndThenQuiesces() {
+  void messageOnlyBatchAdvancesAndThenQuiesces() {
     FakeTransactions txs = new FakeTransactions();
     txs.queueSnapshot(
         b ->
             b.queuedInputs.addAll(
                 List.of(
-                    ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_MODEL),
-                    ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.SET_AGENT))));
+                    ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.CUSTOM_MESSAGE),
+                    ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE))));
     txs.queueSnapshot(b -> {});
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
@@ -288,13 +309,13 @@ class ThreadReconcilerTest {
   @Test
   void harvestsCompleteSnapshotBatchAndCreatesOnePlanFromFinalHead() {
     FakeTransactions txs = new FakeTransactions();
-    ThreadInput config = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_MODEL);
+    ThreadInput config = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.CUSTOM_MESSAGE);
     ThreadInput firstMessage =
         ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE);
     ThreadInput secondMessage =
         ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.CUSTOM_MESSAGE);
     ThreadInput trailingConfig =
-        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.SET_AGENT);
+        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.USER_MESSAGE);
     txs.queueSnapshot(
         b -> b.queuedInputs.addAll(List.of(config, firstMessage, secondMessage, trailingConfig)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
@@ -303,10 +324,7 @@ class ThreadReconcilerTest {
           b.primaryWork =
               Optional.of(
                   new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(
-                      new ModelInvocationPlan(
-                          4L,
-                          ReconcileTestSupport.modelInvocationRequest(),
-                          ReconcileTestSupport.configSnapshot())));
+                      new ModelInvocationPlan(4L, ReconcileTestSupport.modelInvocationRequest())));
           b.headEntryId = 4L;
         });
     txs.createOutcome =
@@ -331,21 +349,18 @@ class ThreadReconcilerTest {
     // harvest 成功后，snapshot 2 暴露最终 head 的 ModelInvocationPlan 并仍包含新 input；
     // create 成功后返回 Suspended；新 input 不会被当前 batch harvest。
     FakeTransactions txs = new FakeTransactions();
-    ThreadInput cfg = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.SET_MODEL);
+    ThreadInput cfg = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.CUSTOM_MESSAGE);
     ThreadInput msg = ReconcileTestSupport.input(THREAD_ID, 2L, ThreadInputType.USER_MESSAGE);
     ThreadInput secondMsg = ReconcileTestSupport.input(THREAD_ID, 3L, ThreadInputType.USER_MESSAGE);
     ThreadInput trailingConfig =
-        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.SET_AGENT);
+        ReconcileTestSupport.input(THREAD_ID, 4L, ThreadInputType.USER_MESSAGE);
     ThreadInput later = ReconcileTestSupport.input(THREAD_ID, 5L, ThreadInputType.USER_MESSAGE);
 
     txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(cfg, msg, secondMsg, trailingConfig)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
 
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            4L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(4L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
@@ -471,10 +486,7 @@ class ThreadReconcilerTest {
   void lostOwnershipOnCreateReturnsLostOwnership() {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            1L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b ->
             b.primaryWork =
@@ -535,10 +547,7 @@ class ThreadReconcilerTest {
   void createFailureReleasesLeaseAndReturnsFailed() {
     FakeTransactions txs = new FakeTransactions();
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            1L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     Failure failure = new Failure("CREATE_FAIL", "boom");
     txs.queueSnapshot(
         b ->
@@ -604,7 +613,7 @@ class ThreadReconcilerTest {
           b ->
               b.queuedInputs.add(
                   ReconcileTestSupport.input(
-                      THREAD_ID, currentSequence, ThreadInputType.SET_YOLO)));
+                      THREAD_ID, currentSequence, ThreadInputType.CUSTOM_MESSAGE)));
     }
 
     ThreadReconciler reconciler = new ThreadReconciler(txs, CLOCK, 2);
@@ -698,6 +707,7 @@ class ThreadReconcilerTest {
 
     ApplyOutcome applyTerminalModelOutcome;
     ApplyOutcome applyTerminalToolOutcome;
+    ApplyOutcome applyPlanningFailureOutcome;
     SuspendOutcome suspendOutcome;
     ApplyOutcome harvestOutcome;
     ModelCreationOutcome createOutcome;
@@ -709,6 +719,7 @@ class ThreadReconcilerTest {
     final AtomicInteger renewCount = new AtomicInteger();
     final AtomicInteger applyTerminalModelCount = new AtomicInteger();
     final AtomicInteger applyTerminalToolCount = new AtomicInteger();
+    final AtomicInteger applyPlanningFailureCount = new AtomicInteger();
     final AtomicInteger suspendCount = new AtomicInteger();
     final AtomicInteger createCount = new AtomicInteger();
     final AtomicInteger harvestCount = new AtomicInteger();
@@ -716,6 +727,7 @@ class ThreadReconcilerTest {
     final AtomicInteger bestEffortReleaseCount = new AtomicInteger();
     final AtomicReference<TurnInputBatch> lastHarvestedBatch = new AtomicReference<>();
     final AtomicReference<ContinuationRef> lastExpectedBlocker = new AtomicReference<>();
+    final AtomicReference<PlanningFailure> lastPlanningFailure = new AtomicReference<>();
 
     void queueSnapshot(SnapshotMutator mutator) {
       queueSnapshotFor(THREAD_ID, TOKEN, mutator);
@@ -773,6 +785,16 @@ class ThreadReconcilerTest {
       instantLog.add(now);
       operationLog.add("apply-tools");
       return applyTerminalToolOutcome;
+    }
+
+    @Override
+    public ApplyOutcome applyPlanningFailure(
+        ThreadOwnership ownership, PlanningFailure failure, Instant now) {
+      applyPlanningFailureCount.incrementAndGet();
+      instantLog.add(now);
+      operationLog.add("apply-planning-failure");
+      lastPlanningFailure.set(failure);
+      return applyPlanningFailureOutcome;
     }
 
     @Override

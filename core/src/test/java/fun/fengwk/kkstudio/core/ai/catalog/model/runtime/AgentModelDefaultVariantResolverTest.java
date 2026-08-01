@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.impl.model.AgentModelDO;
 
-/** Model Variant overrides must reference the current Model configuration. */
+/** Model Variant overrides must reference the current composite Model identity. */
 class AgentModelDefaultVariantResolverTest {
 
   @Test
@@ -20,22 +20,27 @@ class AgentModelDefaultVariantResolverTest {
     AgentModelMapper mapper = mock(AgentModelMapper.class);
     AgentModelRuntimeConfigParser parser = new AgentModelRuntimeConfigParser(new ObjectMapper());
     AgentModelDO model = new AgentModelDO();
-    model.setId(7L);
+    model.setProviderName("provider");
+    model.setName("model");
     model.setConfigJson(parser.encode(executableConfig()));
-    when(mapper.getById(7L)).thenReturn(model);
+    when(mapper.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
     AgentModelDefaultVariantResolver resolver =
         new AgentModelDefaultVariantResolver(mapper, parser);
 
-    assertEquals("default", resolver.resolve(7L, null));
-    assertEquals("default", resolver.resolve(7L, " default "));
+    assertEquals("default", resolver.resolve("provider", "model", null));
+    assertEquals("default", resolver.resolve("provider", "model", " default "));
     assertEquals(
-        "unknown agent model variant: modelId=7, variant=missing",
-        assertThrows(IllegalArgumentException.class, () -> resolver.resolve(7L, "missing"))
+        "unknown agent model variant: model=provider/model, variant=missing",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> resolver.resolve("provider", "model", "missing"))
             .getMessage());
     assertEquals(
-        "unknown agent model: 8",
-        assertThrows(IllegalArgumentException.class, () -> resolver.resolve(8L, "default"))
+        "unknown agent model: missing/model",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> resolver.resolve("missing", "model", "default"))
             .getMessage());
   }
 }

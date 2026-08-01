@@ -11,12 +11,11 @@ import java.util.function.Function;
  * Resolves a frozen {@link ProviderRequest} to a ready-to-call {@link ModelProvider} plus its
  * transport {@link ModelCallTimeoutPolicy}.
  *
- * <p>Implementations are expected to look up the persisted Provider row by {@code
- * request.model().providerResourceId()}, validate that the persisted type matches the frozen {@code
- * ProviderType} on the request, confirm a Harness {@code ProviderFactory} is registered for that
- * type and freeze a short-lived Provider adapter resource. The adapter creates the SDK-bound {@link
- * ModelProvider} only on the Provider I/O executor, after the durable deadline has capped the
- * transport timeout.
+ * <p>Implementations look up the persisted Provider row by {@code request.model().providerName()},
+ * validate that the persisted type matches the frozen {@code ProviderType} on the request, confirm
+ * a Harness {@code ProviderFactory} is registered for that type and freeze a short-lived Provider
+ * adapter resource. The adapter creates the SDK-bound {@link ModelProvider} only on the Provider
+ * I/O executor, after the durable deadline has capped the transport timeout.
  */
 public interface ProviderResolutionService {
 

@@ -29,7 +29,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
 import java.util.List;
 
-/** Agent definitions and their model references are global. */
+/** Agent definitions are global and reference immutable model names. */
 public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -40,86 +40,79 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
   public void shouldPersistGlobalStructuredDefinition() {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("agent-provider-" + suffix);
-    AgentModelDTO model = model(provider.getId(), "agent-model-" + suffix);
+    AgentModelDTO model = model(provider.getName(), "agent-model-" + suffix);
     String name = "agent-definition-" + suffix;
+    String modelRef = provider.getName() + "/" + model.getName();
 
-    AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(model.getId(), name));
+    AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(modelRef, name));
+    assertEquals(modelRef, definition.getModel());
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals("0", definition.getVersion());
     assertThrows(
         AiDuplicateException.class,
-        () -> agentDefinitionService.createAgent(agent(model.getId(), name)));
+        () -> agentDefinitionService.createAgent(agent(modelRef, name)));
     assertThrows(
-        AiInUseException.class, () -> agentModelService.deleteModel(id(model.getId()), "0"));
+        AiInUseException.class,
+        () -> agentModelService.deleteModel(provider.getName(), model.getName(), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
-    update.setName(definition.getName());
     update.setDescription("updated");
     update.setSystemPrompt(definition.getSystemPrompt());
-    update.setModelId(definition.getModelId());
     update.setVariant(definition.getVariant());
     update.setConfig(definition.getConfig());
     update.setExpectedVersion(definition.getVersion());
-    AgentDefinitionDTO updated = agentDefinitionService.updateAgent(id(definition.getId()), update);
+    AgentDefinitionDTO updated = agentDefinitionService.updateAgent(name, update);
+    assertEquals(name, updated.getName());
+    assertEquals(modelRef, updated.getModel());
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
         agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(candidate -> candidate.getId().equals(definition.getId())));
+            .anyMatch(candidate -> candidate.getName().equals(name)));
 
     AgentDefinitionUpdateDTO stale = new AgentDefinitionUpdateDTO();
-    stale.setName(definition.getName());
     stale.setDescription("stale");
-    stale.setModelId(definition.getModelId());
     stale.setConfig(definition.getConfig());
     stale.setExpectedVersion(definition.getVersion());
     assertThrows(
-        AiVersionConflictException.class,
-        () -> agentDefinitionService.updateAgent(id(definition.getId()), stale));
+        AiVersionConflictException.class, () -> agentDefinitionService.updateAgent(name, stale));
 
-    agentDefinitionService.deleteAgent(id(definition.getId()), updated.getVersion());
+    agentDefinitionService.deleteAgent(name, updated.getVersion());
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> agentDefinitionService.deleteAgent(id(definition.getId()), "0"));
-    agentModelService.deleteModel(id(model.getId()), model.getVersion());
-    agentProviderService.deleteProvider(id(provider.getId()), provider.getVersion());
+        AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
+    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
   @Test
   public void rejectsVariantOutsideTheSelectedModelConfiguration() {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("agent-variant-provider-" + suffix);
-    AgentModelDTO model = model(provider.getId(), "agent-variant-model-" + suffix);
-    AgentDefinitionCreateDTO invalid = agent(model.getId(), "agent-invalid-variant-" + suffix);
+    AgentModelDTO model = model(provider.getName(), "agent-variant-model-" + suffix);
+    String modelRef = provider.getName() + "/" + model.getName();
+    AgentDefinitionCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
     invalid.setVariant("missing");
 
-    try {
-      assertThrows(AiValidationException.class, () -> agentDefinitionService.createAgent(invalid));
+    assertThrows(AiValidationException.class, () -> agentDefinitionService.createAgent(invalid));
 
-      AgentDefinitionCreateDTO defaultVariant =
-          agent(model.getId(), "agent-valid-variant-" + suffix);
-      defaultVariant.setVariant(null);
-      AgentDefinitionDTO created = agentDefinitionService.createAgent(defaultVariant);
-      try {
-        assertNull(created.getVariant());
-        AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
-        invalidUpdate.setName(created.getName());
-        invalidUpdate.setDescription(created.getDescription());
-        invalidUpdate.setSystemPrompt(created.getSystemPrompt());
-        invalidUpdate.setModelId(model.getId());
-        invalidUpdate.setVariant("missing");
-        invalidUpdate.setConfig(created.getConfig());
-        invalidUpdate.setExpectedVersion(created.getVersion());
-        assertThrows(
-            AiValidationException.class,
-            () -> agentDefinitionService.updateAgent(id(created.getId()), invalidUpdate));
-      } finally {
-        agentDefinitionService.deleteAgent(id(created.getId()), created.getVersion());
-      }
+    AgentDefinitionCreateDTO valid = agent(modelRef, "agent-valid-variant-" + suffix);
+    valid.setVariant(null);
+    AgentDefinitionDTO created = agentDefinitionService.createAgent(valid);
+    try {
+      assertNull(created.getVariant());
+      AgentDefinitionUpdateDTO invalidUpdate = new AgentDefinitionUpdateDTO();
+      invalidUpdate.setDescription(created.getDescription());
+      invalidUpdate.setVariant("missing");
+      invalidUpdate.setConfig(created.getConfig());
+      invalidUpdate.setExpectedVersion(created.getVersion());
+      assertThrows(
+          AiValidationException.class,
+          () -> agentDefinitionService.updateAgent(created.getName(), invalidUpdate));
     } finally {
-      agentModelService.deleteModel(id(model.getId()), model.getVersion());
-      agentProviderService.deleteProvider(id(provider.getId()), provider.getVersion());
+      agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
+      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
 
@@ -130,28 +123,23 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     return agentProviderService.createProvider(dto);
   }
 
-  private AgentModelDTO model(String providerId, String name) {
+  private AgentModelDTO model(String providerName, String name) {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
-    dto.setProviderId(providerId);
+    dto.setProviderName(providerName);
     dto.setName(name);
     executable(dto);
     return agentModelService.createModel(dto);
   }
 
-  private AgentDefinitionCreateDTO agent(String modelId, String name) {
+  private AgentDefinitionCreateDTO agent(String model, String name) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    // tools/skills require live capability validation; keep empty for basic CRUD coverage
     config.setTools(List.of());
     config.setSkills(List.of());
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
-    dto.setModelId(modelId);
+    dto.setModel(model);
     dto.setVariant("default");
     dto.setConfig(config);
     return dto;
-  }
-
-  private long id(String value) {
-    return Long.parseLong(value);
   }
 }

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -59,6 +60,15 @@ public interface ThreadReconcileTransactions {
    */
   ApplyOutcome applyTerminalToolResults(
       ThreadOwnership ownership, long assistantEntryId, Instant now);
+
+  /**
+   * Append an AssistantError barrier for a typed planning failure and advance the head.
+   *
+   * <p>The adapter maps the pure failure to its durable error payload; no ModelInvocation or fake
+   * ProviderRequest is created.
+   */
+  ApplyOutcome applyPlanningFailure(
+      ThreadOwnership ownership, PlanningFailure failure, Instant now);
 
   /**
    * 原子校验 {@code expectedBlocker} 仍是当前 durable blocker 并释放 Thread lease；若 sibling 已终态、blocker 已替换或新

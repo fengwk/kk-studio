@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +16,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Objects;
 
 /**
@@ -66,14 +69,14 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           nextSequenceValue() > sequenceBeforeReapply,
           "re-applying a seed must preserve sequence progress");
     }
-    // Sequence must advance past the largest explicit seed id (19 from agent_model,
-    // also includes retry_policy and realtime_stream_policy id=1).
+    // Only the harness singleton rows use explicit ids; catalog identities are names.
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
         ResultSet rs = st.executeQuery("select nextval('kk_studio_id_seq')")) {
       assertTrue(rs.next());
       long nextId = rs.getLong(1);
-      assertTrue(nextId > 19L, () -> "sequence must exceed the highest e2e seed id, got " + nextId);
+      assertTrue(
+          nextId > 1L, () -> "sequence must exceed the highest explicit seed id, got " + nextId);
     }
     // Subsequent inserts must not collide with deterministic seed ids.
     assertDoesNotThrow(
@@ -95,19 +98,19 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       applyE2eDatabase(conn);
       try (Statement st = conn.createStatement()) {
         assertEquals(
-            "1:minimax:openai_response,2:openai:openai_response,3:xai:openai_response,"
-                + "4:deepseek:openai,5:google:google,6:anthropic:anthropic,7:zai:openai",
+            "anthropic:anthropic,deepseek:openai,google:google,minimax:openai_response,"
+                + "openai:openai_response,xai:openai_response,zai:openai",
             singleString(
                 st,
-                "select string_agg(id || ':' || name || ':' || provider_type, ',' order by id)"
+                "select string_agg(name || ':' || provider_type, ',' order by name)"
                     + " from agent_provider"),
-            "the complete E2E seed catalog must retain its deterministic provider ids");
+            "the complete E2E seed catalog must retain its deterministic provider names");
         assertEquals(
-            "1:minimax:openai_response",
+            "minimax:openai_response",
             singleString(
                 st,
-                "select id || ':' || name || ':' || provider_type from agent_provider where id = 1"),
-            "the MiniMax credential synchronizer targets only deterministic provider id=1");
+                "select name || ':' || provider_type from agent_provider where name = 'minimax'"),
+            "the MiniMax credential synchronizer targets the minimax provider name");
       }
       long retryPolicyCount;
       try (Statement st = conn.createStatement();
@@ -181,14 +184,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
     try (Statement st = conn.createStatement()) {
       assertEquals(
-          "1:MiniMax-M2.7:high",
+          "minimax/MiniMax-M2.7:high",
           singleString(
               st,
-              "select a.model_id || ':' || m.name || ':' || a.variant"
+              "select a.model_provider_name || '/' || a.model_name || ':' || a.variant"
                   + " from agent_definition a"
-                  + " join agent_model m on m.id = a.model_id"
+                  + " join agent_model m on m.provider_name = a.model_provider_name"
+                  + " and m.name = a.model_name"
                   + " where a.name = 'default-assistant'"),
-          "the default E2E agent must remain bound to MiniMax-M2.7");
+          "the default E2E agent must remain bound to minimax/MiniMax-M2.7");
     }
     assertPiModelCatalog(conn);
   }
@@ -204,17 +208,29 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               singleString(
                   st,
                   "select jsonb_agg(jsonb_build_object("
-                      + "'id', m.id,"
-                      + "'providerId', m.provider_id,"
                       + "'provider', p.name,"
                       + "'name', m.name,"
                       + "'description', m.description,"
                       + "'config', m.config"
-                      + ") order by m.id)::text"
+                      + ") order by m.provider_name, m.name)::text"
                       + " from agent_model m"
-                      + " join agent_provider p on p.id = m.provider_id"));
-      assertEquals(expected, actual, "E2E models must match the effective Pi 0.82.1 catalog");
+                      + " join agent_provider p on p.name = m.provider_name"));
+      assertEquals(
+          canonicalModels(expected),
+          canonicalModels(actual),
+          "E2E models must match the effective Pi 0.82.1 catalog");
     }
+  }
+
+  private static JsonNode canonicalModels(JsonNode models) {
+    ArrayList<JsonNode> sorted = new ArrayList<>();
+    models.forEach(sorted::add);
+    sorted.sort(
+        Comparator.comparing(
+            model -> model.path("provider").asText() + "/" + model.path("name").asText()));
+    ArrayNode canonical = OBJECT_MAPPER.createArrayNode();
+    sorted.forEach(canonical::add);
+    return canonical;
   }
 
   private static void assertSingleCount(Connection conn, String table, long expected)
@@ -235,16 +251,18 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           singleString(
               st,
               "select string_agg(name || '|' || provider_type || '|' || coalesce(credential,''),"
-                  + " ';' order by id) from agent_provider"));
-      sb.append('|');
-      sb.append(
-          singleString(
-              st, "select string_agg(name || '|' || version, ';' order by id) from agent_model"));
+                  + " ';' order by name) from agent_provider"));
       sb.append('|');
       sb.append(
           singleString(
               st,
-              "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by id)"
+              "select string_agg(provider_name || '/' || name || '|' || version,"
+                  + " ';' order by provider_name, name) from agent_model"));
+      sb.append('|');
+      sb.append(
+          singleString(
+              st,
+              "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
                   + " from agent_definition"));
       sb.append('|');
       sb.append(
@@ -288,21 +306,21 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       sb.append(
           singleString(
               st,
-              "select string_agg(id || '|' || name || '|' || provider_type || '|' ||"
+              "select string_agg(name || '|' || provider_type || '|' ||"
                   + " coalesce(base_url, '') || '|' || coalesce(credential, '') || '|' ||"
-                  + " version, ';' order by id) from agent_provider"));
+                  + " version, ';' order by name) from agent_provider"));
       sb.append('|');
       sb.append(
           singleString(
               st,
-              "select string_agg(id || '|' || provider_id || '|' || name || '|' || description"
-                  + " || '|' || config::text || '|' || version, ';' order by id) from"
-                  + " agent_model"));
+              "select string_agg(provider_name || '/' || name || '|' || coalesce(description, '')"
+                  + " || '|' || config::text || '|' || version,"
+                  + " ';' order by provider_name, name) from agent_model"));
       sb.append('|');
       sb.append(
           singleString(
               st,
-              "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by id)"
+              "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
                   + " from agent_definition"));
       sb.append('|');
       sb.append(

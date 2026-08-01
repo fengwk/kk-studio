@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinit
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /** Converts global Agent definitions to public DTOs. */
 @AllArgsConstructor
@@ -20,11 +21,11 @@ public class AgentDefinitionConverter {
       return null;
     }
     AgentDefinitionDTO dto = new AgentDefinitionDTO();
-    dto.setId(Long.toString(definition.getId()));
     dto.setName(definition.getName());
     dto.setDescription(definition.getDescription());
     dto.setSystemPrompt(definition.getSystemPrompt());
-    dto.setModelId(Long.toString(definition.getModelId()));
+    dto.setModel(
+        new ModelRef(definition.getModelProviderName(), definition.getModelName()).toString());
     dto.setVariant(definition.getVariant());
     dto.setConfig(configCodec.decode(definition.getConfigJson()));
     dto.setVersion(CatalogVersions.format(definition.getVersion()));

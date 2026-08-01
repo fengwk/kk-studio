@@ -4,23 +4,21 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/**
- * Public read representation of a Chat collection.
- *
- * <p>主键与 {@code defaultAgentId} 在 HTTP / DTO 边界以十进制字符串暴露；持久层内部仍为 {@code Long}。 Agent 删除后 Chat
- * 可保留过期的 defaultAgentId，由前端提示用户重新选择。
- */
+/** Public read representation of a Chat collection. */
 @Data
 public class ChatDTO {
 
   private String id;
   private String title;
 
-  /** Always present in persisted Chat state; the referenced Agent may later be stale. */
-  private String defaultAgentId;
+  /** Required visible Agent identity; it may later be stale after Agent deletion. */
+  private String agentName;
 
   /** Optional live Environment identity; it may be stale or offline. */
-  private String defaultEnvironmentName;
+  private String environmentName;
+
+  /** Visible sending permission mode. */
+  private boolean yoloEnabled;
 
   /** Non-negative decimal string version; clients must echo on every update. */
   private String version;

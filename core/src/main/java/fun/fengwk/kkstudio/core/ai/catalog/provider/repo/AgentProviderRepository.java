@@ -10,20 +10,18 @@ public interface AgentProviderRepository {
 
   Page<AgentProvider> page(PageQuery pageQuery);
 
-  AgentProvider getById(long id);
-
   AgentProvider getByName(String name);
 
   boolean create(AgentProvider provider);
 
   /**
-   * Atomic CAS update on (id, expectedVersion). Returns true when the row was updated and version
-   * incremented by exactly one; false when the id is missing or the version no longer matches.
+   * Atomic CAS update on (name, expectedVersion). Returns true when the row was updated and version
+   * incremented by exactly one; false when the name is missing or the version no longer matches.
    */
-  boolean updateById(AgentProvider provider, long expectedVersion);
+  boolean updateByName(AgentProvider provider, long expectedVersion);
 
-  /** Atomic CAS delete on (id, expectedVersion). */
-  boolean deleteById(long id, long expectedVersion);
+  /** Atomic CAS delete on (name, expectedVersion). */
+  boolean deleteByName(String name, long expectedVersion);
 
-  boolean hasModels(long providerId);
+  boolean hasModels(String providerName);
 }

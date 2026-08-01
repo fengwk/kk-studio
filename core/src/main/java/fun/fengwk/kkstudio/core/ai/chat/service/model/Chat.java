@@ -10,8 +10,9 @@ public class Chat {
 
   private Long id;
   private String title;
-  private Long defaultAgentId;
-  private String defaultEnvironmentName;
+  private String agentName;
+  private String environmentName;
+  private boolean yoloEnabled;
   private Long version;
   private Instant createTime;
   private Instant updateTime;

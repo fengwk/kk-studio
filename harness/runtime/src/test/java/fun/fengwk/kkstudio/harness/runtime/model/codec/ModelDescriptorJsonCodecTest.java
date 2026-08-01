@@ -93,10 +93,9 @@ class ModelDescriptorJsonCodecTest {
   void enumSetsAreSortedByName() throws Exception {
     ModelDescriptor descriptor =
         new ModelDescriptor(
-            10,
-            20,
-            ProviderType.ANTHROPIC,
+            "provider",
             "claude",
+            ProviderType.ANTHROPIC,
             true,
             true,
             new ModelPricing(
@@ -151,10 +150,9 @@ class ModelDescriptorJsonCodecTest {
     root.fieldNames().forEachRemaining(names::add);
     assertEquals(
         List.of(
-            "providerResourceId",
-            "modelResourceId",
+            "providerName",
+            "modelName",
             "providerType",
-            "modelId",
             "tools",
             "reasoning",
             "pricing",
@@ -166,8 +164,7 @@ class ModelDescriptorJsonCodecTest {
             names.get(3).asText(),
             names.get(4).asText(),
             names.get(5).asText(),
-            names.get(6).asText(),
-            names.get(7).asText()));
+            names.get(6).asText()));
   }
 
   // ---------- Strict rejection ----------
@@ -184,7 +181,7 @@ class ModelDescriptorJsonCodecTest {
   @Test
   void rejectsMissingDescriptorField() {
     ObjectNode node = canonicalDescriptorNode();
-    node.remove("modelId");
+    node.remove("modelName");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -196,11 +193,11 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
-  /** 非正整数字段必须拒绝。 */
+  /** 空 provider name 必须拒绝。 */
   @Test
-  void rejectsNonPositiveProviderResourceId() {
+  void rejectsInvalidProviderName() {
     ObjectNode node = canonicalDescriptorNode();
-    node.put("providerResourceId", 0);
+    node.put("providerName", "");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -269,8 +266,8 @@ class ModelDescriptorJsonCodecTest {
   void rejectsDuplicateField() throws Exception {
     String json =
         "{"
-            + "\"providerResourceId\":1,\"providerResourceId\":2,"
-            + "\"modelResourceId\":3,\"providerType\":\"OPENAI\",\"modelId\":\"x\","
+            + "\"providerName\":\"provider\",\"providerName\":\"other\","
+            + "\"modelName\":\"x\",\"providerType\":\"OPENAI\","
             + "\"tools\":false,\"reasoning\":false,"
             + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
             + "\"serviceTier\":\"s\",\"serviceTierMultiplier\":\"1\",\"version\":\"v\","
@@ -284,17 +281,17 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
   }
 
-  /** 边界：providerResourceId 必须正整数（0 / 负数 / 字符串拒绝）。 */
+  /** 边界：providerName 必须为非空、无首尾空白的字符串。 */
   @Test
-  void rejectsProviderResourceIdBoundary() {
+  void rejectsProviderNameBoundary() {
     ObjectNode zero = canonicalDescriptorNode();
-    zero.put("providerResourceId", 0);
+    zero.put("providerName", "");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(zero));
     ObjectNode neg = canonicalDescriptorNode();
-    neg.put("providerResourceId", -1);
+    neg.put("providerName", " provider");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(neg));
     ObjectNode str = canonicalDescriptorNode();
-    str.put("providerResourceId", "10");
+    str.put("providerName", 10);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
   }
 
@@ -332,11 +329,8 @@ class ModelDescriptorJsonCodecTest {
    * 端到端：canonical wire fixture 必须与 ProviderRequestJsonCodec 生成的 request JSON 完全一致，确保 shared codec
    * 抽取后 wire bit-identical。
    *
-   * <p>{@code ProviderRequestJsonCodec.encode} 输出的 JSON 经 parse 后，整型字段（{@code providerResourceId} /
-   * {@code modelResourceId} 等）会以 Jackson 默认的最小宽度 numeric node 表示（{@code IntNode}），而共享 codec 的直接
-   * encodeNode 路径会保留 {@code LongNode}； 两棵 {@link JsonNode} 树虽然文本完全一致，但 {@code JsonNode#equals} 在不同
-   * numeric node 子类上会返回 {@code false}。因此本测试只比较 canonical serialized wire 文本；同时保留通过 shared codec
-   * 反向解码的 对象相等断言，确保两端语义等价。
+   * <p>{@code ProviderRequestJsonCodec.encode} 与共享 codec 必须对 model/variant 子树输出相同的 canonical
+   * wire；同时保留通过 shared codec 反向解码的对象相等断言，确保两端语义等价。
    */
   @Test
   void sharedCodecMatchesCanonicalProviderFixture() throws Exception {
@@ -365,10 +359,9 @@ class ModelDescriptorJsonCodecTest {
 
   private static ModelDescriptor canonicalDescriptor() {
     return new ModelDescriptor(
-        1001L,
-        2002L,
-        ProviderType.OPENAI,
+        "openai",
         "gpt-5-mini",
+        ProviderType.OPENAI,
         true,
         true,
         canonicalPricing(),
