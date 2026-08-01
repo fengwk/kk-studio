@@ -6,7 +6,7 @@ import { AppShell } from '@/platform/shell/AppShell'
 import { setLocale } from '@/shared/i18n'
 
 describe('AppShell locale selector', () => {
-  it('switches the live selector between English and 中文', async () => {
+  it('keeps both responsive dropdowns synchronized and supports keyboard controls', async () => {
     setLocale('zh-CN')
     const user = userEvent.setup()
 
@@ -18,17 +18,48 @@ describe('AppShell locale selector', () => {
       </MemoryRouter>,
     )
 
-    const selectors = screen.getAllByRole('combobox', { name: '语言' })
-    expect(selectors).toHaveLength(2)
-    expect(selectors.every((selector) => (selector as HTMLSelectElement).value === 'zh-CN')).toBe(true)
+    const chineseTriggers = screen.getAllByRole('button', { name: '语言: 中文' })
+    expect(chineseTriggers).toHaveLength(2)
+    expect(chineseTriggers.map((trigger) => trigger.querySelector('.locale-selector-current')?.textContent)).toEqual([
+      '中文',
+      '中文',
+    ])
+    expect(chineseTriggers.every((trigger) => trigger.getAttribute('aria-expanded') === 'false')).toBe(true)
 
-    await user.selectOptions(selectors[1]!, 'en-US')
+    await user.click(chineseTriggers[0]!)
+
+    expect(screen.getByRole('listbox', { name: '语言' })).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getByRole('option', { name: 'English', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(chineseTriggers[0]).toHaveAttribute('aria-expanded', 'true')
+    expect(chineseTriggers[1]).toHaveAttribute('aria-expanded', 'false')
+
+    // The selected 中文 option is focused on open; ArrowUp moves to English, Enter selects it.
+    await user.keyboard('{ArrowUp}')
+    await user.keyboard('{Enter}')
 
     expect(document.documentElement.lang).toBe('en-US')
-    const englishSelectors = screen.getAllByRole('combobox', { name: 'Language' })
-    expect(englishSelectors).toHaveLength(2)
-    expect(englishSelectors.every((selector) => (selector as HTMLSelectElement).value === 'en-US')).toBe(true)
+    const englishTriggers = screen.getAllByRole('button', { name: 'Language: English' })
+    expect(englishTriggers).toHaveLength(2)
+    expect(englishTriggers.map((trigger) => trigger.querySelector('.locale-selector-current')?.textContent)).toEqual([
+      'English',
+      'English',
+    ])
     expect(localStorage.getItem('kk-studio.locale')).toBe('en-US')
     expect(screen.getByRole('link', { name: 'AI' })).toBeInTheDocument()
+
+    await user.click(englishTriggers[0]!)
+    expect(screen.getByRole('listbox', { name: 'Language' })).toBeInTheDocument()
+    await user.click(screen.getByText('Content'))
+    expect(screen.queryByRole('listbox', { name: 'Language' })).not.toBeInTheDocument()
+
+    await user.click(englishTriggers[1]!)
+    expect(screen.getByRole('listbox', { name: 'Language' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox', { name: 'Language' })).not.toBeInTheDocument()
+    expect(document.activeElement).toBe(englishTriggers[1])
   })
 })
