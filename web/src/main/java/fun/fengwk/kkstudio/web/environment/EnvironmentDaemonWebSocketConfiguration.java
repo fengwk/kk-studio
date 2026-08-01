@@ -12,11 +12,11 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayPropert
 /**
  * WebSocket transport registration for the Daemon v1 Environment gateway.
  *
- * <p>Daemon {@code CAPABILITIES} frames routinely exceed Tomcat's default 8 KiB text buffer once
- * coding tools and skills are advertised. A tolerant {@link ServletServerContainerFactoryBean}
- * raises the JSR-356 {@link jakarta.websocket.server.ServerContainer} buffer limits when a real
- * servlet container is present and stays a no-op in non-container Spring contexts so MockMvc and
- * {@code WebEnvironment.MOCK} tests can boot.
+ * <p>Daemon {@code READY} frames may exceed Tomcat's default 8 KiB text buffer when skills are
+ * advertised. A tolerant {@link ServletServerContainerFactoryBean} raises the JSR-356 {@link
+ * jakarta.websocket.server.ServerContainer} buffer limits when a real servlet container is present
+ * and stays a no-op in non-container Spring contexts so MockMvc and {@code WebEnvironment.MOCK}
+ * tests can boot.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket

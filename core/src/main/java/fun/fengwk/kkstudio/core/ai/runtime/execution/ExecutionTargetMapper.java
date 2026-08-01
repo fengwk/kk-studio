@@ -163,7 +163,6 @@ public interface ExecutionTargetMapper extends BaseMapper {
             on candidate.target_kind = 'TOOL_INVOCATION'
            and candidate.target_id = invocation.id
           where candidate.route_key = #{routeKey}
-            and invocation.location = 'ENVIRONMENT'
             and invocation.environment_name = #{routeKey}
             and invocation.status in (
                 'QUEUED', 'RUNNING', 'RETRY_WAIT', 'WAITING_INTERACTION'

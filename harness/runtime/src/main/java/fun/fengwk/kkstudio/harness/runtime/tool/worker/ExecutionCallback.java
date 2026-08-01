@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -236,7 +235,7 @@ final class ExecutionCallback implements ToolExecutionListener {
   }
 
   private void timeout() {
-    if (binding.location() == ToolExecutionLocation.ENVIRONMENT) {
+    if (binding.environmentName() != null) {
       // Remote deadline: side effects may have run; converge conservatively to UNKNOWN.
       completeUnknownResult(
           "LEASE_EXPIRED", "Tool deadline elapsed; remote side effect result is unknown.");

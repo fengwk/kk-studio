@@ -41,7 +41,7 @@ public final class ThreadInputPayloadJsonCodec {
     Objects.requireNonNull(type, "type");
     Objects.requireNonNull(json, "json");
     return switch (type) {
-      case SET_AGENT, SET_MODEL, SET_YOLO -> new RuntimeConfigInputPayload(
+      case SET_AGENT, SET_MODEL, SET_ENVIRONMENT, SET_YOLO -> new RuntimeConfigInputPayload(
           type, CONFIG_CODEC.decode(json));
       case USER_MESSAGE -> decodeUser(json);
       case CUSTOM_MESSAGE -> decodeCustom(json);

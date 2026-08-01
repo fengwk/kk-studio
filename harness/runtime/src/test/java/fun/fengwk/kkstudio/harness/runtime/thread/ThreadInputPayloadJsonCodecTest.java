@@ -6,18 +6,23 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
 import java.util.List;
 
 /** final Input payload codec 必须按 durable type 严格还原最终 payload。 */
@@ -32,6 +37,11 @@ class ThreadInputPayloadJsonCodecTest {
         new RuntimeConfigInputPayload(ThreadInputType.SET_AGENT, config);
     assertEquals(
         configPayload, codec.decode(ThreadInputType.SET_AGENT, codec.encode(configPayload)));
+    RuntimeConfigInputPayload environmentPayload =
+        new RuntimeConfigInputPayload(ThreadInputType.SET_ENVIRONMENT, config);
+    assertEquals(
+        environmentPayload,
+        codec.decode(ThreadInputType.SET_ENVIRONMENT, codec.encode(environmentPayload)));
 
     RuntimeEntryInputPayload messagePayload =
         new RuntimeEntryInputPayload(
@@ -94,14 +104,38 @@ class ThreadInputPayloadJsonCodecTest {
                         List.<AgentMessageContent>of(new TextMessageContent("bad"))))));
   }
 
-  private static String canonicalConfigJson() throws IOException {
-    try (InputStream stream =
-        ThreadInputPayloadJsonCodecTest.class.getResourceAsStream(
-            "/fun/fengwk/kkstudio/harness/runtime/configuration/runtime-config.json")) {
-      if (stream == null) {
-        throw new IOException("runtime config fixture is missing");
-      }
-      return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-    }
+  private static String canonicalConfigJson() {
+    ModelDescriptor descriptor =
+        new ModelDescriptor(
+            2L,
+            3L,
+            ProviderType.OPENAI,
+            "gpt-test",
+            true,
+            false,
+            new ModelPricing(
+                "USD",
+                "default",
+                "standard",
+                BigDecimal.ONE,
+                "v1",
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO),
+            PromptCachePolicy.disabled());
+    RuntimeConfigSnapshot snapshot =
+        new RuntimeConfigSnapshot(
+            new AgentSnapshot(1L, "agent", "system"),
+            new ModelSnapshot(
+                descriptor,
+                new ModelVariant("default", null, null, null, null, null, null, List.of(), null)),
+            null,
+            List.of(),
+            List.of(),
+            false);
+    return new RuntimeConfigJsonCodec().encode(snapshot);
   }
 }

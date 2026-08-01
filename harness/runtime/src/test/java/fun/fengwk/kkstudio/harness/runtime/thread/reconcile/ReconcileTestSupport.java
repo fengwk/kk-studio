@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
@@ -96,9 +97,14 @@ public final class ReconcileTestSupport {
     return new RuntimeConfigSnapshot(
         new AgentSnapshot(1L, "agent", "system"),
         new ModelSnapshot(request.model(), request.variant()),
+        null,
         List.of(),
         List.of(),
         false);
+  }
+
+  public static ModelInvocationRequest modelInvocationRequest() {
+    return new ModelInvocationRequest(providerRequest(), List.of(), List.of(), false);
   }
 
   /**

@@ -18,9 +18,9 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
 
   String FIELDS =
       """
-      ti.id, ti.thread_id, ti.session_id, ti.assistant_entry_id, ti.ordinal,
+      ti.id, ti.thread_id, ti.session_id, ti.assistant_entry_id, ti.model_invocation_id, ti.ordinal,
       ti.tool_call_id, ti.descriptor::text as descriptor_json,
-      ti.arguments::text as arguments_json, ti.location, ti.environment_name,
+      ti.arguments::text as arguments_json, ti.environment_name,
       ti.execution_epoch, ti.status, ti.attempt, ti.next_attempt_at,
       ti.worker_token, ti.worker_until, ti.deadline_at, ti.last_activity_at,
       ti.result::text as result_json, ti.error::text as error_json,
@@ -39,11 +39,11 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
         @Result(column = "thread_id", property = "threadId"),
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "assistant_entry_id", property = "assistantEntryId"),
+        @Result(column = "model_invocation_id", property = "modelInvocationId"),
         @Result(column = "ordinal", property = "ordinal"),
         @Result(column = "tool_call_id", property = "toolCallId"),
         @Result(column = "descriptor_json", property = "descriptorJson"),
         @Result(column = "arguments_json", property = "argumentsJson"),
-        @Result(column = "location", property = "location"),
         @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "execution_epoch", property = "executionEpoch"),
         @Result(column = "status", property = "status"),
@@ -184,7 +184,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       set permission_state = 'ALLOWED',
           descriptor = cast(#{descriptorJson} as jsonb),
           arguments = cast(#{argumentsJson} as jsonb),
-          location = #{location},
           environment_name = #{environmentName}
       where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
         and attempt = #{attempt} and status = 'RUNNING' and permission_state = 'PENDING'
@@ -198,7 +197,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       @Param("token") String token,
       @Param("descriptorJson") String descriptorJson,
       @Param("argumentsJson") String argumentsJson,
-      @Param("location") String location,
       @Param("environmentName") String environmentName,
       @Param("now") OffsetDateTime now);
 
@@ -213,7 +211,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       set permission_state = 'ASKED', status = 'WAITING_INTERACTION',
           descriptor = cast(#{descriptorJson} as jsonb),
           arguments = cast(#{argumentsJson} as jsonb),
-          location = #{location},
           environment_name = #{environmentName},
           worker_token = null, worker_until = null,
           started_at = null, deadline_at = null, last_activity_at = null,
@@ -230,7 +227,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       @Param("token") String token,
       @Param("descriptorJson") String descriptorJson,
       @Param("argumentsJson") String argumentsJson,
-      @Param("location") String location,
       @Param("environmentName") String environmentName,
       @Param("now") OffsetDateTime now);
 
@@ -290,42 +286,6 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
       @Param("attempt") int attempt,
       @Param("token") String token,
       @Param("activityAt") OffsetDateTime activityAt,
-      @Param("now") OffsetDateTime now);
-
-  @Update(
-      """
-      update harness_tool_invocation
-      set status = 'QUEUED', worker_token = null, worker_until = null,
-          started_at = null, deadline_at = null, last_activity_at = null
-      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
-        and status = 'RUNNING' and attempt = #{attempt} and worker_token = #{token}
-        and worker_until > #{now}
-      """)
-  int releaseUnstartedQueued(
-      @Param("id") long id,
-      @Param("threadId") long threadId,
-      @Param("executionEpoch") long executionEpoch,
-      @Param("attempt") int attempt,
-      @Param("token") String token,
-      @Param("now") OffsetDateTime now);
-
-  @Update(
-      """
-      update harness_tool_invocation
-      set status = 'RETRY_WAIT', attempt = #{previousAttempt}, next_attempt_at = #{nextAttemptAt},
-          worker_token = null, worker_until = null
-      where id = #{id} and thread_id = #{threadId} and execution_epoch = #{executionEpoch}
-        and status = 'RUNNING' and attempt = #{attempt} and worker_token = #{token}
-        and worker_until > #{now}
-      """)
-  int releaseUnstartedRetry(
-      @Param("id") long id,
-      @Param("threadId") long threadId,
-      @Param("executionEpoch") long executionEpoch,
-      @Param("attempt") int attempt,
-      @Param("previousAttempt") int previousAttempt,
-      @Param("token") String token,
-      @Param("nextAttemptAt") OffsetDateTime nextAttemptAt,
       @Param("now") OffsetDateTime now);
 
   @Update(

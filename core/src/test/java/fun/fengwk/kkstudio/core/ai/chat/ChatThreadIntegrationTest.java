@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.ai.chat;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -145,17 +146,32 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void chatScopedCreatePersistsAssociationAndUnknownThreadIsRejected() {
-    ChatDTO chat = createChat("scoped-create");
+    ChatDTO chat = createChat("scoped-create", "env-default");
 
     HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
 
-    assertEquals("UNBOUND", created.getStatus());
+    assertEquals("IDLE", created.getStatus());
+    assertEquals("1", created.getActiveAgentDefinitionId());
+    assertEquals("env-default", created.getActiveEnvironmentName());
+    assertEquals(false, created.getYoloEnabled());
+    assertNotNull(created.getSessionId());
+    assertNotNull(created.getHeadEntryId());
     assertEquals(
         List.of(created.getThreadId()),
         threadIds(chatThreadService.listThreads(chat.getId(), "created", null, 20)));
     assertThrows(
         AiResourceNotFoundException.class,
         () -> chatThreadService.associateThread(chat.getId(), "999999999999"));
+  }
+
+  @Test
+  void chatScopedCreateSupportsNoDefaultEnvironment() {
+    ChatDTO chat = createChat("no-environment");
+
+    HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
+
+    assertNull(created.getActiveEnvironmentName());
+    assertEquals("1", created.getActiveAgentDefinitionId());
   }
 
   @Test
@@ -190,10 +206,51 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
     }
   }
 
+  @Test
+  void chatScopedCreateRollsBackAssociationAndThreadWhenBootstrapFails() {
+    ChatDTO chat = createChat("bootstrap-atomic", "env-default");
+    long threadCount = jdbc.queryForObject("select count(*) from harness_thread", Long.class);
+    long sessionCount = jdbc.queryForObject("select count(*) from harness_session", Long.class);
+    jdbc.execute(
+        """
+        create function fail_harness_session_insert() returns trigger
+        language plpgsql as $$
+        begin
+          raise exception 'forced bootstrap failure';
+        end
+        $$;
+        """);
+    jdbc.execute(
+        "create trigger fail_harness_session_insert before insert on harness_session"
+            + " for each row execute function fail_harness_session_insert()");
+
+    try {
+      assertThrows(DataAccessException.class, () -> chatThreadService.createThread(chat.getId()));
+      assertEquals(
+          threadCount, jdbc.queryForObject("select count(*) from harness_thread", Long.class));
+      assertEquals(
+          sessionCount, jdbc.queryForObject("select count(*) from harness_session", Long.class));
+      assertEquals(
+          0L,
+          jdbc.queryForObject(
+              "select count(*) from chat_thread where chat_id = ?",
+              Long.class,
+              Long.parseLong(chat.getId())));
+    } finally {
+      jdbc.execute("drop trigger if exists fail_harness_session_insert on harness_session");
+      jdbc.execute("drop function if exists fail_harness_session_insert()");
+    }
+  }
+
   private ChatDTO createChat(String title) {
+    return createChat(title, null);
+  }
+
+  private ChatDTO createChat(String title, String defaultEnvironmentName) {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle(title);
     create.setDefaultAgentId("1");
+    create.setDefaultEnvironmentName(defaultEnvironmentName);
     return chatService.createChat(create);
   }
 

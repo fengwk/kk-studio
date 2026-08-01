@@ -33,7 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.sql.Connection;
 import java.time.Instant;
@@ -113,7 +113,7 @@ class HarnessExecutionTargetProductionWiringIntegrationTest {
         name,
         LiveEnvironmentStatus.READY,
         new ReadyConnection(),
-        new DaemonToolCapabilities(List.of(), List.of()),
+        List.<DaemonSkillDescriptor>of(),
         Instant.now());
   }
 

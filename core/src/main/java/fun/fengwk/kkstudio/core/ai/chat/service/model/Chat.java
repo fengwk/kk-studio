@@ -11,6 +11,7 @@ public class Chat {
   private Long id;
   private String title;
   private Long defaultAgentId;
+  private String defaultEnvironmentName;
   private Long version;
   private Instant createTime;
   private Instant updateTime;

@@ -10,7 +10,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
-/** Verifies Model/Tool ownership, location, lease, retry, terminal and apply invariants. */
+/** Verifies Model/Tool ownership, environment-name, lease, retry, terminal and apply invariants. */
 class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach
@@ -253,6 +253,7 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
     ThreadFixture threadOwner = createThread();
     ThreadFixture otherSession = createThread();
     long assistantId = appendAssistant(threadOwner);
+    long modelInvocationId = InvocationFixture.insertQueuedModel(threadOwner, 1L);
 
     // Assistant Entry is in threadOwner.session but the carrier session_id is
     // otherSession.session, so (session_id, assistant_entry_id) cannot pair on
@@ -265,14 +266,45 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
             try (PreparedStatement ps =
                 conn.prepareStatement(
                     "insert into harness_tool_invocation (id, thread_id, session_id,"
-                        + " assistant_entry_id, ordinal, tool_call_id, descriptor, arguments,"
-                        + " location, environment_name, execution_epoch, status, attempt)"
-                        + " values (?, ?, ?, ?, 0, 'cross-session', '{}'::jsonb, '{}'::jsonb,"
-                        + " 'PLATFORM', null, 1, 'QUEUED', 1)")) {
+                        + " assistant_entry_id, model_invocation_id, ordinal, tool_call_id, descriptor, arguments,"
+                        + " environment_name, execution_epoch, status, attempt)"
+                        + " values (?, ?, ?, ?, ?, 0, 'cross-session', '{}'::jsonb, '{}'::jsonb,"
+                        + " null, 1, 'QUEUED', 1)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, threadOwner.threadId);
               ps.setLong(3, otherSession.sessionId);
               ps.setLong(4, assistantId);
+              ps.setLong(5, modelInvocationId);
+              ps.executeUpdate();
+            }
+          });
+    }
+  }
+
+  @Test
+  void toolInvocationModelMustBelongToTheSameThread() throws SQLException {
+    ThreadFixture toolOwner = createThread();
+    ThreadFixture modelOwner = createThread();
+    long assistantId = appendAssistant(toolOwner);
+    long foreignModelInvocationId = InvocationFixture.insertQueuedModel(modelOwner, 1L);
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_harness_tool_invocation_model",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "insert into harness_tool_invocation (id, thread_id, session_id,"
+                        + " assistant_entry_id, model_invocation_id, ordinal, tool_call_id, descriptor, arguments,"
+                        + " environment_name, execution_epoch, status, attempt)"
+                        + " values (?, ?, ?, ?, ?, 0, 'cross-thread-model', '{}'::jsonb,"
+                        + " '{}'::jsonb, null, 1, 'QUEUED', 1)")) {
+              ps.setLong(1, FIXTURE_IDS.incrementAndGet());
+              ps.setLong(2, toolOwner.threadId);
+              ps.setLong(3, toolOwner.sessionId);
+              ps.setLong(4, assistantId);
+              ps.setLong(5, foreignModelInvocationId);
               ps.executeUpdate();
             }
           });
@@ -284,8 +316,7 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
     ThreadFixture thread = createThread();
     long assistantId = appendAssistant(thread);
     long invocationId =
-        InvocationFixture.insertQueuedTool(
-            thread, assistantId, 0, "lifecycle", "PLATFORM", null, 1L);
+        InvocationFixture.insertQueuedTool(thread, assistantId, 0, "lifecycle", null, 1L);
 
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
@@ -365,16 +396,21 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void toolLocationRequiresExactlyOneValidEnvironmentReference() throws SQLException {
+  void toolEnvironmentNameAllowsNullOrNonBlankAndRejectsBlank() throws SQLException {
     ThreadFixture thread = createThread();
     long assistantId = appendAssistant(thread);
 
-    assertInvalidToolLocation(thread, assistantId, 0, "ENVIRONMENT", null);
-    assertInvalidToolLocation(thread, assistantId, 1, "ENVIRONMENT", "   ");
-    InvocationFixture.insertQueuedTool(
-        thread, assistantId, 2, "environment", "ENVIRONMENT", "prod", 1L);
-    assertInvalidToolLocation(thread, assistantId, 3, "PLATFORM", "prod");
-    InvocationFixture.insertQueuedTool(thread, assistantId, 4, "platform", "PLATFORM", null, 1L);
+    // null environment_name is the PLATFORM / unset-route carrier.
+    InvocationFixture.insertQueuedTool(thread, assistantId, 0, "platform", null, 1L);
+    // a non-blank environment_name is the ENVIRONMENT carrier.
+    InvocationFixture.insertQueuedTool(thread, assistantId, 1, "environment", "prod", 1L);
+
+    // Empty or non-canonical surrounding whitespace violates the durable route constraint.
+    assertInvalidToolEnvironmentName(thread, assistantId, 2, "");
+    assertInvalidToolEnvironmentName(thread, assistantId, 3, "   ");
+    assertInvalidToolEnvironmentName(thread, assistantId, 4, "\t");
+    assertInvalidToolEnvironmentName(thread, assistantId, 5, "\n");
+    assertInvalidToolEnvironmentName(thread, assistantId, 6, "\tprod\t");
   }
 
   @Test
@@ -388,18 +424,9 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
           "ck_harness_tool_invocation_tool_call_id",
           () ->
               InvocationFixture.insertQueuedTool(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread,
-                  assistantId,
-                  0,
-                  "   ",
-                  "PLATFORM",
-                  null,
-                  1L));
+                  conn, FIXTURE_IDS.incrementAndGet(), thread, assistantId, 0, "   ", null, 1L));
     }
-    InvocationFixture.insertQueuedTool(
-        thread, assistantId, 0, "provider-call", "PLATFORM", null, 1L);
+    InvocationFixture.insertQueuedTool(thread, assistantId, 0, "provider-call", null, 1L);
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -412,12 +439,10 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
                   assistantId,
                   0,
                   "different-provider-call",
-                  "PLATFORM",
                   null,
                   1L));
     }
-    InvocationFixture.insertQueuedTool(
-        thread, assistantId, 1, "provider-call", "PLATFORM", null, 1L);
+    InvocationFixture.insertQueuedTool(thread, assistantId, 1, "provider-call", null, 1L);
   }
 
   private ThreadFixture createThread() throws SQLException {
@@ -428,13 +453,13 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
     return thread.appendChild("MESSAGE");
   }
 
-  private void assertInvalidToolLocation(
-      ThreadFixture thread, long assistantId, int ordinal, String location, String environmentName)
+  private void assertInvalidToolEnvironmentName(
+      ThreadFixture thread, long assistantId, int ordinal, String environmentName)
       throws SQLException {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_tool_invocation_location_env",
+          "ck_harness_tool_invocation_environment_name",
           () ->
               InvocationFixture.insertQueuedTool(
                   conn,
@@ -442,8 +467,7 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
                   thread,
                   assistantId,
                   ordinal,
-                  "invalid-location-" + ordinal,
-                  location,
+                  "invalid-environment-" + ordinal,
                   environmentName,
                   1L));
     }

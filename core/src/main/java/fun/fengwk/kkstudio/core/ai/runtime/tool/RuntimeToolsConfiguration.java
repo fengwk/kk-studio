@@ -15,15 +15,17 @@ import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 
 import java.time.Clock;
+import java.util.Set;
 
 /**
- * Wires platform tools ({@code load_skill}, goal tools) as Spring {@code Tool} beans and exposes
+ * Wires runtime tools ({@code load_skill}, goal tools) as Spring {@code Tool} beans and exposes
  * them as {@link ToolFactory} beans for {@code ToolFactories}.
  */
 @Configuration(proxyBeanMethods = false)
-public class PlatformToolsConfiguration {
+public class RuntimeToolsConfiguration {
 
   @Bean
   @ConditionalOnBean(GoalStore.class)
@@ -85,5 +87,10 @@ public class PlatformToolsConfiguration {
   @Bean
   public ToolFactories toolFactories(ObjectProvider<ToolFactory> toolFactoryBeans) {
     return new ToolFactories(toolFactoryBeans.orderedStream().toList());
+  }
+
+  @Bean
+  public ToolCatalog toolCatalog(ToolFactories toolFactories) {
+    return new ToolCatalog(toolFactories.descriptors(), Set.of(LoadSkillTool.NAME));
   }
 }

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.model;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
@@ -30,7 +29,7 @@ public record ModelInvocation(
     long threadId,
     long sourceHeadEntryId,
     long executionEpoch,
-    ProviderRequest request,
+    ModelInvocationRequest request,
     InvocationStatus status,
     int attempt,
     Instant nextAttemptAt,

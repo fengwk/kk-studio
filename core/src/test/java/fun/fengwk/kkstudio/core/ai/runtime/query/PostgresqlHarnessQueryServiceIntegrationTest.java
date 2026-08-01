@@ -266,14 +266,15 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         OffsetDateTime.ofInstant(NOW.plusSeconds(4), ZoneOffset.UTC));
     long toolInvocationId = Long.parseLong(threadId) + 50;
     jdbc.update(
-        "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, ordinal,"
-            + " tool_call_id, descriptor, arguments, location, environment_name, execution_epoch,"
-            + " status, attempt, finished_at, created_at) values (?, ?, ?, ?, 0, 'call-1',"
-            + " cast(? as jsonb), '{}'::jsonb, 'PLATFORM', null, ?, 'CANCELLED', 1, ?, ?)",
+        "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id, model_invocation_id, ordinal,"
+            + " tool_call_id, descriptor, arguments, environment_name, execution_epoch, status,"
+            + " attempt, finished_at, created_at) values (?, ?, ?, ?, ?, 0, 'call-1',"
+            + " cast(? as jsonb), '{}'::jsonb, null, ?, 'CANCELLED', 1, ?, ?)",
         toolInvocationId,
         Long.parseLong(threadId),
         bootstrap.session().id(),
         assistantEntryId,
+        modelInvocationId,
         TOOL_DESCRIPTOR_JSON,
         executionEpoch,
         OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
@@ -317,7 +318,8 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
         replacementConfigEntryId,
         boot.sessionId(),
         boot.configEntryId(),
-        RUNTIME_CONFIG_CODEC.encode(TestRuntimeConfigs.config("nearest-agent", false)),
+        RUNTIME_CONFIG_CODEC.encode(
+            TestRuntimeConfigs.config("nearest-agent", false).withEnvironmentName("env-a")),
         OffsetDateTime.ofInstant(NOW.plusMillis(500), ZoneOffset.UTC));
     long messageEntryId = replacementConfigEntryId + 1;
     jdbc.update(
@@ -336,6 +338,7 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
 
     assertEquals("1", projected.getActiveAgentDefinitionId());
     assertEquals("nearest-agent", projected.getActiveAgentName());
+    assertEquals("env-a", projected.getActiveEnvironmentName());
     assertEquals("2", projected.getModelId());
     assertEquals("default", projected.getVariant());
     assertEquals(false, projected.getYoloEnabled());

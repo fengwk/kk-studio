@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.ACK;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CANCELLED;
-import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.CAPABILITIES;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.COMPLETED;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.HELLO;
 import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.PARTIAL;
@@ -12,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -38,19 +39,14 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolNumberSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
@@ -87,6 +83,7 @@ class DaemonRuntimeTest {
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
+  private FakeTransport handshakeTransport;
 
   @AfterEach
   void closeRuntime() {
@@ -95,7 +92,7 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 断线后必须重连并重新完成 HELLO/CAPABILITIES/READY 的 READY/PULL 握手。 */
+  /** 断线后必须重连并重新完成 HELLO/WELCOME/READY 的握手，使 daemon 在新连接上重新进入 READY 状态。 */
   @Test
   void reconnectsAfterDisconnectAndReannouncesReadiness() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -103,75 +100,77 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    List<DaemonEnvelope> handshake = transport.takeMessages(3);
-    assertMessageTypes(handshake, HELLO, CAPABILITIES, READY);
-    assertEquals(
-        "test-gateway-token", codec.readPayload(handshake.get(0)).path("gatewayToken").asText());
-    JsonNode descriptor = codec.readPayload(handshake.get(1)).path("tools").get(0);
-    assertEquals("test", descriptor.path("name").asText());
-    assertEquals("1.0.0", descriptor.path("version").asText());
-    assertEquals("test", descriptor.path("rendererKey").asText());
-    assertFalse(descriptor.has("executionLocation"));
-    assertEquals("READ_ONLY", descriptor.path("sideEffect").asText());
-    assertEquals(10_000, descriptor.path("timeoutMillis").asLong());
-    assertEquals("object", descriptor.path("inputSchema").path("type").asText());
-    assertTrue(descriptor.path("inputSchema").path("properties").isObject());
-    assertTrue(descriptor.path("inputSchema").path("required").isArray());
+    completeHandshake(0);
+    List<DaemonEnvelope> handshake = transport.takeMessages(2);
+    assertMessageTypes(handshake, HELLO, READY);
+    JsonNode hello = codec.readPayload(handshake.get(0));
+    assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
+    assertEquals("daemon", hello.path("daemonId").asText());
+    assertEquals(DaemonProtocol.VERSION_1, hello.path("protocolVersion").asInt());
+    assertEquals(EnvironmentToolCatalog.version(), hello.path("toolCatalogVersion").asText());
+    assertTrue(codec.readPayload(handshake.get(1)).path("skills").isArray());
 
     transport.disconnect();
     transport.awaitConnections(1);
-    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    completeHandshake(0);
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
-  /** CAPABILITIES 必须完整保留 object/array/enum/primitive schema，供 Cloud 做参数匹配。 */
+  /** Production constructors must not advertise the fixed catalog for a partial registry. */
   @Test
-  void serializesCompleteToolSchemaInCapabilities() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new SchemaTool());
+  void productionRuntimeRejectsRegistryThatDoesNotMatchFixedCatalog() {
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(new TestTool());
+    DaemonConfig config =
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            "environment",
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            List.of());
 
-    runtime.start();
-    transport.awaitConnections(1);
-    List<DaemonEnvelope> handshake = transport.takeMessages(3);
-
-    JsonNode schema = codec.readPayload(handshake.get(1)).path("tools").get(0).path("inputSchema");
-    assertEquals("string", schema.path("properties").path("text").path("type").asText());
-    assertEquals("integer", schema.path("properties").path("count").path("type").asText());
-    assertEquals("number", schema.path("properties").path("ratio").path("type").asText());
-    assertEquals("boolean", schema.path("properties").path("enabled").path("type").asText());
-    assertEquals(
-        List.of("fast", "safe"), jsonTexts(schema.path("properties").path("mode").path("enum")));
-    assertEquals(
-        "string", schema.path("properties").path("tags").path("items").path("type").asText());
-    JsonNode nested = schema.path("properties").path("options");
-    assertEquals("object", nested.path("type").asText());
-    assertEquals("boolean", nested.path("properties").path("force").path("type").asText());
-    assertEquals(List.of("force"), jsonTexts(nested.path("required")));
-    assertTrue(nested.path("additionalProperties").asBoolean());
+    assertThrows(
+        IllegalStateException.class,
+        () -> new DaemonRuntime(config, registry, DaemonSkillRegistry.empty()));
   }
 
   /**
-   * Daemon 发出的 CAPABILITIES payload 必须能被 Cloud 共享的 codec 解码回完整 {@link
-   * fun.fengwk.kkstudio.harness.tool.ToolDescriptor} 列表，避免 Cloud/Daemon 协议漂移。
+   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 codec 解码回完整 {@link DaemonSkillDescriptor} 列表，避免
+   * Cloud/Daemon 协议漂移。
    */
   @Test
-  void capabilitiesPayloadIsFullyDecodableBySharedCodec() throws InterruptedException {
-    DaemonToolCapabilitiesCodec codec = new DaemonToolCapabilitiesCodec();
-    FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new SchemaTool());
+  void readySkillsPayloadIsFullyDecodableBySharedCodec() throws Exception {
+    Path skillRoot = Files.createTempDirectory("daemon-skills-codec");
+    Path skillDir = skillRoot.resolve("demo");
+    Files.createDirectories(skillDir);
+    Files.writeString(
+        skillDir.resolve("SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n");
+    try {
+      DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
+      FakeTransport transport = new FakeTransport();
+      runtime =
+          runtime(transport, new TestTool(), DaemonSkillRegistry.discover(List.of(skillRoot)));
 
-    runtime.start();
-    transport.awaitConnections(1);
-    List<DaemonEnvelope> handshake = transport.takeMessages(3);
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake(0);
+      List<DaemonEnvelope> handshake = transport.takeMessages(2);
+      assertMessageTypes(handshake, HELLO, READY);
 
-    DaemonToolCapabilitiesCodec.DaemonToolCapabilities capabilities =
-        codec.decode(handshake.get(1).payloadJson());
+      List<DaemonSkillDescriptor> skills = skillsCodec.decode(handshake.get(1).payloadJson());
 
-    assertEquals(1, capabilities.tools().size());
-    assertEquals("schema", capabilities.tools().get(0).name());
-    assertEquals("2.1.0", capabilities.tools().get(0).version());
-    assertEquals("schema", capabilities.tools().get(0).name());
-    assertNotNull(capabilities.tools().get(0).sideEffect());
+      assertEquals(1, skills.size());
+      assertEquals("demo", skills.get(0).name());
+      assertEquals("Demo skill", skills.get(0).description());
+      assertNotNull(skills.get(0).description());
+    } finally {
+      deleteRecursively(skillRoot);
+    }
   }
 
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
@@ -182,7 +181,9 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    List<DaemonEnvelope> handshake = transport.takeMessages(3);
+    assertMessageTypes(handshake, HELLO, READY, DaemonMessageType.HEARTBEAT);
 
     assertMessageTypes(List.of(transport.takeNextMessage()), DaemonMessageType.HEARTBEAT);
   }
@@ -196,8 +197,9 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(2);
+    completeHandshake(0);
 
-    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
   }
 
   /** 任一出站 send failure 都使连接失效；重连后 journal 仍阻止 invocation 重启。 */
@@ -209,14 +211,16 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(8);
+    transport.takeMessages(2);
     transport.failNextSend();
     transport.receive(invoke("send-failure", 9));
     transport.awaitConnections(1);
-    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    completeHandshake(0);
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(1, tool.executions.get());
 
-    transport.receive(invoke("send-failure", 0));
+    transport.receive(invoke("send-failure", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
   }
@@ -229,7 +233,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("unknown-invocation", 1, "missing"));
 
     List<DaemonEnvelope> messages = transport.takeMessages(2);
@@ -245,7 +250,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1,
@@ -276,7 +282,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
@@ -302,7 +309,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(3);
+    transport.takeMessages(2);
     DaemonEnvelope invoke = invoke("sequence-invocation", 4);
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
@@ -327,7 +335,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(3);
+    transport.takeMessages(2);
     transport.receive(invoke("original", 4));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
 
@@ -345,7 +354,7 @@ class DaemonRuntimeTest {
     assertEquals(2, tool.executions.get());
   }
 
-  /** WELCOME/ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应。 */
+  /** ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应；WELCOME 由握手阶段消耗。 */
   @Test
   void acceptsInboundPlatformProtocolMessagesWithinSequence() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -354,13 +363,13 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
-    transport.receive(platformMessage(DaemonMessageType.WELCOME, 20));
-    transport.receive(platformMessage(DaemonMessageType.ACK, 21));
-    transport.receive(platformMessage(DaemonMessageType.ERROR, 22));
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(platformMessage(DaemonMessageType.ACK, 1));
+    transport.receive(platformMessage(DaemonMessageType.ERROR, 2));
     assertFalse(transport.hasMessages());
 
-    transport.receive(invoke("after-control", 23));
+    transport.receive(invoke("after-control", 3));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
     assertEquals(1, tool.executions.get());
   }
@@ -374,7 +383,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("version-mismatch", 1, "test", "2.0.0", 1000));
 
     assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
@@ -397,7 +407,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1,
@@ -421,7 +432,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(6);
+    transport.takeMessages(2);
     DaemonEnvelope invoke = invoke("invocation-1", 7);
     transport.receive(invoke);
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
@@ -441,8 +453,9 @@ class DaemonRuntimeTest {
 
     transport.disconnect();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
-    transport.receive(invoke("invocation-1", 0));
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke("invocation-1", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
     assertEquals(1, tool.executions.get());
   }
@@ -456,7 +469,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("timeout", 1, "test", "1.0.0", 30));
     transport.takeMessages(2);
 
@@ -477,7 +491,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invokeWithoutTimeout("omitted-descriptor-timeout", 1, "test", "1.0.0"));
     transport.takeMessages(2);
 
@@ -493,7 +508,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invokeWithoutTimeout("omitted-default-timeout", 1, "fallback", "1.0.0"));
     transport.takeMessages(2);
 
@@ -510,7 +526,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("zero-timeout", 1, "test", "1.0.0", 0));
     transport.takeMessages(2);
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
@@ -533,7 +550,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("default-timeout", 1, "fallback", "1.0.0", 0));
     transport.takeMessages(2);
 
@@ -551,7 +569,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("complete-before-timeout", 1, "test", "1.0.0", 50));
     transport.takeMessages(2);
     tool.complete(new ToolResult("complete-before-timeout", List.of(), false, "{}", false));
@@ -572,7 +591,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("structured-content", 1));
     transport.takeMessages(2);
     tool.partial(
@@ -607,7 +627,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("artifact-rewrite", 1));
     transport.takeMessages(2);
     tool.complete(
@@ -650,7 +671,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("artifact-fail", 1));
     transport.takeMessages(2);
 
@@ -700,7 +722,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("no-source", 1));
     transport.takeMessages(2);
 
@@ -729,7 +752,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("tool-error", 1));
     transport.takeMessages(2);
     tool.error(new IllegalStateException("tool failed"));
@@ -751,7 +775,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("invocation-2", 1));
     transport.takeMessages(2);
 
@@ -770,7 +795,7 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** CAPABILITIES 必须同时携带 tools 与 skills 摘要，且 skills 不含本地路径。 */
+  /** READY 只携带 skills 摘要，且 skills 不含本地路径。 */
   @Test
   void announcesSkillsAlongsideToolsInCapabilities() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills");
@@ -785,11 +810,12 @@ class DaemonRuntimeTest {
 
       runtime.start();
       transport.awaitConnections(1);
-      List<DaemonEnvelope> handshake = transport.takeMessages(3);
-      assertMessageTypes(handshake, HELLO, CAPABILITIES, READY);
+      completeHandshake(0);
+      List<DaemonEnvelope> handshake = transport.takeMessages(2);
+      assertMessageTypes(handshake, HELLO, READY);
 
       JsonNode payload = codec.readPayload(handshake.get(1));
-      assertEquals("test", payload.path("tools").get(0).path("name").asText());
+      assertFalse(payload.has("tools"));
       assertEquals(1, payload.path("skills").size());
       assertEquals("demo", payload.path("skills").get(0).path("name").asText());
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
@@ -814,7 +840,8 @@ class DaemonRuntimeTest {
           runtime(transport, new TestTool(), DaemonSkillRegistry.discover(List.of(skillRoot)));
       runtime.start();
       transport.awaitConnections(1);
-      transport.takeMessages(3);
+      completeHandshake(0);
+      transport.takeMessages(2);
 
       DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
       transport.receive(
@@ -845,7 +872,8 @@ class DaemonRuntimeTest {
     runtime = runtime(transport, new TestTool(), DaemonSkillRegistry.empty());
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
 
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     transport.receive(
@@ -876,7 +904,8 @@ class DaemonRuntimeTest {
     runtime.start();
 
     transport.awaitConnections(3);
-    assertMessageTypes(transport.takeMessages(3), HELLO, CAPABILITIES, READY);
+    completeHandshake(0);
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
@@ -906,10 +935,12 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
 
     transport.receiveFromConnection(0, invoke("stale-invocation", 1));
     assertFalse(transport.hasMessages());
@@ -928,10 +959,12 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
 
     transport.receiveFromConnection(0, cancel("stale-cancel", 1));
     assertFalse(transport.hasMessages());
@@ -950,10 +983,12 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
 
     transport.receiveFromConnection(
         0,
@@ -1022,14 +1057,15 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
 
     transport.receive(
         new DaemonEnvelope(
             DaemonProtocol.VERSION_1, DaemonMessageType.HELLO, "environment", null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
-    transport.receive(cancel("unknown-cancel", 2));
+    transport.receive(cancel("unknown-cancel", 1));
     assertMessageTypes(transport.takeMessages(1), ACK);
 
     transport.receive(
@@ -1038,7 +1074,7 @@ class DaemonRuntimeTest {
             DaemonMessageType.LOAD_SKILL,
             "environment",
             "invalid-skill-payload",
-            3,
+            2,
             "{}"));
     assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -1054,7 +1090,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     transport.receive(invoke("shutdown-invocation", 1));
     assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
 
@@ -1097,7 +1134,8 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    transport.takeMessages(3);
+    completeHandshake(0);
+    transport.takeMessages(2);
     Thread invocationThread =
         new Thread(
             () -> transport.receive(invoke("shutdown-race", 1, "blocking")),
@@ -1131,6 +1169,7 @@ class DaemonRuntimeTest {
 
   private DaemonRuntime runtime(
       FakeTransport transport, Tool tool, InMemoryDaemonInvocationJournal journal) {
+    handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -1153,6 +1192,7 @@ class DaemonRuntimeTest {
 
   private DaemonRuntime runtime(
       FakeTransport transport, Tool tool, ScheduledExecutorService scheduler) {
+    handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -1206,6 +1246,7 @@ class DaemonRuntimeTest {
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ArtifactSource artifactSource) {
+    handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
     return new DaemonRuntime(
@@ -1242,6 +1283,14 @@ class DaemonRuntimeTest {
                 }
               });
     }
+  }
+
+  /**
+   * 模拟 Cloud 完成 HELLO/WELCOME/READY 握手：发送 WELCOME 让 daemon 推进到 READY。后续入站 sequence 必须从 {@code
+   * welcomeSequence + 1} 起严格递增。
+   */
+  private void completeHandshake(long welcomeSequence) throws InterruptedException {
+    handshakeTransport.receive(platformMessage(DaemonMessageType.WELCOME, welcomeSequence));
   }
 
   private DaemonEnvelope invoke(String invocationId, long sequence) {
@@ -1457,52 +1506,6 @@ class DaemonRuntimeTest {
       private boolean awaitClosed(Duration timeout) throws InterruptedException {
         return closed.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
       }
-    }
-  }
-
-  private static final class SchemaTool implements Tool {
-
-    private final ToolDescriptor descriptor =
-        new ToolDescriptor(
-            "schema",
-            "2.1.0",
-            "schema tool",
-            "schema-renderer",
-            new ToolParamsSchema(
-                "schema arguments",
-                Map.of(
-                    "text",
-                    new ToolStringSchema("text value"),
-                    "count",
-                    new ToolIntegerSchema("count value"),
-                    "ratio",
-                    new ToolNumberSchema("ratio value"),
-                    "enabled",
-                    new ToolBooleanSchema("enabled value"),
-                    "mode",
-                    new ToolEnumSchema("execution mode", List.of("fast", "safe")),
-                    "tags",
-                    new ToolArraySchema("tag values", new ToolStringSchema("tag")),
-                    "options",
-                    new ToolObjectSchema(
-                        "nested options",
-                        Map.of("force", new ToolBooleanSchema("force execution")),
-                        Set.of("force"),
-                        true)),
-                Set.of("text"),
-                false),
-            ToolSideEffect.IDEMPOTENT,
-            Duration.ofSeconds(3));
-
-    @Override
-    public ToolDescriptor descriptor() {
-      return descriptor;
-    }
-
-    @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
-      throw new AssertionError("schema tool must not execute");
     }
   }
 

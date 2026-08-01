@@ -58,22 +58,22 @@ public final class UpdateGoalTool implements Tool {
 
   @Override
   public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
-    return PlatformToolSupport.complete(request, listener, this::run);
+    return RuntimeToolSupport.complete(request, listener, this::run);
   }
 
   private ToolResult run(ToolExecutionRequest request) {
-    JsonNode args = PlatformToolSupport.requireObjectArgs(request.call().argumentsJson());
-    PlatformToolSupport.rejectUnknownFields(args, Set.of("status", "reason"));
+    JsonNode args = RuntimeToolSupport.requireObjectArgs(request.call().argumentsJson());
+    RuntimeToolSupport.rejectUnknownFields(args, Set.of("status", "reason"));
     GoalStatus status =
-        GoalStatus.parseUpdateStatus(PlatformToolSupport.requireNonBlankString(args, "status"));
-    String reason = PlatformToolSupport.requireNonBlankString(args, "reason");
+        GoalStatus.parseUpdateStatus(RuntimeToolSupport.requireNonBlankString(args, "status"));
+    String reason = RuntimeToolSupport.requireNonBlankString(args, "reason");
     try {
       ThreadGoal goal =
           store.updateTerminal(request.context().threadId(), status, reason, clock.instant());
-      return PlatformToolSupport.success(
-          request.call().id(), PlatformToolSupport.formatGoalJson(goal));
+      return RuntimeToolSupport.success(
+          request.call().id(), RuntimeToolSupport.formatGoalJson(goal));
     } catch (IllegalStateException error) {
-      return PlatformToolSupport.error(request.call().id(), PlatformToolSupport.message(error));
+      return RuntimeToolSupport.error(request.call().id(), RuntimeToolSupport.message(error));
     }
   }
 }

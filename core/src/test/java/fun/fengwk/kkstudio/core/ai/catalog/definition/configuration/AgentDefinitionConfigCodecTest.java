@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.catalog.definition.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,24 +18,13 @@ class AgentDefinitionConfigCodecTest {
   @Test
   void roundTripsCompleteConfig() {
     AgentDefinitionConfigDTO config = config();
-    config.setEnvironmentName("local");
     config.setTools(List.of("read"));
     config.setSkills(List.of("dev"));
 
     AgentDefinitionConfigDTO decoded = codec.decode(codec.encode(config));
 
-    assertEquals("local", decoded.getEnvironmentName());
     assertEquals(List.of("read"), decoded.getTools());
     assertEquals(List.of("dev"), decoded.getSkills());
-  }
-
-  @Test
-  void roundTripsNullEnvironmentName() {
-    AgentDefinitionConfigDTO config = config();
-    config.setEnvironmentName(null);
-    String json = codec.encode(config);
-    // Project's Jackson convention writes nulls explicitly; round-trip preserves the value.
-    assertNull(codec.decode(json).getEnvironmentName());
   }
 
   @Test
@@ -50,14 +38,6 @@ class AgentDefinitionConfigCodecTest {
     AgentDefinitionConfigDTO missingSkills = config();
     missingSkills.setSkills(null);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSkills));
-
-    AgentDefinitionConfigDTO blankEnv = config();
-    blankEnv.setEnvironmentName(" ");
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(blankEnv));
-
-    AgentDefinitionConfigDTO whitespaceEnv = config();
-    whitespaceEnv.setEnvironmentName(" local ");
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(whitespaceEnv));
 
     AgentDefinitionConfigDTO duplicate = config();
     duplicate.setSkills(List.of("dev", "dev"));
@@ -77,9 +57,7 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(
         IllegalStateException.class,
         () -> codec.decode("{\"tools\":[],\"skills\":[],\"unknown\":true}"));
-    assertThrows(
-        IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[],\"skills\":[],\"environmentName\":42}"));
+    assertThrows(IllegalStateException.class, () -> codec.decode("{\"tools\":[42],\"skills\":[]}"));
     assertThrows(
         IllegalStateException.class, () -> codec.decode("{\"tools\":[],\"skills\":[]} {}"));
   }

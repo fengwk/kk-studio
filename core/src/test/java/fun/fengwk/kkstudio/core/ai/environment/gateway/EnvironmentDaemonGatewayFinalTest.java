@@ -10,16 +10,17 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -37,8 +37,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -50,9 +48,13 @@ class EnvironmentDaemonGatewayFinalTest {
   private static final long INVOCATION_ID = 9001L;
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
   private static final String GATEWAY_TOKEN = "gateway-test-token";
+  private static final List<DaemonSkillDescriptor> ADVERTISED_SKILLS =
+      List.of(
+          new DaemonSkillDescriptor("dev", "Developer rules"),
+          new DaemonSkillDescriptor("ops", "Operations rules"));
 
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
-  private final DaemonToolCapabilitiesCodec capabilitiesCodec = new DaemonToolCapabilitiesCodec();
+  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
 
   @Test
@@ -77,7 +79,7 @@ class EnvironmentDaemonGatewayFinalTest {
     handle.cancel();
     assertTrue(messageTypes(connection.envelopes()).contains(DaemonMessageType.CANCEL));
 
-    fixture.gateway.receive(connection.connectionId(), completed(3, resultPayload("done")));
+    fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
     assertEquals("provider-call", listener.completed.toolCallId());
   }
@@ -89,7 +91,7 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listener = new RecordingListener();
     fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
 
-    fixture.gateway.receive(connection.connectionId(), partial(3, resultPayload("chunk")));
+    fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("chunk")));
     assertEquals("chunk", ((TextToolContent) listener.partial.contents().get(0)).text());
 
     String artifactPayload =
@@ -121,7 +123,7 @@ class EnvironmentDaemonGatewayFinalTest {
                 "{}",
                 false),
             ignored -> new byte[] {7, 8});
-    fixture.gateway.receive(connection.connectionId(), completed(3, payload));
+    fixture.gateway.receive(connection.connectionId(), completed(2, payload));
     BinaryToolContent binary = (BinaryToolContent) listener.completed.contents().get(0);
     assertEquals("text/plain", binary.mediaType());
     assertEquals(2, binary.content().length);
@@ -136,7 +138,7 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(
-            DaemonMessageType.CANCELLED, Long.toString(INVOCATION_ID), 3, "{\"reason\":\"stop\"}"));
+            DaemonMessageType.CANCELLED, Long.toString(INVOCATION_ID), 2, "{\"reason\":\"stop\"}"));
     assertTrue(listener.error instanceof RemoteToolCancelledException);
     assertEquals("stop", listener.error.getMessage());
   }
@@ -194,7 +196,7 @@ class EnvironmentDaemonGatewayFinalTest {
           }
         };
     fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
-    fixture.gateway.receive(connection.connectionId(), completed(3, resultPayload("done")));
+    fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     assertTrue(completeSawLockFree.get());
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
   }
@@ -243,17 +245,51 @@ class EnvironmentDaemonGatewayFinalTest {
             .count();
     assertEquals(1, cancelCount);
 
-    fixture.gateway.receive(connection.connectionId(), completed(3, resultPayload("done")));
+    fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     int envelopesAfterComplete = connection.envelopes().size();
     handle.cancel();
     assertEquals(envelopesAfterComplete, connection.envelopes().size());
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
   }
 
+  @Test
+  void readyRegistersAdvertisedSkillsAndStaticTools() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skills");
+    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_NAME));
+    var registered = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
+    assertEquals(ADVERTISED_SKILLS, registered.skills());
+    // Tools come from the static EnvironmentToolCatalog; wire READY does not advertise them.
+    assertEquals(EnvironmentToolCatalog.descriptors(), registered.tools());
+  }
+
+  @Test
+  void helloVersionMismatchIsRejectedAndClosesConnection() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-version-mismatch");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), helloWithVersion("2", 0));
+    assertTrue(connection.closed);
+    assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
+  }
+
+  @Test
+  void heartbeatKeepsEnvironmentAliveAfterReady() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-heartbeat");
+    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_NAME));
+    Instant heartbeatAt = NOW.plusSeconds(10);
+    fixture.now.set(heartbeatAt);
+    fixture.gateway.receive(connection.connectionId(), heartbeat(2));
+    assertEquals(
+        heartbeatAt, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
+  }
+
   private ToolExecutionRequest request(ToolDescriptor descriptor) {
     return new ToolExecutionRequest(
         descriptor,
-        new ToolCall("provider-call", descriptor.name(), "{}"),
+        new ToolCall("provider-call", descriptor.name(), "{\"path\":\"README.md\"}"),
         Duration.ofSeconds(30),
         new ToolExecutionContext(INVOCATION_ID, 7001L));
   }
@@ -266,19 +302,27 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private String hello(long sequence) {
+    return helloWithVersion(EnvironmentToolCatalog.version(), sequence);
+  }
+
+  private String helloWithVersion(String catalogVersion, long sequence) {
     return envelope(
         DaemonMessageType.HELLO,
         null,
         sequence,
-        "{\"daemonId\":\"d1\",\"protocolVersion\":1,\"gatewayToken\":\"" + GATEWAY_TOKEN + "\"}");
-  }
-
-  private String capabilities(long sequence, String payload) {
-    return envelope(DaemonMessageType.CAPABILITIES, null, sequence, payload);
+        "{\"daemonId\":\"d1\",\"protocolVersion\":1,\"toolCatalogVersion\":\""
+            + catalogVersion
+            + "\",\"gatewayToken\":\""
+            + GATEWAY_TOKEN
+            + "\"}");
   }
 
   private String ready(long sequence) {
-    return envelope(DaemonMessageType.READY, null, sequence, "{\"pull\":true}");
+    return envelope(DaemonMessageType.READY, null, sequence, skillsCodec.encode(ADVERTISED_SKILLS));
+  }
+
+  private String heartbeat(long sequence) {
+    return envelope(DaemonMessageType.HEARTBEAT, null, sequence, "{}");
   }
 
   private String partial(long sequence, String payload) {
@@ -314,22 +358,14 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private static ToolDescriptor descriptor() {
-    return new ToolDescriptor(
-        "read",
-        "1",
-        "read file",
-        "read",
-        new ToolParamsSchema("", Map.of(), Set.of(), false),
-        ToolSideEffect.READ_ONLY,
-        Duration.ofSeconds(30));
+    return EnvironmentToolCatalog.require("read");
   }
 
   private final class Fixture {
-    private final LiveEnvironmentRegistry environmentRegistry =
-        new LiveEnvironmentRegistry(capabilitiesCodec);
-    private final AtomicReference<Instant> now = new AtomicReference<>(NOW);
-    private final EnvironmentDaemonGateway gateway;
-    private final ToolDescriptor descriptor;
+    final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry();
+    final AtomicReference<Instant> now = new AtomicReference<>(NOW);
+    final EnvironmentDaemonGateway gateway;
+    final ToolDescriptor descriptor;
 
     private Fixture(ToolDescriptor descriptor, EnvironmentReadyListener readyListener) {
       this.descriptor = descriptor;
@@ -338,7 +374,6 @@ class EnvironmentDaemonGatewayFinalTest {
       gateway =
           new EnvironmentDaemonGateway(
               environmentRegistry,
-              capabilitiesCodec,
               gatewayProperties,
               new Clock() {
                 @Override
@@ -359,18 +394,12 @@ class EnvironmentDaemonGatewayFinalTest {
               readyListener);
     }
 
-    private FakeConnection connectReady(String connectionId) {
+    FakeConnection connectReady(String connectionId) {
       FakeConnection connection = new FakeConnection(connectionId);
       gateway.open(connection);
       gateway.receive(connection.connectionId(), hello(0));
-      gateway.receive(connection.connectionId(), capabilities(1, capabilitiesJson()));
-      gateway.receive(connection.connectionId(), ready(2));
+      gateway.receive(connection.connectionId(), ready(1));
       return connection;
-    }
-
-    private String capabilitiesJson() {
-      return capabilitiesCodec.encode(
-          new DaemonToolCapabilitiesCodec.DaemonToolCapabilities(List.of(descriptor), List.of()));
     }
   }
 

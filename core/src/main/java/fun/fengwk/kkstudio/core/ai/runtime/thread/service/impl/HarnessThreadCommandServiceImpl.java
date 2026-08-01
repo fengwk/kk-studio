@@ -6,6 +6,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.core.ai.runtime.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.ai.runtime.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandService;
+import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
@@ -69,10 +71,12 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
             requireExpectedEpoch(dto.getExpectedExecutionEpoch()),
             dto.getTitle(),
             definitionId,
+            dto.getEnvironmentName(),
             Boolean.TRUE.equals(dto.getYoloEnabled()));
     HarnessThreadBootstrapResultDTO response = new HarnessThreadBootstrapResultDTO();
     response.setSession(sessionConverter.convert(result.session()));
-    response.setThread(converter.convert(result.thread()));
+    response.setThread(
+        converter.convert(result.thread(), (RuntimeConfigSnapshot) result.configEntry().payload()));
     return response;
   }
 
@@ -195,6 +199,27 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
                 id,
                 modelId,
                 request.getVariant(),
+                request.getClientMessageId(),
+                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
+            .input());
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadInputDTO queueEnvironment(
+      String threadId, HarnessThreadEnvironmentSetDTO request) {
+    Objects.requireNonNull(request, "request");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    Optional<EnqueueResult> existing =
+        coordinator.findExistingInput(id, request.getClientMessageId());
+    if (existing.isPresent()) {
+      return converter.convert(existing.get().input());
+    }
+    return converter.convert(
+        coordinator
+            .queueEnvironment(
+                id,
+                request.getEnvironmentName(),
                 request.getClientMessageId(),
                 requireExpectedEpoch(request.getExpectedExecutionEpoch()))
             .input());

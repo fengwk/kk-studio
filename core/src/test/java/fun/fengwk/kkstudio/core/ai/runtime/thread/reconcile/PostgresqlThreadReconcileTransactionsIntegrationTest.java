@@ -4,20 +4,27 @@ import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.Postgre
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
+import fun.fengwk.kkstudio.core.ai.runtime.skill.DatabaseThreadSelectedSkillLookup;
+import fun.fengwk.kkstudio.core.ai.runtime.thread.command.RuntimeConfigSnapshotResolver;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -27,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -36,6 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.skill.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeConfigInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
@@ -53,7 +62,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
@@ -76,6 +84,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -92,7 +101,31 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   @Autowired private ThreadReconcileTransactions transactions;
   @Autowired private ThreadCommandTransactions commands;
+  @Autowired private DatabaseThreadSelectedSkillLookup selectedSkillLookup;
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
+  @MockitoBean private RuntimeConfigSnapshotResolver capabilityResolver;
+
+  @BeforeEach
+  void stubRuntimeCapabilities() {
+    when(capabilityResolver.resolve(any()))
+        .thenAnswer(
+            invocation -> {
+              RuntimeConfigSnapshot config = invocation.getArgument(0);
+              List<ToolBinding> bindings =
+                  config.toolNames().stream()
+                      .map(
+                          name ->
+                              "environmentTool".equals(name)
+                                  ? ToolBinding.of(tool(name), "environment")
+                                  : ToolBinding.of(tool(name)))
+                      .toList();
+              List<SkillSnapshot> skills =
+                  config.skillNames().stream()
+                      .map(name -> new SkillSnapshot(name, "frozen " + name, "environment"))
+                      .toList();
+              return new RuntimeCapabilityResolver.ResolvedCapabilities(bindings, skills);
+            });
+  }
 
   @Test
   void claimsRenewsAndFencesExpiredTokenAndEpoch() {
@@ -332,8 +365,6 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals(1, count("select count(*) from harness_model_usage"));
     assertEquals(2, count("select count(*) from harness_tool_invocation"));
     assertEquals(
-        "PLATFORM", scalar("select location from harness_tool_invocation where ordinal = 0"));
-    assertEquals(
         "environment",
         scalar("select environment_name from harness_tool_invocation where ordinal = 1"));
     assertEquals(
@@ -364,6 +395,35 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             "select count(*) from harness_thread_input where thread_id = "
                 + prepared.threadId()
                 + " and status = 'QUEUED'"));
+  }
+
+  @Test
+  void materializedToolKeepsTerminalModelIdForFrozenSkillLookup() {
+    Instant now = Instant.now();
+    Prepared prepared = prepareDebt(now, List.of(environmentTool()), List.of("frozen-skill"));
+    long modelId = createInvocation(prepared, now);
+    completeModel(
+        modelId,
+        "SUCCEEDED",
+        response(List.of(new ProviderToolCall("environment-call", "environmentTool", "{}"))),
+        null);
+
+    wake(prepared.threadId());
+    ThreadOwnership owner =
+        transactions.claim(prepared.threadId(), "frozen-skill", Instant.now()).orElseThrow();
+    assertEquals(
+        ApplyOutcome.PROGRESSED, transactions.applyTerminalModel(owner, modelId, Instant.now()));
+
+    long toolId =
+        longScalar(
+            "select id from harness_tool_invocation where thread_id = " + prepared.threadId());
+    assertEquals(modelId, longScalar("select model_invocation_id from harness_tool_invocation"));
+    assertNotEquals(modelId, toolId, "model and tool invocation ids must be distinct");
+    assertEquals(
+        List.of("frozen-skill"),
+        selectedSkillLookup.selectedSkills(toolId, prepared.threadId()).stream()
+            .map(SelectedSkillMetadata::name)
+            .toList());
   }
 
   @Test
@@ -741,9 +801,13 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   private Prepared prepareDebt(Instant now, List<ToolBinding> tools) {
+    return prepareDebt(now, tools, List.of());
+  }
+
+  private Prepared prepareDebt(Instant now, List<ToolBinding> tools, List<String> skillNames) {
     TestThreads.Bootstrapped boot = TestThreads.bootstrap(commands, "reconcile", now);
     long threadId = boot.threadId();
-    commands.enqueue(threadId, config(tools), "config", boot.executionEpoch(), now);
+    commands.enqueue(threadId, config(tools, skillNames), "config", boot.executionEpoch(), now);
     commands.enqueue(threadId, user("hello"), "user", boot.executionEpoch(), now);
     Instant claimedAt = now;
     assertEquals(
@@ -773,6 +837,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   private static RuntimeConfigInputPayload config(List<ToolBinding> tools) {
+    return config(tools, List.of());
+  }
+
+  private static RuntimeConfigInputPayload config(
+      List<ToolBinding> tools, List<String> skillNames) {
     ModelPricing pricing =
         new ModelPricing(
             "USD",
@@ -798,13 +867,21 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             false,
             pricing,
             PromptCachePolicy.disabled());
+    String environmentName =
+        tools.stream()
+            .map(ToolBinding::environmentName)
+            .filter(Objects::nonNull)
+            .findFirst()
+            .orElse(null);
+    List<String> toolNames = tools.stream().map(binding -> binding.descriptor().name()).toList();
     return new RuntimeConfigInputPayload(
         ThreadInputType.SET_AGENT,
         new RuntimeConfigSnapshot(
             new AgentSnapshot(1, "agent", "system"),
             new ModelSnapshot(descriptor, variant),
-            tools,
-            List.of(),
+            environmentName,
+            toolNames,
+            skillNames,
             false));
   }
 
@@ -818,15 +895,14 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   private static ToolBinding platformTool() {
-    return ToolBinding.of(tool("platformTool", ToolExecutionLocation.PLATFORM));
+    return ToolBinding.of(tool("platformTool"));
   }
 
   private static ToolBinding environmentTool() {
-    return ToolBinding.of(
-        tool("environmentTool", ToolExecutionLocation.ENVIRONMENT), "environment");
+    return ToolBinding.of(tool("environmentTool"), "environment");
   }
 
-  private static ToolDescriptor tool(String name, ToolExecutionLocation location) {
+  private static ToolDescriptor tool(String name) {
     return new ToolDescriptor(
         name,
         "v1",

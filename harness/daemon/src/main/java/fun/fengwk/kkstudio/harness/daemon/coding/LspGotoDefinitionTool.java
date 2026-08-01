@@ -2,19 +2,12 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.util.Map;
-import java.util.Set;
 
 /** Resolves a symbol definition through the optional local LSP bridge. */
 public final class LspGotoDefinitionTool extends AbstractCodingTool {
@@ -22,30 +15,7 @@ public final class LspGotoDefinitionTool extends AbstractCodingTool {
   private final LspBridge bridge;
 
   public LspGotoDefinitionTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "lsp_goto_definition",
-            "1",
-            CodingToolPrompts.load("lsp_goto_definition"),
-            null,
-            new ToolParamsSchema(
-                "LspGotoDefinition parameters",
-                Map.of(
-                    "path",
-                        new ToolStringSchema(
-                            "Existing source file path supported by an LSP server. This path is also used to infer the workspace root."),
-                    "workdir",
-                        new ToolStringSchema(
-                            "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."),
-                    "line", new ToolIntegerSchema("1-based line number for the target position."),
-                    "character",
-                        new ToolIntegerSchema(
-                            "0-based character offset at the target position. Default: 0.")),
-                Set.of("path", "line"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)));
+    super(config, EnvironmentToolCatalog.require("lsp_goto_definition"));
     this.bridge = new LspBridge(config);
   }
 

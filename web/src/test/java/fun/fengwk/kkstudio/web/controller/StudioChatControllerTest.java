@@ -148,8 +148,8 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
               .perform(post("/api/ai/chat/{chatId}/threads", chatId))
               .andExpect(status().isCreated())
               .andExpect(jsonPath("$.data.threadId").isString())
-              .andExpect(jsonPath("$.data.status").value("UNBOUND"))
-              .andExpect(jsonPath("$.data.executionEpoch").value("0"))
+              .andExpect(jsonPath("$.data.status").value("IDLE"))
+              .andExpect(jsonPath("$.data.executionEpoch").value("1"))
               .andReturn();
       String scopedThreadId = data(scopedCreate).path("threadId").asText();
 

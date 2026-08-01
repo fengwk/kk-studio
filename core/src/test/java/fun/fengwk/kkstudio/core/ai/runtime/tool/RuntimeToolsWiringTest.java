@@ -18,8 +18,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Verifies platform tools are Spring beans and resolvable through {@link ToolFactories}. */
-class PlatformToolsWiringTest extends PostgresSpringTestSupport {
+/** Verifies runtime tools are Spring beans and resolvable through the shared catalog. */
+class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private List<Tool> tools;
   @Autowired private ToolFactories toolFactories;

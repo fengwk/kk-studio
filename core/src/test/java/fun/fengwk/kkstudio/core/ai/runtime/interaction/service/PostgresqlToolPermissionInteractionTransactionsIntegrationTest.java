@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionResponse;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionStatus;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransition;
 import fun.fengwk.kkstudio.harness.runtime.interaction.ToolPermissionDecision;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -41,8 +40,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   @Test
   void findsOpenToolPermissionInteractionWithItsExplicitDurableFacts() {
     ThreadContext unrelated = newThread(false);
-    WaitingInteraction fixture =
-        newWaiting(ToolExecutionLocation.PLATFORM, null, BASE, unrelated.threadId());
+    WaitingInteraction fixture = newWaiting(null, BASE, unrelated.threadId());
 
     Interaction found = transactions.find(fixture.interactionId()).orElseThrow();
 
@@ -64,8 +62,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   @Test
   void approvesPlatformToolFromDatabaseOwnerAndActivatesItsParkedTarget() {
     ThreadContext unrelated = newThread(false);
-    WaitingInteraction fixture =
-        newWaiting(ToolExecutionLocation.PLATFORM, null, BASE, unrelated.threadId());
+    WaitingInteraction fixture = newWaiting(null, BASE, unrelated.threadId());
     Instant resolvedAt = BASE.plusSeconds(1);
 
     InteractionTransition transition =
@@ -95,8 +92,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
 
   @Test
   void approvalUsesEnvironmentFifoHeadInsteadOfBypassingOlderPermissionTool() {
-    WaitingInteraction first =
-        newWaiting(ToolExecutionLocation.ENVIRONMENT, "env-a", BASE, newThread(false).threadId());
+    WaitingInteraction first = newWaiting("env-a", BASE, newThread(false).threadId());
     QueuedTool second = newQueuedEnvironment("env-a", BASE.plusSeconds(1));
 
     transactions.resolve(
@@ -116,8 +112,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   @Test
   void denialUsesDatabaseOwnerThenSchedulesOwningThreadAndNextEnvironmentHead() {
     ThreadContext unrelated = newThread(false);
-    WaitingInteraction first =
-        newWaiting(ToolExecutionLocation.ENVIRONMENT, "env-a", BASE, unrelated.threadId());
+    WaitingInteraction first = newWaiting("env-a", BASE, unrelated.threadId());
     QueuedTool second = newQueuedEnvironment("env-a", BASE.plusSeconds(1));
     Instant resolvedAt = BASE.plusSeconds(2);
 
@@ -146,8 +141,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
 
   @Test
   void rejectsStaleOrInvalidOwnerTransitionsWithoutPartialWrites() {
-    WaitingInteraction stale =
-        newWaiting(ToolExecutionLocation.PLATFORM, null, BASE, newThread(false).threadId());
+    WaitingInteraction stale = newWaiting(null, BASE, newThread(false).threadId());
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -160,11 +154,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     assertOpenWaitingAndParked(stale);
 
     WaitingInteraction resolved =
-        newWaiting(
-            ToolExecutionLocation.PLATFORM,
-            null,
-            BASE.plusSeconds(10),
-            newThread(false).threadId());
+        newWaiting(null, BASE.plusSeconds(10), newThread(false).threadId());
     transactions.resolve(
         resolved.interactionId(),
         0L,
@@ -191,11 +181,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         targetState(ExecutionTargetKind.TOOL_INVOCATION, resolved.toolId()).dispatchEnabled());
 
     WaitingInteraction invalidOwner =
-        newWaiting(
-            ToolExecutionLocation.PLATFORM,
-            null,
-            BASE.plusSeconds(20),
-            newThread(false).threadId());
+        newWaiting(null, BASE.plusSeconds(20), newThread(false).threadId());
     jdbc.update(
         "update harness_tool_invocation set status = 'QUEUED', permission_state = 'ALLOWED' where id = ?",
         invalidOwner.toolId());
@@ -216,11 +202,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         targetState(ExecutionTargetKind.TOOL_INVOCATION, invalidOwner.toolId()).dispatchEnabled());
 
     WaitingInteraction missingTarget =
-        newWaiting(
-            ToolExecutionLocation.PLATFORM,
-            null,
-            BASE.plusSeconds(30),
-            newThread(false).threadId());
+        newWaiting(null, BASE.plusSeconds(30), newThread(false).threadId());
     jdbc.update(
         "delete from harness_execution_target where target_kind = 'TOOL_INVOCATION' and target_id = ?",
         missingTarget.toolId());
@@ -253,8 +235,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
 
   @Test
   void databaseAllowsOnlyOneOpenInteractionPerToolAndAllowsAnotherAfterResolution() {
-    WaitingInteraction fixture =
-        newWaiting(ToolExecutionLocation.PLATFORM, null, BASE, newThread(false).threadId());
+    WaitingInteraction fixture = newWaiting(null, BASE, newThread(false).threadId());
 
     assertThrows(
         DataIntegrityViolationException.class,
@@ -276,8 +257,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
 
   @Test
   void rejectsDispatchableOrMisroutedPermissionTargetsWithoutResolvingInteraction() {
-    WaitingInteraction dispatchable =
-        newWaiting(ToolExecutionLocation.PLATFORM, null, BASE, newThread(false).threadId());
+    WaitingInteraction dispatchable = newWaiting(null, BASE, newThread(false).threadId());
     jdbc.update(
         "update harness_execution_target set dispatch_enabled = true"
             + " where target_kind = 'TOOL_INVOCATION' and target_id = ?",
@@ -296,11 +276,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         transactions.find(dispatchable.interactionId()).orElseThrow().status());
 
     WaitingInteraction misrouted =
-        newWaiting(
-            ToolExecutionLocation.ENVIRONMENT,
-            "env-a",
-            BASE.plusSeconds(10),
-            newThread(false).threadId());
+        newWaiting("env-a", BASE.plusSeconds(10), newThread(false).threadId());
     jdbc.update(
         "update harness_execution_target set route_key = 'wrong-env'"
             + " where target_kind = 'TOOL_INVOCATION' and target_id = ?",
@@ -318,13 +294,10 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   }
 
   private WaitingInteraction newWaiting(
-      ToolExecutionLocation location,
-      String environmentName,
-      Instant createdAt,
-      long requestThreadId) {
+      String environmentName, Instant createdAt, long requestThreadId) {
     ThreadContext owner = newThread(false);
     long toolId = ids.incrementAndGet();
-    insertTool(toolId, owner, location, environmentName, "WAITING_INTERACTION", "ASKED", createdAt);
+    insertTool(toolId, owner, environmentName, "WAITING_INTERACTION", "ASKED", createdAt);
     insertTarget(ExecutionTargetKind.TOOL_INVOCATION, toolId, environmentName, false, createdAt);
     String requestJson =
         """
@@ -338,14 +311,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   private QueuedTool newQueuedEnvironment(String environmentName, Instant createdAt) {
     ThreadContext owner = newThread(false);
     long toolId = ids.incrementAndGet();
-    insertTool(
-        toolId,
-        owner,
-        ToolExecutionLocation.ENVIRONMENT,
-        environmentName,
-        "QUEUED",
-        "PENDING",
-        createdAt);
+    insertTool(toolId, owner, environmentName, "QUEUED", "PENDING", createdAt);
     insertTarget(ExecutionTargetKind.TOOL_INVOCATION, toolId, environmentName, false, createdAt);
     return new QueuedTool(toolId);
   }
@@ -378,25 +344,33 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   private void insertTool(
       long toolId,
       ThreadContext owner,
-      ToolExecutionLocation location,
       String environmentName,
       String status,
       String permissionState,
       Instant createdAt) {
+    long modelInvocationId = toolId + 1_000_000L;
+    jdbc.update(
+        "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+            + " execution_epoch, request, status, attempt, created_at) values (?, ?, ?, 0,"
+            + " '{}'::jsonb, 'QUEUED', 1, ?)",
+        modelInvocationId,
+        owner.threadId(),
+        owner.entryId(),
+        timestamp(createdAt));
     jdbc.update(
         """
         insert into harness_tool_invocation (
-            id, thread_id, session_id, assistant_entry_id, ordinal, tool_call_id, descriptor,
-            arguments, location, environment_name, execution_epoch, status, attempt,
+            id, thread_id, session_id, assistant_entry_id, model_invocation_id, ordinal, tool_call_id, descriptor,
+            arguments, environment_name, execution_epoch, status, attempt,
             permission_state, yolo_enabled, created_at
-        ) values (?, ?, ?, ?, 0, ?, '{}'::jsonb, '{}'::jsonb, ?, ?, 0, ?, 1, ?, false, ?)
+        ) values (?, ?, ?, ?, ?, 0, ?, '{}'::jsonb, '{}'::jsonb, ?, 0, ?, 1, ?, false, ?)
         """,
         toolId,
         owner.threadId(),
         owner.sessionId(),
         owner.entryId(),
+        modelInvocationId,
         "call-" + toolId,
-        location.name(),
         environmentName,
         status,
         permissionState,

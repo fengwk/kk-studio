@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.core.ai.environment.registry;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolCapabilitiesCodec.DaemonToolCapabilities;
 
 import java.time.Instant;
 import java.util.List;
@@ -12,30 +12,26 @@ import java.util.Objects;
 /**
  * Snapshot of one server-memory Environment entry keyed by non-blank {@code environmentName}.
  *
- * <p>Capabilities are empty until CAPABILITIES is accepted; status becomes {@link
- * LiveEnvironmentStatus#READY} only after READY.
+ * <p>Environment tools are fixed by {@link EnvironmentToolCatalog}; READY only publishes the
+ * daemon's available skills.
  */
 public record LiveEnvironment(
     String environmentName,
     LiveEnvironmentStatus status,
     EnvironmentDaemonConnection connection,
-    DaemonToolCapabilities capabilities,
+    List<DaemonSkillDescriptor> skills,
     Instant lastSeenAt) {
 
   public LiveEnvironment {
     environmentName = requireNonBlank(environmentName, "environmentName");
     status = Objects.requireNonNull(status, "status");
     connection = Objects.requireNonNull(connection, "connection");
-    capabilities = Objects.requireNonNull(capabilities, "capabilities");
+    skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
     lastSeenAt = Objects.requireNonNull(lastSeenAt, "lastSeenAt");
   }
 
   public List<ToolDescriptor> tools() {
-    return capabilities.tools();
-  }
-
-  public List<DaemonSkillDescriptor> skills() {
-    return capabilities.skills();
+    return EnvironmentToolCatalog.descriptors();
   }
 
   public boolean isReady() {

@@ -12,7 +12,6 @@ public class InteractionToolOwnerDO {
   private Long executionEpoch;
   private String status;
   private String permissionState;
-  private String location;
   private String environmentName;
   private OffsetDateTime createdAt;
 }

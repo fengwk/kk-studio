@@ -15,7 +15,6 @@ public class ToolInvocationDTO {
   private String toolCallId;
   private String toolName;
   private String toolVersion;
-  private String location;
   private String environmentName;
   private String argumentsJson;
   private Long executionEpoch;

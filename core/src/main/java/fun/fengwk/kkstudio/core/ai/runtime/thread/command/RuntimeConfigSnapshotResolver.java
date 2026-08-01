@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.thread.command;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -22,11 +23,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
@@ -40,15 +44,14 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 仅用于命令提交时的 live resource -> immutable {@link RuntimeConfigSnapshot} 冻结器。
+ * Resolves durable command snapshots and, separately, the live capabilities for one model plan.
  *
- * <p>实现 runtime {@link RuntimeConfigSource}：可以读取 Definition、Model、Provider、ready Environment 和
- * {@link ToolFactories} 暴露的 platform tool descriptors，但严禁调用 {@link ProviderFactory#create(String,
- * String)} 或任何 Provider I/O。credential 不进入 descriptor；它只在后续 worker 依据 {@code providerResourceId}
- * 短生命周期解析。纯 YOLO 替换由 runtime 编排侧的 {@link RuntimeConfigSnapshot#withYoloEnabled(boolean)} 完成。
+ * <p>Command methods never read the Environment registry. Live registry state is consulted only by
+ * {@link #resolve(RuntimeConfigSnapshot)} after a response debt has been identified.
  */
 @Component
-public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
+public class RuntimeConfigSnapshotResolver
+    implements RuntimeConfigSource, RuntimeCapabilityResolver {
 
   private final AgentDefinitionMapper definitionMapper;
   private final AgentDefinitionConfigCodec definitionConfigCodec;
@@ -56,8 +59,29 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
   private final AgentProviderRepository providerRepository;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
-  private final ToolFactories toolFactories;
+  private final ToolCatalog toolCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
+
+  @Autowired
+  public RuntimeConfigSnapshotResolver(
+      AgentDefinitionMapper definitionMapper,
+      AgentDefinitionConfigCodec definitionConfigCodec,
+      AgentModelRepository modelRepository,
+      AgentProviderRepository providerRepository,
+      AgentModelRuntimeConfigParser modelConfigParser,
+      ProviderFactories providerFactories,
+      ToolCatalog toolCatalog,
+      LiveEnvironmentRegistry environmentRegistry) {
+    this.definitionMapper = Objects.requireNonNull(definitionMapper, "definitionMapper");
+    this.definitionConfigCodec =
+        Objects.requireNonNull(definitionConfigCodec, "definitionConfigCodec");
+    this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
+    this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
+    this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
+    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+  }
 
   public RuntimeConfigSnapshotResolver(
       AgentDefinitionMapper definitionMapper,
@@ -68,58 +92,171 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       ProviderFactories providerFactories,
       ToolFactories toolFactories,
       LiveEnvironmentRegistry environmentRegistry) {
-    this.definitionMapper = Objects.requireNonNull(definitionMapper, "definitionMapper");
-    this.definitionConfigCodec =
-        Objects.requireNonNull(definitionConfigCodec, "definitionConfigCodec");
-    this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
-    this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
-    this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
-    this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
-    this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
-    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this(
+        definitionMapper,
+        definitionConfigCodec,
+        modelRepository,
+        providerRepository,
+        modelConfigParser,
+        providerFactories,
+        new ToolCatalog(toolFactories.descriptors(), Set.of(LoadSkillTool.NAME)),
+        environmentRegistry);
   }
 
-  /** 使用 Definition 的默认 model/variant 构造完整快照。 */
   @Override
   public RuntimeConfigSnapshot resolveAgent(long definitionId, boolean yoloEnabled) {
+    return resolveAgent(definitionId, null, yoloEnabled);
+  }
+
+  @Override
+  public RuntimeConfigSnapshot resolveAgent(
+      long definitionId, String environmentName, boolean yoloEnabled) {
     AgentDefinitionDO definition = requireDefinition(definitionId);
     if (definition.getModelId() == null || definition.getModelId() <= 0) {
       throw new IllegalArgumentException("agent definition has no default model: " + definitionId);
     }
-    return resolve(definition, definition.getModelId(), definition.getVariant(), yoloEnabled);
+    AgentDefinitionConfigDTO config = definitionConfigCodec.decode(definition.getConfigJson());
+    validateStaticSelections(config);
+    return new RuntimeConfigSnapshot(
+        new AgentSnapshot(definition.getId(), definition.getName(), definition.getSystemPrompt()),
+        resolveModel(definition.getModelId(), definition.getVariant()),
+        environmentName,
+        config.getTools(),
+        config.getSkills(),
+        yoloEnabled);
   }
 
-  /** 复制现有快照，只替换完整、当前可用的 model/variant；并重新校验 tool capability。 */
+  @Override
+  public RuntimeConfigSnapshot replaceAgent(RuntimeConfigSnapshot current, long definitionId) {
+    Objects.requireNonNull(current, "current");
+    AgentDefinitionDO definition = requireDefinition(definitionId);
+    if (definition.getModelId() == null || definition.getModelId() <= 0) {
+      throw new IllegalArgumentException("agent definition has no default model: " + definitionId);
+    }
+    AgentDefinitionConfigDTO config = definitionConfigCodec.decode(definition.getConfigJson());
+    validateStaticSelections(config);
+    return new RuntimeConfigSnapshot(
+        new AgentSnapshot(definition.getId(), definition.getName(), definition.getSystemPrompt()),
+        resolveModel(definition.getModelId(), definition.getVariant()),
+        current.environmentName(),
+        config.getTools(),
+        config.getSkills(),
+        current.yoloEnabled());
+  }
+
   @Override
   public RuntimeConfigSnapshot replaceModel(
       RuntimeConfigSnapshot current, long modelId, String requestedVariant) {
     Objects.requireNonNull(current, "current");
-    ModelSnapshot model = resolveModel(modelId, requestedVariant);
-    if (!current.tools().isEmpty() && !model.descriptor().tools()) {
-      throw new IllegalArgumentException("selected model does not support configured tools");
-    }
+    ModelSnapshotParts model = resolveModelParts(modelId, requestedVariant);
     return new RuntimeConfigSnapshot(
-        current.agent(), model, current.tools(), current.skills(), current.yoloEnabled());
+        current.agent(),
+        model.snapshot(),
+        current.environmentName(),
+        current.toolNames(),
+        current.skillNames(),
+        current.yoloEnabled());
   }
 
-  private RuntimeConfigSnapshot resolve(
-      AgentDefinitionDO definition, long modelId, String requestedVariant, boolean yoloEnabled) {
-    AgentDefinitionConfigDTO config = definitionConfigCodec.decode(definition.getConfigJson());
-    String environmentName = optionalEnvironmentName(config.getEnvironmentName());
+  @Override
+  public ResolvedCapabilities resolve(RuntimeConfigSnapshot config) {
+    Objects.requireNonNull(config, "config");
+    List<ToolBinding> bindings = new ArrayList<>();
+    Set<String> selected = new HashSet<>();
     LiveEnvironment environment =
-        environmentName == null ? null : requireReadyEnvironment(environmentName);
-    List<ToolBinding> tools =
-        resolveTools(config.getTools(), environment, !config.getSkills().isEmpty());
-    List<SkillSnapshot> skills = resolveSkills(config.getSkills(), environment);
-    return new RuntimeConfigSnapshot(
-        new AgentSnapshot(definition.getId(), definition.getName(), definition.getSystemPrompt()),
-        resolveModel(modelId, requestedVariant),
-        tools,
-        skills,
-        yoloEnabled);
+        config.environmentName() == null
+            ? null
+            : environmentRegistry
+                .find(config.environmentName())
+                .filter(LiveEnvironment::isReady)
+                .orElse(null);
+
+    for (String name : config.toolNames()) {
+      ToolDescriptor local = toolCatalog.findLocal(name).orElse(null);
+      if (local != null) {
+        addBinding(bindings, selected, ToolBinding.of(local));
+        continue;
+      }
+      ToolDescriptor environmentTool = toolCatalog.findEnvironment(name).orElse(null);
+      if (environmentTool == null || environment == null) {
+        // Environment capabilities are optional at plan time. An offline target must not block
+        // the Thread or cause an endless requeue cycle.
+        continue;
+      }
+      addBinding(bindings, selected, ToolBinding.of(environmentTool, config.environmentName()));
+    }
+
+    List<SkillSnapshot> skills = resolveSkills(config, environment);
+    if (!skills.isEmpty()) {
+      ToolDescriptor loadSkill =
+          toolCatalog
+              .findRuntimeManaged(LoadSkillTool.NAME)
+              .orElseThrow(
+                  () -> new IllegalStateException("load_skill runtime tool is not registered"));
+      addBinding(bindings, selected, ToolBinding.of(loadSkill));
+    }
+    return new ResolvedCapabilities(bindings, skills);
   }
 
-  private ModelSnapshot resolveModel(long modelId, String requestedVariant) {
+  private List<SkillSnapshot> resolveSkills(
+      RuntimeConfigSnapshot config, LiveEnvironment environment) {
+    if (environment == null || config.skillNames().isEmpty()) {
+      return List.of();
+    }
+    Map<String, SkillSnapshot> available = new HashMap<>();
+    environment
+        .skills()
+        .forEach(
+            skill ->
+                available.putIfAbsent(
+                    skill.name(),
+                    new SkillSnapshot(
+                        skill.name(), skill.description(), config.environmentName())));
+    List<SkillSnapshot> result = new ArrayList<>();
+    for (String name : config.skillNames()) {
+      SkillSnapshot skill = available.get(name);
+      if (skill != null) {
+        result.add(skill);
+      }
+    }
+    return List.copyOf(result);
+  }
+
+  private static void addBinding(
+      List<ToolBinding> bindings, Set<String> selected, ToolBinding binding) {
+    if (!selected.add(binding.descriptor().name())) {
+      throw new IllegalArgumentException("duplicate selected tool: " + binding.descriptor().name());
+    }
+    bindings.add(binding);
+  }
+
+  private void validateStaticSelections(AgentDefinitionConfigDTO config) {
+    Set<String> names = new HashSet<>();
+    for (String name : config.getTools()) {
+      if (!names.add(name)) {
+        throw new IllegalArgumentException("duplicate agent tool: " + name);
+      }
+      if (LoadSkillTool.NAME.equals(name)) {
+        throw new IllegalArgumentException("load_skill is runtime-managed and cannot be selected");
+      }
+      if (toolCatalog.find(name).isEmpty()) {
+        throw new IllegalArgumentException("unknown agent tool: " + name);
+      }
+    }
+  }
+
+  private AgentDefinitionDO requireDefinition(long definitionId) {
+    if (definitionId <= 0) {
+      throw new IllegalArgumentException("definitionId must be positive");
+    }
+    AgentDefinitionDO definition = definitionMapper.getById(definitionId);
+    if (definition == null) {
+      throw new IllegalArgumentException("unknown agent definition: " + definitionId);
+    }
+    return definition;
+  }
+
+  private ModelSnapshotParts resolveModelParts(long modelId, String requestedVariant) {
     if (modelId <= 0) {
       throw new IllegalArgumentException("modelId must be positive");
     }
@@ -143,7 +280,6 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
                     new IllegalArgumentException(
                         "no provider factory registered for " + providerType));
     ParsedAgentModelConfig parsed = modelConfigParser.parse(model.getConfigJson());
-    // 先在 resolver 内完成 variant 身份校验，确保 ModelSnapshot 仅承载已知 variant。
     String variantId =
         requestedVariant == null || requestedVariant.isBlank()
             ? parsed.defaultVariant()
@@ -166,147 +302,11 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
             parsed.reasoning(),
             parsed.pricing(),
             cachePolicy(providerType, factory.promptCacheCapability()));
-    return new ModelSnapshot(descriptor, variant);
+    return new ModelSnapshotParts(new ModelSnapshot(descriptor, variant));
   }
 
-  private List<ToolBinding> resolveTools(
-      List<String> names, LiveEnvironment environment, boolean hasSelectedSkills) {
-    Objects.requireNonNull(names, "agent tools");
-    Map<String, ToolDescriptor> platform = platformTools();
-    List<ToolBinding> result = new ArrayList<>();
-    Set<String> selected = new HashSet<>();
-    for (String name : names) {
-      requireShortName(name, "tool");
-      ToolDescriptor descriptor = platform.get(name);
-      if (descriptor != null) {
-        addBinding(result, selected, ToolBinding.of(descriptor));
-        continue;
-      }
-      if (environment == null) {
-        throw new IllegalArgumentException("unknown tool without ready environment: " + name);
-      }
-      ToolDescriptor environmentTool = uniqueEnvironmentTool(environment, name);
-      addBinding(result, selected, ToolBinding.of(environmentTool, environment.environmentName()));
-    }
-    for (String automatic : List.of("create_goal", "get_goal", "update_goal")) {
-      ToolDescriptor descriptor = platform.get(automatic);
-      if (descriptor != null) {
-        addBinding(result, selected, ToolBinding.of(descriptor));
-      }
-    }
-    if (hasSelectedSkills) {
-      ToolDescriptor loadSkill = platform.get("load_skill");
-      if (loadSkill != null) {
-        addBinding(result, selected, ToolBinding.of(loadSkill));
-      }
-    }
-    return List.copyOf(result);
-  }
-
-  private List<SkillSnapshot> resolveSkills(List<String> names, LiveEnvironment environment) {
-    Objects.requireNonNull(names, "agent skills");
-    if (names.isEmpty()) {
-      return List.of();
-    }
-    if (environment == null) {
-      throw new IllegalArgumentException("skills require a ready environment");
-    }
-    Map<String, SkillSnapshot> available = new HashMap<>();
-    environment
-        .skills()
-        .forEach(
-            skill ->
-                available.putIfAbsent(
-                    skill.name(),
-                    new SkillSnapshot(
-                        skill.name(), skill.description(), environment.environmentName())));
-    List<SkillSnapshot> result = new ArrayList<>();
-    for (String name : names) {
-      requireShortName(name, "skill");
-      SkillSnapshot skill = available.get(name);
-      if (skill == null) {
-        throw new IllegalArgumentException("selected skill is unavailable: " + name);
-      }
-      result.add(skill);
-    }
-    return List.copyOf(result);
-  }
-
-  private Map<String, ToolDescriptor> platformTools() {
-    Map<String, ToolDescriptor> result = new HashMap<>();
-    for (ToolDescriptor descriptor : toolFactories.descriptors()) {
-      ToolDescriptor prior = result.putIfAbsent(descriptor.name(), descriptor);
-      if (prior != null) {
-        throw new IllegalArgumentException(
-            "ambiguous registered PLATFORM tool name: " + descriptor.name());
-      }
-    }
-    return result;
-  }
-
-  private static ToolDescriptor uniqueEnvironmentTool(LiveEnvironment environment, String name) {
-    ToolDescriptor found = null;
-    for (ToolDescriptor descriptor : environment.tools()) {
-      if (!descriptor.name().equals(name)) {
-        continue;
-      }
-      if (found != null) {
-        throw new IllegalArgumentException("ambiguous environment tool: " + name);
-      }
-      found = descriptor;
-    }
-    if (found == null) {
-      throw new IllegalArgumentException("unknown environment tool: " + name);
-    }
-    return found;
-  }
-
-  private static void addBinding(
-      List<ToolBinding> bindings, Set<String> selected, ToolBinding binding) {
-    if (!selected.add(binding.descriptor().name())) {
-      throw new IllegalArgumentException("duplicate selected tool: " + binding.descriptor().name());
-    }
-    bindings.add(binding);
-  }
-
-  private AgentDefinitionDO requireDefinition(long definitionId) {
-    if (definitionId <= 0) {
-      throw new IllegalArgumentException("definitionId must be positive");
-    }
-    AgentDefinitionDO definition = definitionMapper.getById(definitionId);
-    if (definition == null) {
-      throw new IllegalArgumentException("unknown agent definition: " + definitionId);
-    }
-    return definition;
-  }
-
-  private LiveEnvironment requireReadyEnvironment(String environmentName) {
-    return environmentRegistry
-        .find(environmentName)
-        .filter(LiveEnvironment::isReady)
-        .orElseThrow(
-            () ->
-                new IllegalArgumentException(
-                    "environment is offline or missing: " + environmentName));
-  }
-
-  private static String optionalEnvironmentName(String value) {
-    if (value == null || value.isBlank()) {
-      return null;
-    }
-    if (!value.equals(value.trim())) {
-      throw new IllegalArgumentException("environmentName must not have surrounding whitespace");
-    }
-    return value;
-  }
-
-  private static void requireShortName(String value, String kind) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(kind + " name must not be blank");
-    }
-    if (value.indexOf(':') >= 0 || value.indexOf('/') >= 0 || value.indexOf('@') >= 0) {
-      throw new IllegalArgumentException(kind + " selection must use a short name: " + value);
-    }
+  private ModelSnapshot resolveModel(long modelId, String requestedVariant) {
+    return resolveModelParts(modelId, requestedVariant).snapshot();
   }
 
   private static ProviderType providerType(AgentProviderType value) {
@@ -329,4 +329,6 @@ public class RuntimeConfigSnapshotResolver implements RuntimeConfigSource {
       case GOOGLE -> PromptCachePolicy.automatic(capability);
     };
   }
+
+  private record ModelSnapshotParts(ModelSnapshot snapshot) {}
 }

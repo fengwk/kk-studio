@@ -11,11 +11,11 @@ public class ToolInvocationDO {
   private Long threadId;
   private Long sessionId;
   private Long assistantEntryId;
+  private Long modelInvocationId;
   private Integer ordinal;
   private String toolCallId;
   private String descriptorJson;
   private String argumentsJson;
-  private String location;
   private String environmentName;
   private Long executionEpoch;
   private String status;

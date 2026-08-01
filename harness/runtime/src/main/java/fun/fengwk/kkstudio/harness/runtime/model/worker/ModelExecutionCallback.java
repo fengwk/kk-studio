@@ -110,7 +110,7 @@ final class ModelExecutionCallback implements ModelExecutionListener {
                   new ModelExecutionRequest(
                       claimed.invocation().id(),
                       claimed.invocation().attempt(),
-                      claimed.invocation().request(),
+                      claimed.invocation().request().providerRequest(),
                       claimed.invocation().deadlineAt()),
                   this);
       setHandle(executionHandle);
@@ -205,7 +205,8 @@ final class ModelExecutionCallback implements ModelExecutionListener {
       Instant completedAt;
       synchronized (this) {
         completion = streamAccumulator.complete(response);
-        ModelResponseValidator.validate(claimed.invocation().request(), completion.response());
+        ModelResponseValidator.validate(
+            claimed.invocation().request().providerRequest(), completion.response());
         completedAt = clock.instant();
       }
       persistSuccess(completion.response(), completion.gaps(), completedAt);

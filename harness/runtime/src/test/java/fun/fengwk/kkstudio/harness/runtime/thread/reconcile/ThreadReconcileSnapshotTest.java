@@ -147,7 +147,9 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            1L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            1L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
 
@@ -293,7 +295,9 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            999L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            999L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
     assertThrows(
@@ -360,7 +364,9 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 5L);
     ModelInvocationPlan plan =
         new ModelInvocationPlan(
-            5L, ReconcileTestSupport.providerRequest(), ReconcileTestSupport.configSnapshot());
+            5L,
+            ReconcileTestSupport.modelInvocationRequest(),
+            ReconcileTestSupport.configSnapshot());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
     // 匹配 head：5L == 5L，应成功

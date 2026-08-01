@@ -92,7 +92,8 @@ public final class LoadSkillTool implements Tool {
       }
       String skillName = parseName(request.call().argumentsJson());
       Optional<SelectedSkillMetadata> selected =
-          skillLookup.findSelected(request.context().threadId(), skillName);
+          skillLookup.findSelected(
+              request.context().invocationId(), request.context().threadId(), skillName);
       if (selected.isEmpty()) {
         complete(handle, error(callId, "unknown or unselected skill: " + skillName));
         return handle;

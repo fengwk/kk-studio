@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -65,8 +66,9 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
   public PostgresqlThreadCommandTransactions(
       ThreadCommandMapper mapper,
       HarnessIdGenerator idGenerator,
-      ExecutionTargetStore executionTargetStore) {
-    this(mapper, idGenerator, new ModelInvocationPlanner(), executionTargetStore);
+      ExecutionTargetStore executionTargetStore,
+      RuntimeCapabilityResolver capabilityResolver) {
+    this(mapper, idGenerator, new ModelInvocationPlanner(capabilityResolver), executionTargetStore);
   }
 
   /** Package-private test ctor for deterministic planner and durable target wiring. */

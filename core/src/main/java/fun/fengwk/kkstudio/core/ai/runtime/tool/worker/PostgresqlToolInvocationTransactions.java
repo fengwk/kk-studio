@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
@@ -298,69 +297,6 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public ToolInvocationUpdateOutcome releaseUnstarted(
-      ClaimedToolInvocation claimed, Instant nextAttemptAt, Instant now) {
-    LockedTool locked = lockOwned(claimed, now);
-    if (locked == null) {
-      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
-    }
-    ToolInvocationDO row = locked.row();
-    ToolInvocation invocation = claimed.invocation();
-    InvocationStatus previousStatus = claimed.previousStatus();
-    int affected;
-    Instant persistedNow = persistence(now);
-    Instant rescheduleAt;
-    if (previousStatus == InvocationStatus.QUEUED) {
-      if (nextAttemptAt != null || invocation.attempt() != 1) {
-        throw new IllegalArgumentException(
-            "QUEUED release requires attempt 1 and no nextAttemptAt");
-      }
-      affected =
-          invocationMapper.releaseUnstartedQueued(
-              invocation.id(),
-              invocation.threadId(),
-              invocation.executionEpoch(),
-              invocation.attempt(),
-              invocation.workerLease().token(),
-              offset(persistedNow));
-      rescheduleAt = persistedNow;
-    } else if (previousStatus == InvocationStatus.RETRY_WAIT) {
-      if (invocation.attempt() <= 1 || nextAttemptAt == null) {
-        throw new IllegalArgumentException(
-            "RETRY_WAIT release requires a previous attempt and nextAttemptAt");
-      }
-      Instant next = persistence(nextAttemptAt);
-      if (!next.isAfter(row.getLastActivityAt().toInstant())
-          || !next.isBefore(row.getDeadlineAt().toInstant())) {
-        throw new IllegalArgumentException(
-            "nextAttemptAt must be after activity and before deadline");
-      }
-      affected =
-          invocationMapper.releaseUnstartedRetry(
-              invocation.id(),
-              invocation.threadId(),
-              invocation.executionEpoch(),
-              invocation.attempt(),
-              invocation.attempt() - 1,
-              invocation.workerLease().token(),
-              offset(next),
-              offset(persistedNow));
-      rescheduleAt = next;
-    } else {
-      throw new IllegalArgumentException("previousStatus must be QUEUED or RETRY_WAIT");
-    }
-    if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
-      return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
-    }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), routeKey(row), rescheduleAt),
-        "reschedule tool invocation target after releaseUnstarted");
-    return ToolInvocationUpdateOutcome.APPLIED;
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
   public ToolInvocationUpdateOutcome completeSuccess(
       ClaimedToolInvocation claimed,
       Supplier<ToolResult> resultSupplier,
@@ -485,18 +421,11 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || invocation.permissionState() != ToolPermissionState.PENDING) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // Route stability: descriptor/arguments may change but the execution route (location and
-    // environment name) must not. A permission boundary that re-routes must be rejected before
-    // any state mutation.
     if (!routeStable(row, finalBinding)) {
       throw new IllegalArgumentException(
           "persistPermissionAllowed rejected route change: locked row is "
-              + row.getLocation()
-              + "/"
               + row.getEnvironmentName()
               + " but final binding is "
-              + finalBinding.location()
-              + "/"
               + finalBinding.environmentName());
     }
     int affected =
@@ -508,15 +437,11 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
             invocation.workerLease().token(),
             descriptorCodec.encode(finalBinding.descriptor()),
             finalArgumentsJson,
-            finalBinding.location().name(),
             finalBinding.environmentName(),
             offset(persistence(now)));
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // The target lease is preserved; rescheduleLocked on the same lease deadline keeps the existing
-    // gate (and triggers NOTIFY only on a strictly earlier move). Use the locked row's route key
-    // so PLATFORM (null) and ENVIRONMENT rows stay on their declared route.
     requireTargetAffected(
         executionTargetStore.rescheduleLocked(
             ExecutionTargetKind.TOOL_INVOCATION,
@@ -548,16 +473,12 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || invocation.permissionState() != ToolPermissionState.PENDING) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // Route stability: the final binding's location/environment must equal the locked row's.
+    // Route stability: the final binding's Environment target must equal the locked row's.
     if (!routeStable(row, finalBinding)) {
       throw new IllegalArgumentException(
           "awaitPermission rejected route change: locked row is "
-              + row.getLocation()
-              + "/"
               + row.getEnvironmentName()
               + " but final binding is "
-              + finalBinding.location()
-              + "/"
               + finalBinding.environmentName());
     }
     int affected =
@@ -569,7 +490,6 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
             invocation.workerLease().token(),
             descriptorCodec.encode(finalBinding.descriptor()),
             finalArgumentsJson,
-            finalBinding.location().name(),
             finalBinding.environmentName(),
             offset(persistence(now)));
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
@@ -671,11 +591,6 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
   }
 
   private static boolean routeStable(ToolInvocationDO row, ToolBinding finalBinding) {
-    String rowLocation = row.getLocation();
-    String finalLocation = finalBinding.location().name();
-    if (!Objects.equals(rowLocation, finalLocation)) {
-      return false;
-    }
     return Objects.equals(row.getEnvironmentName(), finalBinding.environmentName());
   }
 
@@ -813,9 +728,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
   }
 
   private static String routeKey(ToolInvocationDO row) {
-    return ToolExecutionLocation.ENVIRONMENT.name().equals(row.getLocation())
-        ? row.getEnvironmentName()
-        : null;
+    return row.getEnvironmentName();
   }
 
   private static ToolInvocationUpdateOutcome outcome(int affected) {

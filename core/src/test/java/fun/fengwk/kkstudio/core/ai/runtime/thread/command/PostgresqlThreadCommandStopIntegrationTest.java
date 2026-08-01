@@ -74,11 +74,14 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     long toolRetry = 93_002L;
     long toolRunning = 93_003L;
     long toolWaitingPermission = 93_004L;
-    insertTool(toolQueued, threadId, sessionId, assistantEntryId, 0, epoch, "QUEUED");
-    insertTool(toolRetry, threadId, sessionId, assistantEntryId, 1, epoch, "RETRY_WAIT");
-    insertTool(toolRunning, threadId, sessionId, assistantEntryId, 2, epoch, "RUNNING");
+    insertTool(toolQueued, modelQueued, threadId, sessionId, assistantEntryId, 0, epoch, "QUEUED");
+    insertTool(
+        toolRetry, modelQueued, threadId, sessionId, assistantEntryId, 1, epoch, "RETRY_WAIT");
+    insertTool(
+        toolRunning, modelQueued, threadId, sessionId, assistantEntryId, 2, epoch, "RUNNING");
     insertTool(
         toolWaitingPermission,
+        modelQueued,
         threadId,
         sessionId,
         assistantEntryId,
@@ -257,6 +260,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
 
   private static void insertTool(
       long id,
+      long modelInvocationId,
       long threadId,
       long sessionId,
       long assistantEntryId,
@@ -268,17 +272,18 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
         PreparedStatement statement =
             connection.prepareStatement(
                 "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id,"
-                    + " ordinal, tool_call_id, descriptor, arguments, location, execution_epoch,"
-                    + " status, attempt, created_at) values (?, ?, ?, ?, ?, ?, '{}'::jsonb,"
-                    + " '{}'::jsonb, 'PLATFORM', ?, 'QUEUED', 1, ?)")) {
+                    + " model_invocation_id, ordinal, tool_call_id, descriptor, arguments, environment_name,"
+                    + " execution_epoch, status, attempt, created_at) values (?, ?, ?, ?, ?, ?,"
+                    + " ?, '{}'::jsonb, '{}'::jsonb, null, ?, 'QUEUED', 1, ?)")) {
       statement.setLong(1, id);
       statement.setLong(2, threadId);
       statement.setLong(3, sessionId);
       statement.setLong(4, assistantEntryId);
-      statement.setInt(5, ordinal);
-      statement.setString(6, "call-" + id);
-      statement.setLong(7, epoch);
-      statement.setTimestamp(8, Timestamp.from(BASE));
+      statement.setLong(5, modelInvocationId);
+      statement.setInt(6, ordinal);
+      statement.setString(7, "call-" + id);
+      statement.setLong(8, epoch);
+      statement.setTimestamp(9, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
     transitionInvocation("harness_tool_invocation", id, status, "tool-running");

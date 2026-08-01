@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.ai.runtime.tool.worker;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolExecutionLocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
@@ -53,11 +52,11 @@ final class ToolInvocationRowConverter {
         row.getId(),
         row.getThreadId(),
         row.getAssistantEntryId(),
+        row.getModelInvocationId(),
         row.getOrdinal(),
         row.getToolCallId(),
         descriptor,
         row.getArgumentsJson(),
-        ToolExecutionLocation.valueOf(row.getLocation()),
         row.getEnvironmentName(),
         row.getExecutionEpoch(),
         InvocationStatus.valueOf(row.getStatus()),

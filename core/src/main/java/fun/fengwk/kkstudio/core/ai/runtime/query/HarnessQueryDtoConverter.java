@@ -83,6 +83,7 @@ public class HarnessQueryDtoConverter {
     RuntimeConfigSnapshot config = RUNTIME_CONFIG_CODEC.decode(runtimeConfigJson);
     dto.setActiveAgentDefinitionId(HarnessIds.format(config.agent().definitionId()));
     dto.setActiveAgentName(config.agent().name());
+    dto.setActiveEnvironmentName(config.environmentName());
     dto.setModelId(HarnessIds.format(config.model().descriptor().modelResourceId()));
     dto.setVariant(config.model().variant().id());
     dto.setYoloEnabled(config.yoloEnabled());

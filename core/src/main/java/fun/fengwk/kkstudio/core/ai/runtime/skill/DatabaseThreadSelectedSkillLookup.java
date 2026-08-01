@@ -5,10 +5,9 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.ai.runtime.query.HarnessQueryRow;
 import fun.fengwk.kkstudio.core.ai.runtime.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.command.ThreadCommandMapper;
-import fun.fengwk.kkstudio.core.ai.runtime.thread.command.ThreadCommandRow;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.skill.SelectedSkillMetadata;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
@@ -21,7 +20,8 @@ import java.util.Objects;
  */
 @Component
 public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSkillLookup {
-  private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
+  private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
+      new ModelInvocationRequestJsonCodec();
 
   private final PostgresqlHarnessQueryMapper queryMapper;
   private final ThreadCommandMapper threadCommandMapper;
@@ -33,7 +33,10 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
   }
 
   @Override
-  public List<SelectedSkillMetadata> selectedSkills(long threadId) {
+  public List<SelectedSkillMetadata> selectedSkills(long invocationId, long threadId) {
+    if (invocationId <= 0) {
+      throw new IllegalArgumentException("invocationId must be positive");
+    }
     if (threadId <= 0) {
       throw new IllegalArgumentException("threadId must be positive");
     }
@@ -41,14 +44,14 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
     if (thread == null) {
       throw new IllegalArgumentException("unknown thread: " + threadId);
     }
-    ThreadCommandRow configRow =
-        threadCommandMapper.findEffectiveRuntimeConfig(
-            thread.getSessionId(), thread.getHeadEntryId(), threadId);
-    if (configRow == null || configRow.getPayloadJson() == null) {
+    String requestJson = threadCommandMapper.findModelInvocationRequest(invocationId, threadId);
+    if (requestJson == null) {
       return List.of();
     }
-    RuntimeConfigSnapshot config = CONFIG_CODEC.decode(configRow.getPayloadJson());
-    return config.skills().stream().map(DatabaseThreadSelectedSkillLookup::toMetadata).toList();
+    ModelInvocationRequest request = REQUEST_CODEC.decode(requestJson);
+    return request.skillSnapshots().stream()
+        .map(DatabaseThreadSelectedSkillLookup::toMetadata)
+        .toList();
   }
 
   private static SelectedSkillMetadata toMetadata(SkillSnapshot skill) {

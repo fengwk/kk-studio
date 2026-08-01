@@ -165,11 +165,21 @@ create table chat (
     title               varchar(256),
     -- default_agent_id intentionally has no FK: it preserves a stale reference
     -- after an AgentDefinition is deleted, by design.
-    default_agent_id    bigint,
+    default_agent_id    bigint        not null,
+    default_environment_name varchar(128),
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
-    constraint ck_chat_version_nonneg check (version >= 0)
+    constraint ck_chat_version_nonneg check (version >= 0),
+    constraint ck_chat_default_environment_name check (
+        default_environment_name is null
+        or (
+            default_environment_name !~ '^[[:space:]]'
+            and default_environment_name !~ '[[:space:]]$'
+            and char_length(default_environment_name) > 0
+            and char_length(default_environment_name) <= 128
+        )
+    )
 );
 
 create index idx_chat_modified on chat (updated_at, id);
@@ -260,6 +270,26 @@ create index idx_harness_thread_runnable
 create index idx_harness_thread_processor_until
     on harness_thread (processor_until, id) where processor_until is not null;
 
+create table chat_thread (
+    chat_id     bigint        not null,
+    thread_id   bigint        not null,
+    created_at  timestamptz(3) not null default current_timestamp,
+    constraint pk_chat_thread primary key (chat_id, thread_id),
+    constraint fk_chat_thread_chat foreign key (chat_id)
+        references chat (id) on delete cascade,
+    constraint fk_chat_thread_thread foreign key (thread_id)
+        references harness_thread (id) on delete cascade
+);
+
+create index idx_chat_thread_thread
+    on chat_thread (thread_id, chat_id);
+
+create index idx_harness_thread_updated_id
+    on harness_thread (updated_at desc, id desc);
+
+create index idx_harness_thread_created_id
+    on harness_thread (created_at desc, id desc);
+
 create table harness_thread_input (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
     thread_id         bigint        not null,
@@ -279,7 +309,7 @@ create table harness_thread_input (
     constraint ck_harness_thread_input_type check (
         input_type in (
             'USER_MESSAGE', 'CUSTOM_MESSAGE',
-            'SET_AGENT', 'SET_MODEL', 'SET_YOLO'
+            'SET_AGENT', 'SET_MODEL', 'SET_ENVIRONMENT', 'SET_YOLO'
         )
     ),
     constraint ck_harness_thread_input_status check (
@@ -325,6 +355,8 @@ create table harness_model_invocation (
     safe_stream_snapshot  jsonb,
     constraint uk_harness_model_invocation_source
         unique (thread_id, source_head_entry_id, execution_epoch),
+    constraint uk_harness_model_invocation_thread_id
+        unique (thread_id, id),
     -- Owning Thread is referenced by id only; the thread<->session relationship
     -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_model_invocation_thread foreign key (thread_id)
@@ -475,11 +507,11 @@ create table harness_tool_invocation (
     thread_id             bigint        not null,
     session_id            bigint        not null,
     assistant_entry_id    bigint        not null,
+    model_invocation_id   bigint        not null,
     ordinal               integer       not null,
     tool_call_id          varchar(256)  not null,
     descriptor            jsonb         not null,
     arguments             jsonb         not null,
-    location              varchar(16)   not null,
     environment_name      varchar(128),
     execution_epoch       bigint        not null,
     status                varchar(32)   not null,
@@ -504,21 +536,23 @@ create table harness_tool_invocation (
     -- is enforced upstream by Thread commands via the head Entry.
     constraint fk_harness_tool_invocation_thread foreign key (thread_id)
         references harness_thread (id),
+    constraint fk_harness_tool_invocation_model foreign key (thread_id, model_invocation_id)
+        references harness_model_invocation (thread_id, id),
     -- session_id stays as a constraint carrier so the assistant Entry belongs
     -- to the same Session as the carrier.
     constraint fk_harness_tool_invocation_assistant foreign key (session_id, assistant_entry_id)
         references harness_entry (session_id, id),
-    constraint ck_harness_tool_invocation_location check (
-        location in ('PLATFORM','ENVIRONMENT')
-    ),
     constraint ck_harness_tool_invocation_tool_call_id check (
         char_length(btrim(tool_call_id)) > 0
     ),
-    constraint ck_harness_tool_invocation_location_env check (
-        (location = 'PLATFORM' and environment_name is null)
-        or (location = 'ENVIRONMENT'
-            and environment_name is not null
-            and char_length(btrim(environment_name)) > 0)
+    constraint ck_harness_tool_invocation_environment_name check (
+        environment_name is null
+        or (
+            environment_name !~ '^[[:space:]]'
+            and environment_name !~ '[[:space:]]$'
+            and char_length(environment_name) > 0
+            and char_length(environment_name) <= 128
+        )
     ),
     constraint ck_harness_tool_invocation_status check (
         status in (
@@ -638,11 +672,13 @@ create table harness_tool_invocation (
     )
 );
 
-create index idx_harness_tool_invocation_location_claim
-    on harness_tool_invocation (location, environment_name, status, next_attempt_at, id);
+create index idx_harness_tool_invocation_environment_claim
+    on harness_tool_invocation (environment_name, status, next_attempt_at, id);
+create index idx_harness_tool_invocation_model
+    on harness_tool_invocation (model_invocation_id);
 create index idx_harness_tool_invocation_environment_queue
     on harness_tool_invocation (environment_name, created_at, assistant_entry_id, ordinal, id)
-    where location = 'ENVIRONMENT'
+    where environment_name is not null
       and status in ('QUEUED', 'RUNNING', 'RETRY_WAIT', 'WAITING_INTERACTION');
 create index idx_harness_tool_invocation_status
     on harness_tool_invocation (status, id);

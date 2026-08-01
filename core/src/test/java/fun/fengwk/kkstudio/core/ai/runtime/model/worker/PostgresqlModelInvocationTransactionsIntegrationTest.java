@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -38,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ClaimedModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelInvocationUpdateOutcome;
@@ -69,7 +70,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class PostgresqlModelInvocationTransactionsIntegrationTest
     extends PostgresSpringTestSupport {
 
-  private static final ProviderRequestJsonCodec REQUEST_CODEC = new ProviderRequestJsonCodec();
+  private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
+      new ModelInvocationRequestJsonCodec();
   private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
   private static final ModelInvocationErrorJsonCodec ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
@@ -1560,7 +1562,11 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     return row;
   }
 
-  private static ProviderRequest sampleRequest() {
+  private static ModelInvocationRequest sampleRequest() {
+    return new ModelInvocationRequest(sampleProviderRequest(), List.of(), List.of(), false);
+  }
+
+  private static ProviderRequest sampleProviderRequest() {
     ModelPricing pricing =
         new ModelPricing(
             "USD",

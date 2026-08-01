@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -37,6 +38,10 @@ import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -47,8 +52,10 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -943,25 +950,20 @@ class ModelWorkerTest {
   /** Frozen requests cannot hide ambiguous duplicate tool names from response validation. */
   @Test
   void rejectsDuplicateFrozenToolDefinitions() {
-    Fixture fixture = fixture();
     ProviderRequest base = request();
     ProviderToolDefinition tool =
         new ProviderToolDefinition("tool", "test tool", "{\"type\":\"object\"}");
-    fixture.transactions.current =
-        queued(
-            new ProviderRequest(
-                base.model(),
-                base.variant(),
-                base.messages(),
-                List.of(tool, tool),
-                base.cacheControl()),
-            NOW.minusSeconds(1));
-
-    assertTrue(fixture.worker.dispatch(1L));
-    fixture.executor.listener.onComplete(response("answer", ProviderStopReason.COMPLETED));
-
-    assertEquals(InvocationStatus.FAILED, fixture.transactions.current.status());
-    assertTrue(fixture.transactions.current.error().message().contains("duplicate tool"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            queued(
+                new ProviderRequest(
+                    base.model(),
+                    base.variant(),
+                    base.messages(),
+                    List.of(tool, tool),
+                    base.cacheControl()),
+                NOW.minusSeconds(1)));
   }
 
   /** Tool arguments are strictly required to remain JSON objects at the Runtime boundary. */
@@ -1484,7 +1486,11 @@ class ModelWorkerTest {
         base.model(),
         base.variant(),
         base.messages(),
-        List.of(new ProviderToolDefinition("tool", "test tool", "{\"type\":\"object\"}")),
+        List.of(
+            new ProviderToolDefinition(
+                "tool",
+                "test tool",
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}")),
         base.cacheControl());
   }
 
@@ -1991,12 +1997,14 @@ class ModelWorkerTest {
   }
 
   private static ModelInvocation queued(ProviderRequest request, Instant createdAt) {
+    List<ToolBinding> toolBindings =
+        request.tools().stream().map(ModelWorkerTest::binding).toList();
     return new ModelInvocation(
         1L,
         2L,
         3L,
         0L,
-        request,
+        new ModelInvocationRequest(request, toolBindings, List.of(), false),
         InvocationStatus.QUEUED,
         1,
         null,
@@ -2010,6 +2018,18 @@ class ModelWorkerTest {
         null,
         null,
         null);
+  }
+
+  private static ToolBinding binding(ProviderToolDefinition providerTool) {
+    return ToolBinding.of(
+        new ToolDescriptor(
+            providerTool.name(),
+            "1",
+            providerTool.description(),
+            providerTool.name(),
+            new ToolParamsSchema(null, Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(1)));
   }
 
   private static ModelInvocation copy(

@@ -45,16 +45,6 @@ public interface ToolInvocationTransactions {
   ToolInvocationUpdateOutcome recordActivity(
       ClaimedToolInvocation claimed, Instant activityAt, Instant now);
 
-  /**
-   * Release an invocation that was claimed but never dispatched. The target's {@code available_at}
-   * is rescheduled to {@code now} (for {@link InvocationStatus#QUEUED} releases) or {@code
-   * nextAttemptAt} (for {@link InvocationStatus#RETRY_WAIT} releases). The pre-claim state comes
-   * exclusively from {@link ClaimedToolInvocation#previousStatus()}; the owning Thread is not
-   * touched.
-   */
-  ToolInvocationUpdateOutcome releaseUnstarted(
-      ClaimedToolInvocation claimed, Instant nextAttemptAt, Instant now);
-
   ToolInvocationUpdateOutcome completeSuccess(
       ClaimedToolInvocation claimed,
       Supplier<ToolResult> resultSupplier,
@@ -88,9 +78,9 @@ public interface ToolInvocationTransactions {
 
   /**
    * Persist the final authorized execution plan and transition permission state to {@code ALLOWED}.
-   * The Tool descriptor, arguments, location and environment name are overwritten atomically with
-   * the caller-supplied final plan. The durable target row is preserved (or rescheduled to the
-   * worker lease deadline) so the caller can immediately dispatch the post-allow invocation.
+   * The Tool descriptor, arguments, route and environment name are overwritten atomically with the
+   * caller-supplied final plan. The durable target row is preserved (or rescheduled to the worker
+   * lease deadline) so the caller can immediately dispatch the post-allow invocation.
    */
   ToolInvocationUpdateOutcome persistPermissionAllowed(
       ClaimedToolInvocation claimed,

@@ -567,21 +567,34 @@ class PostgresqlExecutionTargetStoreIntegrationTest extends PostgresSpringTestSu
           statement.setObject(4, offset(seeds.getFirst().createdAt()));
           assertEquals(1, statement.executeUpdate());
         }
+        long modelInvocationId = seeds.getFirst().invocationId() + 1_000_000L;
+        try (PreparedStatement statement =
+            connection.prepareStatement(
+                "insert into harness_model_invocation (id, thread_id, source_head_entry_id,"
+                    + " execution_epoch, request, status, attempt, created_at)"
+                    + " values (?, ?, ?, 0, '{}'::jsonb, 'QUEUED', 1, ?)")) {
+          statement.setLong(1, modelInvocationId);
+          statement.setLong(2, threadId);
+          statement.setLong(3, rootEntryId);
+          statement.setObject(4, offset(seeds.getFirst().createdAt()));
+          assertEquals(1, statement.executeUpdate());
+        }
         try (PreparedStatement statement =
             connection.prepareStatement(
                 "insert into harness_tool_invocation (id, thread_id, session_id, assistant_entry_id,"
-                    + " ordinal, tool_call_id, descriptor, arguments, location, environment_name,"
+                    + " model_invocation_id, ordinal, tool_call_id, descriptor, arguments, environment_name,"
                     + " execution_epoch, status, attempt, created_at) values (?, ?, ?, ?, ?, ?,"
-                    + " '{}'::jsonb, '{}'::jsonb, 'ENVIRONMENT', ?, 0, 'QUEUED', 1, ?)")) {
+                    + " ?, '{}'::jsonb, '{}'::jsonb, ?, 0, 'QUEUED', 1, ?)")) {
           for (ToolSeed seed : seeds) {
             statement.setLong(1, seed.invocationId());
             statement.setLong(2, threadId);
             statement.setLong(3, sessionId);
             statement.setLong(4, assistantEntryId);
-            statement.setInt(5, seed.ordinal());
-            statement.setString(6, "call-" + seed.invocationId());
-            statement.setString(7, routeKey);
-            statement.setObject(8, offset(seed.createdAt()));
+            statement.setLong(5, modelInvocationId);
+            statement.setInt(6, seed.ordinal());
+            statement.setString(7, "call-" + seed.invocationId());
+            statement.setString(8, routeKey);
+            statement.setObject(9, offset(seed.createdAt()));
             assertEquals(1, statement.executeUpdate());
           }
         }

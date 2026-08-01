@@ -2,19 +2,12 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,26 +16,7 @@ import java.util.regex.Pattern;
 public final class EditTool extends AbstractCodingTool {
 
   public EditTool(CodingToolsConfig config) {
-    super(
-        config,
-        new ToolDescriptor(
-            "edit",
-            "1",
-            CodingToolPrompts.load("edit"),
-            null,
-            new ToolParamsSchema(
-                "Edit parameters",
-                Map.of(
-                    "path", new ToolStringSchema("File path"),
-                    "old_string", new ToolStringSchema("Exact text to replace"),
-                    "new_string", new ToolStringSchema("Replacement text"),
-                    "replace_all", new ToolBooleanSchema("Replace every exact match"),
-                    "workdir",
-                        new ToolStringSchema("Optional environment-root-relative directory")),
-                Set.of("path", "old_string", "new_string"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(1)));
+    super(config, EnvironmentToolCatalog.require("edit"));
   }
 
   @Override

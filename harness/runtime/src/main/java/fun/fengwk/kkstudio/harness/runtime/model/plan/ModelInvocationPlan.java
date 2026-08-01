@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.model.plan;
 
 import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 
 import java.util.Objects;
 
@@ -13,7 +13,7 @@ import java.util.Objects;
  * lease；不允许在此之前再 harvest 后续配置或消息，否则响应快照会被后续 Input 污染。
  */
 public record ModelInvocationPlan(
-    long sourceHeadEntryId, ProviderRequest request, RuntimeConfigSnapshot configSnapshot) {
+    long sourceHeadEntryId, ModelInvocationRequest request, RuntimeConfigSnapshot configSnapshot) {
 
   public ModelInvocationPlan {
     if (sourceHeadEntryId <= 0) {

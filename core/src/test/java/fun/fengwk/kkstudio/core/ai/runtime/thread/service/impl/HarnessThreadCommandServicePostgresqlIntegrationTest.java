@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadAgentSetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloSetDTO;
@@ -39,7 +40,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
 
   /** Queued config 不受 live resource mutation 影响，后续 SET_* 从 pending snapshot 复制。 */
   @Test
-  void freezesQueuedAgentAndCopiesPendingSnapshotForModelAndYolo() throws Exception {
+  void freezesQueuedConfigAndComposesPendingAgentEnvironmentModelAndYolo() throws Exception {
     seedResources();
     TestThreads.Bootstrapped boot =
         TestThreads.bootstrap(transactions, "snapshot", Instant.parse("2026-07-24T00:00:00Z"));
@@ -56,6 +57,30 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     assertEquals("frozen-agent", agentSnapshot.agent().name());
     assertEquals("frozen prompt", agentSnapshot.agent().systemPrompt());
     assertEquals(MODEL_A_ID, agentSnapshot.model().descriptor().modelResourceId());
+
+    HarnessThreadEnvironmentSetDTO environmentRequest = new HarnessThreadEnvironmentSetDTO();
+    environmentRequest.setEnvironmentName("env-a");
+    environmentRequest.setClientMessageId("environment-1");
+    environmentRequest.setExpectedExecutionEpoch(epoch);
+    HarnessThreadInputDTO environmentInput =
+        commandService.queueEnvironment(Long.toString(threadId), environmentRequest);
+    RuntimeConfigSnapshot environmentSnapshot =
+        decode(environmentInput, ThreadInputType.SET_ENVIRONMENT);
+    assertEquals("env-a", environmentSnapshot.environmentName());
+    assertEquals(agentSnapshot.agent(), environmentSnapshot.agent());
+    assertEquals(agentSnapshot.model(), environmentSnapshot.model());
+    assertEquals(agentSnapshot.toolNames(), environmentSnapshot.toolNames());
+    assertEquals(agentSnapshot.skillNames(), environmentSnapshot.skillNames());
+    assertEquals(agentSnapshot.yoloEnabled(), environmentSnapshot.yoloEnabled());
+
+    HarnessThreadEnvironmentSetDTO environmentRetry = new HarnessThreadEnvironmentSetDTO();
+    environmentRetry.setEnvironmentName(" ");
+    environmentRetry.setClientMessageId("environment-1");
+    environmentRetry.setExpectedExecutionEpoch(epoch);
+    HarnessThreadInputDTO retriedEnvironment =
+        commandService.queueEnvironment(Long.toString(threadId), environmentRetry);
+    assertEquals(environmentInput.getInputId(), retriedEnvironment.getInputId());
+    assertEquals(environmentInput.getPayloadJson(), retriedEnvironment.getPayloadJson());
 
     invalidateLiveAgentAndModel();
     HarnessThreadAgentSetDTO retry = new HarnessThreadAgentSetDTO();
@@ -76,8 +101,9 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
         commandService.queueModel(Long.toString(threadId), modelRequest);
     RuntimeConfigSnapshot modelSnapshot = decode(modelInput, ThreadInputType.SET_MODEL);
     assertEquals(agentSnapshot.agent(), modelSnapshot.agent());
-    assertEquals(agentSnapshot.tools(), modelSnapshot.tools());
-    assertEquals(agentSnapshot.skills(), modelSnapshot.skills());
+    assertEquals("env-a", modelSnapshot.environmentName());
+    assertEquals(agentSnapshot.toolNames(), modelSnapshot.toolNames());
+    assertEquals(agentSnapshot.skillNames(), modelSnapshot.skillNames());
     assertEquals(agentSnapshot.yoloEnabled(), modelSnapshot.yoloEnabled());
     assertEquals(MODEL_B_ID, modelSnapshot.model().descriptor().modelResourceId());
     assertEquals("fast", modelSnapshot.model().variant().id());
@@ -91,12 +117,29 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     RuntimeConfigSnapshot yoloSnapshot = decode(yoloInput, ThreadInputType.SET_YOLO);
     assertEquals(modelSnapshot.agent(), yoloSnapshot.agent());
     assertEquals(modelSnapshot.model(), yoloSnapshot.model());
-    assertEquals(modelSnapshot.tools(), yoloSnapshot.tools());
-    assertEquals(modelSnapshot.skills(), yoloSnapshot.skills());
+    assertEquals(modelSnapshot.toolNames(), yoloSnapshot.toolNames());
+    assertEquals(modelSnapshot.skillNames(), yoloSnapshot.skillNames());
+    assertEquals("env-a", yoloSnapshot.environmentName());
     assertEquals(!modelSnapshot.yoloEnabled(), yoloSnapshot.yoloEnabled());
+
+    HarnessThreadEnvironmentSetDTO clearRequest = new HarnessThreadEnvironmentSetDTO();
+    clearRequest.setEnvironmentName(null);
+    clearRequest.setClientMessageId("environment-clear");
+    clearRequest.setExpectedExecutionEpoch(epoch);
+    HarnessThreadInputDTO clearInput =
+        commandService.queueEnvironment(Long.toString(threadId), clearRequest);
+    RuntimeConfigSnapshot cleared = decode(clearInput, ThreadInputType.SET_ENVIRONMENT);
+    assertEquals(null, cleared.environmentName());
+    assertEquals(yoloSnapshot.agent(), cleared.agent());
+    assertEquals(yoloSnapshot.model(), cleared.model());
+    assertEquals(yoloSnapshot.toolNames(), cleared.toolNames());
+    assertEquals(yoloSnapshot.skillNames(), cleared.skillNames());
+    assertEquals(yoloSnapshot.yoloEnabled(), cleared.yoloEnabled());
     assertEquals(1L, agentInput.getSequence());
-    assertEquals(2L, modelInput.getSequence());
-    assertEquals(3L, yoloInput.getSequence());
+    assertEquals(2L, environmentInput.getSequence());
+    assertEquals(3L, modelInput.getSequence());
+    assertEquals(4L, yoloInput.getSequence());
+    assertEquals(5L, clearInput.getSequence());
   }
 
   private static RuntimeConfigSnapshot decode(HarnessThreadInputDTO input, ThreadInputType type) {
