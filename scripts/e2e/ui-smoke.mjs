@@ -263,8 +263,13 @@ async function main(argv) {
   await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
     await goto('/settings')
     await expectVisibleText(page, '设置')
-    const localeSelector = page.locator('.topbar-right select.locale-selector')
-    await localeSelector.selectOption('en-US')
+    const localeTrigger = page.locator('.topbar-right .locale-selector-trigger')
+    await localeTrigger.click()
+    await page.getByRole('listbox', { name: '语言' }).waitFor({ state: 'visible' })
+    await page.getByRole('option', { name: 'English', exact: true }).waitFor({ state: 'visible' })
+    await page.getByRole('option', { name: '中文', exact: true }).waitFor({ state: 'visible' })
+    await shot(caseArt, 'language-selector-open')
+    await page.getByRole('option', { name: 'English', exact: true }).click()
     await expectVisibleText(page, 'Setting')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
@@ -273,7 +278,8 @@ async function main(argv) {
 
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
     await expectVisibleText(page, 'Setting')
-    await page.locator('.topbar-right select.locale-selector').selectOption('zh-CN')
+    await page.locator('.topbar-right .locale-selector-trigger').click()
+    await page.getByRole('option', { name: '中文', exact: true }).click()
     await expectVisibleText(page, '设置')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),

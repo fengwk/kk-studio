@@ -203,7 +203,7 @@ Agent config 只包含 `tools` 与 `skills`；Environment target 不属于 Agent
 
 | Case | 断言 |
 | --- | --- |
-| `ui.i18n.language_switch` | `/settings` 通过右上角原生语言下拉切换 English/中文，切换后持久化并在 reload 后保持 |
+| `ui.i18n.language_switch` | `/settings` 通过右上角自定义语言 dropdown/listbox 切换 English/中文，截图打开菜单，切换后持久化并在 reload 后保持 |
 | `ui.chats.page_loads` | `/chats` + 新建 Chat |
 | `ui.models.page_loads` | `/models` 渲染全部 19 个 Pi seed 模型 + 新建 Model |
 | `ui.models.open_create_modal` | 点击新建 Model |

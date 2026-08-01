@@ -4338,34 +4338,111 @@ div.is-error {
 }
 
 .locale-selector {
+  position: relative;
   display: inline-block;
+  max-width: 100%;
+}
+
+.locale-selector .locale-selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-height: 30px;
   max-width: 100%;
-  padding: 0 28px 0 10px;
+  padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--fg-muted);
-  background-color: var(--surface);
+  color: var(--fg);
+  background: var(--surface);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
   line-height: 1;
+  white-space: nowrap;
 }
 
-.locale-selector:hover {
-  color: var(--fg);
+.locale-selector .locale-selector-trigger:hover,
+.locale-selector .locale-selector-trigger[aria-expanded='true'] {
   border-color: var(--border-hover);
+  background: var(--surface-hover);
 }
 
-.locale-selector:focus-visible {
+.locale-selector .locale-selector-trigger:focus-visible {
   outline: none;
   border-color: var(--green-primary);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.locale-selector option {
+.locale-selector-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-dim);
+  transition: transform 0.16s ease;
+}
+
+.locale-selector-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.locale-selector-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  display: grid;
+  gap: 2px;
+  min-width: 132px;
+  max-width: calc(100vw - 24px);
+  padding: 5px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--overlay-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.locale-selector .locale-selector-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  text-align: left;
+}
+
+.locale-selector .locale-selector-option:hover,
+.locale-selector .locale-selector-option.is-active {
   color: var(--fg);
-  background: var(--surface);
+  background: var(--surface-hover);
+}
+
+.locale-selector .locale-selector-option[aria-selected='true'] {
+  color: var(--green-primary);
+  font-weight: 600;
+}
+
+.locale-option-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.locale-option-indicator svg {
+  width: 14px;
+  height: 14px;
 }
 
 .topnav .locale-selector {
@@ -4379,14 +4456,32 @@ div.is-error {
 
   .topnav .locale-selector {
     display: block;
-    min-height: 42px;
     width: 100%;
     margin-top: 4px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .topnav .locale-selector .locale-selector-trigger {
+    display: flex;
+    width: 100%;
+    min-height: 42px;
     padding: 0 12px;
     border: 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0 0 7px 7px;
-    background-color: transparent;
+    background: transparent;
+    font-size: 14px;
+  }
+
+  .topnav .locale-selector .locale-selector-menu {
+    right: 0;
+    left: 0;
+    max-width: none;
+  }
+
+  .topnav .locale-selector .locale-selector-option {
+    min-height: 38px;
+    padding: 0 12px;
     font-size: 14px;
   }
 }
