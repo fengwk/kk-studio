@@ -90,19 +90,19 @@ kill_daemon() {
 
 package_backend() {
   local java_home=$1
-  step "Packaging backend (Java 21, offline, skipTests)"
+  step "Clean packaging backend (Java 21, offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    env JAVA_HOME="$java_home" mvn -o -pl web -am -DskipTests package
+    env JAVA_HOME="$java_home" mvn -o -pl web -am -DskipTests clean package
   )
 }
 
 package_daemon() {
   local java_home=$1
-  step "Packaging daemon (Java 21, offline, skipTests)"
+  step "Clean packaging daemon (Java 21, offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    env JAVA_HOME="$java_home" mvn -o -pl harness/daemon -am -DskipTests package
+    env JAVA_HOME="$java_home" mvn -o -pl harness/daemon -am -DskipTests clean package
   )
 }
 

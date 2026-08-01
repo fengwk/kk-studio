@@ -14,7 +14,7 @@
 
 ```bash
 ./scripts/e2e.sh                         # 默认完整 L1 矩阵（免费）
-./scripts/e2e.sh --rebuild               # 重打包并重启服务
+./scripts/e2e.sh --rebuild               # 清理 Maven target、重打包并重启服务
 ./scripts/e2e.sh --real                  # + 真 MiniMax 文本（需 TEST_MINIMAX_*）
 ./scripts/e2e.sh --real --with-branch
 ./scripts/e2e.sh --real --with-tools
