@@ -1,11 +1,13 @@
 import { assert, envelopeData, pageResults, sleep, cid } from '../lib/http.mjs'
 import {
+  createChatThread,
   createBootstrappedThread,
   getThread,
   getThreadSnapshot,
   snapshotEntries,
   rebindWhenQuiescent,
   waitForModelTextDeltaAfterSseConnected,
+  waitForThreadInputApplied,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -373,13 +375,32 @@ registerCase({
   level: 'L4',
   title: 'Daemon Environment READY',
   requires: ['tools'],
-  docs: 'tool-e2e READY 且含 coding tools',
+  docs: 'READY 只上报 skills；GET /api/ai/environment 投影固定 Environment tool catalog + skills',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/ai/environment')
     const match = (envelopeData(json) || []).find((e) => e.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
-    const names = new Set((match.tools || []).map((t) => t.name))
-    assert(['read', 'write', 'edit', 'apply_patch'].some((n) => names.has(n)), JSON.stringify([...names]))
+    const expectedToolNames = [
+      'read',
+      'write',
+      'edit',
+      'apply_patch',
+      'bash',
+      'grep',
+      'find',
+      'lsp_goto_definition',
+      'lsp_workspace_symbols',
+      'lsp_java_decompile',
+    ]
+    const actualTools = match.tools || []
+    const names = actualTools.map((tool) => tool.name)
+    assert(
+      names.length === expectedToolNames.length
+        && expectedToolNames.every((name) => names.includes(name))
+        && actualTools.every((tool) => tool.version === '1'),
+      JSON.stringify({ expectedToolNames, actualTools }),
+    )
+    assert(Array.isArray(match.skills), JSON.stringify(match))
   },
 })
 
@@ -388,7 +409,7 @@ registerCase({
   level: 'L4',
   title: 'YOLO 下 tool invocation',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：要求 read；tool-invocations 非空',
+  docs: '仅 minimax/MiniMax-M2.7：临时 Agent 只选择 read；Chat defaultEnvironmentName 路由；断言 invocation.environmentName 且 SUCCEEDED',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -402,20 +423,35 @@ registerCase({
       modelId: String(ctx.vars.seedModel.id),
       variant: ctx.vars.seedModel.config.defaultVariant,
       config: {
-        environmentName: ctx.daemonEnv,
         tools: ['read'],
         skills: [],
       },
     })
     const toolAgent = envelopeData(agentJson)
     assert(toolAgent?.id, JSON.stringify(agentJson))
+    let chat = null
     try {
-      const { thread } = await createBootstrappedThread(ctx, {
-        agentDefinitionId: toolAgent.id,
-        title: `e2e-tool-${suffix}`,
-        yoloEnabled: true,
+      const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
+        title: `e2e-tool-chat-${suffix}`,
+        defaultAgentId: String(toolAgent.id),
+        defaultEnvironmentName: ctx.daemonEnv,
       })
+      chat = envelopeData(chatJson)
+      const thread = await createChatThread(ctx, chat.id)
+      assert(thread.activeEnvironmentName === ctx.daemonEnv, JSON.stringify(thread))
       const tid = thread.threadId
+      const { status: yoloStatus, json: yoloJson } = await ctx.call(
+        'PUT',
+        `/api/ai/runtime/threads/${tid}/yolo`,
+        {
+          yoloEnabled: true,
+          clientMessageId: cid(),
+          expectedExecutionEpoch: Number(thread.executionEpoch),
+        },
+      )
+      assert(yoloStatus === 202, JSON.stringify(yoloJson))
+      const yoloInput = envelopeData(yoloJson)
+      await waitForThreadInputApplied(ctx, tid, yoloInput.inputId)
       await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
         content:
           '必须调用 read 工具读取环境根目录。请使用参数 {"path":"."}，不要猜测或跳过工具，'
@@ -442,10 +478,24 @@ registerCase({
         `read invocation used unexpected environment: ${JSON.stringify(readInvocation)}`,
       )
       assert(
+        !Object.hasOwn(readInvocation, 'location'),
+        `ToolInvocationDTO must not expose location: ${JSON.stringify(readInvocation)}`,
+      )
+      assert(
         readInvocation.status === 'SUCCEEDED',
         `read invocation did not succeed: ${JSON.stringify(readInvocation)}`,
       )
     } finally {
+      if (chat?.id) {
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/chat/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          )
+        } catch {
+          // Preserve the primary assertion failure.
+        }
+      }
       try {
         await ctx.call(
           'DELETE',

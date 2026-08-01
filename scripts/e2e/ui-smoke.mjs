@@ -89,13 +89,18 @@ async function apiDeleteByName(backendUrl, resource, name) {
 async function requireRealMiniMaxM27(backendUrl) {
   const { json: agentsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')
   const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
+  const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
   const agents = agentsJson?.data?.results || []
   const models = modelsJson?.data?.results || []
+  const providers = providersJson?.data?.results || []
   const agent = agents.find((candidate) => candidate.name === 'default-assistant')
   const model = models.find((candidate) => Number(candidate.id) === 1)
+  const provider = providers.find((candidate) => String(candidate.id) === String(model?.providerId))
   assert(
-    model?.name === 'MiniMax-M2.7' && String(agent?.modelId) === String(model.id),
-    `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model })}`,
+    provider?.name === 'minimax'
+      && model?.name === 'MiniMax-M2.7'
+      && String(agent?.modelId) === String(model.id),
+    `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model, provider })}`,
   )
 }
 

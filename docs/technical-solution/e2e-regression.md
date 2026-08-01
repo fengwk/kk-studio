@@ -6,7 +6,7 @@
 
 ## 边界
 
-- **已覆盖**：API 契约、HTTP `Accept-Language` 错误国际化、资源 CRUD、Chat↔Thread 历史关联与 opaque cursor 分页、Model/Agent 配置校验矩阵、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、usage 语义；可选真模型/分支/tool。
+- **已覆盖**：API 契约、HTTP `Accept-Language` 错误国际化、资源 CRUD、Chat↔Thread 历史关联与 opaque cursor 分页、Chat `defaultEnvironmentName` 的 canonical create/update/clear、Model/Agent 配置校验矩阵、Chat-scoped Thread 原子 bootstrap、Thread 生命周期与 head 重定位（bootstrap / rebind / unbind / stop / epoch fencing）、Thread `SET_ENVIRONMENT` set/clear/idempotency、usage 语义；可选真模型/分支/tool。
 - **未覆盖（默认）**：浏览器点击 UI、Canvas/ComfyUI 全流程、配置笛卡尔全组合穷举、SSE 多 Pane 视觉。
 - 真模型与 tool/branch 默认关闭，需显式参数。
 
@@ -37,7 +37,9 @@ npm --prefix frontend run e2e:list
 
 当前默认 E2E Agent 固定使用 `minimax/MiniMax-M2.7`，因此 `--real` 必须同时提供
 `TEST_MINIMAX_BASE_URL` 和 `TEST_MINIMAX_API_KEY`。这是唯一真实 credential 输入；同步器
-仅更新确定性 MiniMax Provider `id=1`，并将 Base URL 去尾斜杠后补为 `/v1`。
+仅更新确定性 MiniMax Provider `id=1`，并将 Base URL 去尾斜杠后补为 `/v1`。所有带
+`real` 要求的 API case 都经过同一严格 guard：Provider 必须是 `minimax`，Model 必须是
+seed `id=1` 的 `MiniMax-M2.7`，不得通过开关或 fixture 扩展到其它真实模型。
 
 E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 
@@ -67,7 +69,7 @@ E2E seed 固定包含 Pi 0.82.1 有效运行时中的 19 个模型：
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke（L5） |
 | `scripts/e2e/lib/http.mjs` | fetch/断言 |
 | `scripts/e2e/lib/fixtures.mjs` | 合法体与配置矩阵行 |
-| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/重绑、Thread page `{items,nextCursor}` 解析、Thread/Session 读取、等待静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
+| `scripts/e2e/lib/harness.mjs` | 共享 Thread 步骤：创建/引导/Chat-scoped 原子创建、重绑、Thread page `{items,nextCursor}` 解析、Thread/Session 读取、等待 mailbox 应用与静止，以及先连接 SSE 再等待严格模型文本 delta 的 stop 时机 helper |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
 | `scripts/e2e/cases/*.mjs` | API 用例 |
 | `core/src/test/resources/.../pi-model-catalog.json` | Pi 0.82.1 有效模型目录快照 |
@@ -92,10 +94,10 @@ reports/e2e/LATEST_RUN.txt
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | seed 契约、CRUD、配置校验、Thread 生命周期与 head 重定位、Thread snapshot 404、proxy |
+| L1 | 默认 | 免费 | seed 契约、CRUD、Chat Environment 默认值、Chat-scoped 原子 bootstrap、配置校验、Thread 生命周期与 head 重定位、SET_ENVIRONMENT、Thread snapshot 404、proxy |
 | L2 | `--real` | `minimax/MiniMax-M2.7` | 文本轮次 + usage 入账；流式 `/stop` 持久化 partial assistant barrier，并在其后继续 follow-up |
 | L3 | `--real --with-branch` | `minimax/MiniMax-M2.7` | rebind 到历史 Entry 后的分支路径 usage |
-| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | Environment READY；临时 Agent 显式绑定 `read` 后完成 YOLO tool invocation |
+| L4 | `--with-tools` / `--real --with-tools` | daemon / `minimax/MiniMax-M2.7` | READY 仅上报 skills，Environment 查询投影固定工具目录；临时 Agent 只选择 `read`，通过 Chat default Environment 路由并完成 YOLO tool invocation |
 | L5 | `--ui` | 本地浏览器 | 页面可达、列表渲染、打开新建模态、无致命 pageerror；截图入报告 |
 
 API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认执行全部免费 L1（**55** 条）。`--ui` 额外 **15** 条 UI smoke（`--real` 时再 +1 真实首发）。
@@ -113,6 +115,7 @@ API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `thread_snapshot.unknown_thread_404` | 未知 Thread snapshot 404 |
 | `frontend.proxy_model_contract` | 5173 代理契约 |
 | `thread.commands_model_yolo` | SET_MODEL + SET_YOLO 应用 |
+| `thread.commands_environment` | SET_ENVIRONMENT set/clear；重复 `clientMessageId` 幂等返回原 input；过期 `expectedExecutionEpoch` => 409 且不写入 Input |
 | `thread.commands_model_invalid_variant_rejected` | 非法 Variant 在 SET_MODEL 入队前拒绝 |
 | `harness.retry_policy_round_trip` | GET original → PUT 合法差异策略 → GET 四字段一致；finally 恢复 original |
 | `harness.realtime_stream_policy_round_trip` | GET original → PUT 合法差异 `maxLength` → GET 一致；finally 恢复 original |
@@ -143,9 +146,10 @@ API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `crud.model.lifecycle` | create/update/delete model（临时 provider；PUT/DELETE 使用版本） |
 | `crud.agent.lifecycle` | create/update/delete agent（PUT/DELETE 使用版本） |
 | `crud.chat.invalid_agent_id` | 非正整数字符串 defaultAgentId => 400 |
+| `crud.chat.default_environment` | `defaultEnvironmentName` canonical create/update；显式 null clear；空白或首尾空格 => 400 |
 | `crud.model.delete_unknown_rejected` | 删除不存在 Model（`expectedVersion=0`）=> 404 |
 | `crud.chat.lifecycle` | create/update/delete chat；PUT/DELETE 使用版本；空白 title 更新拒绝；删后 404。Chat 不拥有 Thread/Session 生命周期 |
-| `crud.chat.thread_association_pagination` | Chat-scoped 原子创建 Thread；全局 Thread 幂等关联；当前 Chat 与全局列表返回 `{items,nextCursor}`，limit=1 的连续页无重复 |
+| `crud.chat.thread_association_pagination` | Chat-scoped POST 原子 create+associate+bootstrap 并返回绑定 Thread（断言 `activeEnvironmentName`）；全局 Thread 幂等关联；当前 Chat 与全局列表返回 `{items,nextCursor}`，limit=1 的连续页无重复 |
 
 ### Model config 矩阵
 
@@ -169,15 +173,16 @@ API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 
 ### Agent config 矩阵
 
+Agent config 只包含 `tools` 与 `skills`；Environment target 不属于 Agent fixture，而由 Chat
+`defaultEnvironmentName` 或 Thread `SET_ENVIRONMENT` 冻结到 Runtime Config。
+
 | Case 后缀 | 期望 |
 | --- | --- |
 | `valid.empty_lists` | 成功（空 `tools`/`skills`） |
 | `invalid.missing_tools` | 400（`tools` 必填） |
 | `invalid.missing_skills` | 400（`skills` 必填） |
-| `invalid.unready_environment` | 400（`environmentName` 不是 READY 环境） |
 | `invalid.unknown_tool` | 400 unknown agent tool |
 | `invalid.duplicate_skill` | 400 |
-| `invalid.blank_environment_name` | 400 environmentName blank |
 | `invalid.unknown_field_rejected` | 400（未知字段被严格 codec 拒绝） |
 
 另有 setup/teardown case 管理临时 provider/model。
@@ -190,8 +195,8 @@ API 矩阵注册 **61** 条（以 `./scripts/e2e.sh --list` 为准）。默认�
 | `real.queued_input_batch` | `--real` | 首轮流式执行期间连续入队两条消息；下一 turn 同批 APPLIED，只产生一个 ModelInvocation 和一个 assistant MESSAGE |
 | `real.stop_partial_continue` | `--real` | 首个非空文本 delta 后 stop；durable `ASSISTANT_ABORTED` 仅含安全 text/thinking；follow-up 位于 barrier 后，旧 debt 不重派 |
 | `branch.path_usage` | `--real --with-branch` | 另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀 |
-| `daemon.ready` | `--with-tools` | Daemon Environment READY |
-| `tool.read_turn` | `--real --with-tools` | 创建仅绑定当前 READY Environment 与 `read` 的临时 MiniMax Agent；YOLO 调用 `read({"path":"."})` 且 invocation `SUCCEEDED` |
+| `daemon.ready` | `--with-tools` | Daemon READY 只上报 skills；GET `/api/ai/environment` 仍返回固定 Environment tool catalog + skills |
+| `tool.read_turn` | `--real --with-tools` | 创建只选择 `read` 的临时 MiniMax Agent；Chat `defaultEnvironmentName` 路由 Chat-scoped 原子 Thread；YOLO 调用 `read({"path":"."})`，断言 `invocation.environmentName` 且 `SUCCEEDED` |
 
 ## UI smoke（L5）
 
@@ -221,10 +226,10 @@ GET|POST /api/ai/catalog/providers
 GET|POST /api/ai/catalog/models
 GET|POST /api/ai/catalog/agents
 PUT|DELETE /api/ai/catalog/{providers,models,agents}/{id}            # expectedVersion 必填十进制字符串
-GET|POST /api/ai/chat
+GET|POST /api/ai/chat                                             # Chat create 可选 defaultEnvironmentName
 GET|PUT|DELETE /api/ai/chat/{id}                                     # PUT/DELETE 的 expectedVersion 必填
 GET /api/ai/chat/{id}/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
-POST /api/ai/chat/{id}/threads                                     # 原子创建并关联 UNBOUND Thread
+POST /api/ai/chat/{id}/threads                                     # 原子 create+associate+bootstrap，返回绑定 Thread
 PUT /api/ai/chat/{id}/threads/{threadId}                           # 幂等历史关联
 GET|POST /api/ai/runtime/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
 GET /api/ai/runtime/threads/{id}
@@ -232,7 +237,7 @@ POST /api/ai/runtime/threads/{id}/bootstrap                          # => 201 {s
 PUT /api/ai/runtime/threads/{id}/head                                # headEntryId 可为 null
 POST /api/ai/runtime/threads/{id}/messages
 POST /api/ai/runtime/threads/{id}/messages/custom
-PUT /api/ai/runtime/threads/{id}/{agent,model,yolo}
+PUT /api/ai/runtime/threads/{id}/{agent,model,yolo,environment}     # SET_ENVIRONMENT 支持 set/clear
 POST /api/ai/runtime/threads/{id}/stop
 GET /api/ai/runtime/threads/{id}/snapshot                            # unknown => 404
 GET /api/ai/runtime/threads/{id}/events/stream?afterRevision={revision}
@@ -251,7 +256,17 @@ GET /api/ai/environment
 WebSocket /api/ai/environment/daemon/v1
 ```
 
-上述 Thread 写接口的请求体均含必填 `expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
+Chat create/update 的 `defaultEnvironmentName` 只做 canonical name 校验；update 省略字段表示保留，
+显式 JSON `null` 表示清除。Chat-scoped Thread POST 在同一事务内创建 Thread、关联 Chat、
+bootstrap Session/ROOT/RUNTIME_CONFIG 并返回绑定的 `HarnessThreadDTO`，调用方不得再发
+`/bootstrap`。`HarnessThreadDTO.activeEnvironmentName` 是当前冻结 Runtime Config 的 Environment
+target；`PUT /environment` 产生 `SET_ENVIRONMENT` mailbox input，`null` 清除，使用
+`clientMessageId` 幂等并以 `expectedExecutionEpoch` 做 fencing。上述 Thread 写接口的请求体均含必填
+`expectedExecutionEpoch`：epoch 过期或 Thread 非静止 => `409`，未知资源 => `404`。
+
+Daemon 的 `READY` frame 只携带 skills 摘要；`GET /api/ai/environment` 由服务端投影固定
+Environment tool catalog 与 READY skills。`ToolInvocationDTO` 不暴露 `location`，工具目标快照
+只通过 `environmentName` 表示；真实 tool case 必须断言该字段。
 
 全局与 Chat-scoped Thread 列表统一返回 `data: {items, nextCursor}`；`recent` 按 `harness_thread.updated_at`、`created` 按
 `harness_thread.created_at` 降序 keyset，cursor 是绑定 sort 的 opaque token，默认 limit 为 20、最大为 100。
@@ -267,7 +282,7 @@ Catalog（Provider / Model / Agent）与 Chat 响应中的 `version` 是十进�
 ## 维护
 
 1. 改 API/配置校验：先更新 `fixtures.mjs` 矩阵行与本文表格，再跑 `./scripts/e2e.sh`。
-2. 改首发/编排：更新 `cases/seed-and-harness.mjs`；跨用例复用的 Thread 步骤放进 `lib/harness.mjs`，不在各 case 内重复拼 HTTP。
+2. 改 Chat/Thread 编排：更新 `cases/crud.mjs` 或 `cases/seed-and-harness.mjs`；跨用例复用的 Thread 步骤放进 `lib/harness.mjs`，Chat-scoped POST 已包含 bootstrap，不得在 helper 中重复调用 `/bootstrap`。
 3. 前端 UI 变更：默认 E2E 不绑 selector；组件测用 Vitest。
 4. 报告失败时从 `reports/e2e/latest/report.md` 开始排查。
 5. 运行 jar 必须与源码一致；重启后需重新注入 provider credential。

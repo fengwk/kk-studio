@@ -46,6 +46,24 @@ export async function createUnboundThread(ctx) {
   return thread
 }
 
+/** Chat-scoped POST performs create, association and bootstrap atomically. */
+export async function createChatThread(ctx, chatId) {
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
+  )
+  assert(status === 201, `create Chat thread status ${status}: ${JSON.stringify(json)}`)
+  const thread = envelopeData(json)
+  threadIdOf(thread)
+  executionEpochOf(thread)
+  assert(thread.status === 'IDLE', `Chat thread must be bound: ${JSON.stringify(thread)}`)
+  assert(
+    thread.sessionId && thread.headEntryId,
+    `Chat thread must have a session/head: ${JSON.stringify(thread)}`,
+  )
+  return thread
+}
+
 export async function getThread(ctx, threadId) {
   const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${encodeURIComponent(threadId)}`)
   const thread = envelopeData(json)
@@ -113,6 +131,27 @@ export async function snapshotEntries(ctx, threadId) {
 export async function snapshotInputs(ctx, threadId) {
   const snapshot = await getThreadSnapshot(ctx, threadId)
   return snapshot.inputs || []
+}
+
+export async function waitForThreadInputApplied(
+  ctx,
+  threadId,
+  inputId,
+  { timeoutMs = 15_000, intervalMs = 250 } = {},
+) {
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    const inputs = await snapshotInputs(ctx, threadId)
+    const input = inputs.find((candidate) => String(candidate.inputId) === String(inputId))
+    const thread = await getThread(ctx, threadId)
+    last = { input, thread, inputs }
+    if (input?.status === 'APPLIED' && !thread.processing) {
+      return last
+    }
+    await sleep(intervalMs)
+  }
+  throw new Error(`Thread input did not apply: ${JSON.stringify(last)}`)
 }
 
 export async function listSessionEntries(ctx, sessionId) {

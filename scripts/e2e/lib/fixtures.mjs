@@ -218,18 +218,6 @@ export function agentConfigMatrix() {
       }),
     },
     {
-      id: 'invalid.unready_environment',
-      ok: false,
-      expectStatus: 400,
-      messageIncludes: /environment.*READY/i,
-      title: 'environmentName 必须是 READY 环境',
-      build: () => ({
-        tools: [],
-        skills: [],
-        environmentName: `e2e-unready-${crypto.randomUUID()}`,
-      }),
-    },
-    {
       id: 'invalid.unknown_tool',
       ok: false,
       expectStatus: 400,
@@ -249,18 +237,6 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         skills: ['a', 'a'],
-      }),
-    },
-    {
-      id: 'invalid.blank_environment_name',
-      ok: false,
-      expectStatus: 400,
-      messageIncludes: /environmentName|blank/i,
-      title: 'environmentName 空白',
-      build: () => ({
-        tools: [],
-        skills: [],
-        environmentName: ' ',
       }),
     },
     {
