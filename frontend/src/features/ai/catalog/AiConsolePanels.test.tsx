@@ -54,7 +54,8 @@ describe('AiConsolePanels', () => {
             {
               id: 'c1',
               title: 'One',
-               defaultAgentId: 'missing',
+              defaultAgentId: 'missing',
+              defaultEnvironmentName: null,
               version: '1',
               createTime: null,
               updateTime: null,
@@ -73,7 +74,6 @@ describe('AiConsolePanels', () => {
               modelId: 'm1',
               variant: 'default',
               config: {
-                environmentName: 'local',
                 tools: ['bash'],
                 skills: []
               },

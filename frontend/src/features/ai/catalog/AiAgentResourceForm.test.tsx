@@ -45,13 +45,12 @@ function modelWithVariants(): AgentModelView {
 }
 
 describe('AgentForm current contracts', () => {
-  it('selects model/variant/environment and toggles tools', async () => {
+  it('selects model/variant and toggles unified tools and live skills', async () => {
     const user = userEvent.setup()
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
         tools: ['missing-tool'],
-        environmentName: 'gone',
       })
       return (
         <AgentForm
@@ -59,19 +58,16 @@ describe('AgentForm current contracts', () => {
           models={[modelWithVariants()]}
           environments={[
             {
-              name: 'platform',
-              status: 'READY',
-              lastSeen: null,
-              tools: [{ name: 'bash', version: '1', description: 'shell' }],
-              skills: [{ name: 'dev', description: 'dev' }],
-            },
-            {
               name: 'local',
               status: 'READY',
               lastSeen: null,
-              tools: [{ name: 'lsp', version: '1', description: 'lsp' }],
-              skills: [],
+              tools: [],
+              skills: [{ name: 'dev', description: 'dev' }],
             },
+          ]}
+          toolCatalog={[
+            { name: 'bash', version: '1', description: 'shell' },
+            { name: 'lsp', version: '1', description: 'lsp' },
           ]}
           onChange={setDraft}
         />
@@ -85,12 +81,13 @@ describe('AgentForm current contracts', () => {
     expect(missingTool).toBeChecked()
     await user.click(missingTool)
     expect(missingTool).not.toBeChecked()
-    await user.selectOptions(screen.getByLabelText('Environment'), 'local')
     await user.click(screen.getByLabelText(/bash/))
     expect(screen.getByLabelText(/bash/)).toBeChecked()
+    await user.click(screen.getByLabelText(/dev/))
+    expect(screen.getByLabelText(/dev/)).toBeChecked()
   })
 
-  it('renders field-level errors for tools, skills, and environmentName', () => {
+  it('renders field-level errors for tools and skills without an Agent Environment field', () => {
     render(
       <AgentForm
         draft={emptyAgentDraft(modelWithVariants())}
@@ -99,7 +96,6 @@ describe('AgentForm current contracts', () => {
           variant: '请选择 Variant',
           tools: 'Tools 冲突',
           skills: 'Skills 冲突',
-          environmentName: 'Env 缺失',
         }}
         onChange={() => undefined}
       />,
@@ -108,6 +104,6 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByText('请选择 Variant')).toBeInTheDocument()
     expect(screen.getByText('Tools 冲突')).toBeInTheDocument()
     expect(screen.getByText('Skills 冲突')).toBeInTheDocument()
-    expect(screen.getByText('Env 缺失')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Environment')).not.toBeInTheDocument()
   })
 })

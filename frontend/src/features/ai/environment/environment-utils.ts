@@ -9,3 +9,7 @@ export function filterEnvironments(
     .filter((environment) => includesSearch(environment.name, search))
     .sort((left, right) => naturalNameCompare(left.name, right.name))
 }
+
+export function filterReadyEnvironments(environments: LiveEnvironmentDTO[]): LiveEnvironmentDTO[] {
+  return environments.filter((environment) => String(environment.status).toUpperCase() === 'READY')
+}

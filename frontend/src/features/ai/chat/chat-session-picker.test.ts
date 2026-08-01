@@ -35,6 +35,7 @@ function thread(
     inputSequence: 0,
     activeAgentDefinitionId: null,
     activeAgentName: null,
+    activeEnvironmentName: null,
     modelId: null,
     variant: null,
     yoloEnabled: false,

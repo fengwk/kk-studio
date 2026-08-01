@@ -78,8 +78,8 @@ export const aiCatalog = {
     'zh-CN': '编辑',
   },
   'ai.catalog.createAgentDescription': {
-    'en-US': 'Combine Model, Environment, tools, skills, and policy',
-    'zh-CN': '配置聚合：Model / Environment / tools / skills / policy',
+    'en-US': 'Combine Model, tools, skills, and policy',
+    'zh-CN': '配置聚合：Model / tools / skills / policy',
   },
   'ai.catalog.createModel': {
     'en-US': 'Create Model',
@@ -136,10 +136,6 @@ export const aiCatalog = {
   'ai.catalog.card.modelDefault': {
     'en-US': 'Model default',
     'zh-CN': '模型默认',
-  },
-  'ai.catalog.card.environment': {
-    'en-US': 'Environment',
-    'zh-CN': 'Env',
   },
   'ai.catalog.card.tools': {
     'en-US': 'Tools',
@@ -260,10 +256,6 @@ export const aiCatalog = {
   'ai.catalog.form.systemPromptPlaceholder': {
     'en-US': 'System prompt',
     'zh-CN': '系统提示词',
-  },
-  'ai.catalog.form.environment': {
-    'en-US': 'Environment',
-    'zh-CN': 'Environment',
   },
   'ai.catalog.form.apiKeyOptional': {
     'en-US': 'API Key (optional)',
@@ -424,10 +416,6 @@ export const aiCatalog = {
   'ai.catalog.form.credentialCreateHint': {
     'en-US': 'Leave blank to call the OpenAI-compatible endpoint without Authorization.',
     'zh-CN': '留空会以无 Authorization 方式请求 OpenAI-compatible 端点。',
-  },
-  'ai.catalog.form.environmentHint': {
-    'en-US': 'Changing Environment refreshes the available Tools/Skills; selected items are retained when possible and are not cleared automatically. Offline or unavailable items are dimmed but can still be deselected and saved.',
-    'zh-CN': '切换 Environment 只会刷新可选 Tools/Skills 列表；已勾选项会尽量保留，不会自动清空。离线/暂不可用项置灰，仍可取消勾选并保存。',
   },
   'ai.catalog.form.noCandidateTools': {
     'en-US': 'No candidate Tools',
@@ -634,8 +622,8 @@ export const aiCatalog = {
     'zh-CN': 'Skills 名称冲突，请检查勾选项',
   },
   'ai.catalog.validation.capabilityDuplicate': {
-    'en-US': '{{kind}} names conflict after removing environment prefixes: {{names}}',
-    'zh-CN': '{{kind}} 去前缀后存在重名：{{names}}',
+    'en-US': '{{kind}} names must be unique: {{names}}',
+    'zh-CN': '{{kind}} 名称不能重复：{{names}}',
   },
   'ai.catalog.validation.network': {
     'en-US': 'Network error. Please try again later.',
@@ -705,6 +693,10 @@ export const aiCatalog = {
     'en-US': 'Default Agent',
     'zh-CN': 'Default Agent',
   },
+  'ai.chat.defaultEnvironment': {
+    'en-US': 'Default Environment',
+    'zh-CN': 'Default Environment',
+  },
   'ai.chat.updated': {
     'en-US': 'Updated',
     'zh-CN': 'Updated',
@@ -724,6 +716,22 @@ export const aiCatalog = {
   'ai.chat.selectAgent': {
     'en-US': 'Select an Agent',
     'zh-CN': '请选择 Agent',
+  },
+  'ai.chat.noneEnvironment': {
+    'en-US': '(None)',
+    'zh-CN': '（无）',
+  },
+  'ai.chat.selectEnvironment': {
+    'en-US': 'Select Environment',
+    'zh-CN': '选择 Environment',
+  },
+  'ai.chat.noEnvironments': {
+    'en-US': 'No READY Environments',
+    'zh-CN': '暂无 READY Environment',
+  },
+  'ai.chat.selected': {
+    'en-US': 'Selected',
+    'zh-CN': '已选',
   },
   'ai.chat.selectAgentTitle': {
     'en-US': 'Select Agent',
@@ -766,8 +774,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create and bootstrap a new Thread; /agent selects the default Agent and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建并 bootstrap 新 Thread；/agent 选默认 Agent，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread; /agent and /environment change Chat defaults, and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建新 Thread；/agent 和 /environment 修改 Chat 默认值，/thread 复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',
@@ -993,6 +1001,10 @@ export const aiCatalog = {
     'en-US': 'Switch Agent (change the blank pane default or enqueue SET_AGENT in a conversation)',
     'zh-CN': '切换 Agent（空白页改默认 Agent；对话中入队 SET_AGENT）',
   },
+  'ai.runtime.command.environment': {
+    'en-US': 'Switch Environment (change the blank pane default or enqueue SET_ENVIRONMENT in a conversation)',
+    'zh-CN': '切换 Environment（空白页改默认 Environment；对话中入队 SET_ENVIRONMENT）',
+  },
   'ai.runtime.command.model': {
     'en-US': 'Switch Model (enqueue SET_MODEL)',
     'zh-CN': '切换 Model（入队 SET_MODEL）',
@@ -1028,6 +1040,10 @@ export const aiCatalog = {
   'ai.runtime.command.agentLabel': {
     'en-US': 'agent',
     'zh-CN': 'agent',
+  },
+  'ai.runtime.command.environmentLabel': {
+    'en-US': 'environment',
+    'zh-CN': 'environment',
   },
   'ai.runtime.command.modelLabel': {
     'en-US': 'model',
@@ -1177,6 +1193,10 @@ export const aiCatalog = {
     'en-US': 'unknown-variant',
     'zh-CN': 'unknown-variant',
   },
+  'ai.runtime.status.environmentFallback': {
+    'en-US': '(none)',
+    'zh-CN': '（无）',
+  },
   'ai.runtime.status.agentSwitchTitle': {
     'en-US': 'Click to switch Agent',
     'zh-CN': '点击切换 Agent',
@@ -1184,6 +1204,10 @@ export const aiCatalog = {
   'ai.runtime.status.modelSwitchTitle': {
     'en-US': 'Click to switch Model; right-click to switch Variant',
     'zh-CN': '点击切换 Model，右键切换 Variant',
+  },
+  'ai.runtime.status.environmentSwitchTitle': {
+    'en-US': 'Click to switch Environment',
+    'zh-CN': '点击切换 Environment',
   },
   'ai.runtime.status.agentText': {
     'en-US': 'agent:{{name}}',
@@ -1196,6 +1220,10 @@ export const aiCatalog = {
   'ai.runtime.status.modelText': {
     'en-US': '{{model}} · {{variant}}',
     'zh-CN': '{{model}} · {{variant}}',
+  },
+  'ai.runtime.status.environmentText': {
+    'en-US': 'environment:{{name}}',
+    'zh-CN': '环境：{{name}}',
   },
   'ai.runtime.entry.rootTitle': {
     'en-US': 'Conversation started',
@@ -1341,6 +1369,14 @@ export const aiCatalog = {
     'en-US': 'Failed to update default Agent',
     'zh-CN': '更新默认 Agent 失败',
   },
+  'ai.runtime.action.updateEnvironmentFailed': {
+    'en-US': 'Failed to update default Environment',
+    'zh-CN': '更新默认 Environment 失败',
+  },
+  'ai.runtime.action.firstSendMissingSession': {
+    'en-US': 'Chat Thread creation did not return a Session',
+    'zh-CN': '创建 Chat Thread 未返回 Session',
+  },
   'ai.runtime.action.unavailableScene': {
     'en-US': 'This scene cannot use /{{command}}',
     'zh-CN': '当前场景不可用：/{{command}}',
@@ -1384,6 +1420,10 @@ export const aiCatalog = {
   'ai.runtime.action.switchModelFailed': {
     'en-US': 'Failed to switch Model',
     'zh-CN': '切换 Model 失败',
+  },
+  'ai.runtime.action.switchEnvironmentFailed': {
+    'en-US': 'Failed to switch Environment',
+    'zh-CN': '切换 Environment 失败',
   },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',

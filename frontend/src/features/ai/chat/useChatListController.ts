@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery } from '@tanstack/react-query'
@@ -24,12 +25,14 @@ function resolveChatDefaultAgentId(
 
 export function useChatListController(
   agents: AgentDefinitionDTO[],
+  environments: LiveEnvironmentDTO[],
   enabled: boolean,
 ) {
   const navigate = useNavigate()
   const { t } = useI18n()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [selectedEnvironmentName, setSelectedEnvironmentName] = useState('')
   const [title, setTitle] = useState('')
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
@@ -45,11 +48,13 @@ export function useChatListController(
       chatService.createChat({
         title: title.trim(),
         defaultAgentId: selectedAgentId,
+        ...(selectedEnvironmentName ? { defaultEnvironmentName: selectedEnvironmentName } : {}),
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
       setModalOpen(false)
       setTitle('')
+      setSelectedEnvironmentName('')
       setFormError('')
       setNameError('')
       navigate(`/chats/${encodeURIComponent(chat.id)}`)
@@ -59,6 +64,7 @@ export function useChatListController(
   function openCreateChat(agentId?: string) {
     setSelectedAgentId(resolveChatDefaultAgentId(agentId, selectedAgentId, agents))
     setTitle('')
+    setSelectedEnvironmentName('')
     setFormError('')
     setNameError('')
     setModalOpen(true)
@@ -74,6 +80,10 @@ export function useChatListController(
 
   function handleSelectAgent(agentId: string) {
     setSelectedAgentId(agentId)
+  }
+
+  function handleSelectEnvironment(environmentName: string) {
+    setSelectedEnvironmentName(environmentName)
   }
 
   const submitCreateChat: FormEventHandler<HTMLFormElement> = (event) => {
@@ -101,7 +111,9 @@ export function useChatListController(
     createChatModal: {
       open: modalOpen,
       agents,
+      environments,
       selectedAgentId,
+      selectedEnvironmentName,
       title,
       pending: createChatMutation.isPending,
       formError: formError || (createChatMutation.error ? String(createChatMutation.error.message || createChatMutation.error) : ''),
@@ -112,6 +124,7 @@ export function useChatListController(
         setNameError('')
       },
       onSelectAgent: handleSelectAgent,
+      onSelectEnvironment: handleSelectEnvironment,
       onTitleChange: handleTitleChange,
       onSubmit: submitCreateChat,
     },

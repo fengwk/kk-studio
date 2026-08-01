@@ -49,7 +49,6 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     modelId: 'model-1',
     variant: 'quality',
     config: {
-      environmentName: 'local',
       tools: ['read', 'bash', 'grep'],
       skills: ['dev'],
     },
@@ -108,7 +107,6 @@ describe('AI resource cards', () => {
           description: null,
           modelId: 'missing-model',
           config: {
-            environmentName: null,
             tools: [],
             skills: [],
           },

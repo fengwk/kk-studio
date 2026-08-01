@@ -8,10 +8,12 @@ export interface AiConsoleResourceQueries {
   providersQuery: ReturnType<typeof useQuery>
   modelsQuery: ReturnType<typeof useQuery>
   agentsQuery: ReturnType<typeof useQuery>
+  toolsQuery: ReturnType<typeof useQuery>
   environmentsQuery: ReturnType<typeof useQuery>
   providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
   models: AgentModelView[]
   agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
+  toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
   environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
 }
 
@@ -19,6 +21,7 @@ export interface AiConsoleResourceQueryEnabled {
   providers: boolean
   models: boolean
   agents: boolean
+  tools: boolean
   environments: boolean
 }
 
@@ -43,6 +46,12 @@ export function useAiConsoleResourceQueries(
     enabled: enabled.agents,
   })
 
+  const toolsQuery = useQuery({
+    queryKey: queryKeys.tools.list,
+    queryFn: () => agentService.listTools(),
+    enabled: enabled.tools,
+  })
+
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
@@ -53,6 +62,7 @@ export function useAiConsoleResourceQueries(
     providersQuery,
     modelsQuery,
     agentsQuery,
+    toolsQuery,
     environmentsQuery,
     providers: providersQuery.data?.results ?? [],
     models: toAgentModelViews(
@@ -60,6 +70,7 @@ export function useAiConsoleResourceQueries(
       providersQuery.data?.results ?? [],
     ),
     agents: agentsQuery.data?.results ?? [],
+    toolCatalog: toolsQuery.data ?? [],
     environments: environmentsQuery.data ?? [],
   }
 }

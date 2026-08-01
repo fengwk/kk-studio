@@ -12,6 +12,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
     listModels: vi.fn(),
     listAgents: vi.fn(),
+    listTools: vi.fn(),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -38,6 +39,7 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.listProviders).mockImplementation(async () => page([currentProvider]))
     vi.mocked(agentService.listModels).mockImplementation(async () => page([currentModel]))
     vi.mocked(agentService.listAgents).mockImplementation(async () => page([currentAgent]))
+    vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(agentService.createProvider).mockResolvedValue(currentProvider)
     vi.mocked(agentService.deleteProvider).mockResolvedValue(undefined)
     vi.mocked(agentService.createModel).mockResolvedValue(currentModel)
@@ -285,7 +287,6 @@ function agent() {
     modelId: 'model-1',
     variant: 'default',
     config: {
-      environmentName: null,
       tools: [],
       skills: []
     },

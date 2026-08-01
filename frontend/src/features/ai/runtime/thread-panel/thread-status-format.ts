@@ -2,7 +2,7 @@ import type { ThreadUsageSummary } from '@/features/ai/runtime/thread-panel/thre
 import { translate } from '@/shared/i18n'
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'usage'
+  key: 'agent' | 'model' | 'environment' | 'usage'
   className: string
   text: string
   title: string
@@ -15,9 +15,11 @@ export interface ThreadStatusModel {
   provider: string
   model: string
   variant: string
+  environment: string
   yoloOn: boolean
   agentText: string
   modelText: string
+  environmentText: string
   usageText: string
   segments: ThreadStatusSegment[]
 }
@@ -27,12 +29,14 @@ export interface ThreadStatusModelInput {
   providerName?: string
   modelName?: string
   variantName?: string
+  environmentName?: string | null
   yoloEnabled?: boolean
   usage?: ThreadUsageSummary
   contextWindow?: number
   onAgentClick?: () => void
   onModelClick?: () => void
   onVariantClick?: () => void
+  onEnvironmentClick?: () => void
 }
 
 /** Normalize blank placeholder strings; returns "" for null/undefined/'undefined'/'null'/'-'. */
@@ -100,6 +104,8 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const provider = clean(input.providerName)
   const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
   const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
+  const environment =
+    clean(input.environmentName) || translate('ai.runtime.status.environmentFallback')
   const yoloOn = Boolean(input.yoloEnabled)
 
   const tokensIn = asInt(input.usage?.inputTokens)
@@ -122,6 +128,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const agentText = yoloOn
     ? translate('ai.runtime.status.agentYoloText', { name: agentLabel })
     : translate('ai.runtime.status.agentText', { name: agentLabel })
+  const environmentText = translate('ai.runtime.status.environmentText', { name: environment })
   // 未开对话 / 零用量也展示，便于看到 context 上限与费用位（与 pi/opencode 一致）
   const usageText = [
     `↑${formatTokens(tokensIn)}`,
@@ -155,6 +162,15 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       onSecondaryClick: input.onVariantClick,
     },
     {
+      key: 'environment',
+      className: 'thread-status-environment',
+      text: environmentText,
+      title: input.onEnvironmentClick
+        ? `${environmentText} · ${translate('ai.runtime.status.environmentSwitchTitle')}`
+        : environmentText,
+      onClick: input.onEnvironmentClick,
+    },
+    {
       key: 'usage',
       className: 'thread-status-usage',
       text: usageText,
@@ -167,9 +183,11 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     provider,
     model,
     variant,
+    environment,
     yoloOn,
     agentText,
     modelText,
+    environmentText,
     usageText,
     segments,
   }

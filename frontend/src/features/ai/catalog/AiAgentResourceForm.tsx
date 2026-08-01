@@ -1,7 +1,7 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import {
-  buildCapabilityCandidates,
-  PLATFORM_ENVIRONMENT_NAME,
+  buildSkillCandidates,
+  buildToolCandidates,
   withSelectedOrphans,
   type CapabilityOption,
 } from '@/features/ai/catalog/agent-capability-candidates'
@@ -13,6 +13,7 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type {
   AgentDefinitionDTO,
+  ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { translate, useI18n } from '@/shared/i18n'
@@ -24,12 +25,14 @@ function toggleName(items: string[], name: string): string[] {
 export function AgentForm({
   draft,
   models,
+  toolCatalog = [],
   environments = [],
   fieldErrors = {},
   onChange,
 }: {
   draft: AgentDraft
   models: AgentModelView[]
+  toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
@@ -39,20 +42,12 @@ export function AgentForm({
   const selectedModel = models.find((model) => String(model.id) === draft.modelId)
   const variantOptions = variantOptionsFromModel(selectedModel)
   const selectedVariant = draft.variant.trim()
-  const readyEnvironments = environments.filter(
-    (environment) =>
-      environment.name !== PLATFORM_ENVIRONMENT_NAME && String(environment.status).toUpperCase() === 'READY',
-  )
-  const selectedEnvironment = environments.find((environment) => environment.name === draft.environmentName)
-  const environmentMissing = Boolean(draft.environmentName.trim()) && !selectedEnvironment
-  const environmentOffline =
-    Boolean(selectedEnvironment) && String(selectedEnvironment?.status).toUpperCase() !== 'READY'
   const toolCandidates = withSelectedOrphans(
-    buildCapabilityCandidates(environments, draft.environmentName, 'tools'),
+    buildToolCandidates(toolCatalog),
     draft.tools,
   )
   const skillCandidates = withSelectedOrphans(
-    buildCapabilityCandidates(environments, draft.environmentName, 'skills'),
+    buildSkillCandidates(environments),
     draft.skills,
   )
 
@@ -110,41 +105,6 @@ export function AgentForm({
         />
       </label>
 
-      <label className={`form-group${fieldErrors.environmentName ? ' is-error' : ''}`}>
-        <FieldLabel>{t('ai.catalog.form.environment')}</FieldLabel>
-        <FormSelect
-          aria-label={t('ai.catalog.form.environment')}
-          value={draft.environmentName}
-          placeholder={t('ai.catalog.form.none')}
-          options={[
-            { value: '', label: t('ai.catalog.form.none') },
-            ...readyEnvironments.map((environment) => ({
-              value: environment.name,
-              label: environment.name,
-            })),
-            ...(environmentMissing || environmentOffline
-              ? [
-                  {
-                    value: draft.environmentName,
-                    label: `${draft.environmentName}（${
-                      environmentMissing
-                        ? t('ai.catalog.form.unavailable')
-                        : t('ai.catalog.form.offline')
-                    }）`,
-                  },
-                ]
-              : []),
-          ]}
-          onChange={(environmentName) => onChange({ ...draft, environmentName })}
-        />
-        {fieldErrors.environmentName ? (
-          <span className="field-error">{fieldErrors.environmentName}</span>
-        ) : null}
-      </label>
-      <div className="inline-hint" role="note">
-        {t('ai.catalog.form.environmentHint')}
-      </div>
-
       <fieldset className={`form-group capability-picker${fieldErrors.tools ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.form.tools')}</legend>
         <CapabilityChecklist
@@ -201,41 +161,27 @@ function CapabilityChecklist({
     )
   }
 
-  const groups = new Map<string, CapabilityOption[]>()
-  for (const option of options) {
-    const bucket = groups.get(option.source) ?? []
-    bucket.push(option)
-    groups.set(option.source, bucket)
-  }
-
   return (
     <div className="capability-options">
-      {[...groups.entries()].map(([source, items]) => (
-        <div key={source} className="capability-group">
-          {items.map((option) => {
-            const checked = selected.includes(option.name)
-            const label = option.missing ? option.name : `${option.source}/${option.name}`
-            const stateClass = option.missing
-              ? ' is-offline is-missing'
-              : option.offline
-                ? ' is-offline'
-                : ''
-            return (
-              <label
-                key={`${option.source}/${option.name}`}
-                className={`capability-option${checked ? ' is-selected' : ''}${stateClass}`}
-              >
-                <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
-                <span>
-                  <code className="capability-name">{label}</code>
-                  {option.missing ? <small>{translate('ai.catalog.form.unavailable')}</small> : null}
-                  {!option.missing && option.offline ? <small>{translate('ai.catalog.form.offline')}</small> : null}
-                </span>
-              </label>
-            )
-          })}
-        </div>
-      ))}
+      {options.map((option) => {
+        const checked = selected.includes(option.name)
+        const stateClass = option.missing ? ' is-offline is-missing' : option.offline ? ' is-offline' : ''
+        return (
+          <label
+            key={option.name}
+            className={`capability-option${checked ? ' is-selected' : ''}${stateClass}`}
+          >
+            <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
+            <span>
+              <code className="capability-name">{option.name}</code>
+              {option.version ? <small>{option.version}</small> : null}
+              {option.description ? <small>{option.description}</small> : null}
+              {option.missing ? <small>{translate('ai.catalog.form.unavailable')}</small> : null}
+              {!option.missing && option.offline ? <small>{translate('ai.catalog.form.offline')}</small> : null}
+            </span>
+          </label>
+        )
+      })}
     </div>
   )
 }

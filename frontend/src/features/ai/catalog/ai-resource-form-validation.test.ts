@@ -12,7 +12,6 @@ const EMPTY_AGENT_DRAFT = {
   systemPrompt: '',
   modelId: '',
   variant: '',
-  environmentName: '',
   tools: [],
   skills: [],
 }

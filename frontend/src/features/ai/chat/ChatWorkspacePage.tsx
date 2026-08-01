@@ -16,6 +16,7 @@ import {
 } from '@/features/ai/chat/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
@@ -57,7 +58,12 @@ export function ChatWorkspacePage() {
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
   })
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
+  })
   const agents = agentsQuery.data?.results ?? []
+  const environments = environmentsQuery.data ?? []
 
   useEffect(() => {
     if (!chatQuery.data?.id || !chatId || migratedChatId.current === chatId) {
@@ -83,11 +89,17 @@ export function ChatWorkspacePage() {
   const updateChatMutation = useMutation({
     mutationFn: ({
       defaultAgentId,
+      defaultEnvironmentName,
       expectedVersion,
     }: {
-      defaultAgentId: string
+      defaultAgentId?: string
+      defaultEnvironmentName?: string | null
       expectedVersion: string
-    }) => chatService.updateChat(chatId, { defaultAgentId, expectedVersion }),
+    }) => chatService.updateChat(chatId, {
+      ...(defaultAgentId === undefined ? {} : { defaultAgentId }),
+      ...(defaultEnvironmentName === undefined ? {} : { defaultEnvironmentName }),
+      expectedVersion,
+    }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.chats.detail(chatId) })
       await queryClient.invalidateQueries({ queryKey: queryKeys.chats.list })
@@ -168,6 +180,7 @@ export function ChatWorkspacePage() {
             key={pane.id}
             chat={chat}
             agents={agents}
+            environments={environments}
             pane={pane}
             focused={paneState.focusedPaneId === pane.id}
             sessionSort={paneState.sessionSort}
@@ -179,6 +192,12 @@ export function ChatWorkspacePage() {
             onDefaultAgentChange={async (agentId) => {
               await updateChatMutation.mutateAsync({
                 defaultAgentId: agentId,
+                expectedVersion: chat.version,
+              })
+            }}
+            onDefaultEnvironmentChange={async (environmentName) => {
+              await updateChatMutation.mutateAsync({
+                defaultEnvironmentName: environmentName,
                 expectedVersion: chat.version,
               })
             }}

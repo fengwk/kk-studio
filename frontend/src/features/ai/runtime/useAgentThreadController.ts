@@ -119,6 +119,20 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
     },
   })
+  const setEnvironmentMutation = useMutation({
+    mutationFn: (payload: {
+      environmentName: string | null
+      expectedExecutionEpoch: BackendLong
+    }) =>
+      harnessService.setThreadEnvironment(threadId, {
+        environmentName: payload.environmentName,
+        clientMessageId: createClientMessageId(),
+        expectedExecutionEpoch: payload.expectedExecutionEpoch,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
+    },
+  })
 
   /**
    * A 409 means the local epoch is stale or the Thread is not quiescent. Surface an explicit
@@ -268,6 +282,19 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
       })
   }
 
+  function setThreadEnvironment(environmentName: string | null): Promise<void> {
+    if (!thread || !requireBoundThread('ai.runtime.action.switchEnvironmentFailed')) {
+      return Promise.resolve()
+    }
+    setActionError(null)
+    return setEnvironmentMutation
+      .mutateAsync({ environmentName, expectedExecutionEpoch: thread.executionEpoch })
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        reportMutationError(error, 'ai.runtime.action.switchEnvironmentFailed')
+      })
+  }
+
   return {
     sessionId,
     agents,
@@ -300,6 +327,7 @@ export function useAgentThreadController(threadId: string, initialDraft = '') {
     stopThread,
     setThreadAgent,
     setThreadModel,
+    setThreadEnvironment,
     runCommand,
   }
 }
@@ -330,6 +358,7 @@ function resolveRuntimeLabels(
     // Canonical display identity is provider/model.
     modelName: formatModelRef(providerName, bareModelName),
     variantName: firstNonEmpty(thread?.variant, agent?.variant),
+    environmentName: firstNonEmpty(thread?.activeEnvironmentName),
     contextWindow,
   }
 }

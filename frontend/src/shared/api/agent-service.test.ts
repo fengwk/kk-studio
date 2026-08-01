@@ -19,10 +19,12 @@ describe('agentService', () => {
     await service.listProviders(2, 20)
     await service.listModels(3, 30)
     await service.listAgents(4, 40)
+    await service.listTools()
 
     expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/providers', { params: { pageNumber: 2, pageSize: 20 } })
     expect(client.get).toHaveBeenNthCalledWith(2, '/ai/catalog/models', { params: { pageNumber: 3, pageSize: 30 } })
     expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', { params: { pageNumber: 4, pageSize: 40 } })
+    expect(client.get).toHaveBeenNthCalledWith(4, '/ai/catalog/tools')
   })
 
   it('uses the standard page defaults for global resource lists', async () => {
@@ -78,7 +80,7 @@ describe('agentService', () => {
       systemPrompt: null,
       modelId: 'model-1',
       variant: 'default',
-      config: { environmentName: null, tools: [], skills: [] },
+       config: { tools: [], skills: [] },
     }
     const updateProviderBody = { description: 'updated', expectedVersion: '7' }
     const updateModelBody = {

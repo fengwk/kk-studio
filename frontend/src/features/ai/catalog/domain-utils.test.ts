@@ -159,7 +159,6 @@ describe('AI domain utilities', () => {
         modelId: 'model-1',
         variant: 'default',
         config: {
-          environmentName: null,
           tools: ['search'],
           skills: [],
         },
@@ -246,7 +245,6 @@ describe('AI domain utilities', () => {
       systemPrompt: ' prompt ',
       modelId: ' model-1 ',
       variant: ' default ',
-      environmentName: '',
       tools: [' search ', ''],
       skills: [],
     }
@@ -257,7 +255,6 @@ describe('AI domain utilities', () => {
       modelId: 'model-1',
       variant: 'default',
       config: {
-        environmentName: null,
         tools: ['search'],
         skills: [],
       },
@@ -278,7 +275,6 @@ describe('AI domain utilities', () => {
         modelId: 'model-1',
         variant: 'default',
         config: {
-          environmentName: null,
           tools: [],
           skills: [],
         },
@@ -336,13 +332,13 @@ describe('AI domain utilities', () => {
     expect(
       filterChats(
         [
-           { id: '2', title: 'beta', defaultAgentId: 'missing', version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
-           { id: '1', title: 'alpha', defaultAgentId: 'missing', version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
+           { id: '2', title: 'beta', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
+           { id: '1', title: 'alpha', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
         ],
         '',
       ).map((item) => item.title),
     ).toEqual(['alpha', 'beta'])
-     expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: 'missing', version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
+      expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -397,7 +393,6 @@ describe('AI domain utilities', () => {
         modelId: 'model-2',
         variant: 'default',
         config: {
-          environmentName: null,
           tools: [],
           skills: [],
         },

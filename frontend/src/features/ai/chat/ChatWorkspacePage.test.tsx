@@ -110,7 +110,6 @@ describe('ChatWorkspacePage', () => {
           modelId: 'm1',
           variant: 'default',
           config: {
-            environmentName: null,
             tools: [],
             skills: [],
           },
@@ -126,6 +125,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'a1',
+      defaultEnvironmentName: null,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -134,6 +134,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'a1',
+      defaultEnvironmentName: null,
       version: '2',
       createTime: null,
       updateTime: null,
@@ -159,6 +160,7 @@ describe('ChatWorkspacePage', () => {
         inputSequence: 0,
         activeAgentDefinitionId: 'a1',
         activeAgentName: 'assistant',
+        activeEnvironmentName: null,
         modelId: 'm1',
         variant: 'default',
         yoloEnabled: false,
@@ -193,6 +195,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'missing',
+      defaultEnvironmentName: null,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -212,6 +215,7 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       defaultAgentId: 'missing',
+      defaultEnvironmentName: null,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -222,6 +226,7 @@ describe('ChatWorkspacePage', () => {
         id: 'chat-1',
         title: 'Workspace',
         defaultAgentId: 'a1',
+        defaultEnvironmentName: null,
         version: '2',
         createTime: null,
         updateTime: null,
@@ -231,48 +236,22 @@ describe('ChatWorkspacePage', () => {
       events.push('create-thread')
       return {
         threadId: 't-stale-agent',
-        sessionId: null,
+        sessionId: 's-stale-agent',
         sessionTitle: null,
-        headEntryId: null,
-        executionEpoch: 0,
-        status: 'UNBOUND',
+        headEntryId: 'e-config',
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
         inputSequence: 0,
-        activeAgentDefinitionId: null,
-        activeAgentName: null,
-        modelId: null,
-        variant: null,
+        activeAgentDefinitionId: 'a1',
+        activeAgentName: 'assistant',
+        activeEnvironmentName: null,
+        modelId: 'm1',
+        variant: 'default',
         yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
-      }
-    })
-    vi.mocked(harnessService.bootstrapThread).mockImplementation(async () => {
-      events.push('bootstrap')
-      return {
-        session: {
-          sessionId: 's-stale-agent',
-          title: null,
-          createTime: null,
-          updateTime: null,
-        },
-        thread: {
-          threadId: 't-stale-agent',
-          sessionId: 's-stale-agent',
-          sessionTitle: null,
-          headEntryId: 'e-config',
-          executionEpoch: 1,
-          status: 'IDLE',
-          inputSequence: 0,
-          activeAgentDefinitionId: 'a1',
-          activeAgentName: 'assistant',
-          modelId: 'm1',
-          variant: 'default',
-          yoloEnabled: false,
-          processing: false,
-          createTime: null,
-          updateTime: null,
-        },
       }
     })
     vi.mocked(harnessService.submitThreadMessage).mockImplementation(async () => {
@@ -301,6 +280,7 @@ describe('ChatWorkspacePage', () => {
         inputSequence: 1,
         activeAgentDefinitionId: 'a1',
         activeAgentName: 'assistant',
+        activeEnvironmentName: null,
         modelId: 'm1',
         variant: 'default',
         yoloEnabled: false,
@@ -319,7 +299,7 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await user.click(await screen.findByRole('button', { name: 'assistant' }))
 
-    await waitFor(() => expect(events).toEqual(['update-agent', 'create-thread', 'bootstrap', 'message']))
+    await waitFor(() => expect(events).toEqual(['update-agent', 'create-thread', 'message']))
     expect(chatService.updateChat).toHaveBeenCalledWith('chat-1', {
       defaultAgentId: 'a1',
       expectedVersion: '1',
@@ -358,54 +338,29 @@ describe('ChatWorkspacePage', () => {
     expect(loadChatPaneState('chat-1').panes[0].threadId).toBe('temporarily-unavailable')
   })
 
-  it('performs first-send createThread/bootstrap/message order for blank pane with default agent', async () => {
+  it('performs atomic createThread/message order for blank pane with default agent', async () => {
     const user = userEvent.setup()
     const order: string[] = []
     vi.mocked(chatService.createChatThread).mockImplementation(async () => {
       order.push('createChatThread')
       return {
         threadId: 't-new',
-        sessionId: null,
+        sessionId: 's-new',
         sessionTitle: null,
-        headEntryId: null,
-        executionEpoch: 0,
-        status: 'UNBOUND',
+        headEntryId: 'e-config',
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
         inputSequence: 0,
-        activeAgentDefinitionId: null,
-        activeAgentName: null,
-        modelId: null,
-        variant: null,
+        activeAgentDefinitionId: 'a1',
+        activeAgentName: 'assistant',
+        activeEnvironmentName: null,
+        modelId: 'm1',
+        variant: 'default',
         yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
-      }
-    })
-    vi.mocked(harnessService.bootstrapThread).mockImplementation(async () => {
-      order.push('bootstrap')
-      return {
-        session: {
-          sessionId: 's-new',
-          title: null,          createTime: null,
-          updateTime: null,
-        },
-        thread: {
-          threadId: 't-new',
-          sessionId: 's-new',
-          sessionTitle: null,
-          headEntryId: 'e-config',
-          executionEpoch: 1,
-          status: 'IDLE',
-          inputSequence: 0,
-          activeAgentDefinitionId: 'a1',
-          activeAgentName: 'assistant',
-          modelId: 'm1',
-          variant: 'default',
-          yoloEnabled: false,
-          processing: false,
-          createTime: null,
-          updateTime: null,
-        },
       }
     })
     vi.mocked(harnessService.submitThreadMessage).mockImplementation(async () => {
@@ -418,8 +373,8 @@ describe('ChatWorkspacePage', () => {
         payloadJson: '{}',
         clientMessageId: 'c2',
         status: 'QUEUED',
-            resolvedAt: null,
-            createTime: null,
+        resolvedAt: null,
+        createTime: null,
       }
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
@@ -434,6 +389,7 @@ describe('ChatWorkspacePage', () => {
         inputSequence: 2,
         activeAgentDefinitionId: 'a1',
         activeAgentName: 'assistant',
+        activeEnvironmentName: null,
         modelId: 'm1',
         variant: 'default',
         yoloEnabled: false,
@@ -450,23 +406,18 @@ describe('ChatWorkspacePage', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
-    // Strict new order; Chat-scoped creation and bootstrap precede the first message.
-    await waitFor(() => expect(order).toEqual(['createChatThread', 'bootstrap', 'message']))
+    // Atomic Chat-scoped creation precedes the first message; no bootstrap call follows.
+    await waitFor(() => expect(order).toEqual(['createChatThread', 'message']))
     expect(chatService.createChatThread).toHaveBeenCalledWith('chat-1')
-    expect(harnessService.bootstrapThread).toHaveBeenCalledWith('t-new', {
-      title: undefined,
-      agentDefinitionId: 'a1',
-      yoloEnabled: false,
-      expectedExecutionEpoch: 0,
-    })
-    // The message is fenced by the epoch bootstrap returned, not the pre-bootstrap one.
+    expect(harnessService.bootstrapThread).not.toHaveBeenCalled()
+    // The message is fenced by the epoch returned by atomic Thread creation.
     expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t-new', {
       content: 'first message',
       clientMessageId: expect.any(String),
       expectedExecutionEpoch: 1,
     })
     expect(harnessService.setThreadAgent).not.toHaveBeenCalled()
-    // The pane binds to the bootstrapped Thread and leaves the blank state behind.
+    // The pane binds to the atomically created Thread and leaves the blank state behind.
     await waitFor(() => expect(screen.queryByText('新对话')).not.toBeInTheDocument())
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith('t-new'))
   })
@@ -491,6 +442,7 @@ describe('ChatWorkspacePage', () => {
         inputSequence: 0,
         activeAgentDefinitionId: 'a1',
         activeAgentName: 'assistant',
+        activeEnvironmentName: null,
         modelId: 'm1',
         variant: 'default',
         yoloEnabled: false,

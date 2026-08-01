@@ -11,7 +11,11 @@ import {
   useAgentThreadController,
 } from '@/features/ai/runtime'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
-import { AgentSelectionModal, SelectionListModal } from '@/features/ai/chat/SelectionListModal'
+import {
+  AgentSelectionModal,
+  EnvironmentSelectionModal,
+  SelectionListModal,
+} from '@/features/ai/chat/SelectionListModal'
 import { type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import {
   canRebindThread,
@@ -29,6 +33,7 @@ import {
   variantOptionsFromModel,
 } from '@/features/ai/catalog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
@@ -62,6 +67,7 @@ function firstNonEmpty(...values: unknown[]): string {
 export function BoundThreadPane({
   chatId,
   agents,
+  environments = [],
   paneId,
   threadId,
   focused,
@@ -74,6 +80,7 @@ export function BoundThreadPane({
 }: {
   chatId: string
   agents: AgentDefinitionDTO[]
+  environments?: LiveEnvironmentDTO[]
   paneId: string
   threadId: string
   focused: boolean
@@ -95,11 +102,13 @@ export function BoundThreadPane({
   const [sessionModalOpen, setSessionModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
   const [modelModalOpen, setModelModalOpen] = useState(false)
   const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [threadAssociationPending, setThreadAssociationPending] = useState(false)
+  const [environmentPending, setEnvironmentPending] = useState(false)
   const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
   const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
   const rebindable = canRebindThread(controller.thread)
@@ -166,6 +175,16 @@ export function BoundThreadPane({
     }
   }
 
+  async function selectEnvironment(environmentName: string | null) {
+    setEnvironmentPending(true)
+    try {
+      await controller.setThreadEnvironment(environmentName)
+      setEnvironmentModalOpen(false)
+    } finally {
+      setEnvironmentPending(false)
+    }
+  }
+
   /** /session and /tree both relocate the current Thread, so both need a quiescent Thread. */
   function openRebindTarget(open: () => void) {
     if (!rebindable) {
@@ -191,6 +210,9 @@ export function BoundThreadPane({
       case 'agent':
         setAgentModalOpen(true)
         return
+      case 'environment':
+        setEnvironmentModalOpen(true)
+        return
       case 'model':
         setModelModalOpen(true)
         return
@@ -201,7 +223,7 @@ export function BoundThreadPane({
         openRebindTarget(() => setHistorySessionId(sessionId || null))
         return
       case 'new':
-        // Detach the pane so the next send creates and bootstraps a fresh Thread.
+        // Detach the pane so the next send creates a fresh Chat-bound Thread atomically.
         controller.setDraft('')
         onThreadChange(null)
         return
@@ -224,6 +246,7 @@ export function BoundThreadPane({
     providerName: controller.runtimeLabels.providerName,
     modelName: controller.runtimeLabels.modelName,
     variantName: controller.runtimeLabels.variantName,
+    environmentName: controller.runtimeLabels.environmentName,
     contextWindow: controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {
@@ -259,6 +282,10 @@ export function BoundThreadPane({
     onVariantClick: () => {
       onFocus()
       setVariantModalOpen(true)
+    },
+    onEnvironmentClick: () => {
+      onFocus()
+      setEnvironmentModalOpen(true)
     },
   }
   const activity: ChatPanelActivityInput = {
@@ -348,6 +375,16 @@ export function BoundThreadPane({
           void controller.setThreadAgent(agentId).then(async () => {
             await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
           })
+        }}
+      />
+      <EnvironmentSelectionModal
+        open={environmentModalOpen}
+        environments={environments}
+        selectedEnvironmentName={controller.thread?.activeEnvironmentName}
+        selectionPending={environmentPending}
+        onClose={() => setEnvironmentModalOpen(false)}
+        onSelect={(environmentName) => {
+          void selectEnvironment(environmentName)
         }}
       />
       <SelectionListModal

@@ -13,6 +13,10 @@ export const queryKeys = {
     all: ['agents'] as const,
     list: ['agents', 'list'] as const,
   },
+  tools: {
+    all: ['tools'] as const,
+    list: ['tools', 'list'] as const,
+  },
   environments: {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,

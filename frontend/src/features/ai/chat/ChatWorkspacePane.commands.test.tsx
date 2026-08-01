@@ -31,6 +31,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     updateThreadHead: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
+    setThreadEnvironment: vi.fn(),
     setThreadYolo: vi.fn(),
     submitThreadMessage: vi.fn(),
     stopThread: vi.fn(),
@@ -56,6 +57,7 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     revision: '0',
     activeAgentDefinitionId: 'a1',
     activeAgentName: 'assistant',
+    activeEnvironmentName: 'local',
     modelId: 'm1',
     variant: 'default',
     yoloEnabled: false,
@@ -134,7 +136,7 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: { environmentName: null, tools: [], skills: [] },
+    config: { tools: [], skills: [] },
     createTime: null,
     updateTime: null,
   },
@@ -145,7 +147,7 @@ const agents = [
     systemPrompt: null,
     modelId: 'm1',
     variant: 'default',
-    config: { environmentName: null, tools: [], skills: [] },
+    config: { tools: [], skills: [] },
     createTime: null,
     updateTime: null,
   },
@@ -159,8 +161,13 @@ function renderBoundPane(overrides?: { onThreadChange?: (threadId: string | null
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
-        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', version: '1', createTime: null, updateTime: null }}
+        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', defaultEnvironmentName: null, version: '1', createTime: null, updateTime: null }}
         agents={agents}
+        environments={[
+          { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'remote', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'connecting', status: 'CONNECTING', lastSeen: null, tools: [], skills: [] },
+        ]}
         pane={{ id: 'pane-1', threadId: 't1' }}
         focused
         sessionSort="recent"
@@ -285,6 +292,42 @@ describe('ChatWorkspacePane commands', () => {
       expect(harnessService.setThreadModel).toHaveBeenLastCalledWith(
         't1',
         expect.objectContaining({ modelId: 'm1', variant: 'default', expectedExecutionEpoch: 5 }),
+      ),
+    )
+  })
+
+  it('switches Environment through /environment and the footer, offering only READY targets', async () => {
+    const user = userEvent.setup()
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'remote' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'remote' }))
+
+    await waitFor(() =>
+      expect(harnessService.setThreadEnvironment).toHaveBeenCalledWith(
+        't1',
+        expect.objectContaining({
+          environmentName: 'remote',
+          expectedExecutionEpoch: 5,
+        }),
+      ),
+    )
+
+    await user.click(screen.getByRole('button', { name: '环境：local' }))
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '（无）' }))
+    await waitFor(() =>
+      expect(harnessService.setThreadEnvironment).toHaveBeenLastCalledWith(
+        't1',
+        expect.objectContaining({
+          environmentName: null,
+          expectedExecutionEpoch: 5,
+        }),
       ),
     )
   })

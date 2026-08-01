@@ -74,7 +74,6 @@ function agent(id: string, modelId: string): AgentDefinitionDTO {
     modelId,
     variant: 'default',
     config: {
-      environmentName: null,
       tools: [],
       skills: [],
     },

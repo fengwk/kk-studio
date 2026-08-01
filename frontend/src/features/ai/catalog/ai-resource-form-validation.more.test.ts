@@ -157,8 +157,8 @@ describe('ai-resource-form-validation additional branches', () => {
 
   it.each([
     // empty variant is a valid "use model default" override
-    [agent({ tools: ['one/read', 'two/read'] }), 'tools'],
-    [agent({ skills: ['one/dev', 'two/dev'] }), 'skills'],
+    [agent({ tools: ['read', 'read'] }), 'tools'],
+    [agent({ skills: ['dev', 'dev'] }), 'skills'],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
     const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })
     expect(result.ok).toBe(false)
