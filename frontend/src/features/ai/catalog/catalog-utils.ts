@@ -12,12 +12,12 @@ export function resourceTitle(modal: ResourceModal): string {
     ? translate('ai.catalog.createPrefix')
     : translate('ai.catalog.editPrefix')
   if (modal.kind === 'provider') {
-    return `${prefix} ${translate('ai.nav.providers')}`
+    return `${prefix} ${translate('ai.catalog.resourceType.provider')}`
   }
   if (modal.kind === 'model') {
-    return `${prefix} ${translate('ai.nav.models')}`
+    return `${prefix} ${translate('ai.catalog.resourceType.model')}`
   }
-  return `${prefix} ${translate('ai.nav.agents')}`
+  return `${prefix} ${translate('ai.catalog.resourceType.agent')}`
 }
 
 export function filterAgents(agents: AgentDefinitionDTO[], search: string): AgentDefinitionDTO[] {

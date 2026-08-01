@@ -9,21 +9,20 @@ export function LocaleSelector({ className }: { className?: string }) {
   const { locale, setLocale, t } = useI18n()
 
   return (
-    <div
+    <select
       className={['locale-selector', className].filter(Boolean).join(' ')}
-      role="group"
       aria-label={t('platform.localeSelector')}
+      value={locale}
+      onChange={(event) => setLocale(event.target.value as AppLocale)}
     >
       {localeOptions.map((option) => (
-        <button
+        <option
           key={option.value}
-          type="button"
-          aria-pressed={locale === option.value}
-          onClick={() => setLocale(option.value)}
+          value={option.value}
         >
           {option.label}
-        </button>
+        </option>
       ))}
-    </div>
+    </select>
   )
 }

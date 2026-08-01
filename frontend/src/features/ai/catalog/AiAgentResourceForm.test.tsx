@@ -47,6 +47,8 @@ function modelWithVariants(): AgentModelView {
 describe('AgentForm current contracts', () => {
   it('selects model/variant and toggles unified tools and live skills', async () => {
     const user = userEvent.setup()
+    const longDescription =
+      'Execute shell commands in the configured environment and return the captured output without losing long diagnostic context.'
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
@@ -66,7 +68,7 @@ describe('AgentForm current contracts', () => {
             },
           ]}
           toolCatalog={[
-            { name: 'bash', version: '1', description: 'shell' },
+            { name: 'bash', version: '1', description: longDescription },
             { name: 'lsp', version: '1', description: 'lsp' },
           ]}
           onChange={setDraft}
@@ -79,10 +81,18 @@ describe('AgentForm current contracts', () => {
     expect(screen.queryByText(/无效\/离线 Tools/)).not.toBeInTheDocument()
     const missingTool = screen.getByLabelText(/missing-tool/)
     expect(missingTool).toBeChecked()
+    const bashInput = screen.getByLabelText(/bash/)
+    const bashOption = bashInput.closest('.capability-option')
+    expect(bashOption).toHaveClass('capability-option-detailed')
+    expect(bashOption?.querySelector('.capability-option-body')).toBeInTheDocument()
+    expect(bashOption?.querySelector('.capability-option-heading .capability-name')).toHaveTextContent('bash')
+    expect(bashOption?.querySelector('.capability-option-meta')).toHaveTextContent('1')
+    expect(bashOption?.querySelector('.capability-option-description')).toHaveTextContent(longDescription)
+    expect(bashOption?.querySelector('.capability-option-description')).toHaveAttribute('title', longDescription)
     await user.click(missingTool)
     expect(missingTool).not.toBeChecked()
-    await user.click(screen.getByLabelText(/bash/))
-    expect(screen.getByLabelText(/bash/)).toBeChecked()
+    await user.click(bashInput)
+    expect(bashInput).toBeChecked()
     await user.click(screen.getByLabelText(/dev/))
     expect(screen.getByLabelText(/dev/)).toBeChecked()
   })

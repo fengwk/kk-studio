@@ -3,27 +3,39 @@ import type { LocaleCatalog } from '@/shared/i18n/types'
 export const aiCatalog = {
   'ai.nav.chats': {
     'en-US': 'Chat',
-    'zh-CN': 'Chat',
+    'zh-CN': '对话',
   },
   'ai.nav.agents': {
     'en-US': 'Agent',
-    'zh-CN': 'Agent',
+    'zh-CN': '代理',
   },
   'ai.nav.models': {
     'en-US': 'Model',
-    'zh-CN': 'Model',
+    'zh-CN': '模型',
   },
   'ai.nav.providers': {
     'en-US': 'Provider',
-    'zh-CN': 'Provider',
+    'zh-CN': '提供商',
   },
   'ai.nav.environments': {
     'en-US': 'Environment',
-    'zh-CN': 'Environment',
+    'zh-CN': '环境',
   },
   'ai.nav.setting': {
     'en-US': 'Setting',
     'zh-CN': '设置',
+  },
+  'ai.catalog.resourceType.agent': {
+    'en-US': 'Agent',
+    'zh-CN': 'Agent',
+  },
+  'ai.catalog.resourceType.model': {
+    'en-US': 'Model',
+    'zh-CN': 'Model',
+  },
+  'ai.catalog.resourceType.provider': {
+    'en-US': 'Provider',
+    'zh-CN': 'Provider',
   },
   'ai.common.loadingResources': {
     'en-US': 'Loading resources',
