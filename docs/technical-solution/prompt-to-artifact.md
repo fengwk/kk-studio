@@ -9,7 +9,7 @@ flowchart LR
     Input[ThreadInput USER_MESSAGE]
     Entry[User Session Entry]
     Plan[ModelInvocationPlanner]
-    Provider[Frozen ProviderRequest]
+    Provider[Frozen ModelInvocationRequest]
     MI[ModelInvocation]
     Assistant[Assistant Entry + Usage]
     Invocation[ToolInvocation]
@@ -32,9 +32,9 @@ flowchart LR
 1. 用户或自定义消息通过 `POST /api/ai/runtime/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 在
    无 primary work 时将 snapshot 中全部 queued Input 按 TURN_INPUT_BATCH 原子 harvest，物化 Entry 并推进 head；snapshot
    后到达者留给下一 turn。
-2. 有效运行配置来自路径上最近完整 `RUNTIME_CONFIG` Entry，不从 live Definition 补齐历史。`ModelInvocationPlanner` 从 root-to-head path 判定 response debt，投影语义消息、组装 Skill system section 与冻结 Tool definitions，再经 `PromptCacheRequestFinalizer` 得到最终 `ProviderRequest`。
-3. Tool 短名 platform-first，再回退所选 READY Environment。Environment 离线则明确失败。
-4. Provider 执行只回放冻结请求中的 providerType/providerResourceId/model。
+2. 有效运行配置来自路径上最近完整 `RUNTIME_CONFIG` Entry，不从 live Definition 补齐历史。`ModelInvocationPlanner` 从 root-to-head path 判定 response debt，投影语义消息、组装 Skill system section 与冻结 Tool definitions，再经 `PromptCacheRequestFinalizer` 得到 `ModelInvocationRequest` 的最终 `providerRequest`；bindings、skill snapshots 和 yolo 同时冻结。
+3. Agent tools 只保存统一 ToolCatalog 中的短名。`RuntimeCapabilityResolver` 依据 Thread 的可空 `environmentName` 解析本次 ToolBinding：空值使用本地 runtime，非空值绑定指定 RemoteTool；固定十个 Environment 工具的 descriptor 来自 `EnvironmentToolCatalog`。
+4. Provider 执行只回放冻结 request 中的 `providerRequest()`；`load_skill` 只从冻结 `skillSnapshots` 解析。发送前远程目标不可用时 ToolInvocation 为 `FAILED`，发送结果不确定时为 `UNKNOWN`。
 
 Provider 流式 delta 写入 Redis realtime projection。Assistant 完成时，`ModelWorker` 先把 terminal 写入 `harness_model_invocation` 并标记 Thread runnable；`ThreadReconciler` 再原子提交 Assistant Entry、`harness_model_usage`、可选 ToolInvocations 与 head。
 
@@ -44,8 +44,8 @@ Provider Tool Call 先作为 `QUEUED + PENDING` 写入 `harness_tool_invocation`
 
 统一 `ToolWorker` 从数据库 claim Invocation：
 
-- `PLATFORM` → 本地 `Tool`
-- `ENVIRONMENT` → `RemoteTool` → transport → Daemon → 同一 Tool API
+- `environmentName == null` → 本地 `Tool`
+- `environmentName != null` → `RemoteTool` → transport → Daemon → 同一 Tool API
 
 partial 写 Redis realtime；terminal 写 Invocation。当前 Tool batch 全部终态后，Reconciler 按 ordinal 物化 Tool Result Entry 并推进 head。下一轮 Provider 请求只读持久 Entry。
 

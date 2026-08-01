@@ -1,13 +1,13 @@
 # Prompt Cache、Usage 与 Cost Ledger
 
-本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以最终 `ProviderRequest` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `harness_model_usage` 账本；聚合层再按 Thread、Session 或 Model 读取账本。
+本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以冻结 `ModelInvocationRequest.providerRequest()` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `harness_model_usage` 账本；聚合层再按 Thread、Session 或 Model 读取账本。
 
 ## 端到端链路
 
 ```mermaid
 flowchart LR
     A[ModelInvocationPlanner<br/>标准 ProviderRequest<br/>cacheControl = NONE] --> C[PromptCacheRequestFinalizer]
-    C --> R[冻结 ProviderRequest<br/>写入 ModelInvocation]
+    C --> R[冻结 ModelInvocationRequest<br/>写入 ModelInvocation]
     R --> D[ModelWorker / Provider Adapter]
     D --> E[ProviderResponse<br/>usage metadata]
     E --> F[ModelUsageDraft]
@@ -19,7 +19,7 @@ flowchart LR
 
 1. `ModelInvocationPlanner` 先构造 `cacheControl = NONE` 的标准请求。
 2. 同一步骤直接调用绑定 `sessionId` 的 `PromptCacheRequestFinalizer`，由它独占最终 cache control 的生成。
-3. 最终请求作为冻结 `ProviderRequest` 写入 durable ModelInvocation；`ModelWorker` 只回放该请求中的 providerType/providerResourceId/model。
+3. 最终请求与同一 ModelInvocation 的 toolBindings、skillSnapshots、yoloEnabled 一起组成冻结 `ModelInvocationRequest`；`ModelWorker` 只回放其中的 `providerRequest()`。
 4. Provider Adapter 只接收冻结后的控制结果。
 5. Provider 完成后，`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
 6. `ModelWorker` 先提交 ModelInvocation terminal 并标记 Thread runnable；`ThreadReconciler` 在 processor fencing 下原子提交 Assistant Entry、`harness_model_usage`、可选 ToolInvocations 与 head。
@@ -43,7 +43,7 @@ flowchart LR
 
 ### Session Finalizer
 
-`PromptCacheRequestFinalizer` 是 `ModelInvocationPlanner` 冻结 `ProviderRequest` 时唯一可信的 cache control 生成点。它始终覆盖请求中已有的 control，并直接写入冻结请求：
+`PromptCacheRequestFinalizer` 是 `ModelInvocationPlanner` 冻结 `ModelInvocationRequest` 前唯一可信的 cache control 生成点。它始终覆盖请求中已有的 control，并写入冻结 request 的 `providerRequest`：
 
 | Policy 状态 | 最终 control |
 | --- | --- |
@@ -213,7 +213,7 @@ or
 mode in {AFFINITY, BREAKPOINTS} and retention != NONE
 ```
 
-Draft 从最终 `ProviderRequest` 读取 model、cache mode、最终 retention 和 affinity key，从 `ProviderResponse` 读取 stop reason、usage、cost 和 Provider metadata。
+Draft 从冻结 `ModelInvocationRequest.providerRequest()` 读取 model、cache mode、最终 retention 和 affinity key，从 `ProviderResponse` 读取 stop reason、usage、cost 和 Provider metadata。
 
 ### ModelUsageRecord 与 Assistant Entry
 
@@ -408,7 +408,7 @@ runtime 仅从 `config.abilities` 派生 `tools` / `reasoning`，并直接投影
 
 ### Tool Binding 解析
 
-Agent 配置中的 `tools` 仅为短名。platform-first：先匹配已注册 PLATFORM tool，再回退所选 READY Environment capability 并绑定 `environmentName`。Environment 离线则明确失败。
+Agent 配置中的 `tools` 仅为短名。`RuntimeCapabilityResolver` 依据统一 `ToolCatalog`、Thread 的 `environmentName` 和 live Environment registry 解析本次 request 的 `ToolBinding`；绑定的 `environmentName == null` 时使用本地 runtime，否则使用对应 RemoteTool。runtime-managed `load_skill` 从冻结 request 的 `skillSnapshots` 解析，不由 Agent tools 选择；远程目标在发送前不可用则 ToolInvocation 为 `FAILED`，发送结果不确定则为 `UNKNOWN`。
 
 ### 进程生命周期
 

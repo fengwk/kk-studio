@@ -6,7 +6,7 @@
 
 | 域 | 代码位置 | 职责 | 当前成熟度 |
 | --- | --- | --- | --- |
-| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.ai.runtime` + `features/ai` | Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
+| **Harness / AI** | `harness-tool` / `harness-runtime` / `harness-daemon` + `core.ai.runtime` + `features/ai` | Agent、Environment、Chat、Session Entry Tree、可复用 HarnessThread、Model/Tool Invocation、Interaction | 现行契约 |
 | **Studio / Canvas** | `studio` + `core.studio` + `features/canvas` | 全局单实例持久化画布（document / node / link / command-dedup） | 现行契约 |
 
 依赖：
@@ -56,8 +56,10 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 | HarnessThread | 可跨 Session 复用的 durable runtime process：可空 head / mailbox / lease / epoch 控制面；当前 Session 由 head Entry 派生 |
 | Branch | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry |
 | ThreadInput | 有序 mailbox 命令 |
-| ModelInvocation | 冻结 ProviderRequest 的 durable Provider 调用 |
-| ToolInvocation | 单次 ToolCall 的 durable 执行事实 |
+| ModelInvocation | 冻结 `ModelInvocationRequest` 的 durable Provider 调用 |
+| ToolInvocation | 单次 ToolCall 的 durable 执行事实；可空 `environmentName` 表示本地 runtime 或 RemoteTool 目标 |
+| ToolCatalog | Agent 可选的本地工具与固定十个 Environment 工具的统一目录 |
+| Environment | Daemon 连接形成的内存实时资源；固定工具目录，READY skills |
 | Interaction | 通用人机/外部交互事实 |
 | Realtime projection | Redis Streams 有界覆盖层，非 durable journal |
 
@@ -88,7 +90,8 @@ FUNCTION 节点当前唯一实例是 `system.generate-text` v1。
 | `/api/functions`、`/api/workflows`、`/api/function-runs` 等 | 暂不暴露 |
 | Harness `/api/ai/runtime/sessions` | 仅查询 Session 列表/详情与 Entry Tree；Session/ROOT/RUNTIME_CONFIG 只由 Thread bootstrap 原子创建 |
 | Harness `/api/ai/runtime/threads` | 全局 Thread 列表；创建 UNBOUND Thread |
-| Harness `/api/ai/runtime/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交、Entries/Inputs、Redis realtime SSE、Stop；全局策略位于 `/api/ai/runtime/settings/retry-policy` 与 `/api/ai/runtime/settings/realtime-stream-policy` |
+| Harness `/api/ai/runtime/threads/{threadId}` | Thread 读取、bootstrap、`PUT /head` 重定位、mailbox 提交（含 SET_ENVIRONMENT）、Entries/Inputs、Redis realtime SSE、Stop；全局策略位于 `/api/ai/runtime/settings/retry-policy` 与 `/api/ai/runtime/settings/realtime-stream-policy` |
+| `GET /api/ai/catalog/tools` | 统一可选 ToolCatalog |
 
 ## 7. 实现进度一句话
 

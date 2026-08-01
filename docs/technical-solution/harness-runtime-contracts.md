@@ -119,13 +119,12 @@ public record ContinuationRef(ExecutionTarget owner, ExecutionTarget blocker) {}
 
 ### 3.1 RuntimeConfigSnapshot
 
-`RuntimeConfigSnapshot(AgentSnapshot agent, ModelSnapshot model, List<ToolBinding> tools, List<SkillSnapshot> skills, boolean yoloEnabled)`。
+`RuntimeConfigSnapshot(AgentSnapshot agent, ModelSnapshot model, String environmentName, List<String> toolNames, List<String> skillNames, boolean yoloEnabled)`。
 
-- 完整、自足、不可变；不含 secret；credential 只使用稳定 reference（`ModelDescriptor.providerResourceId`）；集合排序确定。
-- `tools` 与 `skills` 做 defensive copy：`tools` Provider tool name 唯一并按 `(name, version, environmentName nullsFirst)` 排序；`skills` name 唯一并按 name 字典序。
-- `tools` 非空时 `model.descriptor().tools()` 必须为 true。
-- ENVIRONMENT 工具 binding 的 `environmentName` 与每个 `SkillSnapshot.sourceEnvironment()` 必须全部相等（PLATFORM 工具不参与）；`withYoloEnabled(boolean)` 仅替换顶层 `yoloEnabled`。
-- 每次配置命令写完整 snapshot。
+- 完整、自足、不可变；不含 secret；credential 只使用稳定 reference（`ModelDescriptor.providerResourceId`）；名称集合按字典序 canonical。
+- `environmentName` 可空；空值表示当前 runtime 的本地执行，非空值是本次 Thread 的 RemoteTool 目标。Environment 名称最多 128 个字符，不能包含首尾空白。
+- `toolNames` 与 `skillNames` 只允许短名，分别去重并排序；非空 tools/skills 要求 `model.descriptor().tools()` 为 true。
+- `withEnvironmentName(String)` 只替换 Environment；`withYoloEnabled(boolean)` 只替换 yolo。每次配置命令写完整 snapshot。
 
 ### 3.2 Entry payload JSON
 
@@ -142,7 +141,7 @@ public Optional<ModelInvocationPlan> plan(
 
 - 输入必须是完整连续 root-to-head path，末 Entry 等于 `sourceHeadEntryId`
 - 不访问 Store、Spring、Clock 或 live Definition，不写 Entry/head
-- 发现 response debt 后只读 debt 前缀；plan 绑定实际 head，并包含该前缀的完整 `RuntimeConfigSnapshot` 与经 Prompt Cache finalization 的完整 `ProviderRequest`
+- 发现 response debt 后只读 debt 前缀；plan 绑定实际 head，并包含该前缀的完整 `RuntimeConfigSnapshot` 与经 Prompt Cache finalization 的冻结 `ModelInvocationRequest`
 - 后续 queued 配置不能反向改变已存在的 response debt
 
 ### 3.4 ModelInvocation
@@ -153,7 +152,7 @@ public record ModelInvocation(
     long threadId,
     long sourceHeadEntryId,
     long executionEpoch,
-    ProviderRequest request,
+    ModelInvocationRequest request,
     InvocationStatus status,
     int attempt,
     Instant nextAttemptAt,
@@ -178,26 +177,37 @@ public record ModelInvocation(
 - Reconciler 只能 apply terminal 且 `appliedAt == null` 的 result
 - worker terminal 事务只写 Invocation terminal 并原子设置 Thread `runnable=true`
 - Reconciler apply 成功时写 Assistant/AssistantError Entry、Usage、ToolInvocations、head 和 `appliedAt`
-- Provider 执行只使用冻结 `ProviderRequest` 的 providerType/providerResourceId/model
+- Provider 执行只使用冻结 `ModelInvocationRequest.providerRequest()`；后续 Tool 路由和 `load_skill` 解析只使用同一 request 的 frozen bindings/skills
 - `safeStreamSnapshot` 仅承载 text/thinking 累积；SSE 前以 Thread + Invocation 锁 fenced 写入；retry-attempt CAS 重置；`/stop` 读取 `(threadId, executionEpoch, sourceHeadEntryId)` 且 `safe_stream_snapshot is not null AND applied_at is null` 的未应用行，保留已经写入的部分输出到 `ASSISTANT_ABORTED`
+
+### 3.4.1 ModelInvocationRequest
+
+`ModelInvocationRequest` 是一次 ModelInvocation 的唯一冻结请求：
+
+```java
+public record ToolBinding(ToolDescriptor descriptor, String environmentName) {}
+
+public record ModelInvocationRequest(
+    ProviderRequest providerRequest,
+    List<ToolBinding> toolBindings,
+    List<SkillSnapshot> skillSnapshots,
+    boolean yoloEnabled) {}
+```
+
+`providerRequest.tools` 与 `toolBindings` 按顺序严格一一对应，数量、名称、description 和 input schema 必须完全一致；`skillSnapshots` 是本次请求的完整 selected skills。`ModelInvocationRequestJsonCodec` 只接受 `providerRequest`、`toolBindings`、`skillSnapshots`、`yoloEnabled` 四个字段，并对嵌套 descriptor、binding 与 skill snapshot 做严格字段校验。`load_skill` 从该冻结 request 的 `skillSnapshots` 解析正文，不重新读取当前 Agent 或 live Environment 配置。
 
 ### 3.5 ToolInvocation
 
 ```java
-public enum ToolExecutionLocation {
-  PLATFORM,
-  ENVIRONMENT
-}
-
 public record ToolInvocation(
     long id,
     long threadId,
     long assistantEntryId,
+    long modelInvocationId,
     int ordinal,
     String toolCallId,
     ToolDescriptor descriptor,
     String argumentsJson,
-    ToolExecutionLocation location,
     String environmentName,
     long executionEpoch,
     InvocationStatus status,
@@ -218,11 +228,11 @@ public record ToolInvocation(
 
 约束：
 
-- `(threadId, assistantEntryId, executionEpoch, ordinal)` 唯一
+- `(threadId, assistantEntryId, executionEpoch, ordinal)` 唯一；`(threadId, modelInvocationId)` 外键指向产生该 ToolCall 的 ModelInvocation
 - Tool worker 不写 Entry/head
 - sibling 全部 terminal 后，Reconciler 在一个事务中按 ordinal 写 Tool Result Entry，并设置所有 sibling `appliedAt`
-- ENVIRONMENT 必须有 environmentName，PLATFORM 必须没有
-- 本地：`ToolWorker -> Tool`；远程：`ToolWorker -> RemoteTool -> transport -> Daemon -> Tool`
+- `environmentName == null` 时走本地 `ToolWorker -> Tool`；非空时走 `ToolWorker -> RemoteTool -> transport -> Daemon -> Tool`
+- 发送前远程目标不可用时写 `FAILED`；发送结果不确定时写 `UNKNOWN`，不得重放该副作用
 - `PENDING` 只允许在 `QUEUED`/`RUNNING` 或未执行的取消/设置失败终态；`ALLOWED` 必须在任何外部 Tool I/O 前持久化
 - `ASKED` 只允许在无 lease/clock 的 `WAITING_INTERACTION`，且对应一个 OPEN `tool-permission` Interaction 与 parked target
 - `DENIED` 只允许在 `FAILED`；批准恢复 `QUEUED + ALLOWED` 并经 target route FIFO gate 调度，拒绝删除 Tool target 并原子唤醒 Thread
@@ -250,7 +260,7 @@ public record Interaction(
 
 ### 3.7 Command coordinators
 
-- `ThreadCommandCoordinator` 拥有 UNBOUND Thread 创建、bootstrap、head 重定位、typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
+- `ThreadCommandCoordinator` 拥有 UNBOUND Thread 创建、bootstrap、head 重定位、typed payload 构造、消息/role 校验、idempotency short-circuit、当前 config 选择、SET_AGENT/SET_MODEL/SET_ENVIRONMENT/SET_YOLO 完整快照和 Stop 调用；对 Core 返回 coordinator-owned result，不泄漏 transaction SPI result。
 - Thread `bootstrapThread` 在同一事务内创建 Session / ROOT / `RUNTIME_CONFIG`，并将 Thread head 重定位到 `RUNTIME_CONFIG` Entry。Session / ROOT / `RUNTIME_CONFIG` 三件套仅由 `bootstrapThread` 内部私有 helper 落库，未公开为 Runtime SPI。
 - `InteractionCoordinator` 拥有 Tool permission projection 和 deterministic approval resolution。
 
@@ -261,12 +271,14 @@ HarnessThread createThread();
 
 BootstrapResult bootstrapThread(
     long threadId, long expectedExecutionEpoch,
-    String title, long agentDefinitionId, boolean yoloEnabled);
+    String title, long agentDefinitionId, String environmentName, boolean yoloEnabled);
 
 HarnessThread updateHead(long threadId, long expectedExecutionEpoch, Long headEntryId);
 ```
 
-`bootstrapThread` 只接受 UNBOUND Thread，在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把 head 绑定到 `RUNTIME_CONFIG` Entry。`updateHead` 的 `headEntryId` 可空：非空为 bind/rebind，空为 unbind。二者与所有 mailbox 命令、Stop 一样，都必须携带 `expectedExecutionEpoch`。
+`bootstrapThread` 只接受 UNBOUND Thread，在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把 head 绑定到 `RUNTIME_CONFIG` Entry；初始配置包含 Agent、Model、Environment、tools、skills 和 yolo。`updateHead` 的 `headEntryId` 可空：非空为 bind/rebind，空为 unbind。二者与所有 mailbox 命令、Stop 一样，都必须携带 `expectedExecutionEpoch`。
+
+`SET_ENVIRONMENT` 接收可空 Environment 名称；`null` 清除目标并切回本地 runtime。命令只替换 `RuntimeConfigSnapshot.environmentName`，保留 Agent、Model、tools、skills 与 yolo。配置命令通过 `expectedExecutionEpoch` 做 CAS fencing，重复 idempotency key 直接返回既有 Input。
 
 Coordinator 不依赖 Spring/DTO/HTTP；Core boundary 负责十进制字符串解析、Spring 外层事务、durable target mutation 与 DTO 映射。
 
@@ -302,8 +314,8 @@ public record ExecutionTarget(ExecutionTargetKind kind, long id) {}
 ```
 
 Core 的 PostgreSQL target store 为每个 `(kind, id)` 保留唯一 durable row，并以 `dispatch_enabled` 作为
-显式 gate。`schedule` 创建/启用普通 target；ENVIRONMENT Tool materialization 使用 `park` 创建 disabled
-row，随后按 `created_at, assistant_entry_id, ordinal, id` 只启用 route FIFO head。`lockDue`、due scan 和
+显式 gate。`schedule` 创建/启用普通 target；非空 Environment Tool materialization 使用 `park` 创建 disabled
+row，随后按 `created_at, assistant_entry_id, ordinal, id` 只启用目标 FIFO head。`lockDue`、due scan 和
 nearest-due timing 忽略 disabled row，`lock`/`findAll` 仍可观察 parked row。schema trigger 在 commit 后
 投递 PostgreSQL `NOTIFY`；`PostgresqlExecutionTargetListener`、startup/reconnect、Environment READY 与
 nearest-due timer 只调用 coalesced dispatcher wake，通知失败或丢失永不回滚业务事务。
@@ -341,15 +353,28 @@ Adapter 必须支持 best-effort cancel；Runtime 以 worker token/epoch 判断 
 ### 4.5 RuntimeConfigSource
 
 ```java
+import java.util.Objects;
+
 public interface RuntimeConfigSource {
   RuntimeConfigSnapshot resolveAgent(long definitionId, boolean yoloEnabled);
+
+  default RuntimeConfigSnapshot resolveAgent(
+      long definitionId, String environmentName, boolean yoloEnabled) {
+    return resolveAgent(definitionId, yoloEnabled).withEnvironmentName(environmentName);
+  }
+
+  default RuntimeConfigSnapshot replaceAgent(RuntimeConfigSnapshot current, long definitionId) {
+    Objects.requireNonNull(current, "current");
+    return resolveAgent(definitionId, current.environmentName(), current.yoloEnabled())
+        .withEnvironmentName(current.environmentName());
+  }
 
   RuntimeConfigSnapshot replaceModel(
       RuntimeConfigSnapshot current, long modelId, String requestedVariant);
 }
 ```
 
-这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与 `ToolFactories` 暴露的 platform Tool descriptors，但不得发起 Provider I/O。纯 `SET_YOLO` 变换由 `RuntimeConfigSnapshot.withYoloEnabled` 完成。
+这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与统一 `ToolCatalog`，但不得发起 Provider I/O。`replaceAgent` 只替换 Agent，保留 current 的 Environment、Model、tools、skills 与 yolo；纯 `SET_ENVIRONMENT` / `SET_YOLO` 变换分别由 `RuntimeConfigSnapshot.withEnvironmentName` / `withYoloEnabled` 完成。
 
 ## 5. Transaction ports
 
@@ -467,7 +492,7 @@ THREAD target dispatch
 TOOL_INVOCATION target dispatch
   -> claim specified ToolInvocation
   -> check unresolved Interaction
-  -> execute PLATFORM Tool 或 ENVIRONMENT RemoteTool
+  -> execute local Tool or non-null Environment RemoteTool
   -> partial to RealtimeEventSink
   -> terminal via ToolInvocationTransactions
   -> terminal transaction schedules Thread target

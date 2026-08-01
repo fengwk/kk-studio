@@ -46,7 +46,7 @@ flowchart LR
 | 模块 | 职责 | 禁止 |
 | --- | --- | --- |
 | `studio` | Canvas 纯领域与端口 | Spring、MyBatis、HTTP、Harness 类型 |
-| `harness-tool` | location-neutral Tool API / schema / RemoteTool / Daemon 协议 | Runtime 状态机 |
+| `harness-tool` | route-neutral Tool API / schema / RemoteTool / Daemon 协议 | Runtime 状态机 |
 | `harness-runtime` | Session / Thread / Invocation / Interaction / Reconciler / Model 契约 | Provider SDK、Spring、HTTP |
 | `harness-daemon` | 独立 Environment 进程适配器 | 依赖 runtime / Spring |
 | `core` | Application boundary、composition、持久化/事务、worker lifecycle、S3、ComfyUI 与 Studio adapters；LangChain4j Provider | 成为第二个“万能领域层” |
@@ -70,20 +70,22 @@ frontend → web APIs (via shared/api)
 
 | 事实 | 职责 |
 | --- | --- |
-| **Chat** | 持久 Chat 集合与必填但可 stale 的默认 Agent 引用；通过 `chat_thread` 历史聚合 Thread，不拥有 Thread 生命周期，也不保存 Pane |
+| **Chat** | 持久 Chat 集合与必填但可 stale 的默认 Agent 引用、可空默认 Environment 名称；通过 `chat_thread` 历史聚合 Thread，不拥有 Thread 生命周期，也不保存 Pane |
 | **Pane** | 浏览器本地 Chat 工作区姿势：固定 8 个槽位的布局、焦点与各面板可空 `threadId` 仅存 localStorage；layout 只控制可见前 N 个 |
 | **Session** | 共享 append-only Entry Tree 的边界，不持有 Thread；存储列只有 `id`、`title`、`created_at`；由 Thread `bootstrapThread` 在同一事务中创建 |
 | **Entry** | 语义持久真源：`ROOT`、`RUNTIME_CONFIG`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`（用户 `/stop` 持久化的 partial assistant turn，仅含安全 text/thinking） |
 | **HarnessThread** | 可复用 durable runtime process：可空 `headEntryId`、input sequence、`runnable`、execution epoch、processor lease；当前 Session 由 head Entry 派生 |
 | **Branch(thread)** | 不是独立实体：把某个 Thread 的 head 重定位到历史 Entry 即继续该分支；路径由 root→`headEntryId` 派生 |
 | **ThreadInput** | 多生产者有序 mailbox：消息与配置命令；幂等键；TURN_INPUT_BATCH harvest |
-| **ModelInvocation** | 冻结 ProviderRequest 的 durable Provider 调用 |
-| **ToolInvocation** | 工具 lease、结果与终态；`PLATFORM`/`ENVIRONMENT` 路由；ID 是副作用幂等边界 |
+| **ModelInvocation** | 冻结 `ModelInvocationRequest` 的 durable Provider 调用 |
+| **ToolInvocation** | 单次 ToolCall 的 lease、结果与终态；可空 `environmentName` 决定本地 runtime 或 RemoteTool 目标；ID 是副作用幂等边界 |
 | **Interaction** | 通用 approval/clarification/external input |
 | **Usage / Cost** | 每 Assistant Entry 一条不可变账本（`harness_model_usage`） |
-| **Live Environment** | 当前 Daemon 连接发现的内存工具/Skill 元数据；按名称唯一，不持久化 |
+| **Live Environment** | 当前 Daemon 连接发现的内存 Environment；按名称唯一，工具来自固定目录，skills 来自 READY 上报，不持久化 |
 
-Chat↔Thread 是历史多对多聚合关系：一个 Chat 可关联多个 Thread，一个 Thread 也可出现在多个 Chat；关系不承担活跃时间排序，Chat 删除只删除关系。前端 AI 从 Chat 卡片进入本地 Pane 工作区。空 Pane 首发：`POST /api/ai/chat/{chatId}/threads -> bootstrap -> USER_MESSAGE`，Chat-scoped 创建与关系写入在同一事务中完成。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 为装饰队列；流式覆盖来自无 SSE id 的 Redis `realtime` 事件，重连恢复只使用 durable Thread revision，每个已绑定 Pane 都建立自己的 EventSource。
+Agent 与 Environment 是平级的全局运行资源。Agent definition 的 `config` 只保存短名 `tools` 与 `skills`；Environment 由 Chat 的 `defaultEnvironmentName` 或 Thread runtime config 选择。统一 ToolCatalog 由 Agent 可选的本地工具和固定的十个 Environment 工具组成，runtime-managed 的 `load_skill` 只在选中 skills 时由 runtime 注入。
+
+Chat↔Thread 是历史多对多聚合关系：一个 Chat 可关联多个 Thread，一个 Thread 也可出现在多个 Chat；关系不承担活跃时间排序，Chat 删除只删除关系。前端 AI 从 Chat 卡片进入本地 Pane 工作区。`POST /api/ai/chat/{chatId}/threads` 在一个事务中依次完成 Thread 创建、Chat 关联、bootstrap、Chat 默认 Agent/Environment 与 defaultYolo 的应用，并返回完成查询得到的 Thread；任一步失败都回滚。前端以 Thread 路径 Entries 为历史基线，未物化的 `USER_MESSAGE` / `CUSTOM_MESSAGE` inputs 为装饰队列；流式覆盖来自无 SSE id 的 Redis `realtime` 事件，重连恢复只使用 durable Thread revision，每个已绑定 Pane 都建立自己的 EventSource。
 
 Thread head 的外部重定位（bootstrap / rebind / unbind）要求 Thread 逻辑静止，并以 `expectedExecutionEpoch` 做 CAS fencing：成功后 epoch+1 并清 lease/runnable，旧 epoch 的执行结果不再能写入。
 
@@ -131,8 +133,9 @@ Canvas 表现模型与 Studio 词汇映射：`features/canvas/domain-map.ts`。
 1. **双域不混写**：Canvas 不引用 Harness Session/Thread 类型；Harness 不引用 CanvasDocument。
 2. **Agent 进入 Studio 只有 Function 门面**：`system.agent.execute`（后续 Adapter 实现）。
 3. **Link 与 Reference 不混称**：当前 Canvas 不持久化 ResourceReference。
-4. **stub 必须诚实**：未实现能力不直接打包进接口；只暴露实际可用的 Canvas 行为。
-5. **文档进度与代码一致**：见各文档落地描述。
+4. **Agent 与 Environment 分离**：Agent 编辑面只维护 Agent 自身的 tools/skills，Chat 编辑面维护默认 Agent 与默认 Environment。
+5. **stub 必须诚实**：未实现能力不直接打包进接口；只暴露实际可用的 Canvas 行为。
+6. **文档进度与代码一致**：见各文档落地描述。
 
 ## 8. 入口文档
 

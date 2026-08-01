@@ -18,7 +18,7 @@ Harness 代码模块只有三个，聚合于 `harness/pom.xml`：
 
 ```text
 harness/
-├── tool/       # location-neutral Tool API / schema / RemoteTool / Daemon 协议
+├── tool/       # route-neutral Tool API / schema / RemoteTool / Daemon 协议
 ├── runtime/    # Session/Entry/Thread/Invocation/Interaction/Reconciler/Model 契约
 └── daemon/     # 独立 Environment 进程适配器，仅依赖 tool
 ```
@@ -98,7 +98,7 @@ Entry 是 transcript 与运行配置的唯一语义事实，类型：
 - `ASSISTANT_ERROR`
 - `ASSISTANT_ABORTED`（用户 `/stop` 触发，仅含安全 text/thinking，是 Provider 上下文中完整的 partial assistant turn 与 debt barrier）
 
-`RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Tool descriptors/bindings、selected skills 与 yolo 开关。不保存 secret value；credential 只存稳定 reference。
+`RUNTIME_CONFIG` 保存一次完整、不可变、已解析的有效运行快照：Agent identity、system prompt、effective model/variant、Environment 名称、tools/skills 短名与 yolo 开关。不保存 secret value；credential 只存稳定 reference。每次 ModelInvocation 规划时，再从这些短名和 live Environment registry 解析本次请求使用的 descriptor、binding 与 skill snapshot。
 
 配置修改不是 patch fold。每次配置命令都解析并追加完整 `RUNTIME_CONFIG`。任意 Entry head 可独立恢复有效配置。
 
@@ -131,7 +131,7 @@ Branch 不是独立实体：从历史 Entry 继续对话，就是把某个 Threa
 
 ### 3.3 ThreadInput
 
-有序 mailbox，只接收 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_YOLO`。外部 Invocation terminal 不进 mailbox；通过 `runnable` 让 Reconciler 优先收敛 continuation debt。
+有序 mailbox，只接收 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`、`SET_YOLO`。外部 Invocation terminal 不进 mailbox；通过 `runnable` 让 Reconciler 优先收敛 continuation debt。
 
 Mailbox 采用 TURN_INPUT_BATCH（turn-start batch）：
 
@@ -145,7 +145,7 @@ snapshot；最终 head 最多创建一次 ModelInvocation。snapshot 后到达�
 
 ### 3.4 ModelInvocation
 
-`ModelInvocationPlanner` 从完整 root-to-head Entry path 判定 response debt，从 debt 前缀与最近 `RUNTIME_CONFIG` 构造并冻结完整 `ProviderRequest`（含 Prompt Cache finalization）。worker 只回放该冻结请求：`providerType` / `providerResourceId` / model 等均来自 snapshot，不 live 重建 Agent。
+`ModelInvocationPlanner` 从完整 root-to-head Entry path 判定 response debt，从 debt 前缀与最近 `RUNTIME_CONFIG` 构造并冻结 `ModelInvocationRequest`。其中 `ProviderRequest` 是最终 Provider 请求，`toolBindings`、`skillSnapshots` 与 `yoloEnabled` 同时冻结；Provider tools 与 bindings 按顺序严格一一对应。Prompt Cache finalization 在冻结前完成。worker 只回放该请求：`providerType` / `providerResourceId` / model 等均来自 snapshot，不 live 重建 Agent。
 
 ModelInvocation 负责 source head、execution epoch、request snapshot、状态、worker lease、deadline/activity/retry、terminal result/error 与 `appliedAt`。
 
@@ -153,9 +153,9 @@ ModelInvocation 负责 source head、execution epoch、request snapshot、状态
 
 ### 3.5 ToolInvocation
 
-一次 Assistant ToolCall 的 durable 执行事实：Assistant Entry、ordinal、toolCallId、descriptor/arguments snapshot、`ToolExecutionLocation`（`PLATFORM` | `ENVIRONMENT`）、状态、worker lease、deadline/retry、result/error、`appliedAt`、permission state 与冻结的 YOLO 开关。
+一次 Assistant ToolCall 的 durable 执行事实：Assistant Entry、所属 `modelInvocationId`、ordinal、toolCallId、descriptor/arguments snapshot、可空 `environmentName`、状态、worker lease、deadline/retry、result/error、`appliedAt`、permission state 与冻结的 YOLO 开关。`modelInvocationId` 与 `threadId` 共同引用同一 ModelInvocation。
 
-`ToolExecutionLocation` 与 `ToolBinding` 是 runtime 路由状态，不属于 tool 模块的功能描述。
+`environmentName == null` 时，ToolWorker 从本地 ToolRegistry 执行；非空时构造 `RemoteTool` 并发送到该 Environment。发送前发现目标不可用写入 `FAILED`，发送结果不确定写入 `UNKNOWN`；两种结果都由 durable Invocation 事实记录。
 
 统一 `ToolWorker` 只写 ToolInvocation 与 realtime partial，不写 Entry/head。
 
@@ -168,22 +168,22 @@ QUEUED + PENDING
   -> DENY: FAILED + DENIED -> delete Tool target + schedule Thread target
 ```
 
-批准只把 `WAITING_INTERACTION + ASKED` 恢复为 `QUEUED + ALLOWED`，并通过原 PLATFORM target 或 ENVIRONMENT route FIFO head 启用；它不会再次运行 permission evaluator。ASKED target 保持 route queue 成员身份，因此不能让后续 sibling 越过等待用户决定的 head。
+批准只把 `WAITING_INTERACTION + ASKED` 恢复为 `QUEUED + ALLOWED`，并通过原本地或 Environment route FIFO head 启用；它不会再次运行 permission evaluator。ASKED target 保持 route queue 成员身份，因此不能让后续 sibling 越过等待用户决定的 head。
 
 执行路径：
 
 ```text
-PLATFORM
+local runtime
   ToolWorker -> Tool.execute(...)
 
-ENVIRONMENT
+remote Environment
   ToolWorker -> RemoteTool -> transport -> Daemon inbound -> 同一 Tool API
 ```
 
 Gateway 只拥有连接与协议，不是第二套 durable 状态机。
 
 `harness_execution_target` 为每个 durable Thread/Model/Tool target 保留唯一队列行，并以
-`dispatch_enabled` 作为显式 gate。PLATFORM Tool target 由 `schedule` 创建为 enabled；ENVIRONMENT
+`dispatch_enabled` 作为显式 gate。本地 Tool target 由 `schedule` 创建为 enabled；Environment
 Tool target 由 Reconciler materialization 先 `park`，同一事务完成后只 enable 每个 route 的 oldest
 queued head。route FIFO 使用 Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`，
 RUNNING、RETRY_WAIT 和 WAITING_INTERACTION head 会阻塞后续 sibling。`PostgresqlExecutionTargetDispatcher`
@@ -274,7 +274,7 @@ sequenceDiagram
 
 ## 6. Tool 执行
 
-Reconciler apply terminal Model 时原子写 Assistant Entry、Usage、ToolInvocations 与 head。
+Reconciler apply terminal Model 时原子写 Assistant Entry、Usage、ToolInvocations 与 head。每个 ToolInvocation 的 `modelInvocationId` 指向产生该 ToolCall 的 ModelInvocation，且与 ToolInvocation 的 `threadId` 组成复合 FK。
 
 `ToolWorker` 领取 `QUEUED` Invocation：本地 `Tool` 或 `RemoteTool`。全部 sibling terminal 后，Reconciler 按 ordinal 追加 Tool Result Entry，产生下一次 response debt。
 

@@ -1,6 +1,6 @@
 # 存储模型
 
-PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权威 DDL 为 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行。S3 只保存 ComfyUI 对象和浏览器直传对象，不承担 Harness 或 Canvas 事务状态。Redis 不保存 durable truth。
+PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权威且最终的 schema 为 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行；仓库不提供后续结构迁移。S3 只保存 ComfyUI 对象和浏览器直传对象，不承担 Harness 或 Canvas 事务状态。Redis 不保存 durable truth。
 
 ## 资源文件
 
@@ -16,7 +16,7 @@ PostgreSQL 是 Harness 执行恢复与 Canvas 最小持久化的事实源。权�
 | --- | --- | --- |
 | `agent_provider` | Provider 连接和配置 | `name` 唯一 |
 | `agent_model` | 模型能力和配置 | `(provider_id, name)` 唯一 |
-| `agent_definition` | Agent 定义、默认模型和 config | `name` 唯一 |
+| `agent_definition` | Agent 定义、默认模型和 config（仅 tools/skills 短名） | `name` 唯一；config 不保存 Environment |
 | live Environment registry（非表） | 当前 Daemon 的内存 Environment registry | `environmentName` 唯一；断开即移除 |
 | `comfyui_workflow_api` | ComfyUI 工作流卡片 | `api_name` 唯一 |
 
@@ -39,14 +39,14 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 
 | 表 | 职责 | 关键字段 / 约束 |
 | --- | --- | --- |
-| `chat` | 持久 Chat 集合与默认 Agent 引用 | `default_agent_id` 非空；写入时必须指向现存 Agent，但不设 FK，因此 Agent 删除后允许保留 stale id |
+| `chat` | 持久 Chat 集合、默认 Agent 与默认 Environment | `default_agent_id` 非空；写入时必须指向现存 Agent，但不设 FK，因此 Agent 删除后允许保留 stale id；`default_environment_name` 可空并按 canonical 名称约束 |
 | `chat_thread` | Chat↔Thread 历史多对多关联 | `(chat_id, thread_id)` 主键；Chat 删除级联关系，Thread 不被删除；`created_at` 仅为关系审计，不参与 Thread 活跃排序 |
 | `harness_session` | Entry Tree 容器 | `id`、`title`、`created_at`；仅与 append-only Entry Tree 关联，存储上不持有 Thread |
 | `harness_entry` | append-only 语义历史 | `session_id`、`parent_entry_id`、`entry_type`、`payload` jsonb；类型为 `ROOT/RUNTIME_CONFIG/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED`（`ASSISTANT_ABORTED` 仅承载安全 text/thinking） |
 | `harness_thread` | 可复用 durable runtime process | 可空 `head_entry_id`（单列 FK）、`input_sequence`、`runnable`、`execution_epoch`、`processor_token`/`processor_until` |
 | `harness_thread_input` | 有序 mailbox | `(thread_id, sequence)` 与幂等键唯一；`QUEUED/APPLIED/CANCELLED` |
-| `harness_model_invocation` | 冻结 Provider 调用 | `(thread_id, source_head_entry_id, execution_epoch)` 唯一；request/result jsonb；`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`safe_stream_snapshot` jsonb 仅 text/thinking，fenced-write 在每次 SSE 发布前，retry-attempt CAS 中重置 |
-| `harness_tool_invocation` | Tool 执行事实 | `(thread_id, assistant_entry_id, execution_epoch, ordinal)` 唯一；`PLATFORM/ENVIRONMENT` |
+| `harness_model_invocation` | 冻结 Model 调用 | `(thread_id, source_head_entry_id, execution_epoch)` 唯一；`request` 是严格一份 `ModelInvocationRequest`；`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`safe_stream_snapshot` jsonb 仅 text/thinking，fenced-write 在每次 SSE 发布前，retry-attempt CAS 中重置 |
+| `harness_tool_invocation` | Tool 执行事实 | `(thread_id, assistant_entry_id, execution_epoch, ordinal)` 唯一；`model_invocation_id` 非空并以 `(thread_id, model_invocation_id)` FK 到 ModelInvocation；可空 `environment_name` 决定本地 runtime 或 RemoteTool |
 | `harness_interaction` | 通用交互事实 | open owner 唯一约束 |
 | `harness_retry_policy` | 全局自动重试策略 | 单行策略 |
 | `harness_realtime_stream_policy` | 全局 Redis realtime Stream 容量策略 | 单行 `max_length`；默认 5000 |
@@ -56,7 +56,7 @@ FUNCTION 节点当前唯一可持久化实例是 `system.generate-text` v1。
 
 Chat 不保存 Pane；Pane 始终在浏览器 localStorage 中保存 `pane-1..pane-8` 八个固定槽位，layout 只决定前 N 个槽位是否渲染。Chat↔Thread 关系是历史聚合，不是 Thread 所有权；一个 Thread 可以被多个 Chat 关联。Session **不**保存 Thread、Branch 或完整 Agent 配置副本。Thread 行不保存 `session_id`，也不保存 Agent/model 当前列：当前 Session 由 `head_entry_id` 派生，配置以 `RUNTIME_CONFIG` Entry 为权威。
 
-Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`harness_model_invocation.source_head_entry_id` 单列 FK 到 `harness_entry(id)`，thread↔session 一致性由上游 Thread 命令通过 head Entry 维护；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与账本/调用属于同一 Session。head 重定位通过递增 `execution_epoch` 隔离旧代际，因此 tool invocation 的来源唯一键含 `execution_epoch`。
+Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`harness_model_invocation.source_head_entry_id` 单列 FK 到 `harness_entry(id)`，thread↔session 一致性由上游 Thread 命令通过 head Entry 维护；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与账本/调用属于同一 Session。ToolInvocation 的 `model_invocation_id` 通过 `(thread_id, model_invocation_id)` 复合 FK 绑定同一 Thread 下的 ModelInvocation。head 重定位通过递增 `execution_epoch` 隔离旧代际，因此 tool invocation 的来源唯一键含 `execution_epoch`。
 
 `/stop` 在 Thread 行锁内原子完成：判定当前 head 是否仍有未终结 response debt（沿用 Reconciler 的 `ModelInvocationPlanner`，旧代际的 invocation 不参与）。若存在 response debt 且当前 head 存在 matching `safe_stream_snapshot is not null AND applied_at is null` 行，则追加 `ASSISTANT_ABORTED`（仅含 text/thinking）并把 head 重新指向它；否则追加 `ASSISTANT_ERROR(CANCELLED)` barrier。Stop 不修改已 RUNNING/SUCCEEDED 的 invocation 行——它只是一道 epoch fence，旧 generation 的 `completeSuccess/completeFailure/completeCancelled` 在新 epoch 下都会被 CAS 拒绝。Tool/empty partial 不会让 stop 物化 `ToolInvocation` 或写入含 tool fragment 的 aborted entry。
 
@@ -70,5 +70,5 @@ Model/Tool Invocation 与 Usage 的 Thread 归属均为单列 `thread_id` FK。`
 - Assistant Entry 与 Usage Record 原子写入；`assistant_entry_id` 唯一冲突回滚整事务。
 - Harvest 按 TURN_INPUT_BATCH 将 snapshot 中全部 queued Input 按 sequence 应用；每条 Input 仅能从 `QUEUED` 成功迁移一次，
   snapshot 后追加的 Input 留给下一 turn。
-- Daemon 断开只移除对应内存 Environment；历史 `harness_tool_invocation.environment_name` 保留冻结路由名。
+- Daemon 断开只移除对应内存 Environment；历史 `harness_tool_invocation.environment_name` 保留冻结目标名。发送前目标不可用写 `FAILED`，发送结果不确定写 `UNKNOWN`。
 - ComfyUI job 是远端系统事实；数据库只保存工作流定义；对象走固定 bucket 预签名边界。

@@ -1,6 +1,6 @@
 # Harness 能力装配
 
-本文描述 Harness Runtime 当前生效的直接能力装配：core 通过 Spring `ObjectProvider` 收集所有 `ProviderFactory` / `ToolFactory` / `BeforeToolCallInterceptor` / `AfterToolCallInterceptor` bean，并把它们装配到 typed collection 与 interceptor chain。
+本文描述 Harness Runtime 当前生效的直接能力装配：Core 通过 Spring `ObjectProvider` 收集所有 `ProviderFactory` / `ToolFactory` / `BeforeToolCallInterceptor` / `AfterToolCallInterceptor` bean，并把它们装配到 typed collection、统一 ToolCatalog 与 interceptor chain。
 
 ## 设计目标
 
@@ -26,14 +26,15 @@ ModelExecutionConfiguration
         ▼ ObjectProvider<ProviderFactory>
         └─ ProviderFactories ──► DatabaseProviderResolutionService
 
-PlatformToolsConfiguration
+RuntimeToolsConfiguration
         │
         ├─ ToolFactory beans (per platform Tool)
         │
         ▼ ObjectProvider<ToolFactory>
-        └─ ToolFactories ──► ToolRegistry（toolFactories::find）
-                           └─► AgentDefinitionLiveCapabilityValidator
-                           └─► RuntimeConfigSnapshotResolver
+        └─ ToolFactories ──► ToolCatalog
+                           ├─► AgentDefinitionConfigValidator
+                           ├─► RuntimeConfigSnapshotResolver
+                           └─► StudioToolCatalogController
 
 BeforeToolCallInterceptor beans (incl. PermissionEvaluator)
 AfterToolCallInterceptor beans
@@ -96,7 +97,7 @@ public interface ToolFactory {
 
 ### Core composition
 
-[`PlatformToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/PlatformToolsConfiguration.java) 暴露 4 个具体 `Tool` bean（`CreateGoalTool` / `GetGoalTool` / `UpdateGoalTool` / `LoadSkillTool`）以及对应的 `ToolFactory` bean（`createGoalToolFactory` / `getGoalToolFactory` / `updateGoalToolFactory` / `loadSkillToolFactory`）。
+[`RuntimeToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsConfiguration.java) 暴露 4 个具体 `Tool` bean（`CreateGoalTool` / `GetGoalTool` / `UpdateGoalTool` / `LoadSkillTool`）以及对应的 `ToolFactory` bean（`createGoalToolFactory` / `getGoalToolFactory` / `updateGoalToolFactory` / `loadSkillToolFactory`）。
 
 ### `ToolFactories`
 
@@ -107,12 +108,16 @@ public interface ToolFactory {
 
 重复 `(name, version)` 在构造时以 `IllegalArgumentException` 失败；重复 tool 名下的多个版本同样在 `find` 时维持各自 key。
 
-`PlatformToolsConfiguration` 通过 `ObjectProvider<ToolFactory>` 装配。
+`RuntimeToolsConfiguration` 通过 `ObjectProvider<ToolFactory>` 装配。
 
 消费方：
-- [`AgentDefinitionLiveCapabilityValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionLiveCapabilityValidator.java) 通过 `ToolFactories.descriptors()` 列出 platform tool name。
-- [`RuntimeConfigSnapshotResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolver.java) 同上。
-- [`HarnessToolWorkerConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/worker/HarnessToolWorkerConfiguration.java) 把 `ToolFactories.find(name, version)` 暴露为 `ToolRegistry` bean。
+- [`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 将本地 ToolFactory descriptor 与固定十个 `EnvironmentToolCatalog` descriptor 合并，并把 `load_skill` 保留为 runtime-managed tool。
+- [`AgentDefinitionConfigValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidator.java) 通过 `ToolCatalog` 校验 Agent 的短名 tools；runtime-managed `load_skill` 不可由 Agent 选择。
+- [`RuntimeConfigSnapshotResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolver.java) 依据 Agent 的 tools/skills、Thread Environment 和 live registry 解析每次 ModelInvocation 的 binding 与 skill snapshot。
+- [`HarnessToolWorkerConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/worker/HarnessToolWorkerConfiguration.java) 把本地 `ToolFactories.find(name, version)` 暴露为 `ToolRegistry`。
+- [`ToolCatalogQueryService`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/ToolCatalogQueryService.java) 为 `GET /api/ai/catalog/tools` 投影可选目录。
+
+`EnvironmentToolCatalog` 是 `harness-tool` 中的固定单一来源，包含 `read`、`write`、`edit`、`apply_patch`、`bash`、`grep`、`find`、`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile` 十个版本化 descriptor。生产 `DaemonRuntime` 校验本地注册表与该目录完全相等并冻结注册表，Gateway 以同一目录校验远程调用。
 
 ## ToolInterceptorChain
 
@@ -137,5 +142,5 @@ public ToolInterceptorChain toolInterceptorChain(
 - [`ProviderFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java)：重复 provider type、null ctor、adapter type mismatch、cache capability 透传、create 一次性调用。
 - [`ToolFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactoriesTest.java)：重复 (name, version) 拒绝、descriptor 顺序、find 命中/缺席、descriptor mismatch 与 singleton descriptor 漂移拒绝。
 - [`ModelExecutionConfigurationTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfigurationTest.java)：四个 named ProviderFactory bean 全部进入 `ProviderFactories`，并创建各自对应的 adapter。
-- [`PlatformToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/tool/PlatformToolsWiringTest.java)：四个 platform Tool 全部可经 `ToolFactories.find` 解析。
-- [`AgentDefinitionLiveCapabilityValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionLiveCapabilityValidatorTest.java) / [`RuntimeConfigSnapshotResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolverTest.java) / [`DatabaseModelExecutionResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseModelExecutionResolverTest.java)：consumer 切换到 typed collection 后行为保持。
+- [`RuntimeToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsWiringTest.java) / [`ToolCatalogTest`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolCatalogTest.java)：runtime tools、固定 Environment 工具、runtime-managed `load_skill` 与冲突校验。
+- [`AgentDefinitionConfigValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidatorTest.java) / [`RuntimeConfigSnapshotResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolverTest.java) / [`DatabaseModelExecutionResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseModelExecutionResolverTest.java)：消费者通过统一 ToolCatalog 解析 Agent 配置与 ModelInvocation 资源。
