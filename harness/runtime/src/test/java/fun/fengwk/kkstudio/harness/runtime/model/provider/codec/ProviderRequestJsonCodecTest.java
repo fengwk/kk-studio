@@ -79,7 +79,7 @@ class ProviderRequestJsonCodecTest {
     assertEquals(request, decoded);
     assertEquals(encoded, codec.encode(decoded));
     assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
-    assertEquals("gpt-5-mini", canonicalNode().path("model").path("modelId").asText());
+    assertEquals("gpt-5-mini", canonicalNode().path("model").path("modelName").asText());
     assertEquals(
         Set.of(
             ProviderTextBlock.class,
@@ -198,7 +198,7 @@ class ProviderRequestJsonCodecTest {
         root -> root.set("messages", NODES.objectNode()));
     assertStrictLayer(
         root -> model(root).put("extra", true),
-        root -> model(root).remove("modelId"),
+        root -> model(root).remove("modelName"),
         root -> model(root).put("tools", "true"));
     assertStrictLayer(
         root -> variant(root).put("extra", true),
@@ -281,13 +281,10 @@ class ProviderRequestJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeNode(null));
 
-    assertRejected(root -> model(root).put("providerResourceId", 0));
+    assertRejected(root -> model(root).put("providerName", ""));
     assertRejected(
         root ->
-            model(root)
-                .set(
-                    "providerResourceId",
-                    NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE))));
+            model(root).set("providerName", NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE))));
     assertRejected(root -> variant(root).put("temperature", Double.NaN));
     assertRejected(root -> variant(root).put("temperature", "0.2"));
     assertRejected(
@@ -356,10 +353,9 @@ class ProviderRequestJsonCodecTest {
             EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
     ModelDescriptor model =
         new ModelDescriptor(
-            1001,
-            2002,
-            ProviderType.OPENAI,
+            "openai",
             "gpt-5-mini",
+            ProviderType.OPENAI,
             true,
             true,
             canonicalPricing(),
@@ -425,10 +421,9 @@ class ProviderRequestJsonCodecTest {
     ModelDescriptor model = source.model();
     ModelDescriptor updatedModel =
         new ModelDescriptor(
-            model.providerResourceId(),
-            model.modelResourceId(),
+            model.providerName(),
+            model.modelName(),
             model.providerType(),
-            model.modelId(),
             model.tools(),
             model.reasoning(),
             model.pricing(),

@@ -217,7 +217,7 @@ abstract class LangChainModelProvider implements ModelProvider {
   private static ChatRequestParameters parameters(ProviderRequest request) {
     ModelVariant variant = request.variant();
     DefaultChatRequestParameters.Builder<?> builder =
-        DefaultChatRequestParameters.builder().modelName(request.model().modelId());
+        DefaultChatRequestParameters.builder().modelName(request.model().modelName());
     // Model 未声明 tools 时绝不注入 tool specs，即使 Agent 配了 tools。
     if (request.model().tools()) {
       List<ToolSpecification> toolSpecs = tools(request.tools());

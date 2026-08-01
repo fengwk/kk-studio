@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.query.PostgresqlHarnessQueryMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.usage.service.ModelUsageAggregationService;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
 import java.util.HashSet;
@@ -43,21 +44,25 @@ public class ModelUsageAggregationServiceImpl implements ModelUsageAggregationSe
         recordStore.listBySessionId(view.getSessionId()).stream()
             .filter(record -> pathEntryIds.contains(record.assistantEntryId()))
             .toList();
-    return summarize("thread", threadId, onPath);
+    return summarize("thread", Long.toString(threadId), onPath);
   }
 
   @Override
   public ModelUsageSummaryDTO summarizeSession(long sessionId) {
-    return summarize("session", sessionId, recordStore.listBySessionId(sessionId));
+    return summarize("session", Long.toString(sessionId), recordStore.listBySessionId(sessionId));
   }
 
   @Override
-  public ModelUsageSummaryDTO summarizeModel(long modelResourceId) {
-    return summarize("model", modelResourceId, recordStore.listByModelResourceId(modelResourceId));
+  public ModelUsageSummaryDTO summarizeModel(ModelRef model) {
+    Objects.requireNonNull(model, "model");
+    return summarize(
+        "model",
+        model.toString(),
+        recordStore.listByModel(model.providerName(), model.modelName()));
   }
 
   private ModelUsageSummaryDTO summarize(
-      String scopeType, long scopeId, List<ModelUsageRecord> records) {
+      String scopeType, String scopeId, List<ModelUsageRecord> records) {
     ModelUsageSummaryAccumulator accumulator = new ModelUsageSummaryAccumulator(scopeType, scopeId);
     records.forEach(accumulator::add);
     return accumulator.toSummary();

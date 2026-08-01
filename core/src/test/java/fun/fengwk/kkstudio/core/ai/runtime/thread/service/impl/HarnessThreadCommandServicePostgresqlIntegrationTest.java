@@ -29,7 +29,6 @@ import java.time.Instant;
 /** 真实 command facade + PostgreSQL 对 immutable RuntimeConfig Input 的冻结回归。 */
 class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSpringTestSupport {
 
-  private static final long PROVIDER_ID = 80_001L;
   private static final long MODEL_A_ID = 80_002L;
   private static final long MODEL_B_ID = 80_003L;
   private static final long DEFINITION_ID = 80_004L;
@@ -171,31 +170,22 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     try (Connection connection = newConnection();
         Statement statement = connection.createStatement()) {
       statement.executeUpdate(
-          "insert into agent_provider (id, name, provider_type, config) values ("
-              + PROVIDER_ID
-              + ", 'provider', 'openai', '{}'::jsonb)");
+          "insert into agent_provider (name, provider_type, config) values "
+              + "('provider', 'openai', '{}'::jsonb)");
       statement.executeUpdate(
-          "insert into agent_model (id, provider_id, name, description, config) values ("
-              + MODEL_A_ID
-              + ", "
-              + PROVIDER_ID
-              + ", 'model-a', 'Model A', '"
+          "insert into agent_model (provider_name, name, description, config) values ("
+              + "'provider', 'model-a', 'Model A', '"
               + modelConfig("default")
               + "'::jsonb)");
       statement.executeUpdate(
-          "insert into agent_model (id, provider_id, name, description, config) values ("
-              + MODEL_B_ID
-              + ", "
-              + PROVIDER_ID
-              + ", 'model-b', 'Model B', '"
+          "insert into agent_model (provider_name, name, description, config) values ("
+              + "'provider', 'model-b', 'Model B', '"
               + modelConfig("fast")
               + "'::jsonb)");
       statement.executeUpdate(
-          "insert into agent_definition (id, name, system_prompt, model_id, variant, config) values ("
-              + DEFINITION_ID
-              + ", 'frozen-agent', 'frozen prompt', "
-              + MODEL_A_ID
-              + ", 'default', '"
+          "insert into agent_definition ("
+              + "name, system_prompt, model_provider_name, model_name, variant, config"
+              + ") values ('frozen-agent', 'frozen prompt', 'provider', 'model-a', 'default', '"
               + definitionConfig()
               + "'::jsonb)");
     }
@@ -208,14 +198,12 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
           1,
           statement.executeUpdate(
               "update agent_definition set name = 'mutated-agent', system_prompt = 'mutated',"
-                  + " config = '{}'::jsonb, version = version + 1 where id = "
-                  + DEFINITION_ID));
+                  + " config = '{}'::jsonb, version = version + 1 where name = 'frozen-agent'"));
       assertEquals(
           1,
           statement.executeUpdate(
               "update agent_model set name = 'mutated-model-a', config = '{}'::jsonb,"
-                  + " version = version + 1 where id = "
-                  + MODEL_A_ID));
+                  + " version = version + 1 where provider_name = 'provider' and name = 'model-a'"));
     }
   }
 

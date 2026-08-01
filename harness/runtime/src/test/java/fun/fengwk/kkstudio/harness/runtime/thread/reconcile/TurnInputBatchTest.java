@@ -13,13 +13,13 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 import java.util.ArrayList;
 import java.util.List;
 
-/** {@link TurnInputBatch} 的构造约束、不可变性以及任意 config/message 排列测试。 */
+/** {@link TurnInputBatch} 的构造约束、不可变性以及 USER/CUSTOM message 排列测试。 */
 class TurnInputBatchTest {
 
   @Test
   void rejectsNonPositiveThreadId() {
     assertThrows(
-        IllegalArgumentException.class, () -> new TurnInputBatch(0L, List.of(config(1L, 1L))));
+        IllegalArgumentException.class, () -> new TurnInputBatch(0L, List.of(custom(1L, 1L))));
   }
 
   @Test
@@ -33,21 +33,20 @@ class TurnInputBatchTest {
   }
 
   @Test
-  void acceptsConfigOnlyBatch() {
-    ThreadInput cfg1 = config(1L, 1L);
-    ThreadInput cfg2 = config(1L, 2L);
-    TurnInputBatch batch = new TurnInputBatch(1L, List.of(cfg1, cfg2));
+  void acceptsUserAndCustomMessageBatch() {
+    ThreadInput user = user(1L, 1L);
+    ThreadInput custom = custom(1L, 2L);
+    TurnInputBatch batch = new TurnInputBatch(1L, List.of(user, custom));
 
-    assertEquals(List.of(cfg1, cfg2), batch.inputs());
+    assertEquals(List.of(user, custom), batch.inputs());
   }
 
   @Test
-  void allowsArbitraryConfigAndMessageOrderAndMultipleMessages() {
-    ThreadInput cfg = config(1L, 1L);
-    ThreadInput firstMessage = message(1L, 2L);
-    ThreadInput secondMessage = message(1L, 3L);
-    ThreadInput trailingConfig = config(1L, 4L);
-    List<ThreadInput> inputs = List.of(cfg, firstMessage, secondMessage, trailingConfig);
+  void allowsUserAndCustomMessagesInMailboxOrder() {
+    ThreadInput firstMessage = user(1L, 1L);
+    ThreadInput secondMessage = custom(1L, 2L);
+    ThreadInput thirdMessage = user(1L, 3L);
+    List<ThreadInput> inputs = List.of(firstMessage, secondMessage, thirdMessage);
     TurnInputBatch batch = new TurnInputBatch(1L, inputs);
 
     assertEquals(inputs, batch.inputs());
@@ -55,7 +54,7 @@ class TurnInputBatchTest {
 
   @Test
   void messageOnlyBatchIsValid() {
-    ThreadInput msg = message(1L, 5L);
+    ThreadInput msg = user(1L, 5L);
     TurnInputBatch batch = new TurnInputBatch(1L, List.of(msg));
 
     assertEquals(List.of(msg), batch.inputs());
@@ -64,17 +63,17 @@ class TurnInputBatchTest {
   @Test
   void inputsAreDefensivelyCopiedAndImmutable() {
     ArrayList<ThreadInput> mutable = new ArrayList<>();
-    mutable.add(config(1L, 1L));
+    mutable.add(user(1L, 1L));
     TurnInputBatch batch = new TurnInputBatch(1L, mutable);
     mutable.clear();
 
     assertEquals(1, batch.inputs().size());
-    assertThrows(UnsupportedOperationException.class, () -> batch.inputs().add(message(1L, 2L)));
+    assertThrows(UnsupportedOperationException.class, () -> batch.inputs().add(user(1L, 2L)));
   }
 
   @Test
   void rejectsCrossThreadInput() {
-    ThreadInput foreign = config(2L, 1L);
+    ThreadInput foreign = user(2L, 1L);
     assertThrows(IllegalArgumentException.class, () -> new TurnInputBatch(1L, List.of(foreign)));
   }
 
@@ -97,17 +96,17 @@ class TurnInputBatchTest {
 
   @Test
   void rejectsNonMonotonicSequences() {
-    ThreadInput first = config(1L, 2L);
-    ThreadInput second = config(1L, 1L);
+    ThreadInput first = user(1L, 2L);
+    ThreadInput second = custom(1L, 1L);
     assertThrows(
         IllegalArgumentException.class, () -> new TurnInputBatch(1L, List.of(first, second)));
   }
 
-  private static ThreadInput config(long threadId, long sequence) {
-    return ReconcileTestSupport.input(threadId, sequence, ThreadInputType.SET_MODEL);
+  private static ThreadInput custom(long threadId, long sequence) {
+    return ReconcileTestSupport.input(threadId, sequence, ThreadInputType.CUSTOM_MESSAGE);
   }
 
-  private static ThreadInput message(long threadId, long sequence) {
+  private static ThreadInput user(long threadId, long sequence) {
     return ReconcileTestSupport.input(threadId, sequence, ThreadInputType.USER_MESSAGE);
   }
 }

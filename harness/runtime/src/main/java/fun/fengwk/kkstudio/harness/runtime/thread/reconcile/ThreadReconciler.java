@@ -6,7 +6,9 @@ import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
+import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
@@ -280,8 +282,12 @@ public final class ThreadReconciler {
           // 3. 仍有外部工作未结束时暂停；不能越过它接收更晚的 mailbox 输入。
           yield suspendForBlocker(ownership, suspension.blocker());
         }
+        case ApplyPlanningFailure failure -> {
+          // 4. 解析失败是 durable AssistantError barrier，不创建伪造的模型调用。
+          yield applyPlanningFailure(ownership, failure.failure());
+        }
         case CreateModelInvocation creation -> {
-          // 4. 当前回合已欠模型回复时先创建调用，避免后续 Input 污染冻结的 ProviderRequest。
+          // 5. 当前回合已欠模型回复时先创建调用，避免后续 Input 污染冻结的 ProviderRequest。
           yield createModelInvocation(ownership, creation.plan());
         }
       };
@@ -360,6 +366,12 @@ public final class ThreadReconciler {
         yield new FinishReconcile(new StepResult.Failed(failed.failure()));
       }
     };
+  }
+
+  private IterationOutcome applyPlanningFailure(
+      ThreadOwnership ownership, PlanningFailure failure) {
+    ApplyOutcome outcome = transactions.applyPlanningFailure(ownership, failure, clock.instant());
+    return reloadOrLostOwnership(outcome);
   }
 
   /**

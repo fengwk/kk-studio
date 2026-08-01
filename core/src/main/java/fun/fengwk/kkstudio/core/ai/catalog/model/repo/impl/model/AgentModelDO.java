@@ -4,17 +4,14 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** {@code agent_model} 行映射：LLM 模型条目（绑定 provider_id）。 */
+/** {@code agent_model} 行映射：LLM 模型条目（绑定 provider_name）。 */
 @Data
 public class AgentModelDO {
 
-  /** 业务主键。 */
-  private Long id;
+  /** 绑定 Provider 名称。 */
+  private String providerName;
 
-  /** 绑定 Provider id。 */
-  private Long providerId;
-
-  /** 在所属 Provider 内唯一的模型名称。 */
+  /** 上游 Provider 的模型名称。 */
   private String name;
 
   /** 描述。 */

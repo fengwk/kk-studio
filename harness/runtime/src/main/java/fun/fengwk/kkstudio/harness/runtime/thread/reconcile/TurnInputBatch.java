@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
 import java.util.List;
 import java.util.Objects;
@@ -10,8 +9,7 @@ import java.util.Objects;
 /**
  * TURN_INPUT_BATCH：turn 启动时 snapshot 中同 Thread、QUEUED、sequence 严格递增的全部 Input。
  *
- * <p>empty 列表非法；config 与 message 可以任意有序组合，且允许包含多个 message。Batch 只保存 canonical {@link
- * #inputs()}，不维护可从列表派生的重复字段。
+ * <p>empty 列表非法；消息输入按 mailbox 顺序批量应用。Batch 只保存 canonical {@link #inputs()}，不维护可从列表派生的重复字段。
  */
 public record TurnInputBatch(long threadId, List<ThreadInput> inputs) {
 
@@ -41,10 +39,6 @@ public record TurnInputBatch(long threadId, List<ThreadInput> inputs) {
                 + input.sequence()
                 + " after "
                 + previousSequence);
-      }
-      ThreadInputType type = input.type();
-      if (!type.isConfig() && !type.isMessage()) {
-        throw new IllegalArgumentException("unsupported input type: " + type);
       }
       previousSequence = input.sequence();
     }

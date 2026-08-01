@@ -14,7 +14,7 @@ public interface AgentModelService {
 
   AgentModelDTO createModel(AgentModelCreateDTO createDTO);
 
-  AgentModelDTO updateModel(long id, AgentModelUpdateDTO updateDTO);
+  AgentModelDTO updateModel(String providerName, String modelName, AgentModelUpdateDTO updateDTO);
 
-  void deleteModel(long id, String expectedVersion);
+  void deleteModel(String providerName, String modelName, String expectedVersion);
 }

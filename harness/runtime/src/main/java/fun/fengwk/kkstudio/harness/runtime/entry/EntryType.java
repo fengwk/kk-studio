@@ -8,8 +8,6 @@ package fun.fengwk.kkstudio.harness.runtime.entry;
 public enum EntryType {
   /** Session 语义根，唯一且无 parent。 */
   ROOT,
-  /** 完整、不可变的运行配置快照。 */
-  RUNTIME_CONFIG,
   /** 对话消息；具体结构由 payload 子类型决定。 */
   MESSAGE,
   /** 由业务扩展注入的对话消息。 */

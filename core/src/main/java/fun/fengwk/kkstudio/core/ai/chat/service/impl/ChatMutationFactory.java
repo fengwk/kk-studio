@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.core.ai.chat.service.impl;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
-import fun.fengwk.kkstudio.core.ai.chat.service.ChatIds;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
+import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
@@ -14,8 +14,8 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
  * Normalizes Chat mutable fields and allocates Chat ids.
  *
  * <p>Update semantics: {@code null} fields preserve the current value. Chat title is required when
- * supplied; a supplied {@code defaultAgentId} must be non-blank and is parsed as a positive decimal
- * string. Catalog existence is validated by {@link ChatGuard}.
+ * supplied; a supplied {@code agentName} must be non-blank. Catalog existence is validated by
+ * {@link ChatGuard}.
  */
 @Component
 public class ChatMutationFactory {
@@ -26,11 +26,15 @@ public class ChatMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final PostgresqlSequenceIdGenerator idGenerator;
+  private final ToolSettingsProvider toolSettingsProvider;
 
   public ChatMutationFactory(
-      AgentEditableSupport editableSupport, PostgresqlSequenceIdGenerator idGenerator) {
+      AgentEditableSupport editableSupport,
+      PostgresqlSequenceIdGenerator idGenerator,
+      ToolSettingsProvider toolSettingsProvider) {
     this.editableSupport = editableSupport;
     this.idGenerator = idGenerator;
+    this.toolSettingsProvider = toolSettingsProvider;
   }
 
   public Chat newChat(ChatCreateDTO createDTO) {
@@ -45,8 +49,12 @@ public class ChatMutationFactory {
     }
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
-    chat.setDefaultAgentId(parseRequiredAgentId(createDTO.getDefaultAgentId()));
-    chat.setDefaultEnvironmentName(canonicalEnvironmentName(createDTO.getDefaultEnvironmentName()));
+    chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
+    chat.setEnvironmentName(canonicalEnvironmentName(createDTO.getEnvironmentName()));
+    chat.setYoloEnabled(
+        createDTO.getYoloEnabled() == null
+            ? toolSettingsProvider.get().defaultYolo()
+            : createDTO.getYoloEnabled());
     return chat;
   }
 
@@ -65,25 +73,31 @@ public class ChatMutationFactory {
       editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
       chat.setTitle(title);
     }
-    if (updateDTO.getDefaultAgentId() != null) {
-      chat.setDefaultAgentId(parseRequiredAgentId(updateDTO.getDefaultAgentId()));
+    if (updateDTO.getAgentName() != null) {
+      chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
     }
-    if (updateDTO.isDefaultEnvironmentNameProvided()) {
-      chat.setDefaultEnvironmentName(
-          canonicalEnvironmentName(updateDTO.getDefaultEnvironmentName()));
+    if (updateDTO.isEnvironmentNameProvided()) {
+      chat.setEnvironmentName(canonicalEnvironmentName(updateDTO.getEnvironmentName()));
+    }
+    if (updateDTO.isYoloEnabledProvided()) {
+      if (updateDTO.getYoloEnabled() == null) {
+        throw new AiValidationException(RESOURCE, "yoloEnabled must not be null");
+      }
+      chat.setYoloEnabled(updateDTO.getYoloEnabled());
     }
   }
 
-  /** Parses the required Agent id text. */
-  private Long parseRequiredAgentId(String raw) {
+  /** Normalizes the required Agent name text. */
+  private String parseRequiredAgentName(String raw) {
     if (raw == null) {
-      throw new AiValidationException(RESOURCE, "defaultAgentId must not be blank");
+      throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
     String trimmed = raw.trim();
     if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "defaultAgentId must not be blank");
+      throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
-    return ChatIds.parsePositive(trimmed, "defaultAgentId");
+    editableSupport.validateMaxLength(RESOURCE, "agentName", trimmed, 64);
+    return trimmed;
   }
 
   private String canonicalEnvironmentName(String raw) {
@@ -92,16 +106,15 @@ public class ChatMutationFactory {
     }
     String trimmed = raw.trim();
     if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "defaultEnvironmentName must not be blank");
+      throw new AiValidationException(RESOURCE, "environmentName must not be blank");
     }
     if (!raw.equals(trimmed)) {
       throw new AiValidationException(
-          RESOURCE, "defaultEnvironmentName must not contain surrounding whitespace");
+          RESOURCE, "environmentName must not contain surrounding whitespace");
     }
     if (trimmed.length() > ENVIRONMENT_NAME_MAX_LENGTH) {
       throw new AiValidationException(
-          RESOURCE,
-          "defaultEnvironmentName must be <= " + ENVIRONMENT_NAME_MAX_LENGTH + " characters");
+          RESOURCE, "environmentName must be <= " + ENVIRONMENT_NAME_MAX_LENGTH + " characters");
     }
     return trimmed;
   }

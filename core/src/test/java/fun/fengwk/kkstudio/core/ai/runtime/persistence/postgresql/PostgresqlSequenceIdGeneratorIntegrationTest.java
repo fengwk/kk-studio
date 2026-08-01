@@ -45,7 +45,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
    * setval('kk_studio_id_seq', ..., true)} clause advances the sequence past this value so every
    * subsequent allocation must be strictly greater.
    */
-  private static final long E2E_SEED_MAX_ID = 19L;
+  private static final long E2E_SEED_MAX_ID = 1L;
 
   private PostgresqlSequenceIdGenerator generator;
   private SequenceMapper jdbcMapper;
@@ -90,9 +90,9 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   }
 
   /**
-   * Strict monotonic ordering, no duplicates, shared across distinct call sites. The non-Harness
-   * business generators (provider, model, definition, comfyui, canvas, chat, chat session) all
-   * delegate to the same physical sequence.
+   * Strict monotonic ordering, no duplicates, shared across distinct call sites. The generated
+   * durable business and Harness entities all delegate to the same physical sequence; catalog
+   * identities are names and therefore do not consume it.
    */
   @Test
   void allocationsAreStrictlyMonotonicAndSharedAcrossCallSites() {
@@ -101,14 +101,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     Map<String, Long> lastBySite = new LinkedHashMap<>();
 
     String[] sites = {
-      "agent_provider",
-      "agent_model",
-      "agent_definition",
-      "comfyui_workflow_api",
-      "canvas_document",
-      "canvas_node",
-      "canvas_link",
-      "chat"
+      "comfyui_workflow_api", "canvas_document", "canvas_node", "canvas_link", "chat"
     };
 
     long previous = 0L;
@@ -133,9 +126,9 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   }
 
   /**
-   * After applying the e2e seed (provider ids 1..7, model ids 1..12, definition id 1, retry and
-   * realtime Stream policy ids 1), the seed script advances the sequence via {@code setval(...,
-   * true)} so no allocation can ever return a value within the seeded range.
+   * After applying the e2e seed (retry and realtime Stream policy ids 1), the seed script advances
+   * the sequence via {@code setval(..., true)} so no allocation can ever return a value within the
+   * seeded range.
    */
   @Test
   void allocationsNeverReuseSeededDeterministicIds() throws Exception {
@@ -145,9 +138,6 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
         ResultSet rs =
             st.executeQuery(
                 "select greatest("
-                    + "coalesce((select max(id) from agent_provider), 0),"
-                    + "coalesce((select max(id) from agent_model), 0),"
-                    + "coalesce((select max(id) from agent_definition), 0),"
                     + "coalesce((select max(id) from harness_realtime_stream_policy), 0),"
                     + "coalesce((select max(id) from harness_retry_policy), 0)"
                     + ")")) {

@@ -3,28 +3,24 @@ package fun.fengwk.kkstudio.core.ai.catalog.model.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.core.ai.catalog.model.AgentModelTestData;
 import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Model mutations reject raw JSON that cannot be executed by the Harness runtime. */
+/** Model mutations reject configurations that cannot be executed by the Harness runtime. */
 public class AgentModelMutationFactoryTest {
 
   private static AgentModelConfigDTO validConfig() {
@@ -32,44 +28,39 @@ public class AgentModelMutationFactoryTest {
         32768, 4096, true, false, "standard", "v1", List.of("default"), "default");
   }
 
-  /** A create is accepted only when the structured config is a complete executable config. */
   @Test
-  public void shouldRequireExecutableModelConfiguration() {
+  public void shouldRequireExecutableModelConfigurationAndKeepIdentity() {
     AgentModelMutationFactory factory = factory();
     AgentModelCreateDTO create = new AgentModelCreateDTO();
-    create.setName("model");
 
-    assertThrows(AiValidationException.class, () -> factory.newModel(2L, create));
+    assertThrows(AiValidationException.class, () -> factory.newModel("provider", "model", create));
     AgentModel existing = new AgentModel();
     existing.setName("existing");
     assertThrows(
         AiValidationException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
 
-    AgentModelConfigDTO config = validConfig();
-    create.setConfig(config);
-    AgentModel model = new AgentModel();
-    model.setName("existing");
+    create.setConfig(validConfig());
+    AgentModel model = factory.newModel("provider", "model", create);
+    assertEquals("provider", model.getProviderName());
+    assertEquals("model", model.getName());
     factory.update(model, create);
     assertEquals("model", model.getName());
-    assertEquals(serialize(config), model.getConfigJson());
+    assertEquals("provider", model.getProviderName());
 
     AgentModelConfigDTO invalid =
         AgentModelTestData.buildConfig(
             32768, 4096, true, false, "standard", "v1", List.of(), "missing");
     create.setConfig(invalid);
-    assertThrows(AiValidationException.class, () -> factory.newModel(2L, create));
-    assertThrows(AiValidationException.class, () -> factory.newModel(0L, create));
-    assertThrows(AiValidationException.class, () -> factory.newModel(2L, null));
+    assertThrows(AiValidationException.class, () -> factory.newModel("provider", "model", create));
+    assertThrows(AiValidationException.class, () -> factory.newModel(" ", "model", create));
+    assertThrows(AiValidationException.class, () -> factory.newModel("provider", "model", null));
   }
 
-  /**
-   * Edit must round-trip the pricing metadata (currency/pricingTier/serviceTier/multiplier/version)
-   * instead of clobbering it with fixed defaults.
-   */
   @Test
   public void shouldPreservePricingMetadataAcrossEdit() {
     AgentModelMutationFactory factory = factory();
     AgentModel model = new AgentModel();
+    model.setProviderName("provider");
     model.setName("model");
     AgentModelConfigDTO baseline = validConfig();
     AgentModelPricingDTO pricing = baseline.getPricing();
@@ -84,11 +75,9 @@ public class AgentModelMutationFactoryTest {
     pricing.setCacheWritePerMillionTokens(new BigDecimal("2"));
     pricing.setCacheWriteLongPerMillionTokens(new BigDecimal("3"));
     pricing.setReasoningPerMillionTokens(new BigDecimal("4"));
-    model.setConfigJson(serialize(baseline));
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-    update.setName("model");
-    update.setDescription("renamed");
+    update.setDescription("updated");
     update.setConfig(baseline);
     factory.update(model, update);
 
@@ -108,67 +97,34 @@ public class AgentModelMutationFactoryTest {
     assertEquals(new BigDecimal("4"), persisted.getPricing().getReasoningPerMillionTokens());
   }
 
-  /**
-   * Edit must keep the existing default input modality (TEXT-only by default) instead of expanding
-   * it to every supported modality.
-   */
   @Test
-  public void shouldPreserveInputModalitiesOnEdit() {
-    AgentModelMutationFactory factory = factory();
-    AgentModel model = new AgentModel();
-    model.setName("model");
-    AgentModelConfigDTO baseline = validConfig();
-    baseline.getAbilities().setInputModalities(List.of(AgentModelInputModality.TEXT));
-    model.setConfigJson(serialize(baseline));
-
-    AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-    update.setName("model");
-    update.setDescription("renamed");
-    update.setConfig(baseline);
-    factory.update(model, update);
-
-    AgentModelConfigDTO persisted =
-        new AgentModelRuntimeConfigParser(new ObjectMapper()).decode(model.getConfigJson());
-    assertEquals(
-        List.of(AgentModelInputModality.TEXT), persisted.getAbilities().getInputModalities());
-  }
-
-  @Test
-  public void shouldEnforceModelSchemaStringLimitsAfterNormalization() {
+  public void shouldEnforceModelSchemaStringLimits() {
     AgentModelMutationFactory factory = factory();
     AgentModelCreateDTO accepted = create("n".repeat(128), "d".repeat(512));
-    AgentModel persisted = factory.newModel(2L, accepted);
+    AgentModel persisted = factory.newModel("provider", accepted.getName(), accepted);
     assertEquals("n".repeat(128), persisted.getName());
     assertEquals("d".repeat(512), persisted.getDescription());
 
     assertThrows(
-        AiValidationException.class, () -> factory.newModel(2L, create("n".repeat(129), null)));
+        AiValidationException.class,
+        () -> factory.newModel("provider", "n".repeat(129), create("n".repeat(129), null)));
     assertThrows(
-        AiValidationException.class, () -> factory.newModel(2L, create("model", "d".repeat(513))));
+        AiValidationException.class,
+        () -> factory.newModel("provider", "model", create("model", "d".repeat(513))));
   }
 
   private static AgentModelCreateDTO create(String name, String description) {
     AgentModelCreateDTO create = new AgentModelCreateDTO();
     create.setName(name);
+    create.setProviderName("provider");
     create.setDescription(description);
     create.setConfig(validConfig());
     return create;
   }
 
-  private static String serialize(AgentModelConfigDTO config) {
-    try {
-      return new ObjectMapper().writeValueAsString(config);
-    } catch (Exception error) {
-      throw new IllegalStateException(error);
-    }
-  }
-
   private AgentModelMutationFactory factory() {
-    PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
-    when(idGenerator.next()).thenReturn(202L);
+    ObjectMapper objectMapper = new ObjectMapper();
     return new AgentModelMutationFactory(
-        new AgentEditableSupport(new ObjectMapper()),
-        new AgentModelRuntimeConfigParser(new ObjectMapper()),
-        idGenerator);
+        new AgentEditableSupport(objectMapper), new AgentModelRuntimeConfigParser(objectMapper));
   }
 }

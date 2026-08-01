@@ -6,8 +6,6 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -18,14 +16,13 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.SafeStreamSnapshotJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlanner;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.RuntimeCapabilityResolver;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.ResponseDebtDetector;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
@@ -52,94 +49,33 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   private static final RuntimeEntryPayloadJsonCodec ENTRY_CODEC =
       new RuntimeEntryPayloadJsonCodec();
-  private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
   private static final ThreadInputPayloadJsonCodec INPUT_CODEC = new ThreadInputPayloadJsonCodec();
   private static final SafeStreamSnapshotJsonCodec SNAPSHOT_CODEC =
       new SafeStreamSnapshotJsonCodec();
+  private static final ResponseDebtDetector DEBT_DETECTOR = new ResponseDebtDetector();
 
   private final ThreadCommandMapper mapper;
   private final HarnessIdGenerator idGenerator;
-  private final ModelInvocationPlanner planner;
   private final ExecutionTargetStore executionTargetStore;
 
   @Autowired
   public PostgresqlThreadCommandTransactions(
       ThreadCommandMapper mapper,
       HarnessIdGenerator idGenerator,
-      ExecutionTargetStore executionTargetStore,
-      RuntimeCapabilityResolver capabilityResolver) {
-    this(mapper, idGenerator, new ModelInvocationPlanner(capabilityResolver), executionTargetStore);
-  }
-
-  /** Package-private test ctor for deterministic planner and durable target wiring. */
-  PostgresqlThreadCommandTransactions(
-      ThreadCommandMapper mapper,
-      HarnessIdGenerator idGenerator,
-      ModelInvocationPlanner planner,
       ExecutionTargetStore executionTargetStore) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
-    this.planner = Objects.requireNonNull(planner, "planner");
     this.executionTargetStore =
         Objects.requireNonNull(executionTargetStore, "executionTargetStore");
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public HarnessThread createThread(Instant now) {
-    Instant persistedNow = persistenceInstant(now);
-    long threadId = idGenerator.nextThreadId();
-    requireAffected(mapper.insertThread(threadId, null, offset(persistedNow)), "insert thread");
-    return new HarnessThread(threadId, null, 0, false, 0, 0, null, persistedNow, persistedNow);
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
-  public ThreadCommandTransactions.BootstrapResult bootstrapThread(
-      long threadId,
-      long expectedExecutionEpoch,
-      String title,
-      RuntimeConfigSnapshot initialConfig,
-      Instant now) {
-    requirePositive(threadId, "threadId");
-    Objects.requireNonNull(initialConfig, "initialConfig");
-    Instant persistedNow = persistenceInstant(now);
-    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
-    if (thread.getHeadEntryId() != null) {
-      throw new IllegalStateException("thread is already bound: " + threadId);
-    }
-    SessionCreation created = createSession(title, initialConfig, persistedNow);
-    HarnessThread bound =
-        rebind(thread, expectedExecutionEpoch, created.configEntry().id(), persistedNow);
-    return new ThreadCommandTransactions.BootstrapResult(
-        created.session(), created.rootEntry(), created.configEntry(), bound);
-  }
-
-  /**
-   * Private bundle produced by the local {@link #createSession} helper below. Exists only so {@link
-   * #bootstrapThread} can express the three writes (Session / ROOT / RUNTIME_CONFIG) as one atomic
-   * mutation; it is not part of the public {@code ThreadCommandTransactions} SPI.
-   */
-  private record SessionCreation(
-      Session session, SessionEntry rootEntry, SessionEntry configEntry) {
-    private SessionCreation {
-      Objects.requireNonNull(session, "session");
-      Objects.requireNonNull(rootEntry, "rootEntry");
-      Objects.requireNonNull(configEntry, "configEntry");
-    }
-  }
-
-  /**
-   * Atomic Session bootstrap: append-only ROOT plus the frozen initial RUNTIME_CONFIG. Runs inside
-   * the bootstrap transaction.
-   */
-  private SessionCreation createSession(
-      String title, RuntimeConfigSnapshot initialConfig, Instant now) {
-    Objects.requireNonNull(initialConfig, "initialConfig");
+  public HarnessThread createThread(String title, Instant now) {
     Instant persistedNow = persistenceInstant(now);
     long sessionId = idGenerator.nextSessionId();
     long rootEntryId = idGenerator.nextEntryId();
-    long configEntryId = idGenerator.nextEntryId();
+    long threadId = idGenerator.nextThreadId();
     OffsetDateTime timestamp = offset(persistedNow);
 
     requireAffected(mapper.insertSession(sessionId, title, timestamp), "insert session");
@@ -152,33 +88,21 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             ENTRY_CODEC.encode(new RootEntryPayload()),
             timestamp),
         "insert root entry");
-    requireAffected(
-        mapper.insertEntry(
-            configEntryId,
-            sessionId,
-            rootEntryId,
-            EntryType.RUNTIME_CONFIG.name(),
-            ENTRY_CODEC.encode(initialConfig),
-            timestamp),
-        "insert runtime config entry");
-    Session session = new Session(sessionId, title, persistedNow);
-    SessionEntry root = new SessionEntry(rootEntryId, null, new RootEntryPayload());
-    SessionEntry config = new SessionEntry(configEntryId, rootEntryId, initialConfig);
-    return new SessionCreation(session, root, config);
+    requireAffected(mapper.insertThread(threadId, rootEntryId, timestamp), "insert thread");
+    return new HarnessThread(
+        threadId, rootEntryId, 0, false, 0, 0, null, persistedNow, persistedNow);
   }
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public HarnessThread updateHead(
-      long threadId, long expectedExecutionEpoch, Long headEntryId, Instant now) {
+      long threadId, long expectedExecutionEpoch, long headEntryId, Instant now) {
     requirePositive(threadId, "threadId");
+    requirePositive(headEntryId, "headEntryId");
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
-    if (headEntryId != null) {
-      requirePositive(headEntryId, "headEntryId");
-      if (mapper.findEntry(headEntryId) == null) {
-        throw new IllegalArgumentException("unknown entry: " + headEntryId);
-      }
+    if (mapper.findEntry(headEntryId) == null) {
+      throw new IllegalArgumentException("unknown entry: " + headEntryId);
     }
     return rebind(thread, expectedExecutionEpoch, headEntryId, persistedNow);
   }
@@ -211,7 +135,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
   private HarnessThread rebind(
       ThreadCommandRow thread,
       long expectedExecutionEpoch,
-      Long headEntryId,
+      long headEntryId,
       Instant persistedNow) {
     long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
     executionTargetStore.deleteIfExists(ExecutionTargetKind.THREAD, thread.getId());
@@ -229,20 +153,6 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
         null,
         thread.getCreatedAt().toInstant(),
         persistedNow);
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
-  public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(
-      long threadId, long expectedExecutionEpoch) {
-    ThreadCommandRow thread = lockThread(threadId);
-    requireEpoch(thread, expectedExecutionEpoch);
-    if (thread.getHeadEntryId() == null) {
-      return Optional.empty();
-    }
-    ThreadCommandRow row =
-        mapper.findEffectiveRuntimeConfig(thread.getSessionId(), thread.getHeadEntryId(), threadId);
-    return row == null ? Optional.empty() : Optional.of(CONFIG_CODEC.decode(row.getPayloadJson()));
   }
 
   @Override
@@ -271,8 +181,8 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockThread(threadId);
     requireEpoch(thread, expectedExecutionEpoch);
-    if (thread.getHeadEntryId() == null) {
-      throw new IllegalStateException("thread is unbound: " + threadId);
+    if (!payload.type().isMessage() || !(payload instanceof RuntimeEntryInputPayload)) {
+      throw new IllegalArgumentException("thread input payload must be a USER/CUSTOM message");
     }
 
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
@@ -318,20 +228,16 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     ThreadCommandRow thread = lockThread(threadId);
     requireEpoch(thread, expectedExecutionEpoch);
     OffsetDateTime timestamp = offset(persistedNow);
-    Long headEntryId = thread.getHeadEntryId();
-    Long sessionId = thread.getSessionId();
+    long headEntryId = thread.getHeadEntryId();
+    long sessionId = thread.getSessionId();
 
-    // 1) 用 canonical planner 判定当前 head 的 response debt（沿用 planner 的债务判定，不复制）。
-    boolean hasDebt = false;
-    if (headEntryId != null && sessionId != null) {
-      List<SessionEntry> path = loadPathAsSessionEntries(sessionId, headEntryId);
-      hasDebt = !planner.plan(sessionId, headEntryId, path).isEmpty();
-    }
+    // 1) 用纯债务检测器判定当前 head 的 response debt，不读取任何 live definition。
+    boolean hasDebt = DEBT_DETECTOR.hasDebt(loadPathAsSessionEntries(sessionId, headEntryId));
 
     // 2) 仅在 head 有 response debt 时才尝试读取该 head 的安全流快照；快照来源必须限制在当前 head 与 epoch。
     SafeStreamSnapshot safeSnapshot = SafeStreamSnapshot.EMPTY;
     boolean safeSnapshotEligible = false;
-    if (hasDebt && headEntryId != null) {
+    if (hasDebt) {
       String snapshotJson =
           mapper.findSafeStreamSnapshotByHead(threadId, expectedExecutionEpoch, headEntryId);
       if (snapshotJson != null) {
@@ -343,7 +249,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     // 3) 按 (debt, safeSnapshot.hasContent) 决定 barrier 类型；只有 durable assistant execution 阶段
     //    (hasDebt == false) 或没有该 head 的快照时不追加 aborted entry。无快照/空快照时只落 cancellation barrier；
     //    永远不物化 tool fragment，绝不创建 ToolInvocation，绝不重建旧 debt 的 ModelInvocation。
-    if (hasDebt && sessionId != null && headEntryId != null) {
+    if (hasDebt) {
       EntryPayload barrierPayload;
       if (safeSnapshotEligible && safeSnapshot.hasContent()) {
         barrierPayload =
@@ -399,11 +305,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     executionTargetStore.schedule(ExecutionTargetKind.THREAD, thread.getId(), null, now);
   }
 
-  /**
-   * 把 {@code harness_entry} 路径还原成 {@link SessionEntry}（仅用于 planner，不被持久化）。 复用了 {@code
-   * ThreadCommandMapper.findEffectiveRuntimeConfig} 中已存在的 recursive CTE 模式； 本地再声明一份以避免引入额外的 query
-   * mapper 依赖。
-   */
+  /** 把 {@code harness_entry} 路径还原成 {@link SessionEntry}（仅用于纯 response debt 检测，不被持久化）。 */
   private List<SessionEntry> loadPathAsSessionEntries(long sessionId, long headEntryId) {
     List<ThreadCommandRow> rows = mapper.findEntryPathForPlanner(sessionId, headEntryId);
     List<SessionEntry> entries = new ArrayList<>(rows.size());

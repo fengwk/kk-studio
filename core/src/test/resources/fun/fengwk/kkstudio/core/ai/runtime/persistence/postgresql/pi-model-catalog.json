@@ -1,7 +1,5 @@
 [
   {
-    "id": 1,
-    "providerId": 1,
     "provider": "minimax",
     "name": "MiniMax-M2.7",
     "description": "MiniMax-M2.7 (Responses)",
@@ -44,8 +42,6 @@
     }
   },
   {
-    "id": 2,
-    "providerId": 1,
     "provider": "minimax",
     "name": "MiniMax-M3",
     "description": "MiniMax-M3 (Responses)",
@@ -89,8 +85,6 @@
     }
   },
   {
-    "id": 3,
-    "providerId": 2,
     "provider": "openai",
     "name": "gpt-5.4",
     "description": "GPT-5.4",
@@ -146,8 +140,6 @@
     }
   },
   {
-    "id": 4,
-    "providerId": 2,
     "provider": "openai",
     "name": "gpt-5.5",
     "description": "GPT-5.5",
@@ -203,8 +195,6 @@
     }
   },
   {
-    "id": 5,
-    "providerId": 2,
     "provider": "openai",
     "name": "gpt-5.6-luna",
     "description": "GPT-5.6 Luna",
@@ -264,8 +254,6 @@
     }
   },
   {
-    "id": 6,
-    "providerId": 2,
     "provider": "openai",
     "name": "gpt-5.6-sol",
     "description": "GPT-5.6 Sol",
@@ -325,8 +313,6 @@
     }
   },
   {
-    "id": 7,
-    "providerId": 2,
     "provider": "openai",
     "name": "gpt-5.6-terra",
     "description": "GPT-5.6 Terra",
@@ -386,8 +372,6 @@
     }
   },
   {
-    "id": 8,
-    "providerId": 3,
     "provider": "xai",
     "name": "grok-4.5",
     "description": "Grok 4.5",
@@ -435,8 +419,6 @@
     }
   },
   {
-    "id": 9,
-    "providerId": 4,
     "provider": "deepseek",
     "name": "deepseek-v4-flash",
     "description": "DeepSeek V4 Flash",
@@ -482,8 +464,6 @@
     }
   },
   {
-    "id": 10,
-    "providerId": 4,
     "provider": "deepseek",
     "name": "deepseek-v4-pro",
     "description": "DeepSeek V4 Pro",
@@ -529,8 +509,6 @@
     }
   },
   {
-    "id": 11,
-    "providerId": 5,
     "provider": "google",
     "name": "gemini-3.5-flash",
     "description": "Gemini 3.5 Flash",
@@ -582,8 +560,6 @@
     }
   },
   {
-    "id": 12,
-    "providerId": 5,
     "provider": "google",
     "name": "gemini-3.6-flash",
     "description": "Gemini 3.6 Flash",
@@ -635,8 +611,6 @@
     }
   },
   {
-    "id": 13,
-    "providerId": 5,
     "provider": "google",
     "name": "gemini-3.1-pro-preview",
     "description": "Gemini 3.1 Pro Preview",
@@ -680,8 +654,6 @@
     }
   },
   {
-    "id": 14,
-    "providerId": 6,
     "provider": "anthropic",
     "name": "claude-sonnet-4-6",
     "description": "Claude Sonnet 4.6",
@@ -740,8 +712,6 @@
     }
   },
   {
-    "id": 15,
-    "providerId": 6,
     "provider": "anthropic",
     "name": "claude-opus-4-6",
     "description": "Claude Opus 4.6",
@@ -800,8 +770,6 @@
     }
   },
   {
-    "id": 16,
-    "providerId": 6,
     "provider": "anthropic",
     "name": "claude-sonnet-5",
     "description": "Claude Sonnet 5",
@@ -864,8 +832,6 @@
     }
   },
   {
-    "id": 17,
-    "providerId": 6,
     "provider": "anthropic",
     "name": "claude-opus-5",
     "description": "Claude Opus 5",
@@ -928,8 +894,6 @@
     }
   },
   {
-    "id": 18,
-    "providerId": 6,
     "provider": "anthropic",
     "name": "claude-fable-5",
     "description": "Claude Fable 5",
@@ -989,8 +953,6 @@
     }
   },
   {
-    "id": 19,
-    "providerId": 7,
     "provider": "zai",
     "name": "glm-5.2",
     "description": "GLM-5.2",

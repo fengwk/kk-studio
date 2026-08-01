@@ -26,8 +26,7 @@ create sequence kk_studio_id_seq
 ------------------------------------------------------------------------------
 
 create table agent_provider (
-    id              bigint        primary key default nextval('kk_studio_id_seq'),
-    name            varchar(64)   not null,
+    name            varchar(64)   primary key,
     description     varchar(512),
     provider_type   varchar(64)   not null,
     base_url        varchar(512),
@@ -40,42 +39,35 @@ create table agent_provider (
     constraint ck_agent_provider_version_nonneg check (version >= 0)
 );
 
-create unique index uk_agent_provider_name on agent_provider (name);
-
 create table agent_model (
-    id              bigint        primary key default nextval('kk_studio_id_seq'),
-    provider_id     bigint        not null,
+    provider_name   varchar(64)   not null,
     name            varchar(128)  not null,
     description     varchar(512),
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
-    constraint fk_agent_model_provider foreign key (provider_id)
-        references agent_provider (id),
+    constraint pk_agent_model primary key (provider_name, name),
+    constraint fk_agent_model_provider foreign key (provider_name)
+        references agent_provider (name),
     constraint ck_agent_model_version_nonneg check (version >= 0)
 );
 
-create unique index uk_agent_model_provider_name
-    on agent_model (provider_id, name);
-
 create table agent_definition (
-    id              bigint        primary key default nextval('kk_studio_id_seq'),
-    name            varchar(64)   not null,
+    name            varchar(64)   primary key,
     description     varchar(512),
     system_prompt   text,
-    model_id        bigint        not null,
+    model_provider_name varchar(64) not null,
+    model_name      varchar(128)  not null,
     variant         varchar(64),
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
-    constraint fk_agent_definition_model foreign key (model_id)
-        references agent_model (id),
+    constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
+        references agent_model (provider_name, name),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
-
-create unique index uk_agent_definition_name on agent_definition (name);
 
 create table comfyui_workflow_api (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
@@ -163,21 +155,25 @@ create table canvas_command_dedup (
 create table chat (
     id                  bigint        primary key default nextval('kk_studio_id_seq'),
     title               varchar(256),
-    -- default_agent_id intentionally has no FK: it preserves a stale reference
+    -- agent_name intentionally has no FK: it preserves a stale reference
     -- after an AgentDefinition is deleted, by design.
-    default_agent_id    bigint        not null,
-    default_environment_name varchar(128),
+    agent_name          varchar(64)   not null,
+    environment_name    varchar(128),
+    yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
     constraint ck_chat_version_nonneg check (version >= 0),
-    constraint ck_chat_default_environment_name check (
-        default_environment_name is null
+    constraint ck_chat_agent_name check (
+        btrim(agent_name) <> '' and char_length(agent_name) <= 64
+    ),
+    constraint ck_chat_environment_name check (
+        environment_name is null
         or (
-            default_environment_name !~ '^[[:space:]]'
-            and default_environment_name !~ '[[:space:]]$'
-            and char_length(default_environment_name) > 0
-            and char_length(default_environment_name) <= 128
+            environment_name !~ '^[[:space:]]'
+            and environment_name !~ '[[:space:]]$'
+            and char_length(environment_name) > 0
+            and char_length(environment_name) <= 128
         )
     )
 );
@@ -201,8 +197,7 @@ create table harness_entry (
     constraint uk_harness_entry_session_id unique (session_id, id),
     constraint ck_harness_entry_type check (
         entry_type in (
-            'ROOT', 'RUNTIME_CONFIG', 'MESSAGE', 'CUSTOM_MESSAGE',
-            'ASSISTANT_ERROR', 'ASSISTANT_ABORTED'
+            'ROOT', 'MESSAGE', 'CUSTOM_MESSAGE', 'ASSISTANT_ERROR', 'ASSISTANT_ABORTED'
         )
     ),
     -- ROOT entries must have no parent; every other entry must have a parent.
@@ -235,7 +230,7 @@ create table harness_session (
 
 create table harness_thread (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
-    head_entry_id     bigint,
+    head_entry_id     bigint        not null,
     input_sequence    bigint        not null,
     runnable          boolean       not null,
     execution_epoch   bigint        not null,
@@ -244,8 +239,8 @@ create table harness_thread (
     processor_until   timestamptz(3),
     created_at        timestamptz(3) not null default current_timestamp,
     updated_at        timestamptz(3) not null default current_timestamp,
-    -- head_entry_id is optional and stored as a single-column FK into the global
-    -- Entry id space (cross-session ownership is enforced upstream by commands).
+    -- head_entry_id is stored as a single-column FK into the global Entry id space
+    -- (cross-session ownership is enforced upstream by commands).
     constraint fk_harness_thread_head foreign key (head_entry_id)
         references harness_entry (id)
         deferrable initially deferred,
@@ -308,8 +303,7 @@ create table harness_thread_input (
     ),
     constraint ck_harness_thread_input_type check (
         input_type in (
-            'USER_MESSAGE', 'CUSTOM_MESSAGE',
-            'SET_AGENT', 'SET_MODEL', 'SET_ENVIRONMENT', 'SET_YOLO'
+            'USER_MESSAGE', 'CUSTOM_MESSAGE'
         )
     ),
     constraint ck_harness_thread_input_status check (
@@ -883,10 +877,9 @@ create table harness_model_usage (
     session_id                         bigint        not null,
     thread_id                          bigint        not null,
     assistant_entry_id                 bigint        not null,
-    provider_resource_id               bigint        not null,
-    model_resource_id                  bigint        not null,
+    provider_name                      varchar(64)   not null,
+    model_name                         varchar(128)  not null,
     provider_type                      varchar(64)   not null,
-    provider_model_id                  varchar(256)  not null,
     prompt_cache_mode                  varchar(32)   not null,
     prompt_cache_retention             varchar(16)   not null,
     cache_eligible                     boolean       not null,
@@ -949,7 +942,7 @@ create index idx_harness_model_usage_thread
 create index idx_harness_model_usage_session
     on harness_model_usage (session_id, id);
 create index idx_harness_model_usage_model
-    on harness_model_usage (model_resource_id, id);
+    on harness_model_usage (provider_name, model_name, id);
 
 ------------------------------------------------------------------------------
 -- 3.5 Thread revision invalidation

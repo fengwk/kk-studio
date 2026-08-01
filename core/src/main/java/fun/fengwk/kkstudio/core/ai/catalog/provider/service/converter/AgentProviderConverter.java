@@ -22,7 +22,6 @@ public class AgentProviderConverter {
       return null;
     }
     AgentProviderDTO dto = new AgentProviderDTO();
-    dto.setId(Long.toString(provider.getId()));
     dto.setName(provider.getName());
     dto.setDescription(provider.getDescription());
     dto.setProviderType(provider.getProviderType().name());

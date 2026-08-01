@@ -22,8 +22,9 @@ public class AgentDefinitionReferenceResolverTest {
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(definitions, models);
 
-    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent(1L));
-    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireModel(2L));
+    assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent("missing"));
+    assertThrows(
+        AiResourceNotFoundException.class, () -> resolver.requireModel("provider", "missing"));
 
     when(definitions.getByName("duplicate")).thenReturn(new AgentDefinition());
     assertThrows(AiDuplicateException.class, () -> resolver.ensureNameAvailable("duplicate"));

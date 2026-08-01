@@ -55,7 +55,7 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
         OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
             OpenAiStreamingChatModel.builder()
                 .baseUrl(descriptor.endpoint())
-                .modelName(request.model().modelId())
+                .modelName(request.model().modelName())
                 .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
                 .returnThinking(thinking)
                 .customParameters(customParameters(control, minimax, reasoningEffort));

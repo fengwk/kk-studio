@@ -28,8 +28,8 @@ class LoadSkillToolTest {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId) ->
             List.of(
-                new SelectedSkillMetadata("dev", "Developer rules", "platform"),
-                new SelectedSkillMetadata("project", "Project skill", "local-dev"));
+                new SkillBinding("dev", "Developer rules", "platform"),
+                new SkillBinding("project", "Project skill", "local-dev"));
     RecordingBodyLoader loader = new RecordingBodyLoader();
     loader.result =
         new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n\nDo the thing.\n");
@@ -45,8 +45,7 @@ class LoadSkillToolTest {
   @Test
   void rejectsUnselectedSkillAndOfflineSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        (invocationId, threadId) ->
-            List.of(new SelectedSkillMetadata("dev", "Developer rules", "platform"));
+        (invocationId, threadId) -> List.of(new SkillBinding("dev", "Developer rules", "platform"));
     RecordingBodyLoader loader = new RecordingBodyLoader();
     loader.result =
         new SkillBodyLoader.SkillBodyLoadResult.Failed(

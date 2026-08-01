@@ -9,9 +9,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.core.ai.runtime.usage.service.ModelUsageAggregationService;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
-/** 模型调用账本的 Session 与 Model 聚合 API；Thread usage belongs to its snapshot. */
+/** 模型调用账本的 Session 与 name-based Model 聚合 API。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/runtime/usage")
 @RestController
@@ -26,9 +27,9 @@ public class StudioModelUsageController {
         aggregationService.summarizeSession(parsePositiveLong(sessionId, "sessionId")));
   }
 
-  @GetMapping("/models/{modelId}")
-  public Result<ModelUsageSummaryDTO> summarizeModel(@PathVariable("modelId") String modelId) {
-    return Results.ok(aggregationService.summarizeModel(parsePositiveLong(modelId, "modelId")));
+  @GetMapping("/models/{modelRef}")
+  public Result<ModelUsageSummaryDTO> summarizeModel(@PathVariable("modelRef") String modelRef) {
+    return Results.ok(aggregationService.summarizeModel(ModelRef.parse(modelRef)));
   }
 
   private static long parsePositiveLong(String raw, String name) {

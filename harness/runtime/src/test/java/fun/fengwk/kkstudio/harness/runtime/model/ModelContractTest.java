@@ -22,41 +22,27 @@ import java.util.Set;
 /** 模型描述、用量与成本公共契约测试。 */
 class ModelContractTest {
 
-  /** 模型描述 provider / model id 必须为正整数；modelId 不能为空；pricing / cache policy 不可为空。 */
+  /** 模型描述必须使用非空 name；pricing / cache policy 不可为空。 */
   @Test
   void enforcesDescriptorResourceAndIdentityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                0L,
-                1L,
-                ProviderType.OPENAI,
-                "model",
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                0L,
-                ProviderType.OPENAI,
-                "model",
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                1L,
-                1L,
-                ProviderType.OPENAI,
                 "",
+                "model",
+                ProviderType.OPENAI,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
+                "provider",
+                "",
+                ProviderType.OPENAI,
                 true,
                 false,
                 pricing(),
@@ -65,10 +51,14 @@ class ModelContractTest {
         NullPointerException.class,
         () ->
             new ModelDescriptor(
-                1L,
-                1L,
-                ProviderType.OPENAI,
+                "provider", "model", null, true, false, pricing(), PromptCachePolicy.disabled()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelDescriptor(
+                "provider",
                 "model",
+                ProviderType.OPENAI,
                 true,
                 false,
                 null,
@@ -77,7 +67,7 @@ class ModelContractTest {
         NullPointerException.class,
         () ->
             new ModelDescriptor(
-                1L, 1L, ProviderType.OPENAI, "model", true, false, pricing(), null));
+                "provider", "model", ProviderType.OPENAI, true, false, pricing(), null));
   }
 
   /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */

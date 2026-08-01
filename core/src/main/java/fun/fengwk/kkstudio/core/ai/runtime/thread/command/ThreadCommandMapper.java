@@ -38,7 +38,7 @@ public interface ThreadCommandMapper extends BaseMapper {
           + "values (#{id}, #{headEntryId}, 0, false, 0, #{now}, #{now})")
   int insertThread(
       @Param("id") long id,
-      @Param("headEntryId") Long headEntryId,
+      @Param("headEntryId") long headEntryId,
       @Param("now") OffsetDateTime now);
 
   @Select(
@@ -59,7 +59,7 @@ public interface ThreadCommandMapper extends BaseMapper {
   @Select(
       "select t.id, t.head_entry_id, e.session_id, t.input_sequence, t.runnable, t.execution_epoch, t.revision,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at"
-          + " from harness_thread t left join harness_entry e on e.id = t.head_entry_id"
+          + " from harness_thread t join harness_entry e on e.id = t.head_entry_id"
           + " where t.id = #{threadId} for no key update of t")
   @Results(
       id = "threadResultMap",
@@ -101,7 +101,7 @@ public interface ThreadCommandMapper extends BaseMapper {
       """)
   boolean hasActiveExecution(@Param("threadId") long threadId, @Param("epoch") long epoch);
 
-  /** 静止 rebind：CAS 期望 epoch，递增代际、清 lease/runnable，并写入可空 head。 */
+  /** 静止 rebind：CAS 期望 epoch，递增代际、清 lease/runnable，并写入新的 head。 */
   @Update(
       "update harness_thread set head_entry_id = #{headEntryId}, execution_epoch = #{epoch},"
           + " processor_token = null, processor_until = null, runnable = false,"
@@ -111,7 +111,7 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("threadId") long threadId,
       @Param("expectedEpoch") long expectedEpoch,
       @Param("epoch") long epoch,
-      @Param("headEntryId") Long headEntryId,
+      @Param("headEntryId") long headEntryId,
       @Param("now") OffsetDateTime now);
 
   /** Stop discards unresolvable OPEN Tool permission prompts for the stopped Thread. */
@@ -122,48 +122,6 @@ public interface ThreadCommandMapper extends BaseMapper {
       where hi.tool_invocation_id = ti.id and hi.status = 'OPEN' and ti.thread_id = #{threadId}
       """)
   int deleteOpenToolPermissionInteractions(@Param("threadId") long threadId);
-
-  @Select(
-      """
-      with recursive path (id, parent_entry_id, depth) as (
-        select e.id, e.parent_entry_id, 0 from harness_entry e
-        where e.session_id = #{sessionId} and e.id = #{headEntryId}
-        union all
-        select e.id, e.parent_entry_id, p.depth + 1 from harness_entry e
-        join path p on p.parent_entry_id = e.id where e.session_id = #{sessionId}
-      ), queued_config as (
-        select i.payload from harness_thread_input i
-        where i.thread_id = #{threadId}
-          and i.status = 'QUEUED'
-          and i.input_type in ('SET_AGENT', 'SET_MODEL', 'SET_ENVIRONMENT', 'SET_YOLO')
-        order by i.sequence desc
-        limit 1
-      ), path_config as (
-        select e.payload
-        from path p join harness_entry e on e.id = p.id and e.session_id = #{sessionId}
-        where e.entry_type = 'RUNTIME_CONFIG'
-        order by p.depth
-        limit 1
-      )
-      select q.payload::text as payload_json from queued_config q
-      union all
-      select p.payload::text as payload_json from path_config p
-      where not exists (select 1 from queued_config)
-      """)
-  @Results(
-      id = "runtimeConfigEntryResultMap",
-      value = {
-        @Result(column = "id", property = "id"),
-        @Result(column = "session_id", property = "sessionId"),
-        @Result(column = "parent_entry_id", property = "parentEntryId"),
-        @Result(column = "entry_type", property = "entryType"),
-        @Result(column = "payload_json", property = "payloadJson"),
-        @Result(column = "created_at", property = "createdAt")
-      })
-  ThreadCommandRow findEffectiveRuntimeConfig(
-      @Param("sessionId") long sessionId,
-      @Param("headEntryId") long headEntryId,
-      @Param("threadId") long threadId);
 
   @Select(
       "select id, thread_id, sequence, input_type, payload::text as payload_json, idempotency_key, status, created_at, applied_at "

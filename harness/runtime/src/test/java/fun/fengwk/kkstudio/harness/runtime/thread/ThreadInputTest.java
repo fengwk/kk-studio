@@ -249,7 +249,7 @@ class ThreadInputTest {
                 1L,
                 1L,
                 1L,
-                ThreadInputType.SET_AGENT,
+                ThreadInputType.CUSTOM_MESSAGE,
                 payload,
                 "key",
                 InputStatus.QUEUED,

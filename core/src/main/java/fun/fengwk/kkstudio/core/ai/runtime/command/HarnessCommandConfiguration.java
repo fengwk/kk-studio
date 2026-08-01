@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.interaction.InteractionTransactions;
 import fun.fengwk.kkstudio.harness.runtime.interaction.ToolPermissionInteractionCodec;
@@ -22,8 +21,8 @@ public class HarnessCommandConfiguration {
 
   @Bean
   public ThreadCommandCoordinator threadCommandCoordinator(
-      ThreadCommandTransactions transactions, RuntimeConfigSource configSource, Clock clock) {
-    return new ThreadCommandCoordinator(transactions, configSource, clock);
+      ThreadCommandTransactions transactions, Clock clock) {
+    return new ThreadCommandCoordinator(transactions, clock);
   }
 
   @Bean

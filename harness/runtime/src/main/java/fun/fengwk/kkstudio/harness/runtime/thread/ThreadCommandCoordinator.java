@@ -1,14 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
 import java.time.Clock;
@@ -20,67 +16,46 @@ import java.util.Optional;
 /**
  * Framework-free Thread command orchestration.
  *
- * <p>Owns typed payload construction, content/role validation, current-config selection, snapshot
- * replacement via {@link RuntimeConfigSource}, and durable {@link ThreadCommandTransactions} calls.
- * Outbound transaction nested types are mapped to coordinator-owned inbound results so command
- * facades never need to import the transaction SPI. Callers remain responsible for outer
- * transactions and decimal/DTO boundaries.
- *
- * <p>Idempotent retries always short-circuit through {@link #findExistingInput(long, String)}
- * before any live resource resolution or payload validation that depends on changed request fields.
+ * <p>Each response-producing message carries its own compact {@link TurnSettings} reference. Live
+ * definitions are intentionally absent from this command boundary; they are resolved later by the
+ * planner for the specific provider query.
  */
 public final class ThreadCommandCoordinator {
 
   private final ThreadCommandTransactions transactions;
-  private final RuntimeConfigSource configSource;
   private final Clock clock;
 
-  public ThreadCommandCoordinator(
-      ThreadCommandTransactions transactions, RuntimeConfigSource configSource, Clock clock) {
+  public ThreadCommandCoordinator(ThreadCommandTransactions transactions, Clock clock) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
-    this.configSource = Objects.requireNonNull(configSource, "configSource");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  /** Creates an unbound durable Thread. */
-  public HarnessThread createThread() {
-    return transactions.createThread(clock.instant());
+  /** Atomically creates the Session, ROOT entry, and already-bound Thread. */
+  public HarnessThread createThread(String title) {
+    return transactions.createThread(title, clock.instant());
   }
 
-  /** Bootstraps an unbound Thread with a frozen initial agent configuration. */
-  public BootstrapResult bootstrapThread(
-      long threadId,
-      long expectedExecutionEpoch,
-      String title,
-      long agentDefinitionId,
-      String environmentName,
-      boolean yoloEnabled) {
-    RuntimeConfigSnapshot initial =
-        configSource.resolveAgent(agentDefinitionId, environmentName, yoloEnabled);
-    ThreadCommandTransactions.BootstrapResult result =
-        transactions.bootstrapThread(
-            threadId, expectedExecutionEpoch, title, initial, clock.instant());
-    return new BootstrapResult(
-        result.session(), result.rootEntry(), result.configEntry(), result.thread());
-  }
-
-  public HarnessThread updateHead(long threadId, long expectedExecutionEpoch, Long headEntryId) {
+  public HarnessThread updateHead(long threadId, long expectedExecutionEpoch, long headEntryId) {
     return transactions.updateHead(threadId, expectedExecutionEpoch, headEntryId, clock.instant());
   }
 
   /**
    * Looks up a previously persisted input by stable idempotency key.
    *
-   * <p>Command facades must call this before parsing live resource ids that may have become
-   * invalid, so retries short-circuit without re-validating live definitions/models.
+   * <p>Callers should use this before constructing a request whose changed settings may no longer
+   * be valid; an idempotent retry then returns the original input unchanged.
    */
   public Optional<EnqueueResult> findExistingInput(long threadId, String idempotencyKey) {
     return transactions.findExistingInput(threadId, idempotencyKey).map(this::toEnqueueResult);
   }
 
-  /** Enqueues a user message after content validation; retries short-circuit first. */
+  /** Enqueues a user turn after content validation; retries short-circuit first. */
   public EnqueueResult submitUserMessage(
-      long threadId, String content, String idempotencyKey, long expectedExecutionEpoch) {
+      long threadId,
+      TurnSettings settings,
+      String content,
+      String idempotencyKey,
+      long expectedExecutionEpoch) {
     Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
     if (existing.isPresent()) {
       return existing.get();
@@ -92,14 +67,15 @@ public final class ThreadCommandCoordinator {
     return enqueue(
         threadId,
         new RuntimeEntryInputPayload(
-            ThreadInputType.USER_MESSAGE, new MessageEntryPayload(message)),
+            ThreadInputType.USER_MESSAGE, new MessageEntryPayload(message, settings, null)),
         idempotencyKey,
         expectedExecutionEpoch);
   }
 
-  /** Enqueues a custom system/user message; retries short-circuit before role/content checks. */
+  /** Enqueues a custom system/user turn; retries short-circuit before role/content checks. */
   public EnqueueResult submitCustomMessage(
       long threadId,
+      TurnSettings settings,
       String role,
       String content,
       String idempotencyKey,
@@ -115,118 +91,12 @@ public final class ThreadCommandCoordinator {
     return enqueue(
         threadId,
         new RuntimeEntryInputPayload(
-            ThreadInputType.CUSTOM_MESSAGE, new CustomMessageEntryPayload(message)),
+            ThreadInputType.CUSTOM_MESSAGE, new CustomMessageEntryPayload(message, settings)),
         idempotencyKey,
         expectedExecutionEpoch);
   }
 
-  /** Freezes a pure YOLO policy replacement onto the current thread config and enqueues it. */
-  public EnqueueResult queueYolo(
-      long threadId, boolean yoloEnabled, String idempotencyKey, long expectedExecutionEpoch) {
-    Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    RuntimeConfigSnapshot current =
-        transactions
-            .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
-            .orElseThrow(
-                () -> new IllegalStateException("thread has no runtime config: " + threadId));
-    RuntimeConfigSnapshot frozen = current.withYoloEnabled(yoloEnabled);
-    return enqueue(
-        threadId,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_YOLO, frozen),
-        idempotencyKey,
-        expectedExecutionEpoch);
-  }
-
-  /**
-   * Resolves a live agent definition into a frozen snapshot and enqueues SET_AGENT.
-   *
-   * <p>Callers that must parse a live definition id from external input should short-circuit via
-   * {@link #findExistingInput(long, String)} first so deleted/invalid ids never reach this method
-   * on an idempotent retry.
-   */
-  public EnqueueResult queueAgent(
-      long threadId,
-      long definitionId,
-      boolean defaultYolo,
-      String idempotencyKey,
-      long expectedExecutionEpoch) {
-    Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    Optional<RuntimeConfigSnapshot> current =
-        transactions.lockAndFindCurrentConfig(threadId, expectedExecutionEpoch);
-    RuntimeConfigSnapshot frozen =
-        current.isPresent()
-            ? configSource.replaceAgent(current.get(), definitionId)
-            : configSource.resolveAgent(definitionId, null, defaultYolo);
-    return enqueue(
-        threadId,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_AGENT, frozen),
-        idempotencyKey,
-        expectedExecutionEpoch);
-  }
-
-  /**
-   * Replaces the model on the current thread config via live model resolution and enqueues
-   * SET_MODEL.
-   *
-   * <p>Same idempotency ordering as {@link #queueAgent(long, long, boolean, String, long)}.
-   */
-  public EnqueueResult queueModel(
-      long threadId,
-      long modelId,
-      String variant,
-      String idempotencyKey,
-      long expectedExecutionEpoch) {
-    Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    RuntimeConfigSnapshot current =
-        transactions
-            .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
-            .orElseThrow(
-                () -> new IllegalStateException("thread has no runtime config: " + threadId));
-    RuntimeConfigSnapshot frozen = configSource.replaceModel(current, modelId, variant);
-    return enqueue(
-        threadId,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_MODEL, frozen),
-        idempotencyKey,
-        expectedExecutionEpoch);
-  }
-
-  /** Replaces only the Environment target on the current runtime snapshot and enqueues it. */
-  public EnqueueResult queueEnvironment(
-      long threadId, String environmentName, String idempotencyKey, long expectedExecutionEpoch) {
-    Optional<EnqueueResult> existing = findExistingInput(threadId, idempotencyKey);
-    if (existing.isPresent()) {
-      return existing.get();
-    }
-    RuntimeConfigSnapshot current =
-        transactions
-            .lockAndFindCurrentConfig(threadId, expectedExecutionEpoch)
-            .orElseThrow(
-                () -> new IllegalStateException("thread has no runtime config: " + threadId));
-    RuntimeConfigSnapshot frozen = current.withEnvironmentName(environmentName);
-    return enqueue(
-        threadId,
-        new RuntimeConfigInputPayload(ThreadInputType.SET_ENVIRONMENT, frozen),
-        idempotencyKey,
-        expectedExecutionEpoch);
-  }
-
-  /**
-   * /stop 完整语义：原子发现当前 epoch 的可 partial durable 状态，按 canonical planner 判定 response debt，决定是否追加
-   * {@code ASSISTANT_ABORTED} 终止 entry（仅含安全 text/thinking）或 {@code ASSISTANT_ERROR} cancellation
-   * barrier，再 fence epoch 与清理 queued inputs/safe invocations。
-   *
-   * <p>该方法实现 Pi abort/continue partial 语义：safe text/thinking 持久化为 durable assistant turn， tool-call
-   * fragment 永远不进入 durable Entry 或 ToolInvocation，follow-up 不会重建旧 debt。
-   */
+  /** Fences the current execution epoch and applies the existing durable stop semantics. */
   public StopResult stop(long threadId, long expectedExecutionEpoch) {
     ThreadCommandTransactions.StopResult result =
         transactions.stop(threadId, expectedExecutionEpoch, clock.instant());
@@ -268,17 +138,6 @@ public final class ThreadCommandCoordinator {
       throw new IllegalArgumentException("custom message role must be system or user");
     }
     return role;
-  }
-
-  /** Inbound enqueue outcome for command facades: the persisted input. */
-  public record BootstrapResult(
-      Session session, SessionEntry rootEntry, SessionEntry configEntry, HarnessThread thread) {
-    public BootstrapResult {
-      Objects.requireNonNull(session, "session");
-      Objects.requireNonNull(rootEntry, "rootEntry");
-      Objects.requireNonNull(configEntry, "configEntry");
-      Objects.requireNonNull(thread, "thread");
-    }
   }
 
   public record EnqueueResult(ThreadInput input) {

@@ -1,14 +1,21 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 
 import java.util.Objects;
 
-/** 扩展显式要求进入模型上下文的消息 Entry。 */
-public record CustomMessageEntryPayload(AgentMessage message) implements RuntimeEntryPayload {
+/** Extension message that explicitly starts or continues a response-producing turn. */
+public record CustomMessageEntryPayload(AgentMessage message, TurnSettings turnSettings)
+    implements RuntimeEntryPayload {
 
   public CustomMessageEntryPayload {
     Objects.requireNonNull(message, "message");
+    if (message.role() != AgentMessageRole.SYSTEM && message.role() != AgentMessageRole.USER) {
+      throw new IllegalArgumentException("custom message role must be SYSTEM or USER");
+    }
+    Objects.requireNonNull(turnSettings, "turnSettings");
   }
 
   @Override

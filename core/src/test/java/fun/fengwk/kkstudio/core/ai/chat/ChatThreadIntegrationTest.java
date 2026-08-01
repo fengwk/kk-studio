@@ -246,11 +246,11 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
     return createChat(title, null);
   }
 
-  private ChatDTO createChat(String title, String defaultEnvironmentName) {
+  private ChatDTO createChat(String title, String environmentName) {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle(title);
-    create.setDefaultAgentId("1");
-    create.setDefaultEnvironmentName(defaultEnvironmentName);
+    create.setAgentName("default-assistant");
+    create.setEnvironmentName(environmentName);
     return chatService.createChat(create);
   }
 

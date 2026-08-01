@@ -10,8 +10,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -146,10 +147,7 @@ class ThreadReconcileSnapshotTest {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            1L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
 
@@ -165,29 +163,28 @@ class ThreadReconcileSnapshotTest {
   }
 
   @Test
-  void rejectsOwnershipWithDifferentThreadId() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(2L, 0L, "tok");
+  void constructsWithApplyPlanningFailure() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
+    PlanningFailure failure =
+        new PlanningFailure(PlanningFailureKind.ENVIRONMENT_NOT_FOUND, "environment missing");
+    ThreadReconcileSnapshot.PrimaryWork work =
+        new ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure(failure);
+
+    ThreadReconcileSnapshot snapshot =
+        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
+
+    ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure applied =
+        assertInstanceOf(
+            ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure.class,
+            snapshot.primaryWork().orElseThrow());
+    assertEquals(failure, applied.failure());
   }
 
   @Test
-  void rejectsUnboundOwnedThread() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread =
-        new HarnessThread(
-            1L,
-            null,
-            0L,
-            true,
-            0L,
-            0L,
-            new Lease("tok", ReconcileTestSupport.NOW.plusSeconds(60)),
-            ReconcileTestSupport.NOW,
-            ReconcileTestSupport.NOW);
-
+  void rejectsOwnershipWithDifferentThreadId() {
+    ThreadOwnership ownership = ReconcileTestSupport.ownership(2L, 0L, "tok");
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
     assertThrows(
         IllegalArgumentException.class,
         () -> new ThreadReconcileSnapshot(ownership, thread, Optional.empty(), List.of()));
@@ -294,10 +291,7 @@ class ThreadReconcileSnapshotTest {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            999L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(999L, ReconcileTestSupport.modelInvocationRequest());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
     assertThrows(
@@ -335,7 +329,7 @@ class ThreadReconcileSnapshotTest {
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
     List<ThreadInput> inputs =
         List.of(
-            ReconcileTestSupport.input(1L, 2L, ThreadInputType.SET_MODEL),
+            ReconcileTestSupport.input(1L, 2L, ThreadInputType.CUSTOM_MESSAGE),
             ReconcileTestSupport.input(1L, 1L, ThreadInputType.USER_MESSAGE));
     assertThrows(
         IllegalArgumentException.class,
@@ -363,10 +357,7 @@ class ThreadReconcileSnapshotTest {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
     HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 5L);
     ModelInvocationPlan plan =
-        new ModelInvocationPlan(
-            5L,
-            ReconcileTestSupport.modelInvocationRequest(),
-            ReconcileTestSupport.configSnapshot());
+        new ModelInvocationPlan(5L, ReconcileTestSupport.modelInvocationRequest());
     ThreadReconcileSnapshot.PrimaryWork work =
         new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
     // 匹配 head：5L == 5L，应成功

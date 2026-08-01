@@ -7,6 +7,9 @@ import lombok.Data;
 public class HarnessThreadMessageCreateDTO {
   private Long expectedExecutionEpoch;
   private String content;
+  private String agentName;
+  private String environmentName;
+  private Boolean yoloEnabled;
 
   /** 客户端幂等键。 */
   private String clientMessageId;

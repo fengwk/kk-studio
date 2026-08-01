@@ -3,21 +3,15 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSource;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ReconcileTestSupport;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -26,371 +20,183 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * Runtime command coordinator: idempotency short-circuit, payload construction and config freeze
- * ordering. Uses hand-rolled fakes (runtime has no Mockito dependency).
- */
+/** Coordinator tests for idempotency, message-only inputs, and exact per-turn settings. */
 class ThreadCommandCoordinatorTest {
 
   private static final Instant NOW = Instant.parse("2026-07-24T00:00:00Z");
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", "environment", true);
 
   private FakeTransactions transactions;
-  private FakeConfigSource configSource;
   private ThreadCommandCoordinator coordinator;
 
   @BeforeEach
   void setUp() {
     transactions = new FakeTransactions();
-    configSource = new FakeConfigSource();
-    coordinator = new ThreadCommandCoordinator(transactions, configSource, CLOCK);
+    coordinator = new ThreadCommandCoordinator(transactions, CLOCK);
   }
 
-  /** Same idempotency key must return the persisted input before live config resolution. */
   @Test
-  void configRetryShortCircuitsBeforeLiveResolution() {
-    ThreadInputPayload payload = new StubPayload(ThreadInputType.SET_AGENT);
-    ThreadInput persisted =
-        new ThreadInput(
-            9L,
-            1L,
-            1L,
-            ThreadInputType.SET_AGENT,
-            payload,
-            "same-key",
-            InputStatus.QUEUED,
-            NOW,
-            null);
+  void idempotentRetryReturnsExistingMessageBeforeValidatingNewContent() {
+    ThreadInput persisted = input(9L, 1L, ThreadInputType.USER_MESSAGE, SETTINGS);
     transactions.existing.put("1:same-key", new ThreadCommandTransactions.EnqueueResult(persisted));
 
     ThreadCommandCoordinator.EnqueueResult result =
-        coordinator.queueAgent(1L, 99L, false, "same-key", 0L);
+        coordinator.submitUserMessage(1L, SETTINGS, " ", "same-key", 4L);
+
     assertSame(persisted, result.input());
-    assertEquals(0, configSource.resolveCalls);
-    assertEquals(0, transactions.lockCalls);
     assertEquals(0, transactions.enqueueCalls);
-  }
-
-  /**
-   * Every typed command returns its durable idempotent result before validating new request data.
-   */
-  @Test
-  void typedCommandRetriesShortCircuitBeforeValidationAndConfigLookup() {
-    ThreadInput user = rememberExisting(ThreadInputType.USER_MESSAGE, "user-key");
-    ThreadInput custom = rememberExisting(ThreadInputType.CUSTOM_MESSAGE, "custom-key");
-    ThreadInput yolo = rememberExisting(ThreadInputType.SET_YOLO, "yolo-key");
-    ThreadInput model = rememberExisting(ThreadInputType.SET_MODEL, "model-key");
-    ThreadInput environment = rememberExisting(ThreadInputType.SET_ENVIRONMENT, "environment-key");
-
-    assertSame(user, coordinator.submitUserMessage(1L, " ", "user-key", 0L).input());
-    assertSame(custom, coordinator.submitCustomMessage(1L, null, " ", "custom-key", 0L).input());
-    assertSame(yolo, coordinator.queueYolo(1L, true, "yolo-key", 0L).input());
-    assertSame(model, coordinator.queueModel(1L, 99L, "deleted", "model-key", 0L).input());
-    assertSame(
-        environment, coordinator.queueEnvironment(1L, " invalid ", "environment-key", 0L).input());
-    assertEquals(0, transactions.lockCalls);
-    assertEquals(0, transactions.enqueueCalls);
-    assertEquals(0, configSource.replaceCalls);
+    assertEquals(1, transactions.findCalls);
   }
 
   @Test
-  void createsUnboundThreadWithInjectedClock() {
-    HarnessThread created = coordinator.createThread();
-
-    assertSame(transactions.createdThread, created);
+  void createsAndUpdatesThreadsThroughInjectedClock() {
+    assertSame(transactions.createdThread, coordinator.createThread("title"));
+    assertEquals("title", transactions.lastTitle);
     assertEquals(NOW, transactions.lastCreateNow);
-  }
 
-  @Test
-  void bootstrapsThreadAndMapsTransactionResult() {
-    ThreadCommandCoordinator.BootstrapResult result =
-        coordinator.bootstrapThread(1L, 4L, "session", 7L, "env-a", true);
-
-    assertEquals(1L, transactions.lastBootstrapThreadId);
-    assertEquals(4L, transactions.lastExpectedEpoch);
-    assertEquals("session", transactions.lastBootstrapTitle);
-    assertEquals(
-        configSource.resolved.withEnvironmentName("env-a"), transactions.lastBootstrapConfig);
-    assertEquals(NOW, transactions.lastBootstrapNow);
-    assertSame(transactions.bootstrapSession, result.session());
-    assertSame(transactions.bootstrapRoot, result.rootEntry());
-    assertSame(transactions.bootstrapConfig, result.configEntry());
-    assertSame(transactions.bootstrapThread, result.thread());
-  }
-
-  @Test
-  void updatesHeadWithExpectedEpochAndInjectedClock() {
-    HarnessThread updated = coordinator.updateHead(1L, 4L, 99L);
-
-    assertSame(transactions.updatedThread, updated);
+    assertSame(transactions.updatedThread, coordinator.updateHead(1L, 7L, 99L));
     assertEquals(1L, transactions.lastUpdateThreadId);
-    assertEquals(4L, transactions.lastExpectedEpoch);
+    assertEquals(7L, transactions.lastExpectedEpoch);
     assertEquals(99L, transactions.lastHeadEntryId);
     assertEquals(NOW, transactions.lastUpdateNow);
   }
 
-  /** User message payload is typed USER_MESSAGE with USER role text content after validation. */
   @Test
-  void submitUserMessageBuildsTypedPayloadAfterContentValidation() {
-    coordinator.submitUserMessage(1L, "hello", "m1", 0L);
+  void submitUserMessageStoresTheExactTurnSettings() {
+    ThreadCommandCoordinator.EnqueueResult result =
+        coordinator.submitUserMessage(1L, SETTINGS, "hello", "user-key", 7L);
 
-    assertEquals(1, transactions.enqueueCalls);
     RuntimeEntryInputPayload payload = (RuntimeEntryInputPayload) transactions.lastPayload;
-    assertEquals(ThreadInputType.USER_MESSAGE, payload.type());
     MessageEntryPayload entry = (MessageEntryPayload) payload.payload();
+    assertEquals(ThreadInputType.USER_MESSAGE, payload.type());
     assertEquals(AgentMessageRole.USER, entry.message().role());
     assertEquals("hello", ((TextMessageContent) entry.message().contents().getFirst()).text());
+    assertEquals(SETTINGS, entry.turnSettings());
+    assertSame(result.input(), transactions.lastEnqueuedInput);
+    assertEquals(7L, transactions.lastExpectedEpoch);
     assertEquals(NOW, transactions.lastNow);
   }
 
-  /** Blank content is rejected after the idempotency miss path. */
   @Test
-  void submitUserMessageRejectsBlankContent() {
-    assertThrows(
-        IllegalArgumentException.class, () -> coordinator.submitUserMessage(1L, "  ", "m1", 0L));
-    assertEquals(0, transactions.enqueueCalls);
-  }
-
-  /** Custom role must be system/user; payload type is CUSTOM_MESSAGE. */
-  @Test
-  void submitCustomMessageParsesRoleAndBuildsPayload() {
-    coordinator.submitCustomMessage(1L, "system", "note", "c1", 0L);
+  void submitCustomMessageStoresTheExactTurnSettingsAndRole() {
+    ThreadCommandCoordinator.EnqueueResult result =
+        coordinator.submitCustomMessage(1L, SETTINGS, "system", "instruction", "custom-key", 8L);
 
     RuntimeEntryInputPayload payload = (RuntimeEntryInputPayload) transactions.lastPayload;
-    assertEquals(ThreadInputType.CUSTOM_MESSAGE, payload.type());
     CustomMessageEntryPayload entry = (CustomMessageEntryPayload) payload.payload();
+    assertEquals(ThreadInputType.CUSTOM_MESSAGE, payload.type());
     assertEquals(AgentMessageRole.SYSTEM, entry.message().role());
+    assertEquals("instruction", text(entry.message()));
+    assertEquals(SETTINGS, entry.turnSettings());
+    assertSame(result.input(), transactions.lastEnqueuedInput);
   }
 
   @Test
-  void submitCustomMessageRejectsAssistantRole() {
+  void rejectsInvalidNewMessagesAfterIdempotencyMiss() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> coordinator.submitCustomMessage(1L, "assistant", "x", "c1", 0L));
-  }
-
-  @Test
-  void submitCustomMessageRejectsBlankAndUnknownRoles() {
+        () -> coordinator.submitUserMessage(1L, SETTINGS, " ", "blank", 0L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> coordinator.submitCustomMessage(1L, " ", "x", "blank-role", 0L));
+        () -> coordinator.submitCustomMessage(1L, SETTINGS, "assistant", "x", "role", 0L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> coordinator.submitCustomMessage(1L, "operator", "x", "unknown-role", 0L));
-  }
-
-  /** YOLO freezes via pure snapshot transform without touching RuntimeConfigSource. */
-  @Test
-  void queueYoloUsesPureSnapshotTransform() {
-    RuntimeConfigSnapshot current = ReconcileTestSupport.configSnapshot();
-    transactions.currentConfig = Optional.of(current);
-
-    coordinator.queueYolo(1L, true, "y1", 0L);
-
-    RuntimeConfigInputPayload payload = (RuntimeConfigInputPayload) transactions.lastPayload;
-    assertEquals(ThreadInputType.SET_YOLO, payload.type());
-    assertTrue(payload.snapshot().yoloEnabled());
-    assertEquals(current.agent(), payload.snapshot().agent());
-    assertEquals(0, configSource.resolveCalls);
-    assertEquals(0, configSource.replaceCalls);
-  }
-
-  /** SET_AGENT reuses current yolo when present; otherwise product defaultYolo is applied. */
-  @Test
-  void queueAgentPreservesCurrentYoloAndResolvesLiveAgent() {
-    RuntimeConfigSnapshot current =
-        ReconcileTestSupport.configSnapshot().withEnvironmentName("env-a").withYoloEnabled(true);
-    transactions.currentConfig = Optional.of(current);
-    configSource.resolved = ReconcileTestSupport.configSnapshot().withYoloEnabled(true);
-
-    coordinator.queueAgent(1L, 7L, false, "a1", 0L);
-
-    assertEquals(1, configSource.resolveCalls);
-    assertEquals(7L, configSource.lastDefinitionId);
-    assertTrue(configSource.lastYolo);
-    assertEquals(ThreadInputType.SET_AGENT, transactions.lastPayload.type());
-    assertEquals(
-        "env-a",
-        transactions.lastPayload instanceof RuntimeConfigInputPayload payload
-            ? payload.snapshot().environmentName()
-            : null);
-  }
-
-  @Test
-  void queueAgentFallsBackToDefaultYoloWhenNoCurrentConfig() {
-    transactions.currentConfig = Optional.empty();
-    configSource.resolved = ReconcileTestSupport.configSnapshot();
-
-    coordinator.queueAgent(1L, 7L, false, "a2", 0L);
-
-    assertEquals(7L, configSource.lastDefinitionId);
-    assertEquals(false, configSource.lastYolo);
-  }
-
-  /** SET_MODEL replaces model through SPI after locking current config. */
-  @Test
-  void queueModelDelegatesToConfigSource() {
-    RuntimeConfigSnapshot current = ReconcileTestSupport.configSnapshot();
-    transactions.currentConfig = Optional.of(current);
-    configSource.replaced = ReconcileTestSupport.configSnapshot();
-
-    coordinator.queueModel(1L, 3L, "fast", "mod1", 0L);
-
-    assertEquals(1, configSource.replaceCalls);
-    assertSame(current, configSource.lastCurrent);
-    assertEquals(3L, configSource.lastModelId);
-    assertEquals("fast", configSource.lastVariant);
-    assertEquals(ThreadInputType.SET_MODEL, transactions.lastPayload.type());
-  }
-
-  @Test
-  void queueEnvironmentReplacesOnlyEnvironmentAndSupportsClear() {
-    RuntimeConfigSnapshot current =
-        ReconcileTestSupport.configSnapshot().withEnvironmentName("env-a").withYoloEnabled(true);
-    transactions.currentConfig = Optional.of(current);
-
-    coordinator.queueEnvironment(1L, "env-b", "env-1", 0L);
-    RuntimeConfigSnapshot replaced =
-        ((RuntimeConfigInputPayload) transactions.lastPayload).snapshot();
-    assertEquals(ThreadInputType.SET_ENVIRONMENT, transactions.lastPayload.type());
-    assertEquals("env-b", replaced.environmentName());
-    assertEquals(current.agent(), replaced.agent());
-    assertEquals(current.model(), replaced.model());
-    assertEquals(current.toolNames(), replaced.toolNames());
-    assertEquals(current.skillNames(), replaced.skillNames());
-    assertEquals(current.yoloEnabled(), replaced.yoloEnabled());
-
-    coordinator.queueEnvironment(1L, null, "env-2", 0L);
-    assertEquals(
-        null, ((RuntimeConfigInputPayload) transactions.lastPayload).snapshot().environmentName());
-  }
-
-  /** Config replacement commands require an existing frozen runtime config. */
-  @Test
-  void configReplacementRejectsThreadWithoutRuntimeConfig() {
-    assertThrows(
-        IllegalStateException.class, () -> coordinator.queueYolo(1L, true, "y-missing", 0L));
-    assertThrows(
-        IllegalStateException.class,
-        () -> coordinator.queueModel(1L, 3L, "fast", "model-missing", 0L));
-    assertThrows(
-        IllegalStateException.class,
-        () -> coordinator.queueEnvironment(1L, "env-a", "environment-missing", 0L));
+        () -> coordinator.submitCustomMessage(1L, SETTINGS, "operator", "x", "role-2", 0L));
     assertEquals(0, transactions.enqueueCalls);
-    assertEquals(0, configSource.replaceCalls);
   }
 
   @Test
-  void stopUsesInjectedClock() {
-    ThreadCommandCoordinator.StopResult stop = coordinator.stop(1L, 0L);
+  void findExistingInputMapsTheDurableResult() {
+    ThreadInput persisted = input(9L, 1L, ThreadInputType.CUSTOM_MESSAGE, SETTINGS);
+    transactions.existing.put("1:key", new ThreadCommandTransactions.EnqueueResult(persisted));
+
+    Optional<ThreadCommandCoordinator.EnqueueResult> result =
+        coordinator.findExistingInput(1L, "key");
+
+    assertTruePresent(result);
+    assertSame(persisted, result.orElseThrow().input());
+    assertEquals(1, transactions.findCalls);
+  }
+
+  @Test
+  void stopUsesInjectedClockAndPreservesTransactionOutcome() {
+    ThreadCommandCoordinator.StopResult result = coordinator.stop(1L, 9L);
+
+    assertEquals(10L, result.executionEpoch());
+    assertEquals(List.of(), result.cancelledInputs());
+    assertEquals(1L, transactions.lastStopThreadId);
+    assertEquals(9L, transactions.lastStopExpectedEpoch);
     assertEquals(NOW, transactions.lastStopNow);
-    assertEquals(1L, stop.executionEpoch());
   }
 
-  private ThreadInput rememberExisting(ThreadInputType type, String key) {
-    ThreadInputPayload payload = new StubPayload(type);
-    ThreadInput input =
-        new ThreadInput(
-            9L + transactions.existing.size(),
-            1L,
-            1L,
-            type,
-            payload,
-            key,
-            InputStatus.QUEUED,
-            NOW,
-            null);
-    transactions.existing.put("1:" + key, new ThreadCommandTransactions.EnqueueResult(input));
-    return input;
+  private static void assertTruePresent(Optional<?> value) {
+    if (value.isEmpty()) {
+      throw new AssertionError("expected an existing input");
+    }
   }
 
-  private record StubPayload(ThreadInputType type) implements ThreadInputPayload {}
+  private static String text(AgentMessage message) {
+    return ((TextMessageContent) message.contents().getFirst()).text();
+  }
 
-  private static final class FakeConfigSource implements RuntimeConfigSource {
-    int resolveCalls;
-    int replaceCalls;
-    long lastDefinitionId;
-    boolean lastYolo;
-    RuntimeConfigSnapshot lastCurrent;
-    long lastModelId;
-    String lastVariant;
-    RuntimeConfigSnapshot resolved = ReconcileTestSupport.configSnapshot();
-    RuntimeConfigSnapshot replaced = ReconcileTestSupport.configSnapshot();
+  private static ThreadInput input(
+      long id, long sequence, ThreadInputType type, TurnSettings settings) {
+    RuntimeEntryInputPayload payload =
+        type == ThreadInputType.USER_MESSAGE
+            ? new RuntimeEntryInputPayload(
+                type, new MessageEntryPayload(userMessage("persisted"), settings, null))
+            : new RuntimeEntryInputPayload(
+                type, new CustomMessageEntryPayload(systemMessage("persisted"), settings));
+    return new ThreadInput(
+        id, 1L, sequence, type, payload, "persisted-" + id, InputStatus.QUEUED, NOW, null);
+  }
 
-    @Override
-    public RuntimeConfigSnapshot resolveAgent(long definitionId, boolean yoloEnabled) {
-      resolveCalls++;
-      lastDefinitionId = definitionId;
-      lastYolo = yoloEnabled;
-      return resolved;
-    }
+  private static AgentMessage userMessage(String content) {
+    return message(AgentMessageRole.USER, content);
+  }
 
-    @Override
-    public RuntimeConfigSnapshot replaceModel(
-        RuntimeConfigSnapshot current, long modelId, String requestedVariant) {
-      replaceCalls++;
-      lastCurrent = current;
-      lastModelId = modelId;
-      lastVariant = requestedVariant;
-      return replaced;
-    }
+  private static AgentMessage systemMessage(String content) {
+    return message(AgentMessageRole.SYSTEM, content);
+  }
+
+  private static AgentMessage message(AgentMessageRole role, String content) {
+    return new AgentMessage(role, List.of(new TextMessageContent(content)));
   }
 
   private static final class FakeTransactions implements ThreadCommandTransactions {
-    final Map<String, EnqueueResult> existing = new HashMap<>();
-    Optional<RuntimeConfigSnapshot> currentConfig = Optional.empty();
-    int lockCalls;
-    int enqueueCalls;
-    ThreadInputPayload lastPayload;
-    Instant lastNow;
-    Instant lastStopNow;
-    Instant lastCreateNow;
-    long lastBootstrapThreadId;
-    long lastExpectedEpoch;
-    String lastBootstrapTitle;
-    RuntimeConfigSnapshot lastBootstrapConfig;
-    Instant lastBootstrapNow;
-    long lastUpdateThreadId;
-    Long lastHeadEntryId;
-    Instant lastUpdateNow;
-    final HarnessThread createdThread =
-        new HarnessThread(1L, null, 0L, false, 0L, 0L, null, NOW, NOW);
-    final Session bootstrapSession = new Session(10L, "session", NOW);
-    final SessionEntry bootstrapRoot = new SessionEntry(11L, null, new RootEntryPayload());
-    final SessionEntry bootstrapConfig =
-        new SessionEntry(12L, bootstrapRoot.id(), ReconcileTestSupport.configSnapshot());
-    final HarnessThread bootstrapThread =
-        new HarnessThread(1L, bootstrapConfig.id(), 0L, false, 5L, 0L, null, NOW, NOW);
-    final HarnessThread updatedThread =
-        new HarnessThread(1L, 99L, 0L, false, 5L, 0L, null, NOW, NOW);
-    final AtomicInteger nextId = new AtomicInteger(100);
+    private final Map<String, EnqueueResult> existing = new HashMap<>();
+    private final HarnessThread createdThread =
+        new HarnessThread(1L, 1L, 0L, false, 0L, 0L, null, NOW, NOW);
+    private final HarnessThread updatedThread =
+        new HarnessThread(1L, 99L, 0L, false, 7L, 1L, null, NOW, NOW);
+    private int findCalls;
+    private int enqueueCalls;
+    private Instant lastCreateNow;
+    private String lastTitle;
+    private long lastUpdateThreadId;
+    private long lastExpectedEpoch;
+    private long lastHeadEntryId;
+    private Instant lastUpdateNow;
+    private ThreadInputPayload lastPayload;
+    private ThreadInput lastEnqueuedInput;
+    private Instant lastNow;
+    private long lastStopThreadId;
+    private long lastStopExpectedEpoch;
+    private Instant lastStopNow;
+    private int nextId = 100;
 
     @Override
-    public HarnessThread createThread(Instant now) {
+    public HarnessThread createThread(String title, Instant now) {
+      lastTitle = title;
       lastCreateNow = now;
       return createdThread;
     }
 
     @Override
-    public BootstrapResult bootstrapThread(
-        long threadId,
-        long expectedExecutionEpoch,
-        String title,
-        RuntimeConfigSnapshot initialConfig,
-        Instant now) {
-      lastBootstrapThreadId = threadId;
-      lastExpectedEpoch = expectedExecutionEpoch;
-      lastBootstrapTitle = title;
-      lastBootstrapConfig = initialConfig;
-      lastBootstrapNow = now;
-      return new BootstrapResult(bootstrapSession, bootstrapRoot, bootstrapConfig, bootstrapThread);
-    }
-
-    @Override
     public HarnessThread updateHead(
-        long threadId, long expectedExecutionEpoch, Long headEntryId, Instant now) {
+        long threadId, long expectedExecutionEpoch, long headEntryId, Instant now) {
       lastUpdateThreadId = threadId;
       lastExpectedEpoch = expectedExecutionEpoch;
       lastHeadEntryId = headEntryId;
@@ -399,14 +205,8 @@ class ThreadCommandCoordinatorTest {
     }
 
     @Override
-    public Optional<RuntimeConfigSnapshot> lockAndFindCurrentConfig(
-        long threadId, long expectedExecutionEpoch) {
-      lockCalls++;
-      return currentConfig;
-    }
-
-    @Override
     public Optional<EnqueueResult> findExistingInput(long threadId, String idempotencyKey) {
+      findCalls++;
       return Optional.ofNullable(existing.get(threadId + ":" + idempotencyKey));
     }
 
@@ -419,10 +219,11 @@ class ThreadCommandCoordinatorTest {
         Instant now) {
       enqueueCalls++;
       lastPayload = payload;
+      lastExpectedEpoch = expectedExecutionEpoch;
       lastNow = now;
-      ThreadInput input =
+      lastEnqueuedInput =
           new ThreadInput(
-              nextId.getAndIncrement(),
+              nextId++,
               threadId,
               1L,
               payload.type(),
@@ -431,13 +232,15 @@ class ThreadCommandCoordinatorTest {
               InputStatus.QUEUED,
               now,
               null);
-      return new EnqueueResult(input);
+      return new EnqueueResult(lastEnqueuedInput);
     }
 
     @Override
     public StopResult stop(long threadId, long expectedExecutionEpoch, Instant now) {
+      lastStopThreadId = threadId;
+      lastStopExpectedEpoch = expectedExecutionEpoch;
       lastStopNow = now;
-      return new StopResult(1L, List.of());
+      return new StopResult(expectedExecutionEpoch + 1L, List.of());
     }
   }
 }

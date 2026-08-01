@@ -40,16 +40,16 @@ public class StudioAgentDefinitionController {
     return Results.created(agentDefinitionService.createAgent(createDTO));
   }
 
-  @PutMapping("/{id}")
+  @PutMapping("/{name}")
   public Result<AgentDefinitionDTO> updateAgent(
-      @PathVariable long id, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
-    return Results.ok(agentDefinitionService.updateAgent(id, updateDTO));
+      @PathVariable String name, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
+    return Results.ok(agentDefinitionService.updateAgent(name, updateDTO));
   }
 
-  @DeleteMapping("/{id}")
+  @DeleteMapping("/{name}")
   public Result<Void> deleteAgent(
-      @PathVariable long id, @RequestParam("expectedVersion") String expectedVersion) {
-    agentDefinitionService.deleteAgent(id, expectedVersion);
+      @PathVariable String name, @RequestParam("expectedVersion") String expectedVersion) {
+    agentDefinitionService.deleteAgent(name, expectedVersion);
     return Results.noContent();
   }
 }

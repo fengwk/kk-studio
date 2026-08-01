@@ -3,13 +3,14 @@ package fun.fengwk.kkstudio.harness.runtime.skill;
 import java.util.Objects;
 
 /**
- * Resolved metadata for one selected Agent skill used by skill loading and system prompt assembly.
+ * Immutable skill fact frozen into one model invocation.
  *
- * <p>Only short name, description, and source Environment name are retained. Skill body and local
- * paths never enter runtime config or Entry Tree.
+ * <p>The body is intentionally absent. The name, description, and source environment are the exact
+ * metadata used to build the provider prompt and to route a later {@code load_skill} call.
  */
-public record SelectedSkillMetadata(String name, String description, String sourceEnvironment) {
-  public SelectedSkillMetadata {
+public record SkillBinding(String name, String description, String sourceEnvironment) {
+
+  public SkillBinding {
     name = requireNonBlank(name, "name");
     description = requireNonBlank(description, "description");
     sourceEnvironment = requireNonBlank(sourceEnvironment, "sourceEnvironment");
@@ -19,6 +20,9 @@ public record SelectedSkillMetadata(String name, String description, String sour
     Objects.requireNonNull(value, field);
     if (value.isBlank()) {
       throw new IllegalArgumentException(field + " must not be blank");
+    }
+    if (!value.equals(value.trim())) {
+      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
     }
     return value;
   }

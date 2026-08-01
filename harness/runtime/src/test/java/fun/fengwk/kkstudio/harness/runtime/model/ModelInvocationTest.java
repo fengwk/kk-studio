@@ -389,10 +389,9 @@ class ModelInvocationTest {
             BigDecimal.ZERO);
     ModelDescriptor model =
         new ModelDescriptor(
-            1,
-            2,
-            ProviderType.OPENAI,
+            "provider",
             "model",
+            ProviderType.OPENAI,
             false,
             false,
             pricing,

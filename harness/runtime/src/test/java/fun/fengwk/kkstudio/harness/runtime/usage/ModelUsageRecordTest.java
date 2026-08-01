@@ -68,10 +68,9 @@ class ModelUsageRecordTest {
             BigDecimal.ZERO);
     ModelCost cost = ModelCost.calculate(pricing, usage);
     return new ModelUsageDraft(
-        101L,
-        202L,
-        ProviderType.OPENAI,
+        "provider",
         "model-x",
+        ProviderType.OPENAI,
         PromptCacheMode.UNSUPPORTED,
         PromptCacheRetention.NONE,
         false,

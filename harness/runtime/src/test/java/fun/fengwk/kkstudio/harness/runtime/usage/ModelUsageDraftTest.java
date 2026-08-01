@@ -35,17 +35,16 @@ class ModelUsageDraftTest {
   void freezesFinalIdentityAndCacheControl() {
     ModelPricing pricing = zeroPricing();
     ModelDescriptor model =
-        model(301L, 302L, ProviderType.GOOGLE, "gemini-final", pricing, affinityPolicy());
+        model("google", "gemini-final", ProviderType.GOOGLE, pricing, affinityPolicy());
     ProviderRequest finalRequest =
         request(model, ProviderCacheControl.affinity(PromptCacheRetention.LONG, "final-key"));
     ProviderResponse response = response(ModelCost.calculate(pricing, USAGE));
 
     ModelUsageDraft draft = ModelUsageDraft.from(finalRequest, response);
 
-    assertEquals(301L, draft.providerResourceId());
-    assertEquals(302L, draft.modelResourceId());
+    assertEquals("google", draft.providerName());
+    assertEquals("gemini-final", draft.modelName());
     assertEquals(ProviderType.GOOGLE, draft.providerType());
-    assertEquals("gemini-final", draft.providerModelId());
     assertEquals(PromptCacheMode.AFFINITY, draft.promptCacheMode());
     assertEquals(PromptCacheRetention.LONG, draft.promptCacheRetention());
     assertTrue(draft.cacheEligible());
@@ -65,10 +64,9 @@ class ModelUsageDraftTest {
     ModelPricing pricing = zeroPricing();
     ModelDescriptor model =
         model(
-            1L,
-            2L,
-            ProviderType.GOOGLE,
+            "google",
             "gemini",
+            ProviderType.GOOGLE,
             pricing,
             PromptCachePolicy.automatic(PromptCacheCapability.automatic()));
 
@@ -86,7 +84,7 @@ class ModelUsageDraftTest {
   void disabledCacheIsNotEligible() {
     ModelPricing pricing = zeroPricing();
     ModelDescriptor model =
-        model(1L, 2L, ProviderType.OPENAI, "model", pricing, PromptCachePolicy.disabled());
+        model("openai", "model", ProviderType.OPENAI, pricing, PromptCachePolicy.disabled());
     ProviderRequest finalRequest =
         request(model, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "forged-key"));
 
@@ -104,7 +102,7 @@ class ModelUsageDraftTest {
     ModelUsage usage = new ModelUsage(1, 0, 0, 0, 0, 0, 1);
     ModelPricing pricing = pricingWithInputPrice(BigDecimal.ONE);
     ModelDescriptor model =
-        model(1L, 2L, ProviderType.OPENAI, "model", pricing, PromptCachePolicy.disabled());
+        model("openai", "model", ProviderType.OPENAI, pricing, PromptCachePolicy.disabled());
     ModelCost expected = ModelCost.calculate(pricing, usage);
     ModelCost equivalentScale =
         new ModelCost(
@@ -140,19 +138,19 @@ class ModelUsageDraftTest {
   /** Draft 自身也拒绝 ledger 身份、缓存派生和 metadata 的非法值，并沿用 raw usage JSON 规则。 */
   @Test
   void validatesDraftInvariantsAndRawUsageJson() {
+    assertThrows(IllegalArgumentException.class, () -> draft("", "model", null, false, null, null));
     assertThrows(
-        IllegalArgumentException.class, () -> draft(0L, 2L, "model", null, false, null, null));
+        IllegalArgumentException.class, () -> draft("provider", "", null, false, null, null));
     assertThrows(
-        IllegalArgumentException.class, () -> draft(1L, 0L, "model", null, false, null, null));
-    assertThrows(IllegalArgumentException.class, () -> draft(1L, 2L, " ", null, false, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> draft(1L, 2L, "model", PromptCacheRetention.SHORT, true, " ", null));
+        IllegalArgumentException.class, () -> draft("provider", " ", null, false, null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> draft(1L, 2L, "model", PromptCacheRetention.NONE, false, "key", null));
+        () -> draft("provider", "model", PromptCacheRetention.SHORT, true, " ", null));
     assertThrows(
-        IllegalArgumentException.class, () -> draft(1L, 2L, "model", null, true, null, null));
+        IllegalArgumentException.class,
+        () -> draft("provider", "model", PromptCacheRetention.NONE, false, "key", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> draft("provider", "model", null, true, null, null));
     assertThrows(IllegalArgumentException.class, () -> draftWithMetadata(" ", null, "{}"));
     assertThrows(IllegalArgumentException.class, () -> draftWithMetadata(null, " ", "{}"));
     assertThrows(IllegalArgumentException.class, () -> draftWithMetadata(null, null, " "));
@@ -177,10 +175,9 @@ class ModelUsageDraftTest {
         IllegalArgumentException.class,
         () ->
             new ModelUsageDraft(
-                1L,
-                2L,
-                ProviderType.OPENAI,
+                "provider",
                 "model",
+                ProviderType.OPENAI,
                 PromptCacheMode.UNSUPPORTED,
                 PromptCacheRetention.NONE,
                 false,
@@ -195,18 +192,16 @@ class ModelUsageDraftTest {
   }
 
   private static ModelUsageDraft draft(
-      long providerResourceId,
-      long modelResourceId,
-      String providerModelId,
+      String providerName,
+      String modelName,
       PromptCacheRetention retention,
       boolean cacheEligible,
       String cacheAffinityKey,
       String rawUsageJson) {
     return new ModelUsageDraft(
-        providerResourceId,
-        modelResourceId,
+        providerName,
+        modelName,
         ProviderType.OPENAI,
-        providerModelId,
         PromptCacheMode.UNSUPPORTED,
         retention == null ? PromptCacheRetention.NONE : retention,
         cacheEligible,
@@ -223,10 +218,9 @@ class ModelUsageDraftTest {
   private static ModelUsageDraft draftWithMetadata(
       String requestId, String reportedServiceTier, String rawUsageJson) {
     return new ModelUsageDraft(
-        1L,
-        2L,
-        ProviderType.OPENAI,
+        "provider",
         "model",
+        ProviderType.OPENAI,
         PromptCacheMode.UNSUPPORTED,
         PromptCacheRetention.NONE,
         false,
@@ -267,14 +261,12 @@ class ModelUsageDraftTest {
   }
 
   private static ModelDescriptor model(
-      long providerResourceId,
-      long modelResourceId,
+      String providerName,
+      String modelName,
       ProviderType providerType,
-      String modelId,
       ModelPricing pricing,
       PromptCachePolicy policy) {
-    return new ModelDescriptor(
-        providerResourceId, modelResourceId, providerType, modelId, true, false, pricing, policy);
+    return new ModelDescriptor(providerName, modelName, providerType, true, false, pricing, policy);
   }
 
   private static PromptCachePolicy affinityPolicy() {

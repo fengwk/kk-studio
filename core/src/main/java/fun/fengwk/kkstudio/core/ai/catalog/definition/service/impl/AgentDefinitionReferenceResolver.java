@@ -21,19 +21,20 @@ final class AgentDefinitionReferenceResolver {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
 
-  AgentDefinition requireAgent(long id) {
-    AgentDefinition definition = agentDefinitionRepository.getById(id);
+  AgentDefinition requireAgent(String name) {
+    AgentDefinition definition = agentDefinitionRepository.getByName(name);
     if (definition == null) {
       throw new AiResourceNotFoundException(
-          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + id);
+          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + name);
     }
     return definition;
   }
 
-  AgentModel requireModel(long id) {
-    AgentModel model = agentModelRepository.getById(id);
+  AgentModel requireModel(String providerName, String modelName) {
+    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
     if (model == null) {
-      throw new AiResourceNotFoundException(MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
     }
     return model;
   }

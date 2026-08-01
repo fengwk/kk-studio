@@ -18,10 +18,10 @@ final class AgentProviderGuard {
 
   private final AgentProviderRepository agentProviderRepository;
 
-  AgentProvider requireProvider(long id) {
-    AgentProvider provider = agentProviderRepository.getById(id);
+  AgentProvider requireProvider(String name) {
+    AgentProvider provider = agentProviderRepository.getByName(name);
     if (provider == null) {
-      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
     }
     return provider;
   }
@@ -38,9 +38,9 @@ final class AgentProviderGuard {
     }
   }
 
-  void ensureDeletable(long id) {
-    if (agentProviderRepository.hasModels(id)) {
-      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id);
+  void ensureDeletable(String name) {
+    if (agentProviderRepository.hasModels(name)) {
+      throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + name);
     }
   }
 }

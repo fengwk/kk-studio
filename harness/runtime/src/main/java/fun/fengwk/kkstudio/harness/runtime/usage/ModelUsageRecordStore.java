@@ -27,6 +27,6 @@ public interface ModelUsageRecordStore {
   /** 按 session id 拉取所有账本；按 id asc。 */
   List<ModelUsageRecord> listBySessionId(long sessionId);
 
-  /** 按 model resource id 拉取所有账本；按 id asc。 */
-  List<ModelUsageRecord> listByModelResourceId(long modelResourceId);
+  /** 按 provider/model 名称拉取所有账本；按 id asc。 */
+  List<ModelUsageRecord> listByModel(String providerName, String modelName);
 }

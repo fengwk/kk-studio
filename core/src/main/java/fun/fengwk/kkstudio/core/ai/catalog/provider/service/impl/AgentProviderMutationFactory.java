@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderC
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
@@ -22,21 +21,16 @@ final class AgentProviderMutationFactory {
 
   private final AgentEditableSupport editableSupport;
   private final AgentProviderConfigurationCodec configurationCodec;
-  private final PostgresqlSequenceIdGenerator idGenerator;
 
   AgentProviderMutationFactory(
-      AgentEditableSupport editableSupport,
-      AgentProviderConfigurationCodec configurationCodec,
-      PostgresqlSequenceIdGenerator idGenerator) {
+      AgentEditableSupport editableSupport, AgentProviderConfigurationCodec configurationCodec) {
     this.editableSupport = editableSupport;
     this.configurationCodec = configurationCodec;
-    this.idGenerator = idGenerator;
   }
 
-  AgentProvider newProvider(AgentProviderEditablePropertiesDTO properties) {
-    Mutation mutation = newMutation(properties, null, null, null, true);
+  AgentProvider newProvider(String name, AgentProviderEditablePropertiesDTO properties) {
+    Mutation mutation = newMutation(properties, name, null, null, true);
     AgentProvider provider = new AgentProvider();
-    provider.setId(idGenerator.next());
     apply(provider, mutation);
     return provider;
   }
@@ -70,10 +64,7 @@ final class AgentProviderMutationFactory {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = editableSupport.firstNonBlank(properties.getName(), fallbackName);
-    if (name == null) {
-      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
-    }
+    String name = requireName(fallbackName);
     String providerType = editableSupport.trimToNull(properties.getProviderType());
     if (providerType == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");
@@ -104,6 +95,15 @@ final class AgentProviderMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
+  }
+
+  private String requireName(String name) {
+    String normalized = editableSupport.trimToNull(name);
+    if (normalized == null) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    editableSupport.validateMaxLength(RESOURCE, "name", normalized, NAME_MAX_LENGTH);
+    return normalized;
   }
 
   record Mutation(

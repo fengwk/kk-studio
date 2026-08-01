@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
@@ -13,22 +11,17 @@ import java.util.Objects;
 /**
  * final ThreadInput payload 的严格 canonical codec。
  *
- * <p>Input type 由 durable {@code input_type} 列承载，因此 payload JSON 不再重复 discriminator。配置命令直接编码完整
- * {@link RuntimeConfigSnapshot}；消息命令直接编码可写入 {@code harness_entry} 的最终 payload。委托的两个 codec 均拒绝
- * duplicate field、trailing token、未知字段与错误类型。
+ * <p>Input type 由 durable {@code input_type} 列承载，因此 payload JSON 不再重复 discriminator。 消息命令直接编码可写入
+ * {@code harness_entry} 的最终 payload；Entry codec 拒绝 duplicate field、trailing token、未知字段与错误类型。
  */
 public final class ThreadInputPayloadJsonCodec {
 
-  private static final RuntimeConfigJsonCodec CONFIG_CODEC = new RuntimeConfigJsonCodec();
   private static final RuntimeEntryPayloadJsonCodec ENTRY_CODEC =
       new RuntimeEntryPayloadJsonCodec();
 
   /** 编码与 payload 自报 type 一致的 canonical JSON。 */
   public String encode(ThreadInputPayload payload) {
     Objects.requireNonNull(payload, "payload");
-    if (payload instanceof RuntimeConfigInputPayload config) {
-      return CONFIG_CODEC.encode(config.snapshot());
-    }
     if (payload instanceof RuntimeEntryInputPayload entry) {
       return ENTRY_CODEC.encode(entry.payload());
     }
@@ -41,8 +34,6 @@ public final class ThreadInputPayloadJsonCodec {
     Objects.requireNonNull(type, "type");
     Objects.requireNonNull(json, "json");
     return switch (type) {
-      case SET_AGENT, SET_MODEL, SET_ENVIRONMENT, SET_YOLO -> new RuntimeConfigInputPayload(
-          type, CONFIG_CODEC.decode(json));
       case USER_MESSAGE -> decodeUser(json);
       case CUSTOM_MESSAGE -> decodeCustom(json);
     };

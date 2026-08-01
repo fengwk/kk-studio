@@ -24,31 +24,29 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
 
   @Test
   void agentResourcesKeepProviderAndModelOwnership() throws SQLException {
-    long providerId = FIXTURE_IDS.incrementAndGet();
-    long modelId = FIXTURE_IDS.incrementAndGet();
+    String providerName = "provider-" + FIXTURE_IDS.incrementAndGet();
+    String modelName = "model-" + FIXTURE_IDS.incrementAndGet();
     try (Connection conn = newConnection()) {
-      insertProvider(conn, providerId);
+      insertProvider(conn, providerName);
     }
 
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn,
-          "fk_agent_model_provider",
-          () -> insertModel(conn, modelId, providerId + 1_000_000L));
+          conn, "fk_agent_model_provider", () -> insertModel(conn, "missing-provider", modelName));
     }
     try (Connection conn = newConnection()) {
-      insertModel(conn, modelId, providerId);
+      insertModel(conn, providerName, modelName);
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "fk_agent_definition_model",
-          () -> insertDefinition(conn, FIXTURE_IDS.incrementAndGet(), modelId + 1_000_000L));
+          () -> insertDefinition(conn, "missing-agent", "missing-provider", "missing-model"));
     }
   }
 
   @Test
-  void chatDefaultEnvironmentNameRequiresCanonicalValue() throws SQLException {
+  void chatEnvironmentNameRequiresCanonicalValueAndAgentNameIsRequired() throws SQLException {
     try (Connection conn = newConnection()) {
       insertChat(conn, FIXTURE_IDS.incrementAndGet(), null);
       insertChat(conn, FIXTURE_IDS.incrementAndGet(), "prod");
@@ -58,7 +56,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       try (Connection conn = newConnection()) {
         assertTransactionConstraintViolation(
             conn,
-            "ck_chat_default_environment_name",
+            "ck_chat_environment_name",
             () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), invalid));
       }
     }
@@ -68,6 +66,15 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
               SQLException.class,
               () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), "x".repeat(129)));
       assertEquals("22001", tooLong.getSQLState());
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into chat (id, title, agent_name, environment_name)"
+                    + " values (?, 'schema-test', ?, null)")) {
+      ps.setLong(1, FIXTURE_IDS.incrementAndGet());
+      ps.setString(2, " ");
+      assertTransactionConstraintViolation(conn, "ck_chat_agent_name", () -> ps.executeUpdate());
     }
   }
 
@@ -210,49 +217,48 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertProvider(Connection conn, long id) throws SQLException {
+  private void insertProvider(Connection conn, String name) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_provider (id, name, provider_type, config)"
-                + " values (?, ?, 'openai', '{}'::jsonb)")) {
-      ps.setLong(1, id);
-      ps.setString(2, "provider-" + id);
+            "insert into agent_provider (name, provider_type, config)"
+                + " values (?, 'openai', '{}'::jsonb)")) {
+      ps.setString(1, name);
       assertEquals(1, ps.executeUpdate());
     }
   }
 
-  private void insertModel(Connection conn, long id, long providerId) throws SQLException {
+  private void insertModel(Connection conn, String providerName, String name) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_model (id, provider_id, name, config)"
-                + " values (?, ?, ?, '{}'::jsonb)")) {
-      ps.setLong(1, id);
-      ps.setLong(2, providerId);
-      ps.setString(3, "model-" + id);
+            "insert into agent_model (provider_name, name, config)"
+                + " values (?, ?, '{}'::jsonb)")) {
+      ps.setString(1, providerName);
+      ps.setString(2, name);
       assertEquals(1, ps.executeUpdate());
     }
   }
 
-  private void insertDefinition(Connection conn, long id, long modelId) throws SQLException {
-    try (PreparedStatement ps =
-        conn.prepareStatement(
-            "insert into agent_definition (id, name, model_id, config)"
-                + " values (?, ?, ?, '{}'::jsonb)")) {
-      ps.setLong(1, id);
-      ps.setString(2, "agent-" + id);
-      ps.setLong(3, modelId);
-      assertEquals(1, ps.executeUpdate());
-    }
-  }
-
-  private void insertChat(Connection conn, long id, String defaultEnvironmentName)
+  private void insertDefinition(
+      Connection conn, String name, String modelProviderName, String modelName)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into chat (id, title, default_agent_id, default_environment_name)"
-                + " values (?, 'schema-test', 1, ?)")) {
+            "insert into agent_definition (name, model_provider_name, model_name, config)"
+                + " values (?, ?, ?, '{}'::jsonb)")) {
+      ps.setString(1, name);
+      ps.setString(2, modelProviderName);
+      ps.setString(3, modelName);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertChat(Connection conn, long id, String environmentName) throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into chat (id, title, agent_name, environment_name)"
+                + " values (?, 'schema-test', 'schema-agent', ?)")) {
       ps.setLong(1, id);
-      ps.setString(2, defaultEnvironmentName);
+      ps.setString(2, environmentName);
       assertEquals(1, ps.executeUpdate());
     }
   }

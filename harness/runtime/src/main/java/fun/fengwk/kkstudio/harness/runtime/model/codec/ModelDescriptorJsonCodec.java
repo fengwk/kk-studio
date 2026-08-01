@@ -59,10 +59,9 @@ public final class ModelDescriptorJsonCodec {
   /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
       orderedSet(
-          "providerResourceId",
-          "modelResourceId",
+          "providerName",
+          "modelName",
           "providerType",
-          "modelId",
           "tools",
           "reasoning",
           "pricing",
@@ -166,10 +165,9 @@ public final class ModelDescriptorJsonCodec {
 
   private static ObjectNode writeDescriptor(ModelDescriptor descriptor) {
     ObjectNode node = NODES.objectNode();
-    node.put("providerResourceId", descriptor.providerResourceId());
-    node.put("modelResourceId", descriptor.modelResourceId());
+    node.put("providerName", descriptor.providerName());
+    node.put("modelName", descriptor.modelName());
     node.put("providerType", descriptor.providerType().name());
-    node.put("modelId", descriptor.modelId());
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
     node.set("pricing", writePricing(descriptor.pricing()));
@@ -185,22 +183,14 @@ public final class ModelDescriptorJsonCodec {
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("unknown providerType", exception);
     }
-    long providerResourceId = positiveLong(node, "providerResourceId");
-    long modelResourceId = positiveLong(node, "modelResourceId");
-    String modelId = text(node, "modelId");
+    String providerName = text(node, "providerName");
+    String modelName = text(node, "modelName");
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
     ModelPricing pricing = readPricing(node.get("pricing"));
     PromptCachePolicy policy = readCachePolicy(node.get("promptCachePolicy"));
     return new ModelDescriptor(
-        providerResourceId,
-        modelResourceId,
-        providerType,
-        modelId,
-        tools,
-        reasoning,
-        pricing,
-        policy);
+        providerName, modelName, providerType, tools, reasoning, pricing, policy);
   }
 
   // ---------- ModelVariant ----------

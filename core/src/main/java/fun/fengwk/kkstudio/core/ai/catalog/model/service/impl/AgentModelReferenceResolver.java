@@ -22,39 +22,41 @@ final class AgentModelReferenceResolver {
   private final AgentModelRepository agentModelRepository;
   private final AgentProviderRepository agentProviderRepository;
 
-  AgentModel requireModel(long id) {
-    AgentModel model = agentModelRepository.getById(id);
+  AgentModel requireModel(String providerName, String name) {
+    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, name);
     if (model == null) {
-      throw new AiResourceNotFoundException(MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + id);
+      throw new AiResourceNotFoundException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + name);
     }
     return model;
   }
 
-  AgentProvider requireProvider(long id) {
-    AgentProvider provider = agentProviderRepository.getById(id);
+  AgentProvider requireProvider(String name) {
+    AgentProvider provider = agentProviderRepository.getByName(name);
     if (provider == null) {
       throw new AiResourceNotFoundException(
-          PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + id);
+          PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + name);
     }
     return provider;
   }
 
-  void ensureNameAvailable(long providerId, String name) {
-    if (agentModelRepository.getByProviderIdAndName(providerId, name) != null) {
+  void ensureNameAvailable(String providerName, String name) {
+    if (agentModelRepository.getByProviderNameAndName(providerName, name) != null) {
       throw new AiDuplicateException(
           MODEL_RESOURCE, MODEL_RESOURCE + " name already exists under this provider: " + name);
     }
   }
 
-  void ensureNameAvailable(long providerId, String currentName, String nextName) {
+  void ensureNameAvailable(String providerName, String currentName, String nextName) {
     if (!currentName.equals(nextName)) {
-      ensureNameAvailable(providerId, nextName);
+      ensureNameAvailable(providerName, nextName);
     }
   }
 
-  void ensureDeletable(long id) {
-    if (agentModelRepository.hasAgents(id)) {
-      throw new AiInUseException(MODEL_RESOURCE, MODEL_RESOURCE + " in use by agents: " + id);
+  void ensureDeletable(String providerName, String name) {
+    if (agentModelRepository.hasAgents(providerName, name)) {
+      throw new AiInUseException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " in use by agents: " + providerName + "/" + name);
     }
   }
 }

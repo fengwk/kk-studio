@@ -4,12 +4,9 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** {@code agent_definition} 行映射：绑定 model_id 的全局 Agent 定义。 */
+/** {@code agent_definition} 行映射：绑定 provider/model 名称的全局 Agent 定义。 */
 @Data
 public class AgentDefinitionDO {
-
-  /** 业务主键。 */
-  private Long id;
 
   /** 全局唯一名称。 */
   private String name;
@@ -20,8 +17,10 @@ public class AgentDefinitionDO {
   /** 系统提示词。 */
   private String systemPrompt;
 
-  /** 绑定的 Model id。 */
-  private Long modelId;
+  /** 绑定的 Model provider/name composite identity. */
+  private String modelProviderName;
+
+  private String modelName;
 
   /** 可选 Variant 覆盖（null 表示沿用 Model.defaultVariant）。 */
   private String variant;

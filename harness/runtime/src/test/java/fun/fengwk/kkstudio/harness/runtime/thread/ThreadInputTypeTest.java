@@ -1,37 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** ThreadInputType 分类辅助方法测试。 */
+import java.util.List;
+
+/** The mailbox has only response-producing message input kinds. */
 class ThreadInputTypeTest {
 
   @Test
-  void messageTypes() {
-    assertTrue(ThreadInputType.USER_MESSAGE.isMessage());
-    assertTrue(ThreadInputType.CUSTOM_MESSAGE.isMessage());
-    assertFalse(ThreadInputType.SET_AGENT.isMessage());
-    assertFalse(ThreadInputType.SET_MODEL.isMessage());
-    assertFalse(ThreadInputType.SET_YOLO.isMessage());
-    assertFalse(ThreadInputType.SET_ENVIRONMENT.isMessage());
-  }
-
-  @Test
-  void configTypes() {
-    assertTrue(ThreadInputType.SET_AGENT.isConfig());
-    assertTrue(ThreadInputType.SET_MODEL.isConfig());
-    assertTrue(ThreadInputType.SET_YOLO.isConfig());
-    assertTrue(ThreadInputType.SET_ENVIRONMENT.isConfig());
-    assertFalse(ThreadInputType.USER_MESSAGE.isConfig());
-    assertFalse(ThreadInputType.CUSTOM_MESSAGE.isConfig());
-  }
-
-  @Test
-  void messageAndConfigAreMutuallyExclusive() {
+  void containsNoConfigurationCommands() {
+    assertEquals(
+        List.of("USER_MESSAGE", "CUSTOM_MESSAGE"),
+        List.of(ThreadInputType.values()).stream().map(Enum::name).toList());
     for (ThreadInputType type : ThreadInputType.values()) {
-      assertFalse(type.isMessage() && type.isConfig());
+      assertTrue(type.isMessage());
     }
   }
 }

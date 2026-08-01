@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.core.persistence.PostgresqlIntegrityViolationClassifi
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /** Global model CRUD. */
 @AllArgsConstructor
@@ -44,114 +45,105 @@ public class AgentModelServiceImpl implements AgentModelService {
   @Override
   @Transactional
   public AgentModelDTO createModel(AgentModelCreateDTO createDTO) {
-    long providerId = parseId(createDTO == null ? null : createDTO.getProviderId(), "providerId");
-    referenceResolver.requireProvider(providerId);
-    AgentModel model = modelMutationFactory.newModel(providerId, createDTO);
-    referenceResolver.ensureNameAvailable(providerId, model.getName());
+    ModelRef ref =
+        parseRef(
+            createDTO == null ? null : createDTO.getProviderName(),
+            createDTO == null ? null : createDTO.getName());
+    referenceResolver.requireProvider(ref.providerName());
+    AgentModel model =
+        modelMutationFactory.newModel(ref.providerName(), ref.modelName(), createDTO);
+    referenceResolver.ensureNameAvailable(ref.providerName(), ref.modelName());
     try {
       if (!agentModelRepository.create(model)) {
         throw new IllegalStateException("create agent model failed");
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
-          RESOURCE,
-          RESOURCE + " name already exists under this provider: " + model.getName(),
-          error);
+          RESOURCE, RESOURCE + " name already exists under this provider: " + ref, error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         throw new AiResourceNotFoundException(
-            PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + providerId, error);
+            PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + ref.providerName(), error);
       }
       throw error;
     }
-    AgentModel loaded = agentModelRepository.getById(model.getId());
+    AgentModel loaded =
+        agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
     return agentModelConverter.convert(loaded);
   }
 
   @Override
   @Transactional
-  public AgentModelDTO updateModel(long id, AgentModelUpdateDTO updateDTO) {
+  public AgentModelDTO updateModel(
+      String providerName, String modelName, AgentModelUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
       throw new AiValidationException(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    AgentModel model = referenceResolver.requireModel(id);
-    ensureExpectedVersion(model, id, rawExpected, expected);
-    String currentName = model.getName();
+    ModelRef ref = parseRef(providerName, modelName);
+    AgentModel model = referenceResolver.requireModel(ref.providerName(), ref.modelName());
+    ensureExpectedVersion(model, ref, rawExpected, expected);
     modelMutationFactory.update(model, updateDTO);
-    // provider_id is immutable on update; uniqueness is still scoped to the owning provider.
-    referenceResolver.ensureNameAvailable(model.getProviderId(), currentName, model.getName());
     try {
-      if (!agentModelRepository.updateById(model, expected)) {
-        AgentModel reread = agentModelRepository.getById(id);
+      if (!agentModelRepository.updateByName(model, expected)) {
+        AgentModel reread =
+            agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
         }
         throw new AiVersionConflictException(
-            RESOURCE, Long.toString(id), rawExpected, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, ref.toString(), rawExpected, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
-          RESOURCE,
-          RESOURCE + " name already exists under this provider: " + model.getName(),
-          error);
+          RESOURCE, RESOURCE + " name already exists under this provider: " + ref, error);
     }
-    AgentModel reloaded = agentModelRepository.getById(id);
+    AgentModel reloaded =
+        agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
     return agentModelConverter.convert(reloaded);
   }
 
   @Override
   @Transactional
-  public void deleteModel(long id, String expectedVersion) {
+  public void deleteModel(String providerName, String modelName, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentModel model = referenceResolver.requireModel(id);
-    ensureExpectedVersion(model, id, expectedVersion, expected);
-    referenceResolver.ensureDeletable(id);
+    ModelRef ref = parseRef(providerName, modelName);
+    AgentModel model = referenceResolver.requireModel(ref.providerName(), ref.modelName());
+    ensureExpectedVersion(model, ref, expectedVersion, expected);
+    referenceResolver.ensureDeletable(ref.providerName(), ref.modelName());
     try {
-      if (!agentModelRepository.deleteById(id, expected)) {
-        AgentModel reread = agentModelRepository.getById(id);
+      if (!agentModelRepository.deleteByName(ref.providerName(), ref.modelName(), expected)) {
+        AgentModel reread =
+            agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
         }
         throw new AiVersionConflictException(
-            RESOURCE,
-            Long.toString(id),
-            expectedVersion,
-            CatalogVersions.format(reread.getVersion()));
+            RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + id, error);
+        throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + ref, error);
       }
       throw error;
     }
   }
 
   private static void ensureExpectedVersion(
-      AgentModel model, long id, String expectedVersion, long expected) {
+      AgentModel model, ModelRef ref, String expectedVersion, long expected) {
     if (model.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE, Long.toString(id), expectedVersion, CatalogVersions.format(model.getVersion()));
+          RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(model.getVersion()));
     }
   }
 
-  private long parseId(String value, String field) {
-    if (value == null) {
-      throw new AiValidationException(RESOURCE, field + " must not be null");
-    }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, field + " must not be blank");
-    }
-    if (!trimmed.matches("^[1-9][0-9]*$")) {
-      throw new AiValidationException(
-          RESOURCE, field + " must be an unsigned positive decimal: " + value);
-    }
+  private static ModelRef parseRef(String providerName, String modelName) {
     try {
-      return Long.parseLong(trimmed);
-    } catch (NumberFormatException error) {
-      throw new AiValidationException(RESOURCE, field + " exceeds long range: " + value, error);
+      return new ModelRef(providerName, modelName);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(
+          RESOURCE, "model must identify providerName/modelName", error);
     }
   }
 }

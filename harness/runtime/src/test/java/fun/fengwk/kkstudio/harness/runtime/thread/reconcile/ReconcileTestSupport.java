@@ -1,8 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.AgentSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.ModelSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
@@ -13,11 +12,16 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -49,7 +53,24 @@ public final class ReconcileTestSupport {
   }
 
   static ThreadInput input(long threadId, long sequence, ThreadInputType type) {
-    ThreadInputPayload payload = () -> type;
+    TurnSettings settings = new TurnSettings("agent-" + threadId, "environment", false);
+    ThreadInputPayload payload =
+        switch (type) {
+          case USER_MESSAGE -> new RuntimeEntryInputPayload(
+              type,
+              new MessageEntryPayload(
+                  new AgentMessage(
+                      AgentMessageRole.USER, List.of(new TextMessageContent("user-" + sequence))),
+                  settings,
+                  null));
+          case CUSTOM_MESSAGE -> new RuntimeEntryInputPayload(
+              type,
+              new CustomMessageEntryPayload(
+                  new AgentMessage(
+                      AgentMessageRole.SYSTEM,
+                      List.of(new TextMessageContent("custom-" + sequence))),
+                  settings));
+        };
     return new ThreadInput(
         sequence,
         threadId,
@@ -81,26 +102,14 @@ public final class ReconcileTestSupport {
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
-            1L,
-            2L,
+            "provider-test",
+            "model-test",
             ProviderType.OPENAI,
-            "gpt-test",
             false,
             false,
             pricing,
             PromptCachePolicy.automatic(PromptCacheCapability.automatic()));
     return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
-  }
-
-  public static RuntimeConfigSnapshot configSnapshot() {
-    ProviderRequest request = providerRequest();
-    return new RuntimeConfigSnapshot(
-        new AgentSnapshot(1L, "agent", "system"),
-        new ModelSnapshot(request.model(), request.variant()),
-        null,
-        List.of(),
-        List.of(),
-        false);
   }
 
   public static ModelInvocationRequest modelInvocationRequest() {

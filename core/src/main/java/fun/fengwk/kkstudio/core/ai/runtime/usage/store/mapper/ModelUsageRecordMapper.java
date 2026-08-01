@@ -22,7 +22,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
 
   String COLUMNS =
       "id, session_id, thread_id, assistant_entry_id,"
-          + " provider_resource_id, model_resource_id, provider_type, provider_model_id,"
+          + " provider_name, model_name, provider_type,"
           + " prompt_cache_mode, prompt_cache_retention, cache_eligible, cache_affinity_key,"
           + " stop_reason,"
           + " usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,"
@@ -40,7 +40,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
       """
       insert into harness_model_usage (
           id, session_id, thread_id, assistant_entry_id,
-          provider_resource_id, model_resource_id, provider_type, provider_model_id,
+          provider_name, model_name, provider_type,
           prompt_cache_mode, prompt_cache_retention, cache_eligible, cache_affinity_key,
           stop_reason,
           usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,
@@ -55,7 +55,7 @@ public interface ModelUsageRecordMapper extends BaseMapper {
           created_at
       ) values (
           #{id}, #{sessionId}, #{threadId}, #{assistantEntryId},
-          #{providerResourceId}, #{modelResourceId}, #{providerType}, #{providerModelId},
+          #{providerName}, #{modelName}, #{providerType},
           #{promptCacheMode}, #{promptCacheRetention}, #{cacheEligible}, #{cacheAffinityKey},
           #{stopReason},
           #{usageInputTokens}, #{usageOutputTokens}, #{usageCacheReadTokens},
@@ -83,10 +83,9 @@ public interface ModelUsageRecordMapper extends BaseMapper {
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "thread_id", property = "threadId"),
         @Result(column = "assistant_entry_id", property = "assistantEntryId"),
-        @Result(column = "provider_resource_id", property = "providerResourceId"),
-        @Result(column = "model_resource_id", property = "modelResourceId"),
+        @Result(column = "provider_name", property = "providerName"),
+        @Result(column = "model_name", property = "modelName"),
         @Result(column = "provider_type", property = "providerType"),
-        @Result(column = "provider_model_id", property = "providerModelId"),
         @Result(column = "prompt_cache_mode", property = "promptCacheMode"),
         @Result(column = "prompt_cache_retention", property = "promptCacheRetention"),
         @Result(column = "cache_eligible", property = "cacheEligible"),
@@ -141,7 +140,8 @@ public interface ModelUsageRecordMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from harness_model_usage where model_resource_id = #{modelResourceId} order by id asc")
+          + " from harness_model_usage where provider_name = #{providerName} and model_name = #{modelName} order by id asc")
   @ResultMap("modelUsageRecordResultMap")
-  List<ModelUsageRecordDO> listByModelResourceId(@Param("modelResourceId") long modelResourceId);
+  List<ModelUsageRecordDO> listByModel(
+      @Param("providerName") String providerName, @Param("modelName") String modelName);
 }

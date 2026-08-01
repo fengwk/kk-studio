@@ -36,7 +36,7 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
             OpenAiOfficialResponsesStreamingChatModel.builder()
                 .baseUrl(descriptor.endpoint())
                 .apiKey(apiKey)
-                .modelName(request.model().modelId())
+                .modelName(request.model().modelName())
                 .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout());
         String reasoningEffort =
             request.model().reasoning() ? request.variant().reasoningEffort() : null;

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -9,11 +11,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -33,7 +37,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** HTTP contract for global Agent resources, string IDs and credential redaction. */
+/** HTTP contract for global name-identified catalog resources. */
 @AutoConfigureMockMvc
 public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
 
@@ -41,38 +45,39 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
   @Autowired private ObjectMapper objectMapper;
 
   @Test
-  public void shouldUseGlobalAgentResourceRoutes() throws Exception {
+  public void shouldUseNameBasedIdentitiesAndEnforceCatalogGuards() throws Exception {
     String suffix = Long.toString(System.nanoTime());
+    String providerName = "provider-" + suffix;
+    String modelName = "model-" + suffix;
+    String agentName = "agent-" + suffix;
 
     AgentProviderCreateDTO provider = new AgentProviderCreateDTO();
-    provider.setName("provider-" + suffix);
+    provider.setName(providerName);
+    provider.setDescription("provider description");
     provider.setProviderType("openai");
     provider.setCredential("secret-value");
     provider.setModelCallTimeoutMillis(120_000L);
     provider.setModelCallIdleTimeoutMillis(3_000L);
-    String providerId =
-        id(
+    JsonNode providerData =
+        data(
             mockMvc
                 .perform(
                     post("/api/ai/catalog/providers")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(provider)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.id").isString())
-                .andExpect(jsonPath("$.data.version").value("0"))
-                .andExpect(jsonPath("$.data.createTime").isNumber())
-                .andExpect(jsonPath("$.data.updateTime").isNumber())
-                .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
-                .andExpect(jsonPath("$.data.configured").value(true))
+                .andExpect(jsonPath("$.data.name").value(providerName))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
                 .andExpect(jsonPath("$.data.credential").doesNotExist())
-                .andExpect(jsonPath("$.data.modelCallTimeoutMillis").value(120000))
-                .andExpect(jsonPath("$.data.modelCallIdleTimeoutMillis").value(3000))
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
+                .andExpect(jsonPath("$.data.configured").value(true))
+                .andExpect(jsonPath("$.data.version").value("0"))
+                .andReturn());
+    assertEquals(providerName, providerData.path("name").asText());
+    assertFalse(providerData.has("id"));
+    assertFalse(providerData.has("credential"));
 
     AgentProviderCreateDTO duplicateProvider = new AgentProviderCreateDTO();
-    duplicateProvider.setName(provider.getName());
+    duplicateProvider.setName(providerName);
     duplicateProvider.setProviderType("openai");
     mockMvc
         .perform(
@@ -84,40 +89,115 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
 
     AgentModelCreateDTO model = new AgentModelCreateDTO();
-    model.setName("model-" + suffix);
-    model.setProviderId(providerId);
+    model.setProviderName(providerName);
+    model.setName(modelName);
     configureExecutableModel(model);
-    String modelId =
-        id(
+    JsonNode modelData =
+        data(
             mockMvc
                 .perform(
                     post("/api/ai/catalog/models")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(model)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
-                .andExpect(jsonPath("$.data.providerId").value(providerId))
+                .andExpect(jsonPath("$.data.providerName").value(providerName))
+                .andExpect(jsonPath("$.data.name").value(modelName))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.providerId").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").doesNotExist())
                 .andExpect(jsonPath("$.data.version").value("0"))
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
+                .andReturn());
+    assertEquals(providerName, modelData.path("providerName").asText());
+    assertEquals(modelName, modelData.path("name").asText());
+    assertFalse(modelData.has("id"));
+    assertFalse(modelData.has("providerId"));
+    assertFalse(modelData.has("modelId"));
+
+    AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
+    agentConfig.setTools(List.of());
+    agentConfig.setSkills(List.of());
+    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
+    agent.setName(agentName);
+    agent.setModel(providerName + "/" + modelName);
+    agent.setVariant("default");
+    agent.setConfig(agentConfig);
+    JsonNode agentData =
+        data(
+            mockMvc
+                .perform(
+                    post("/api/ai/catalog/agents")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(agent)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.name").value(agentName))
+                .andExpect(jsonPath("$.data.model").value(providerName + "/" + modelName))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.providerId").doesNotExist())
+                .andExpect(jsonPath("$.data.config.tools").isEmpty())
+                .andExpect(jsonPath("$.data.config.skills").isEmpty())
+                .andExpect(jsonPath("$.data.version").value("0"))
+                .andReturn());
+    assertEquals(agentName, agentData.path("name").asText());
+    assertEquals(providerName + "/" + modelName, agentData.path("model").asText());
+    assertFalse(agentData.has("id"));
+    assertFalse(agentData.has("modelId"));
+    assertFalse(agentData.has("providerId"));
+
+    JsonNode providerPage =
+        data(
+            mockMvc
+                .perform(get("/api/ai/catalog/providers"))
+                .andExpect(status().isOk())
+                .andReturn());
+    JsonNode listedProvider = findResult(providerPage, providerName);
+    assertFalse(listedProvider.has("id"));
+    assertFalse(listedProvider.has("credential"));
+
+    JsonNode modelPage =
+        data(mockMvc.perform(get("/api/ai/catalog/models")).andExpect(status().isOk()).andReturn());
+    JsonNode listedModel = findResult(modelPage, modelName);
+    assertEquals(providerName, listedModel.path("providerName").asText());
+    assertFalse(listedModel.has("id"));
+    assertFalse(listedModel.has("providerId"));
+    assertFalse(listedModel.has("modelId"));
+
+    JsonNode agentPage =
+        data(mockMvc.perform(get("/api/ai/catalog/agents")).andExpect(status().isOk()).andReturn());
+    JsonNode listedAgent = findResult(agentPage, agentName);
+    assertEquals(providerName + "/" + modelName, listedAgent.path("model").asText());
+    assertFalse(listedAgent.has("id"));
+    assertFalse(listedAgent.has("modelId"));
+    assertFalse(listedAgent.has("providerId"));
 
     AgentProviderUpdateDTO providerUpdate = new AgentProviderUpdateDTO();
-    providerUpdate.setProviderType("openai");
     providerUpdate.setDescription("updated provider");
+    providerUpdate.setProviderType("openai");
+    providerUpdate.setExpectedVersion("0");
+    ObjectNode providerUpdateBody = objectMapper.valueToTree(providerUpdate);
+    providerUpdateBody.put("name", "renamed-" + providerName);
+    JsonNode updatedProvider =
+        data(
+            mockMvc
+                .perform(
+                    put("/api/ai/catalog/providers/{name}", providerName)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(providerUpdateBody.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value(providerName))
+                .andExpect(jsonPath("$.data.description").value("updated provider"))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.credential").doesNotExist())
+                .andExpect(jsonPath("$.data.version").value("1"))
+                .andReturn());
+    assertEquals(providerName, updatedProvider.path("name").asText());
+    assertFalse(updatedProvider.has("id"));
+    assertFalse(updatedProvider.has("credential"));
+
     providerUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/ai/catalog/providers/{id}", providerId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(providerUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated provider"))
-        .andExpect(jsonPath("$.data.version").value("1"));
-
-    mockMvc
-        .perform(
-            put("/api/ai/catalog/providers/{id}", providerId)
+            put("/api/ai/catalog/providers/{name}", providerName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(providerUpdate)))
         .andExpect(status().isConflict())
@@ -125,202 +205,202 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").value("agent_provider"))
         .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
         .andExpect(jsonPath("$.errors.actualVersion").value("1"));
-    mockMvc
-        .perform(delete("/api/ai/catalog/providers/{id}", providerId).param("expectedVersion", "1"))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("in_use"))
-        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
 
     AgentModelUpdateDTO modelUpdate = new AgentModelUpdateDTO();
-    modelUpdate.setName(model.getName());
     modelUpdate.setDescription("updated model");
     modelUpdate.setConfig(model.getConfig());
     modelUpdate.setExpectedVersion("0");
-    mockMvc
-        .perform(
-            put("/api/ai/catalog/models/{id}", modelId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(modelUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated model"))
-        .andExpect(jsonPath("$.data.version").value("1"));
-
-    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
-    agent.setName("agent-" + suffix);
-    agent.setModelId(modelId);
-    agent.setVariant("default");
-    agent.setConfig(config);
-    String agentId =
-        id(
+    ObjectNode modelUpdateBody = objectMapper.valueToTree(modelUpdate);
+    modelUpdateBody.put("providerName", "renamed-" + providerName);
+    modelUpdateBody.put("name", "renamed-" + modelName);
+    JsonNode updatedModel =
+        data(
             mockMvc
                 .perform(
-                    post("/api/ai/catalog/agents")
+                    put("/api/ai/catalog/models")
+                        .param("providerName", providerName)
+                        .param("modelName", modelName)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(agent)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.id").isString())
-                .andExpect(jsonPath("$.data.workspaceId").doesNotExist())
-                .andExpect(jsonPath("$.data.modelId").value(modelId))
-                .andExpect(jsonPath("$.data.config.tools").isEmpty())
-                .andExpect(jsonPath("$.data.config.skills").isEmpty())
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
+                        .content(modelUpdateBody.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.providerName").value(providerName))
+                .andExpect(jsonPath("$.data.name").value(modelName))
+                .andExpect(jsonPath("$.data.description").value("updated model"))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.providerId").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.version").value("1"))
+                .andReturn());
+    assertEquals(providerName, updatedModel.path("providerName").asText());
+    assertEquals(modelName, updatedModel.path("name").asText());
+
+    modelUpdate.setExpectedVersion("0");
+    mockMvc
+        .perform(
+            put("/api/ai/catalog/models")
+                .param("providerName", providerName)
+                .param("modelName", modelName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(modelUpdate)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_model"))
+        .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
+        .andExpect(jsonPath("$.errors.actualVersion").value("1"));
+
     AgentDefinitionUpdateDTO agentUpdate = new AgentDefinitionUpdateDTO();
-    agentUpdate.setName("agent-" + suffix);
     agentUpdate.setDescription("updated agent");
-    agentUpdate.setModelId(modelId);
+    agentUpdate.setSystemPrompt("updated prompt");
     agentUpdate.setVariant("default");
-    agentUpdate.setConfig(config);
+    agentUpdate.setConfig(agentConfig);
+    agentUpdate.setExpectedVersion("0");
+    ObjectNode agentUpdateBody = objectMapper.valueToTree(agentUpdate);
+    agentUpdateBody.put("name", "renamed-" + agentName);
+    agentUpdateBody.put("model", "other-provider/other-model");
+    JsonNode updatedAgent =
+        data(
+            mockMvc
+                .perform(
+                    put("/api/ai/catalog/agents/{name}", agentName)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(agentUpdateBody.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.name").value(agentName))
+                .andExpect(jsonPath("$.data.model").value(providerName + "/" + modelName))
+                .andExpect(jsonPath("$.data.description").value("updated agent"))
+                .andExpect(jsonPath("$.data.id").doesNotExist())
+                .andExpect(jsonPath("$.data.modelId").doesNotExist())
+                .andExpect(jsonPath("$.data.providerId").doesNotExist())
+                .andExpect(jsonPath("$.data.version").value("1"))
+                .andReturn());
+    assertEquals(agentName, updatedAgent.path("name").asText());
+    assertEquals(providerName + "/" + modelName, updatedAgent.path("model").asText());
+
     agentUpdate.setExpectedVersion("0");
     mockMvc
         .perform(
-            put("/api/ai/catalog/agents/{id}", agentId)
+            put("/api/ai/catalog/agents/{name}", agentName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentUpdate)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.description").value("updated agent"))
-        .andExpect(jsonPath("$.data.version").value("1"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_definition"))
+        .andExpect(jsonPath("$.errors.expectedVersion").value("0"))
+        .andExpect(jsonPath("$.errors.actualVersion").value("1"));
 
-    AgentProviderCreateDTO disposableProvider = new AgentProviderCreateDTO();
-    disposableProvider.setName("disposable-provider-" + suffix);
-    disposableProvider.setProviderType("openai");
-    String disposableProviderId =
-        id(
-            mockMvc
-                .perform(
-                    post("/api/ai/catalog/providers")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(disposableProvider)))
-                .andExpect(status().isCreated())
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
-    AgentModelCreateDTO disposableModel = new AgentModelCreateDTO();
-    disposableModel.setName("disposable-model-" + suffix);
-    disposableModel.setProviderId(disposableProviderId);
-    configureExecutableModel(disposableModel);
-    String disposableModelId =
-        id(
-            mockMvc
-                .perform(
-                    post("/api/ai/catalog/models")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(disposableModel)))
-                .andExpect(status().isCreated())
-                .andReturn()
-                .getResponse()
-                .getContentAsString());
     mockMvc
         .perform(
-            delete("/api/ai/catalog/models/{id}", disposableModelId).param("expectedVersion", "0"))
+            delete("/api/ai/catalog/providers/{name}", providerName).param("expectedVersion", "1"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("in_use"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_provider"));
+    mockMvc
+        .perform(
+            delete("/api/ai/catalog/models")
+                .param("providerName", providerName)
+                .param("modelName", modelName)
+                .param("expectedVersion", "1"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("in_use"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_model"));
+
+    mockMvc
+        .perform(delete("/api/ai/catalog/agents/{name}", agentName).param("expectedVersion", "1"))
         .andExpect(status().isNoContent());
     mockMvc
-        .perform(delete("/api/ai/catalog/providers/{id}", disposableProviderId))
+        .perform(
+            delete("/api/ai/catalog/models")
+                .param("providerName", providerName)
+                .param("modelName", modelName)
+                .param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+    mockMvc
+        .perform(
+            delete("/api/ai/catalog/providers/{name}", providerName).param("expectedVersion", "1"))
+        .andExpect(status().isNoContent());
+  }
+
+  @Test
+  public void shouldRejectMalformedModelRefsAndLegacyNumericContracts() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+
+    AgentDefinitionCreateDTO malformed = new AgentDefinitionCreateDTO();
+    malformed.setName("malformed-agent-" + suffix);
+    malformed.setModel("provider-without-model");
+    malformed.setVariant("default");
+    malformed.setConfig(config);
+    mockMvc
+        .perform(
+            post("/api/ai/catalog/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(malformed)))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.code").value("validation"));
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
+
+    AgentModelCreateDTO modelShape = new AgentModelCreateDTO();
+    modelShape.setName("legacy-model-" + suffix);
+    configureExecutableModel(modelShape);
+    ObjectNode legacyModel = objectMapper.valueToTree(modelShape);
+    legacyModel.remove("providerName");
+    legacyModel.put("providerId", "1");
     mockMvc
         .perform(
-            delete("/api/ai/catalog/providers/{id}", disposableProviderId)
-                .param("expectedVersion", "0"))
-        .andExpect(status().isNoContent());
+            post("/api/ai/catalog/models")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(legacyModel.toString()))
+        .andExpect(status().isBadRequest());
 
+    AgentDefinitionCreateDTO agentShape = new AgentDefinitionCreateDTO();
+    agentShape.setName("legacy-agent-" + suffix);
+    agentShape.setVariant("default");
+    agentShape.setConfig(config);
+    ObjectNode legacyAgent = objectMapper.valueToTree(agentShape);
+    legacyAgent.remove("model");
+    legacyAgent.put("modelId", "1");
     mockMvc
-        .perform(get("/api/ai/catalog/models"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[0].providerId").isString());
+        .perform(
+            post("/api/ai/catalog/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(legacyAgent.toString()))
+        .andExpect(status().isBadRequest());
+
+    ObjectNode legacyProvider = objectMapper.createObjectNode();
+    legacyProvider.put("id", "1");
+    legacyProvider.put("providerType", "openai");
     mockMvc
-        .perform(get("/api/ai/catalog/providers"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[0].credential").doesNotExist());
+        .perform(
+            post("/api/ai/catalog/providers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(legacyProvider.toString()))
+        .andExpect(status().isBadRequest());
+
+    mockMvc.perform(get("/api/ai/catalog/providers/1")).andExpect(status().isMethodNotAllowed());
+    mockMvc.perform(get("/api/ai/catalog/models/1")).andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/ai/catalog/agents/1")).andExpect(status().isMethodNotAllowed());
     mockMvc
-        .perform(get("/api/ai/catalog/agents"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.results[0].modelId").isString());
+        .perform(
+            put("/api/ai/catalog/models/1").contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isNotFound());
     mockMvc
-        .perform(delete("/api/ai/catalog/agents/{id}", agentId).param("expectedVersion", "1"))
-        .andExpect(status().isNoContent());
-    mockMvc
-        .perform(delete("/api/ai/catalog/models/{id}", modelId).param("expectedVersion", "1"))
-        .andExpect(status().isNoContent());
-    mockMvc
-        .perform(delete("/api/ai/catalog/providers/{id}", providerId).param("expectedVersion", "1"))
-        .andExpect(status().isNoContent());
-    mockMvc.perform(get("/api/workspaces")).andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/workspaces/1")).andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/workspaces/1/agents")).andExpect(status().isNotFound());
+        .perform(delete("/api/ai/catalog/models/1").param("expectedVersion", "0"))
+        .andExpect(status().isNotFound());
   }
 
-  @Test
-  public void shouldNotMapLegacyAiApiRoutes() throws Exception {
-    List<String> legacyPaths =
-        List.of(
-            "/api/providers",
-            "/api/models",
-            "/api/agents",
-            "/api/chats",
-            "/api/threads",
-            "/api/sessions",
-            "/api/environments",
-            "/api/harness/retry-policy",
-            "/api/harness/realtime-stream-policy",
-            "/api/interactions/open",
-            "/api/tool-invocations/1",
-            "/api/artifacts/1",
-            "/api/usage/models/1");
+  private JsonNode data(MvcResult result) throws Exception {
+    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+  }
 
-    for (String legacyPath : legacyPaths) {
-      mockMvc.perform(get(legacyPath)).andExpect(status().isNotFound());
+  private static JsonNode findResult(JsonNode page, String name) {
+    for (JsonNode result : page.path("results")) {
+      if (name.equals(result.path("name").asText())) {
+        return result;
+      }
     }
-  }
-
-  @Test
-  public void shouldRejectInvalidOrUnknownAgentConfigFields() throws Exception {
-    String namePrefix = "agent-config-" + System.nanoTime();
-
-    mockMvc
-        .perform(
-            post("/api/ai/catalog/agents")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"name":"%s-unknown","modelId":"1","variant":"default",
-                    "config":{"tools":[],"skills":[],"unexpected":true}}
-                    """
-                        .formatted(namePrefix)))
-        .andExpect(status().isBadRequest());
-
-    mockMvc
-        .perform(
-            post("/api/ai/catalog/agents")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"name":"%s-blank","modelId":"1","variant":"default",
-                    "config":{"environmentName":" ","tools":[],"skills":[]}}
-                    """
-                        .formatted(namePrefix)))
-        .andExpect(status().isBadRequest());
-
-    mockMvc
-        .perform(
-            post("/api/ai/catalog/agents")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"name":"%s-unready","modelId":"1","variant":"default",
-                    "config":{"environmentName":"preview","tools":[],"skills":[]}}
-                    """
-                        .formatted(namePrefix)))
-        .andExpect(status().isBadRequest());
-  }
-
-  private String id(String response) throws Exception {
-    JsonNode node = objectMapper.readTree(response);
-    return node.get("data").get("id").asText();
+    throw new AssertionError("missing page result: " + name);
   }
 
   private static void configureExecutableModel(AgentModelCreateDTO model) {

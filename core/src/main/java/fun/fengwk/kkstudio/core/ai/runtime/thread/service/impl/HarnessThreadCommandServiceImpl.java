@@ -3,81 +3,38 @@ package fun.fengwk.kkstudio.core.ai.runtime.thread.service.impl;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.ai.runtime.session.service.impl.HarnessSessionDtoConverter;
 import fun.fengwk.kkstudio.core.ai.runtime.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandService;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.EnqueueResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopResult;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadAgentSetDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapResultDTO;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloSetDTO;
 
 import java.util.Objects;
-import java.util.Optional;
 
 /** Thin Core Thread command boundary: decimal/DTO parse and product defaults. */
 @Service
 public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandService {
 
   private final ThreadCommandCoordinator coordinator;
-  private final ToolSettingsProvider toolSettingsProvider;
   private final HarnessThreadDtoConverter converter;
-  private final HarnessSessionDtoConverter sessionConverter;
 
   public HarnessThreadCommandServiceImpl(
-      ThreadCommandCoordinator coordinator,
-      ToolSettingsProvider toolSettingsProvider,
-      HarnessThreadDtoConverter converter,
-      HarnessSessionDtoConverter sessionConverter) {
+      ThreadCommandCoordinator coordinator, HarnessThreadDtoConverter converter) {
     this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
-    this.toolSettingsProvider =
-        Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.converter = Objects.requireNonNull(converter, "converter");
-    this.sessionConverter = Objects.requireNonNull(sessionConverter, "sessionConverter");
   }
 
   @Override
   @Transactional
-  public HarnessThreadDTO createThread() {
-    return converter.convert(coordinator.createThread());
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadBootstrapResultDTO bootstrapThread(
-      String threadId, HarnessThreadBootstrapDTO dto) {
-    Objects.requireNonNull(dto, "dto");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    long definitionId = HarnessIds.parsePositive(dto.getAgentDefinitionId(), "agentDefinitionId");
-    if (dto.getYoloEnabled() == null) {
-      throw new IllegalArgumentException("yoloEnabled must not be null");
-    }
-    ThreadCommandCoordinator.BootstrapResult result =
-        coordinator.bootstrapThread(
-            id,
-            requireExpectedEpoch(dto.getExpectedExecutionEpoch()),
-            dto.getTitle(),
-            definitionId,
-            dto.getEnvironmentName(),
-            Boolean.TRUE.equals(dto.getYoloEnabled()));
-    HarnessThreadBootstrapResultDTO response = new HarnessThreadBootstrapResultDTO();
-    response.setSession(sessionConverter.convert(result.session()));
-    response.setThread(
-        converter.convert(result.thread(), (RuntimeConfigSnapshot) result.configEntry().payload()));
-    return response;
+  public HarnessThreadDTO createThread(String title) {
+    return converter.convert(coordinator.createThread(title));
   }
 
   @Override
@@ -85,10 +42,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
   public HarnessThreadDTO updateHead(String threadId, HarnessThreadHeadUpdateDTO dto) {
     Objects.requireNonNull(dto, "dto");
     long id = HarnessIds.parsePositive(threadId, "threadId");
-    Long headEntryId =
-        dto.getHeadEntryId() == null
-            ? null
-            : HarnessIds.parsePositive(dto.getHeadEntryId(), "headEntryId");
+    long headEntryId = HarnessIds.parsePositive(dto.getHeadEntryId(), "headEntryId");
     return converter.convert(
         coordinator.updateHead(
             id, requireExpectedEpoch(dto.getExpectedExecutionEpoch()), headEntryId));
@@ -111,6 +65,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
         coordinator
             .submitUserMessage(
                 id,
+                turnSettings(
+                    createDTO.getAgentName(),
+                    createDTO.getEnvironmentName(),
+                    createDTO.getYoloEnabled()),
                 createDTO.getContent(),
                 createDTO.getClientMessageId(),
                 requireExpectedEpoch(createDTO.getExpectedExecutionEpoch()))
@@ -127,101 +85,14 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
         coordinator
             .submitCustomMessage(
                 id,
+                turnSettings(
+                    createDTO.getAgentName(),
+                    createDTO.getEnvironmentName(),
+                    createDTO.getYoloEnabled()),
                 createDTO.getRole(),
                 createDTO.getContent(),
                 createDTO.getClientMessageId(),
                 requireExpectedEpoch(createDTO.getExpectedExecutionEpoch()))
-            .input());
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadInputDTO queueYolo(String threadId, HarnessThreadYoloSetDTO request) {
-    Objects.requireNonNull(request, "request");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<EnqueueResult> existing =
-        coordinator.findExistingInput(id, request.getClientMessageId());
-    if (existing.isPresent()) {
-      return converter.convert(existing.get().input());
-    }
-    if (request.getYoloEnabled() == null) {
-      throw new IllegalArgumentException("yoloEnabled must not be null");
-    }
-    return converter.convert(
-        coordinator
-            .queueYolo(
-                id,
-                Boolean.TRUE.equals(request.getYoloEnabled()),
-                request.getClientMessageId(),
-                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
-            .input());
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadInputDTO queueAgent(String threadId, HarnessThreadAgentSetDTO request) {
-    Objects.requireNonNull(request, "request");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    // Short-circuit before parsing live definition ids so retries never re-validate deleted/changed
-    // resources.
-    Optional<EnqueueResult> existing =
-        coordinator.findExistingInput(id, request.getClientMessageId());
-    if (existing.isPresent()) {
-      return converter.convert(existing.get().input());
-    }
-    long definitionId =
-        HarnessIds.parsePositive(request.getAgentDefinitionId(), "agentDefinitionId");
-    return converter.convert(
-        coordinator
-            .queueAgent(
-                id,
-                definitionId,
-                toolSettingsProvider.get().defaultYolo(),
-                request.getClientMessageId(),
-                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
-            .input());
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadInputDTO queueModel(String threadId, HarnessThreadModelSetDTO request) {
-    Objects.requireNonNull(request, "request");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<EnqueueResult> existing =
-        coordinator.findExistingInput(id, request.getClientMessageId());
-    if (existing.isPresent()) {
-      return converter.convert(existing.get().input());
-    }
-    long modelId = HarnessIds.parsePositive(request.getModelId(), "modelId");
-    return converter.convert(
-        coordinator
-            .queueModel(
-                id,
-                modelId,
-                request.getVariant(),
-                request.getClientMessageId(),
-                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
-            .input());
-  }
-
-  @Override
-  @Transactional
-  public HarnessThreadInputDTO queueEnvironment(
-      String threadId, HarnessThreadEnvironmentSetDTO request) {
-    Objects.requireNonNull(request, "request");
-    long id = HarnessIds.parsePositive(threadId, "threadId");
-    Optional<EnqueueResult> existing =
-        coordinator.findExistingInput(id, request.getClientMessageId());
-    if (existing.isPresent()) {
-      return converter.convert(existing.get().input());
-    }
-    return converter.convert(
-        coordinator
-            .queueEnvironment(
-                id,
-                request.getEnvironmentName(),
-                request.getClientMessageId(),
-                requireExpectedEpoch(request.getExpectedExecutionEpoch()))
             .input());
   }
 
@@ -236,5 +107,13 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     dto.setExecutionEpoch(result.executionEpoch());
     dto.setCancelledInputs(result.cancelledInputs().stream().map(converter::convert).toList());
     return dto;
+  }
+
+  private static TurnSettings turnSettings(
+      String agentName, String environmentName, Boolean yoloEnabled) {
+    if (yoloEnabled == null) {
+      throw new IllegalArgumentException("yoloEnabled must not be null");
+    }
+    return new TurnSettings(agentName, environmentName, yoloEnabled);
   }
 }

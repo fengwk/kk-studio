@@ -19,18 +19,19 @@ import java.util.List;
 public interface AgentProviderMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, name, description, provider_type, base_url, credential, config, version, "
+      "name, description, provider_type, base_url, credential, config, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_provider")
   long count();
 
   @Select(
-      "select " + COLUMNS + " from agent_provider order by id asc limit #{limit} offset #{offset}")
+      "select "
+          + COLUMNS
+          + " from agent_provider order by name asc limit #{limit} offset #{offset}")
   @Results(
       id = "agentProviderResultMap",
       value = {
-        @Result(column = "id", property = "id"),
         @Result(column = "name", property = "name"),
         @Result(column = "description", property = "description"),
         @Result(column = "provider_type", property = "providerType"),
@@ -43,10 +44,6 @@ public interface AgentProviderMapper extends BaseMapper {
       })
   List<AgentProviderDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
-  @Select("select " + COLUMNS + " from agent_provider where id = #{id}")
-  @ResultMap("agentProviderResultMap")
-  AgentProviderDO getById(@Param("id") long id);
-
   @Select("select " + COLUMNS + " from agent_provider where name = #{name}")
   @ResultMap("agentProviderResultMap")
   AgentProviderDO getByName(@Param("name") String name);
@@ -54,10 +51,10 @@ public interface AgentProviderMapper extends BaseMapper {
   @Insert(
       """
       insert into agent_provider (
-          id, name, description, provider_type, base_url, credential, config,
+          name, description, provider_type, base_url, credential, config,
           created_at, updated_at, version
       ) values (
-          #{id}, #{name}, #{description}, #{providerType}, #{baseUrl}, #{credential},
+          #{name}, #{description}, #{providerType}, #{baseUrl}, #{credential},
           cast(#{configJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
@@ -66,18 +63,18 @@ public interface AgentProviderMapper extends BaseMapper {
   @Update(
       """
       update agent_provider
-      set name = #{provider.name}, description = #{provider.description},
-          provider_type = #{provider.providerType}, base_url = #{provider.baseUrl},
+      set description = #{provider.description}, provider_type = #{provider.providerType},
+          base_url = #{provider.baseUrl},
           credential = #{provider.credential}, config = cast(#{provider.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
-      where id = #{provider.id} and version = #{expectedVersion}
+      where name = #{provider.name} and version = #{expectedVersion}
       """)
-  int updateById(
+  int updateByName(
       @Param("provider") AgentProviderDO provider, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_provider where id = #{id} and version = #{expectedVersion}")
-  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
+  @Delete("delete from agent_provider where name = #{name} and version = #{expectedVersion}")
+  int deleteByName(@Param("name") String name, @Param("expectedVersion") long expectedVersion);
 
-  @Select("select count(*) from agent_model where provider_id = #{providerId}")
-  long countModelsByProviderId(@Param("providerId") long providerId);
+  @Select("select count(*) from agent_model where provider_name = #{providerName}")
+  long countModelsByProviderName(@Param("providerName") String providerName);
 }

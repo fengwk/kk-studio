@@ -10,7 +10,6 @@ import java.time.Instant;
 @Data
 public class AgentProvider {
 
-  private Long id;
   private String name;
   private String description;
   private AgentProviderType providerType;

@@ -28,8 +28,7 @@ public class AgentModelConverter {
       return null;
     }
     AgentModelDTO dto = new AgentModelDTO();
-    dto.setId(Long.toString(model.getId()));
-    dto.setProviderId(Long.toString(model.getProviderId()));
+    dto.setProviderName(model.getProviderName());
     dto.setName(model.getName());
     dto.setDescription(model.getDescription());
     dto.setConfig(decodeConfig(model));
@@ -43,7 +42,8 @@ public class AgentModelConverter {
     String configJson = model.getConfigJson();
     if (configJson == null || configJson.isBlank()) {
       throw new AiValidationException(
-          "agent_model", "agent model config is required: " + model.getId());
+          "agent_model",
+          "agent model config is required: " + model.getProviderName() + "/" + model.getName());
     }
     return runtimeConfigParser.decode(configJson);
   }

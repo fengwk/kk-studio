@@ -50,8 +50,9 @@ public class PostgresqlChatRepository implements ChatRepository {
     ChatDO target = new ChatDO();
     target.setId(chat.getId());
     target.setTitle(chat.getTitle());
-    target.setDefaultAgentId(chat.getDefaultAgentId());
-    target.setDefaultEnvironmentName(chat.getDefaultEnvironmentName());
+    target.setAgentName(chat.getAgentName());
+    target.setEnvironmentName(chat.getEnvironmentName());
+    target.setYoloEnabled(chat.isYoloEnabled());
     return target;
   }
 
@@ -62,8 +63,9 @@ public class PostgresqlChatRepository implements ChatRepository {
     Chat target = new Chat();
     target.setId(row.getId());
     target.setTitle(row.getTitle());
-    target.setDefaultAgentId(row.getDefaultAgentId());
-    target.setDefaultEnvironmentName(row.getDefaultEnvironmentName());
+    target.setAgentName(row.getAgentName());
+    target.setEnvironmentName(row.getEnvironmentName());
+    target.setYoloEnabled(row.isYoloEnabled());
     target.setVersion(row.getVersion());
     target.setCreateTime(row.getCreateTime());
     target.setUpdateTime(row.getUpdateTime());

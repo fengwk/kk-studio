@@ -8,7 +8,6 @@ import lombok.Data;
 @Data
 public class AgentProviderEditablePropertiesDTO {
 
-  private String name;
   private String description;
   private String providerType;
   private String baseUrl;

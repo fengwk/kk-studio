@@ -38,7 +38,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
             .perform(
                 post("/api/ai/chat")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"title\":\"i18n-test\",\"defaultAgentId\":\"1\"}"))
+                    .content("{\"title\":\"i18n-test\",\"agentName\":\"default-assistant\"}"))
             .andExpect(status().isCreated())
             .andReturn();
     String chatId =

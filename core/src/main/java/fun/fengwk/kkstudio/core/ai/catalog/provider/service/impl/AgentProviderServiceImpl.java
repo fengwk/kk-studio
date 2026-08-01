@@ -43,7 +43,8 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   @Override
   @Transactional
   public AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO) {
-    AgentProvider provider = providerMutationFactory.newProvider(createDTO);
+    String name = createDTO == null ? null : createDTO.getName();
+    AgentProvider provider = providerMutationFactory.newProvider(name, createDTO);
     providerGuard.ensureNameAvailable(provider.getName());
     try {
       if (!agentProviderRepository.create(provider)) {
@@ -53,75 +54,67 @@ public class AgentProviderServiceImpl implements AgentProviderService {
       throw new AiDuplicateException(
           RESOURCE, "agent provider name already exists: " + provider.getName(), error);
     }
-    AgentProvider loaded = agentProviderRepository.getById(provider.getId());
+    AgentProvider loaded = agentProviderRepository.getByName(provider.getName());
     return agentProviderConverter.convert(loaded);
   }
 
   @Override
   @Transactional
-  public AgentProviderDTO updateProvider(long id, AgentProviderUpdateDTO updateDTO) {
+  public AgentProviderDTO updateProvider(String name, AgentProviderUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
       throw new AiValidationException(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    AgentProvider provider = providerGuard.requireProvider(id);
-    ensureExpectedVersion(provider, id, rawExpected, expected);
-    String currentName = provider.getName();
+    AgentProvider provider = providerGuard.requireProvider(name);
+    ensureExpectedVersion(provider, name, rawExpected, expected);
     providerMutationFactory.update(provider, updateDTO);
-    providerGuard.ensureNameAvailable(currentName, provider.getName());
     try {
-      if (!agentProviderRepository.updateById(provider, expected)) {
-        AgentProvider reread = agentProviderRepository.getById(id);
+      if (!agentProviderRepository.updateByName(provider, expected)) {
+        AgentProvider reread = agentProviderRepository.getByName(name);
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
         }
         throw new AiVersionConflictException(
-            RESOURCE, Long.toString(id), rawExpected, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
           RESOURCE, "agent provider name already exists: " + provider.getName(), error);
     }
-    AgentProvider reloaded = agentProviderRepository.getById(id);
+    AgentProvider reloaded = agentProviderRepository.getByName(name);
     return agentProviderConverter.convert(reloaded);
   }
 
   @Override
   @Transactional
-  public void deleteProvider(long id, String expectedVersion) {
+  public void deleteProvider(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentProvider provider = providerGuard.requireProvider(id);
-    ensureExpectedVersion(provider, id, expectedVersion, expected);
-    providerGuard.ensureDeletable(id);
+    AgentProvider provider = providerGuard.requireProvider(name);
+    ensureExpectedVersion(provider, name, expectedVersion, expected);
+    providerGuard.ensureDeletable(name);
     try {
-      if (!agentProviderRepository.deleteById(id, expected)) {
-        AgentProvider reread = agentProviderRepository.getById(id);
+      if (!agentProviderRepository.deleteByName(name, expected)) {
+        AgentProvider reread = agentProviderRepository.getByName(name);
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
         }
         throw new AiVersionConflictException(
-            RESOURCE,
-            Long.toString(id),
-            expectedVersion,
-            CatalogVersions.format(reread.getVersion()));
+            RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + id, error);
+        throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + name, error);
       }
       throw error;
     }
   }
 
   private static void ensureExpectedVersion(
-      AgentProvider provider, long id, String expectedVersion, long expected) {
+      AgentProvider provider, String name, String expectedVersion, long expected) {
     if (provider.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE,
-          Long.toString(id),
-          expectedVersion,
-          CatalogVersions.format(provider.getVersion()));
+          RESOURCE, name, expectedVersion, CatalogVersions.format(provider.getVersion()));
     }
   }
 }

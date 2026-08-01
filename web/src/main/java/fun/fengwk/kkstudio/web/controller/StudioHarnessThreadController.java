@@ -21,20 +21,14 @@ import fun.fengwk.kkstudio.core.ai.runtime.realtime.HarnessRealtimeEventTail;
 import fun.fengwk.kkstudio.core.ai.runtime.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadQueryService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadAgentSetDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadBootstrapResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadModelSetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloSetDTO;
 import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
 import java.util.Objects;
@@ -80,12 +74,6 @@ public class StudioHarnessThreadController {
         withMissingResourceTranslation(() -> queryService.listAll(sort, cursor, limit)));
   }
 
-  /** 创建未绑定 Thread：无请求体，head 为空，尚未绑定任何 Session。 */
-  @PostMapping
-  public Result<HarnessThreadDTO> createThread() {
-    return Results.created(withMissingResourceTranslation(commandService::createThread));
-  }
-
   /** 查询指定 Thread 的当前状态。 */
   @GetMapping("/{threadId}")
   public Result<HarnessThreadDTO> getThread(@PathVariable String threadId) {
@@ -98,20 +86,12 @@ public class StudioHarnessThreadController {
     return Results.ok(withMissingResourceTranslation(() -> queryService.getSnapshot(threadId)));
   }
 
-  /** 绑定、跨 Session 切换或清空 Thread head，携带 expectedExecutionEpoch 做 CAS fencing。 */
+  /** 将 Thread head 切换到同一或其他 Session 的 Entry，携带 expectedExecutionEpoch 做 CAS fencing。 */
   @PutMapping("/{threadId}/head")
   public Result<HarnessThreadDTO> updateHead(
       @PathVariable String threadId, @RequestBody HarnessThreadHeadUpdateDTO request) {
     return Results.ok(
         withMissingResourceTranslation(() -> commandService.updateHead(threadId, request)));
-  }
-
-  /** 为 UNBOUND Thread 原子创建 Session/ROOT/RUNTIME_CONFIG 并绑定 head。 */
-  @PostMapping("/{threadId}/bootstrap")
-  public Result<HarnessThreadBootstrapResultDTO> bootstrapThread(
-      @PathVariable String threadId, @RequestBody HarnessThreadBootstrapDTO request) {
-    return Results.created(
-        withMissingResourceTranslation(() -> commandService.bootstrapThread(threadId, request)));
   }
 
   /** 将用户消息异步入队；202 仅表示消息已接受，不代表模型已完成。 */
@@ -130,38 +110,6 @@ public class StudioHarnessThreadController {
     return Results.accepted(
         withMissingResourceTranslation(
             () -> commandService.submitCustomMessage(threadId, createDTO)));
-  }
-
-  /** 异步更新 Thread 的 YOLO 运行策略。 */
-  @PutMapping("/{threadId}/yolo")
-  public Result<HarnessThreadInputDTO> queueYolo(
-      @PathVariable String threadId, @RequestBody HarnessThreadYoloSetDTO request) {
-    return Results.accepted(
-        withMissingResourceTranslation(() -> commandService.queueYolo(threadId, request)));
-  }
-
-  /** 异步切换 Thread 的当前 Agent。 */
-  @PutMapping("/{threadId}/agent")
-  public Result<HarnessThreadInputDTO> queueAgent(
-      @PathVariable String threadId, @RequestBody HarnessThreadAgentSetDTO request) {
-    return Results.accepted(
-        withMissingResourceTranslation(() -> commandService.queueAgent(threadId, request)));
-  }
-
-  /** 异步切换 Thread 的当前 Model 与 Variant。 */
-  @PutMapping("/{threadId}/model")
-  public Result<HarnessThreadInputDTO> queueModel(
-      @PathVariable String threadId, @RequestBody HarnessThreadModelSetDTO request) {
-    return Results.accepted(
-        withMissingResourceTranslation(() -> commandService.queueModel(threadId, request)));
-  }
-
-  /** 异步切换 Thread 的 Environment target；null 清除 target。 */
-  @PutMapping("/{threadId}/environment")
-  public Result<HarnessThreadInputDTO> queueEnvironment(
-      @PathVariable String threadId, @RequestBody HarnessThreadEnvironmentSetDTO request) {
-    return Results.accepted(
-        withMissingResourceTranslation(() -> commandService.queueEnvironment(threadId, request)));
   }
 
   /**

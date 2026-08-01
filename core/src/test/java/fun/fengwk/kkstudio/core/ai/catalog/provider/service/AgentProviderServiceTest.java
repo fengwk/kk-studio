@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.util.Arrays;
 
-/** Provider names are global and credentials never cross the service boundary. */
+/** Provider names are immutable global identities and credentials never cross the API boundary. */
 public class AgentProviderServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -32,51 +32,36 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
 
     assertTrue(provider.isConfigured());
     assertFalse(hasProperty(provider, "credential"));
+    assertEquals(name, provider.getName());
     assertEquals("0", provider.getVersion());
     assertThrows(
         AiDuplicateException.class,
         () -> agentProviderService.createProvider(provider(name, "another")));
     assertTrue(
         agentProviderService.pageProviders(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(candidate -> candidate.getId().equals(provider.getId())));
+            .anyMatch(candidate -> candidate.getName().equals(name)));
 
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setProviderType("openai");
     update.setCredential("rotated-secret");
     update.setExpectedVersion(provider.getVersion());
-    AgentProviderDTO updated = agentProviderService.updateProvider(id(provider.getId()), update);
+    AgentProviderDTO updated = agentProviderService.updateProvider(name, update);
+    assertEquals(name, updated.getName());
     assertTrue(updated.isConfigured());
     assertEquals("1", updated.getVersion());
     assertThrows(
-        AiVersionConflictException.class,
-        () -> agentProviderService.updateProvider(id(provider.getId()), update));
+        AiVersionConflictException.class, () -> agentProviderService.updateProvider(name, update));
 
     AgentProviderUpdateDTO badUpdate = new AgentProviderUpdateDTO();
     assertThrows(
-        AiValidationException.class,
-        () -> agentProviderService.updateProvider(id(provider.getId()), badUpdate));
-
+        AiValidationException.class, () -> agentProviderService.updateProvider(name, badUpdate));
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> agentProviderService.updateProvider(Long.MAX_VALUE, update));
-    assertThrows(
-        AiVersionConflictException.class,
-        () ->
-            agentProviderService.updateProvider(
-                id(provider.getId()), staleUpdate(provider.getVersion(), "rotated-secret-2")));
+        () -> agentProviderService.updateProvider("missing-" + name, update));
 
-    agentProviderService.deleteProvider(id(provider.getId()), updated.getVersion());
+    agentProviderService.deleteProvider(name, updated.getVersion());
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> agentProviderService.deleteProvider(id(provider.getId()), "0"));
-  }
-
-  private AgentProviderUpdateDTO staleUpdate(String version, String credential) {
-    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
-    update.setProviderType("openai");
-    update.setCredential(credential);
-    update.setExpectedVersion(version);
-    return update;
+        AiResourceNotFoundException.class, () -> agentProviderService.deleteProvider(name, "0"));
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {
@@ -91,9 +76,5 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
   private boolean hasProperty(AgentProviderDTO provider, String property) {
     return Arrays.stream(provider.getClass().getDeclaredFields())
         .anyMatch(field -> field.getName().equals(property));
-  }
-
-  private long id(String value) {
-    return Long.parseLong(value);
   }
 }

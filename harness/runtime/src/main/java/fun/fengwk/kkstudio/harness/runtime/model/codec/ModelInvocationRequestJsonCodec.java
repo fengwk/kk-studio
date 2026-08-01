@@ -9,10 +9,10 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
@@ -31,7 +31,7 @@ public final class ModelInvocationRequestJsonCodec {
   private static final ProviderRequestJsonCodec PROVIDER_CODEC = new ProviderRequestJsonCodec();
   private static final ToolDescriptorJsonCodec TOOL_CODEC = new ToolDescriptorJsonCodec();
   private static final Set<String> FIELDS =
-      orderedSet("providerRequest", "toolBindings", "skillSnapshots", "yoloEnabled");
+      orderedSet("providerRequest", "toolBindings", "skillBindings", "yoloEnabled");
   private static final Set<String> TOOL_FIELDS = orderedSet("descriptor", "environmentName");
   private static final Set<String> SKILL_FIELDS =
       orderedSet("name", "description", "sourceEnvironment");
@@ -65,8 +65,8 @@ public final class ModelInvocationRequestJsonCodec {
         node.put("environmentName", binding.environmentName());
       }
     }
-    ArrayNode skills = root.putArray("skillSnapshots");
-    for (SkillSnapshot skill : request.skillSnapshots()) {
+    ArrayNode skills = root.putArray("skillBindings");
+    for (SkillBinding skill : request.skillBindings()) {
       ObjectNode node = skills.addObject();
       node.put("name", skill.name());
       node.put("description", skill.description());
@@ -90,7 +90,7 @@ public final class ModelInvocationRequestJsonCodec {
     ProviderRequest providerRequest =
         PROVIDER_CODEC.decodeNode(required(root, "providerRequest", "modelInvocationRequest"));
     List<ToolBinding> bindings = decodeTools(array(root.get("toolBindings"), "toolBindings"));
-    List<SkillSnapshot> skills = decodeSkills(array(root.get("skillSnapshots"), "skillSnapshots"));
+    List<SkillBinding> skills = decodeSkills(array(root.get("skillBindings"), "skillBindings"));
     JsonNode yolo = required(root, "yoloEnabled", "modelInvocationRequest");
     if (!yolo.isBoolean()) {
       throw new IllegalArgumentException("yoloEnabled must be boolean");
@@ -117,19 +117,19 @@ public final class ModelInvocationRequestJsonCodec {
     return List.copyOf(result);
   }
 
-  private static List<SkillSnapshot> decodeSkills(ArrayNode array) {
-    ArrayList<SkillSnapshot> result = new ArrayList<>(array.size());
+  private static List<SkillBinding> decodeSkills(ArrayNode array) {
+    ArrayList<SkillBinding> result = new ArrayList<>(array.size());
     Set<String> names = new HashSet<>();
     for (JsonNode value : array) {
-      ObjectNode node = object(value, "skillSnapshot");
-      fields(node, SKILL_FIELDS, "skillSnapshot");
-      SkillSnapshot skill =
-          new SkillSnapshot(
-              text(required(node, "name", "skillSnapshot"), "name"),
-              text(required(node, "description", "skillSnapshot"), "description"),
-              text(required(node, "sourceEnvironment", "skillSnapshot"), "sourceEnvironment"));
+      ObjectNode node = object(value, "skillBinding");
+      fields(node, SKILL_FIELDS, "skillBinding");
+      SkillBinding skill =
+          new SkillBinding(
+              text(required(node, "name", "skillBinding"), "name"),
+              text(required(node, "description", "skillBinding"), "description"),
+              text(required(node, "sourceEnvironment", "skillBinding"), "sourceEnvironment"));
       if (!names.add(skill.name())) {
-        throw new IllegalArgumentException("duplicate skill snapshot: " + skill.name());
+        throw new IllegalArgumentException("duplicate skill binding: " + skill.name());
       }
       result.add(skill);
     }

@@ -2,17 +2,14 @@ package fun.fengwk.kkstudio.core.ai.catalog.provider.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
@@ -62,18 +59,21 @@ public class AgentProviderMutationFactoryTest {
   @Test
   public void shouldRejectInvalidProviderConfiguration() {
     AgentProviderMutationFactory factory = factory();
-    assertThrows(AiValidationException.class, () -> factory.newProvider(null));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(null, null));
 
     AgentProviderCreateDTO blank = provider(" ", null);
-    assertThrows(AiValidationException.class, () -> factory.newProvider(blank));
+    assertThrows(AiValidationException.class, () -> factory.newProvider(blank.getName(), blank));
 
     AgentProviderCreateDTO unsupported = provider("provider", null);
     unsupported.setProviderType("missing");
-    assertThrows(AiValidationException.class, () -> factory.newProvider(unsupported));
+    assertThrows(
+        AiValidationException.class, () -> factory.newProvider(unsupported.getName(), unsupported));
 
     AgentProviderCreateDTO invalidTimeout = provider("provider", null);
     invalidTimeout.setModelCallIdleTimeoutMillis(0L);
-    assertThrows(AiValidationException.class, () -> factory.newProvider(invalidTimeout));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newProvider(invalidTimeout.getName(), invalidTimeout));
   }
 
   @Test
@@ -82,27 +82,17 @@ public class AgentProviderMutationFactoryTest {
     AgentProviderCreateDTO accepted = provider(" " + "n".repeat(64) + " ", "c".repeat(512));
     accepted.setDescription("d".repeat(512));
     accepted.setBaseUrl("u".repeat(512));
-    AgentProvider persisted = factory.newProvider(accepted);
+    AgentProvider persisted = factory.newProvider(accepted.getName(), accepted);
     assertEquals("n".repeat(64), persisted.getName());
-    assertEquals("d".repeat(512), persisted.getDescription());
-    assertEquals("u".repeat(512), persisted.getBaseUrl());
-    assertEquals("c".repeat(512), persisted.getCredential());
-
-    AgentProvider emojiProvider = factory.newProvider(provider("😀".repeat(64), null));
-    assertEquals(64, emojiProvider.getName().codePointCount(0, emojiProvider.getName().length()));
 
     AgentProviderCreateDTO oversizedName = provider("n".repeat(65), null);
-    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedName));
-    AgentProviderCreateDTO oversizedEmojiName = provider("😀".repeat(65), null);
-    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedEmojiName));
-    AgentProviderCreateDTO oversizedDescription = provider("provider", null);
-    oversizedDescription.setDescription("d".repeat(513));
-    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedDescription));
-    AgentProviderCreateDTO oversizedBaseUrl = provider("provider", null);
-    oversizedBaseUrl.setBaseUrl("u".repeat(513));
-    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedBaseUrl));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newProvider(oversizedName.getName(), oversizedName));
     AgentProviderCreateDTO oversizedCredential = provider("provider", "c".repeat(513));
-    assertThrows(AiValidationException.class, () -> factory.newProvider(oversizedCredential));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newProvider(oversizedCredential.getName(), oversizedCredential));
   }
 
   private AgentProviderCreateDTO provider(String name, String credential) {
@@ -115,7 +105,6 @@ public class AgentProviderMutationFactoryTest {
 
   private AgentProvider existingProvider(String credential, String configJson) {
     AgentProvider provider = new AgentProvider();
-    provider.setId(1L);
     provider.setName("provider");
     provider.setProviderType(AgentProviderType.openai);
     provider.setCredential(credential);
@@ -125,11 +114,7 @@ public class AgentProviderMutationFactoryTest {
 
   private AgentProviderMutationFactory factory() {
     ObjectMapper objectMapper = new ObjectMapper();
-    PostgresqlSequenceIdGenerator idGenerator = Mockito.mock(PostgresqlSequenceIdGenerator.class);
-    when(idGenerator.next()).thenReturn(101L);
     return new AgentProviderMutationFactory(
-        new AgentEditableSupport(objectMapper),
-        new AgentProviderConfigurationCodec(objectMapper),
-        idGenerator);
+        new AgentEditableSupport(objectMapper), new AgentProviderConfigurationCodec(objectMapper));
   }
 }

@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.model.plan;
 
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.configuration.SkillSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
@@ -19,7 +17,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.SessionEntry;
+import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
@@ -28,46 +28,67 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 
 /**
- * 从完整 root-to-head Entry path 派生当前 response debt 对应的冻结 ModelInvocation plan。
+ * Derives one immutable provider request from a root-to-head semantic path.
  *
- * <p>planner 只读取传入值对象。发现 debt 后，请求只使用截至 debt Entry 的路径前缀；head 与 debt 之间的配置或系统消息不能反向改变该 response
- * debt。返回 plan 仍以实际 head 作为 source identity，由 Reconciler 在事务中创建 Invocation。
+ * <p>The planner stores no live configuration. It locates the originating name-only turn reference,
+ * resolves that reference for every plan call, and freezes the resulting provider request, tool
+ * bindings, skill bindings, and YOLO flag into the durable invocation request.
  */
 public final class ModelInvocationPlanner {
 
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
-  private final RuntimeCapabilityResolver capabilityResolver;
+  private final TurnExecutionResolver executionResolver;
+  private final ResponseDebtDetector debtDetector;
 
-  public ModelInvocationPlanner(RuntimeCapabilityResolver capabilityResolver) {
+  public ModelInvocationPlanner(TurnExecutionResolver executionResolver) {
     this(
         new ProviderMessageProjector(),
         new ToolDescriptorJsonCodec(),
         new PromptCacheAffinityKeyFactory(),
-        capabilityResolver);
+        executionResolver,
+        new ResponseDebtDetector());
   }
 
   ModelInvocationPlanner(
       ProviderMessageProjector messageProjector,
       ToolDescriptorJsonCodec toolDescriptorCodec,
       PromptCacheAffinityKeyFactory cacheKeyFactory,
-      RuntimeCapabilityResolver capabilityResolver) {
+      TurnExecutionResolver executionResolver) {
+    this(
+        messageProjector,
+        toolDescriptorCodec,
+        cacheKeyFactory,
+        executionResolver,
+        new ResponseDebtDetector());
+  }
+
+  ModelInvocationPlanner(
+      ProviderMessageProjector messageProjector,
+      ToolDescriptorJsonCodec toolDescriptorCodec,
+      PromptCacheAffinityKeyFactory cacheKeyFactory,
+      TurnExecutionResolver executionResolver,
+      ResponseDebtDetector debtDetector) {
     this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
     this.toolDescriptorCodec = Objects.requireNonNull(toolDescriptorCodec, "toolDescriptorCodec");
     this.cacheKeyFactory = Objects.requireNonNull(cacheKeyFactory, "cacheKeyFactory");
-    this.capabilityResolver = Objects.requireNonNull(capabilityResolver, "capabilityResolver");
+    this.executionResolver = Objects.requireNonNull(executionResolver, "executionResolver");
+    this.debtDetector = Objects.requireNonNull(debtDetector, "debtDetector");
   }
 
   /**
-   * 派生当前 head 的 ModelInvocation plan。
+   * Plans the current head.
    *
-   * @return 没有 response debt 或最近响应已由 Assistant/AssistantError 终结时返回 empty
+   * <p>{@link PlanningResult.Failed} is a durable-facing terminal planning outcome. It is not
+   * represented by a fake provider request and lets the transaction adapter append an {@code
+   * ASSISTANT_ERROR} barrier.
    */
-  public Optional<ModelInvocationPlan> plan(
+  public PlanningResult plan(
       long sessionId, long sourceHeadEntryId, List<SessionEntry> rootToHead) {
     if (sessionId <= 0) {
       throw new IllegalArgumentException("sessionId must be positive");
@@ -76,37 +97,45 @@ public final class ModelInvocationPlanner {
       throw new IllegalArgumentException("sourceHeadEntryId must be positive");
     }
     List<SessionEntry> path = validatePath(sourceHeadEntryId, rootToHead);
-    int debtIndex = findDebtIndex(path);
-    if (debtIndex < 0) {
-      return Optional.empty();
+    OptionalInt debtIndex = debtDetector.findDebtIndex(path);
+    if (debtIndex.isEmpty()) {
+      return new PlanningResult.NoDebt();
     }
 
-    List<SessionEntry> debtPrefix = List.copyOf(path.subList(0, debtIndex + 1));
-    RuntimeConfigSnapshot config = latestConfig(debtPrefix);
-    RuntimeCapabilityResolver.ResolvedCapabilities capabilities =
-        capabilityResolver.resolve(config);
-    List<AgentMessage> semanticMessages =
-        projectSemanticMessages(debtPrefix, config, capabilities.skillSnapshots());
+    List<SessionEntry> debtPrefix = List.copyOf(path.subList(0, debtIndex.getAsInt() + 1));
+    Optional<TurnSettings> settings = nearestTurnSettings(debtPrefix);
+    if (settings.isEmpty()) {
+      return new PlanningResult.Failed(
+          new PlanningFailure(
+              PlanningFailureKind.MISSING_TURN_SETTINGS,
+              "response debt has no originating turn settings"));
+    }
+
+    TurnExecutionResolver.Resolution resolution =
+        Objects.requireNonNull(executionResolver.resolve(settings.get()), "resolver resolution");
+    if (resolution instanceof TurnExecutionResolver.Resolution.Failed failed) {
+      return new PlanningResult.Failed(failed.failure());
+    }
+    ResolvedTurnExecution execution =
+        ((TurnExecutionResolver.Resolution.Resolved) resolution).execution();
+
+    List<AgentMessage> semanticMessages = projectSemanticMessages(debtPrefix, execution);
     List<ProviderMessage> providerMessages = messageProjector.project(semanticMessages);
-    List<ProviderToolDefinition> providerTools = providerTools(capabilities.toolBindings());
+    List<ProviderToolDefinition> providerTools = providerTools(execution.toolBindings());
     ProviderRequest baseRequest =
         new ProviderRequest(
-            config.model().descriptor(),
-            config.model().variant(),
+            execution.model(),
+            execution.variant(),
             providerMessages,
             providerTools,
             ProviderCacheControl.none());
     ProviderRequest request =
         new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).apply(baseRequest);
-    return Optional.of(
-        new ModelInvocationPlan(
-            sourceHeadEntryId,
-            new ModelInvocationRequest(
-                request,
-                capabilities.toolBindings(),
-                capabilities.skillSnapshots(),
-                config.yoloEnabled()),
-            config));
+    ModelInvocationRequest invocationRequest =
+        new ModelInvocationRequest(
+            request, execution.toolBindings(), execution.skillBindings(), execution.yoloEnabled());
+    return new PlanningResult.Planned(
+        new ModelInvocationPlan(sourceHeadEntryId, invocationRequest));
   }
 
   private static List<SessionEntry> validatePath(
@@ -144,7 +173,6 @@ public final class ModelInvocationPlanner {
     boolean supported =
         switch (payload.type()) {
           case ROOT -> payload instanceof RootEntryPayload;
-          case RUNTIME_CONFIG -> payload instanceof RuntimeConfigSnapshot;
           case MESSAGE -> payload instanceof MessageEntryPayload;
           case CUSTOM_MESSAGE -> payload instanceof CustomMessageEntryPayload;
           case ASSISTANT_ERROR -> payload instanceof AssistantErrorEntryPayload;
@@ -159,58 +187,24 @@ public final class ModelInvocationPlanner {
     }
   }
 
-  private static int findDebtIndex(List<SessionEntry> path) {
-    for (int index = path.size() - 1; index >= 0; index--) {
-      EntryPayload payload = path.get(index).payload();
-      if (payload instanceof AssistantErrorEntryPayload) {
-        return -1;
-      }
-      if (payload instanceof AssistantAbortedEntryPayload) {
-        // Aborted assistant turn 视为完整 Provider semantic assistant turn：关闭 debt barrier。
-        return -1;
-      }
-      AgentMessage message = message(payload);
-      if (message == null || message.role() == AgentMessageRole.SYSTEM) {
-        continue;
-      }
-      if (message.role() == AgentMessageRole.ASSISTANT) {
-        return -1;
-      }
-      if (message.role() == AgentMessageRole.USER || message.role() == AgentMessageRole.TOOL) {
-        return index;
-      }
-    }
-    return -1;
-  }
-
-  private static AgentMessage message(EntryPayload payload) {
-    if (payload instanceof MessageEntryPayload message) {
-      return message.message();
-    }
-    if (payload instanceof CustomMessageEntryPayload message) {
-      return message.message();
-    }
-    if (payload instanceof AssistantAbortedEntryPayload message) {
-      return message.message();
-    }
-    return null;
-  }
-
-  private static RuntimeConfigSnapshot latestConfig(List<SessionEntry> debtPrefix) {
+  private static Optional<TurnSettings> nearestTurnSettings(List<SessionEntry> debtPrefix) {
     for (int index = debtPrefix.size() - 1; index >= 0; index--) {
-      if (debtPrefix.get(index).payload() instanceof RuntimeConfigSnapshot config) {
-        return config;
+      EntryPayload payload = debtPrefix.get(index).payload();
+      if (payload instanceof CustomMessageEntryPayload custom) {
+        return Optional.of(custom.turnSettings());
+      }
+      if (payload instanceof MessageEntryPayload message
+          && message.message().role() == AgentMessageRole.USER) {
+        return Optional.of(message.turnSettings());
       }
     }
-    throw new IllegalArgumentException("response debt requires an earlier RUNTIME_CONFIG entry");
+    return Optional.empty();
   }
 
   private static List<AgentMessage> projectSemanticMessages(
-      List<SessionEntry> debtPrefix,
-      RuntimeConfigSnapshot config,
-      List<SkillSnapshot> skillSnapshots) {
+      List<SessionEntry> debtPrefix, ResolvedTurnExecution execution) {
     List<AgentMessage> messages = new ArrayList<>();
-    String systemPrompt = composeSystemPrompt(config, skillSnapshots);
+    String systemPrompt = composeSystemPrompt(execution.systemPrompt(), execution.skillBindings());
     if (!systemPrompt.isBlank()) {
       messages.add(AgentMessage.system(systemPrompt));
     }
@@ -221,7 +215,6 @@ public final class ModelInvocationPlanner {
       } else if (payload instanceof CustomMessageEntryPayload message) {
         messages.add(message.message());
       } else if (payload instanceof AssistantAbortedEntryPayload message) {
-        // Aborted assistant turn 的 text/thinking 必须作为 Provider 上下文的完整 assistant turn。
         messages.add(message.message());
       }
     }
@@ -239,11 +232,9 @@ public final class ModelInvocationPlanner {
         .toList();
   }
 
-  private static String composeSystemPrompt(
-      RuntimeConfigSnapshot config, List<SkillSnapshot> skillSnapshots) {
-    String base = config.agent().systemPrompt();
-    if (skillSnapshots.isEmpty()) {
-      return base;
+  private static String composeSystemPrompt(String systemPrompt, List<SkillBinding> skillBindings) {
+    if (skillBindings.isEmpty()) {
+      return systemPrompt;
     }
     StringBuilder section = new StringBuilder();
     section.append("\n\n");
@@ -251,7 +242,7 @@ public final class ModelInvocationPlanner {
     section.append(
         "Use a skill by its exact name from <available_skills> when the task matches its description.\n");
     section.append("\n<available_skills>\n");
-    for (SkillSnapshot skill : skillSnapshots) {
+    for (SkillBinding skill : skillBindings) {
       section.append("  <skill>\n");
       section.append("    <name>").append(escapeXml(skill.name())).append("</name>\n");
       section
@@ -261,7 +252,7 @@ public final class ModelInvocationPlanner {
       section.append("  </skill>\n");
     }
     section.append("</available_skills>");
-    return base.isBlank() ? section.toString().stripLeading() : base + section;
+    return systemPrompt.isBlank() ? section.toString().stripLeading() : systemPrompt + section;
   }
 
   private static String escapeXml(String value) {

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /** Global Agent definition CRUD. */
 @AllArgsConstructor
@@ -49,11 +50,14 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   @Override
   @Transactional
   public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
-    long modelId = parseModelId(createDTO == null ? null : createDTO.getModelId());
-    referenceResolver.requireModel(modelId);
-    AgentDefinition definition = definitionMutationFactory.newAgent(modelId, createDTO);
+    ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel());
+    referenceResolver.requireModel(modelRef.providerName(), modelRef.modelName());
+    String name = createDTO == null ? null : createDTO.getName();
+    AgentDefinition definition =
+        definitionMutationFactory.newAgent(
+            name, modelRef.providerName(), modelRef.modelName(), createDTO);
     referenceResolver.ensureNameAvailable(definition.getName());
-    validateVariant(modelId, definition.getVariant());
+    validateVariant(modelRef, definition.getVariant());
     validateConfig(configCodec.decode(definition.getConfigJson()));
     try {
       if (!agentDefinitionRepository.create(definition)) {
@@ -65,40 +69,37 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         throw new AiResourceNotFoundException(
-            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId, error);
+            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
       }
       throw error;
     }
-    AgentDefinition loaded = agentDefinitionRepository.getById(definition.getId());
+    AgentDefinition loaded = agentDefinitionRepository.getByName(definition.getName());
     return agentDefinitionConverter.convert(loaded);
   }
 
   @Override
   @Transactional
-  public AgentDefinitionDTO updateAgent(long id, AgentDefinitionUpdateDTO updateDTO) {
+  public AgentDefinitionDTO updateAgent(String name, AgentDefinitionUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
       throw new AiValidationException(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    AgentDefinition definition = referenceResolver.requireAgent(id);
-    ensureExpectedVersion(definition, id, rawExpected, expected);
-    long modelId = parseModelId(updateDTO == null ? null : updateDTO.getModelId());
-    referenceResolver.requireModel(modelId);
-    String currentName = definition.getName();
+    AgentDefinition definition = referenceResolver.requireAgent(name);
+    ensureExpectedVersion(definition, name, rawExpected, expected);
+    ModelRef modelRef = new ModelRef(definition.getModelProviderName(), definition.getModelName());
+    referenceResolver.requireModel(modelRef.providerName(), modelRef.modelName());
     definitionMutationFactory.update(definition, updateDTO);
-    definition.setModelId(modelId);
-    referenceResolver.ensureNameAvailable(currentName, definition.getName());
-    validateVariant(modelId, definition.getVariant());
+    validateVariant(modelRef, definition.getVariant());
     validateConfig(configCodec.decode(definition.getConfigJson()));
     try {
-      if (!agentDefinitionRepository.updateById(definition, expected)) {
-        AgentDefinition reread = agentDefinitionRepository.getById(id);
+      if (!agentDefinitionRepository.updateByName(definition, expected)) {
+        AgentDefinition reread = agentDefinitionRepository.getByName(name);
         if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
         }
         throw new AiVersionConflictException(
-            RESOURCE, Long.toString(id), rawExpected, CatalogVersions.format(reread.getVersion()));
+            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
@@ -106,66 +107,50 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         throw new AiResourceNotFoundException(
-            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelId, error);
+            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
       }
       throw error;
     }
-    AgentDefinition reloaded = agentDefinitionRepository.getById(id);
+    AgentDefinition reloaded = agentDefinitionRepository.getByName(name);
     return agentDefinitionConverter.convert(reloaded);
   }
 
   @Override
   @Transactional
-  public void deleteAgent(long id, String expectedVersion) {
+  public void deleteAgent(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentDefinition definition = referenceResolver.requireAgent(id);
-    ensureExpectedVersion(definition, id, expectedVersion, expected);
-    if (!agentDefinitionRepository.deleteById(id, expected)) {
-      AgentDefinition reread = agentDefinitionRepository.getById(id);
+    AgentDefinition definition = referenceResolver.requireAgent(name);
+    ensureExpectedVersion(definition, name, expectedVersion, expected);
+    if (!agentDefinitionRepository.deleteByName(name, expected)) {
+      AgentDefinition reread = agentDefinitionRepository.getByName(name);
       if (reread == null) {
-        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
       }
       throw new AiVersionConflictException(
-          RESOURCE,
-          Long.toString(id),
-          expectedVersion,
-          CatalogVersions.format(reread.getVersion()));
+          RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 
   private static void ensureExpectedVersion(
-      AgentDefinition definition, long id, String expectedVersion, long expected) {
+      AgentDefinition definition, String name, String expectedVersion, long expected) {
     if (definition.getVersion() != expected) {
       throw new AiVersionConflictException(
-          RESOURCE,
-          Long.toString(id),
-          expectedVersion,
-          CatalogVersions.format(definition.getVersion()));
+          RESOURCE, name, expectedVersion, CatalogVersions.format(definition.getVersion()));
     }
   }
 
-  private long parseModelId(String value) {
-    if (value == null) {
-      throw new AiValidationException(RESOURCE, "modelId must not be null");
-    }
-    String trimmed = value.trim();
-    if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "modelId must not be blank");
-    }
-    if (!trimmed.matches("^[1-9][0-9]*$")) {
+  private static ModelRef parseModelRef(String raw) {
+    try {
+      return ModelRef.parse(raw);
+    } catch (IllegalArgumentException error) {
       throw new AiValidationException(
-          RESOURCE, "modelId must be an unsigned positive decimal: " + value);
-    }
-    try {
-      return Long.parseLong(trimmed);
-    } catch (NumberFormatException error) {
-      throw new AiValidationException(RESOURCE, "modelId exceeds long range: " + value, error);
+          RESOURCE, "model must identify providerName/modelName", error);
     }
   }
 
-  private void validateVariant(long modelId, String variant) {
+  private void validateVariant(ModelRef modelRef, String variant) {
     try {
-      variantResolver.resolve(modelId, variant);
+      variantResolver.resolve(modelRef.providerName(), modelRef.modelName(), variant);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }

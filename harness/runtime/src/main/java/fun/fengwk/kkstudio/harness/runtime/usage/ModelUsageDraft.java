@@ -21,10 +21,9 @@ import java.util.Objects;
 
 /** Provider 完成事实对应的不可变 usage ledger draft。 */
 public record ModelUsageDraft(
-    long providerResourceId,
-    long modelResourceId,
+    String providerName,
+    String modelName,
     ProviderType providerType,
-    String providerModelId,
     PromptCacheMode promptCacheMode,
     PromptCacheRetention promptCacheRetention,
     boolean cacheEligible,
@@ -41,14 +40,9 @@ public record ModelUsageDraft(
   private static final String EMPTY_USAGE_JSON = "{}";
 
   public ModelUsageDraft {
-    if (providerResourceId <= 0) {
-      throw new IllegalArgumentException("providerResourceId must be positive");
-    }
-    if (modelResourceId <= 0) {
-      throw new IllegalArgumentException("modelResourceId must be positive");
-    }
+    providerName = requireName(providerName, "providerName");
+    modelName = requireName(modelName, "modelName");
     providerType = Objects.requireNonNull(providerType, "providerType");
-    providerModelId = requireNonBlank(providerModelId, "providerModelId");
     promptCacheMode = Objects.requireNonNull(promptCacheMode, "promptCacheMode");
     promptCacheRetention = Objects.requireNonNull(promptCacheRetention, "promptCacheRetention");
     if (cacheAffinityKey != null && cacheAffinityKey.isBlank()) {
@@ -83,10 +77,9 @@ public record ModelUsageDraft(
     PromptCacheRetention retention = cacheControl.retention();
     String affinityKey = retention == PromptCacheRetention.NONE ? null : cacheControl.affinityKey();
     return new ModelUsageDraft(
-        model.providerResourceId(),
-        model.modelResourceId(),
+        model.providerName(),
+        model.modelName(),
         model.providerType(),
-        model.modelId(),
         cacheMode,
         retention,
         cacheEligible(cacheMode, retention),
@@ -122,9 +115,12 @@ public record ModelUsageDraft(
     }
   }
 
-  private static String requireNonBlank(String value, String name) {
+  private static String requireName(String value, String name) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(name + " must not be blank");
+    }
+    if (!value.equals(value.trim())) {
+      throw new IllegalArgumentException(name + " must not contain surrounding whitespace");
     }
     return value;
   }

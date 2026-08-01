@@ -19,18 +19,20 @@ import java.util.List;
 public interface AgentModelMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, provider_id, name, description, config, version, "
+      "provider_name, name, description, config, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select("select count(*) from agent_model")
   long count();
 
-  @Select("select " + COLUMNS + " from agent_model order by id asc limit #{limit} offset #{offset}")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from agent_model order by provider_name asc, name asc limit #{limit} offset #{offset}")
   @Results(
       id = "agentModelResultMap",
       value = {
-        @Result(column = "id", property = "id"),
-        @Result(column = "provider_id", property = "providerId"),
+        @Result(column = "provider_name", property = "providerName"),
         @Result(column = "name", property = "name"),
         @Result(column = "description", property = "description"),
         @Result(column = "config", property = "configJson"),
@@ -40,25 +42,21 @@ public interface AgentModelMapper extends BaseMapper {
       })
   List<AgentModelDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
-  @Select("select " + COLUMNS + " from agent_model where id = #{id}")
-  @ResultMap("agentModelResultMap")
-  AgentModelDO getById(@Param("id") long id);
-
   @Select(
       "select "
           + COLUMNS
-          + " from agent_model where provider_id = #{providerId} and name = #{name}")
+          + " from agent_model where provider_name = #{providerName} and name = #{name}")
   @ResultMap("agentModelResultMap")
-  AgentModelDO getByProviderIdAndName(
-      @Param("providerId") long providerId, @Param("name") String name);
+  AgentModelDO getByProviderNameAndName(
+      @Param("providerName") String providerName, @Param("name") String name);
 
   @Insert(
       """
       insert into agent_model (
-          id, provider_id, name, description, config,
+          provider_name, name, description, config,
           created_at, updated_at, version
       ) values (
-          #{id}, #{providerId}, #{name}, #{description}, cast(#{configJson} as jsonb),
+          #{providerName}, #{name}, #{description}, cast(#{configJson} as jsonb),
           current_timestamp, current_timestamp, 0
       )
       """)
@@ -67,17 +65,25 @@ public interface AgentModelMapper extends BaseMapper {
   @Update(
       """
       update agent_model
-      set name = #{model.name}, description = #{model.description},
-          config = cast(#{model.configJson} as jsonb),
+      set description = #{model.description}, config = cast(#{model.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
-      where id = #{model.id} and version = #{expectedVersion}
+      where provider_name = #{model.providerName} and name = #{model.name}
+        and version = #{expectedVersion}
       """)
-  int updateById(
+  int updateByName(
       @Param("model") AgentModelDO model, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from agent_model where id = #{id} and version = #{expectedVersion}")
-  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
+  @Delete(
+      "delete from agent_model where provider_name = #{providerName} and name = #{name} "
+          + "and version = #{expectedVersion}")
+  int deleteByName(
+      @Param("providerName") String providerName,
+      @Param("name") String name,
+      @Param("expectedVersion") long expectedVersion);
 
-  @Select("select count(*) from agent_definition where model_id = #{modelId}")
-  long countAgentsByModelId(@Param("modelId") long modelId);
+  @Select(
+      "select count(*) from agent_definition where model_provider_name = #{providerName} "
+          + "and model_name = #{name}")
+  long countAgentsByModelName(
+      @Param("providerName") String providerName, @Param("name") String name);
 }
