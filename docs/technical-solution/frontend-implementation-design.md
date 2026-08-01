@@ -7,10 +7,10 @@
 | 主题 | 当前契约 |
 | --- | --- |
 | 工程与发布 | `frontend/` 保持独立 Vite 工程；Maven `distribution` 在 `prepare-package` 构建并嵌入 `web` Fat JAR 的 `classpath:/static` |
-| 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、只读 Environment Registry、Harness 设置、ComfyUI |
+| 页面范围 | Chat 卡片与本地 Pane 工作区、Provider/Model/Agent、统一 ToolCatalog、只读 Environment Registry、Harness 设置、ComfyUI |
 | 服务端状态 | React Query |
 | 本地状态 | `localStorage` 的 `ChatPaneState`（按 chatId）与全局 Locale 偏好 |
-| 资源 API | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents`、`/api/ai/environment` |
+| 资源 API | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents`、`/api/ai/catalog/tools`、`/api/ai/environment` |
 | Chat API | `/api/ai/chat` |
 | Harness API | `/api/ai/runtime/threads`、`/api/ai/runtime/threads/{threadId}/snapshot`、`/api/ai/runtime/sessions`、`/api/ai/runtime/tool-invocations`、`/api/ai/runtime/usage`、`/api/ai/runtime/interactions` |
 | 实时通道 | snapshot-first + durable revision SSE；无 id 的 Redis `realtime` 仅作临时 overlay |
@@ -36,7 +36,7 @@
 | `/agents` | Agent 管理 | Agent CRUD |
 | `/models` | Model 管理 | Model CRUD |
 | `/providers` | Provider 管理 | Provider CRUD |
-| `/environments` | Environment Registry | 只读 live registry |
+| `/environment` | Environment Registry | 只读 live registry 与固定工具目录状态 |
 | `/settings` | Harness 设置 | 全局自动重试与 realtime Stream 容量策略 |
 | `/comfyui` | ComfyUI 工作流 | 独立工作流运行时 |
 
@@ -44,9 +44,10 @@
 
 ### Chat 卡片
 
-- `GET/POST /api/ai/chat` 列表/创建；`defaultAgentId` 创建时必填且必须指向现存 Agent。
+- `GET/POST /api/ai/chat` 列表/创建；`defaultAgentId` 创建时必填且必须指向现存 Agent，`defaultEnvironmentName` 可空。
 - 进入 Chat 打开 `/chats/:chatId`。
 - Chat.defaultAgentId 在 Agent 查询中缺失时视为 stale；Chat 仍可读取，只有 Blank Pane 首发或显式使用 Agent 选择器时要求重新选择。
+- Chat 默认 Environment 在 Chat 创建/编辑与工作区默认设置中维护；它可以指向当前离线或尚未连接的 Environment，运行时在发送阶段按实时状态处理。
 - Chat 通过服务端 Chat↔Thread 历史多对多关系聚合 Thread；Pane 只保存本地绑定，不拥有 Thread 生命周期。
 
 ### 本地 `ChatPaneState`
@@ -64,12 +65,11 @@
 
 ### 空 Pane 与首发
 
-1. Footer 显示 Agent：空 Pane 用 Chat default；已绑定 Pane 用 Thread DTO。
-2. Chat default Agent stale 或无可用 Agent 时打开选择器；选择成功先更新 Chat 默认 Agent。
+1. Footer 显示 Agent 与 Environment：空 Pane 使用 Chat 默认值，已绑定 Pane 使用 Thread DTO。
+2. Chat default Agent stale 或无可用 Agent 时打开 Agent 选择器；选择成功先更新 Chat 默认 Agent。Environment 选择属于 Chat/Thread 工作区，不出现在 Agent 编辑器。
 3. 首发顺序（`chat-first-send.ts`）：
-   - `POST /api/ai/chat/{chatId}/threads`（原子创建并归入 Chat 的 UNBOUND Thread）
-   - `POST /api/ai/runtime/threads/:id/bootstrap`（默认 Agent + yolo，带 `expectedExecutionEpoch`；返回 `{session, thread}`）
-   - `POST /api/ai/runtime/threads/:id/messages`（USER_MESSAGE，带 bootstrap 返回的 `executionEpoch`）
+   - `POST /api/ai/chat/{chatId}/threads`（服务端原子创建、归入 Chat、bootstrap 默认 Agent/Environment 与 defaultYolo，并返回已查询的 Thread）
+   - `POST /api/ai/runtime/threads/:id/messages`（USER_MESSAGE，带返回的 `executionEpoch`）
    - 将 `pane.threadId` 设为该 Thread
 
 ### Slash 命令
@@ -78,7 +78,7 @@
 | --- | --- |
 | `/session` | 列出全部 Session；选中后从其 Entry Tree 选目标 head，`PUT /api/ai/runtime/threads/:id/head` 重定位当前 Thread |
 | `/thread` | 在“当前 Chat”与“全局 Thread”两个范围中按 `recent/created` 游标分页；当前范围直接替换 pane，切到全局后先 `PUT /api/ai/chat/{chatId}/threads/{threadId}` 成功再绑定 pane |
-| `/agent` `/model` `/variant` | 入队 SET_AGENT / SET_MODEL |
+| `/agent` `/model` `/variant` `/environment` | 入队 SET_AGENT / SET_MODEL / SET_ENVIRONMENT |
 | `/tree` | 打开历史面板，把当前 Thread 的 head 重定位到所选 Entry |
 | `/yolo` `/stop` `/new` | 既有语义；无 `/retry` |
 
@@ -88,22 +88,23 @@
 
 ## API 边界
 
-`shared/api/chat-service.ts`、`environment-service.ts`、`agent-service.ts`、`harness-service.ts` 为前端边界。
+`shared/api/chat-service.ts`、`environment-service.ts`、`agent-service.ts`、`harness-service.ts` 为前端边界；ToolCatalog 由 catalog query 读取，不由 Agent 表单复制维护。
 
 | Service | HTTP 接口 | 用途 |
 | --- | --- | --- |
 | Chat CRUD | `/api/ai/chat` | Chat 列表与 CRUD |
 | `listChatThreads` | `GET /api/ai/chat/{chatId}/threads?sort&cursor&limit` | 当前 Chat 的 `{items,nextCursor}` 游标分页 |
-| `createChatThread` | `POST /api/ai/chat/{chatId}/threads` | 同事务创建并关联 UNBOUND Thread |
+| `createChatThread` | `POST /api/ai/chat/{chatId}/threads` | 同事务创建、关联、bootstrap 默认配置并返回已查询 Thread |
 | `associateThread` | `PUT /api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史 Chat↔Thread 关系 |
 | Environments | `GET /api/ai/environment` | 只读 live registry |
+| Tool catalog | `GET /api/ai/catalog/tools` | 本地可选工具与固定十个 Environment 工具；不返回 runtime-managed `load_skill` |
 | `listThreads` | `GET /api/ai/runtime/threads?sort&cursor&limit` | 全局 `{items,nextCursor}` Thread 游标分页（`/thread` 与 `/session` 的运行态来源） |
 | `createThread` | `POST /api/ai/runtime/threads` | 创建 UNBOUND Thread（无 body） |
 | `bootstrapThread` | `POST /api/ai/runtime/threads/{id}/bootstrap` | 创建 Session 并绑定 head，返回 `{session, thread}` |
 | `updateThreadHead` | `PUT /api/ai/runtime/threads/{id}/head` | bind / 跨 Session rebind / unbind（`headEntryId` 可为 `null`） |
 | `getThreadSnapshot` | `GET /api/ai/runtime/threads/{id}/snapshot` | 唯一 chat-runtime 投影：revision、Thread、Entries、Inputs、invocations、open interactions 与 usage |
 | `submitThreadMessage` | `POST /api/ai/runtime/threads/{id}/messages` | 入队用户消息（202） |
-| `setThreadAgent` / `setThreadModel` / `setThreadYolo` | `PUT /api/ai/runtime/threads/{id}/agent`、`/model`、`/yolo` | 入队配置命令（202） |
+| `setThreadAgent` / `setThreadModel` / `setThreadEnvironment` / `setThreadYolo` | `PUT /api/ai/runtime/threads/{id}/agent`、`/model`、`/environment`、`/yolo` | 入队配置命令（202）；Environment 为 `null` 时清除目标 |
 | `createThreadRealtimeStream` | `GET /api/ai/runtime/threads/{id}/events/stream?afterRevision={revision}` | revision/resync invalidation 与无 id 的 Redis realtime overlay |
 | `stopThread` | `POST .../stop` | Stop |
 | `listSessions` / `getSession` / `listSessionEntries` | `/api/ai/runtime/sessions` | Session 列表、详情与 Entry Tree |
@@ -123,13 +124,16 @@ AgentDefinitionDTO {
   id, name, description, systemPrompt,
   modelId, variant,
   config: {
-    environmentName: string | null,
     tools[], skills[]
   }
 }
 ```
 
-Model 与 Agent 的 `PUT` 提交完整 editable body。候选 tools/skills 采用 platform-first。
+Model 与 Agent 的 `PUT` 提交完整 editable body。Agent 的 config 只提交 tools/skills 短名；候选来自统一 ToolCatalog 与当前可见的 Environment skills，`load_skill` 不作为 Agent 选择项。Chat DTO 单独提供 `defaultAgentId` 与可空 `defaultEnvironmentName`。
+
+### Environment 页面与目录
+
+`/environment` 只读展示 live Environment 的连接状态、固定十个工具及 READY 上报的 skills。Environment 选择器出现在 Chat 默认配置和 Thread 工作区命令中，Agent 表单不提供 Environment 字段；Agent 只选择统一 ToolCatalog 中的本地工具和固定 Environment 工具短名。
 
 ## Chat transcript
 
@@ -206,7 +210,7 @@ frontend/src
 └── styles.css
 ```
 
-`queryKeys.chats.*` 覆盖 Chat；`queryKeys.environments.list` 覆盖 live registry；`queryKeys.threads.list` 覆盖全局 Thread 列表；`queryKeys.threads.snapshot(...)` 是 chat runtime 的唯一 Thread 业务状态。head 重定位成功后失效 snapshot 与 `threads.list`。
+`queryKeys.chats.*` 覆盖 Chat；`queryKeys.environments.list` 覆盖 `/environment` 的 live registry；`queryKeys.toolCatalog.list` 覆盖统一 ToolCatalog；`queryKeys.threads.list` 覆盖全局 Thread 列表；`queryKeys.threads.snapshot(...)` 是 chat runtime 的唯一 Thread 业务状态。head 重定位成功后失效 snapshot 与 `threads.list`。
 
 ## 验证
 

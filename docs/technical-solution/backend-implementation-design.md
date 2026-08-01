@@ -31,13 +31,14 @@ flowchart LR
 
 | 域 | 接口 | 用途 |
 | --- | --- | --- |
-| Provider / Model / Agent | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents` | 全局 Agent 资源 CRUD |
-| Chat | `/api/ai/chat` | 持久 Chat CRUD；`defaultAgentId` 写入时必填且必须存在，Agent 删除后允许 stale；Chat 通过历史关系聚合 Thread |
-| Chat Thread | `GET/POST /api/ai/chat/{chatId}/threads`、`PUT /api/ai/chat/{chatId}/threads/{threadId}` | Chat 范围 opaque keyset 列表、Chat-scoped 原子创建与幂等关联 |
+| Provider / Model / Agent | `/api/ai/catalog/providers`、`/api/ai/catalog/models`、`/api/ai/catalog/agents` | 全局 Provider、Model、Agent 资源 CRUD；Agent config 只包含 tools/skills |
+| Tool catalog | `GET /api/ai/catalog/tools` | 本地可选工具与固定十个 Environment 工具的统一目录；runtime-managed `load_skill` 不出现在可选目录 |
+| Chat | `/api/ai/chat` | 持久 Chat CRUD；必填 `defaultAgentId` 与可空 `defaultEnvironmentName`；默认 Agent 引用允许 stale，Environment 名称是实时身份 |
+| Chat Thread | `GET/POST /api/ai/chat/{chatId}/threads`、`PUT /api/ai/chat/{chatId}/threads/{threadId}` | Chat 范围 opaque keyset 列表；POST 原子完成创建、关联、bootstrap、默认配置应用和查询；PUT 幂等关联 |
 | Session | `GET /api/ai/runtime/sessions`、`GET /api/ai/runtime/sessions/{sessionId}`、`/entries` | flat Session 查询与 Session Entry Tree；Session 仅由 Thread bootstrap 创建 |
 | Thread | `GET /api/ai/runtime/threads?sort&cursor&limit`、`POST /api/ai/runtime/threads`、`GET /api/ai/runtime/threads/{threadId}`、`GET /api/ai/runtime/threads/{threadId}/snapshot` | 全局 opaque keyset Thread 列表（统一返回 `{items,nextCursor}`）；创建 UNBOUND Thread（201，无 body）；单一 chat-runtime snapshot 含 revision、状态、entries、inputs、invocations、open interactions 和 usage |
 | Thread head | `POST /api/ai/runtime/threads/{id}/bootstrap`、`PUT /api/ai/runtime/threads/{id}/head` | bootstrap 创建 Session 并绑定 head（201 `{session, thread}`）；`PUT /head` 做 bind/rebind/unbind |
-| Thread 输入（202） | `POST /api/ai/runtime/threads/{id}/messages`、`/messages/custom`、`PUT .../agent`、`/model`、`/yolo` | mailbox 入队 |
+| Thread 输入（202） | `POST /api/ai/runtime/threads/{id}/messages`、`/messages/custom`、`PUT .../agent`、`/model`、`/environment`、`/yolo` | mailbox 入队 |
 | Thread realtime | `GET /api/ai/runtime/threads/{id}/events/stream` | durable `revision`/`resync` SSE 加上无 id 的 lossy Redis `realtime`；`afterRevision` 与 `Last-Event-ID` 只表示 revision |
 | Thread 控制 | `POST /api/ai/runtime/threads/{id}/stop` | epoch fencing 取消 queued Input、可安全取消的 Invocation 与 OPEN Interaction |
 | Retry policy | `GET` / `PUT /api/ai/runtime/settings/retry-policy` | 全局持久化自动重试策略 |
@@ -68,6 +69,7 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 | `StudioHarnessRealtimeStreamPolicyController` | `/api/ai/runtime/settings/realtime-stream-policy` | realtime Stream 最大保留事件数策略 |
 | `StudioHarnessSessionController` | `/api/ai/runtime/sessions` | Session 查询、Session Entries |
 | `StudioChatController` | `/api/ai/chat` | Chat CRUD、Chat-scoped Thread 列表/创建/关联 |
+| `StudioToolCatalogController` | `/api/ai/catalog/tools` | 统一可选 ToolCatalog 查询 |
 | `StudioHarnessObservabilityController` | `/api/ai/runtime` | 单个 tool invocation、artifacts；Thread 集合事实位于 snapshot |
 | `StudioInteractionController` | `/api/ai/runtime/interactions` | Interaction 查询与响应 |
 | `StudioModelUsageController` | `/api/ai/runtime/usage` | 聚合 |
@@ -77,7 +79,7 @@ Model 与 Agent 的 `PUT` 接收完整 editable body。Provider credential 不�
 
 Session 只组织 Entry Tree，不持有 Thread；Thread 是可跨 Session 复用的 durable runtime process，当前 Session 由 head Entry 派生。Chat 通过 `chat_thread(chat_id, thread_id)` 历史聚合 Thread，关系是多对多且不复制 Thread 的 `created_at`/`updated_at`。
 
-`POST /api/ai/runtime/threads` 创建 UNBOUND Thread；`POST /api/ai/runtime/threads/{id}/bootstrap` 在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把该 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry。
+`POST /api/ai/runtime/threads` 创建 UNBOUND Thread；`POST /api/ai/runtime/threads/{id}/bootstrap` 在一个事务内创建 Session/ROOT/RUNTIME_CONFIG 并把该 UNBOUND Thread 的 head 绑定到 `RUNTIME_CONFIG` Entry。`RUNTIME_CONFIG` 由 Agent、Model、Environment 名称、tools/skills 短名和 yolo 组成。
 
 `PUT /api/ai/runtime/threads/{id}/head` 是外部修改 head 的唯一入口，可跨 Session 重定位或传 `null` 回到 UNBOUND；不复制 Entry 或 Invocation。它要求 Thread 逻辑静止：无有效 processor lease、`runnable=false`、无 QUEUED Input、当前 epoch 无非终态 Model/Tool Invocation、无相关 OPEN Interaction。满足后 CAS `expectedExecutionEpoch`，成功则 epoch+1 并清 lease/`runnable`，旧 epoch 的执行结果不再能写入。分支就是这样的 head 重定位，没有独立的 Branch 实体。
 
@@ -87,7 +89,7 @@ head 最多创建一次冻结 `ModelInvocation`，snapshot 后到达者留给下
 
 查询：`GET /api/ai/runtime/threads` 与 `GET /api/ai/chat/{chatId}/threads` 都返回 `{items,nextCursor}`。`sort=recent` 使用 `harness_thread.updated_at`，`sort=created` 使用 `harness_thread.created_at`，均按时间、`id` 降序 keyset；`limit` 默认 20、最大 100，cursor 是绑定 sort 的 opaque `v1` token。`sessionId`/`sessionTitle`/`headEntryId` 均可空，DTO 附带当前 `executionEpoch`。`GET /api/ai/runtime/threads/{id}/snapshot` 在 REPEATABLE READ 下返回 revision 与 root→head Entries（UNBOUND 为空）、按 `sequence ASC` 的 inputs、invocations、open interactions 和 usage。`createTime` 只用于展示；不得用墙钟重排因果顺序。
 
-`POST /api/ai/chat/{chatId}/threads` 在一个事务中创建 UNBOUND Thread 并写入 Chat 关系；任一侧失败都回滚。`PUT /api/ai/chat/{chatId}/threads/{threadId}` 使用 `(chat_id, thread_id)` 唯一键幂等写入，重复关联不产生新行。
+`POST /api/ai/chat/{chatId}/threads` 在一个事务中完成以下步骤：创建 Thread、写入 `chat_thread` 关联、以 Chat 的默认 Agent/Environment 和全局 defaultYolo bootstrap Session/ROOT/RUNTIME_CONFIG、读取最终 Thread 查询投影。任一步失败都回滚，因此客户端收到的 Thread 已经完成 bootstrap。`PUT /api/ai/chat/{chatId}/threads/{threadId}` 使用 `(chat_id, thread_id)` 唯一键幂等写入，重复关联不产生新行。
 
 Java 领域类型使用 `HarnessThread`，避免与 `java.lang.Thread` 冲突。
 
@@ -132,10 +134,9 @@ GET /api/ai/runtime/threads/{id}/events/stream?afterRevision={revision}
 
 ## Tool、Environment 与 Artifact
 
-统一 `ToolWorker` 从数据库 claim Invocation：
+`ToolCatalog` 是 Core 与 Agent 编辑、runtime resolver、Daemon 生产注册共同使用的统一目录：本地可选工具与固定十个 Environment 工具按短名和版本索引，`load_skill` 作为 runtime-managed 工具保留在内部注册中，不接受 Agent 选择。`GET /api/ai/catalog/tools` 只返回可选目录。
 
-- `PLATFORM` → 本地 `Tool`
-- `ENVIRONMENT` → `RemoteTool` → Gateway transport → Daemon → 同一 Tool API
+`ToolBinding.environmentName == null` 表示由当前 runtime 的本地 ToolRegistry 执行；非空表示通过 `RemoteTool` 将调用发送到指定 Environment。ToolInvocation 与 Binding 的路由只由这个可空目标名决定。发送前发现远程目标不可用时终态为 `FAILED`；发送结果不确定时终态为 `UNKNOWN`，不得重放可能已经发生的副作用。
 
 Gateway 只管理连接与协议，不是第二套 durable 状态机。Environment 不提供 REST CRUD；`GET /api/ai/environment` 投影当前连接 Daemon 的内存 Registry。协议细节见 [environment-daemon-gateway.md](environment-daemon-gateway.md)。
 

@@ -18,7 +18,7 @@ Redis 重启、清空或网络隔离不会丢失 PostgreSQL 中的用户 Input�
 
 项目只保留 PostgreSQL schema、driver、seed 与集成测试。所有持久化集成测试运行在真实 PostgreSQL 上。
 
-权威 DDL：[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行。
+权威且最终的 DDL：[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行；仓库不提供后续结构迁移。
 
 ## 3. ID 生成
 
@@ -55,7 +55,7 @@ Durable entity id 使用 PostgreSQL sequence `kk_studio_id_seq`，由 Store/IdGe
 
 ### 4.5 `harness_model_invocation`
 
-source head、execution epoch、完整 `ProviderRequest` snapshot、状态、worker lease、deadline/activity、retry、terminal response/error、`applied_at`。
+source head、execution epoch、完整 `ModelInvocationRequest` snapshot、状态、worker lease、deadline/activity、retry、terminal response/error、`applied_at`。
 
 唯一 `(thread_id, source_head_entry_id, execution_epoch)`。
 
@@ -63,7 +63,7 @@ source head、execution epoch、完整 `ProviderRequest` snapshot、状态、wor
 
 ### 4.6 `harness_tool_invocation`
 
-Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONMENT`、execution epoch、worker lease、deadline/retry、terminal result/error、`applied_at`、`permission_state` 与冻结的 `yolo_enabled`。
+Assistant Entry、`model_invocation_id`、ordinal、ToolCall、descriptor/arguments、可空 `environment_name`、execution epoch、worker lease、deadline/retry、terminal result/error、`applied_at`、`permission_state` 与冻结的 `yolo_enabled`。
 
 唯一 `(thread_id, assistant_entry_id, execution_epoch, ordinal)`。
 
@@ -72,9 +72,9 @@ Assistant Entry、ordinal、ToolCall、descriptor/arguments、`PLATFORM/ENVIRONM
 - 新行是 `QUEUED + PENDING`；`yolo_enabled` 从生成该 ToolCall 的冻结 RuntimeConfig 复制。
 - `ALLOW` 先在同一 Tool worker lease 内持久化最终 descriptor/arguments 与 `ALLOWED`，然后才允许任何外部 Tool I/O。
 - `ASK` 原子写入最终计划、`WAITING_INTERACTION + ASKED`、一个以 `tool_invocation_id` 关联该 Tool 的 OPEN Interaction，并 park 该 Tool target。
-- 用户批准把行转为 `QUEUED + ALLOWED` 并仅经原 route FIFO gate 重新启用 target；拒绝转为 `FAILED + DENIED`，删除 Tool target、唤醒 Thread 并激活下一个环境 route head。
+- 用户批准把行转为 `QUEUED + ALLOWED` 并仅经原 route FIFO gate 重新启用 target；拒绝转为 `FAILED + DENIED`，删除 Tool target、唤醒 Thread 并激活下一个目标 FIFO head。发送前发现非空 Environment 不可用时写 `FAILED`，发送结果不确定时写 `UNKNOWN`。
 
-Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK。`harness_model_invocation` 不持有 `session_id`，`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与其属于同一 Session。
+Model/Tool Invocation 与 `harness_model_usage` 的 Thread 归属都是单列 `thread_id` FK。`harness_model_invocation` 不持有 `session_id`，`source_head_entry_id` 单列 FK 到 `harness_entry(id)`；`harness_tool_invocation` 与 `harness_model_usage` 的 `session_id` 仍作为约束载体，保证所引用的 Entry 与其属于同一 Session。`harness_tool_invocation.model_invocation_id` 通过 `(thread_id, model_invocation_id)` 复合 FK 指向同一 Thread 的 ModelInvocation。
 
 ### 4.7 `harness_interaction`
 
@@ -107,9 +107,9 @@ Model/Tool retry 到期只 dispatch 对应 Invocation，terminal 前不必激活
 
 `harness_execution_target` 是唯一 durable activation queue：每个 `(target_kind, target_id)` 只有一行，
 `dispatch_enabled` 是显式 dispatch gate。`lock` 与 `findAll` 可见 disabled parked row，但 `lockDue`、due
-扫描和 nearest-due timer 只读取 enabled row。PLATFORM target 通过 `schedule` 正常启用；ENVIRONMENT
-Tool target 先通过 `park` 写入 disabled row，完成同一批 materialization 后按 route 激活 oldest queued
-head。route FIFO 顺序固定为 joined Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`；
+扫描和 nearest-due timer 只读取 enabled row。本地 Tool target 通过 `schedule` 正常启用；非空 Environment
+Tool target 先通过 `park` 写入 disabled row，完成同一批 materialization 后按目标激活 oldest queued
+head。目标 FIFO 顺序固定为 joined Tool invocation 的 `created_at, assistant_entry_id, ordinal, id`；
 RUNNING、RETRY_WAIT 或 WAITING_INTERACTION head 都阻塞后续 sibling。Tool terminal 删除当前
 target、调度 owning Thread 后，在同一事务中激活下一 route head。启用插入、enable transition 和
 enabled row 的严格提前会触发 PostgreSQL NOTIFY；parked/disabled row rewrite 与 lease extension 不会。
@@ -151,7 +151,7 @@ durable target mutation
   -> ThreadReconciler.activate / ModelWorker.dispatch / ToolWorker.dispatch
 ```
 
-dispatcher 在启动、listener 连接或重连、收到 `NOTIFY`、Environment READY 以及 nearest-due timer 时 coalesced wake。每个 handler 重新锁定自己的 target 与领域事实；重复 wake、过期 snapshot 或丢失通知均不改变正确性。ENVIRONMENT eligibility 只读取 `LiveEnvironmentRegistry.listReady()` 的当前快照，READY 回调只调用 `dispatcher.wake()`。
+dispatcher 在启动、listener 连接或重连、收到 `NOTIFY`、Environment READY 以及 nearest-due timer 时 coalesced wake。每个 handler 重新锁定自己的 target 与领域事实；重复 wake、过期 snapshot 或丢失通知均不改变正确性。非空 Environment eligibility 只读取 `LiveEnvironmentRegistry.listReady()` 的当前快照，READY 回调只调用 `dispatcher.wake()`。
 
 ## 7. Redis Streams realtime projection
 
