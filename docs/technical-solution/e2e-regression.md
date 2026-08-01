@@ -2,7 +2,7 @@
 
 本文描述 `kk-studio` 当前生效的端到端自动化回归：矩阵分层、入口、报告目录、用例清单与维护方式。
 
-> `e2e` profile 通过 Flyway 对空 PostgreSQL 数据库执行 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)、[`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql) 与 [`V3__chat_thread_and_default_agent.sql`](../../core/src/main/resources/db/migration/V3__chat_thread_and_default_agent.sql)。不再使用 H2/MySQL 作为 durable 存储；启动 e2e 前需提供可写空库（可用环境变量 `KK_STUDIO_DB_URL` / `KK_STUDIO_DB_USER` / `KK_STUDIO_DB_PASSWORD`）。`flyway_schema_history` 校验并记录已执行版本。
+> `e2e` profile 通过 Flyway 对空 PostgreSQL 数据库执行权威且最终的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) 与 [`V2__e2e_seed.sql`](../../core/src/main/resources/db/seed/e2e/V2__e2e_seed.sql)。不再使用 H2/MySQL 作为 durable 存储；启动 e2e 前需提供可写空库（可用环境变量 `KK_STUDIO_DB_URL` / `KK_STUDIO_DB_USER` / `KK_STUDIO_DB_PASSWORD`）。`flyway_schema_history` 校验并记录已执行版本。
 
 ## 边界
 
