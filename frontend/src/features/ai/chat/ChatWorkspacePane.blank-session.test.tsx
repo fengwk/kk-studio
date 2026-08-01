@@ -50,6 +50,7 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     inputSequence: 0,
     activeAgentDefinitionId: null,
     activeAgentName: null,
+    activeEnvironmentName: null,
     modelId: null,
     variant: null,
     yoloEnabled: false,
@@ -69,7 +70,6 @@ const agents = [
     modelId: 'm1',
     variant: 'default',
     config: {
-      environmentName: null,
       tools: [],
       skills: [],
     },
@@ -81,13 +81,17 @@ const agents = [
 function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onDefaultAgentChange?: (agentId: string) => Promise<void>
+  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
   defaultAgentId?: string
+  defaultEnvironmentName?: string | null
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onDefaultAgentChange = overrides?.onDefaultAgentChange ?? vi.fn(async () => undefined)
+  const onDefaultEnvironmentChange =
+    overrides?.onDefaultEnvironmentChange ?? vi.fn(async () => undefined)
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
@@ -95,11 +99,16 @@ function renderBlankPane(overrides?: {
           id: 'chat-1',
           title: 'C',
           defaultAgentId: overrides?.defaultAgentId === undefined ? 'a1' : overrides.defaultAgentId,
+          defaultEnvironmentName: overrides?.defaultEnvironmentName ?? null,
           version: '1',
           createTime: null,
           updateTime: null,
         }}
         agents={agents}
+        environments={[
+          { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'connecting', status: 'CONNECTING', lastSeen: null, tools: [], skills: [] },
+        ]}
         pane={{ id: 'pane-1', threadId: null }}
         focused
         sessionSort="recent"
@@ -109,10 +118,11 @@ function renderBlankPane(overrides?: {
         onSessionSortChange={() => undefined}
         onThreadSortChange={() => undefined}
         onDefaultAgentChange={onDefaultAgentChange}
+        onDefaultEnvironmentChange={onDefaultEnvironmentChange}
       />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onDefaultAgentChange }
+  return { onThreadChange, onDefaultAgentChange, onDefaultEnvironmentChange }
 }
 
 describe('BlankComposerPane /thread and agent error handling', () => {
@@ -134,6 +144,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'session',
       'thread',
       'agent',
+      'environment',
       'model',
       'variant',
       'yolo',
@@ -146,6 +157,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.filter((command) => !command.disabled).map((command) => command.id)).toEqual([
       'thread',
       'agent',
+      'environment',
     ])
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'session')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)
@@ -260,10 +272,11 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
 
-  it('restores the draft and reports the failure when bootstrap rejects', async () => {
+  it('restores the draft and reports the failure when atomic Thread creation rejects', async () => {
     const user = userEvent.setup()
-    vi.mocked(chatService.createChatThread).mockResolvedValue(thread({ threadId: 't-new' }))
-    vi.mocked(harnessService.bootstrapThread).mockRejectedValue(new Error('unknown agent definition: a1'))
+    vi.mocked(chatService.createChatThread).mockRejectedValue(
+      new Error('unknown agent definition: a1'),
+    )
 
     const { onThreadChange } = renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')

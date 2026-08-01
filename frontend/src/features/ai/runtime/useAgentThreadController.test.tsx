@@ -24,6 +24,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     setThreadYolo: vi.fn(),
     setThreadAgent: vi.fn(),
     setThreadModel: vi.fn(),
+    setThreadEnvironment: vi.fn(),
     stopThread: vi.fn(),
   },
 }))
@@ -70,7 +71,6 @@ describe('useAgentThreadController', () => {
           modelId: 'm1',
           variant: 'default',
           config: {
-            environmentName: null,
             tools: [],
             skills: []
           },
@@ -744,6 +744,7 @@ const thread = {
   revision: '0',
   activeAgentDefinitionId: 'agent-1',
   activeAgentName: 'assistant',
+  activeEnvironmentName: 'local',
   modelId: 'm1',
   variant: 'default',
   yoloEnabled: false,

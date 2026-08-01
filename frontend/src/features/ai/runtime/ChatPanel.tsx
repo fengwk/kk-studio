@@ -15,6 +15,7 @@ export interface ChatPanelLabels {
   providerName?: string
   modelName?: string
   variantName?: string
+  environmentName?: string | null
   contextWindow?: number
 }
 
@@ -40,6 +41,7 @@ export interface ChatPanelFooterInput {
   onAgentClick?: () => void
   onModelClick?: () => void
   onVariantClick?: () => void
+  onEnvironmentClick?: () => void
 }
 
 /** Work state and dismissible feedback shown above the composer. */
@@ -90,12 +92,14 @@ export function ChatPanel({
             providerName={labels.providerName}
             modelName={labels.modelName}
             variantName={labels.variantName}
+            environmentName={labels.environmentName}
             contextWindow={labels.contextWindow}
             yoloEnabled={footer.yoloEnabled}
             usage={footer.usage}
             onAgentClick={footer.onAgentClick}
             onModelClick={footer.onModelClick}
             onVariantClick={footer.onVariantClick}
+            onEnvironmentClick={footer.onEnvironmentClick}
           />
         ),
       }}

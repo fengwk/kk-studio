@@ -2,17 +2,19 @@ import { describe, expect, it, vi } from 'vitest'
 import { performBlankPaneFirstSend } from '@/features/ai/chat/chat-first-send'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
-function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
+function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
     threadId: 't1',
     sessionId: null,
     sessionTitle: null,
     headEntryId: null,
     executionEpoch: 0,
+    revision: '0',
     status: 'UNBOUND',
     inputSequence: 0,
     activeAgentDefinitionId: null,
     activeAgentName: null,
+    activeEnvironmentName: null,
     modelId: null,
     variant: null,
     yoloEnabled: false,
@@ -24,30 +26,19 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
 }
 
 describe('performBlankPaneFirstSend', () => {
-  it('creates an UNBOUND Thread, bootstraps it, then enqueues USER_MESSAGE with the bootstrap epoch', async () => {
+  it('creates an atomically bound Thread, then enqueues USER_MESSAGE without bootstrap', async () => {
     const calls: string[] = []
     const createChatThread = vi.fn(async (chatId: string) => {
       calls.push(`createChatThread:${chatId}`)
-      return thread({ threadId: 't1', executionEpoch: 0, status: 'UNBOUND' })
-    })
-    const bootstrapThread = vi.fn(async (threadId: string) => {
-      calls.push(`bootstrap:${threadId}`)
-      return {
-        session: {
-          sessionId: 's1',
-          title: null,
-          createTime: null,
-          updateTime: null,
-        },
-        thread: thread({
-          threadId: 't1',
-          sessionId: 's1',
-          headEntryId: 'e-config',
-          executionEpoch: 1,
-          status: 'IDLE',
-          activeAgentDefinitionId: 'a1',
-        }),
-      }
+      return thread({
+        threadId: 't1',
+        sessionId: 's1',
+        headEntryId: 'e-config',
+        executionEpoch: 1,
+        status: 'IDLE',
+        activeAgentDefinitionId: 'a1',
+        activeAgentName: 'assistant',
+      })
     })
     const submitThreadMessage = vi.fn(
       async (
@@ -71,81 +62,46 @@ describe('performBlankPaneFirstSend', () => {
 
     const result = await performBlankPaneFirstSend({
       chatId: 'chat-1',
-      agentDefinitionId: 'a1',
       content: 'hello',
       createChatThread,
-      bootstrapThread,
       submitThreadMessage,
       createIds: () => ({ userMessageId: 'cid-user' }),
     })
 
-    // Strict order: chat-scoped create -> bootstrap -> message. Association is part of create.
-    expect(calls).toEqual(['createChatThread:chat-1', 'bootstrap:t1', 'user:t1:cid-user:hello:1'])
-    // Bootstrap fences against the epoch of the freshly created UNBOUND Thread.
-    expect(bootstrapThread).toHaveBeenCalledWith('t1', {
-      title: undefined,
-      agentDefinitionId: 'a1',
-      yoloEnabled: false,
-      expectedExecutionEpoch: 0,
-    })
-    // The message must use the *post-bootstrap* epoch, not the pre-bootstrap one.
+    // Atomic Chat-scoped creation already binds the Thread; no bootstrap request is made.
+    expect(calls).toEqual(['createChatThread:chat-1', 'user:t1:cid-user:hello:1'])
     expect(submitThreadMessage).toHaveBeenCalledWith('t1', {
       content: 'hello',
       clientMessageId: 'cid-user',
       expectedExecutionEpoch: 1,
     })
     expect(result.sessionId).toBe('s1')
-    expect(result.thread.threadId).toBe('t1')
-    expect(result.thread.status).toBe('IDLE')
-    expect(result.thread.executionEpoch).toBe(1)
-  })
-
-  it('forwards the requested title and yolo flag into bootstrap', async () => {
-    const createChatThread = vi.fn(async () => thread({ threadId: 't7', executionEpoch: 5 }))
-    const bootstrapThread = vi.fn(async () => ({
-      session: {
-        sessionId: 's7',
-        title: 'Titled',
-        createTime: null,
-        updateTime: null,
-      },
-      thread: thread({ threadId: 't7', sessionId: 's7', executionEpoch: 6, status: 'IDLE' }),
-    }))
-    const submitThreadMessage = vi.fn(async () => ({
-      inputId: 'i1',
-      threadId: 't7',
-      sequence: 1,
-      inputType: 'USER_MESSAGE' as const,
-      payloadJson: '{}',
-      clientMessageId: 'cid',
-      status: 'QUEUED' as const,
-      resolvedAt: null,
-      createTime: null,
-    }))
-
-    await performBlankPaneFirstSend({
-      chatId: 'chat-1',
-      agentDefinitionId: 'a2',
-      content: 'go',
-      title: 'Titled',
-      yoloEnabled: true,
-      createChatThread,
-      bootstrapThread,
-      submitThreadMessage,
-      createIds: () => ({ userMessageId: 'cid' }),
-    })
-
-    expect(bootstrapThread).toHaveBeenCalledWith('t7', {
-      title: 'Titled',
-      agentDefinitionId: 'a2',
-      yoloEnabled: true,
-      expectedExecutionEpoch: 5,
+    expect(result.thread).toMatchObject({
+      threadId: 't1',
+      sessionId: 's1',
+      activeAgentDefinitionId: 'a1',
+      executionEpoch: 1,
+      status: 'IDLE',
     })
   })
 
-  it('surfaces a bootstrap failure without enqueuing the message', async () => {
-    const createChatThread = vi.fn(async () => thread({ threadId: 't9' }))
-    const bootstrapThread = vi.fn(async () => {
+  it('rejects a create response without a Session and never enqueues the message', async () => {
+    const createChatThread = vi.fn(async () => thread({ threadId: 't9', sessionId: null }))
+    const submitThreadMessage = vi.fn()
+
+    await expect(
+      performBlankPaneFirstSend({
+        chatId: 'chat-1',
+        content: 'hello',
+        createChatThread,
+        submitThreadMessage: submitThreadMessage as never,
+      }),
+    ).rejects.toThrow('创建 Chat Thread 未返回 Session')
+    expect(submitThreadMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not enqueue a message when the atomic Thread creation fails', async () => {
+    const createChatThread = vi.fn(async () => {
       throw new Error('unknown agent definition: 404')
     })
     const submitThreadMessage = vi.fn()
@@ -153,10 +109,8 @@ describe('performBlankPaneFirstSend', () => {
     await expect(
       performBlankPaneFirstSend({
         chatId: 'chat-1',
-        agentDefinitionId: 'missing',
         content: 'hello',
         createChatThread,
-        bootstrapThread,
         submitThreadMessage: submitThreadMessage as never,
       }),
     ).rejects.toThrow('unknown agent definition: 404')

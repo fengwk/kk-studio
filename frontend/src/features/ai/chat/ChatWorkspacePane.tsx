@@ -1,6 +1,7 @@
 import { isPaneBound, type ChatPane, type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankComposerPane'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
 
@@ -16,6 +17,7 @@ import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThr
 export function ChatWorkspacePane({
   chat,
   agents,
+  environments = [],
   pane,
   focused,
   sessionSort,
@@ -25,9 +27,11 @@ export function ChatWorkspacePane({
   onSessionSortChange,
   onThreadSortChange,
   onDefaultAgentChange,
+  onDefaultEnvironmentChange = async () => undefined,
 }: {
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
+  environments?: LiveEnvironmentDTO[]
   pane: ChatPane
   focused: boolean
   sessionSort: PaneSortPreference
@@ -37,12 +41,14 @@ export function ChatWorkspacePane({
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
+  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
 }) {
   if (isPaneBound(pane.threadId)) {
     return (
       <BoundThreadPane
         chatId={chat?.id ?? ''}
         agents={agents}
+        environments={environments}
         paneId={pane.id}
         threadId={pane.threadId}
         focused={focused}
@@ -60,12 +66,14 @@ export function ChatWorkspacePane({
     <BlankComposerPane
       chat={chat}
       agents={agents}
+      environments={environments}
       focused={focused}
       threadSort={threadSort}
       onFocus={onFocus}
       onThreadChange={onThreadChange}
       onThreadSortChange={onThreadSortChange}
       onDefaultAgentChange={onDefaultAgentChange}
+      onDefaultEnvironmentChange={onDefaultEnvironmentChange}
     />
   )
 }

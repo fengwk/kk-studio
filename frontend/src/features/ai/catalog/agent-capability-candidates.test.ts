@@ -1,36 +1,55 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildCapabilityCandidates,
+  buildSkillCandidates,
+  buildToolCandidates,
+  withSelectedOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
 
 describe('agent-capability-candidates', () => {
-  it('prefers platform tools/skills and retains selected environment availability', () => {
+  it('builds unified tools without exposing an Environment source', () => {
+    const tools = buildToolCandidates([
+      { name: 'bash', version: '1', description: 'shell' },
+      { name: 'bash', version: '2', description: 'duplicate' },
+      { name: 'read', version: null, description: 'files' },
+    ])
+    expect(tools).toEqual([
+      { name: 'bash', version: '1', description: 'shell' },
+      { name: 'read', version: null, description: 'files' },
+    ])
+    expect(tools[0]).not.toHaveProperty('source')
+  })
+
+  it('merges skills from READY live Environments and retains selected orphans', () => {
     const environments = [
       {
-        name: 'platform',
+        name: 'local',
         status: 'READY',
         lastSeen: null,
-        tools: [{ name: 'bash', version: '1', description: 'shell' }],
-        skills: [{ name: 'dev', description: 'dev skill' }],
+        tools: [],
+        skills: [
+          { name: 'dev', description: 'dev skill' },
+          { name: 'ops', description: 'ops skill' },
+        ],
       },
       {
-        name: 'local',
-        status: 'DISCONNECTED',
+        name: 'remote',
+        status: 'READY',
         lastSeen: null,
-        tools: [
-          { name: 'bash', version: '2', description: 'shadowed' },
-          { name: 'lsp', version: '1', description: 'language' },
-        ],
-        skills: [{ name: 'ops', description: 'ops skill' }],
+        tools: [],
+        skills: [{ name: 'dev', description: 'duplicate' }, { name: 'docs', description: null }],
       },
     ]
-    const tools = buildCapabilityCandidates(environments, 'local', 'tools')
-    expect(tools.map((item) => item.name)).toEqual(['bash', 'lsp'])
-    expect(tools.find((item) => item.name === 'bash')?.source).toBe('platform')
-    expect(tools.find((item) => item.name === 'lsp')?.offline).toBe(true)
-
-    // no selected environment and non-ready platform should yield empty candidates
-    expect(buildCapabilityCandidates([{ ...environments[0], status: 'DISCONNECTED' }], '', 'skills')).toEqual([])
-    expect(buildCapabilityCandidates(environments, '  ', 'skills').map((item) => item.name)).toEqual(['dev'])
+    expect(buildSkillCandidates(environments).map((item) => item.name)).toEqual([
+      'dev',
+      'ops',
+      'docs',
+    ])
+    expect(buildSkillCandidates([{ ...environments[0], status: 'CONNECTING' }])).toEqual([])
+    expect(withSelectedOrphans(buildSkillCandidates(environments), ['missing'])).toEqual([
+      { name: 'dev', description: 'dev skill' },
+      { name: 'ops', description: 'ops skill' },
+      { name: 'docs', description: null },
+      { name: 'missing', description: null, offline: true, missing: true },
+    ])
   })
 })

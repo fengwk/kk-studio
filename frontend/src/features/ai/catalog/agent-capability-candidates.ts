@@ -1,69 +1,57 @@
-import type {
-  LiveEnvironmentDTO,
-  LiveEnvironmentSkillDTO,
-  LiveEnvironmentToolDTO,
-} from '@/shared/api/contracts/ai-environment'
-
-export const PLATFORM_ENVIRONMENT_NAME = 'platform'
+import type { ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface CapabilityOption {
   name: string
-  source: string
+  version?: string | null
   description: string | null
   offline?: boolean
   /** 已配置但不在当前 live 候选中（仍展示，可取消勾选）。 */
   missing?: boolean
 }
 
-function isReady(environment: LiveEnvironmentDTO | undefined): boolean {
-  return Boolean(environment && String(environment.status).toUpperCase() === 'READY')
+function isReady(environment: LiveEnvironmentDTO): boolean {
+  return String(environment.status).toUpperCase() === 'READY'
 }
 
-/**
- * Platform-first tool/skill candidates: READY platform first, then selected env
- * entries that do not collide with platform names.
- */
-export function buildCapabilityCandidates(
-  environments: LiveEnvironmentDTO[],
-  environmentName: string | null | undefined,
-  kind: 'tools' | 'skills',
-): CapabilityOption[] {
-  const byName = new Map(environments.map((environment) => [environment.name, environment]))
-  const platform = byName.get(PLATFORM_ENVIRONMENT_NAME)
-  const selectedName = environmentName?.trim() || ''
-  const selected = selectedName && selectedName !== PLATFORM_ENVIRONMENT_NAME ? byName.get(selectedName) : undefined
-
+/** Build the unified offline-selectable tool catalog without exposing a source environment. */
+export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOption[] {
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
-
-  const append = (
-    environment: LiveEnvironmentDTO | undefined,
-    items: Array<LiveEnvironmentToolDTO | LiveEnvironmentSkillDTO> | undefined,
-    offline: boolean,
-  ) => {
-    if (!environment || !items) {
-      return
+  for (const tool of tools) {
+    const name = tool.name?.trim()
+    if (!name || seen.has(name)) {
+      continue
     }
-    for (const item of items) {
-      const name = item.name?.trim()
+    seen.add(name)
+    options.push({
+      name,
+      version: tool.version ?? null,
+      description: tool.description ?? null,
+    })
+  }
+  return options
+}
+
+/** Merge skills from all READY live Environments by short name. */
+export function buildSkillCandidates(environments: LiveEnvironmentDTO[]): CapabilityOption[] {
+  const options: CapabilityOption[] = []
+  const seen = new Set<string>()
+  for (const environment of environments) {
+    if (!isReady(environment)) {
+      continue
+    }
+    for (const skill of environment.skills ?? []) {
+      const name = skill.name?.trim()
       if (!name || seen.has(name)) {
         continue
       }
       seen.add(name)
       options.push({
         name,
-        source: environment.name,
-        description: item.description ?? null,
-        offline,
+        description: skill.description ?? null,
       })
     }
-  }
-
-  if (isReady(platform)) {
-    append(platform, platform?.[kind], false)
-  }
-  if (selected) {
-    append(selected, selected[kind], !isReady(selected))
   }
   return options
 }
@@ -85,7 +73,6 @@ export function withSelectedOrphans(
     }
     const orphan: CapabilityOption = {
       name,
-      source: 'unavailable',
       description: null,
       offline: true,
       missing: true,

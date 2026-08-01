@@ -8,6 +8,7 @@ import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
+  ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
@@ -17,6 +18,7 @@ export function ResourceEditorModal({
   providers,
   models,
   agents = [],
+  toolCatalog = [],
   environments = [],
   providerDraft,
   modelDraft,
@@ -34,6 +36,7 @@ export function ResourceEditorModal({
   providers: AgentProviderDTO[]
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
+  toolCatalog?: ToolCatalogEntryDTO[]
   environments?: LiveEnvironmentDTO[]
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
@@ -91,6 +94,7 @@ export function ResourceEditorModal({
               draft={agentDraft}
               models={models}
               agents={agents}
+              toolCatalog={toolCatalog}
               environments={environments}
               fieldErrors={fieldErrors}
               onChange={onAgentDraftChange}

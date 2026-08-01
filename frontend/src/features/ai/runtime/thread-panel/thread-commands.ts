@@ -43,6 +43,14 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     keywords: ['set', 'switch', 'definition'],
   },
   {
+    id: 'environment',
+    label: 'environment',
+    description: '',
+    labelKey: 'ai.runtime.command.environmentLabel',
+    descriptionKey: 'ai.runtime.command.environment',
+    keywords: ['set', 'switch', 'runtime', 'target'],
+  },
+  {
     id: 'model',
     label: 'model',
     description: '',
@@ -96,7 +104,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
  * Commands usable on an empty pane. `/thread` picks an existing Thread globally; `/session`
  * rebinds the *current* Thread and therefore needs a pane selection first.
  */
-const BLANK_SCENE_ENABLED = new Set(['thread', 'agent'])
+const BLANK_SCENE_ENABLED = new Set(['thread', 'agent', 'environment'])
 
 /** Project stable command list with scene availability (disabled stays listed). */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {

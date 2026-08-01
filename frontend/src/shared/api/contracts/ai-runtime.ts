@@ -79,6 +79,7 @@ export interface HarnessThreadDTO {
   inputSequence: BackendLong
   activeAgentDefinitionId: string | null
   activeAgentName: string | null
+  activeEnvironmentName: string | null
   modelId: string | null
   variant: string | null
   yoloEnabled: boolean | null
@@ -99,6 +100,7 @@ interface HarnessThreadEpochGuardDTO {
 export interface HarnessThreadBootstrapDTO extends HarnessThreadEpochGuardDTO {
   title?: string
   agentDefinitionId: string
+  environmentName?: string | null
   yoloEnabled: boolean
 }
 
@@ -133,6 +135,11 @@ export interface HarnessThreadModelSetDTO extends HarnessThreadEpochGuardDTO {
   clientMessageId: string
 }
 
+export interface HarnessThreadEnvironmentSetDTO extends HarnessThreadEpochGuardDTO {
+  environmentName: string | null
+  clientMessageId: string
+}
+
 export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO
 
 /**
@@ -160,6 +167,7 @@ export type ThreadInputType =
   | 'CUSTOM_MESSAGE'
   | 'SET_AGENT'
   | 'SET_MODEL'
+  | 'SET_ENVIRONMENT'
   | 'SET_YOLO'
 
 type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
@@ -190,7 +198,6 @@ export interface ToolInvocationDTO {
   toolCallId: string
   toolName: string
   toolVersion: string
-  location: 'PLATFORM' | 'ENVIRONMENT'
   environmentName: string | null
   argumentsJson: string
   status: string

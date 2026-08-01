@@ -10,6 +10,7 @@ describe('ThreadStatusFooter', () => {
         providerName="minimax"
         modelName="MiniMax"
         variantName="default"
+        environmentName="local"
         yoloEnabled
         contextWindow={100000}
         usage={{
@@ -33,7 +34,7 @@ describe('ThreadStatusFooter', () => {
     expect(line).toContain('CH50.0%')
     expect(line).toContain(' · ')
     // 三段都在（布局装箱依赖真实宽度；jsdom 下不一定同行，故不强依赖 sep 数量）
-    expect(footer.querySelectorAll('.thread-status-seg').length).toBe(3)
+    expect(footer.querySelectorAll('.thread-status-seg').length).toBe(4)
     expect(line).toMatch(/4\.0k\/100k · \$0\.300|4k\/100k · \$0\.300/)
   })
 
@@ -136,7 +137,7 @@ describe('ThreadStatusFooter', () => {
           variantName="quality"
         />,
       )
-      expect(screen.getByLabelText('会话状态').querySelectorAll('.thread-status-row')).toHaveLength(3)
+      expect(screen.getByLabelText('会话状态').querySelectorAll('.thread-status-row')).toHaveLength(4)
     } finally {
       if (descriptor) {
         Object.defineProperty(HTMLElement.prototype, 'clientWidth', descriptor)

@@ -18,12 +18,14 @@ export function ThreadStatusFooter({
   providerName,
   modelName,
   variantName,
+  environmentName,
   yoloEnabled,
   usage,
   contextWindow,
   onAgentClick,
   onModelClick,
   onVariantClick,
+  onEnvironmentClick,
 }: ThreadStatusModelInput) {
   const { t, locale } = useI18n()
   const model = useMemo(
@@ -34,12 +36,14 @@ export function ThreadStatusFooter({
         providerName,
         modelName,
         variantName,
+        environmentName,
         yoloEnabled,
         usage,
         contextWindow,
         onAgentClick,
         onModelClick,
         onVariantClick,
+        onEnvironmentClick,
       })
     },
     [
@@ -48,12 +52,14 @@ export function ThreadStatusFooter({
       providerName,
       modelName,
       variantName,
+      environmentName,
       yoloEnabled,
       usage,
       contextWindow,
       onAgentClick,
       onModelClick,
       onVariantClick,
+      onEnvironmentClick,
     ],
   )
 

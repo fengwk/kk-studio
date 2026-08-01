@@ -73,7 +73,6 @@ export interface AgentDraft {
   systemPrompt: string
   modelId: string
   variant: string
-  environmentName: string
   tools: string[]
   skills: string[]
 }

@@ -123,10 +123,15 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
 }
 
 export interface AgentDefinitionConfigDTO {
-  /** Optional live Environment name; an omitted or null value means none. */
-  environmentName?: string | null
   tools: string[]
   skills: string[]
+}
+
+/** Offline-selectable unified runtime tool catalog entry. */
+export interface ToolCatalogEntryDTO {
+  name: string
+  version: string | null
+  description: string | null
 }
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */

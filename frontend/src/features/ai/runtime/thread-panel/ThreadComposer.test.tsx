@@ -15,6 +15,7 @@ describe('ThreadComposer and commands', () => {
       'session',
       'thread',
       'agent',
+      'environment',
       'model',
       'variant',
       'yolo',
@@ -26,7 +27,11 @@ describe('ThreadComposer and commands', () => {
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // A blank pane has no Thread yet, so `/session` (which rebinds the current Thread) is
     // unavailable while `/thread` (pure pane selection) stays enabled.
-    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual(['thread', 'agent'])
+    expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
+      'thread',
+      'agent',
+      'environment',
+    ])
     expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'model')?.disabled).toBe(true)

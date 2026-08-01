@@ -16,29 +16,11 @@ function normalizeNames(items: string[] | null | undefined): string[] {
   return items.map((item) => item.trim()).filter(Boolean)
 }
 
-/** UI 可展示为 env/name；持久化给 Agent 时去掉前缀，只保留短名。 */
-function stripCapabilityPrefix(raw: string): string {
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return ''
-  }
-  const slash = trimmed.indexOf('/')
-  if (slash < 0) {
-    return trimmed
-  }
-  // `<env>/<name>`：只取第一个 `/` 之后的短名。
-  return trimmed.slice(slash + 1).trim()
-}
-
-/**
- * 保存时去掉 env 前缀，并校验短名唯一。
- * 最终写入 Agent config 的永远是无前缀短名。
- */
 function normalizeCapabilityShortNames(
   items: string[] | null | undefined,
   kind: 'tools' | 'skills',
 ): string[] {
-  const shortNames = normalizeNames(items).map(stripCapabilityPrefix).filter(Boolean)
+  const shortNames = normalizeNames(items)
   const seen = new Set<string>()
   const duplicates = new Set<string>()
   for (const name of shortNames) {
@@ -60,7 +42,6 @@ function normalizeCapabilityShortNames(
 
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
-    environmentName: trimToNull(draft.environmentName),
     tools: normalizeCapabilityShortNames(draft.tools, 'tools'),
     skills: normalizeCapabilityShortNames(draft.skills, 'skills'),
   }
@@ -74,7 +55,6 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     modelId: model ? String(model.id) : '',
     // Empty = no override; runtime uses model.defaultVariant.
     variant: '',
-    environmentName: '',
     tools: [],
     skills: [],
   }
@@ -88,7 +68,6 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     systemPrompt: agent.systemPrompt || '',
     modelId: agent.modelId,
     variant: agent.variant?.trim() || '',
-    environmentName: config.environmentName || '',
     tools: normalizeNames(config.tools),
     skills: normalizeNames(config.skills),
   }

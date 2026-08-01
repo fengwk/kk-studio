@@ -14,6 +14,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listProviders: vi.fn(),
     listModels: vi.fn(),
     listAgents: vi.fn(),
+    listTools: vi.fn(),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -37,20 +38,21 @@ const scopeQueryMatrix: Array<{
     providers: number
     models: number
     agents: number
+    tools: number
     environments: number
   }
 }> = [
   {
     scope: 'agents',
-    expected: { providers: 1, models: 1, agents: 1, environments: 1 },
+    expected: { providers: 1, models: 1, agents: 1, tools: 1, environments: 1 },
   },
   {
     scope: 'models',
-    expected: { providers: 1, models: 1, agents: 0, environments: 0 },
+    expected: { providers: 1, models: 1, agents: 0, tools: 0, environments: 0 },
   },
   {
     scope: 'providers',
-    expected: { providers: 1, models: 0, agents: 0, environments: 0 },
+    expected: { providers: 1, models: 0, agents: 0, tools: 0, environments: 0 },
   },
 ]
 
@@ -60,6 +62,7 @@ describe('useCatalogPageController', () => {
     vi.mocked(agentService.listProviders).mockResolvedValue(page([provider()]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([model()]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
+    vi.mocked(agentService.listTools).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   })
 
@@ -74,6 +77,7 @@ describe('useCatalogPageController', () => {
         expect(agentService.listProviders).toHaveBeenCalledTimes(expected.providers)
         expect(agentService.listModels).toHaveBeenCalledTimes(expected.models)
         expect(agentService.listAgents).toHaveBeenCalledTimes(expected.agents)
+        expect(agentService.listTools).toHaveBeenCalledTimes(expected.tools)
         expect(environmentService.listEnvironments).toHaveBeenCalledTimes(
           expected.environments,
         )
@@ -238,7 +242,6 @@ function agent() {
     modelId: 'model-1',
     variant: 'default',
     config: {
-      environmentName: null,
       tools: [],
       skills: [],
     },

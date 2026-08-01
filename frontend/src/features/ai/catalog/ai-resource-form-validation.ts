@@ -23,7 +23,6 @@ export type ResourceFieldKey =
   | 'pricing'
   | 'modelId'
   | 'variant'
-  | 'environmentName'
   | 'tools'
   | 'skills'
   | 'general'

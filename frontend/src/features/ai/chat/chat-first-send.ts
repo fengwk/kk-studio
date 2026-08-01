@@ -2,6 +2,7 @@ import { createClientMessageId } from '@/features/ai/runtime'
 import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { translate } from '@/shared/i18n'
 
 export interface FirstSendResult {
   sessionId: string
@@ -11,42 +12,33 @@ export interface FirstSendResult {
 
 /**
  * Blank pane first send order:
- * 1) create an UNBOUND Thread atomically associated with the Chat
- * 2) bootstrap it with the default Agent and yolo, creating Session/ROOT/RUNTIME_CONFIG
- * 3) enqueue USER_MESSAGE against the epoch returned by bootstrap
+ * 1) create a fully bound Thread atomically associated with the Chat
+ * 2) enqueue USER_MESSAGE against the returned Thread epoch
  */
 export async function performBlankPaneFirstSend(options: {
   chatId: string
-  agentDefinitionId: string
   content: string
-  yoloEnabled?: boolean
-  title?: string
   createChatThread?: typeof chatService.createChatThread
-  bootstrapThread?: typeof harnessService.bootstrapThread
   submitThreadMessage?: typeof harnessService.submitThreadMessage
   createIds?: () => { userMessageId: string }
 }): Promise<FirstSendResult> {
   const createChatThread = options.createChatThread ?? chatService.createChatThread
-  const bootstrapThread = options.bootstrapThread ?? harnessService.bootstrapThread
   const submitThreadMessage = options.submitThreadMessage ?? harnessService.submitThreadMessage
   const ids = options.createIds?.() ?? ({ userMessageId: createClientMessageId() } as const)
 
   const created = await createChatThread(options.chatId)
-  const bootstrapped = await bootstrapThread(created.threadId, {
-    title: options.title,
-    agentDefinitionId: options.agentDefinitionId,
-    yoloEnabled: options.yoloEnabled ?? false,
-    expectedExecutionEpoch: created.executionEpoch,
-  })
-  const userMessageInput = await submitThreadMessage(bootstrapped.thread.threadId, {
+  if (!created.sessionId) {
+    throw new Error(translate('ai.runtime.action.firstSendMissingSession'))
+  }
+  const userMessageInput = await submitThreadMessage(created.threadId, {
     content: options.content,
     clientMessageId: ids.userMessageId,
-    expectedExecutionEpoch: bootstrapped.thread.executionEpoch,
+    expectedExecutionEpoch: created.executionEpoch,
   })
 
   return {
-    sessionId: bootstrapped.session.sessionId,
-    thread: bootstrapped.thread,
+    sessionId: created.sessionId,
+    thread: created,
     userMessageInput,
   }
 }

@@ -5,6 +5,7 @@ export interface ChatDTO {
   id: string
   title: string | null
   defaultAgentId: string
+  defaultEnvironmentName: string | null
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
@@ -13,11 +14,13 @@ export interface ChatDTO {
 export interface ChatCreateDTO {
   title?: string
   defaultAgentId: string
+  defaultEnvironmentName?: string
 }
 
-/** Partial update: omitted defaultAgentId preserves; a supplied value must be non-blank. */
+/** Partial update: omitted fields preserve; explicit null clears defaultEnvironmentName. */
 export interface ChatUpdateDTO {
   title?: string | null
   defaultAgentId?: string
+  defaultEnvironmentName?: string | null
   expectedVersion: CatalogVersion
 }

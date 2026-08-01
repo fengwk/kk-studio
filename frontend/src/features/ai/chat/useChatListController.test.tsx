@@ -13,6 +13,7 @@ vi.mock('@/shared/api/chat-service', () => ({
       id: 'c1',
       title: 'T',
       defaultAgentId: 'a1',
+      defaultEnvironmentName: null,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -29,13 +30,16 @@ const agents = [
     modelId: 'm1',
     variant: 'default',
     config: {
-      environmentName: null,
       tools: [],
       skills: [],
     },
     createTime: null,
     updateTime: null,
   },
+]
+
+const environments = [
+  { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
 ]
 
 describe('useChatListController', () => {
@@ -46,7 +50,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, environments, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('a1'))
     expect(result.current.createChatModal.open).toBe(true)
@@ -62,12 +66,19 @@ describe('useChatListController', () => {
     act(() => {
       result.current.createChatModal.onTitleChange('Hello')
       result.current.createChatModal.onSelectAgent('a1')
+      result.current.createChatModal.onSelectEnvironment('local')
     })
     expect(result.current.createChatModal.formError).toBe('')
     expect(result.current.createChatModal.nameError).toBe('')
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
     })
-    await waitFor(() => expect(chatService.createChat).toHaveBeenCalledWith({ title: 'Hello', defaultAgentId: 'a1' }))
+    await waitFor(() =>
+      expect(chatService.createChat).toHaveBeenCalledWith({
+        title: 'Hello',
+        defaultAgentId: 'a1',
+        defaultEnvironmentName: 'local',
+      }),
+    )
   })
 })

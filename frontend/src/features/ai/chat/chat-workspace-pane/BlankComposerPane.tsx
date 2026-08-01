@@ -19,10 +19,15 @@ import {
 } from '@/features/ai/catalog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { AgentSelectionModal, SelectionListModal } from '@/features/ai/chat/SelectionListModal'
+import {
+  AgentSelectionModal,
+  EnvironmentSelectionModal,
+  SelectionListModal,
+} from '@/features/ai/chat/SelectionListModal'
 import { translate, useI18n } from '@/shared/i18n'
 
 function resolveDefaultAgent(
@@ -63,30 +68,36 @@ function resolveBlankPaneFooterLabels(
 export function BlankComposerPane({
   chat,
   agents,
+  environments = [],
   focused,
   threadSort,
   onFocus,
   onThreadChange,
   onThreadSortChange,
   onDefaultAgentChange,
+  onDefaultEnvironmentChange = async () => undefined,
 }: {
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
+  environments?: LiveEnvironmentDTO[]
   focused: boolean
   threadSort: PaneSortPreference
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   onDefaultAgentChange: (agentId: string) => Promise<void>
+  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
 }) {
   const { t } = useI18n()
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
+  const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const [threadAssociationPending, setThreadAssociationPending] = useState(false)
+  const [environmentPending, setEnvironmentPending] = useState(false)
   const queryClient = useQueryClient()
   const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
   const modelsQuery = useQuery({
@@ -110,13 +121,12 @@ export function BlankComposerPane({
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
 
-  async function runFirstSend(agentId: string, content: string) {
+  async function runFirstSend(content: string) {
     setPending(true)
     setActionError(null)
     try {
       const result = await performBlankPaneFirstSend({
         chatId: chat?.id ?? '',
-        agentDefinitionId: agentId,
         content,
       })
       await Promise.all([
@@ -147,7 +157,7 @@ export function BlankComposerPane({
       setAgentModalOpen(true)
       return
     }
-    await runFirstSend(String(defaultAgent.id), content)
+    await runFirstSend(content)
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -161,6 +171,9 @@ export function BlankComposerPane({
         return
       case 'agent':
         setAgentModalOpen(true)
+        return
+      case 'environment':
+        setEnvironmentModalOpen(true)
         return
       default:
         setActionError(
@@ -193,13 +206,26 @@ export function BlankComposerPane({
     try {
       await onDefaultAgentChange(agentId)
       if (content) {
-        await runFirstSend(agentId, content)
+        await runFirstSend(content)
       }
     } catch (error) {
       setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
       if (content) {
         setDraft(content)
       }
+    }
+  }
+
+  async function handleEnvironmentSelected(environmentName: string | null) {
+    setEnvironmentPending(true)
+    setActionError(null)
+    try {
+      await onDefaultEnvironmentChange(environmentName)
+      setEnvironmentModalOpen(false)
+    } catch (error) {
+      setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
+    } finally {
+      setEnvironmentPending(false)
     }
   }
 
@@ -230,10 +256,15 @@ export function BlankComposerPane({
             modelName={defaultAgent ? footerLabels.modelName : undefined}
             variantName={defaultAgent ? footerLabels.variantName : undefined}
             contextWindow={defaultAgent ? footerLabels.contextWindow : undefined}
+            environmentName={chat?.defaultEnvironmentName}
             yoloEnabled={false}
             onAgentClick={() => {
               onFocus()
               setAgentModalOpen(true)
+            }}
+            onEnvironmentClick={() => {
+              onFocus()
+              setEnvironmentModalOpen(true)
             }}
           />
         </main>
@@ -251,6 +282,16 @@ export function BlankComposerPane({
         }}
         onSelect={(agentId) => {
           void handleAgentSelected(agentId)
+        }}
+      />
+      <EnvironmentSelectionModal
+        open={environmentModalOpen}
+        environments={environments}
+        selectedEnvironmentName={chat?.defaultEnvironmentName}
+        selectionPending={environmentPending}
+        onClose={() => setEnvironmentModalOpen(false)}
+        onSelect={(environmentName) => {
+          void handleEnvironmentSelected(environmentName)
         }}
       />
       {/* /thread only rebinds the pane; no Thread is mutated. */}

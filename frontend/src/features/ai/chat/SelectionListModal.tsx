@@ -1,5 +1,7 @@
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
+import { filterReadyEnvironments } from '@/features/ai/environment/environment-utils'
+import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export interface SelectionListItem {
@@ -182,5 +184,50 @@ export function AgentSelectionModal({
         </div>
       </div>
     </ModalBackdrop>
+  )
+}
+
+export function EnvironmentSelectionModal({
+  open,
+  environments,
+  selectedEnvironmentName,
+  selectionPending = false,
+  onSelect,
+  onClose,
+}: {
+  open: boolean
+  environments: LiveEnvironmentDTO[]
+  selectedEnvironmentName?: string | null
+  selectionPending?: boolean
+  onSelect: (environmentName: string | null) => void | Promise<void>
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  const selected = selectedEnvironmentName?.trim() || ''
+  const items: SelectionListItem[] = [
+    {
+      id: '',
+      title: t('ai.chat.noneEnvironment'),
+      badge: selected ? undefined : t('ai.chat.selected'),
+    },
+    ...filterReadyEnvironments(environments).map((environment) => ({
+      id: environment.name,
+      title: environment.name,
+      badge: environment.name === selected ? t('ai.chat.selected') : undefined,
+    })),
+  ]
+  return (
+    <SelectionListModal
+      open={open}
+      title={t('ai.chat.selectEnvironment')}
+      items={items}
+      sort="recent"
+      onSortChange={() => undefined}
+      showSort={false}
+      selectionPending={selectionPending}
+      emptyText={t('ai.chat.noEnvironments')}
+      onClose={onClose}
+      onSelect={(environmentName) => onSelect(environmentName || null)}
+    />
   )
 }

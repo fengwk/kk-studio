@@ -46,9 +46,8 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     description: ' description ',
     systemPrompt: ' prompt ',
     variant: 'quality',
-    environmentName: ' local ',
-    tools: ['platform/read', 'local/bash'],
-    skills: ['platform/dev'],
+    tools: [' read ', 'bash'],
+    skills: [' dev '],
     ...overrides,
   }
 }
@@ -64,7 +63,9 @@ describe('ai-agent-draft-codec', () => {
       tools: ['read', 'bash'],
       skills: ['dev'],
     })
-    expect(() => toEditableAgent(draft({ tools: ['a/read', 'b/read'] }))).toThrow(/重名/)
+    expect(() => toEditableAgent(draft({ tools: ['read', 'read'] }))).toThrow(
+      /名称不能重复/,
+    )
   })
 
   it('projects persisted definitions and normalizes nullable values', () => {
@@ -76,7 +77,6 @@ describe('ai-agent-draft-codec', () => {
       modelId: 'model-1',
       variant: 'quality',
       config: {
-        environmentName: null,
         tools: [' read ', ''],
         skills: [],
       },
@@ -91,7 +91,6 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: '',
       modelId: 'model-1',
       variant: 'quality',
-      environmentName: '',
       tools: ['read'],
       skills: [],
     })
@@ -112,7 +111,6 @@ describe('ai-agent-draft-codec', () => {
       modelId: 'model-1',
       variant: 'quality',
       config: {
-        environmentName: 'local',
         tools: ['read', 'bash'],
         skills: ['dev'],
       },
@@ -122,12 +120,12 @@ describe('ai-agent-draft-codec', () => {
 
     expect(
       toEditableAgent(
-        draft({ description: '', systemPrompt: '', environmentName: '' }),
+        draft({ description: '', systemPrompt: '' }),
       ),
     ).toMatchObject({
       description: null,
       systemPrompt: null,
-      config: { environmentName: null },
+      config: { tools: ['read', 'bash'], skills: ['dev'] },
     })
     expect(toEditableAgent(draft({ variant: ' ' })).variant).toBeNull()
   })
@@ -135,8 +133,8 @@ describe('ai-agent-draft-codec', () => {
   it.each([
     [{ name: ' ' }, /name/],
     [{ modelId: ' ' }, /modelId/],
-    [{ tools: ['one/read', 'two/read'] }, /tools/],
-    [{ skills: ['one/dev', 'two/dev'] }, /skills/],
+    [{ tools: ['read', 'read'] }, /tools/],
+    [{ skills: ['dev', 'dev'] }, /skills/],
   ] as Array<[Partial<AgentDraft>, RegExp]>)(
     'rejects invalid complete bodies %#',
     (patch, message) => {
@@ -144,9 +142,8 @@ describe('ai-agent-draft-codec', () => {
     },
   )
 
-  it('omits an unset environmentName entirely from the wire payload', () => {
-    expect(toEditableAgent(draft({ environmentName: '' })).config).toEqual({
-      environmentName: null,
+  it('writes the strict config shape with only tools and skills', () => {
+    expect(toEditableAgent(draft()).config).toEqual({
       tools: ['read', 'bash'],
       skills: ['dev'],
     })

@@ -9,6 +9,7 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
+  ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentResourceId, PageResult } from '@/shared/api/contracts/base'
 
@@ -40,6 +41,8 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/ai/catalog/agents', { params: { pageNumber, pageSize } }),
+
+    listTools: (): Promise<ToolCatalogEntryDTO[]> => client.get('/ai/catalog/tools'),
 
     createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
       client.post('/ai/catalog/agents', data),
