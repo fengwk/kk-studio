@@ -5,8 +5,8 @@ import java.util.Objects;
 /**
  * Command-time live resource → immutable {@link RuntimeConfigSnapshot} resolution SPI.
  *
- * <p>Implementations may read durable definitions, models, providers, ready environments and {@code
- * ToolFactories} descriptors. They must not create providers or perform model I/O. Pure in-memory
+ * <p>Implementations may read durable definitions, models, providers, ready environments and tool
+ * catalogs. They must not create providers or perform model I/O. Pure in-memory Environment and
  * YOLO policy replacement is owned by runtime command orchestration, not this SPI.
  */
 public interface RuntimeConfigSource {
@@ -24,7 +24,7 @@ public interface RuntimeConfigSource {
   }
 
   /**
-   * Resolves a replacement Agent while retaining every non-Agent field from the current snapshot.
+   * Resolves the new Agent configuration while retaining the current Environment and YOLO policy.
    */
   default RuntimeConfigSnapshot replaceAgent(RuntimeConfigSnapshot current, long definitionId) {
     Objects.requireNonNull(current, "current");
