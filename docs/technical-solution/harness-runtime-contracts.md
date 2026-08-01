@@ -374,7 +374,7 @@ public interface RuntimeConfigSource {
 }
 ```
 
-这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与统一 `ToolCatalog`，但不得发起 Provider I/O。`replaceAgent` 只替换 Agent，保留 current 的 Environment、Model、tools、skills 与 yolo；纯 `SET_ENVIRONMENT` / `SET_YOLO` 变换分别由 `RuntimeConfigSnapshot.withEnvironmentName` / `withYoloEnabled` 完成。
+这是 command-time live resource 冻结 SPI。Core 实现可以读取 Definition、Model、Provider、ready Environment 与统一 `ToolCatalog`，但不得发起 Provider I/O。`replaceAgent` 依据新的 definition 重新解析 Agent、Model、tools 与 skills，仅沿用 current 的 `environmentName` 与 `yoloEnabled`；纯 `SET_ENVIRONMENT` / `SET_YOLO` 变换分别由 `RuntimeConfigSnapshot.withEnvironmentName` / `withYoloEnabled` 完成。
 
 ## 5. Transaction ports
 

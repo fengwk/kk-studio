@@ -83,9 +83,14 @@ sequenceDiagram
     participant TW as ToolWorker
     participant DB as PostgreSQL
 
-    D->>W: HELLO / READY(skills)
-    W->>G: open / receive text frames
-    G->>R: bind name, fixed tools, READY skills/lastSeen
+    D->>W: HELLO
+    W->>G: HELLO envelope
+    G->>R: bind name, fixed tools
+    G-->>W: WELCOME {}
+    W-->>D: WELCOME {}
+    D->>W: READY(skills)
+    W->>G: READY(skills) envelope
+    G->>R: mark READY, skills, lastSeen
     G-->>L: READY hint after protocol locks
     L-->>ED: wake()
     ED->>TW: dispatch eligible route head
