@@ -203,19 +203,21 @@ Agent config 只包含 `tools` 与 `skills`；Environment target 不属于 Agent
 
 | Case | 断言 |
 | --- | --- |
+| `ui.i18n.language_switch` | `/settings` 通过右上角原生语言下拉切换 English/中文，切换后持久化并在 reload 后保持 |
 | `ui.chats.page_loads` | `/chats` + 新建 Chat |
 | `ui.models.page_loads` | `/models` 渲染全部 19 个 Pi seed 模型 + 新建 Model |
 | `ui.models.open_create_modal` | 点击新建 Model |
-| `ui.agents.page_loads` | `/agents` + default-assistant |
+| `ui.agents.page_loads` | `/agents` + default-assistant；打开编辑模态，逐项断言 heading/description 在自身 capability option 卡片内，并断言各 options 容器内相邻行 bounding box 不重叠，截图后关闭模态 |
 | `ui.providers.page_loads` | `/providers` |
 | `ui.environments.page_loads` | `/environments` |
+| `ui.harness_settings.page_loads` | `/settings` 渲染自动重试与实时流缓存策略卡片，并校验 `maxLength=5000` |
 | `ui.nav.roundtrip` | 导航往返无 pageerror |
 | `ui.chat.create_flow` | UI 创建 Chat 并出现在列表 |
 | `ui.model.create_edit_delete_flow` | UI 创建/编辑/删除 Model |
 | `ui.agent.create_edit_delete_flow` | UI 创建/编辑/删除 Agent |
 | `ui.model.validation_empty_name` | 空名称前端校验错误展示 |
 | `ui.provider.create_edit_delete_flow` | UI 创建/编辑/删除 Provider |
-| `ui.chat.blank_workspace_shell` | 进入空白工作区，校验 blank pane + composer |
+| `ui.chat.blank_workspace_shell` | 进入空白工作区，校验 blank pane + composer，且 Chat 工作区内没有语言选择器 |
 | `ui.chat.blank_first_send_real` | （`--real`）blank 首发真实消息；断言冻结 Agent/Model/Variant footer 与 assistant 的 `OK` 回复 |
 
 截图：`reports/e2e/latest/artifacts/ui_*/`；汇总：`ui-report.md` / `ui-summary.json`。

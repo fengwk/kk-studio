@@ -108,6 +108,43 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg || 'assertion failed')
 }
 
+function normalizeBox(box) {
+  if (!box) return null
+  return {
+    left: box.x,
+    top: box.y,
+    right: box.x + box.width,
+    bottom: box.y + box.height,
+  }
+}
+
+function assertBoxWithin(inner, outer, label) {
+  const tolerance = 0.5
+  const innerEdges = normalizeBox(inner)
+  const outerEdges = normalizeBox(outer)
+  assert(innerEdges && outerEdges, `${label} bounding box is missing`)
+  assert(
+    innerEdges.left >= outerEdges.left - tolerance
+      && innerEdges.top >= outerEdges.top - tolerance
+      && innerEdges.right <= outerEdges.right + tolerance
+      && innerEdges.bottom <= outerEdges.bottom + tolerance,
+    `${label} bounding box escapes its option card`,
+  )
+}
+
+function assertBoxesDoNotOverlap(left, right, label) {
+  const tolerance = 0.5
+  const leftEdges = normalizeBox(left)
+  const rightEdges = normalizeBox(right)
+  assert(leftEdges && rightEdges, `${label} bounding box is missing`)
+  const overlaps =
+    leftEdges.left < rightEdges.right - tolerance
+    && leftEdges.right > rightEdges.left + tolerance
+    && leftEdges.top < rightEdges.bottom - tolerance
+    && leftEdges.bottom > rightEdges.top + tolerance
+  assert(!overlaps, `${label} bounding boxes overlap`)
+}
+
 function listArtifacts(caseDir, reportDir) {
   if (!existsSync(caseDir)) return []
   return readdirSync(caseDir)
@@ -226,7 +263,8 @@ async function main(argv) {
   await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
     await goto('/settings')
     await expectVisibleText(page, '设置')
-    await page.locator('.topbar-right .locale-selector button', { hasText: 'English' }).click()
+    const localeSelector = page.locator('.topbar-right select.locale-selector')
+    await localeSelector.selectOption('en-US')
     await expectVisibleText(page, 'Setting')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
@@ -235,7 +273,7 @@ async function main(argv) {
 
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
     await expectVisibleText(page, 'Setting')
-    await page.locator('.topbar-right .locale-selector button', { hasText: '中文' }).click()
+    await page.locator('.topbar-right select.locale-selector').selectOption('zh-CN')
     await expectVisibleText(page, '设置')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),
@@ -278,6 +316,52 @@ async function main(argv) {
     expectNoFatal(pageErrors, consoleErrors)
     await expectVisibleText(page, '新建 Agent')
     await expectVisibleText(page, 'default-assistant')
+    await page.getByRole('button', { name: '编辑 default-assistant' }).click()
+    const agentModal = page.locator('form.resource-modal-card')
+    await agentModal.waitFor({ state: 'visible', timeout: 10_000 })
+    const detailedOptions = agentModal.locator('.capability-option-detailed')
+    await detailedOptions.first().waitFor({ state: 'visible', timeout: 10_000 })
+    const capabilityContainers = agentModal.locator('.capability-options')
+    const capabilityContainerCount = await capabilityContainers.count()
+    let detailedOptionCount = 0
+
+    for (let containerIndex = 0; containerIndex < capabilityContainerCount; containerIndex++) {
+      const container = capabilityContainers.nth(containerIndex)
+      const options = container.locator('.capability-option-detailed')
+      const optionCount = await options.count()
+      detailedOptionCount += optionCount
+      const optionBoxes = []
+
+      for (let optionIndex = 0; optionIndex < optionCount; optionIndex++) {
+        const option = options.nth(optionIndex)
+        const cardBox = await option.boundingBox()
+        const headingBox = await option.locator('.capability-option-heading').boundingBox()
+        assertBoxWithin(headingBox, cardBox, `capability option ${containerIndex}:${optionIndex} heading`)
+
+        const description = option.locator('.capability-option-description')
+        if (await description.count() > 0) {
+          const descriptionBox = await description.boundingBox()
+          assertBoxWithin(
+            descriptionBox,
+            cardBox,
+            `capability option ${containerIndex}:${optionIndex} description`,
+          )
+        }
+        optionBoxes.push(cardBox)
+      }
+
+      for (let optionIndex = 0; optionIndex < optionBoxes.length - 1; optionIndex++) {
+        assertBoxesDoNotOverlap(
+          optionBoxes[optionIndex],
+          optionBoxes[optionIndex + 1],
+          `adjacent capability options in container ${containerIndex} at indexes ${optionIndex} and ${optionIndex + 1}`,
+        )
+      }
+    }
+    assert(detailedOptionCount > 0, 'default-assistant edit modal has no detailed capability options')
+    await shot(caseArt, 'agent-capability-modal')
+    await agentModal.getByRole('button', { name: '关闭' }).click()
+    await agentModal.waitFor({ state: 'detached', timeout: 10_000 })
   })
 
   await run('ui.providers.page_loads', 'Providers 页可打开', async (caseArt) => {
@@ -320,7 +404,7 @@ async function main(argv) {
     const title = `e2e-ui-chat-${stamp}`
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByLabel('Name').fill(title)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(title).first().waitFor({ state: 'visible', timeout: 15_000 })
     await shot(caseArt, 'chat-created')
@@ -334,14 +418,14 @@ async function main(argv) {
     const renamed = `${name}-upd`
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
-    await page.getByLabel('Name').fill(name)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.getByRole('button', { name: '确认创建' }).click()
     const modelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-created')
 
     // 编辑
     await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
-    await page.getByLabel('Name').fill(renamed)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
     await page.getByRole('button', { name: '保存修改' }).click()
     const renamedModelRef = await resourceCardTitle(page, renamed)
     await shot(caseArt, 'model-updated')
@@ -364,14 +448,14 @@ async function main(argv) {
     const renamed = `${name}-upd`
     await goto('/agents')
     await page.getByText('新建 Agent', { exact: true }).click()
-    await page.getByLabel('Name').fill(name)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.locator('label.form-group', { hasText: 'System Prompt' }).locator('textarea').fill('ui e2e agent')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.getByLabel('Name').fill(renamed)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-updated')
@@ -394,7 +478,7 @@ async function main(argv) {
     await page.waitForTimeout(200)
     await page.locator('.cards-grid').getByText('新建 Model', { exact: true }).click()
     await page.locator('form.modal-card, .modal-card').first().waitFor({ state: 'visible', timeout: 10_000 })
-    const nameInput = page.getByLabel('Name')
+    const nameInput = page.getByRole('textbox', { name: 'Name', exact: true })
     await nameInput.fill('')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.waitForTimeout(400)
@@ -413,7 +497,7 @@ async function main(argv) {
     await goto('/providers')
     await page.keyboard.press('Escape')
     await page.locator('.cards-grid').getByText('新建 Provider', { exact: true }).click()
-    await page.getByLabel('Name').fill(name)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
     await page.getByLabel('Base URL').fill('https://example.com/v1')
     await page.getByLabel('API Key（可选）').fill('sk-e2e-ui-test')
     await page.getByRole('button', { name: '确认创建' }).click()
@@ -421,7 +505,7 @@ async function main(argv) {
     await shot(caseArt, 'provider-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.getByLabel('Name').fill(renamed)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
     // 编辑时不改 key（空 credential 保留）
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
@@ -443,7 +527,7 @@ async function main(argv) {
     // 创建带默认 agent 的 chat，便于 blank 首发
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
-    await page.getByLabel('Name').fill(title)
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
     // 选 default-assistant
     const agentSelect = page.getByLabel('Default Agent')
     await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
@@ -454,6 +538,10 @@ async function main(argv) {
     // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
     await page.getByText('新对话').first().waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 10_000 })
+    assert(
+      await page.locator('.chat-workspace .locale-selector').count() === 0,
+      'chat workspace must not contain a locale selector',
+    )
     await shot(caseArt, 'blank-workspace')
     expectNoFatal(pageErrors, consoleErrors)
 
@@ -469,7 +557,7 @@ async function main(argv) {
       const title = `e2e-ui-send-${stamp}`
       await goto('/chats')
       await page.getByText('新建 Chat', { exact: true }).click()
-      await page.getByLabel('Name').fill(title)
+      await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
       const agentSelect = page.getByLabel('Default Agent')
       await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
         await agentSelect.selectOption({ index: 1 })

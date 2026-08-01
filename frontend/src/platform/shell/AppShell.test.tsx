@@ -18,14 +18,17 @@ describe('AppShell locale selector', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getAllByRole('button', { name: 'English' })).toHaveLength(2)
-    expect(screen.getAllByRole('button', { name: '中文' })).toHaveLength(2)
-    expect(screen.getAllByRole('button', { name: '中文' }).every((button) => button.getAttribute('aria-pressed') === 'true')).toBe(true)
+    const selectors = screen.getAllByRole('combobox', { name: '语言' })
+    expect(selectors).toHaveLength(2)
+    expect(selectors.every((selector) => (selector as HTMLSelectElement).value === 'zh-CN')).toBe(true)
 
-    await user.click(screen.getAllByRole('button', { name: 'English' })[0]!)
+    await user.selectOptions(selectors[1]!, 'en-US')
 
     expect(document.documentElement.lang).toBe('en-US')
-    expect(screen.getAllByRole('button', { name: 'English' }).every((button) => button.getAttribute('aria-pressed') === 'true')).toBe(true)
+    const englishSelectors = screen.getAllByRole('combobox', { name: 'Language' })
+    expect(englishSelectors).toHaveLength(2)
+    expect(englishSelectors.every((selector) => (selector as HTMLSelectElement).value === 'en-US')).toBe(true)
+    expect(localStorage.getItem('kk-studio.locale')).toBe('en-US')
     expect(screen.getByRole('link', { name: 'AI' })).toBeInTheDocument()
   })
 })

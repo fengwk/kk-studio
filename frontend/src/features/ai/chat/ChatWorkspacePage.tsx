@@ -19,7 +19,6 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 
 const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
   { id: 'single', label: '1' },
@@ -159,7 +158,6 @@ export function ChatWorkspacePage() {
           <h1>{title}</h1>
         </div>
         <div className="chat-workspace-actions">
-          <LocaleSelector />
           <div className="chat-layout-switch" role="group" aria-label={t('ai.chat.layout')}>
             {LAYOUTS.map((layout) => (
               <button

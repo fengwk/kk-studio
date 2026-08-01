@@ -169,15 +169,31 @@ function CapabilityChecklist({
         return (
           <label
             key={option.name}
-            className={`capability-option${checked ? ' is-selected' : ''}${stateClass}`}
+            className={`capability-option capability-option-detailed${checked ? ' is-selected' : ''}${stateClass}`}
           >
             <input type="checkbox" checked={checked} onChange={() => onToggle(option.name)} />
-            <span>
-              <code className="capability-name">{option.name}</code>
-              {option.version ? <small>{option.version}</small> : null}
-              {option.description ? <small>{option.description}</small> : null}
-              {option.missing ? <small>{translate('ai.catalog.form.unavailable')}</small> : null}
-              {!option.missing && option.offline ? <small>{translate('ai.catalog.form.offline')}</small> : null}
+            <span className="capability-option-body">
+              <span className="capability-option-heading">
+                <code className="capability-name">{option.name}</code>
+                {option.version ? (
+                  <span className="capability-option-meta">{option.version}</span>
+                ) : null}
+                {option.missing ? (
+                  <span className="capability-option-status">
+                    {translate('ai.catalog.form.unavailable')}
+                  </span>
+                ) : null}
+                {!option.missing && option.offline ? (
+                  <span className="capability-option-status">
+                    {translate('ai.catalog.form.offline')}
+                  </span>
+                ) : null}
+              </span>
+              {option.description ? (
+                <span className="capability-option-description" title={option.description}>
+                  {option.description}
+                </span>
+              ) : null}
             </span>
           </label>
         )
