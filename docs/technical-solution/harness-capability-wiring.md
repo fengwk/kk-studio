@@ -94,11 +94,16 @@ AGENT_NOT_FOUND
 PROVIDER_NOT_FOUND
 MODEL_NOT_FOUND
 VARIANT_NOT_FOUND
+ENVIRONMENT_REQUIRED
 ENVIRONMENT_NOT_FOUND
 TOOL_NOT_FOUND
 SKILL_NOT_FOUND
 INVALID_TURN_SETTINGS
 ```
+
+`environmentName == null` 本身合法；但 Agent 配置了 Environment Tool 或 Skill 时，Resolver
+返回 `ENVIRONMENT_REQUIRED`，绝不静默移除能力。已选择的 Environment 不存在、未 READY
+或连接已关闭时返回携带具体名称的 `ENVIRONMENT_NOT_FOUND`。
 
 Reconciler 把该结果写成 `ASSISTANT_ERROR`，不创建伪 request，也不切换到其他 Agent、Provider、Model、Environment、Tool 或 Skill。
 

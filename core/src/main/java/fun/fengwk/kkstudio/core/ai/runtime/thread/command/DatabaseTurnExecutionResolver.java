@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -140,6 +139,24 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
           "model variant not found: " + providerName + "/" + modelName + " variant=" + variantName);
     }
 
+    List<String> environmentTools =
+        agentConfig.getTools().stream()
+            .filter(name -> toolCatalog.findEnvironment(name).isPresent())
+            .toList();
+    if (settings.environmentName() == null
+        && (!environmentTools.isEmpty() || !agentConfig.getSkills().isEmpty())) {
+      List<String> capabilities = new ArrayList<>();
+      if (!environmentTools.isEmpty()) {
+        capabilities.add("tools [" + String.join(", ", environmentTools) + "]");
+      }
+      if (!agentConfig.getSkills().isEmpty()) {
+        capabilities.add("skills [" + String.join(", ", agentConfig.getSkills()) + "]");
+      }
+      return failed(
+          PlanningFailureKind.ENVIRONMENT_REQUIRED,
+          "selected Agent requires a READY Environment for " + String.join(" and ", capabilities));
+    }
+
     Optional<LiveEnvironment> environment = resolveEnvironment(settings.environmentName());
     if (settings.environmentName() != null && environment.isEmpty()) {
       return failed(
@@ -147,34 +164,20 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
           "environment not found or not READY/open: " + settings.environmentName());
     }
 
-    List<ToolBinding> toolBindings = resolveTools(agentConfig.getTools(), settings, environment);
-    if (toolBindings == null) {
-      return failed(
-          PlanningFailureKind.ENVIRONMENT_NOT_FOUND,
-          "environment not found or not READY/open: " + settings.environmentName());
-    }
-    if (toolBindings.isEmpty() && containsEnvironmentTool(agentConfig.getTools())) {
-      return failed(
-          PlanningFailureKind.ENVIRONMENT_NOT_FOUND,
-          "environment not found or not READY/open: " + settings.environmentName());
-    }
-    if (toolBindings.size() != agentConfig.getTools().size()) {
-      String missing = firstMissingTool(agentConfig.getTools(), toolBindings);
-      return failed(PlanningFailureKind.TOOL_NOT_FOUND, "tool not found: " + missing);
+    List<ToolBinding> toolBindings =
+        resolveTools(agentConfig.getTools(), settings.environmentName());
+    String missingTool = firstMissingTool(agentConfig.getTools(), toolBindings);
+    if (missingTool != null) {
+      return failed(PlanningFailureKind.TOOL_NOT_FOUND, "tool not found: " + missingTool);
     }
 
     List<SkillBinding> skillBindings =
         resolveSkills(agentConfig.getSkills(), settings.environmentName(), environment);
-    if (skillBindings == null) {
-      return failed(
-          PlanningFailureKind.ENVIRONMENT_NOT_FOUND,
-          "environment not found or not READY/open: " + settings.environmentName());
-    }
-    if (skillBindings.size() != agentConfig.getSkills().size()) {
-      String missing = firstMissingSkill(agentConfig.getSkills(), skillBindings);
+    String missingSkill = firstMissingSkill(agentConfig.getSkills(), skillBindings);
+    if (missingSkill != null) {
       return failed(
           PlanningFailureKind.SKILL_NOT_FOUND,
-          "skill not found in environment " + settings.environmentName() + ": " + missing);
+          "skill not found in environment " + settings.environmentName() + ": " + missingSkill);
     }
 
     Optional<ProviderFactory> providerFactory = providerFactories.lookup(providerType);
@@ -234,8 +237,7 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
     return environmentRegistry.find(environmentName).filter(LiveEnvironment::isReady);
   }
 
-  private List<ToolBinding> resolveTools(
-      List<String> names, TurnSettings settings, Optional<LiveEnvironment> environment) {
+  private List<ToolBinding> resolveTools(List<String> names, String environmentName) {
     List<ToolBinding> bindings = new ArrayList<>();
     for (String name : names) {
       Optional<ToolDescriptor> local = toolCatalog.findLocal(name);
@@ -247,10 +249,9 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
       if (environmentTool.isEmpty()) {
         continue;
       }
-      if (settings.environmentName() == null || environment.isEmpty()) {
-        return null;
-      }
-      bindings.add(ToolBinding.of(environmentTool.get(), settings.environmentName()));
+      bindings.add(
+          ToolBinding.of(
+              environmentTool.get(), Objects.requireNonNull(environmentName, "environmentName")));
     }
     return bindings;
   }
@@ -260,20 +261,19 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
     if (names.isEmpty()) {
       return List.of();
     }
-    if (environmentName == null || environment.isEmpty()) {
-      return null;
-    }
+    String selectedEnvironmentName = Objects.requireNonNull(environmentName, "environmentName");
+    LiveEnvironment selectedEnvironment = environment.orElseThrow();
     List<SkillBinding> bindings = new ArrayList<>();
     for (String name : names) {
       DaemonSkillDescriptor descriptor =
-          environment.get().skills().stream()
+          selectedEnvironment.skills().stream()
               .filter(skill -> skill.name().equals(name))
               .findFirst()
               .orElse(null);
       if (descriptor == null) {
         continue;
       }
-      bindings.add(new SkillBinding(name, descriptor.description(), environmentName));
+      bindings.add(new SkillBinding(name, descriptor.description(), selectedEnvironmentName));
     }
     return List.copyOf(bindings);
   }
@@ -292,17 +292,13 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
     return requested.trim();
   }
 
-  private static boolean containsEnvironmentTool(List<String> names) {
-    return names.stream().anyMatch(name -> EnvironmentToolCatalog.find(name).isPresent());
-  }
-
   private static String firstMissingTool(List<String> names, List<ToolBinding> bindings) {
     for (String name : names) {
       if (bindings.stream().noneMatch(binding -> binding.descriptor().name().equals(name))) {
         return name;
       }
     }
-    return "<unknown>";
+    return null;
   }
 
   private static String firstMissingSkill(List<String> names, List<SkillBinding> bindings) {
@@ -311,7 +307,7 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
         return name;
       }
     }
-    return "<unknown>";
+    return null;
   }
 
   private static String requireReference(String value, String description) {

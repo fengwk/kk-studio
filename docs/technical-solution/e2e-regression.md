@@ -6,7 +6,7 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **56** 个 API case；标准入口默认执行免费的 **L1 50** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 56 个 Node API case。
+当前注册 **57** 个 API case；标准入口默认执行免费的 **L1 51** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 57 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -214,6 +214,10 @@ create Session + ROOT + bound Thread
 ```
 
 服务端把三个设置保存为 compact TurnSettings。Resolver 每次 planning 读取最新 Agent、Provider、Model、Variant 与 READY Environment；缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 转为 `ASSISTANT_ERROR`。
+
+L1 同时覆盖无 Environment 的两种语义：model-only/本地 Tool Agent 可使用
+`environmentName=null`；Agent 配置 Environment Tool/Skill 时写入
+`ENVIRONMENT_REQUIRED`，不创建 ModelInvocation，也不在错误文案中输出伪名称 `null`。
 
 `PUT /head` body 必须含非空 `headEntryId` 与 `expectedExecutionEpoch`。静止检查失败或 epoch 过期为 `409`；未知 Entry/Thread/Session 为 `404`。snapshot 的 `revision` 是十进制 durable cursor，SSE revision 帧携带同一 cursor，Redis realtime 没有 SSE id。
 
