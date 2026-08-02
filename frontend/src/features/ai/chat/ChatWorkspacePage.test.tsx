@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/feature
 import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -101,7 +102,7 @@ function snapshot(thread: HarnessThreadDTO) {
 
 function renderWorkspace(chatId = 'chat-1') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+  render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`/chats/${chatId}`]}>
         <Routes>
@@ -111,11 +112,12 @@ function renderWorkspace(chatId = 'chat-1') {
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return queryClient
 }
 
 describe('ChatWorkspacePage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     localStorage.clear()
     setLocale('zh-CN')
     vi.mocked(agentService.listAgents).mockResolvedValue(page([assistantAgent]))
@@ -228,9 +230,191 @@ describe('ChatWorkspacePage', () => {
     await waitFor(() =>
       expect(chatService.updateChat).toHaveBeenLastCalledWith('chat-1', {
         environmentName: null,
+        expectedVersion: '2',
+      }),
+    )
+  })
+
+  it('keeps returned Chat version authoritative across stale refetches and the next mutation', async () => {
+    const user = userEvent.setup()
+    const initialChat: ChatDTO = {
+      id: 'chat-1',
+      title: 'Workspace',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+    const updatedChat: ChatDTO = {
+      ...initialChat,
+      environmentName: 'local',
+      version: '2',
+    }
+    const secondUpdatedChat: ChatDTO = {
+      ...updatedChat,
+      environmentName: null,
+      version: '3',
+    }
+    let resolveStaleRefetch!: (chat: ChatDTO) => void
+    const staleRefetch = new Promise<ChatDTO>((resolve) => {
+      resolveStaleRefetch = resolve
+    })
+    vi.mocked(chatService.getChat)
+      .mockResolvedValueOnce(initialChat)
+      .mockImplementation(() => staleRefetch)
+    vi.mocked(chatService.updateChat)
+      .mockResolvedValueOnce(updatedChat)
+      .mockResolvedValueOnce(secondUpdatedChat)
+
+    const queryClient = renderWorkspace()
+    queryClient.setQueryData(queryKeys.chats.list, [initialChat])
+    await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
+    await user.click(screen.getByRole('button', { name: 'local' }))
+    await waitFor(() =>
+      expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
+        environmentName: 'local',
         expectedVersion: '1',
       }),
     )
+    await waitFor(() =>
+      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('2'),
+    )
+    expect(queryClient.getQueryData<ChatDTO[]>(queryKeys.chats.list)?.[0]).toMatchObject(updatedChat)
+
+    await user.click(screen.getByRole('button', { name: '环境：local' }))
+    await user.click(
+      within(screen.getByLabelText('选择 Environment')).getByRole('button', {
+        name: /（无）/,
+      }),
+    )
+    await waitFor(() =>
+      expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
+        environmentName: null,
+        expectedVersion: '2',
+      }),
+    )
+    await waitFor(() =>
+      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('3'),
+    )
+
+    await act(async () => {
+      resolveStaleRefetch(initialChat)
+      await staleRefetch
+    })
+    await waitFor(() =>
+      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('3'),
+    )
+    expect(queryClient.getQueryData<ChatDTO[]>(queryKeys.chats.list)?.[0]?.version).toBe('3')
+  })
+
+  it('refreshes the Chat after a 409 and keeps the conflict visible before retry', async () => {
+    const user = userEvent.setup()
+    const initialChat: ChatDTO = {
+      id: 'chat-1',
+      title: 'Workspace',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+    const refreshedChat: ChatDTO = { ...initialChat, version: '2' }
+    vi.mocked(chatService.getChat)
+      .mockResolvedValueOnce(initialChat)
+      .mockResolvedValue(refreshedChat)
+    vi.mocked(chatService.updateChat)
+      .mockRejectedValueOnce(new ApiError('Chat version conflict', 409))
+      .mockResolvedValueOnce({ ...refreshedChat, environmentName: 'local', version: '3' })
+
+    renderWorkspace()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    await user.click(screen.getByRole('button', { name: 'local' }))
+
+    expect(await screen.findByText('Chat version conflict')).toBeInTheDocument()
+    await waitFor(() => expect(chatService.getChat).toHaveBeenCalledTimes(2))
+
+    await user.click(screen.getByRole('button', { name: 'local' }))
+    await waitFor(() =>
+      expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
+        environmentName: 'local',
+        expectedVersion: '2',
+      }),
+    )
+  })
+
+  it('serializes same-tick split-pane selections and ignores an immediate send', async () => {
+    const user = userEvent.setup()
+    const state = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
+    saveChatPaneState('chat-1', state)
+    vi.mocked(agentService.listAgents).mockResolvedValue(
+      page([
+        assistantAgent,
+        {
+          name: 'coder',
+          description: null,
+          systemPrompt: null,
+          model: 'minimax/MiniMax',
+          variant: 'default',
+          config: { tools: [], skills: [] },
+          version: '0',
+          createTime: null,
+          updateTime: null,
+        },
+      ]),
+    )
+    let resolveUpdate!: (chat: ChatDTO) => void
+    const updatePromise = new Promise<ChatDTO>((resolve) => {
+      resolveUpdate = resolve
+    })
+    vi.mocked(chatService.updateChat).mockReturnValue(updatePromise)
+
+    renderWorkspace()
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.type(composers[1], 'should be ignored')
+
+    const agentButtons = screen.getAllByRole('button', { name: 'agent:assistant' })
+    await act(async () => {
+      fireEvent.click(agentButtons[0])
+      fireEvent.click(agentButtons[1])
+    })
+    const selectionButtons = screen.getAllByRole('button', { name: 'coder' })
+    const sendButtons = screen.getAllByRole('button', { name: '发送消息' })
+    await act(async () => {
+      // Both selections and the send happen before React can render settingsPending.
+      fireEvent.click(selectionButtons[0])
+      fireEvent.click(selectionButtons[1])
+      fireEvent.click(sendButtons[1])
+    })
+
+    expect(chatService.updateChat).toHaveBeenCalledTimes(1)
+    expect(chatService.updateChat).toHaveBeenCalledWith('chat-1', {
+      agentName: 'coder',
+      expectedVersion: '1',
+    })
+    expect(chatService.createChatThread).not.toHaveBeenCalled()
+    expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpdate({
+        id: 'chat-1',
+        title: 'Workspace',
+        agentName: 'coder',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '2',
+        createTime: null,
+        updateTime: null,
+      })
+      await updatePromise
+    })
+    await waitFor(() => expect(composers[0]).not.toBeDisabled())
   })
 
   it('reselects a stale Chat Agent before creating the first Chat Thread', async () => {
@@ -253,6 +437,7 @@ describe('ChatWorkspacePage', () => {
         title: 'Workspace',
         agentName: 'assistant',
         environmentName: null,
+        yoloEnabled: false,
         version: '2',
         createTime: null,
         updateTime: null,
@@ -382,7 +567,7 @@ describe('ChatWorkspacePage', () => {
 
     renderWorkspace()
     const composers = await screen.findAllByLabelText('给 AI 发送消息')
-    await user.type(composers[0], '/agent{Enter}')
+    await user.click(screen.getAllByRole('button', { name: 'agent:assistant' })[0])
     await user.click(await screen.findByRole('button', { name: 'coder' }))
 
     await waitFor(() => {

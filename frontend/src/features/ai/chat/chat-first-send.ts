@@ -1,4 +1,8 @@
 import { createClientMessageId } from '@/features/ai/runtime'
+import type {
+  ThreadMessagePayload,
+  ThreadMessageReplay,
+} from '@/features/ai/runtime/thread-message-retry'
 import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
@@ -10,10 +14,8 @@ export interface FirstSendResult {
   userMessageInput: HarnessThreadInputDTO
 }
 
-export interface FirstSendReplay {
+export interface FirstSendReplay extends ThreadMessageReplay {
   threadId: string
-  content: string
-  clientMessageId: string
 }
 
 /** Carries the atomically created Thread across a failed first-message request. */
@@ -24,7 +26,7 @@ export class FirstSendMessageError extends Error {
 
   constructor(
     thread: HarnessThreadDTO,
-    content: string,
+    payload: ThreadMessagePayload,
     clientMessageId: string,
     cause: unknown,
   ) {
@@ -32,7 +34,7 @@ export class FirstSendMessageError extends Error {
     this.name = 'FirstSendMessageError'
     this.replay = {
       threadId: thread.threadId,
-      content,
+      ...payload,
       clientMessageId,
     }
     this.thread = thread
@@ -58,6 +60,15 @@ export async function performBlankPaneFirstSend(options: {
   const createChatThread = options.createChatThread ?? chatService.createChatThread
   const submitThreadMessage = options.submitThreadMessage ?? harnessService.submitThreadMessage
   const ids = options.createIds?.() ?? ({ userMessageId: createClientMessageId() } as const)
+  const payload: ThreadMessagePayload = {
+    kind: 'USER_MESSAGE',
+    role: 'user',
+    content: options.content,
+    agentName: options.agentName,
+    environmentName: options.environmentName,
+    yoloEnabled: options.yoloEnabled,
+    firstSendContext: { chatId: options.chatId },
+  }
 
   const created = await createChatThread(options.chatId)
   if (!created.sessionId) {
@@ -76,7 +87,7 @@ export async function performBlankPaneFirstSend(options: {
   } catch (error) {
     throw new FirstSendMessageError(
       created,
-      options.content,
+      payload,
       ids.userMessageId,
       error,
     )

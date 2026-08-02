@@ -12,6 +12,11 @@ import {
   createClientMessageId,
   useAgentThreadMessageMutation,
 } from '@/features/ai/runtime/useAgentThreadMessageMutation'
+import {
+  sameThreadMessagePayload,
+  type ThreadMessagePayload,
+  type ThreadMessageReplay,
+} from '@/features/ai/runtime/thread-message-retry'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
@@ -33,10 +38,7 @@ function errorMessage(error: unknown): string {
   return translate('ai.runtime.action.requestFailed')
 }
 
-export interface ThreadMessageReplay {
-  content: string
-  clientMessageId: string
-}
+export type { ThreadMessageReplay } from '@/features/ai/runtime/thread-message-retry'
 
 export interface ThreadTurnSettings {
   agentName: string
@@ -60,7 +62,7 @@ export function useAgentThreadController(
   // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
   const clientMessageIdRef = useRef<string | null>(null)
-  const replayContentRef = useRef<string | null>(null)
+  const replayPayloadRef = useRef<ThreadMessagePayload | null>(null)
   const initializedReplayThreadRef = useRef<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
@@ -103,9 +105,9 @@ export function useAgentThreadController(
     }
     setDraftState(initialDraft)
     clientMessageIdRef.current = initialReplay?.clientMessageId ?? null
-    replayContentRef.current = initialReplay?.content ?? null
+    replayPayloadRef.current = initialReplay ?? null
     initializedReplayThreadRef.current = threadId
-  }, [initialDraft, initialReplay?.clientMessageId, initialReplay?.content, threadId])
+  }, [initialDraft, initialReplay, threadId])
 
   const stopMutation = useMutation({
     mutationFn: (expectedExecutionEpoch: BackendLong) =>
@@ -132,9 +134,9 @@ export function useAgentThreadController(
 
   function setDraft(next: string) {
     // Editing restored draft to different content resets request replay identity.
-    if (replayContentRef.current != null && next !== replayContentRef.current) {
+    if (replayPayloadRef.current != null && next !== replayPayloadRef.current.content) {
       clientMessageIdRef.current = null
-      replayContentRef.current = null
+      replayPayloadRef.current = null
     }
     setDraftState(next)
   }
@@ -150,10 +152,24 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
-    // Reuse clientMessageId only when replaying the same request after its HTTP submission failed.
-    const isReplay = replayContentRef.current === content && Boolean(clientMessageIdRef.current)
+    const previousPayload = replayPayloadRef.current
+    const payload: ThreadMessagePayload = {
+      kind: previousPayload?.kind ?? 'USER_MESSAGE',
+      role: previousPayload?.role ?? 'user',
+      content,
+      agentName: visibleSettings.agentName,
+      environmentName: visibleSettings.environmentName,
+      yoloEnabled: visibleSettings.yoloEnabled,
+      firstSendContext: previousPayload?.firstSendContext ?? null,
+    }
+    // Reuse clientMessageId only when the complete semantic payload is unchanged.
+    const isReplay = (
+      Boolean(clientMessageIdRef.current)
+      && sameThreadMessagePayload(previousPayload, payload)
+    )
     const clientMessageId = isReplay ? clientMessageIdRef.current! : createClientMessageId()
     clientMessageIdRef.current = clientMessageId
+    replayPayloadRef.current = payload
     // Capture content + id then clear draft immediately so the next message can be typed.
     setDraftState('')
     setInFlightSubmissions((count) => count + 1)
@@ -161,6 +177,9 @@ export function useAgentThreadController(
     // Catch settles the returned promise so concurrent fire-and-forget callers stay safe.
     return createMessageMutation
       .mutateAsync({
+        kind: payload.kind,
+        role: payload.role,
+        firstSendContext: payload.firstSendContext,
         content,
         agentName: visibleSettings.agentName,
         environmentName: visibleSettings.environmentName,
@@ -173,8 +192,8 @@ export function useAgentThreadController(
         if (clientMessageIdRef.current === clientMessageId) {
           clientMessageIdRef.current = null
         }
-        if (replayContentRef.current === content) {
-          replayContentRef.current = null
+        if (replayPayloadRef.current === payload) {
+          replayPayloadRef.current = null
         }
       })
       .catch((error: unknown) => {
@@ -182,7 +201,7 @@ export function useAgentThreadController(
         // Restore only when the composer is empty so an in-progress next draft is preserved.
         setDraftState((current) => {
           if (current.trim() === '') {
-            replayContentRef.current = content
+            replayPayloadRef.current = payload
             clientMessageIdRef.current = clientMessageId
             return content
           }
@@ -224,7 +243,7 @@ export function useAgentThreadController(
       .then(async () => {
         // Stop is not request-idempotent; clear local message replay identity only on success.
         clientMessageIdRef.current = null
-        replayContentRef.current = null
+        replayPayloadRef.current = null
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),

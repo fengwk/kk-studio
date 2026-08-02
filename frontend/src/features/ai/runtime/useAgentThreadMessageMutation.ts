@@ -1,8 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessThreadInputDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
+import type {
+  ThreadMessageKind,
+  ThreadMessagePayload,
+  ThreadMessageRole,
+} from '@/features/ai/runtime/thread-message-retry'
 
 /**
  * Submit a user message to the Thread queue.
@@ -13,28 +20,37 @@ export function useAgentThreadMessageMutation(threadId: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async ({
+      kind = 'USER_MESSAGE',
+      role = 'user',
+      firstSendContext,
       content,
       agentName,
       environmentName,
       yoloEnabled,
       clientMessageId,
       expectedExecutionEpoch,
-    }: {
-      content: string
-      agentName: string
-      environmentName: string | null
-      yoloEnabled: boolean
-      clientMessageId: string
-      expectedExecutionEpoch: BackendLong
-    }): Promise<HarnessThreadInputDTO> =>
-      harnessService.submitThreadMessage(threadId, {
+    }: ThreadMessageMutationInput): Promise<HarnessThreadInputDTO> => {
+      void firstSendContext
+      if (kind === 'CUSTOM_MESSAGE') {
+        return harnessService.submitCustomMessage(threadId, {
+          role,
+          content,
+          agentName,
+          environmentName,
+          yoloEnabled,
+          clientMessageId,
+          expectedExecutionEpoch,
+        })
+      }
+      return harnessService.submitThreadMessage(threadId, {
         content,
         agentName,
         environmentName,
         yoloEnabled,
         clientMessageId,
         expectedExecutionEpoch,
-      }),
+      })
+    },
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
@@ -42,6 +58,17 @@ export function useAgentThreadMessageMutation(threadId: string) {
       ])
     },
   })
+}
+
+export type ThreadMessageMutationInput = Omit<
+  ThreadMessagePayload,
+  'kind' | 'role' | 'firstSendContext'
+> & {
+  kind?: ThreadMessageKind
+  role?: ThreadMessageRole
+  firstSendContext?: ThreadMessagePayload['firstSendContext']
+  clientMessageId: string
+  expectedExecutionEpoch: BackendLong
 }
 
 export function createClientMessageId(): string {

@@ -22,6 +22,7 @@ export function ChatWorkspacePane({
   environments = [],
   pane,
   settingsPending = false,
+  isSettingsMutationLocked = () => false,
   focused,
   sessionSort,
   threadSort,
@@ -38,6 +39,7 @@ export function ChatWorkspacePane({
   environments?: LiveEnvironmentDTO[]
   pane: ChatPane
   settingsPending?: boolean
+  isSettingsMutationLocked?: () => boolean
   focused: boolean
   sessionSort: PaneSortPreference
   threadSort: PaneSortPreference
@@ -73,6 +75,7 @@ export function ChatWorkspacePane({
         environmentName={chat?.environmentName ?? null}
         yoloEnabled={chat?.yoloEnabled ?? false}
         settingsPending={settingsPending}
+        isSettingsMutationLocked={isSettingsMutationLocked}
         paneId={pane.id}
         threadId={pane.threadId}
         focused={focused}
@@ -109,6 +112,7 @@ export function ChatWorkspacePane({
       environmentName={chat?.environmentName ?? null}
       yoloEnabled={chat?.yoloEnabled ?? false}
       settingsPending={settingsPending}
+      isSettingsMutationLocked={isSettingsMutationLocked}
       onAgentChange={onAgentChange}
       onEnvironmentChange={onEnvironmentChange}
       onYoloChange={onYoloChange}
