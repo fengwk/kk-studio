@@ -38,7 +38,7 @@ import type {
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
     ...emptyModelDraft(),
-    providerId: 'provider-1',
+    providerName: 'minimax',
     name: 'MiniMax-M2.7',
     ...overrides,
   }
@@ -69,7 +69,7 @@ function fullConfig(): AgentModelConfigDTO {
 function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
   return {
     id: 'model-1',
-    providerId: 'provider-1',
+    providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: 'Chat model',
     config: fullConfig(),
@@ -89,15 +89,15 @@ describe('AI domain utilities', () => {
       modelCallIdleTimeoutMillis: '120000',
     })
     expect(
-      emptyModelDraft({ id: 'provider-1' }),
+      emptyModelDraft({ name: 'minimax' }),
     ).toMatchObject({
-      providerId: 'provider-1',
+      providerName: 'minimax',
       defaultVariant: 'medium',
       tools: true,
     })
     expect(emptyModelDraft().inputModalities).toEqual(['TEXT'])
     expect(emptyAgentDraft(model())).toMatchObject({
-      modelId: 'model-1',
+      model: 'minimax/MiniMax-M2.7',
       variant: '',
     })
 
@@ -142,7 +142,7 @@ describe('AI domain utilities', () => {
         }),
       ),
     ).toMatchObject({
-      providerId: 'provider-1',
+      providerName: 'minimax',
       name: 'MiniMax-M2.7',
       defaultVariant: 'quality',
       variants: [
@@ -156,7 +156,7 @@ describe('AI domain utilities', () => {
         name: 'assistant',
         description: 'desc',
         systemPrompt: 'prompt',
-        modelId: 'model-1',
+        model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
           tools: ['search'],
@@ -168,7 +168,7 @@ describe('AI domain utilities', () => {
       }),
     ).toMatchObject({
       name: 'assistant',
-      modelId: 'model-1',
+      model: 'minimax/MiniMax-M2.7',
       tools: ['search'],
     })
   })
@@ -194,7 +194,6 @@ describe('AI domain utilities', () => {
       modelCallIdleTimeoutMillis: 3000,
     })
     expect(toEditableProviderUpdate(providerInput)).toEqual({
-      name: 'minimax',
       description: 'provider desc',
       providerType: 'openai',
       baseUrl: 'https://api.minimax.io/v1',
@@ -206,7 +205,7 @@ describe('AI domain utilities', () => {
     const baseVariant = emptyModelDraft().variants[0]
     const editableModel = toEditableModel(
       modelDraft({
-        providerId: ' provider-1 ',
+        providerName: ' minimax ',
         name: ' MiniMax-M2.7 ',
         description: ' chat model ',
         reasoning: true,
@@ -224,7 +223,7 @@ describe('AI domain utilities', () => {
       }),
     )
     expect(editableModel).toMatchObject({
-      providerId: 'provider-1',
+      providerName: 'minimax',
       name: 'MiniMax-M2.7',
       description: 'chat model',
     })
@@ -237,13 +236,13 @@ describe('AI domain utilities', () => {
       },
       defaultVariant: 'quality',
     })
-    expect(toEditableModelUpdate(modelDraft())).not.toHaveProperty('providerId')
+    expect(toEditableModelUpdate(modelDraft())).not.toHaveProperty('providerName')
 
     const agentInput = {
       name: ' assistant ',
       description: ' desc ',
       systemPrompt: ' prompt ',
-      modelId: ' model-1 ',
+      model: ' minimax/MiniMax-M2.7 ',
       variant: ' default ',
       tools: [' search ', ''],
       skills: [],
@@ -252,7 +251,7 @@ describe('AI domain utilities', () => {
       name: 'assistant',
       description: 'desc',
       systemPrompt: 'prompt',
-      modelId: 'model-1',
+      model: 'minimax/MiniMax-M2.7',
       variant: 'default',
       config: {
         tools: ['search'],
@@ -260,7 +259,15 @@ describe('AI domain utilities', () => {
       },
     }
     expect(toEditableAgent(agentInput)).toEqual(expectedAgent)
-    expect(toEditableAgentUpdate(agentInput)).toEqual(expectedAgent)
+    expect(toEditableAgentUpdate(agentInput)).toEqual({
+      description: 'desc',
+      systemPrompt: 'prompt',
+      variant: 'default',
+      config: {
+        tools: ['search'],
+        skills: [],
+      },
+    })
     expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
   })
 
@@ -272,7 +279,7 @@ describe('AI domain utilities', () => {
         name: 'assistant',
         description: 'Cloud agent',
         systemPrompt: null,
-        modelId: 'model-1',
+        model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
           tools: [],
@@ -332,13 +339,13 @@ describe('AI domain utilities', () => {
     expect(
       filterChats(
         [
-           { id: '2', title: 'beta', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
-           { id: '1', title: 'alpha', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
+           { id: '2', title: 'beta', agentName: 'missing', environmentName: null, version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
+           { id: '1', title: 'alpha', agentName: 'missing', environmentName: null, version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
         ],
         '',
       ).map((item) => item.title),
     ).toEqual(['alpha', 'beta'])
-      expect(filterChats([{ id: '1', title: 'alpha', defaultAgentId: 'missing', defaultEnvironmentName: null, version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
+      expect(filterChats([{ id: '1', title: 'alpha', agentName: 'missing', environmentName: null, version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)
@@ -376,7 +383,7 @@ describe('AI domain utilities', () => {
     })
 
     expect(toModelDraft(model({ description: null }))).toMatchObject({
-      providerId: 'provider-1',
+      providerName: 'minimax',
       description: '',
       contextWindow: '128000',
       maxOutputTokens: '8192',
@@ -390,7 +397,7 @@ describe('AI domain utilities', () => {
         name: 'fallback-agent',
         description: null,
         systemPrompt: null,
-        modelId: 'model-2',
+        model: 'openai/gpt-5.4',
         variant: 'default',
         config: {
           tools: [],

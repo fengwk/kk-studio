@@ -65,10 +65,7 @@ export function useAiConsoleResourceQueries(
     toolsQuery,
     environmentsQuery,
     providers: providersQuery.data?.results ?? [],
-    models: toAgentModelViews(
-      modelsQuery.data?.results ?? [],
-      providersQuery.data?.results ?? [],
-    ),
+    models: toAgentModelViews(modelsQuery.data?.results ?? []),
     agents: agentsQuery.data?.results ?? [],
     toolCatalog: toolsQuery.data ?? [],
     environments: environmentsQuery.data ?? [],

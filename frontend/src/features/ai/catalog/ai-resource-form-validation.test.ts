@@ -10,7 +10,7 @@ const EMPTY_AGENT_DRAFT = {
   name: '',
   description: '',
   systemPrompt: '',
-  modelId: '',
+  model: '',
   variant: '',
   tools: [],
   skills: [],
@@ -19,7 +19,7 @@ const EMPTY_AGENT_DRAFT = {
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
     ...emptyModelDraft(),
-    providerId: 'provider-1',
+    providerName: 'provider-1',
     name: 'model',
     ...overrides,
   }
@@ -43,12 +43,12 @@ describe('ai-resource-form-validation', () => {
       { kind: 'model', mode: 'create' },
       {
         providerDraft: { ...providerDraft(), name: '' },
-        modelDraft: draft({ providerId: '   ' }),
+        modelDraft: draft({ providerName: '   ' }),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
     expect(result.ok).toBe(false)
-    expect(result.fields.providerId).toBeDefined()
+    expect(result.fields.providerName).toBeDefined()
   })
 
   it('rejects a model draft with a blank name', () => {

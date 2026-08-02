@@ -13,7 +13,6 @@ import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
   return {
@@ -25,15 +24,15 @@ export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 
 
 export function editProviderEditorPlan(
   providers: AgentProviderDTO[],
-  providerId: AgentResourceId,
+  providerName: string,
 ): Extract<ResourceEditorPlan, { kind: 'provider' }> | null {
-  const provider = providers.find((item) => item.id === providerId)
+  const provider = providers.find((item) => item.name === providerName)
   if (!provider) {
     return null
   }
   return {
     kind: 'provider',
-    modal: { kind: 'provider', mode: 'edit', id: provider.id, expectedVersion: provider.version },
+    modal: { kind: 'provider', mode: 'edit', name: provider.name, expectedVersion: provider.version },
     providerDraft: toProviderDraft(provider),
   }
 }
@@ -50,15 +49,24 @@ export function createModelEditorPlan(
 
 export function editModelEditorPlan(
   models: AgentModelView[],
-  modelId: AgentResourceId,
+  providerName: string,
+  modelName: string,
 ): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
-  const model = models.find((item) => item.id === modelId)
+  const model = models.find(
+    (item) => item.providerName === providerName && item.name === modelName,
+  )
   if (!model) {
     return null
   }
   return {
     kind: 'model',
-    modal: { kind: 'model', mode: 'edit', id: model.id, expectedVersion: model.version },
+    modal: {
+      kind: 'model',
+      mode: 'edit',
+      providerName: model.providerName,
+      name: model.name,
+      expectedVersion: model.version,
+    },
     modelDraft: normalizeModelDraftDefaultVariant(toModelDraft(model)),
   }
 }
@@ -76,15 +84,15 @@ export function createAgentEditorPlan(
 export function editAgentEditorPlan(
   agents: AgentDefinitionDTO[],
   models: AgentModelView[],
-  agentId: AgentResourceId,
+  agentName: string,
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> | null {
-  const agent = agents.find((item) => item.id === agentId)
+  const agent = agents.find((item) => item.name === agentName)
   if (!agent) {
     return null
   }
   return {
     kind: 'agent',
-    modal: { kind: 'agent', mode: 'edit', id: agent.id, expectedVersion: agent.version },
+    modal: { kind: 'agent', mode: 'edit', name: agent.name, expectedVersion: agent.version },
     agentDraft: normalizeAgentDraftDefaultVariant(toAgentDraft(agent), models),
   }
 }

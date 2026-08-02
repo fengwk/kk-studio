@@ -12,8 +12,9 @@ vi.mock('@/shared/api/chat-service', () => ({
     createChat: vi.fn(async () => ({
       id: 'c1',
       title: 'T',
-      defaultAgentId: 'a1',
-      defaultEnvironmentName: null,
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -23,11 +24,10 @@ vi.mock('@/shared/api/chat-service', () => ({
 
 const agents = [
   {
-    id: 'a1',
     name: 'assistant',
     description: null,
     systemPrompt: null,
-    modelId: 'm1',
+    model: 'minimax/MiniMax',
     variant: 'default',
     config: {
       tools: [],
@@ -52,9 +52,9 @@ describe('useChatListController', () => {
     )
     const { result } = renderHook(() => useChatListController(agents, environments, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
-    act(() => result.current.openCreateChat('a1'))
+    act(() => result.current.openCreateChat('assistant'))
     expect(result.current.createChatModal.open).toBe(true)
-    expect(result.current.createChatModal.selectedAgentId).toBe('a1')
+    expect(result.current.createChatModal.selectedAgentName).toBe('assistant')
 
     await act(async () => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
@@ -65,7 +65,7 @@ describe('useChatListController', () => {
 
     act(() => {
       result.current.createChatModal.onTitleChange('Hello')
-      result.current.createChatModal.onSelectAgent('a1')
+      result.current.createChatModal.onSelectAgent('assistant')
       result.current.createChatModal.onSelectEnvironment('local')
     })
     expect(result.current.createChatModal.formError).toBe('')
@@ -76,8 +76,8 @@ describe('useChatListController', () => {
     await waitFor(() =>
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
-        defaultAgentId: 'a1',
-        defaultEnvironmentName: 'local',
+        agentName: 'assistant',
+        environmentName: 'local',
       }),
     )
   })

@@ -7,7 +7,6 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export type ResourceEditorPlan =
   | {
@@ -35,7 +34,7 @@ export type ResourceSubmitPlan =
   | {
       kind: 'provider'
       mode: 'edit'
-      id: AgentResourceId
+      name: string
       data: AgentProviderUpdateDTO
     }
   | {
@@ -46,7 +45,8 @@ export type ResourceSubmitPlan =
   | {
       kind: 'model'
       mode: 'edit'
-      id: AgentResourceId
+      providerName: string
+      name: string
       data: AgentModelUpdateDTO
     }
   | {
@@ -57,6 +57,6 @@ export type ResourceSubmitPlan =
   | {
       kind: 'agent'
       mode: 'edit'
-      id: AgentResourceId
+      name: string
       data: AgentDefinitionUpdateDTO
     }

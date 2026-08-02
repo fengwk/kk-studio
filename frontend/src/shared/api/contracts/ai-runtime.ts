@@ -36,7 +36,7 @@ export interface ModelUsageSummaryDTO {
   costs: ModelUsageCostSummaryDTO[]
 }
 
-/** Flat Session query projection; Sessions are only created as a side effect of Thread bootstrap. */
+/** Flat Session query projection; Sessions are created as part of Chat-scoped Thread creation. */
 export interface HarnessSessionDTO {
   sessionId: string
   title: string | null
@@ -47,7 +47,6 @@ export interface HarnessSessionDTO {
 
 export type EntryType =
   | 'ROOT'
-  | 'RUNTIME_CONFIG'
   | 'MESSAGE'
   | 'CUSTOM_MESSAGE'
   | 'ASSISTANT_ERROR'
@@ -63,26 +62,19 @@ export interface HarnessSessionEntryDTO {
 
 /**
  * HarnessThread query projection; ids are decimal strings.
- * `sessionId` / `sessionTitle` / `headEntryId` are null while the Thread is UNBOUND.
  */
 export interface HarnessThreadDTO {
   threadId: string
-  sessionId: string | null
+  sessionId: string
   sessionTitle: string | null
-  headEntryId: string | null
+  headEntryId: string
   /** CAS fencing token; every external mutation must echo the currently known value. */
   executionEpoch: BackendLong
   /** PostgreSQL durable snapshot cursor, always a decimal bigint string. */
   revision: string
-  /** Derived display status: RUNNING > WAITING > RUNNABLE > UNBOUND/IDLE. */
+  /** Derived display status: RUNNING > WAITING > RUNNABLE > IDLE. */
   status: ThreadStatus
   inputSequence: BackendLong
-  activeAgentDefinitionId: string | null
-  activeAgentName: string | null
-  activeEnvironmentName: string | null
-  modelId: string | null
-  variant: string | null
-  yoloEnabled: boolean | null
   processing: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
@@ -96,47 +88,25 @@ interface HarnessThreadEpochGuardDTO {
   expectedExecutionEpoch: BackendLong
 }
 
-/** Atomically creates Session/ROOT/RUNTIME_CONFIG for an UNBOUND Thread and binds its head. */
-export interface HarnessThreadBootstrapDTO extends HarnessThreadEpochGuardDTO {
-  title?: string
-  agentDefinitionId: string
-  environmentName?: string | null
-  yoloEnabled: boolean
-}
-
-export interface HarnessThreadBootstrapResultDTO {
-  session: HarnessSessionDTO
-  thread: HarnessThreadDTO
-}
-
-/** Binds, moves across Sessions, or clears (null) the Thread head. */
+/** Moves the Thread head within or across Sessions. */
 export interface HarnessThreadHeadUpdateDTO extends HarnessThreadEpochGuardDTO {
-  headEntryId: string | null
+  headEntryId: string
 }
 
 export interface HarnessThreadMessageCreateDTO extends HarnessThreadEpochGuardDTO {
   content: string
-  clientMessageId: string
-}
-
-export interface HarnessThreadYoloSetDTO extends HarnessThreadEpochGuardDTO {
+  agentName: string
+  environmentName: string | null
   yoloEnabled: boolean
   clientMessageId: string
 }
 
-export interface HarnessThreadAgentSetDTO extends HarnessThreadEpochGuardDTO {
-  agentDefinitionId: string
-  clientMessageId: string
-}
-
-export interface HarnessThreadModelSetDTO extends HarnessThreadEpochGuardDTO {
-  modelId: string
-  variant: string
-  clientMessageId: string
-}
-
-export interface HarnessThreadEnvironmentSetDTO extends HarnessThreadEpochGuardDTO {
+export interface HarnessThreadCustomMessageCreateDTO extends HarnessThreadEpochGuardDTO {
+  role: 'system' | 'user'
+  content: string
+  agentName: string
   environmentName: string | null
+  yoloEnabled: boolean
   clientMessageId: string
 }
 
@@ -144,9 +114,8 @@ export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO
 
 /**
  * Query-derived Thread status only. Invocation retry waits are projected as WAITING.
- * UNBOUND means the Thread has no head Entry yet and accepts bind/bootstrap only.
  */
-type ThreadStatus = 'UNBOUND' | 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
+type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
 
 /** Global automatic retry policy; PUT bodies are complete replacements. */
 export interface HarnessRetryPolicyDTO {
@@ -165,10 +134,6 @@ export interface HarnessRealtimeStreamPolicyDTO {
 export type ThreadInputType =
   | 'USER_MESSAGE'
   | 'CUSTOM_MESSAGE'
-  | 'SET_AGENT'
-  | 'SET_MODEL'
-  | 'SET_ENVIRONMENT'
-  | 'SET_YOLO'
 
 type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
 

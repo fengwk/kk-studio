@@ -44,7 +44,7 @@ describe('thread timeline edge branches', () => {
         ),
         entry('7', 'ASSISTANT_ERROR', { error: { kind: 'TRANSIENT', message: 'boom' } }),
       ],
-      [input('set', 'SET_YOLO', { yoloEnabled: true }, false)],
+      [input('applied', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: 'done' }]), true)],
     )
 
     expect(timeline.messages.some((m) => m.role === 'system' && m.text === '系统提示')).toBe(true)

@@ -1,4 +1,4 @@
-import { CircleDot, FileWarning, Settings2 } from 'lucide-react'
+import { CircleDot, FileWarning } from 'lucide-react'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
@@ -31,9 +31,6 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
 }
 
 function EntryIcon({ kind }: { kind: EntryEventDialogueMessage['kind'] }) {
-  if (kind === 'runtime_config') {
-    return <Settings2 />
-  }
   if (kind === 'unsupported_message' || kind === 'unknown_entry') {
     return <FileWarning />
   }

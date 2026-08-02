@@ -204,8 +204,6 @@ function provider() {
 
 function model() {
   return {
-    id: 'model-1',
-    providerId: 'provider-1',
     providerName: 'stub',
     name: 'model',
     description: 'Test model',
@@ -239,7 +237,7 @@ function agent() {
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
-    modelId: 'model-1',
+    model: 'model-1',
     variant: 'default',
     config: {
       tools: [],

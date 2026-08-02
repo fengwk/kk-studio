@@ -84,12 +84,12 @@ describe('SelectionListModal', () => {
     render(
       <AgentSelectionModal
         open
-        agents={[{ id: 'a1', name: 'assistant', description: 'desc' }]}
+        agents={[{ name: 'assistant', description: 'desc' }]}
         onSelect={onSelect}
         onClose={() => undefined}
       />,
     )
     await user.click(screen.getByRole('button', { name: /assistant/ }))
-    expect(onSelect).toHaveBeenCalledWith('a1')
+    expect(onSelect).toHaveBeenCalledWith('assistant')
   })
 })

@@ -13,10 +13,6 @@ export function useAgentThreadQueries(threadId: string) {
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
   })
-  const providersQuery = useQuery({
-    queryKey: queryKeys.providers.list,
-    queryFn: () => agentService.listProviders(),
-  })
   const snapshotQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
     queryFn: () => harnessService.getThreadSnapshot(threadId),
@@ -26,19 +22,13 @@ export function useAgentThreadQueries(threadId: string) {
   const thread = snapshot?.thread
   const sessionId = thread?.sessionId ?? ''
 
-  const providers = providersQuery.data?.results ?? []
-  const models: AgentModelView[] = toAgentModelViews(
-    modelsQuery.data?.results ?? [],
-    providers,
-  )
+  const models: AgentModelView[] = toAgentModelViews(modelsQuery.data?.results ?? [])
   return {
     agentsQuery,
     modelsQuery,
-    providersQuery,
     snapshotQuery,
     agents: agentsQuery.data?.results ?? [],
     models,
-    providers,
     thread,
     sessionId,
     entries: snapshot?.entries ?? [],

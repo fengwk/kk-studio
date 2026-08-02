@@ -5,7 +5,7 @@ import {
   filterModels,
   filterProviders,
 } from '@/features/ai/catalog/catalog-utils'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { useAiConsoleResourceController } from '@/features/ai/catalog/useAiConsoleResourceController'
 import type { AiConsoleResourceQueryEnabled } from '@/features/ai/catalog/useAiConsoleResourceQueries'
 import type {
@@ -94,21 +94,20 @@ export function useCatalogPageController(scope: CatalogPageScope) {
       deletePending: resourceController.agentDeletePending,
       onCreate: resourceController.openCreateAgent,
       onEdit: (agent: AgentDefinitionDTO) =>
-        resourceController.openEditAgent(agent.id),
+        resourceController.openEditAgent(agent.name),
       onDelete: (agent: AgentDefinitionDTO) =>
-        resourceController.deleteAgent(agent.name, agent.id, agent.version),
+        resourceController.deleteAgent(agent.name, agent.version),
     },
     modelPanelProps: {
       models,
       deletePending: resourceController.modelDeletePending,
       onCreate: resourceController.openCreateModel,
       onEdit: (model: AgentModelView) =>
-        resourceController.openEditModel(model.id),
+        resourceController.openEditModel(model.providerName, model.name),
       onDelete: (model: AgentModelView) =>
         resourceController.deleteModel(
-          model.providerName || String(model.providerId),
-          modelRef(model),
-          model.id,
+          model.providerName,
+          model.name,
           model.version,
         ),
     },
@@ -117,11 +116,10 @@ export function useCatalogPageController(scope: CatalogPageScope) {
       deletePending: resourceController.providerDeletePending,
       onCreate: resourceController.openCreateProvider,
       onEdit: (provider: AgentProviderDTO) =>
-        resourceController.openEditProvider(provider.id),
+        resourceController.openEditProvider(provider.name),
       onDelete: (provider: AgentProviderDTO) =>
         resourceController.deleteProvider(
           provider.name,
-          provider.id,
           provider.version,
         ),
     },

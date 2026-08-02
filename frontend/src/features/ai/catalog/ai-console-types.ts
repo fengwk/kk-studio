@@ -1,5 +1,5 @@
 import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId, CatalogVersion } from '@/shared/api/contracts/base'
+import type { CatalogVersion } from '@/shared/api/contracts/base'
 
 export interface ProviderDraft {
   name: string
@@ -50,7 +50,7 @@ export interface ModelPricingDraft {
 
 /** Form draft for a model resource. Inputs stay string-typed for predictable editing UX. */
 export interface ModelDraft {
-  providerId: string
+  providerName: string
   name: string
   description: string
   contextWindow: string
@@ -71,7 +71,7 @@ export interface AgentDraft {
   name: string
   description: string
   systemPrompt: string
-  modelId: string
+  model: string
   variant: string
   tools: string[]
   skills: string[]
@@ -79,10 +79,16 @@ export interface AgentDraft {
 
 export type ResourceModal =
   | { kind: 'provider'; mode: 'create' }
-  | { kind: 'provider'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
+  | { kind: 'provider'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
   | { kind: 'model'; mode: 'create' }
-  | { kind: 'model'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
+  | {
+      kind: 'model'
+      mode: 'edit'
+      providerName: string
+      name: string
+      expectedVersion: CatalogVersion
+    }
   | { kind: 'agent'; mode: 'create' }
-  | { kind: 'agent'; mode: 'edit'; id: AgentResourceId; expectedVersion: CatalogVersion }
+  | { kind: 'agent'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
 
 export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google']

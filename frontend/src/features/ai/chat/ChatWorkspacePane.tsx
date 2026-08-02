@@ -28,8 +28,9 @@ export function ChatWorkspacePane({
   onThreadChange,
   onSessionSortChange,
   onThreadSortChange,
-  onDefaultAgentChange,
-  onDefaultEnvironmentChange = async () => undefined,
+  onAgentChange,
+  onEnvironmentChange = async () => undefined,
+  onYoloChange = async () => undefined,
 }: {
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
@@ -42,8 +43,9 @@ export function ChatWorkspacePane({
   onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
-  onDefaultAgentChange: (agentId: string) => Promise<void>
-  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onAgentChange: (agentName: string) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onYoloChange?: (yoloEnabled: boolean) => Promise<void>
 }) {
   const [firstSendReplay, setFirstSendReplay] = useState<FirstSendReplay | null>(null)
 
@@ -65,6 +67,9 @@ export function ChatWorkspacePane({
         chatId={chat?.id ?? ''}
         agents={agents}
         environments={environments}
+        agentName={chat?.agentName ?? ''}
+        environmentName={chat?.environmentName ?? null}
+        yoloEnabled={chat?.yoloEnabled ?? false}
         paneId={pane.id}
         threadId={pane.threadId}
         focused={focused}
@@ -74,6 +79,9 @@ export function ChatWorkspacePane({
         onThreadChange={handleThreadChange}
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
+        onAgentChange={onAgentChange}
+        onEnvironmentChange={onEnvironmentChange}
+        onYoloChange={onYoloChange}
         initialReplay={
           firstSendReplay?.threadId === pane.threadId
             ? firstSendReplay
@@ -94,8 +102,12 @@ export function ChatWorkspacePane({
       onFocus={onFocus}
       onThreadChange={handleThreadChange}
       onThreadSortChange={onThreadSortChange}
-      onDefaultAgentChange={onDefaultAgentChange}
-      onDefaultEnvironmentChange={onDefaultEnvironmentChange}
+      agentName={chat?.agentName ?? ''}
+      environmentName={chat?.environmentName ?? null}
+      yoloEnabled={chat?.yoloEnabled ?? false}
+      onAgentChange={onAgentChange}
+      onEnvironmentChange={onEnvironmentChange}
+      onYoloChange={onYoloChange}
       onFirstSendRecovery={recoverFirstSend}
     />
   )

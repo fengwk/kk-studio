@@ -7,7 +7,6 @@ type MetaMessageKind = 'turn_usage'
 /** Durable Entry 的非对话审计事件；未知值也必须留在时间线中。 */
 export type EntryEventKind =
   | 'root'
-  | 'runtime_config'
   | 'empty_message'
   | 'unsupported_message'
   | 'unknown_entry'

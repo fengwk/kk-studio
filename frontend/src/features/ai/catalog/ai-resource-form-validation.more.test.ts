@@ -27,7 +27,7 @@ function provider(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
 
 function model(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
-    ...emptyModelDraft({ id: 'provider-1' }),
+    ...emptyModelDraft({ name: 'minimax' }),
     name: 'model',
     ...overrides,
   }
@@ -37,7 +37,7 @@ function agent(overrides: Partial<AgentDraft> = {}): AgentDraft {
   return {
     ...emptyAgentDraft(),
     name: 'agent',
-    modelId: 'model-1',
+    model: 'minimax/model',
     variant: 'medium',
     ...overrides,
   }
@@ -73,9 +73,9 @@ describe('ai-resource-form-validation additional branches', () => {
     ['topP must be in range', /Top P/],
     ['topK must be positive', /Top K/],
     ['frequencyPenalty must be a number', /Penalty/],
-    ['providerId is required', /Provider/],
+    ['providerName is required', /Provider/],
     ['pricing.inputPerMillionTokens must not be negative', /价格/],
-    ['modelId is required', /Model/],
+    ['modelName is required', /Model/],
     ['baseUrl is invalid', /Base URL/],
     ['tools 去前缀后存在重名', /Tools/],
     ['skills 去前缀后存在重名', /Skills/],
@@ -115,11 +115,11 @@ describe('ai-resource-form-validation additional branches', () => {
 
   it.each([
     { kind: 'provider', mode: 'create' },
-    { kind: 'provider', mode: 'edit', id: 'provider-1' },
+    { kind: 'provider', mode: 'edit', name: 'provider' },
     { kind: 'model', mode: 'create' },
-    { kind: 'model', mode: 'edit', id: 'model-1' },
+    { kind: 'model', mode: 'edit', providerName: 'minimax', name: 'model' },
     { kind: 'agent', mode: 'create' },
-    { kind: 'agent', mode: 'edit', id: 'agent-1' },
+    { kind: 'agent', mode: 'edit', name: 'agent' },
   ] as ResourceModal[])('accepts a complete $kind $mode body', (modal) => {
     expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
   })
@@ -137,7 +137,7 @@ describe('ai-resource-form-validation additional branches', () => {
       variants: [{ ...model().variants[0]!, reasoningEffort: 'high' }],
     })
     expect(
-      validate({ kind: 'model', mode: 'edit', id: 'model-1' }, { modelDraft: withExplicitEffort }).ok,
+      validate({ kind: 'model', mode: 'edit', providerName: 'minimax', name: 'model' }, { modelDraft: withExplicitEffort }).ok,
     ).toBe(true)
   })
 
@@ -173,7 +173,7 @@ describe('ai-resource-form-validation additional branches', () => {
       'name',
     )
     expect(
-      validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ modelId: '' }) }).fields,
-    ).toHaveProperty('modelId')
+      validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ model: '' }) }).fields,
+    ).toHaveProperty('model')
   })
 })

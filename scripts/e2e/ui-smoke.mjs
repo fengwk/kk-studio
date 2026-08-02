@@ -82,7 +82,22 @@ async function apiDeleteByName(backendUrl, resource, name) {
   const key = resource === 'chats' ? 'title' : 'name'
   const hit = list.find((item) => item[key] === name)
   if (!hit) return false
-  await apiJson(backendUrl, 'DELETE', `${resourcePath}/${hit.id}`)
+  let deletePath
+  if (resource === 'chats') {
+    deletePath =
+      `${resourcePath}/${encodeURIComponent(hit.id)}`
+      + `?expectedVersion=${encodeURIComponent(hit.version)}`
+  } else if (resource === 'models') {
+    deletePath =
+      `${resourcePath}?providerName=${encodeURIComponent(hit.providerName)}`
+      + `&modelName=${encodeURIComponent(hit.name)}`
+      + `&expectedVersion=${encodeURIComponent(hit.version)}`
+  } else {
+    deletePath =
+      `${resourcePath}/${encodeURIComponent(hit.name)}`
+      + `?expectedVersion=${encodeURIComponent(hit.version)}`
+  }
+  await apiJson(backendUrl, 'DELETE', deletePath)
   return true
 }
 
@@ -94,12 +109,15 @@ async function requireRealMiniMaxM27(backendUrl) {
   const models = modelsJson?.data?.results || []
   const providers = providersJson?.data?.results || []
   const agent = agents.find((candidate) => candidate.name === 'default-assistant')
-  const model = models.find((candidate) => Number(candidate.id) === 1)
-  const provider = providers.find((candidate) => String(candidate.id) === String(model?.providerId))
+  const model = models.find(
+    (candidate) =>
+      candidate.providerName === 'minimax' && candidate.name === 'MiniMax-M2.7',
+  )
+  const provider = providers.find((candidate) => candidate.name === model?.providerName)
   assert(
     provider?.name === 'minimax'
       && model?.name === 'MiniMax-M2.7'
-      && String(agent?.modelId) === String(model.id),
+      && agent?.model === `${model.providerName}/${model.name}`,
     `real UI test must use default-assistant with minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model, provider })}`,
   )
 }
@@ -421,7 +439,6 @@ async function main(argv) {
 
   await run('ui.model.create_edit_delete_flow', 'UI 创建/编辑/删除 Model', async (caseArt) => {
     const name = `e2e-ui-model-${stamp}`
-    const renamed = `${name}-upd`
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
@@ -431,27 +448,25 @@ async function main(argv) {
 
     // 编辑
     await page.getByRole('button', { name: `编辑 ${modelRef}` }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
+    await page.getByRole('textbox', { name: 'Description', exact: true }).fill('updated by UI E2E')
     await page.getByRole('button', { name: '保存修改' }).click()
-    const renamedModelRef = await resourceCardTitle(page, renamed)
+    const updatedModelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-updated')
 
     // 删除确认
-    await page.getByRole('button', { name: `删除 ${renamedModelRef}` }).click()
+    await page.getByRole('button', { name: `删除 ${updatedModelRef}` }).click()
     await page.getByRole('button', { name: '确认删除' }).click()
     await page.waitForTimeout(800)
     await shot(caseArt, 'model-deleted')
     const body = await page.locator('body').innerText()
-    assert(!body.includes(renamedModelRef), `model still visible after delete: ${renamedModelRef}`)
+    assert(!body.includes(updatedModelRef), `model still visible after delete: ${updatedModelRef}`)
     expectNoFatal(pageErrors, consoleErrors)
     // best-effort cleanup if UI delete failed
-    await apiDeleteByName(args.backendUrl, 'models', renamed)
     await apiDeleteByName(args.backendUrl, 'models', name)
   })
 
   await run('ui.agent.create_edit_delete_flow', 'UI 创建/编辑/删除 Agent', async (caseArt) => {
     const name = `e2e-ui-agent-${stamp}`
-    const renamed = `${name}-upd`
     await goto('/agents')
     await page.getByText('新建 Agent', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
@@ -461,19 +476,21 @@ async function main(argv) {
     await shot(caseArt, 'agent-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
+    await page
+      .locator('label.form-group', { hasText: 'System Prompt' })
+      .locator('textarea')
+      .fill('updated ui e2e agent')
     await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-updated')
 
-    await page.getByRole('button', { name: `删除 ${renamed}` }).click()
+    await page.getByRole('button', { name: `删除 ${name}` }).click()
     await page.getByRole('button', { name: '确认删除' }).click()
     await page.waitForTimeout(800)
     await shot(caseArt, 'agent-deleted')
     const body = await page.locator('body').innerText()
-    assert(!body.includes(renamed), `agent still visible after delete: ${renamed}`)
+    assert(!body.includes(name), `agent still visible after delete: ${name}`)
     expectNoFatal(pageErrors, consoleErrors)
-    await apiDeleteByName(args.backendUrl, 'agents', renamed)
     await apiDeleteByName(args.backendUrl, 'agents', name)
   })
 
@@ -499,7 +516,6 @@ async function main(argv) {
 
   await run('ui.provider.create_edit_delete_flow', 'UI 创建/编辑/删除 Provider', async (caseArt) => {
     const name = `e2e-ui-provider-${stamp}`
-    const renamed = `${name}-upd`
     await goto('/providers')
     await page.keyboard.press('Escape')
     await page.locator('.cards-grid').getByText('新建 Provider', { exact: true }).click()
@@ -511,20 +527,19 @@ async function main(argv) {
     await shot(caseArt, 'provider-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
+    await page.getByLabel('Base URL').fill('https://example.com/v2')
     // 编辑时不改 key（空 credential 保留）
     await page.getByRole('button', { name: '保存修改' }).click()
-    await page.getByText(renamed, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'provider-updated')
 
-    await page.getByRole('button', { name: `删除 ${renamed}` }).click()
+    await page.getByRole('button', { name: `删除 ${name}` }).click()
     await page.getByRole('button', { name: '确认删除' }).click()
     await page.waitForTimeout(800)
     await shot(caseArt, 'provider-deleted')
     const body = await page.locator('body').innerText()
-    assert(!body.includes(renamed), `provider still visible after delete: ${renamed}`)
+    assert(!body.includes(name), `provider still visible after delete: ${name}`)
     expectNoFatal(pageErrors, consoleErrors)
-    await apiDeleteByName(args.backendUrl, 'providers', renamed)
     await apiDeleteByName(args.backendUrl, 'providers', name)
   })
 

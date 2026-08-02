@@ -38,10 +38,10 @@ function resolveDefaultAgent(
   chat: ChatDTO | undefined,
   agents: AgentDefinitionDTO[],
 ): AgentDefinitionDTO | undefined {
-  if (!chat?.defaultAgentId) {
+  if (!chat?.agentName) {
     return undefined
   }
-  return agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
+  return agents.find((agent) => agent.name === chat.agentName)
 }
 
 /** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
@@ -58,12 +58,11 @@ function resolveBlankPaneFooterLabels(
       contextWindow: undefined as number | undefined,
     }
   }
-  const modelId = agent.modelId ? String(agent.modelId) : ''
-  const model = models.find((item) => String(item.id) === modelId)
+  const model = models.find((item) => modelRef(item) === agent.model)
   return {
     agentName: agent.name || translate('ai.runtime.action.blankAgent'),
     providerName: model?.providerName || undefined,
-    modelName: model ? modelRef(model) : modelId || undefined,
+    modelName: model ? modelRef(model) : agent.model || undefined,
     variantName: agent.variant || undefined,
     contextWindow: extractContextWindow(model),
   }
@@ -78,8 +77,12 @@ export function BlankComposerPane({
   onFocus,
   onThreadChange,
   onThreadSortChange,
-  onDefaultAgentChange,
-  onDefaultEnvironmentChange = async () => undefined,
+  agentName,
+  environmentName,
+  yoloEnabled,
+  onAgentChange,
+  onEnvironmentChange = async () => undefined,
+  onYoloChange = async () => undefined,
   onFirstSendRecovery,
 }: {
   chat: ChatDTO | undefined
@@ -90,8 +93,12 @@ export function BlankComposerPane({
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
-  onDefaultAgentChange: (agentId: string) => Promise<void>
-  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  agentName: string
+  environmentName: string | null
+  yoloEnabled: boolean
+  onAgentChange: (agentName: string) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onYoloChange?: (yoloEnabled: boolean) => Promise<void>
   onFirstSendRecovery: (replay: FirstSendReplay) => void
 }) {
   const { t } = useI18n()
@@ -110,20 +117,12 @@ export function BlankComposerPane({
     queryKey: queryKeys.models.list,
     queryFn: () => agentService.listModels(),
   })
-  const providersQuery = useQuery({
-    queryKey: queryKeys.providers.list,
-    queryFn: () => agentService.listProviders(),
-  })
-  const providers = providersQuery.data?.results ?? []
-  const models: AgentModelView[] = toAgentModelViews(
-    modelsQuery.data?.results ?? [],
-    providers,
-  )
+  const models: AgentModelView[] = toAgentModelViews(modelsQuery.data?.results ?? [])
   const defaultAgent = resolveDefaultAgent(chat, agents)
   const footerLabels = resolveBlankPaneFooterLabels(defaultAgent, models)
   const agentLabel =
     defaultAgent?.name
-    || (chat?.defaultAgentId
+    || (chat?.agentName
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
 
@@ -134,6 +133,9 @@ export function BlankComposerPane({
       const result = await performBlankPaneFirstSend({
         chatId: chat?.id ?? '',
         content,
+        agentName,
+        environmentName,
+        yoloEnabled,
       })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
@@ -185,6 +187,9 @@ export function BlankComposerPane({
       case 'environment':
         setEnvironmentModalOpen(true)
         return
+      case 'yolo':
+        void onYoloChange(!yoloEnabled)
+        return
       default:
         setActionError(
           command.disabledReason
@@ -209,12 +214,12 @@ export function BlankComposerPane({
     }
   }
 
-  async function handleAgentSelected(agentId: string) {
+  async function handleAgentSelected(selectedAgentName: string) {
     setAgentModalOpen(false)
     const content = pendingContent?.trim()
     setActionError(null)
     try {
-      await onDefaultAgentChange(agentId)
+      await onAgentChange(selectedAgentName)
       if (content) {
         await runFirstSend(content)
       }
@@ -230,7 +235,7 @@ export function BlankComposerPane({
     setEnvironmentPending(true)
     setActionError(null)
     try {
-      await onDefaultEnvironmentChange(environmentName)
+      await onEnvironmentChange(environmentName)
       setEnvironmentModalOpen(false)
     } catch (error) {
       setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
@@ -266,8 +271,8 @@ export function BlankComposerPane({
             modelName={defaultAgent ? footerLabels.modelName : undefined}
             variantName={defaultAgent ? footerLabels.variantName : undefined}
             contextWindow={defaultAgent ? footerLabels.contextWindow : undefined}
-            environmentName={chat?.defaultEnvironmentName}
-            yoloEnabled={false}
+            environmentName={environmentName}
+            yoloEnabled={yoloEnabled}
             onAgentClick={() => {
               onFocus()
               setAgentModalOpen(true)
@@ -282,7 +287,6 @@ export function BlankComposerPane({
       <AgentSelectionModal
         open={agentModalOpen}
         agents={agents.map((agent) => ({
-          id: String(agent.id),
           name: agent.name,
           description: agent.description,
         }))}
@@ -290,14 +294,14 @@ export function BlankComposerPane({
           setAgentModalOpen(false)
           setPendingContent(null)
         }}
-        onSelect={(agentId) => {
-          void handleAgentSelected(agentId)
+        onSelect={(selectedAgentName) => {
+          void handleAgentSelected(selectedAgentName)
         }}
       />
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentName={chat?.defaultEnvironmentName}
+        selectedEnvironmentName={environmentName}
         selectionPending={environmentPending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {

@@ -102,17 +102,17 @@ export function ModelForm({
 
   return (
     <>
-      <label className={`form-group${fieldErrors.providerId ? ' is-error' : ''}`}>
+      <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
         <FormSelect
           aria-label={t('ai.catalog.form.provider')}
-          value={draft.providerId}
+          value={draft.providerName}
           required
           disabled={mode === 'edit'}
-          options={providers.map((provider) => ({ value: String(provider.id), label: provider.name }))}
-          onChange={(providerId) => onChange({ ...draft, providerId })}
+          options={providers.map((provider) => ({ value: provider.name, label: provider.name }))}
+          onChange={(providerName) => onChange({ ...draft, providerName })}
         />
-        {fieldErrors.providerId ? <span className="field-error">{fieldErrors.providerId}</span> : null}
+        {fieldErrors.providerName ? <span className="field-error">{fieldErrors.providerName}</span> : null}
       </label>
 
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
@@ -121,6 +121,7 @@ export function ModelForm({
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="MiniMax-M2.7"
+          readOnly={mode === 'edit'}
           required
         />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}

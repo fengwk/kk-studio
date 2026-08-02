@@ -28,11 +28,6 @@ import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors
 import { toThreadUsageSummary } from '@/features/ai/chat/chat-workspace-pane/usage-adapter'
 import { useChatSessionPicker } from '@/features/ai/chat/useChatSessionPicker'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
-import {
-  extractDefaultVariantFromModel,
-  modelRef,
-  variantOptionsFromModel,
-} from '@/features/ai/catalog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
@@ -52,23 +47,13 @@ function rebindErrorMessage(error: unknown): string {
   return errorMessage(error, translate('ai.runtime.action.rebindFailed'))
 }
 
-function firstNonEmpty(...values: unknown[]): string {
-  for (const value of values) {
-    if (value == null) {
-      continue
-    }
-    const text = String(value).trim()
-    if (text) {
-      return text
-    }
-  }
-  return ''
-}
-
 export function BoundThreadPane({
   chatId,
   agents,
   environments = [],
+  agentName,
+  environmentName,
+  yoloEnabled,
   paneId,
   threadId,
   focused,
@@ -78,12 +63,18 @@ export function BoundThreadPane({
   onThreadChange,
   onSessionSortChange,
   onThreadSortChange,
+  onAgentChange,
+  onEnvironmentChange,
+  onYoloChange,
   initialReplay,
   onReplayInitialized,
 }: {
   chatId: string
   agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
+  agentName: string
+  environmentName: string | null
+  yoloEnabled: boolean
   paneId: string
   threadId: string
   focused: boolean
@@ -93,6 +84,9 @@ export function BoundThreadPane({
   onThreadChange: (threadId: string | null) => void
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
+  onAgentChange: (agentName: string) => Promise<void>
+  onEnvironmentChange: (environmentName: string | null) => Promise<void>
+  onYoloChange: (yoloEnabled: boolean) => Promise<void>
   initialReplay?: ThreadMessageReplay
   onReplayInitialized?: () => void
 }) {
@@ -102,6 +96,7 @@ export function BoundThreadPane({
     threadId,
     initialReplay?.content ?? '',
     initialReplay,
+    { agentName, environmentName, yoloEnabled },
   )
   const sessionId = controller.sessionId
   const queryClient = useQueryClient()
@@ -112,8 +107,6 @@ export function BoundThreadPane({
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
-  const [modelModalOpen, setModelModalOpen] = useState(false)
-  const [variantModalOpen, setVariantModalOpen] = useState(false)
   const [branchDraft, setBranchDraft] = useState('')
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [threadAssociationPending, setThreadAssociationPending] = useState(false)
@@ -193,11 +186,12 @@ export function BoundThreadPane({
   async function selectEnvironment(environmentName: string | null): Promise<boolean> {
     setEnvironmentPending(true)
     try {
-      const success = await controller.setThreadEnvironment(environmentName)
-      if (success) {
-        setEnvironmentModalOpen(false)
-      }
-      return success
+      await onEnvironmentChange(environmentName)
+      setEnvironmentModalOpen(false)
+      return true
+    } catch (error) {
+      setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
+      return false
     } finally {
       setEnvironmentPending(false)
     }
@@ -231,11 +225,8 @@ export function BoundThreadPane({
       case 'environment':
         setEnvironmentModalOpen(true)
         return
-      case 'model':
-        setModelModalOpen(true)
-        return
-      case 'variant':
-        setVariantModalOpen(true)
+      case 'yolo':
+        void onYoloChange(!yoloEnabled)
         return
       case 'tree':
         openRebindTarget(() => setHistorySessionId(sessionId || null))
@@ -249,15 +240,6 @@ export function BoundThreadPane({
         controller.runCommand(command)
     }
   }
-
-  const currentModelId = firstNonEmpty(
-    controller.thread?.modelId,
-    controller.agent?.modelId,
-  )
-  const currentModel =
-    controller.models.find((model) => String(model.id) === currentModelId) ??
-    controller.models.find((model) => model.name === currentModelId)
-  const currentVariantOptions = variantOptionsFromModel(currentModel)
 
   const labels: ChatPanelLabels = {
     agentName: controller.runtimeLabels.agentName,
@@ -285,7 +267,7 @@ export function BoundThreadPane({
     commands: BOUND_PANE_COMMANDS,
   }
   const footer: ChatPanelFooterInput = {
-    yoloEnabled: controller.observability.yolo?.enabled,
+    yoloEnabled,
     usage: controller.observability.usage
       ? toThreadUsageSummary(controller.observability.usage)
       : undefined,
@@ -293,14 +275,8 @@ export function BoundThreadPane({
       onFocus()
       setAgentModalOpen(true)
     },
-    onModelClick: () => {
-      onFocus()
-      setModelModalOpen(true)
-    },
-    onVariantClick: () => {
-      onFocus()
-      setVariantModalOpen(true)
-    },
+    onModelClick: undefined,
+    onVariantClick: undefined,
     onEnvironmentClick: () => {
       onFocus()
       setEnvironmentModalOpen(true)
@@ -383,77 +359,23 @@ export function BoundThreadPane({
       <AgentSelectionModal
         open={agentModalOpen}
         agents={agents.map((agent) => ({
-          id: String(agent.id),
           name: agent.name,
           description: agent.description,
         }))}
         onClose={() => setAgentModalOpen(false)}
-        onSelect={(agentId) => {
+        onSelect={(selectedAgentName) => {
           setAgentModalOpen(false)
-          void controller.setThreadAgent(agentId).then(async () => {
-            await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-          })
+          void onAgentChange(selectedAgentName)
         }}
       />
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentName={controller.thread?.activeEnvironmentName}
+        selectedEnvironmentName={environmentName}
         selectionPending={environmentPending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {
           void selectEnvironment(environmentName)
-        }}
-      />
-      <SelectionListModal
-        open={modelModalOpen}
-        title={t('ai.chat.selectModel')}
-        items={controller.models.map((model) => ({
-          id: String(model.id),
-          title: modelRef(model),
-          subtitle: model.description || undefined,
-        }))}
-        sort="recent"
-        onSortChange={() => undefined}
-        showSort={false}
-        emptyText={t('ai.chat.noModels')}
-        onClose={() => setModelModalOpen(false)}
-        onSelect={(modelId) => {
-          setModelModalOpen(false)
-          const model = controller.models.find((item) => String(item.id) === modelId)
-          if (!model) {
-            return
-          }
-          const variant =
-            extractDefaultVariantFromModel(model) ||
-            variantOptionsFromModel(model)[0] ||
-            'default'
-          void controller.setThreadModel(String(model.id), variant)
-        }}
-      />
-      <SelectionListModal
-        open={variantModalOpen}
-        title={t('ai.chat.selectVariant')}
-        items={currentVariantOptions.map((variant) => ({
-          id: variant,
-          title: variant,
-          subtitle: currentModel ? modelRef(currentModel) : undefined,
-        }))}
-        sort="recent"
-        onSortChange={() => undefined}
-        showSort={false}
-        emptyText={
-          currentModel
-            ? t('ai.chat.noVariantsForModel')
-            : t('ai.chat.setModelFirst')
-        }
-        onClose={() => setVariantModalOpen(false)}
-        onSelect={(variant) => {
-          setVariantModalOpen(false)
-          if (!currentModel) {
-            return
-          }
-          void controller.setThreadModel(String(currentModel.id), variant)
         }}
       />
     </section>

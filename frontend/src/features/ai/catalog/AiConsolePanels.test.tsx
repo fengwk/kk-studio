@@ -28,8 +28,6 @@ const baseConfig = {
 
 function modelWithProvider(): AgentModelView {
   return {
-    id: 'm1',
-    providerId: 'p1',
     providerName: 'minimax',
     name: 'MiniMax',
     description: null,
@@ -54,8 +52,8 @@ describe('AiConsolePanels', () => {
             {
               id: 'c1',
               title: 'One',
-              defaultAgentId: 'missing',
-              defaultEnvironmentName: null,
+              agentName: 'missing',
+              environmentName: null,
               version: '1',
               createTime: null,
               updateTime: null,
@@ -71,7 +69,7 @@ describe('AiConsolePanels', () => {
               name: 'assistant',
               description: 'd',
               systemPrompt: null,
-              modelId: 'm1',
+              model: 'm1',
               variant: 'default',
               config: {
                 tools: ['bash'],

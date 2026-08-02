@@ -10,6 +10,6 @@ describe('queryKeys', () => {
   it('keeps one authoritative snapshot key per Thread and separate aggregate usage keys', () => {
     expect(queryKeys.threads.snapshot('thread-1')).toEqual(['threads', 'snapshot', 'thread-1'])
     expect(queryKeys.usage.session('session-1')).toEqual(['usage', 'sessions', 'session-1'])
-    expect(queryKeys.usage.model(42)).toEqual(['usage', 'models', '42'])
+    expect(queryKeys.usage.model('minimax/MiniMax-M2.7')).toEqual(['usage', 'models', 'minimax/MiniMax-M2.7'])
   })
 })

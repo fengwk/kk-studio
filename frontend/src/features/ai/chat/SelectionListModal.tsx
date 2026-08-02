@@ -7,7 +7,7 @@ import { useI18n } from '@/shared/i18n'
 export interface SelectionListItem {
   id: string
   title: string
-  subtitle?: string
+  subtitle?: string | null
   badge?: string
 }
 
@@ -151,8 +151,8 @@ export function AgentSelectionModal({
   onClose,
 }: {
   open: boolean
-  agents: Array<{ id: string; name: string; description?: string | null }>
-  onSelect: (agentId: string) => void
+  agents: Array<{ name: string; description?: string | null }>
+  onSelect: (agentName: string) => void
   onClose: () => void
 }) {
   const { t } = useI18n()
@@ -173,8 +173,8 @@ export function AgentSelectionModal({
               <li className="selection-empty">{t('ai.chat.noAgents')}</li>
             ) : null}
             {agents.map((agent) => (
-              <li key={agent.id}>
-                <button type="button" className="selection-item" onClick={() => onSelect(agent.id)}>
+              <li key={agent.name}>
+                <button type="button" className="selection-item" onClick={() => onSelect(agent.name)}>
                   <span className="selection-item-title">{agent.name}</span>
                   {agent.description ? <span className="selection-item-subtitle">{agent.description}</span> : null}
                 </button>

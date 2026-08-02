@@ -14,15 +14,24 @@ export function useAgentThreadMessageMutation(threadId: string) {
   return useMutation({
     mutationFn: async ({
       content,
+      agentName,
+      environmentName,
+      yoloEnabled,
       clientMessageId,
       expectedExecutionEpoch,
     }: {
       content: string
+      agentName: string
+      environmentName: string | null
+      yoloEnabled: boolean
       clientMessageId: string
       expectedExecutionEpoch: BackendLong
     }): Promise<HarnessThreadInputDTO> =>
       harnessService.submitThreadMessage(threadId, {
         content,
+        agentName,
+        environmentName,
+        yoloEnabled,
         clientMessageId,
         expectedExecutionEpoch,
       }),

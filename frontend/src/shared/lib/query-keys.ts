@@ -1,5 +1,3 @@
-import type { AgentResourceId } from '@/shared/api/contracts/base'
-
 export const queryKeys = {
   providers: {
     all: ['providers'] as const,
@@ -47,7 +45,7 @@ export const queryKeys = {
   usage: {
     all: ['usage'] as const,
     session: (sessionId: string) => ['usage', 'sessions', sessionId] as const,
-    model: (modelId: AgentResourceId) => ['usage', 'models', String(modelId)] as const,
+    model: (modelName: string) => ['usage', 'models', modelName] as const,
   },
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,

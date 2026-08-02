@@ -6,6 +6,7 @@ import type {
   AgentModelDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
+import { modelRef } from '@/features/ai/catalog/AgentModelView'
 import { trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
 import { translate } from '@/shared/i18n'
 
@@ -52,7 +53,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     name: '',
     description: '',
     systemPrompt: '',
-    modelId: model ? String(model.id) : '',
+    model: model ? modelRef(model) : '',
     // Empty = no override; runtime uses model.defaultVariant.
     variant: '',
     tools: [],
@@ -66,7 +67,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     name: agent.name,
     description: agent.description || '',
     systemPrompt: agent.systemPrompt || '',
-    modelId: agent.modelId,
+    model: agent.model,
     variant: agent.variant?.trim() || '',
     tools: normalizeNames(config.tools),
     skills: normalizeNames(config.skills),
@@ -78,9 +79,9 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   if (!name) {
     throw new Error('name must not be blank')
   }
-  const modelId = draft.modelId.trim()
-  if (!modelId) {
-    throw new Error('modelId must not be blank')
+  const model = draft.model.trim()
+  if (!model) {
+    throw new Error('model must not be blank')
   }
   // Blank override is allowed; backend resolves model.defaultVariant when needed.
   const variant = trimToNull(draft.variant)
@@ -88,12 +89,17 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
     name,
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    modelId,
+    model,
     variant,
     config: toConfig(draft),
   }
 }
 
 export function toEditableAgentUpdate(draft: AgentDraft): AgentDefinitionEditablePropertiesDTO {
-  return toEditableAgent(draft)
+  return {
+    description: trimToNull(draft.description),
+    systemPrompt: trimToNull(draft.systemPrompt),
+    variant: trimToNull(draft.variant),
+    config: toConfig(draft),
+  }
 }

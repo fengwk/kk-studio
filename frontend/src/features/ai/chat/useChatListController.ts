@@ -9,18 +9,18 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useQuery } from '@tanstack/react-query'
 import { useI18n } from '@/shared/i18n'
 
-function resolveChatDefaultAgentId(
-  agentId: string | undefined,
-  selectedAgentId: string,
+function resolveChatAgentName(
+  agentName: string | undefined,
+  selectedAgentName: string,
   agents: AgentDefinitionDTO[],
 ): string {
-  if (agentId && agents.some((agent) => String(agent.id) === agentId)) {
-    return agentId
+  if (agentName && agents.some((agent) => agent.name === agentName)) {
+    return agentName
   }
-  if (selectedAgentId && agents.some((agent) => String(agent.id) === selectedAgentId)) {
-    return selectedAgentId
+  if (selectedAgentName && agents.some((agent) => agent.name === selectedAgentName)) {
+    return selectedAgentName
   }
-  return agents[0] ? String(agents[0].id) : ''
+  return agents[0]?.name ?? ''
 }
 
 export function useChatListController(
@@ -31,7 +31,7 @@ export function useChatListController(
   const navigate = useNavigate()
   const { t } = useI18n()
   const [modalOpen, setModalOpen] = useState(false)
-  const [selectedAgentId, setSelectedAgentId] = useState('')
+  const [selectedAgentName, setSelectedAgentName] = useState('')
   const [selectedEnvironmentName, setSelectedEnvironmentName] = useState('')
   const [title, setTitle] = useState('')
   const [formError, setFormError] = useState('')
@@ -47,8 +47,8 @@ export function useChatListController(
     mutationFn: () =>
       chatService.createChat({
         title: title.trim(),
-        defaultAgentId: selectedAgentId,
-        ...(selectedEnvironmentName ? { defaultEnvironmentName: selectedEnvironmentName } : {}),
+        agentName: selectedAgentName,
+        ...(selectedEnvironmentName ? { environmentName: selectedEnvironmentName } : {}),
       }),
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
@@ -61,8 +61,8 @@ export function useChatListController(
     },
   })
 
-  function openCreateChat(agentId?: string) {
-    setSelectedAgentId(resolveChatDefaultAgentId(agentId, selectedAgentId, agents))
+  function openCreateChat(agentName?: string) {
+    setSelectedAgentName(resolveChatAgentName(agentName, selectedAgentName, agents))
     setTitle('')
     setSelectedEnvironmentName('')
     setFormError('')
@@ -78,8 +78,8 @@ export function useChatListController(
     }
   }
 
-  function handleSelectAgent(agentId: string) {
-    setSelectedAgentId(agentId)
+  function handleSelectAgent(agentName: string) {
+    setSelectedAgentName(agentName)
   }
 
   function handleSelectEnvironment(environmentName: string) {
@@ -93,7 +93,7 @@ export function useChatListController(
       setNameError(t('ai.chat.nameFieldRequired'))
       return
     }
-    if (!selectedAgentId) {
+    if (!selectedAgentName) {
       setFormError(t('ai.chat.agentRequired'))
       return
     }
@@ -112,7 +112,7 @@ export function useChatListController(
       open: modalOpen,
       agents,
       environments,
-      selectedAgentId,
+      selectedAgentName,
       selectedEnvironmentName,
       title,
       pending: createChatMutation.isPending,

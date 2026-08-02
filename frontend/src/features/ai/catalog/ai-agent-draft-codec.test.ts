@@ -10,8 +10,7 @@ import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/a
 
 function model(): AgentModelDTO {
   return {
-    id: 'model-1',
-    providerId: 'provider-1',
+    providerName: 'minimax',
     name: 'model',
     description: null,
     config: {
@@ -54,8 +53,8 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
 
 describe('ai-agent-draft-codec', () => {
   it('creates empty drafts from an optional model without inventing a variant', () => {
-    expect(emptyAgentDraft(model())).toMatchObject({ modelId: 'model-1', variant: '' })
-    expect(emptyAgentDraft()).toMatchObject({ modelId: '', variant: '' })
+    expect(emptyAgentDraft(model())).toMatchObject({ model: 'minimax/model', variant: '' })
+    expect(emptyAgentDraft()).toMatchObject({ model: '', variant: '' })
   })
 
   it('normalizes short capability names and rejects collisions in create payloads', () => {
@@ -70,11 +69,10 @@ describe('ai-agent-draft-codec', () => {
 
   it('projects persisted definitions and normalizes nullable values', () => {
     const agent: AgentDefinitionDTO = {
-      id: 'agent-1',
       name: 'assistant',
       description: null,
       systemPrompt: null,
-      modelId: 'model-1',
+      model: 'minimax/model',
       variant: 'quality',
       config: {
         tools: [' read ', ''],
@@ -89,7 +87,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: '',
       systemPrompt: '',
-      modelId: 'model-1',
+      model: 'minimax/model',
       variant: 'quality',
       tools: ['read'],
       skills: [],
@@ -108,7 +106,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: 'description',
       systemPrompt: 'prompt',
-      modelId: 'model-1',
+      model: 'minimax/model',
       variant: 'quality',
       config: {
         tools: ['read', 'bash'],
@@ -116,7 +114,15 @@ describe('ai-agent-draft-codec', () => {
       },
     }
     expect(toEditableAgent(draft())).toEqual(expected)
-    expect(toEditableAgentUpdate(draft())).toEqual(expected)
+    expect(toEditableAgentUpdate(draft())).toEqual({
+      description: 'description',
+      systemPrompt: 'prompt',
+      variant: 'quality',
+      config: {
+        tools: ['read', 'bash'],
+        skills: ['dev'],
+      },
+    })
 
     expect(
       toEditableAgent(
@@ -132,7 +138,7 @@ describe('ai-agent-draft-codec', () => {
 
   it.each([
     [{ name: ' ' }, /name/],
-    [{ modelId: ' ' }, /modelId/],
+    [{ model: ' ' }, /model/],
     [{ tools: ['read', 'read'] }, /tools/],
     [{ skills: ['dev', 'dev'] }, /skills/],
   ] as Array<[Partial<AgentDraft>, RegExp]>)(

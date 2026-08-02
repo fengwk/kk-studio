@@ -15,7 +15,6 @@ import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 export function useAiConsoleResourceEditorState({
   providers,
@@ -37,26 +36,30 @@ export function useAiConsoleResourceEditorState({
     }
 
     if (resourceModal.kind === 'model') {
-      // Edit mode keeps the persisted providerId so the user never silently rewires a Model
+      // Edit mode keeps the persisted provider name so the user never silently rewires a Model
       // between providers; create mode has no preference and falls back to providers[0].
-      const preferredProviderId =
+      const preferredProviderName =
         resourceModal.mode === 'edit'
-          ? models.find((model) => model.id === resourceModal.id)?.providerId
+          ? models.find(
+            (model) =>
+              model.providerName === resourceModal.providerName &&
+              model.name === resourceModal.name,
+          )?.providerName
           : undefined
       setModelDraft((currentDraft) =>
         normalizeModelDraftDefaultVariant(
-          normalizeModelDraftProvider(currentDraft, providers, preferredProviderId),
+          normalizeModelDraftProvider(currentDraft, providers, preferredProviderName),
         ),
       )
       return
     }
 
     if (resourceModal.kind === 'agent') {
-      const preferredModelId =
+      const preferredModel =
         resourceModal.mode === 'edit'
-          ? agents.find((agent) => agent.id === resourceModal.id)?.modelId
+          ? agents.find((agent) => agent.name === resourceModal.name)?.model
           : undefined
-      setAgentDraft((currentDraft) => normalizeAgentDraftSelection(currentDraft, models, preferredModelId))
+      setAgentDraft((currentDraft) => normalizeAgentDraftSelection(currentDraft, models, preferredModel))
     }
   }, [agents, models, providers, resourceModal])
 
@@ -90,10 +93,13 @@ export function useAiConsoleResourceEditorState({
     onAgentDraftChange: setAgentDraft,
     closeResourceModal,
     openCreateProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
-    openEditProvider: (providerId: AgentResourceId) => applyResourceEditorPlan(editProviderEditorPlan(providers, providerId)),
+    openEditProvider: (providerName: string) =>
+      applyResourceEditorPlan(editProviderEditorPlan(providers, providerName)),
     openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
-    openEditModel: (modelId: AgentResourceId) => applyResourceEditorPlan(editModelEditorPlan(models, modelId)),
+    openEditModel: (providerName: string, modelName: string) =>
+      applyResourceEditorPlan(editModelEditorPlan(models, providerName, modelName)),
     openCreateAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
-    openEditAgent: (agentId: AgentResourceId) => applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentId)),
+    openEditAgent: (agentName: string) =>
+      applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentName)),
   }
 }

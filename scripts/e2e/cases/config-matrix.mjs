@@ -11,9 +11,9 @@ import { registerCase } from '../lib/registry.mjs'
  * 为每个矩阵行注册独立 case，报告里逐条 PASS/FAIL。
  * 共享一个临时 provider，在第一个 case 创建，最后一个 case 删除。
  */
-let sharedProviderId = null
+let sharedProviderName = null
 let sharedProviderVersion = null
-let sharedModelIdForAgent = null
+let sharedModelRefForAgent = null
 let sharedModelVersionForAgent = null
 
 registerCase({
@@ -24,9 +24,9 @@ registerCase({
   async run(ctx) {
     const { json } = await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
     const provider = envelopeData(json)
-    sharedProviderId = String(provider.id)
+    sharedProviderName = String(provider.name)
     sharedProviderVersion = String(provider.version)
-    ctx.vars.matrixProviderId = sharedProviderId
+    ctx.vars.matrixProviderName = sharedProviderName
   },
 })
 
@@ -37,11 +37,11 @@ for (const row of modelConfigMatrix()) {
     title: `Model config 矩阵：${row.title}`,
     docs: `期望 ${row.ok ? '成功创建' : `失败 ${row.expectStatus || 400}`}；${row.messageIncludes || ''}`,
     async run(ctx) {
-      assert(sharedProviderId, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
+      assert(sharedProviderName, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
       const body = row.rawBody
-        ? { providerId: sharedProviderId, name: `mx-${row.id}-${cid().slice(0, 4)}`, description: row.title }
+        ? { providerName: sharedProviderName, name: `mx-${row.id}-${cid().slice(0, 4)}`, description: row.title }
         : {
-            providerId: sharedProviderId,
+            providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
             description: row.title,
             config: row.build(),
@@ -50,10 +50,13 @@ for (const row of modelConfigMatrix()) {
         const { status, json } = await ctx.call('POST', '/api/ai/catalog/models', body)
         assert([200, 201].includes(status), `status ${status}`)
         const model = envelopeData(json)
-        assert(model?.id, JSON.stringify(json))
+        assert(model?.name, JSON.stringify(json))
         ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
         // cleanup model immediately to keep list small
-        await ctx.call('DELETE', `/api/ai/catalog/models/${model.id}?expectedVersion=${encodeURIComponent(model.version)}`)
+        await ctx.call(
+          'DELETE',
+          `/api/ai/catalog/models?providerName=${encodeURIComponent(model.providerName)}&modelName=${encodeURIComponent(model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+        )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/models', body), {
           status: row.expectStatus || 400,
@@ -71,12 +74,12 @@ registerCase({
   title: '配置矩阵收尾：删除临时 Provider',
   docs: '删除 matrix.model.setup_provider 创建的 provider',
   async run(ctx) {
-    if (sharedProviderId) {
+    if (sharedProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${sharedProviderId}?expectedVersion=${encodeURIComponent(sharedProviderVersion)}`,
+        `/api/ai/catalog/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderVersion)}`,
       )
-      sharedProviderId = null
+      sharedProviderName = null
       sharedProviderVersion = null
     }
   },
@@ -94,19 +97,19 @@ registerCase({
       providerCreateBody(`ag-${cid().slice(0, 6)}`),
     )
     const provider = envelopeData(pCreate)
-    const providerId = String(provider.id)
-    ctx.vars.agentMatrixProviderId = providerId
+    const providerName = String(provider.name)
+    ctx.vars.agentMatrixProviderName = providerName
     ctx.vars.agentMatrixProviderVersion = String(provider.version)
     const { json: mCreate } = await ctx.call('POST', '/api/ai/catalog/models', {
-      providerId,
+      providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
       description: 'for agent matrix',
       config: baseModelConfig(),
     })
     const model = envelopeData(mCreate)
-    sharedModelIdForAgent = String(model.id)
+    sharedModelRefForAgent = `${model.providerName}/${model.name}`
     sharedModelVersionForAgent = String(model.version)
-    ctx.vars.agentMatrixModelId = sharedModelIdForAgent
+    ctx.vars.agentMatrixModel = sharedModelRefForAgent
   },
 })
 
@@ -117,12 +120,12 @@ for (const row of agentConfigMatrix()) {
     title: `Agent config 矩阵：${row.title}`,
     docs: `期望 ${row.ok ? '成功创建 agent' : `失败 ${row.expectStatus || 400}`}`,
     async run(ctx) {
-      assert(sharedModelIdForAgent, 'agent matrix model missing')
+      assert(sharedModelRefForAgent, 'agent matrix model missing')
       const body = {
         name: `ag-${row.id}-${cid().slice(0, 4)}`,
         description: row.title,
         systemPrompt: 'e2e',
-        modelId: sharedModelIdForAgent,
+        model: sharedModelRefForAgent,
         variant: 'default',
         config: row.build(),
       }
@@ -130,10 +133,13 @@ for (const row of agentConfigMatrix()) {
         const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
         assert([200, 201].includes(status), `status ${status} ${JSON.stringify(json)}`)
         const agent = envelopeData(json)
-        assert(agent?.id, JSON.stringify(json))
+        assert(agent?.name, JSON.stringify(json))
         if (typeof row.assertCreated === 'function') row.assertCreated(agent)
         ctx.writeArtifact(`agent-${row.id}.json`, JSON.stringify(agent, null, 2))
-        await ctx.call('DELETE', `/api/ai/catalog/agents/${agent.id}?expectedVersion=${encodeURIComponent(agent.version)}`)
+        await ctx.call(
+          'DELETE',
+          `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+        )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/agents', body), {
           status: row.expectStatus || 400,
@@ -159,7 +165,10 @@ registerCase({
         const name = String(agent.name || '')
         if (name.startsWith('ag-') || name.startsWith('e2e-agent-') || name.startsWith('t-[')) {
           try {
-            await ctx.call('DELETE', `/api/ai/catalog/agents/${agent.id}?expectedVersion=${encodeURIComponent(agent.version)}`)
+            await ctx.call(
+              'DELETE',
+              `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+            )
           } catch {
             // ignore
           }
@@ -168,22 +177,25 @@ registerCase({
     } catch {
       // ignore list failures
     }
-    if (sharedModelIdForAgent) {
+    if (sharedModelRefForAgent) {
+      const separator = sharedModelRefForAgent.indexOf('/')
+      const providerName = sharedModelRefForAgent.slice(0, separator)
+      const modelName = sharedModelRefForAgent.slice(separator + 1)
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/models/${sharedModelIdForAgent}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(modelName)}&expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
-      sharedModelIdForAgent = null
+      sharedModelRefForAgent = null
       sharedModelVersionForAgent = null
     }
-    if (ctx.vars.agentMatrixProviderId) {
+    if (ctx.vars.agentMatrixProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${ctx.vars.agentMatrixProviderId}?expectedVersion=${encodeURIComponent(
+        `/api/ai/catalog/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
           ctx.vars.agentMatrixProviderVersion,
         )}`,
       )
-      ctx.vars.agentMatrixProviderId = null
+      ctx.vars.agentMatrixProviderName = null
       ctx.vars.agentMatrixProviderVersion = null
     }
   },

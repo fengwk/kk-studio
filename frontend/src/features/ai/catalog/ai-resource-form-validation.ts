@@ -12,7 +12,7 @@ import { translate } from '@/shared/i18n'
 
 export type ResourceFieldKey =
   | 'name'
-  | 'providerId'
+  | 'providerName'
   | 'baseUrl'
   | 'contextWindow'
   | 'maxOutputTokens'
@@ -21,7 +21,7 @@ export type ResourceFieldKey =
   | 'reasoningEffort'
   | 'defaultVariant'
   | 'pricing'
-  | 'modelId'
+  | 'model'
   | 'variant'
   | 'tools'
   | 'skills'
@@ -65,11 +65,11 @@ function mapError(error: unknown): ResourceFormValidationResult {
   if (/pricing|PerMillion|number|negative/i.test(raw)) {
     return { ok: false, message, fields: { pricing: message } }
   }
-  if (/providerId/i.test(raw)) {
-    return { ok: false, message, fields: { providerId: message } }
+  if (/providerName/i.test(raw)) {
+    return { ok: false, message, fields: { providerName: message } }
   }
-  if (/modelId/i.test(raw)) {
-    return { ok: false, message, fields: { modelId: message } }
+  if (/\bmodel\b/i.test(raw)) {
+    return { ok: false, message, fields: { model: message } }
   }
   if (/baseUrl/i.test(raw)) {
     return { ok: false, message, fields: { baseUrl: message } }
@@ -155,11 +155,11 @@ export function validateResourceDraft(
           fields: { name: translate('ai.catalog.validation.name') },
         }
       }
-      if (!modelDraft.providerId.trim()) {
+      if (!modelDraft.providerName.trim()) {
         return {
           ok: false,
           message: translate('ai.catalog.validation.provider'),
-          fields: { providerId: translate('ai.catalog.validation.provider') },
+          fields: { providerName: translate('ai.catalog.validation.provider') },
         }
       }
       if (modelDraft.inputModalities.length === 0) {
@@ -187,11 +187,11 @@ export function validateResourceDraft(
         fields: { name: translate('ai.catalog.validation.name') },
       }
     }
-    if (!drafts.agentDraft.modelId.trim()) {
+    if (!drafts.agentDraft.model.trim()) {
       return {
         ok: false,
         message: translate('ai.catalog.validation.agentModel'),
-        fields: { modelId: translate('ai.catalog.validation.agentModel') },
+        fields: { model: translate('ai.catalog.validation.agentModel') },
       }
     }
     if (modal.mode === 'edit') {

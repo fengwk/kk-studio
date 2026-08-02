@@ -43,8 +43,7 @@ function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelCo
 
 function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
   return {
-    id: 'model-1',
-    providerId: 'provider-1',
+    providerName: 'minimax',
     name: 'MiniMax-M2.7',
     description: null,
     config: modelConfig(),
@@ -120,12 +119,12 @@ describe('ai-draft-normalizers', () => {
       {
         ...emptyAgentDraft(),
         name: 'assistant',
-        modelId: 'model-sonnet',
+        model: 'anthropic/Claude-Sonnet-4.5',
         variant: 'legacy',
       },
       [
         model({
-          id: 'model-sonnet',
+          providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           config: {
             ...modelConfig(),
@@ -142,7 +141,7 @@ describe('ai-draft-normalizers', () => {
       normalizeAgentDraftDefaultVariant(
         {
           ...emptyAgentDraft(),
-          modelId: 'missing',
+          model: 'missing',
           variant: '   ',
         },
         [],
@@ -155,12 +154,12 @@ describe('ai-draft-normalizers', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
       name: 'assistant',
-      modelId: 'model-minimax',
+      model: 'minimax/MiniMax-M2.7',
       variant: 'default',
     }
     const models = [
       model({
-        id: 'model-minimax',
+        providerName: 'minimax',
         name: 'MiniMax-M2.7',
         config: modelConfig({
           defaultVariant: 'default',
@@ -168,7 +167,7 @@ describe('ai-draft-normalizers', () => {
         }),
       }),
       model({
-        id: 'model-sonnet',
+        providerName: 'anthropic',
         name: 'Claude-Sonnet-4.5',
         config: modelConfig({
           defaultVariant: 'creative',
@@ -177,55 +176,55 @@ describe('ai-draft-normalizers', () => {
       }),
     ]
 
-    expect(applyAgentModelSelection(draft, 'model-sonnet', models)).toMatchObject({
-      modelId: 'model-sonnet',
+    expect(applyAgentModelSelection(draft, 'anthropic/Claude-Sonnet-4.5', models)).toMatchObject({
+      model: 'anthropic/Claude-Sonnet-4.5',
       variant: '',
     })
     expect(applyAgentModelSelection(draft, 'unknown', models)).toMatchObject({
-      modelId: 'unknown',
+      model: 'unknown',
     })
   })
 
   /** Provider normalization preserves the existing draft's provider when it matches. */
   it('preserves a valid existing provider on the draft', () => {
-    const draft = { ...emptyModelDraft(), providerId: 'provider-1' }
+    const draft = { ...emptyModelDraft(), providerName: 'minimax' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
     const result = normalizeModelDraftProvider(draft, providers)
     expect(result).toBe(draft)
   })
 
-  /** When draft provider is missing, fall back to preferred id then to providers[0]. */
-  it('falls back to preferred provider id, then to first provider', () => {
-    const draft = { ...emptyModelDraft(), providerId: '' }
+  /** When draft provider is missing, fall back to preferred name then to providers[0]. */
+  it('falls back to preferred provider name, then to first provider', () => {
+    const draft = { ...emptyModelDraft(), providerName: '' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
 
-    const withPreferred = normalizeModelDraftProvider(draft, providers, 'provider-2')
-    expect(withPreferred.providerId).toBe('provider-2')
+    const withPreferred = normalizeModelDraftProvider(draft, providers, 'anthropic')
+    expect(withPreferred.providerName).toBe('anthropic')
 
-    const withFallback = normalizeModelDraftProvider(draft, providers, 'missing-id')
-    expect(withFallback.providerId).toBe('provider-1')
+    const withFallback = normalizeModelDraftProvider(draft, providers, 'missing-name')
+    expect(withFallback.providerName).toBe('minimax')
 
     const withNoProviders = normalizeModelDraftProvider(draft, [])
-    expect(withNoProviders.providerId).toBe('')
+    expect(withNoProviders.providerName).toBe('')
   })
 
   /** normalizeAgentDraftSelection picks preferred, then fallback model[0]. */
   it('picks preferred model id then first available model', () => {
-    const draft: AgentDraft = { ...emptyAgentDraft(), modelId: 'gone', variant: '' }
+    const draft: AgentDraft = { ...emptyAgentDraft(), model: 'gone', variant: '' }
     const models = [
-      model({ id: 'model-minimax', config: modelConfig({ defaultVariant: 'default', variants: [{ id: 'default' }] }) }),
-      model({ id: 'model-sonnet', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
+      model({ providerName: 'minimax', name: 'MiniMax-M2.7', config: modelConfig({ defaultVariant: 'default', variants: [{ id: 'default' }] }) }),
+      model({ providerName: 'anthropic', name: 'Claude-Sonnet-4.5', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
     ]
 
-    const preferred = normalizeAgentDraftSelection(draft, models, 'model-sonnet')
-    expect(preferred.modelId).toBe('model-sonnet')
+    const preferred = normalizeAgentDraftSelection(draft, models, 'anthropic/Claude-Sonnet-4.5')
+    expect(preferred.model).toBe('anthropic/Claude-Sonnet-4.5')
     expect(preferred.variant).toBe('')
 
     const fallback = normalizeAgentDraftSelection(draft, models)
-    expect(fallback.modelId).toBe('model-minimax')
+    expect(fallback.model).toBe('minimax/MiniMax-M2.7')
     expect(fallback.variant).toBe('')
 
     const empty = normalizeAgentDraftSelection(draft, [])
-    expect(empty.modelId).toBe('gone')
+    expect(empty.model).toBe('gone')
   })
 })

@@ -2,22 +2,17 @@ import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   HarnessSessionDTO,
   HarnessSessionEntryDTO,
-  HarnessThreadAgentSetDTO,
-  HarnessThreadBootstrapDTO,
-  HarnessThreadBootstrapResultDTO,
   HarnessThreadDTO,
-  HarnessThreadEnvironmentSetDTO,
+  HarnessThreadCustomMessageCreateDTO,
   HarnessThreadPage,
   HarnessThreadHeadUpdateDTO,
   HarnessThreadInputDTO,
   HarnessThreadMessageCreateDTO,
-  HarnessThreadModelSetDTO,
   HarnessRetryPolicyDTO,
   HarnessRealtimeStreamPolicyDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
   HarnessThreadSnapshotDTO,
-  HarnessThreadYoloSetDTO,
   ThreadListSort,
 } from '@/shared/api/contracts/ai-runtime'
 
@@ -41,28 +36,15 @@ export function createHarnessService(client: HttpClient = apiClient) {
     },
     getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
       client.get(`/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`),
-    /** Creates an UNBOUND Thread with no head; bind it via bootstrap or updateThreadHead. */
-    createThread: (): Promise<HarnessThreadDTO> => client.post('/ai/runtime/threads'),
-    bootstrapThread: (
-      threadId: string,
-      data: HarnessThreadBootstrapDTO,
-    ): Promise<HarnessThreadBootstrapResultDTO> =>
-      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/bootstrap`, data),
     updateThreadHead: (threadId: string, data: HarnessThreadHeadUpdateDTO): Promise<HarnessThreadDTO> =>
       client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/head`, data),
     submitThreadMessage: (threadId: string, data: HarnessThreadMessageCreateDTO): Promise<HarnessThreadInputDTO> =>
       client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/messages`, data),
-    setThreadYolo: (threadId: string, data: HarnessThreadYoloSetDTO): Promise<HarnessThreadInputDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/yolo`, data),
-    setThreadAgent: (threadId: string, data: HarnessThreadAgentSetDTO): Promise<HarnessThreadInputDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/agent`, data),
-    setThreadModel: (threadId: string, data: HarnessThreadModelSetDTO): Promise<HarnessThreadInputDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/model`, data),
-    setThreadEnvironment: (
+    submitCustomMessage: (
       threadId: string,
-      data: HarnessThreadEnvironmentSetDTO,
+      data: HarnessThreadCustomMessageCreateDTO,
     ): Promise<HarnessThreadInputDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/environment`, data),
+      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/messages/custom`, data),
     stopThread: (threadId: string, data: HarnessThreadStopDTO): Promise<HarnessThreadStopResultDTO> =>
       client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`, data),
     getRetryPolicy: (): Promise<HarnessRetryPolicyDTO> => client.get('/ai/runtime/settings/retry-policy'),

@@ -40,7 +40,7 @@ describe('agentService', () => {
     expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', { params: { pageNumber: 1, pageSize: 50 } })
   })
 
-  it('maps provider, model and agent mutations to global id-based CRUD endpoints', async () => {
+  it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
     const client = createClient()
     const service = createAgentService(client)
     const providerBody = {
@@ -52,7 +52,7 @@ describe('agentService', () => {
       modelCallIdleTimeoutMillis: 120000,
     }
     const modelBody = {
-      providerId: 'provider-1',
+      providerName: 'minimax',
       name: 'MiniMax-M2.7',
       config: {
         limit: { context: 128000, output: 8192 },
@@ -78,7 +78,7 @@ describe('agentService', () => {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
-      modelId: 'model-1',
+      model: 'minimax/MiniMax-M2.7',
       variant: 'default',
        config: { tools: [], skills: [] },
     }
@@ -108,24 +108,24 @@ describe('agentService', () => {
     const updateAgentBody = { description: 'updated', expectedVersion: '9' }
 
     await service.createProvider(providerBody)
-    await service.updateProvider(101, updateProviderBody)
-    await service.deleteProvider(101, '8')
+    await service.updateProvider('minimax', updateProviderBody)
+    await service.deleteProvider('minimax', '8')
     await service.createModel(modelBody)
-    await service.updateModel(202, updateModelBody)
-    await service.deleteModel(202, '10')
+    await service.updateModel('minimax', 'MiniMax-M2.7', updateModelBody)
+    await service.deleteModel('minimax', 'MiniMax-M2.7', '10')
     await service.createAgent(agentBody)
-    await service.updateAgent(303, updateAgentBody)
-    await service.deleteAgent(303, '11')
+    await service.updateAgent('default-assistant', updateAgentBody)
+    await service.deleteAgent('default-assistant', '11')
 
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/providers', providerBody)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/101', updateProviderBody)
-    expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/101', { params: { expectedVersion: '8' } })
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/minimax', updateProviderBody)
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/providers/minimax', { params: { expectedVersion: '8' } })
     expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/catalog/models/202', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/ai/catalog/models/202', { params: { expectedVersion: '10' } })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/catalog/models?providerName=minimax&modelName=MiniMax-M2.7', updateModelBody)
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/ai/catalog/models', { params: { providerName: 'minimax', modelName: 'MiniMax-M2.7', expectedVersion: '10' } })
     expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/agents', agentBody)
-    expect(client.put).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/303', updateAgentBody)
-    expect(client.delete).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/303', { params: { expectedVersion: '11' } })
+    expect(client.put).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/default-assistant', updateAgentBody)
+    expect(client.delete).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/default-assistant', { params: { expectedVersion: '11' } })
   })
 
 })

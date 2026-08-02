@@ -16,7 +16,7 @@ import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts/
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
     ...emptyModelDraft(),
-    providerId: 'provider-1',
+    providerName: 'provider-1',
     name: 'model-a',
     ...overrides,
   }
@@ -67,7 +67,7 @@ function fullConfig(): AgentModelConfigDTO {
 function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
   return {
     id: 'model-1',
-    providerId: 'provider-1',
+    providerName: 'provider-1',
     name: 'model-a',
     description: 'desc',
     config: configOverride ?? fullConfig(),
@@ -83,7 +83,7 @@ describe('ai-model-draft-codec', () => {
     const source = model()
 
     expect(toModelDraft(source)).toMatchObject({
-      providerId: 'provider-1',
+      providerName: 'provider-1',
       name: 'model-a',
       contextWindow: '200000',
       maxOutputTokens: '16000',
@@ -259,10 +259,10 @@ describe('ai-model-draft-codec', () => {
     const input = draft({ name: 'stub', contextWindow: '4096', maxOutputTokens: '512' })
     const config = buildModelConfig(input)
     const create = toEditableModel(input)
-    expect(create.providerId).toBe('provider-1')
+    expect(create.providerName).toBe('provider-1')
     expect(create.name).toBe('stub')
     expect(create.config).toEqual(config)
-    expect(toEditableModelUpdate(input)).not.toHaveProperty('providerId')
+    expect(toEditableModelUpdate(input)).not.toHaveProperty('providerName')
   })
 
   /** Toggling via immutable arrays never drops the last input modality. */
@@ -322,15 +322,17 @@ describe('ai-model-draft-codec', () => {
     )
   })
 
-  /** buildModelConfig rejects blank name + non-blank providerId even before reaching config. */
+  /** buildModelConfig rejects blank name + non-blank providerName even before reaching config. */
   it('rejects blank name in toEditableModel and toEditableModelUpdate', () => {
     expect(() => toEditableModel(draft({ name: '   ' }))).toThrow(/name/)
-    expect(() => toEditableModelUpdate(draft({ name: '' }))).toThrow(/name/)
+    expect(toEditableModelUpdate(draft({ name: '' }))).toEqual(
+      expect.objectContaining({ description: null }),
+    )
   })
 
-  /** toEditableModel rejects a blank providerId. */
-  it('rejects blank providerId in toEditableModel', () => {
-    expect(() => toEditableModel(draft({ providerId: '' }))).toThrow(/providerId is required/)
+  /** toEditableModel rejects a blank providerName. */
+  it('rejects blank providerName in toEditableModel', () => {
+    expect(() => toEditableModel(draft({ providerName: '' }))).toThrow(/providerName is required/)
   })
 
   /** Pricing metadata is required and must not be silently reconstructed during edit. */
@@ -359,16 +361,16 @@ describe('ai-model-draft-codec', () => {
     expect(extractMaxOutputTokens(incomplete)).toBeUndefined()
   })
 
-  /** emptyModelDraft without a model or provider keeps an empty providerId and TEXT only. */
-  it('returns empty providerId when neither model nor provider is supplied', () => {
+  /** emptyModelDraft without a model or provider keeps an empty providerName and TEXT only. */
+  it('returns empty providerName when neither model nor provider is supplied', () => {
     const blank = emptyModelDraft(null)
-    expect(blank.providerId).toBe('')
+    expect(blank.providerName).toBe('')
     expect(blank.inputModalities).toEqual(['TEXT'])
   })
 
   /** emptyModelDraft respects an explicit provider argument. */
   it('uses the explicit provider argument when no model is supplied', () => {
-    const seeded = emptyModelDraft({ id: 'provider-x' })
-    expect(seeded.providerId).toBe('provider-x')
+    const seeded = emptyModelDraft({ name: 'provider-x' })
+    expect(seeded.providerName).toBe('provider-x')
   })
 })

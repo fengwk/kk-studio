@@ -46,24 +46,24 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.deleteModel).mockResolvedValue(undefined)
     vi.mocked(agentService.createAgent).mockResolvedValue(currentAgent)
     vi.mocked(agentService.deleteAgent).mockResolvedValue(undefined)
-    vi.mocked(agentService.updateProvider).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateProvider).mockImplementation(async (_name, data) => {
       currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
       currentModel = { ...currentModel, providerName: currentProvider.name }
-      currentAgent = { ...currentAgent, modelId: currentModel.id }
+      currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
       return currentProvider
     })
-    vi.mocked(agentService.updateModel).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateModel).mockImplementation(async (_providerName, _modelName, data) => {
       currentModel = { ...currentModel, ...data }
-      currentAgent = { ...currentAgent, modelId: String(currentModel.id) }
+      currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
       return currentModel
     })
-    vi.mocked(agentService.updateAgent).mockImplementation(async (_id, data) => {
+    vi.mocked(agentService.updateAgent).mockImplementation(async (_name, data) => {
       currentAgent = { ...currentAgent, ...data }
       return currentAgent
     })
   })
 
-  it('refreshes dependent lists after provider and model rename before editing agent', async () => {
+  it('opens catalog resources by immutable names', async () => {
     const user = userEvent.setup()
     renderHarness()
 
@@ -72,35 +72,29 @@ describe('useAiConsoleResourceController', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'open-provider' }))
-    await user.clear(screen.getByTestId('provider-name'))
-    await user.type(screen.getByTestId('provider-name'), 'stub-renamed')
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
       expect(agentService.updateProvider).toHaveBeenCalledWith(
-        'provider-1',
-        expect.objectContaining({ name: 'stub-renamed', expectedVersion: '0' }),
+        'stub',
+        expect.objectContaining({ expectedVersion: '0' }),
       )
-      expect(agentService.listModels).toHaveBeenCalledTimes(2)
-      expect(agentService.listAgents).toHaveBeenCalledTimes(2)
     })
 
     await user.click(screen.getByRole('button', { name: 'open-model' }))
-    expect(screen.getByTestId('model-provider')).toHaveValue('provider-1')
-    await user.clear(screen.getByTestId('model-name'))
-    await user.type(screen.getByTestId('model-name'), 'acceptance-stub-renamed')
+    expect(screen.getByTestId('model-provider')).toHaveValue('stub')
     await user.click(screen.getByRole('button', { name: 'submit' }))
 
     await waitFor(() => {
       expect(agentService.updateModel).toHaveBeenCalledWith(
-        'model-1',
-        expect.objectContaining({ name: 'acceptance-stub-renamed', expectedVersion: '0' }),
+        'stub',
+        'acceptance-stub',
+        expect.objectContaining({ expectedVersion: '0' }),
       )
-      expect(agentService.listAgents).toHaveBeenCalledTimes(3)
     })
 
     await user.click(screen.getByRole('button', { name: 'open-agent' }))
-    expect(screen.getByTestId('agent-model')).toHaveValue('model-1')
+    expect(screen.getByTestId('agent-model')).toHaveValue('stub/acceptance-stub')
   })
 
   it('keeps unsaved agent fields while synchronizing a stale model binding', async () => {
@@ -119,12 +113,12 @@ describe('useAiConsoleResourceController', () => {
       queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
       queryClient.setQueryData(
         queryKeys.agents.list,
-        page([{ ...currentAgent, modelId: 'model-1' }]),
+        page([{ ...currentAgent, model: 'stub-v2/acceptance-stub-v2' }]),
       )
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-model')).toHaveValue('model-1')
+      expect(screen.getByTestId('agent-model')).toHaveValue('stub-v2/acceptance-stub-v2')
     })
     expect(screen.getByTestId('agent-description')).toHaveValue('edited description')
   })
@@ -143,13 +137,13 @@ function ResourceControllerHarness() {
   return (
     <div>
       <div data-testid="ready">{ready ? 'ready' : 'loading'}</div>
-      <button type="button" onClick={() => controller.openEditProvider('provider-1')}>
+      <button type="button" onClick={() => controller.openEditProvider('stub')}>
         open-provider
       </button>
-      <button type="button" onClick={() => controller.openEditModel('model-1')}>
+      <button type="button" onClick={() => controller.openEditModel('stub', 'acceptance-stub')}>
         open-model
       </button>
-      <button type="button" onClick={() => controller.openEditAgent('agent-1')}>
+      <button type="button" onClick={() => controller.openEditAgent('default-assistant')}>
         open-agent
       </button>
       <form onSubmit={controller.resourceEditorModal.onSubmit}>
@@ -171,7 +165,7 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'model' && (
         <>
-          <input data-testid="model-provider" value={controller.resourceEditorModal.modelDraft.providerId} readOnly />
+          <input data-testid="model-provider" value={controller.resourceEditorModal.modelDraft.providerName} readOnly />
           <input
             data-testid="model-name"
             value={controller.resourceEditorModal.modelDraft.name}
@@ -187,7 +181,7 @@ function ResourceControllerHarness() {
 
       {modal?.kind === 'agent' && (
         <>
-          <input data-testid="agent-model" value={controller.resourceEditorModal.agentDraft.modelId} readOnly />
+          <input data-testid="agent-model" value={controller.resourceEditorModal.agentDraft.model} readOnly />
           <input
             data-testid="agent-description"
             value={controller.resourceEditorModal.agentDraft.description}
@@ -232,7 +226,6 @@ function page<T>(results: T[]) {
 
 function provider() {
   return {
-    id: 'provider-1',
     name: 'stub',
     description: 'Local deterministic provider',
     providerType: 'openai',
@@ -248,8 +241,6 @@ function provider() {
 
 function model() {
   return {
-    id: 'model-1',
-    providerId: 'provider-1',
     providerName: 'stub',
     name: 'acceptance-stub',
     description: 'Acceptance model',
@@ -280,11 +271,10 @@ function model() {
 
 function agent() {
   return {
-    id: 'agent-1',
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
-    modelId: 'model-1',
+    model: 'stub/acceptance-stub',
     variant: 'default',
     config: {
       tools: [],

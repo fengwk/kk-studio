@@ -15,13 +15,13 @@ const entries: HarnessSessionEntryDTO[] = [
   entry('assistant', 'user', 'MESSAGE', message('ASSISTANT', 'answer')),
   entry('tool', 'assistant', 'MESSAGE', message('TOOL', 'tool result')),
   entry('custom', 'assistant', 'CUSTOM_MESSAGE', message('SYSTEM', 'custom text')),
-  entry('config', 'root', 'RUNTIME_CONFIG', {}),
+  entry('error', 'root', 'ASSISTANT_ERROR', { error: { kind: 'INVALID_REQUEST', message: 'bad turn' } }),
 ]
 
 describe('Session Entry Tree', () => {
   it('walks the full parent tree in server child order and applies the two KISS views', () => {
     expect(buildSessionEntryTree(entries, 'conversation').map((item) => item.entry.entryId)).toEqual(['user', 'assistant', 'custom'])
-    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['root', 'user', 'assistant', 'tool', 'custom', 'config'])
+    expect(buildSessionEntryTree(entries, 'all').map((item) => item.entry.entryId)).toEqual(['root', 'user', 'assistant', 'tool', 'custom', 'error'])
   })
 
   it('keeps linear chains compact: depth advances only on visible sibling splits', () => {
@@ -66,8 +66,8 @@ describe('Session Entry Tree', () => {
     expect(byEntryId.get('tool')?.isLastSibling).toBe(false)
     expect(byEntryId.get('custom')?.depth).toBe(3)
     expect(byEntryId.get('custom')?.isLastSibling).toBe(true)
-    expect(byEntryId.get('config')?.depth).toBe(1)
-    expect(byEntryId.get('config')?.isLastSibling).toBe(true)
+    expect(byEntryId.get('error')?.depth).toBe(1)
+    expect(byEntryId.get('error')?.isLastSibling).toBe(true)
   })
 
   it('keeps system and tool Entries out of the conversation view while re-attaching visible descendants', () => {

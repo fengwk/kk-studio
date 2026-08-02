@@ -1,7 +1,6 @@
-import type { AgentResourceId, BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
+import type { BackendLong, CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
 export interface AgentProviderDTO {
-  id: AgentResourceId
   name: string
   description: string | null
   providerType: string
@@ -94,8 +93,7 @@ export interface AgentModelConfigDTO {
 
 /** Public Agent model resource with one structured executable config. */
 export interface AgentModelDTO {
-  id: AgentResourceId
-  providerId: AgentResourceId
+  providerName: string
   name: string
   description: string | null
   config: AgentModelConfigDTO
@@ -109,13 +107,13 @@ export interface AgentModelDTO {
  * {@code description}, and {@code config} are all required when a request body is issued.
  */
 export interface AgentModelEditablePropertiesDTO {
-  name: string
   description: string | null
   config: AgentModelConfigDTO
 }
 
 export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
-  providerId: string
+  providerName: string
+  name: string
 }
 
 export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
@@ -136,11 +134,10 @@ export interface ToolCatalogEntryDTO {
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
 export interface AgentDefinitionDTO {
-  id: AgentResourceId
   name: string
   description: string | null
   systemPrompt: string | null
-  modelId: string
+  model: string
   /** Optional override; null means use the selected Model's defaultVariant. */
   variant: string | null
   config: AgentDefinitionConfigDTO
@@ -151,16 +148,17 @@ export interface AgentDefinitionDTO {
 
 /** Complete Agent Definition create/PUT body. */
 export interface AgentDefinitionEditablePropertiesDTO {
-  name: string
   description: string | null
   systemPrompt: string | null
-  modelId: string
   /** Optional override; null means use the selected Model's defaultVariant. */
   variant: string | null
   config: AgentDefinitionConfigDTO
 }
 
-export type AgentDefinitionCreateDTO = AgentDefinitionEditablePropertiesDTO
+export interface AgentDefinitionCreateDTO extends AgentDefinitionEditablePropertiesDTO {
+  name: string
+  model: string
+}
 
 export interface AgentDefinitionUpdateDTO extends AgentDefinitionEditablePropertiesDTO {
   expectedVersion: CatalogVersion

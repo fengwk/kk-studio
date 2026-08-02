@@ -38,7 +38,7 @@ const agent = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
-  modelId: 'm1',
+  model: 'm1',
   variant: 'default',
   config: {
     tools: [],

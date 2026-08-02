@@ -13,12 +13,12 @@ export function isRunningThread(thread: HarnessThreadDTO): boolean {
   )
 }
 
-/** Only logically quiescent Threads accept an external head rebind; ACTIVE ones are rejected. */
+/** Only logically quiescent Threads accept an external head rebind. */
 export function canRebindThread(thread: HarnessThreadDTO | undefined): boolean {
   if (!thread) {
     return false
   }
-  return !isRunningThread(thread) && (thread.status === 'UNBOUND' || thread.status === 'IDLE')
+  return !isRunningThread(thread) && thread.status === 'IDLE'
 }
 
 /** True when any Thread currently bound to the Session is running / waiting / runnable / processing. */
@@ -26,7 +26,7 @@ export function isSessionRunning(threads: HarnessThreadDTO[] | undefined): boole
   return (threads ?? []).some(isRunningThread)
 }
 
-/** Groups globally listed Threads by their derived (nullable) Session; UNBOUND Threads are skipped. */
+/** Groups globally listed Threads by their derived (nullable) Session. */
 export function groupThreadsBySessionId(
   threads: HarnessThreadDTO[],
 ): Map<string, HarnessThreadDTO[]> {
@@ -75,7 +75,7 @@ export function toSessionSelectionItemWithRunning(
   }
 }
 
-/** Global Thread picker row; UNBOUND Threads stay selectable so they can be bound later. */
+/** Global Thread picker row. */
 export function toThreadSelectionItem(
   thread: HarnessThreadDTO,
   sort: PaneSortPreference = 'recent',
@@ -83,10 +83,9 @@ export function toThreadSelectionItem(
   const running = isRunningThread(thread)
   const time = formatBackendDate(sort === 'created' ? thread.createTime : thread.updateTime)
   const context =
-    thread.activeAgentName
-    || thread.sessionTitle
+    thread.sessionTitle
     || thread.sessionId
-    || translate('ai.chat.unboundSession')
+    || thread.threadId
   return {
     id: thread.threadId,
     title: thread.threadId,

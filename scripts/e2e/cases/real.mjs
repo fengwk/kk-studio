@@ -1,13 +1,12 @@
 import { assert, envelopeData, pageResults, sleep, cid } from '../lib/http.mjs'
 import {
   createChatThread,
-  createBootstrappedThread,
+  createConfiguredChatThread,
   getThread,
   getThreadSnapshot,
   snapshotEntries,
   rebindWhenQuiescent,
   waitForModelTextDeltaAfterSseConnected,
-  waitForThreadInputApplied,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -17,19 +16,20 @@ registerCase({
   level: 'L2',
   title: '真实 Provider 文本轮次成功并记账',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：bootstrap 后发消息等到 IDLE；assistant entry；usage>0',
+  docs: '仅 minimax/MiniMax-M2.7：Chat 原子建 Thread 后发消息等到 IDLE；assistant entry；usage>0',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
       ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
       'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
     )
-    const { session, thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { session, thread } = await createConfiguredChatThread(ctx, {
+      agentName: ctx.vars.agent.name,
       title: `e2e-real-${cid().slice(0, 8)}`,
     })
     const tid = thread.threadId
     await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      ...defaultTurnSettings(ctx),
       content: '只回复单词 OK，不要调用工具，不要解释。',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -77,8 +77,8 @@ registerCase({
     const initialMarker = `QUEUE-INITIAL-${cid()}`
     const firstMarker = `QUEUE-FIRST-${cid()}`
     const secondMarker = `QUEUE-SECOND-${cid()}`
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { thread } = await createConfiguredChatThread(ctx, {
+      agentName: ctx.vars.agent.name,
       title: `e2e-queue-batch-${cid().slice(0, 8)}`,
     })
     const tid = String(thread.threadId)
@@ -89,6 +89,7 @@ registerCase({
         tid,
         () =>
           ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+            ...defaultTurnSettings(ctx),
             content:
               `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
               + '不要总结，不要提前结束。',
@@ -101,11 +102,13 @@ registerCase({
     assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
 
     const firstQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      ...defaultTurnSettings(ctx),
       content: `${firstMarker}\n这是下一 turn 队列批次的第一条消息。`,
       clientMessageId: cid(),
       expectedExecutionEpoch: epoch,
     })
     const secondQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      ...defaultTurnSettings(ctx),
       content: `${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`,
       clientMessageId: cid(),
       expectedExecutionEpoch: epoch,
@@ -198,8 +201,8 @@ registerCase({
       + '不要总结，不要提前结束。'
     const followUpPrompt =
       `${followUpMarker}\n只回复单词 CONTINUED，不要调用工具，不要解释。`
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { thread } = await createConfiguredChatThread(ctx, {
+      agentName: ctx.vars.agent.name,
       title: `e2e-stop-partial-${cid().slice(0, 8)}`,
       yoloEnabled: false,
     })
@@ -211,6 +214,7 @@ registerCase({
         tid,
         () =>
           ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+            ...defaultTurnSettings(ctx),
             content: initialPrompt,
             clientMessageId: cid(),
             expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -269,6 +273,7 @@ registerCase({
     )
 
     const { status: followUpStatus } = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+      ...defaultTurnSettings(ctx),
       content: followUpPrompt,
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(stopped.executionEpoch),
@@ -336,14 +341,15 @@ registerCase({
     const mainTid = ctx.vars.realThreadId
     const sessionId = ctx.vars.realSessionId
     // Branching is just another Thread whose head is relocated onto a historical Entry.
-    const { thread: spare } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { thread: spare } = await createConfiguredChatThread(ctx, {
+      agentName: ctx.vars.agent.name,
       title: `e2e-branch-${cid().slice(0, 8)}`,
     })
     const branched = await rebindWhenQuiescent(ctx, spare.threadId, ctx.vars.assistantEntryId)
     const branchTid = branched.threadId
     assert(branched.headEntryId === String(ctx.vars.assistantEntryId), JSON.stringify(branched))
     await ctx.call('POST', `/api/ai/runtime/threads/${branchTid}/messages`, {
+      ...defaultTurnSettings(ctx),
       content: '在分支上只回复单词 BRANCH，不要调用工具。',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(branched.executionEpoch),
@@ -409,7 +415,7 @@ registerCase({
   level: 'L4',
   title: 'YOLO 下 tool invocation',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：临时 Agent config exact tools=[read], skills=[]；Chat defaultEnvironmentName 路由；断言 invocation.environmentName 且 SUCCEEDED',
+  docs: '仅 minimax/MiniMax-M2.7：临时 Agent exact tools=[read]；Chat 可见 Environment/YOLO 直接随消息发送；断言 ToolInvocation frozen route',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -420,7 +426,7 @@ registerCase({
       systemPrompt:
         'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
         + 'When asked to inspect the environment root, call read with path "." and summarize only its result.',
-      modelId: String(ctx.vars.seedModel.id),
+      model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
       variant: ctx.vars.seedModel.config.defaultVariant,
       config: {
         tools: ['read'],
@@ -428,7 +434,7 @@ registerCase({
       },
     })
     const toolAgent = envelopeData(agentJson)
-    assert(toolAgent?.id, JSON.stringify(agentJson))
+    assert(toolAgent?.name, JSON.stringify(agentJson))
     let chat = null
     try {
       const agentConfig = toolAgent.config
@@ -441,26 +447,17 @@ registerCase({
       )
       const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
         title: `e2e-tool-chat-${suffix}`,
-        defaultAgentId: String(toolAgent.id),
-        defaultEnvironmentName: ctx.daemonEnv,
+        agentName: toolAgent.name,
+        environmentName: ctx.daemonEnv,
+        yoloEnabled: true,
       })
       chat = envelopeData(chatJson)
       const thread = await createChatThread(ctx, chat.id)
-      assert(thread.activeEnvironmentName === ctx.daemonEnv, JSON.stringify(thread))
       const tid = thread.threadId
-      const { status: yoloStatus, json: yoloJson } = await ctx.call(
-        'PUT',
-        `/api/ai/runtime/threads/${tid}/yolo`,
-        {
-          yoloEnabled: true,
-          clientMessageId: cid(),
-          expectedExecutionEpoch: Number(thread.executionEpoch),
-        },
-      )
-      assert(yoloStatus === 202, JSON.stringify(yoloJson))
-      const yoloInput = envelopeData(yoloJson)
-      await waitForThreadInputApplied(ctx, tid, yoloInput.inputId)
       await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
+        agentName: toolAgent.name,
+        environmentName: ctx.daemonEnv,
+        yoloEnabled: true,
         content:
           '必须调用 read 工具读取环境根目录。请使用参数 {"path":"."}，不要猜测或跳过工具，'
           + '然后用一句话总结读取结果。',
@@ -507,7 +504,7 @@ registerCase({
       try {
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/agents/${toolAgent.id}?expectedVersion=${encodeURIComponent(toolAgent.version)}`,
+          `/api/ai/catalog/agents/${encodeURIComponent(toolAgent.name)}?expectedVersion=${encodeURIComponent(toolAgent.version)}`,
         )
       } catch {
         // Preserve the primary assertion failure; matrix runs use an isolated E2E database.
@@ -524,13 +521,21 @@ async function requireRealMiniMaxM27(ctx) {
   const provider = ctx.vars.provider
   assert(provider?.name === 'minimax', `real provider must be minimax: ${JSON.stringify(provider)}`)
   assert(
-    Number(model?.id) === 1 && model?.name === 'MiniMax-M2.7',
+    model?.providerName === 'minimax' && model?.name === 'MiniMax-M2.7',
     `real model must be minimax/MiniMax-M2.7: ${JSON.stringify(model)}`,
   )
   assert(
-    String(agent?.modelId) === String(model.id),
+    agent?.model === `${model.providerName}/${model.name}`,
     `real agent must use minimax/MiniMax-M2.7: ${JSON.stringify({ agent, model })}`,
   )
+}
+
+function defaultTurnSettings(ctx) {
+  return {
+    agentName: ctx.vars.agent.name,
+    environmentName: null,
+    yoloEnabled: false,
+  }
 }
 
 function assertAssistantAbortedEntry(entry) {
