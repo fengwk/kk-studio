@@ -64,10 +64,4 @@ final class AgentDefinitionReferenceResolver {
           DEFINITION_RESOURCE, DEFINITION_RESOURCE + " name already exists: " + name);
     }
   }
-
-  void ensureNameAvailable(String currentName, String nextName) {
-    if (!currentName.equals(nextName)) {
-      ensureNameAvailable(nextName);
-    }
-  }
 }

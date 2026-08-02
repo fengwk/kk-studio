@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.core.ai.catalog.provider.service.impl;
 import fun.fengwk.convention4j.api.page.Page;
 import fun.fengwk.convention4j.api.page.PageQuery;
 import lombok.AllArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,12 +14,10 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.converter.AgentProvi
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
-import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
-import fun.fengwk.kkstudio.core.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
@@ -75,21 +72,16 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     AgentProvider provider = providerGuard.requireProvider(name);
     ensureExpectedVersion(provider, name, rawExpected, expected);
     providerMutationFactory.update(provider, updateDTO);
-    try {
-      if (!agentProviderRepository.updateByName(provider, expected)) {
-        AgentProvider reread = agentProviderRepository.getByName(name);
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+    if (!agentProviderRepository.updateByName(provider, expected)) {
+      AgentProvider reread = agentProviderRepository.getByName(name);
+      if (reread == null) {
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
       }
-      if (!agentProviderRevisionRepository.create(newRevision(provider, expected + 1))) {
-        throw new IllegalStateException("create agent provider revision failed");
-      }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          RESOURCE, "agent provider name already exists: " + provider.getName(), error);
+      throw new AiVersionConflictException(
+          RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+    }
+    if (!agentProviderRevisionRepository.create(newRevision(provider, expected + 1))) {
+      throw new IllegalStateException("create agent provider revision failed");
     }
     AgentProvider reloaded = agentProviderRepository.getByName(name);
     return agentProviderConverter.convert(reloaded);
@@ -102,20 +94,13 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     AgentProvider provider = providerGuard.requireProviderForUpdate(name);
     ensureExpectedVersion(provider, name, expectedVersion, expected);
     providerGuard.ensureDeletable(name);
-    try {
-      if (!agentProviderRepository.deleteByName(name, expected)) {
-        AgentProvider reread = agentProviderRepository.getByName(name);
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
+    if (!agentProviderRepository.deleteByName(name, expected)) {
+      AgentProvider reread = agentProviderRepository.getByName(name);
+      if (reread == null) {
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
       }
-    } catch (DataIntegrityViolationException error) {
-      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + name, error);
-      }
-      throw error;
+      throw new AiVersionConflictException(
+          RESOURCE, name, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 

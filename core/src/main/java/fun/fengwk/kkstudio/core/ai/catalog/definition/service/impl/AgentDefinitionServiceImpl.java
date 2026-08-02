@@ -92,24 +92,13 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     definitionMutationFactory.update(definition, updateDTO);
     validateVariant(modelRef, definition.getVariant());
     validateConfig(configCodec.decode(definition.getConfigJson()));
-    try {
-      if (!agentDefinitionRepository.updateByName(definition, expected)) {
-        AgentDefinition reread = agentDefinitionRepository.getByName(name);
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
+    if (!agentDefinitionRepository.updateByName(definition, expected)) {
+      AgentDefinition reread = agentDefinitionRepository.getByName(name);
+      if (reread == null) {
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
       }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          RESOURCE, "agent definition name already exists: " + definition.getName(), error);
-    } catch (DataIntegrityViolationException error) {
-      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiResourceNotFoundException(
-            MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + modelRef, error);
-      }
-      throw error;
+      throw new AiVersionConflictException(
+          RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     AgentDefinition reloaded = agentDefinitionRepository.getByName(name);
     return agentDefinitionConverter.convert(reloaded);

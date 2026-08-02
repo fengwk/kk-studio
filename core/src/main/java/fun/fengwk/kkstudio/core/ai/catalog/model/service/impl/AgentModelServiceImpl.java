@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.service.AgentModelService;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.converter.AgentModelConverter;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
-import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
@@ -85,19 +84,14 @@ public class AgentModelServiceImpl implements AgentModelService {
     AgentModel model = referenceResolver.requireModel(ref.providerName(), ref.modelName());
     ensureExpectedVersion(model, ref, rawExpected, expected);
     modelMutationFactory.update(model, updateDTO);
-    try {
-      if (!agentModelRepository.updateByName(model, expected)) {
-        AgentModel reread =
-            agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, ref.toString(), rawExpected, CatalogVersions.format(reread.getVersion()));
+    if (!agentModelRepository.updateByName(model, expected)) {
+      AgentModel reread =
+          agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
+      if (reread == null) {
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
       }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          RESOURCE, RESOURCE + " name already exists under this provider: " + ref, error);
+      throw new AiVersionConflictException(
+          RESOURCE, ref.toString(), rawExpected, CatalogVersions.format(reread.getVersion()));
     }
     AgentModel reloaded =
         agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
@@ -112,21 +106,14 @@ public class AgentModelServiceImpl implements AgentModelService {
     AgentModel model = referenceResolver.requireModelForUpdate(ref.providerName(), ref.modelName());
     ensureExpectedVersion(model, ref, expectedVersion, expected);
     referenceResolver.ensureDeletable(ref.providerName(), ref.modelName());
-    try {
-      if (!agentModelRepository.deleteByName(ref.providerName(), ref.modelName(), expected)) {
-        AgentModel reread =
-            agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
+    if (!agentModelRepository.deleteByName(ref.providerName(), ref.modelName(), expected)) {
+      AgentModel reread =
+          agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
+      if (reread == null) {
+        throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + ref);
       }
-    } catch (DataIntegrityViolationException error) {
-      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        throw new AiInUseException(RESOURCE, RESOURCE + " in use by agents: " + ref, error);
-      }
-      throw error;
+      throw new AiVersionConflictException(
+          RESOURCE, ref.toString(), expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
   }
 

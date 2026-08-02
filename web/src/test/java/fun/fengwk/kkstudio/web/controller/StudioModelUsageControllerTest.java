@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import fun.fengwk.kkstudio.core.ai.runtime.usage.store.PostgresqlModelUsageRecordStore;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -55,10 +56,20 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
     insertThreadPath();
     recordStore.insert(
         new ModelUsageRecord(
-            recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(), NOW));
+            recordIds.newModelUsageRecordId(),
+            LARGE_ID,
+            LARGE_ID,
+            LARGE_ID,
+            draft("org/model/v2"),
+            NOW));
 
     assertSummary("/api/ai/runtime/usage/sessions/" + LARGE_ID, "session", Long.toString(LARGE_ID));
-    assertSummary("/api/ai/runtime/usage/models/openai%2Fmodel", "model", "openai/model");
+    assertSummary(
+        get("/api/ai/runtime/usage/models")
+            .param("providerName", "openai")
+            .param("modelName", "org/model/v2"),
+        "model",
+        "openai/org/model/v2");
   }
 
   @Test
@@ -68,17 +79,29 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
           .perform(get("/api/ai/runtime/usage/sessions/{sessionId}", invalid))
           .andExpect(status().isBadRequest());
     }
-    for (String invalid : List.of("abc", "%2Fmodel", "provider%2F")) {
+    for (String invalid : List.of("", " model ", "\u2003model\u2003")) {
       mockMvc
-          .perform(get(URI.create("/api/ai/runtime/usage/models/" + invalid)))
+          .perform(
+              get("/api/ai/runtime/usage/models")
+                  .param("providerName", "openai")
+                  .param("modelName", invalid))
           .andExpect(status().isBadRequest());
     }
+    mockMvc
+        .perform(get("/api/ai/runtime/usage/models").param("providerName", "openai"))
+        .andExpect(status().isBadRequest());
   }
 
   private void assertSummary(String path, String scopeType, String expectedScopeId)
       throws Exception {
+    assertSummary(get(URI.create(path)), scopeType, expectedScopeId);
+  }
+
+  private void assertSummary(
+      MockHttpServletRequestBuilder request, String scopeType, String expectedScopeId)
+      throws Exception {
     mockMvc
-        .perform(get(URI.create(path)))
+        .perform(request)
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.scopeType").value(scopeType))
         .andExpect(jsonPath("$.data.scopeId").value(expectedScopeId))
@@ -145,7 +168,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
         + "\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"0\"}}}";
   }
 
-  private static ModelUsageDraft draft() {
+  private static ModelUsageDraft draft(String modelName) {
     ModelUsage usage = new ModelUsage(10, 0, 30, 5, 0, 0, 45);
     ModelPricing pricing =
         new ModelPricing(
@@ -162,7 +185,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
             BigDecimal.ZERO.setScale(12));
     return new ModelUsageDraft(
         "openai",
-        "model",
+        modelName,
         ProviderType.OPENAI,
         PromptCacheMode.AUTOMATIC,
         PromptCacheRetention.NONE,

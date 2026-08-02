@@ -76,10 +76,6 @@ public class AgentModelServiceImplTest {
     assertThrows(
         AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
 
-    when(repository.updateByName(model, 0L)).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(
-        AiDuplicateException.class, () -> service.updateModel("provider", "model", update));
-
     when(repository.deleteByName(eq("provider"), eq("model"), anyLong())).thenReturn(false);
     when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
     assertThrows(
@@ -87,11 +83,6 @@ public class AgentModelServiceImplTest {
     when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
     assertThrows(
         AiVersionConflictException.class, () -> service.deleteModel("provider", "model", "0"));
-
-    model.setVersion(0L);
-    when(repository.deleteByName(eq("provider"), eq("model"), anyLong()))
-        .thenThrow(integrityFailure("23503"));
-    assertThrows(AiInUseException.class, () -> service.deleteModel("provider", "model", "0"));
     verify(resolver, atLeastOnce()).requireModelForUpdate("provider", "model");
 
     DataIntegrityViolationException nonForeignKey = integrityFailure("22001");

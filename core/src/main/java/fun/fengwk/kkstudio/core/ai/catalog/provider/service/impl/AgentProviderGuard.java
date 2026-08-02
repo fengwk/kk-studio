@@ -40,12 +40,6 @@ final class AgentProviderGuard {
     }
   }
 
-  void ensureNameAvailable(String currentName, String nextName) {
-    if (!currentName.equals(nextName)) {
-      ensureNameAvailable(nextName);
-    }
-  }
-
   void ensureDeletable(String name) {
     if (agentProviderRepository.hasModels(name)) {
       throw new AiInUseException(RESOURCE, RESOURCE + " in use by models: " + name);

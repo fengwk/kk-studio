@@ -85,7 +85,7 @@ Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 
 | POST | `/api/ai/runtime/interactions/{id}/response` | 提交 Interaction response |
 | GET | `/api/ai/runtime/artifacts/{id}` | Artifact bytes |
 | GET | `/api/ai/runtime/usage/sessions/{sessionId}` | Session Usage 聚合 |
-| GET | `/api/ai/runtime/usage/models/{modelRef}` | 按 Model ref 的 Usage 聚合 |
+| GET | `/api/ai/runtime/usage/models?providerName=&modelName=` | 按 Model 复合名称聚合 Usage |
 | GET/PUT | `/api/ai/runtime/settings/retry-policy` | 全局 retry 策略 |
 | GET/PUT | `/api/ai/runtime/settings/realtime-stream-policy` | Redis Stream 容量策略 |
 | GET | `/api/ai/environment` | READY Environment 内存投影 |

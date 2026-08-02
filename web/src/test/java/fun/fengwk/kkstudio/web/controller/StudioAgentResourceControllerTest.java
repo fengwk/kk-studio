@@ -58,13 +58,15 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     provider.setCredential("secret-value");
     provider.setModelCallTimeoutMillis(120_000L);
     provider.setModelCallIdleTimeoutMillis(3_000L);
+    ObjectNode providerBody = objectMapper.valueToTree(provider);
+    providerBody.put("credential", provider.getCredential());
     JsonNode providerData =
         data(
             mockMvc
                 .perform(
                     post("/api/ai/catalog/providers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(provider)))
+                        .content(providerBody.toString()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.name").value(providerName))
                 .andExpect(jsonPath("$.data.id").doesNotExist())
@@ -176,13 +178,19 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     providerUpdate.setExpectedVersion("0");
     ObjectNode providerUpdateBody = objectMapper.valueToTree(providerUpdate);
     providerUpdateBody.put("name", "renamed-" + providerName);
+    mockMvc
+        .perform(
+            put("/api/ai/catalog/providers/{name}", providerName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(providerUpdateBody.toString()))
+        .andExpect(status().isBadRequest());
     JsonNode updatedProvider =
         data(
             mockMvc
                 .perform(
                     put("/api/ai/catalog/providers/{name}", providerName)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(providerUpdateBody.toString()))
+                        .content(objectMapper.writeValueAsString(providerUpdate)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value(providerName))
                 .andExpect(jsonPath("$.data.description").value("updated provider"))
@@ -213,6 +221,14 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     ObjectNode modelUpdateBody = objectMapper.valueToTree(modelUpdate);
     modelUpdateBody.put("providerName", "renamed-" + providerName);
     modelUpdateBody.put("name", "renamed-" + modelName);
+    mockMvc
+        .perform(
+            put("/api/ai/catalog/models")
+                .param("providerName", providerName)
+                .param("modelName", modelName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(modelUpdateBody.toString()))
+        .andExpect(status().isBadRequest());
     JsonNode updatedModel =
         data(
             mockMvc
@@ -221,7 +237,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                         .param("providerName", providerName)
                         .param("modelName", modelName)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(modelUpdateBody.toString()))
+                        .content(objectMapper.writeValueAsString(modelUpdate)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.providerName").value(providerName))
                 .andExpect(jsonPath("$.data.name").value(modelName))
@@ -257,13 +273,19 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     ObjectNode agentUpdateBody = objectMapper.valueToTree(agentUpdate);
     agentUpdateBody.put("name", "renamed-" + agentName);
     agentUpdateBody.put("model", "other-provider/other-model");
+    mockMvc
+        .perform(
+            put("/api/ai/catalog/agents/{name}", agentName)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(agentUpdateBody.toString()))
+        .andExpect(status().isBadRequest());
     JsonNode updatedAgent =
         data(
             mockMvc
                 .perform(
                     put("/api/ai/catalog/agents/{name}", agentName)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(agentUpdateBody.toString()))
+                        .content(objectMapper.writeValueAsString(agentUpdate)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value(agentName))
                 .andExpect(jsonPath("$.data.model").value(providerName + "/" + modelName))

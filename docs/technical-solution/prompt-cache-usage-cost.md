@@ -175,9 +175,10 @@ createdAt
 | --- | --- | --- |
 | Thread | `GET /api/ai/runtime/threads/{threadId}/snapshot` 的 `usage` 字段 | 当前 head path 上的 Assistant Entry |
 | Session | `GET /api/ai/runtime/usage/sessions/{sessionId}` | Session 全部账本 |
-| Model | `GET /api/ai/runtime/usage/models/{modelRef}` | `ModelRef.parse` 后按 `(providerName, modelName)` 查询 |
+| Model | `GET /api/ai/runtime/usage/models?providerName=&modelName=` | 按 `(providerName, modelName)` 查询 |
 
-Model endpoint 的 `{modelRef}` 是 `providerName/modelName`，只切第一个 `/`。聚合响应包含：
+Model endpoint 通过独立的 `providerName`、`modelName` 查询参数接收复合名称，`modelName`
+中的 `/` 按普通查询参数值处理。聚合响应包含：
 
 ```text
 scopeType

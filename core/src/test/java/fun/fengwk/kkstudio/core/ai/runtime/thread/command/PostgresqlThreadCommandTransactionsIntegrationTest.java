@@ -151,4 +151,43 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
         jdbc.queryForObject(
             "select runnable from harness_thread where id = ?", Boolean.class, thread.id()));
   }
+
+  @Test
+  void committedIdempotencyKeyWinsOverLaterEpochFence() {
+    HarnessThread thread = transactions.createThread("idempotency-fence", NOW);
+    RuntimeEntryInputPayload original =
+        new RuntimeEntryInputPayload(
+            ThreadInputType.USER_MESSAGE,
+            new MessageEntryPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent("original"))),
+                new TurnSettings("agent-a", null, false),
+                null));
+    ThreadCommandTransactions.EnqueueResult first =
+        transactions.enqueue(thread.id(), original, "message-1", thread.executionEpoch(), NOW);
+    transactions.stop(thread.id(), thread.executionEpoch(), NOW.plusSeconds(1));
+
+    RuntimeEntryInputPayload changed =
+        new RuntimeEntryInputPayload(
+            ThreadInputType.USER_MESSAGE,
+            new MessageEntryPayload(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("changed"))),
+                new TurnSettings("agent-b", "environment-b", true),
+                null));
+    ThreadCommandTransactions.EnqueueResult retry =
+        transactions.enqueue(thread.id(), changed, "message-1", thread.executionEpoch(), NOW);
+
+    assertEquals(first.input().id(), retry.input().id());
+    assertEquals(1L, retry.input().sequence());
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select count(*) from harness_thread_input where thread_id = ?",
+            Long.class,
+            thread.id()));
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select input_sequence from harness_thread where id = ?", Long.class, thread.id()));
+  }
 }

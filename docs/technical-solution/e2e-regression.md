@@ -229,14 +229,14 @@ POST /api/ai/runtime/interactions/{id}/response
 GET /api/ai/runtime/tool-invocations/{id}
 GET /api/ai/runtime/artifacts/{id}
 GET /api/ai/runtime/usage/sessions/{sessionId}
-GET /api/ai/runtime/usage/models/{modelRef}
+GET /api/ai/runtime/usage/models?providerName={providerName}&modelName={modelName}
 GET|PUT /api/ai/runtime/settings/retry-policy
 GET|PUT /api/ai/runtime/settings/realtime-stream-policy
 GET /api/ai/environment
 WebSocket /api/ai/environment/daemon/v1
 ```
 
-Model Usage 以写入时冻结的 `provider_name`、`model_name` 查询，不对 Catalog 建 FK。`GET /usage/models/{modelRef}` 使用 Model ref 的第一个 `/` 规则。
+Model Usage 以写入时冻结的 `provider_name`、`model_name` 查询，不对 Catalog 建 FK。查询接口使用独立的 `providerName`、`modelName` 参数，因此 Model name 中的 `/` 不依赖 encoded-slash 路由行为。
 
 ## 5. 实现结构与报告
 
