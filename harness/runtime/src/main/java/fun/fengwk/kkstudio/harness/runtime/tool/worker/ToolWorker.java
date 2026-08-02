@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -214,15 +215,18 @@ public final class ToolWorker {
   }
 
   /**
-   * Process-local gate: an in-flight handle for the given ENVIRONMENT name. PLATFORM handles are
-   * matched by its bound environment name.
+   * Process-local gate: an in-flight ENVIRONMENT handle for the given name. PLATFORM handles never
+   * match an Environment route.
    */
   public boolean hasActiveExecution(String environmentName) {
     if (environmentName == null || environmentName.isBlank()) {
       return false;
     }
     return executions.values().stream()
-        .anyMatch(execution -> environmentName.equals(execution.binding().environmentName()));
+        .anyMatch(
+            execution ->
+                execution.binding().type() == ToolType.ENVIRONMENT
+                    && environmentName.equals(execution.binding().environmentName()));
   }
 
   /**

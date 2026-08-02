@@ -33,12 +33,12 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
   @Test
   void userAndCustomInputsPersistExactTurnSettingsAndReplayWithoutLiveResolution() {
     HarnessThread thread =
-        transactions.createThread("message-settings", Instant.parse("2026-07-24T00:00:00Z"));
+        transactions.createThread(
+            "message-settings", "environment-a", Instant.parse("2026-07-24T00:00:00Z"));
 
     HarnessThreadMessageCreateDTO user = new HarnessThreadMessageCreateDTO();
     user.setContent("hello");
     user.setAgentName("agent-a");
-    user.setEnvironmentName("environment-a");
     user.setYoloEnabled(true);
     user.setClientMessageId("user-1");
     user.setExpectedExecutionEpoch(thread.executionEpoch());
@@ -52,14 +52,13 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     MessageEntryPayload userEntry =
         assertInstanceOf(MessageEntryPayload.class, userPayload.payload());
     assertEquals(ThreadInputType.USER_MESSAGE, userPayload.type());
-    assertEquals(new TurnSettings("agent-a", "environment-a", true), userEntry.turnSettings());
+    assertEquals(new TurnSettings("agent-a", true), userEntry.turnSettings());
     assertEquals(1L, userInput.getSequence());
 
     HarnessThreadCustomMessageCreateDTO custom = new HarnessThreadCustomMessageCreateDTO();
     custom.setRole("system");
     custom.setContent("rules");
     custom.setAgentName("agent-b");
-    custom.setEnvironmentName(null);
     custom.setYoloEnabled(false);
     custom.setClientMessageId("custom-1");
     custom.setExpectedExecutionEpoch(thread.executionEpoch());
@@ -73,13 +72,12 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
     CustomMessageEntryPayload customEntry =
         assertInstanceOf(CustomMessageEntryPayload.class, customPayload.payload());
     assertEquals(ThreadInputType.CUSTOM_MESSAGE, customPayload.type());
-    assertEquals(new TurnSettings("agent-b", null, false), customEntry.turnSettings());
+    assertEquals(new TurnSettings("agent-b", false), customEntry.turnSettings());
     assertEquals(2L, customInput.getSequence());
 
     HarnessThreadMessageCreateDTO replay = new HarnessThreadMessageCreateDTO();
     replay.setContent("different body");
     replay.setAgentName(" invalid ");
-    replay.setEnvironmentName(" invalid ");
     replay.setYoloEnabled(null);
     replay.setClientMessageId("user-1");
     replay.setExpectedExecutionEpoch(null);
@@ -93,7 +91,7 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
   @Test
   void rejectsNonCanonicalTurnNamesBeforeWritingAnInput() {
     HarnessThread thread =
-        transactions.createThread("invalid-settings", Instant.parse("2026-07-24T00:00:00Z"));
+        transactions.createThread("invalid-settings", null, Instant.parse("2026-07-24T00:00:00Z"));
     HarnessThreadMessageCreateDTO request = new HarnessThreadMessageCreateDTO();
     request.setContent("hello");
     request.setAgentName(" agent ");

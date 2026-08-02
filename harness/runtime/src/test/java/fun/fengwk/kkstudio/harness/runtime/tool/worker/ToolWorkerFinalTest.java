@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -1652,6 +1653,7 @@ class ToolWorkerFinalTest {
     return new ToolDescriptor(
         "tool",
         "1",
+        ToolType.PLATFORM,
         "test tool",
         null,
         new ToolParamsSchema("input", Map.of(), Set.of(), false),
@@ -1663,6 +1665,7 @@ class ToolWorkerFinalTest {
     return new ToolDescriptor(
         "environmentTool",
         "1",
+        ToolType.ENVIRONMENT,
         "environment tool",
         null,
         new ToolParamsSchema("input", Map.of(), Set.of(), false),

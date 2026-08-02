@@ -17,9 +17,6 @@ public class ChatDO {
   /** 必填 Agent definition name；不建立外键，Agent 删除后可保留陈旧值。 */
   private String agentName;
 
-  /** 可选可见 Environment 名称；不建立外键，Environment 是 live runtime 身份。 */
-  private String environmentName;
-
   /** 可见发送权限模式。 */
   private boolean yoloEnabled;
 

@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
@@ -1515,6 +1516,7 @@ class DaemonRuntimeTest {
         new ToolDescriptor(
             "fallback",
             "1.0.0",
+            ToolType.ENVIRONMENT,
             "default timeout tool",
             null,
             new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
@@ -1559,6 +1561,7 @@ class DaemonRuntimeTest {
           new ToolDescriptor(
               name,
               "1.0.0",
+              ToolType.ENVIRONMENT,
               name + " tool",
               null,
               schema,
@@ -1599,6 +1602,7 @@ class DaemonRuntimeTest {
         new ToolDescriptor(
             "blocking",
             "1.0.0",
+            ToolType.ENVIRONMENT,
             "blocking tool",
             null,
             new ToolParamsSchema("blocking arguments", Map.of(), Set.of(), false),

@@ -8,9 +8,9 @@ import {
 describe('agent-capability-candidates', () => {
   it('builds unified tools without exposing an Environment source', () => {
     const tools = buildToolCandidates([
-      { name: 'bash', version: '1', description: 'shell' },
-      { name: 'bash', version: '2', description: 'duplicate' },
-      { name: 'read', version: null, description: 'files' },
+      { name: 'bash', version: '1', description: 'shell', type: 'PLATFORM' },
+      { name: 'bash', version: '2', description: 'duplicate', type: 'PLATFORM' },
+      { name: 'read', version: null, description: 'files', type: 'ENVIRONMENT' },
     ])
     expect(tools).toEqual([
       { name: 'bash', version: '1', description: 'shell' },

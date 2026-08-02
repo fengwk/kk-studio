@@ -17,14 +17,19 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RuntimeEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
@@ -33,7 +38,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ResolvedTurnExecution;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.TurnExecutionResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -49,11 +58,21 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnaps
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -68,6 +87,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   private static final Instant NOW = Instant.parse("2026-07-24T00:00:00Z");
   private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
       new ModelInvocationRequestJsonCodec();
+  private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
   private static final RuntimeEntryPayloadJsonCodec ENTRY_CODEC =
       new RuntimeEntryPayloadJsonCodec();
 
@@ -75,14 +95,15 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   @Autowired private ThreadReconcileTransactions transactions;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private ExecutionTargetStore executionTargetStore;
   @MockitoBean private TurnExecutionResolver executionResolver;
 
   @Test
   void creationTransactionResolvesAndFreezesTheLatestDefinitions() {
-    TurnSettings settings = new TurnSettings("agent-a", "environment-a", true);
+    TurnSettings settings = new TurnSettings("agent-a", true);
     ResolvedTurnExecution first = execution("provider-a", "model-a", true);
     ResolvedTurnExecution later = execution("provider-b", "model-b", false);
-    when(executionResolver.resolve(settings))
+    when(executionResolver.resolve(settings, null))
         .thenReturn(new TurnExecutionResolver.Resolution.Resolved(first));
 
     Prepared prepared = prepareUserTurn(settings);
@@ -90,7 +111,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         transactions.loadOwnedSnapshot(prepared.ownership(), NOW).orElseThrow();
     assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
 
-    when(executionResolver.resolve(settings))
+    when(executionResolver.resolve(settings, null))
         .thenReturn(new TurnExecutionResolver.Resolution.Resolved(later));
     ModelCreationOutcome.Created created =
         assertInstanceOf(
@@ -105,15 +126,15 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     assertEquals(later.model(), REQUEST_CODEC.decode(requestJson).providerRequest().model());
     assertEquals(later.variant(), REQUEST_CODEC.decode(requestJson).providerRequest().variant());
     assertTrue(!REQUEST_CODEC.decode(requestJson).yoloEnabled());
-    verify(executionResolver).resolve(settings);
+    verify(executionResolver).resolve(settings, null);
   }
 
   @Test
   void typedPlanningFailurePersistsAssistantErrorWithoutModelInvocation() {
-    TurnSettings settings = new TurnSettings("missing-agent", null, false);
+    TurnSettings settings = new TurnSettings("missing-agent", false);
     PlanningFailure failure =
         new PlanningFailure(PlanningFailureKind.AGENT_NOT_FOUND, "agent not found: missing-agent");
-    when(executionResolver.resolve(settings))
+    when(executionResolver.resolve(settings, null))
         .thenReturn(new TurnExecutionResolver.Resolution.Failed(failure));
 
     Prepared prepared = prepareUserTurn(settings);
@@ -151,6 +172,95 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   }
 
   @Test
+  void unavailableToolCallBecomesAssistantErrorWithoutToolMaterialization() {
+    TurnSettings settings = new TurnSettings("agent-a", false);
+    ToolDescriptor visibleTool = platformTool("visible");
+    when(executionResolver.resolve(settings, null))
+        .thenReturn(
+            new TurnExecutionResolver.Resolution.Resolved(
+                execution("provider-a", "model-a", false, List.of(ToolBinding.of(visibleTool)))));
+    Prepared prepared = prepareUserTurn(settings);
+    ModelCreationOutcome.Created created =
+        assertInstanceOf(
+            ModelCreationOutcome.Created.class,
+            transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
+
+    ModelInvocationRequest request =
+        REQUEST_CODEC.decode(
+            jdbc.queryForObject(
+                "select request::text from harness_model_invocation where id = ?",
+                String.class,
+                created.target().id()));
+    assertEquals(
+        List.of("visible"),
+        request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    ProviderResponse response =
+        responseWithToolCall(new ProviderToolCall("call-1", "hidden", "{}"));
+    OffsetDateTime startedAt = timestamp(NOW.plusSeconds(2));
+    OffsetDateTime finishedAt = timestamp(NOW.plusSeconds(3));
+    jdbc.update(
+        """
+        update harness_model_invocation
+        set status = 'SUCCEEDED',
+            result = cast(? as jsonb),
+            started_at = ?,
+            deadline_at = ?,
+            last_activity_at = ?,
+            finished_at = ?
+        where id = ?
+        """,
+        RESPONSE_CODEC.encode(response),
+        startedAt,
+        timestamp(NOW.plusSeconds(32)),
+        finishedAt,
+        finishedAt,
+        created.target().id());
+    executionTargetStore.deleteIfExists(
+        ExecutionTargetKind.MODEL_INVOCATION, created.target().id());
+    jdbc.update("update harness_thread set runnable = true where id = ?", prepared.threadId());
+    executionTargetStore.schedule(
+        ExecutionTargetKind.THREAD, prepared.threadId(), null, NOW.plusSeconds(3));
+
+    ThreadOwnership ownership =
+        transactions
+            .claim(prepared.threadId(), "apply-processor", NOW.plusSeconds(4))
+            .orElseThrow();
+    assertEquals(
+        ApplyOutcome.PROGRESSED,
+        transactions.applyTerminalModel(ownership, created.target().id(), NOW.plusSeconds(5)));
+
+    Long headEntryId =
+        jdbc.queryForObject(
+            "select head_entry_id from harness_thread where id = ?",
+            Long.class,
+            prepared.threadId());
+    assertEquals("ASSISTANT_ERROR", entryType(headEntryId));
+    AssistantErrorEntryPayload error =
+        assertInstanceOf(
+            AssistantErrorEntryPayload.class,
+            ENTRY_CODEC.decode(
+                EntryType.ASSISTANT_ERROR,
+                jdbc.queryForObject(
+                    "select payload::text from harness_entry where id = ?",
+                    String.class,
+                    headEntryId)));
+    assertEquals(
+        "tool is not available in this model invocation: hidden; available tools: [visible]",
+        error.error().message());
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "select count(*) from harness_tool_invocation where model_invocation_id = ?",
+            Long.class,
+            created.target().id()));
+    assertTrue(
+        jdbc.queryForObject(
+            "select applied_at is not null from harness_model_invocation where id = ?",
+            Boolean.class,
+            created.target().id()));
+  }
+
+  @Test
   void creationTransactionResolvesCatalogReadsFromOneDatabaseSnapshot() {
     String providerName = "snapshot-provider";
     jdbc.update(
@@ -159,9 +269,9 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         values (?, 'openai', 'before', '{}'::jsonb)
         """,
         providerName);
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    TurnSettings settings = new TurnSettings("agent-a", false);
     List<String> observedDescriptions = new CopyOnWriteArrayList<>();
-    when(executionResolver.resolve(settings))
+    when(executionResolver.resolve(settings, null))
         .thenAnswer(
             ignored -> {
               observedDescriptions.add(providerDescription(providerName));
@@ -187,8 +297,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   @Test
   void creationReturnsLostOwnershipAfterRelease() {
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
-    when(executionResolver.resolve(settings))
+    TurnSettings settings = new TurnSettings("agent-a", false);
+    when(executionResolver.resolve(settings, null))
         .thenReturn(
             new TurnExecutionResolver.Resolution.Resolved(
                 execution("provider-a", "model-a", false)));
@@ -201,12 +311,12 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         ModelCreationOutcome.LostOwnership.class,
         transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(2)));
 
-    verify(executionResolver).resolve(settings);
+    verify(executionResolver).resolve(settings, null);
   }
 
   @Test
   void creationRejectsMissingResponseDebt() {
-    Prepared prepared = prepareUserTurn(new TurnSettings("agent-a", null, false));
+    Prepared prepared = prepareUserTurn(new TurnSettings("agent-a", false));
     Long rootEntryId =
         jdbc.queryForObject(
             "select id from harness_entry where session_id = "
@@ -232,8 +342,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   @Test
   void creationRetriesAfterConcurrentThreadUpdateInvalidatesItsFirstSnapshot() throws Exception {
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
-    when(executionResolver.resolve(settings))
+    TurnSettings settings = new TurnSettings("agent-a", false);
+    when(executionResolver.resolve(settings, null))
         .thenReturn(
             new TurnExecutionResolver.Resolution.Resolved(
                 execution("provider-a", "model-a", false)));
@@ -270,7 +380,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
       assertInstanceOf(ModelCreationOutcome.Created.class, creation.get(10, TimeUnit.SECONDS));
       command.get(10, TimeUnit.SECONDS);
-      verify(executionResolver).resolve(settings);
+      verify(executionResolver).resolve(settings, null);
     } finally {
       releaseCommand.countDown();
       executor.shutdownNow();
@@ -279,8 +389,8 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   @Test
   void creationRetriesSqlStateSerializationFailureFromCauseChain() {
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
-    when(executionResolver.resolve(settings))
+    TurnSettings settings = new TurnSettings("agent-a", false);
+    when(executionResolver.resolve(settings, null))
         .thenThrow(new RuntimeException(new SQLException("serialization failure", "40001")))
         .thenReturn(
             new TurnExecutionResolver.Resolution.Resolved(
@@ -291,15 +401,15 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         ModelCreationOutcome.Created.class,
         transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
 
-    verify(executionResolver, times(2)).resolve(settings);
+    verify(executionResolver, times(2)).resolve(settings, null);
   }
 
   @Test
   void creationStopsAfterSerializationRetryLimit() {
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    TurnSettings settings = new TurnSettings("agent-a", false);
     CannotSerializeTransactionException failure =
         new CannotSerializeTransactionException("serialization failure");
-    when(executionResolver.resolve(settings)).thenThrow(failure);
+    when(executionResolver.resolve(settings, null)).thenThrow(failure);
     Prepared prepared = prepareUserTurn(settings);
 
     assertEquals(
@@ -310,14 +420,14 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
                 transactions.createModelInvocationAndRelease(
                     prepared.ownership(), NOW.plusSeconds(1))));
 
-    verify(executionResolver, times(3)).resolve(settings);
+    verify(executionResolver, times(3)).resolve(settings, null);
   }
 
   @Test
   void creationDoesNotRetryNonSerializationFailure() {
-    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    TurnSettings settings = new TurnSettings("agent-a", false);
     IllegalStateException failure = new IllegalStateException("resolver failure");
-    when(executionResolver.resolve(settings)).thenThrow(failure);
+    when(executionResolver.resolve(settings, null)).thenThrow(failure);
     Prepared prepared = prepareUserTurn(settings);
 
     assertEquals(
@@ -328,7 +438,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
                 transactions.createModelInvocationAndRelease(
                     prepared.ownership(), NOW.plusSeconds(1))));
 
-    verify(executionResolver).resolve(settings);
+    verify(executionResolver).resolve(settings, null);
   }
 
   private Prepared prepareUserTurn(TurnSettings settings) {
@@ -363,19 +473,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
 
   private static ResolvedTurnExecution execution(
       String providerName, String modelName, boolean yoloEnabled) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "test",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
+    return execution(providerName, modelName, yoloEnabled, List.of());
+  }
+
+  private static ResolvedTurnExecution execution(
+      String providerName, String modelName, boolean yoloEnabled, List<ToolBinding> toolBindings) {
     return new ResolvedTurnExecution(
         "system prompt",
         new ModelDescriptor(
@@ -383,14 +485,59 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
             0L,
             modelName,
             ProviderType.OPENAI,
+            !toolBindings.isEmpty(),
             false,
-            false,
-            pricing,
+            pricing(),
             PromptCachePolicy.disabled()),
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null),
-        List.of(),
+        toolBindings,
         List.of(),
         yoloEnabled);
+  }
+
+  private static ToolDescriptor platformTool(String name) {
+    return new ToolDescriptor(
+        name,
+        "1",
+        ToolType.PLATFORM,
+        name + " description",
+        name,
+        new ToolParamsSchema(null, Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(1));
+  }
+
+  private static ProviderResponse responseWithToolCall(ProviderToolCall toolCall) {
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    return new ProviderResponse(
+        "",
+        "",
+        List.of(toolCall),
+        ProviderStopReason.TOOL_CALLS,
+        usage,
+        ModelCost.calculate(pricing(), usage),
+        "request-1",
+        null,
+        "{}");
+  }
+
+  private static ModelPricing pricing() {
+    return new ModelPricing(
+        "USD",
+        "test",
+        "default",
+        BigDecimal.ONE,
+        "v1",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
+  }
+
+  private static OffsetDateTime timestamp(Instant value) {
+    return OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
   }
 
   private String entryType(long entryId) {

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
@@ -67,6 +68,7 @@ class ToolDescriptorJsonCodecTest {
         new ToolDescriptor(
             "noop",
             "v1",
+            ToolType.PLATFORM,
             "no params",
             "noop",
             new ToolParamsSchema(null, Map.of(), Set.of(), true),
@@ -86,6 +88,7 @@ class ToolDescriptorJsonCodecTest {
         new ToolDescriptor(
             "ord",
             "v1",
+            ToolType.PLATFORM,
             "ord",
             "ord",
             new ToolParamsSchema(
@@ -125,6 +128,7 @@ class ToolDescriptorJsonCodecTest {
         new ToolDescriptor(
             "enumTool",
             "v1",
+            ToolType.PLATFORM,
             "enum",
             "enumTool",
             new ToolParamsSchema(
@@ -191,7 +195,15 @@ class ToolDescriptorJsonCodecTest {
 
     // 组合成 descriptor 后，descriptor 编码中的 inputSchema 子节点必须与 encodeInputSchema 输出完全一致。
     ToolDescriptor descriptor =
-        new ToolDescriptor("x", "v1", "x", "x", schema, ToolSideEffect.READ_ONLY, Duration.ZERO);
+        new ToolDescriptor(
+            "x",
+            "v1",
+            ToolType.PLATFORM,
+            "x",
+            "x",
+            schema,
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
     String descriptorJson = codec.encode(descriptor);
     JsonNode descriptorRoot = mapper.readTree(descriptorJson);
     assertEquals(schemaNode, descriptorRoot.get("inputSchema"));
@@ -210,7 +222,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUnknownTopLevelField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -226,7 +238,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUnknownSchemaField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
@@ -243,7 +255,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUnknownSchemaElementField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -261,7 +273,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUnknownSchemaType() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -279,7 +291,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsTrailingTokens() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -295,7 +307,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsDuplicateTopLevelField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"name\":\"y\",\"version\":\"v1\",\"description\":\"x\","
+            + "\"name\":\"x\",\"name\":\"y\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\","
             + "\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -311,7 +323,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsDuplicatePropertyKey() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -329,7 +341,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonBooleanAdditionalProperties() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
@@ -346,7 +358,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonArrayRequired() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":\"q\","
@@ -363,7 +375,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsDuplicateRequired() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -381,7 +393,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUndeclaredRequired() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[\"q\"],"
@@ -398,7 +410,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonStringEnumValues() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -416,7 +428,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsArrayWithoutItems() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -434,7 +446,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsObjectSchemaWrongType() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"string\",\"properties\":{},\"required\":[],"
@@ -451,7 +463,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsObjectSchemaMissingProperties() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"required\":[],\"additionalProperties\":false}"
@@ -469,6 +481,7 @@ class ToolDescriptorJsonCodecTest {
         new ToolDescriptor(
             "remoteShell",
             "v1",
+            ToolType.ENVIRONMENT,
             "shell",
             "remoteShell",
             new ToolParamsSchema(null, Map.of(), Set.of(), true),
@@ -486,7 +499,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsInvalidToolNamePattern() {
     String json =
         "{"
-            + "\"name\":\"1tool\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"1tool\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -502,7 +515,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUnknownSideEffect() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"UNSAFE\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -518,7 +531,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNegativeTimeout() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":-1,\"inputSchema\":"
             + emptySchema()
@@ -536,7 +549,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonIntegralTimeout() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":\"10s\",\"inputSchema\":"
             + emptySchema()
@@ -550,7 +563,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsMissingName() {
     String json =
         "{"
-            + "\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
@@ -566,7 +579,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsMissingInputSchema() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0"
             + "}";
@@ -648,7 +661,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsEnumValueNotArray() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -666,7 +679,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankEnumElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -684,7 +697,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsDuplicateEnumElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -703,7 +716,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsDuplicateNestedEnumElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -723,7 +736,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonObjectSchemaProperty() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":[]},"
@@ -740,7 +753,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonStringSchemaDescription() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\",\"description\":1}},"
@@ -757,7 +770,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsMissingRequiredField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},"
@@ -774,7 +787,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsMissingAdditionalPropertiesField() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[]}"
@@ -790,7 +803,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNullAdditionalProperties() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
@@ -807,7 +820,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNullRequired() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},"
@@ -824,7 +837,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNonStringRequiredElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},"
@@ -841,7 +854,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankRequiredElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},"
@@ -858,7 +871,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsNestedNonObjectSchemaProperty() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -878,7 +891,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsUndeclaredNestedRequired() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -898,7 +911,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankNestedPropertyName() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -916,7 +929,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankNestedEnumElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -936,7 +949,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankTopLevelPropertyName() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -954,7 +967,7 @@ class ToolDescriptorJsonCodecTest {
   void rejectsBlankTopLevelEnumElement() {
     String json =
         "{"
-            + "\"name\":\"x\",\"version\":\"v1\",\"description\":\"x\",\"rendererKey\":\"x\","
+            + "\"name\":\"x\",\"version\":\"v1\",\"type\":\"PLATFORM\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
             + "\"timeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
@@ -974,6 +987,7 @@ class ToolDescriptorJsonCodecTest {
         new ToolDescriptor(
             "ord",
             "v1",
+            ToolType.PLATFORM,
             "ord",
             "ord",
             new ToolParamsSchema(
@@ -1018,6 +1032,7 @@ class ToolDescriptorJsonCodecTest {
     return new ToolDescriptor(
         name,
         version,
+        ToolType.PLATFORM,
         description,
         name,
         new ToolParamsSchema(
@@ -1033,6 +1048,7 @@ class ToolDescriptorJsonCodecTest {
     return new ToolDescriptor(
         "envTool",
         "v2",
+        ToolType.PLATFORM,
         "nested env tool",
         "envTool",
         new ToolParamsSchema(

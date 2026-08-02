@@ -415,7 +415,7 @@ registerCase({
   level: 'L4',
   title: 'YOLO 下 tool invocation',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：临时 Agent exact tools=[read]；Chat 可见 Environment/YOLO 直接随消息发送；断言 ToolInvocation frozen route',
+  docs: '仅 minimax/MiniMax-M2.7：临时 Agent exact tools=[read]；Thread create 绑定 Environment，消息只发送 Agent/YOLO；断言 ToolInvocation frozen route',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -448,15 +448,15 @@ registerCase({
       const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
         title: `e2e-tool-chat-${suffix}`,
         agentName: toolAgent.name,
-        environmentName: ctx.daemonEnv,
         yoloEnabled: true,
       })
       chat = envelopeData(chatJson)
-      const thread = await createChatThread(ctx, chat.id)
+      const thread = await createChatThread(ctx, chat.id, {
+        environmentName: ctx.daemonEnv,
+      })
       const tid = thread.threadId
       await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
         agentName: toolAgent.name,
-        environmentName: ctx.daemonEnv,
         yoloEnabled: true,
         content:
           '必须调用 read 工具读取环境根目录。请使用参数 {"path":"."}，不要猜测或跳过工具，'
@@ -533,7 +533,6 @@ async function requireRealMiniMaxM27(ctx) {
 function defaultTurnSettings(ctx) {
   return {
     agentName: ctx.vars.agent.name,
-    environmentName: null,
     yoloEnabled: false,
   }
 }

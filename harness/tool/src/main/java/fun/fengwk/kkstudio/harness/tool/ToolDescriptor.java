@@ -5,10 +5,11 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import java.time.Duration;
 import java.util.Objects;
 
-/** 可向模型声明并由执行器实现的工具描述；不携带执行位置。 */
+/** 可向模型声明并由执行器实现的工具描述。 */
 public record ToolDescriptor(
     String name,
     String version,
+    ToolType type,
     String description,
     String rendererKey,
     ToolParamsSchema inputSchema,
@@ -23,6 +24,7 @@ public record ToolDescriptor(
     if (version == null || version.isBlank()) {
       throw new IllegalArgumentException("version must not be blank");
     }
+    type = Objects.requireNonNull(type, "type");
     if (description == null || description.isBlank()) {
       throw new IllegalArgumentException("description must not be blank");
     }

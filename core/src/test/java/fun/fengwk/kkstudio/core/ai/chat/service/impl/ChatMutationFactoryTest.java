@@ -46,14 +46,12 @@ class ChatMutationFactoryTest {
   }
 
   @Test
-  void enforcesChatTitleAndEnvironmentSchemaLimits() {
+  void enforcesChatTitleSchemaLimits() {
     ChatMutationFactory factory = factory(false);
     ChatCreateDTO accepted = new ChatCreateDTO();
     accepted.setTitle("title");
     accepted.setAgentName("assistant");
-    accepted.setEnvironmentName("local");
     Chat chat = factory.newChat(accepted);
-    assertEquals("local", chat.getEnvironmentName());
 
     ChatCreateDTO oversized = new ChatCreateDTO();
     oversized.setTitle("t".repeat(257));
@@ -65,10 +63,8 @@ class ChatMutationFactoryTest {
     assertThrows(AiValidationException.class, () -> factory.apply(chat, update));
 
     ChatUpdateDTO clear = new ChatUpdateDTO();
-    clear.setEnvironmentName(null);
     clear.setYoloEnabled(true);
     factory.apply(chat, clear);
-    assertEquals(null, chat.getEnvironmentName());
     assertTrue(chat.isYoloEnabled());
   }
 

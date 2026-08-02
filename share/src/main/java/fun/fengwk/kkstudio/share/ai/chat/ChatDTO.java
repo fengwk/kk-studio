@@ -14,9 +14,6 @@ public class ChatDTO {
   /** Required visible Agent identity; it may later be stale after Agent deletion. */
   private String agentName;
 
-  /** Optional live Environment identity; it may be stale or offline. */
-  private String environmentName;
-
   /** Visible sending permission mode. */
   private boolean yoloEnabled;
 

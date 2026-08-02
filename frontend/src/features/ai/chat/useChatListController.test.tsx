@@ -13,7 +13,6 @@ vi.mock('@/shared/api/chat-service', () => ({
       id: 'c1',
       title: 'T',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -38,10 +37,6 @@ const agents = [
   },
 ]
 
-const environments = [
-  { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
-]
-
 describe('useChatListController', () => {
   it('creates a Chat with the selected Agent', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -50,7 +45,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, environments, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     expect(result.current.createChatModal.open).toBe(true)
@@ -66,7 +61,6 @@ describe('useChatListController', () => {
     act(() => {
       result.current.createChatModal.onTitleChange('Hello')
       result.current.createChatModal.onSelectAgent('assistant')
-      result.current.createChatModal.onSelectEnvironment('local')
     })
     expect(result.current.createChatModal.formError).toBe('')
     expect(result.current.createChatModal.nameError).toBe('')
@@ -77,7 +71,6 @@ describe('useChatListController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
         agentName: 'assistant',
-        environmentName: 'local',
       }),
     )
   })

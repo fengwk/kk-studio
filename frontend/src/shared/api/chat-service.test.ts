@@ -16,12 +16,11 @@ describe('chatService', () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChats()
-    await service.createChat({ title: 'A', agentName: '9', environmentName: 'local' })
+    await service.createChat({ title: 'A', agentName: '9' })
     await service.getChat('chat /1')
     await service.updateChat('chat /1', {
       title: 'B',
       agentName: '',
-      environmentName: null,
       expectedVersion: '4',
     })
     await service.deleteChat('chat /1', '5')
@@ -30,13 +29,11 @@ describe('chatService', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/chat', {
       title: 'A',
       agentName: '9',
-      environmentName: 'local',
     })
     expect(client.get).toHaveBeenNthCalledWith(2, '/ai/chat/chat%20%2F1')
     expect(client.put).toHaveBeenNthCalledWith(1, '/ai/chat/chat%20%2F1', {
       title: 'B',
       agentName: '',
-      environmentName: null,
       expectedVersion: '4',
     })
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/chat/chat%20%2F1', { params: { expectedVersion: '5' } })
@@ -57,13 +54,15 @@ describe('chatService', () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChatThreads('chat /1', { sort: 'created', cursor: 'opaque/cursor', limit: 7 })
-    await service.createChatThread('chat /1')
+    await service.createChatThread('chat /1', { environmentName: 'local' })
     await service.associateThread('chat /1', 'thread /2')
 
     expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
       params: { sort: 'created', limit: 7, cursor: 'opaque/cursor' },
     })
-    expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
+    expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
+      environmentName: 'local',
+    })
     expect(client.put).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads/thread%20%2F2')
   })
 })

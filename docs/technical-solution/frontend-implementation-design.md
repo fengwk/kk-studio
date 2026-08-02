@@ -11,7 +11,7 @@
 | 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位与全局 Locale |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads`、`snapshot`、`sessions`、`interactions`、`tool-invocations`、`usage` |
+| Runtime API | `/api/ai/runtime/threads`、`snapshot`、`environment`、`sessions`、`interactions`、`tool-invocations`、`usage` |
 | Realtime | REST snapshot first；durable revision SSE + 无 id 的 Redis realtime overlay |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
@@ -32,13 +32,12 @@ interface ChatDTO {
   id: string
   title: string | null
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   version: string
 }
 ```
 
-Chat 编辑器更新这三项设置时携带 `expectedVersion`。Agent 编辑器只维护 Agent 的 system prompt、Model ref、variant、tools 与 skills；Model/Variant/Tool/Skill 的选择由 Agent 决定，不由 Thread footer 另存一份运行配置。
+Chat 编辑器更新这两项设置时携带 `expectedVersion`。Thread snapshot 单独展示 nullable `environmentName`；静止 Thread 通过 `/api/ai/runtime/threads/{threadId}/environment` 设置或清除它。Agent 编辑器只维护 Agent 的 system prompt、Model ref、variant、tools 与 skills；Model/Variant/Tool/Skill 的选择由 Agent 决定。
 
 ## 3. Chat 工作区与 Pane
 
@@ -59,9 +58,9 @@ Chat 编辑器更新这三项设置时携带 `expectedVersion`。Agent 编辑器
 
 ```text
 POST /api/ai/chat/{chatId}/threads
-  -> 返回 Session、非空 head、executionEpoch=0 的已绑定 Thread
+  -> 可携带初始 environmentName，返回 Session、非空 head、executionEpoch=0 的已绑定 Thread
 POST /api/ai/runtime/threads/{threadId}/messages
-  -> 携带 Chat 当前可见 agentName/environmentName/yoloEnabled
+  -> 携带 Chat 当前可见 agentName/yoloEnabled
   -> 携带返回 Thread 的 executionEpoch 与 clientMessageId
 把 threadId 写入 Pane
 ```
@@ -74,14 +73,13 @@ POST /api/ai/runtime/threads/{threadId}/messages
 {
   content,
   agentName,
-  environmentName,
   yoloEnabled,
   clientMessageId,
   expectedExecutionEpoch,
 }
 ```
 
-CUSTOM message 使用 `/messages/custom`，额外携带 `role: 'system' | 'user'`。Input 与 Entry 中的 `TurnSettings` 只保存这三个名称/开关字段；每次 planning 再读取最新 Agent、Model、Provider、Variant、READY Environment、Tool 与 Skill。
+CUSTOM message 使用 `/messages/custom`，额外携带 `role: 'system' | 'user'`。Input 与 Entry 中的 `TurnSettings` 只保存 `agentName` 与 `yoloEnabled`；Environment 由 Thread 当前字段提供，消息 DTO 不携带 `environmentName`。每次 planning 再读取最新 Agent、Model、Provider、Variant、ToolCatalog 与 Thread Environment。
 
 HTTP 重试沿用同一 `clientMessageId`，服务端直接返回已存在 Input，保留第一次发送的 TurnSettings。草稿只在相同内容的提交失败重放时复用该 id。
 
@@ -92,13 +90,14 @@ HTTP 重试沿用同一 `clientMessageId`，服务端直接返回已存在 Input
 | Thread 列表 | `GET /api/ai/runtime/threads?sort&cursor&limit` |
 | Chat 内 Thread 列表 | `GET /api/ai/chat/{chatId}/threads?sort&cursor&limit` |
 | 绑定已有 Thread | `PUT /api/ai/chat/{chatId}/threads/{threadId}` |
+| 设置/清除 Thread Environment | `PUT /api/ai/runtime/threads/{threadId}/environment` |
 | `/session` 或 `/tree` 选择历史 Entry | `PUT /api/ai/runtime/threads/{threadId}/head` |
 | `/stop` | `POST /api/ai/runtime/threads/{threadId}/stop` |
 | 读取运行态 | `GET /api/ai/runtime/threads/{threadId}/snapshot` |
 
-head 请求始终使用非空 `headEntryId` 与当前 `executionEpoch`。服务端要求 Thread 静止；`409` 会展示给用户并刷新 snapshot，不吞掉冲突。
+head 与 Environment 请求始终使用当前 `executionEpoch`。head 仍要求非空 `headEntryId` 与 Thread 静止；Environment 请求体为 `environmentName: string | null` 与 `expectedExecutionEpoch`，mutation pending 期间锁定同一 Pane 的发送，成功后按 revision 合并返回值并刷新 snapshot。任一命令在 Thread 运行中或 epoch 陈旧时返回 `409`，不吞掉冲突。
 
-前端不通过 Thread 发送 Agent/Model/Environment/YOLO 配置命令。用户在 Chat 工作区修改可见设置后，后续每条消息都使用最新值；Agent 的 Model、Variant、Tools、Skills 随 Agent 名称在服务端逐轮解析。
+前端不把 Environment 放入消息请求：Chat 的 Agent/YOLO 修改仍由 Chat API 负责，Thread Environment 通过独立的 fenced command 设置或清除。用户在 Chat 工作区修改可见设置后，后续每条消息都使用最新 `agentName`/`yoloEnabled`；Agent 的 Model、Variant、Tools、Skills 随 Agent 名称在服务端逐轮解析。
 
 ## 6. Query 与 realtime
 

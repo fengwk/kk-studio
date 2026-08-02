@@ -16,7 +16,7 @@ import java.util.List;
 /** Thread input payloads persist only final message entries and their turn reference. */
 class ThreadInputPayloadJsonCodecTest {
 
-  private static final TurnSettings SETTINGS = new TurnSettings("agent", "env", true);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", true);
   private final ThreadInputPayloadJsonCodec codec = new ThreadInputPayloadJsonCodec();
 
   @Test

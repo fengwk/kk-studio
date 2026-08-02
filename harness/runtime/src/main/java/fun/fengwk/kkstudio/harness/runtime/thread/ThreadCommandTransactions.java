@@ -7,10 +7,13 @@ import java.util.Optional;
 
 /** Thread command 用例的原子持久化端口。 */
 public interface ThreadCommandTransactions {
-  HarnessThread createThread(String title, Instant now);
+  HarnessThread createThread(String title, String environmentName, Instant now);
 
   HarnessThread updateHead(
       long threadId, long expectedExecutionEpoch, long headEntryId, Instant now);
+
+  HarnessThread updateEnvironment(
+      long threadId, long expectedExecutionEpoch, String environmentName, Instant now);
 
   Optional<EnqueueResult> findExistingInput(long threadId, String idempotencyKey);
 

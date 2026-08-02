@@ -194,7 +194,6 @@ create table chat (
     -- agent_name intentionally has no FK: it preserves a stale reference
     -- after an AgentDefinition is deleted, by design.
     agent_name          varchar(64)   not null,
-    environment_name    varchar(128),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
@@ -205,15 +204,6 @@ create table chat (
         and agent_name !~ '[[:space:]]$'
         and char_length(agent_name) > 0
         and position('/' in agent_name) = 0
-    ),
-    constraint ck_chat_environment_name check (
-        environment_name is null
-        or (
-            environment_name !~ '^[[:space:]]'
-            and environment_name !~ '[[:space:]]$'
-            and char_length(environment_name) > 0
-            and char_length(environment_name) <= 128
-        )
     )
 );
 
@@ -270,6 +260,7 @@ create table harness_session (
 create table harness_thread (
     id                bigint        primary key default nextval('kk_studio_id_seq'),
     head_entry_id     bigint        not null,
+    environment_name  varchar(128),
     input_sequence    bigint        not null,
     runnable          boolean       not null,
     execution_epoch   bigint        not null,
@@ -286,6 +277,15 @@ create table harness_thread (
     constraint ck_harness_thread_input_sequence_nonneg check (input_sequence >= 0),
     constraint ck_harness_thread_execution_epoch_nonneg check (execution_epoch >= 0),
     constraint ck_harness_thread_revision_nonneg check (revision >= 0),
+    constraint ck_harness_thread_environment_name check (
+        environment_name is null
+        or (
+            environment_name !~ '^[[:space:]]'
+            and environment_name !~ '[[:space:]]$'
+            and char_length(environment_name) > 0
+            and char_length(environment_name) <= 128
+        )
+    ),
     -- processor lease token/until are set or cleared together.
     constraint ck_harness_thread_lease_pair check (
         (processor_token is null and processor_until is null)
@@ -1007,7 +1007,8 @@ begin
     if new.head_entry_id is distinct from old.head_entry_id
        or new.input_sequence is distinct from old.input_sequence
        or new.runnable is distinct from old.runnable
-       or new.execution_epoch is distinct from old.execution_epoch then
+       or new.execution_epoch is distinct from old.execution_epoch
+       or new.environment_name is distinct from old.environment_name then
         new.revision := old.revision + 1;
         new.updated_at := greatest(old.updated_at, current_timestamp);
     elsif new.updated_at < old.updated_at then

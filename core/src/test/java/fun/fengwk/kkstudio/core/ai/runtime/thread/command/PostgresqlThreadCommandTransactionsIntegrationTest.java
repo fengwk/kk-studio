@@ -10,9 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.CustomMessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -33,12 +35,14 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
   @Autowired private ThreadCommandTransactions transactions;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private ExecutionTargetStore executionTargetStore;
 
   @Test
   void createThreadAtomicallyCreatesSessionRootAndBoundHead() {
-    HarnessThread thread = transactions.createThread("atomic-title", NOW);
+    HarnessThread thread = transactions.createThread("atomic-title", "environment-a", NOW);
 
     assertTrue(thread.headEntryId() > 0);
+    assertEquals("environment-a", thread.environmentName());
     assertEquals(0L, thread.executionEpoch());
     assertEquals(0L, thread.inputSequence());
     assertFalse(thread.runnable());
@@ -46,7 +50,8 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     Map<String, Object> projection =
         jdbc.queryForMap(
             """
-            select t.head_entry_id, e.session_id, e.entry_type, e.parent_entry_id, s.title
+            select t.head_entry_id, t.environment_name, e.session_id, e.entry_type,
+                   e.parent_entry_id, s.title
             from harness_thread t
             join harness_entry e on e.id = t.head_entry_id
             join harness_session s on s.id = e.session_id
@@ -54,6 +59,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             """,
             thread.id());
     assertEquals(thread.headEntryId(), ((Number) projection.get("head_entry_id")).longValue());
+    assertEquals("environment-a", projection.get("environment_name"));
     assertEquals("ROOT", projection.get("entry_type"));
     assertEquals("atomic-title", projection.get("title"));
     assertTrue(projection.get("parent_entry_id") == null);
@@ -72,9 +78,79 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
   }
 
   @Test
+  void updateEnvironmentFencesEpochClearsExecutionTargetAndSupportsClear() {
+    HarnessThread thread = transactions.createThread("rebind", "environment-a", NOW);
+    executionTargetStore.schedule(
+        ExecutionTargetKind.THREAD, thread.id(), "thread", NOW.plusSeconds(1));
+
+    HarnessThread rebound =
+        transactions.updateEnvironment(thread.id(), thread.executionEpoch(), "environment-b", NOW);
+
+    assertEquals("environment-b", rebound.environmentName());
+    assertEquals(1L, rebound.executionEpoch());
+    assertEquals(1L, rebound.revision());
+    assertFalse(rebound.runnable());
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "select count(*) from harness_execution_target"
+                + " where target_kind = 'THREAD' and target_id = ?",
+            Long.class,
+            thread.id()));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> transactions.updateEnvironment(thread.id(), thread.executionEpoch(), null, NOW));
+    assertEquals(
+        "environment-b",
+        jdbc.queryForObject(
+            "select environment_name from harness_thread where id = ?", String.class, thread.id()));
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select execution_epoch from harness_thread where id = ?", Long.class, thread.id()));
+
+    HarnessThread cleared = transactions.updateEnvironment(thread.id(), 1L, null, NOW);
+    assertEquals(null, cleared.environmentName());
+    assertEquals(2L, cleared.executionEpoch());
+    assertEquals(2L, cleared.revision());
+    assertEquals(
+        null,
+        jdbc.queryForObject(
+            "select environment_name from harness_thread where id = ?", String.class, thread.id()));
+  }
+
+  @Test
+  void updateEnvironmentRejectsNonquiescentThreadWithoutChangingBinding() {
+    HarnessThread thread = transactions.createThread("busy-rebind", "environment-a", NOW);
+    RuntimeEntryInputPayload payload =
+        new RuntimeEntryInputPayload(
+            ThreadInputType.USER_MESSAGE,
+            new MessageEntryPayload(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                new TurnSettings("agent", false),
+                null));
+    transactions.enqueue(thread.id(), payload, "busy-message", thread.executionEpoch(), NOW);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            transactions.updateEnvironment(
+                thread.id(), thread.executionEpoch(), "environment-b", NOW));
+    assertEquals(
+        "environment-a",
+        jdbc.queryForObject(
+            "select environment_name from harness_thread where id = ?", String.class, thread.id()));
+    assertEquals(
+        0L,
+        jdbc.queryForObject(
+            "select execution_epoch from harness_thread where id = ?", Long.class, thread.id()));
+  }
+
+  @Test
   void enqueueAcceptsOnlyUserOrCustomMessagesAndPreservesIdempotency() {
-    HarnessThread thread = transactions.createThread("mailbox", NOW);
-    TurnSettings settings = new TurnSettings("agent-a", "environment-a", true);
+    HarnessThread thread = transactions.createThread("mailbox", "environment-a", NOW);
+    TurnSettings settings = new TurnSettings("agent-a", true);
     RuntimeEntryInputPayload user =
         new RuntimeEntryInputPayload(
             ThreadInputType.USER_MESSAGE,
@@ -90,7 +166,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             ThreadInputType.USER_MESSAGE,
             new MessageEntryPayload(
                 new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("changed"))),
-                new TurnSettings("agent-b", null, false),
+                new TurnSettings("agent-b", false),
                 null));
     ThreadCommandTransactions.EnqueueResult retry =
         transactions.enqueue(thread.id(), retryPayload, "message-1", thread.executionEpoch(), NOW);
@@ -129,13 +205,13 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
   @Test
   void staleEpochNeverWritesMailboxState() {
-    HarnessThread thread = transactions.createThread("epoch", NOW);
+    HarnessThread thread = transactions.createThread("epoch", null, NOW);
     RuntimeEntryInputPayload payload =
         new RuntimeEntryInputPayload(
             ThreadInputType.USER_MESSAGE,
             new MessageEntryPayload(
                 new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
-                new TurnSettings("agent", null, false),
+                new TurnSettings("agent", false),
                 null));
 
     assertThrows(
@@ -154,14 +230,14 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
 
   @Test
   void committedIdempotencyKeyWinsOverLaterEpochFence() {
-    HarnessThread thread = transactions.createThread("idempotency-fence", NOW);
+    HarnessThread thread = transactions.createThread("idempotency-fence", null, NOW);
     RuntimeEntryInputPayload original =
         new RuntimeEntryInputPayload(
             ThreadInputType.USER_MESSAGE,
             new MessageEntryPayload(
                 new AgentMessage(
                     AgentMessageRole.USER, List.of(new TextMessageContent("original"))),
-                new TurnSettings("agent-a", null, false),
+                new TurnSettings("agent-a", false),
                 null));
     ThreadCommandTransactions.EnqueueResult first =
         transactions.enqueue(thread.id(), original, "message-1", thread.executionEpoch(), NOW);
@@ -172,7 +248,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
             ThreadInputType.USER_MESSAGE,
             new MessageEntryPayload(
                 new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("changed"))),
-                new TurnSettings("agent-b", "environment-b", true),
+                new TurnSettings("agent-b", true),
                 null));
     ThreadCommandTransactions.EnqueueResult retry =
         transactions.enqueue(thread.id(), changed, "message-1", thread.executionEpoch(), NOW);

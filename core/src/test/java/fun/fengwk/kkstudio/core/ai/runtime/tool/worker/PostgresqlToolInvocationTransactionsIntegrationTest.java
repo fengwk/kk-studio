@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -939,6 +940,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     return new ToolDescriptor(
         environmentName == null ? "platformTool" : "environmentTool",
         "1",
+        ToolType.PLATFORM,
         "test tool",
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),

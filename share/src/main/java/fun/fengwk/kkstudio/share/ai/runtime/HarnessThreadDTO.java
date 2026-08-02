@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -18,6 +19,10 @@ public class HarnessThreadDTO {
 
   /** 当前 head Entry。 */
   private String headEntryId;
+
+  /** 当前 Thread 选择的 Environment；为空表示仅使用平台工具。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String environmentName;
 
   /** 当前 execution epoch。 */
   private Long executionEpoch;

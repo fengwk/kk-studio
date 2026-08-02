@@ -19,7 +19,12 @@ public final class TestThreads {
       long threadId, long executionEpoch, long sessionId, long rootEntryId, HarnessThread thread) {}
 
   public static Created create(ThreadCommandTransactions transactions, String title, Instant now) {
-    HarnessThread thread = transactions.createThread(title, now);
+    return create(transactions, title, null, now);
+  }
+
+  public static Created create(
+      ThreadCommandTransactions transactions, String title, String environmentName, Instant now) {
+    HarnessThread thread = transactions.createThread(title, environmentName, now);
     long sessionId = sessionId(thread.headEntryId());
     return new Created(
         thread.id(), thread.executionEpoch(), sessionId, thread.headEntryId(), thread);

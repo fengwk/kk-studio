@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -87,6 +88,7 @@ class RemoteToolTest {
     return new ToolDescriptor(
         "echo",
         "1",
+        ToolType.ENVIRONMENT,
         "echo",
         "echo",
         new ToolParamsSchema("", Map.of(), Set.of(), false),

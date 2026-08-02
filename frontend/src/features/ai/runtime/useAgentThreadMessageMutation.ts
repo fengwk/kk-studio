@@ -25,7 +25,6 @@ export function useAgentThreadMessageMutation(threadId: string) {
       firstSendContext,
       content,
       agentName,
-      environmentName,
       yoloEnabled,
       clientMessageId,
       expectedExecutionEpoch,
@@ -36,7 +35,6 @@ export function useAgentThreadMessageMutation(threadId: string) {
           role,
           content,
           agentName,
-          environmentName,
           yoloEnabled,
           clientMessageId,
           expectedExecutionEpoch,
@@ -45,7 +43,6 @@ export function useAgentThreadMessageMutation(threadId: string) {
       return harnessService.submitThreadMessage(threadId, {
         content,
         agentName,
-        environmentName,
         yoloEnabled,
         clientMessageId,
         expectedExecutionEpoch,

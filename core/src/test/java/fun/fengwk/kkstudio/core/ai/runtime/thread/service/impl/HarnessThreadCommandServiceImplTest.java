@@ -36,14 +36,14 @@ class HarnessThreadCommandServiceImplTest {
     HarnessThreadDtoConverter converter = mock(HarnessThreadDtoConverter.class);
     HarnessThread thread = mock(HarnessThread.class);
     HarnessThreadDTO expected = new HarnessThreadDTO();
-    when(coordinator.createThread("title")).thenReturn(thread);
+    when(coordinator.createThread("title", null)).thenReturn(thread);
     when(converter.convert(thread)).thenReturn(expected);
 
     HarnessThreadCommandServiceImpl service =
         new HarnessThreadCommandServiceImpl(coordinator, converter);
 
-    assertSame(expected, service.createThread("title"));
-    verify(coordinator).createThread("title");
+    assertSame(expected, service.createThread("title", null));
+    verify(coordinator).createThread("title", null);
   }
 
   @Test
@@ -76,7 +76,7 @@ class HarnessThreadCommandServiceImplTest {
     ThreadInput customInput = mock(ThreadInput.class);
     HarnessThreadInputDTO userDTO = new HarnessThreadInputDTO();
     HarnessThreadInputDTO customDTO = new HarnessThreadInputDTO();
-    TurnSettings settings = new TurnSettings("agent-a", "environment-a", true);
+    TurnSettings settings = new TurnSettings("agent-a", true);
     when(coordinator.findExistingInput(5L, "user-key")).thenReturn(Optional.empty());
     when(coordinator.findExistingInput(5L, "custom-key")).thenReturn(Optional.empty());
     when(coordinator.submitUserMessage(5L, settings, "hello", "user-key", 3L))
@@ -89,7 +89,6 @@ class HarnessThreadCommandServiceImplTest {
     HarnessThreadMessageCreateDTO user = new HarnessThreadMessageCreateDTO();
     user.setContent("hello");
     user.setAgentName("agent-a");
-    user.setEnvironmentName("environment-a");
     user.setYoloEnabled(true);
     user.setClientMessageId("user-key");
     user.setExpectedExecutionEpoch(3L);
@@ -97,7 +96,6 @@ class HarnessThreadCommandServiceImplTest {
     custom.setRole("system");
     custom.setContent("rules");
     custom.setAgentName("agent-a");
-    custom.setEnvironmentName("environment-a");
     custom.setYoloEnabled(true);
     custom.setClientMessageId("custom-key");
     custom.setExpectedExecutionEpoch(3L);

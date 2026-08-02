@@ -72,7 +72,8 @@ harness-daemon -> harness-tool
 | Model | `(providerName, name)` | Agent 通过两部分引用 |
 | Agent | immutable `name` | Chat 与每条消息通过 `agentName` 引用 |
 | Variant | Model config 中的 `id` | Agent 的可选 `variant` 覆盖 Model 的 `defaultVariant` |
-| Tool / Skill | 名称与版本或名称 | Agent config 保存名称集合 |
+| Tool | 只有 `PLATFORM` / `ENVIRONMENT` 两类；Agent 可选择目录与内部 Platform Tool 分离 | Agent config 保存可选择 Tool 名称集合 |
+| Skill | 名称 | Agent config 保存名称集合；运行时由 READY Environment 提供 |
 
 公开 Model ref 的格式是 `providerName/modelName`。`ModelRef.parse` 只在第一个 `/` 切分，因此 `modelName` 可以包含额外 `/`。Catalog response 只使用名称、结构化 config 和版本字段，不使用 bigint resource ID。
 
@@ -80,11 +81,11 @@ harness-daemon -> harness-tool
 
 | 事实 | 当前职责 |
 | --- | --- |
-| Chat | 保存 `agentName`、`environmentName`、`yoloEnabled` 这三个可见发送设置，以及标题、版本和时间 |
+| Chat | 保存 `agentName`、`yoloEnabled` 两个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
 | Entry | 对话与运行审计事实，只允许五种 `EntryType` |
-| HarnessThread | `headEntryId`、input sequence、runnable、revision、execution epoch、processor lease 与时间；只保存运行事实 |
+| HarnessThread | nullable `environmentName`、`headEntryId`、input sequence、runnable、revision、execution epoch、processor lease 与时间 |
 | ThreadInput | 有序 mailbox，只允许 `USER_MESSAGE` 与 `CUSTOM_MESSAGE` |
 | ModelInvocation | 一次冻结的 `ModelInvocationRequest` 及其状态、lease、retry 和 terminal 事实 |
 | ToolInvocation | 一次 ToolCall 的原 binding、参数、目标、权限、状态和结果 |
@@ -92,28 +93,28 @@ harness-daemon -> harness-tool
 | Usage | 每个 Assistant Entry 一条不可变模型用量账本 |
 | Live Environment | READY Daemon 的服务器内存投影，按 `environmentName` 唯一 |
 
-USER/CUSTOM message 的 Input 与最终 Entry 都保存 compact `TurnSettings(agentName, environmentName, yoloEnabled)`。Agent 决定 Model、Variant、Tools 和 Skills；Thread 不保存这些 active config。
+USER/CUSTOM message 的 Input 与最终 Entry 都保存 compact `TurnSettings(agentName, yoloEnabled)`；消息 DTO 不携带 `environmentName`。Thread 单独保存当前 nullable `environmentName`，不复制 Agent、Model、Variant、Tool 或 Skill 配置。
 
 ## 5. 创建、发送与执行
 
-`POST /api/ai/chat/{chatId}/threads` 是 Thread 创建入口。一个事务内创建 Session、唯一 ROOT、head 指向 ROOT 的 Thread，并写入 Chat↔Thread 关系；响应已经包含可发送的 Thread。ROOT 保证 head 非空，`PUT /api/ai/runtime/threads/{threadId}/head` 只能指向非空 Entry，并要求 Thread 静止与 `expectedExecutionEpoch` CAS。
+`POST /api/ai/chat/{chatId}/threads` 是 Thread 创建入口。请求可携带 nullable `environmentName`；一个事务内创建 Session、唯一 ROOT、head 指向 ROOT 的 Thread，并写入 Chat↔Thread 关系；响应已经包含可发送的 Thread。ROOT 保证 head 非空，`PUT /api/ai/runtime/threads/{threadId}/head` 只能指向非空 Entry，并要求 Thread 静止与 `expectedExecutionEpoch` CAS。静止 Thread 可通过 `PUT /api/ai/runtime/threads/{threadId}/environment` 设置或清除 `environmentName`；请求体为 `environmentName` 与 `expectedExecutionEpoch`，成功递增 `executionEpoch` 和 `revision`，运行中或 epoch 陈旧返回 `409`。
 
 发送路径如下：
 
 ```text
-Chat 当前可见设置
+Chat 当前 `agentName`、`yoloEnabled` + Thread 当前 nullable `environmentName`
   -> POST /messages 或 /messages/custom
   -> ThreadInput(USER_MESSAGE/CUSTOM_MESSAGE)
   -> TURN_INPUT_BATCH harvest
   -> Entry append
   -> ModelInvocationPlanner
-  -> DatabaseTurnExecutionResolver 读取最新 Catalog 与 READY Environment
+  -> DatabaseTurnExecutionResolver 读取最新 Agent、Provider、Model、ToolCatalog 与 Thread Environment
   -> 冻结 ModelInvocationRequest
   -> ModelWorker / Provider
   -> Assistant Entry + Usage
 ```
 
-Resolver 发现 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 缺失时返回 typed `PlanningFailure`；Reconciler 将其写成 `ASSISTANT_ERROR` barrier，模型调用不会静默降级。已创建的 ModelInvocation retry 使用同一份 request，ToolWorker 也只使用其中冻结的 ToolBinding。
+Resolver 对 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 typed `PlanningFailure`；Platform Tool 总可候选，READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集，null、stale 或 offline Environment 只让这些能力为空。Reconciler 将 planning failure 写成 `ASSISTANT_ERROR` barrier，模型调用不会静默切换资源。已创建的 ModelInvocation retry 使用同一份 request，ToolWorker 也只使用其中冻结的 descriptor/type/environmentName binding。Provider 返回本次 invocation 不可见的 Tool 时，Reconciler 写入包含请求名称和可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不创建 ToolInvocation。
 
 `ThreadReconciler` 是执行过程中 Entry/head 的唯一写者。ModelWorker 只写 ModelInvocation 和 realtime delta；ToolWorker 只写 ToolInvocation 和 realtime partial；terminal 事实通过 PostgreSQL execution target 唤醒后续 Reconcile。
 
