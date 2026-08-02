@@ -78,7 +78,10 @@ skillBindings
 yoloEnabled
 ```
 
-缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 `PlanningFailure`。Reconciler 追加 `ASSISTANT_ERROR` barrier，不创建 ModelInvocation，也不静默使用其他资源。
+缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 `PlanningFailure`。
+无 Environment 且 Agent 需要 Environment Tool/Skill 时返回 `ENVIRONMENT_REQUIRED`；显式选择的
+Environment 不存在或未 READY 时返回 `ENVIRONMENT_NOT_FOUND`。Reconciler 追加
+`ASSISTANT_ERROR` barrier，不创建 ModelInvocation，也不静默使用其他资源。
 
 ## 4. Model 执行
 

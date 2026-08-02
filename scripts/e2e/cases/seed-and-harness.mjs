@@ -354,6 +354,65 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread.environment_required_failure',
+  level: 'L1',
+  title: 'Agent 需要 Environment 能力时拒绝 null Environment',
+  docs: 'environmentName=null 本身合法；Agent 配置 Environment Tool/Skill 时显式写 ENVIRONMENT_REQUIRED，且不创建 ModelInvocation',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    const agentName = `e2e-environment-required-${cid().slice(0, 8)}`
+    const agent = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/agents', {
+          name: agentName,
+          description: 'Requires an Environment tool for planning-boundary verification.',
+          systemPrompt: 'You are an E2E planning-boundary assistant.',
+          model: ctx.vars.agent.model,
+          variant: ctx.vars.agent.variant,
+          config: { tools: ['read'], skills: [] },
+        })
+      ).json,
+    )
+    const { thread } = await createConfiguredChatThread(ctx, {
+      title: `e2e-environment-required-${cid().slice(0, 8)}`,
+      agentName: agent.name,
+      environmentName: null,
+      yoloEnabled: false,
+    })
+    const { json: messageJson } = await ctx.call(
+      'POST',
+      `/api/ai/runtime/threads/${thread.threadId}/messages`,
+      {
+        agentName: agent.name,
+        environmentName: null,
+        yoloEnabled: false,
+        content: 'must require an Environment before provider invocation',
+        clientMessageId: cid(),
+        expectedExecutionEpoch: Number(thread.executionEpoch),
+      },
+    )
+    const input = envelopeData(messageJson)
+    await waitForThreadInputApplied(ctx, thread.threadId, input.inputId)
+    const snapshot = await getThreadSnapshot(ctx, thread.threadId)
+    const errorEntry = (snapshot.entries || []).find((entry) => entry.entryType === 'ASSISTANT_ERROR')
+    assert(errorEntry, JSON.stringify(snapshot.entries))
+    const errorPayload = JSON.parse(errorEntry.payloadJson)
+    const errorMessage = String(errorPayload.error?.message || '')
+    assert(errorMessage.includes('ENVIRONMENT_REQUIRED'), JSON.stringify(errorPayload))
+    assert(errorMessage.includes('requires a READY Environment'), JSON.stringify(errorPayload))
+    assert(!errorMessage.includes(': null'), JSON.stringify(errorPayload))
+    assert(
+      (snapshot.modelInvocations || []).length === 0,
+      `Environment planning failure created ModelInvocation: ${JSON.stringify(snapshot.modelInvocations)}`,
+    )
+    await ctx.call(
+      'DELETE',
+      `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+    )
+  },
+})
+
+registerCase({
   id: 'thread.custom_message_turn_settings',
   level: 'L1',
   title: 'CUSTOM_MESSAGE 同样携带逐消息可见配置',

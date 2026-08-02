@@ -46,7 +46,9 @@ public record TurnSettings(
     boolean yoloEnabled) {}
 ```
 
-`agentName` 必须是 canonical 非空名称；`environmentName` 可以为 null，否则必须是 canonical 非空名称。该值只保存名称引用和 YOLO 开关。
+`agentName` 必须是 canonical 非空名称；`environmentName` 可以为 null，否则必须是 canonical
+非空名称。null 允许 model-only 或只含本地 Tool 的 Agent 执行；Agent 配置了 Environment
+Tool 或 Skill 时，null 会明确产生 `ENVIRONMENT_REQUIRED`，不会静默移除能力。该值只保存名称引用和 YOLO 开关。
 
 ## 3. Invocation 状态
 
@@ -97,6 +99,7 @@ AGENT_NOT_FOUND
 PROVIDER_NOT_FOUND
 MODEL_NOT_FOUND
 VARIANT_NOT_FOUND
+ENVIRONMENT_REQUIRED
 ENVIRONMENT_NOT_FOUND
 TOOL_NOT_FOUND
 SKILL_NOT_FOUND
