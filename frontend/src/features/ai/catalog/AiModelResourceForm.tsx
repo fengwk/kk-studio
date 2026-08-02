@@ -47,6 +47,20 @@ export function ModelForm({
 }) {
   const { t } = useI18n()
   const variantOptions = variantOptionsFromDraft(draft.variants)
+  const providerUnavailable =
+    mode === 'edit' &&
+    Boolean(draft.providerName) &&
+    !providers.some((provider) => provider.name === draft.providerName)
+  const providerOptions = providerUnavailable
+    ? [
+        {
+          value: draft.providerName,
+          label: `${draft.providerName} (${t('ai.catalog.form.unavailable')})`,
+          disabled: true,
+        },
+        ...providers.map((provider) => ({ value: provider.name, label: provider.name })),
+      ]
+    : providers.map((provider) => ({ value: provider.name, label: provider.name }))
   const selectedDefaultVariant = variantOptions.includes(draft.defaultVariant.trim())
     ? draft.defaultVariant.trim()
     : (variantOptions[0] ?? '')
@@ -106,12 +120,18 @@ export function ModelForm({
         <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
         <FormSelect
           aria-label={t('ai.catalog.form.provider')}
+          aria-describedby={providerUnavailable ? 'model-provider-identity-status' : undefined}
           value={draft.providerName}
           required
           disabled={mode === 'edit'}
-          options={providers.map((provider) => ({ value: provider.name, label: provider.name }))}
+          options={providerOptions}
           onChange={(providerName) => onChange({ ...draft, providerName })}
         />
+        {providerUnavailable ? (
+          <span id="model-provider-identity-status" className="inline-hint" role="status">
+            {t('ai.catalog.form.unavailableIdentityHint')}
+          </span>
+        ) : null}
         {fieldErrors.providerName ? <span className="field-error">{fieldErrors.providerName}</span> : null}
       </label>
 

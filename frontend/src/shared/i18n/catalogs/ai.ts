@@ -449,6 +449,14 @@ export const aiCatalog = {
     'en-US': 'Unavailable',
     'zh-CN': '不可用',
   },
+  'ai.catalog.form.unavailableIdentityHint': {
+    'en-US': 'Unavailable; the original identity is retained when saving other fields.',
+    'zh-CN': '不可用；保存其他字段时仍保留原始身份。',
+  },
+  'ai.catalog.form.unavailableModelVariants': {
+    'en-US': 'Variant options are unavailable because the referenced Model is not loaded; the saved override is preserved.',
+    'zh-CN': '引用的 Model 未加载，Variant 选项不可用；已保存的覆盖值会保留。',
+  },
   'ai.catalog.form.offline': {
     'en-US': 'Offline',
     'zh-CN': 'offline',

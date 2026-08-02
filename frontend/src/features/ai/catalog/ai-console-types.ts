@@ -89,6 +89,12 @@ export type ResourceModal =
       expectedVersion: CatalogVersion
     }
   | { kind: 'agent'; mode: 'create' }
-  | { kind: 'agent'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
+  | {
+      kind: 'agent'
+      mode: 'edit'
+      name: string
+      model: string
+      expectedVersion: CatalogVersion
+    }
 
 export const providerTypes = ['openai', 'openai_response', 'anthropic', 'google']

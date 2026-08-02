@@ -114,4 +114,47 @@ describe('AgentForm current contracts', () => {
     expect(screen.getByText('Skills 冲突')).toBeInTheDocument()
     expect(screen.queryByLabelText('Environment')).not.toBeInTheDocument()
   })
+
+  it.each(['deleted/original-model', 'off-page/original-model'])(
+    'shows a missing edit Model %s as an unavailable orphan without unrelated variants',
+    (modelName) => {
+      const draft: AgentDraft = {
+        ...emptyAgentDraft(),
+        name: 'assistant',
+        model: modelName,
+        variant: 'persisted-override',
+      }
+      const unrelatedModel = {
+        ...modelWithVariants(),
+        providerName: 'loaded',
+        name: 'unrelated-model',
+      }
+
+      render(
+        <AgentForm
+          draft={draft}
+          mode="edit"
+          models={[unrelatedModel]}
+          onChange={() => undefined}
+        />,
+      )
+
+      const modelSelect = screen.getByLabelText('Default Model')
+      expect(modelSelect).toHaveValue(modelName)
+      expect(modelSelect).toBeDisabled()
+      expect(modelSelect).toHaveAttribute('aria-describedby', 'agent-model-identity-status')
+      expect(screen.getByRole('option', { name: `${modelName} (不可用)` })).toBeDisabled()
+
+      const variantSelect = screen.getByLabelText('Default Variant Override')
+      expect(variantSelect).toBeDisabled()
+      expect(variantSelect).toHaveAttribute('aria-describedby', 'agent-model-variant-status')
+      expect(screen.getByRole('option', { name: 'persisted-override (不可用)' })).toBeDisabled()
+      expect(screen.queryByRole('option', { name: 'fast' })).not.toBeInTheDocument()
+      expect(screen.getByText('不可用；保存其他字段时仍保留原始身份。')).toBeInTheDocument()
+      expect(
+        screen.getByText('引用的 Model 未加载，Variant 选项不可用；已保存的覆盖值会保留。'),
+      ).toBeInTheDocument()
+      expect(screen.getByPlaceholderText('用途说明')).not.toBeDisabled()
+    },
+  )
 })
