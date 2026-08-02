@@ -349,8 +349,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         deferred.add(rs.getString(1));
       }
     }
-    // Session no longer points back at a Thread, so the old bootstrap cycle is gone; only the
-    // optional Thread head remains deferrable so bootstrap can bind a freshly inserted Entry.
+    // Session no longer points back at a Thread, so the old Session/Thread cycle is gone; only the
+    // optional Thread head remains deferrable so Thread creation can bind a freshly inserted Entry.
     assertEquals(
         Set.of("fk_harness_thread_head"),
         deferred,

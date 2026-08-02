@@ -1,8 +1,8 @@
 /**
  * 工具描述与 schema 的严格、确定性 JSON 编解码。
  *
- * <p>{@link ToolDescriptorJsonCodec} 同时支持 PLATFORM 与 ENVIRONMENT 工具，可被 Runtime RUNTIME_CONFIG
- * snapshot 与 Provider tool input-schema JSON 共享使用。它在边界拒绝：
+ * <p>{@link ToolDescriptorJsonCodec} 同时支持 PLATFORM 与 ENVIRONMENT 工具，可与 Provider tool input-schema
+ * JSON 共享使用。它在边界拒绝：
  *
  * <ul>
  *   <li>未知顶层字段、未知 schema 字段、未知 schema {@code type}；

@@ -52,9 +52,9 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   void globalAndChatPagesUseTimeThenIdKeysetOrderingAndScopeFiltering() {
     ChatDTO firstChat = createChat("first");
     ChatDTO secondChat = createChat("second");
-    TestThreads.Bootstrapped first = TestThreads.bootstrap(threadTransactions, "first", NOW);
-    TestThreads.Bootstrapped second = TestThreads.bootstrap(threadTransactions, "second", NOW);
-    TestThreads.Bootstrapped third = TestThreads.bootstrap(threadTransactions, "third", NOW);
+    TestThreads.Created first = TestThreads.create(threadTransactions, "first", NOW);
+    TestThreads.Created second = TestThreads.create(threadTransactions, "second", NOW);
+    TestThreads.Created third = TestThreads.create(threadTransactions, "third", NOW);
 
     setTimes(first.threadId(), NOW.plusSeconds(20), NOW.plusSeconds(20));
     setTimes(second.threadId(), NOW.plusSeconds(20), NOW.plusSeconds(20));
@@ -98,8 +98,8 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void cursorIsBoundToSortAndAssociationIsIdempotent() {
     ChatDTO chat = createChat("cursor");
-    TestThreads.Bootstrapped first = TestThreads.bootstrap(threadTransactions, "cursor-1", NOW);
-    TestThreads.Bootstrapped second = TestThreads.bootstrap(threadTransactions, "cursor-2", NOW);
+    TestThreads.Created first = TestThreads.create(threadTransactions, "cursor-1", NOW);
+    TestThreads.Created second = TestThreads.create(threadTransactions, "cursor-2", NOW);
     chatThreadService.associateThread(chat.getId(), Long.toString(first.threadId()));
     chatThreadService.associateThread(chat.getId(), Long.toString(first.threadId()));
 
@@ -128,7 +128,7 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   @Test
   void deletingChatRemovesOnlyAssociationsAndPreservesThread() {
     ChatDTO chat = createChat("deletion");
-    TestThreads.Bootstrapped thread = TestThreads.bootstrap(threadTransactions, "survivor", NOW);
+    TestThreads.Created thread = TestThreads.create(threadTransactions, "survivor", NOW);
     chatThreadService.associateThread(chat.getId(), Long.toString(thread.threadId()));
 
     chatService.deleteChat(chat.getId(), "0");
@@ -151,9 +151,6 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
     HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
 
     assertEquals("IDLE", created.getStatus());
-    assertEquals("1", created.getActiveAgentDefinitionId());
-    assertEquals("env-default", created.getActiveEnvironmentName());
-    assertEquals(false, created.getYoloEnabled());
     assertNotNull(created.getSessionId());
     assertNotNull(created.getHeadEntryId());
     assertEquals(
@@ -170,8 +167,9 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
 
     HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
 
-    assertNull(created.getActiveEnvironmentName());
-    assertEquals("1", created.getActiveAgentDefinitionId());
+    assertEquals("IDLE", created.getStatus());
+    assertNotNull(created.getSessionId());
+    assertNotNull(created.getHeadEntryId());
   }
 
   @Test
@@ -207,8 +205,8 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  void chatScopedCreateRollsBackAssociationAndThreadWhenBootstrapFails() {
-    ChatDTO chat = createChat("bootstrap-atomic", "env-default");
+  void chatScopedCreateRollsBackAssociationAndThreadWhenThreadCreateFails() {
+    ChatDTO chat = createChat("thread-create-atomic", "env-default");
     long threadCount = jdbc.queryForObject("select count(*) from harness_thread", Long.class);
     long sessionCount = jdbc.queryForObject("select count(*) from harness_session", Long.class);
     jdbc.execute(
@@ -216,7 +214,7 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
         create function fail_harness_session_insert() returns trigger
         language plpgsql as $$
         begin
-          raise exception 'forced bootstrap failure';
+          raise exception 'forced thread create failure';
         end
         $$;
         """);

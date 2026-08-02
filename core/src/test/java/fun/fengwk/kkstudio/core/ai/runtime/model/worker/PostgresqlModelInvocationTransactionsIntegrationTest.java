@@ -1582,10 +1582,9 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
             new BigDecimal("0"));
     ModelDescriptor descriptor =
         new ModelDescriptor(
-            1L,
-            1L,
-            ProviderType.OPENAI,
+            "provider",
             "acceptance-stub",
+            ProviderType.OPENAI,
             true,
             false,
             pricing,

@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Verifies Session/Entry/Thread bootstrap, mailbox integrity and recursive path loading. */
+/** Verifies the bound Session/Entry/Thread schema, mailbox integrity and recursive path loading. */
 class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach
@@ -28,7 +28,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void sessionRootBootstrapsIndependentlyAndThreadOnlyReferencesItsHeadEntry() throws SQLException {
+  void sessionRootAndThreadUseOnlyTheBoundHeadEntry() throws SQLException {
     ThreadFixture thread = createThread();
 
     try (Connection conn = newConnection();
@@ -59,34 +59,22 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     assertFalse(tableExists("chat_session"));
   }
 
-  /** head_entry_id 可空（UNBOUND Thread），并且只是指向全局 Entry id 的单列 FK。 */
+  /** head_entry_id 必填，并且只是指向全局 Entry id 的单列 FK。 */
   @Test
-  void threadHeadEntryIsNullableAndBoundBySingleColumnForeignKey() throws SQLException {
-    long unbound = ThreadFixture.insertUnboundThread();
+  void threadHeadEntryIsRequiredAndBoundBySingleColumnForeignKey() throws SQLException {
+    ThreadFixture thread = createThread();
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "select head_entry_id, execution_epoch from harness_thread where id = ?")) {
-      ps.setLong(1, unbound);
+                "select is_nullable from information_schema.columns"
+                    + " where table_schema = 'public' and table_name = 'harness_thread'"
+                    + " and column_name = 'head_entry_id'")) {
       try (ResultSet rs = ps.executeQuery()) {
         assertTrue(rs.next());
-        rs.getLong(1);
-        assertTrue(rs.wasNull(), "UNBOUND thread must persist a null head_entry_id");
-        assertEquals(0L, rs.getLong(2));
+        assertEquals("NO", rs.getString(1));
       }
     }
 
-    // A Thread may point at any Entry in the global id space, including another Session's tree.
-    ThreadFixture other = createThread();
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement("update harness_thread set head_entry_id = ? where id = ?")) {
-      ps.setLong(1, other.rootEntryId);
-      ps.setLong(2, unbound);
-      assertEquals(1, ps.executeUpdate());
-    }
-
-    // The single-column FK still rejects a head that does not exist at all.
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -95,7 +83,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
             try (PreparedStatement ps =
                 conn.prepareStatement("update harness_thread set head_entry_id = ? where id = ?")) {
               ps.setLong(1, FIXTURE_IDS.addAndGet(500_000L));
-              ps.setLong(2, unbound);
+              ps.setLong(2, thread.threadId);
               ps.executeUpdate();
             }
           });
@@ -307,7 +295,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void inputTypesMatchRuntimeContractWithoutLegacyAlias() throws SQLException {
+  void inputTypesUseOnlyUserAndCustomMessages() throws SQLException {
     ThreadFixture thread = createThread();
     try (Connection conn = newConnection()) {
       insertInputWithoutAppliedAt(
@@ -315,8 +303,8 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
           FIXTURE_IDS.incrementAndGet(),
           thread.threadId,
           1L,
-          "SET_YOLO",
-          "kernel-yolo",
+          "CUSTOM_MESSAGE",
+          "custom-message",
           "QUEUED");
     }
 
@@ -417,12 +405,10 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   @Test
   void recursiveCteReturnsRootToLeafPath() throws SQLException {
     ThreadFixture thread = createThread();
-    long configId = FIXTURE_IDS.incrementAndGet();
     long userId = FIXTURE_IDS.incrementAndGet();
     long assistantId = FIXTURE_IDS.incrementAndGet();
     try (Connection conn = newConnection()) {
-      thread.insertChildEntry(conn, configId, "RUNTIME_CONFIG");
-      thread.insertChildEntry(conn, userId, configId, "MESSAGE");
+      thread.insertChildEntry(conn, userId, "MESSAGE");
       thread.insertChildEntry(conn, assistantId, userId, "MESSAGE");
     }
 
@@ -449,8 +435,8 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
         }
       }
     }
-    assertEquals(Arrays.asList(thread.rootEntryId, configId, userId, assistantId), ids);
-    assertEquals(Arrays.asList("ROOT", "RUNTIME_CONFIG", "MESSAGE", "MESSAGE"), types);
+    assertEquals(Arrays.asList(thread.rootEntryId, userId, assistantId), ids);
+    assertEquals(Arrays.asList("ROOT", "MESSAGE", "MESSAGE"), types);
   }
 
   private ThreadFixture createThread() throws SQLException {

@@ -65,7 +65,7 @@ import java.util.function.Consumer;
 
 /**
  * Validates that the production {@link DatabaseModelExecutionResolver} routes only through the
- * {@link AgentProviderRepository#getById(long)} path, mirrors the persisted {@link
+ * {@link AgentProviderRepository#getByName(String)} path, mirrors the persisted {@link
  * AgentProviderType} onto the frozen {@link ProviderType}, fails when the persisted type or the
  * Harness factory is missing or the persisted configuration is invalid, and produces a {@link
  * ModelExecutionResource} carrying the shared executor plus the frozen {@link
@@ -108,7 +108,7 @@ class DatabaseModelExecutionResolverTest {
               NoopExecutionListener.INSTANCE);
       await(factory.streamStarted, "Provider stream start");
 
-      assertEquals(Long.toString(PROVIDER_ID), factory.lastDescriptor.providerId());
+      assertEquals("provider", factory.lastDescriptor.providerName());
       assertEquals(ProviderType.OPENAI, factory.lastDescriptor.type());
       assertEquals("https://provider.test/v1", factory.lastDescriptor.endpoint());
       verify(fixture.providers, atLeastOnce()).getByName("provider");
@@ -211,7 +211,7 @@ class DatabaseModelExecutionResolverTest {
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST))
               .getMessage()
-              .contains("baseUrl"));
+              .contains("endpoint"));
     }
 
     CapturingProviderFactory failingFactory =
@@ -375,10 +375,9 @@ class DatabaseModelExecutionResolverTest {
         new ModelVariant("quality", 1024, 0.7, null, null, null, null, List.of(), null);
     ModelDescriptor descriptor =
         new ModelDescriptor(
-            providerId,
-            modelId,
-            type,
+            "provider",
             "provider-api-model",
+            type,
             true,
             false,
             new ModelPricing(

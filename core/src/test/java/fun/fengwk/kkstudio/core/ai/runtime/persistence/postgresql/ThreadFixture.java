@@ -8,11 +8,10 @@ import java.util.Objects;
 /**
  * Deterministic ids for a Session + ROOT Entry + Thread bundle bound to that ROOT.
  *
- * <p>Session and Thread are independent aggregates now: the Session/Entry rows are inserted first,
- * and the Thread only references the ROOT through the deferrable single-column {@code
- * head_entry_id} FK. Tests bootstrap by calling {@link #insertFresh()} or {@link
- * #insertAtomically(Connection)}. Entry helpers keep fixture construction deterministic without
- * random ids or clock-derived values.
+ * <p>Session and Thread are independent aggregates: the Session/Entry rows are inserted first, and
+ * the Thread only references the ROOT through the deferrable single-column {@code head_entry_id}
+ * FK. Entry helpers keep fixture construction deterministic without random ids or clock-derived
+ * values.
  */
 final class ThreadFixture {
 
@@ -83,21 +82,6 @@ final class ThreadFixture {
         conn.setAutoCommit(true);
       }
     }
-  }
-
-  /** Allocate and persist a fresh UNBOUND Thread (no Session, no head Entry). */
-  static long insertUnboundThread() throws SQLException {
-    long threadId = PostgresSchemaSupport.FIXTURE_IDS.addAndGet(1_000L) + 300L;
-    try (Connection conn = PostgresSchemaSupport.newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "insert into harness_thread (id, head_entry_id, input_sequence, runnable,"
-                    + " execution_epoch, created_at, updated_at)"
-                    + " values (?, null, 0, false, 0, current_timestamp, current_timestamp)")) {
-      ps.setLong(1, threadId);
-      ps.executeUpdate();
-    }
-    return threadId;
   }
 
   /** Append a non-ROOT entry under the ROOT (e.g. a MESSAGE for assistant chains). */

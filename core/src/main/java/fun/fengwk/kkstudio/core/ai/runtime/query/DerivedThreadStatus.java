@@ -11,7 +11,6 @@ import java.util.Objects;
  * RUNNING  : processor_token 非空且 processor_until &gt; now
  * WAITING  : 非 RUNNING，且 open Interaction / 同 epoch 非终态 Model|Tool / QUEUED input
  * RUNNABLE : runnable=true 且非 RUNNING/WAITING
- * UNBOUND  : 无以上执行事实且尚未绑定 head Entry
  * IDLE     : 其他
  * </pre>
  */
@@ -19,7 +18,6 @@ public final class DerivedThreadStatus {
   public static final String RUNNING = "RUNNING";
   public static final String WAITING = "WAITING";
   public static final String RUNNABLE = "RUNNABLE";
-  public static final String UNBOUND = "UNBOUND";
   public static final String IDLE = "IDLE";
 
   private DerivedThreadStatus() {}
@@ -38,9 +36,6 @@ public final class DerivedThreadStatus {
     }
     if (isTrue(thread.getRunnable())) {
       return RUNNABLE;
-    }
-    if (thread.getHeadEntryId() == null) {
-      return UNBOUND;
     }
     return IDLE;
   }

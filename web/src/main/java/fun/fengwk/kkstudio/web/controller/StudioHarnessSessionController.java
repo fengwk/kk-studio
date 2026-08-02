@@ -18,9 +18,9 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Session read-only API. Sessions are only created as a side effect of bootstrapping a Thread, so
- * there is no POST endpoint. All methods return a {@link Result} envelope; lookup misses are mapped
- * to 404 by the HTTP translation helper.
+ * Session read-only API. Sessions are only created as a side effect of creating a Thread, so there
+ * is no POST endpoint. All methods return a {@link Result} envelope; lookup misses are mapped to
+ * 404 by the HTTP translation helper.
  */
 @AllArgsConstructor
 @RestController

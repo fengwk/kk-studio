@@ -40,10 +40,9 @@ class PostgresqlModelUsageRecordStoreTest {
     ModelCost expectedCost = ModelCost.calculate(pricing, usage);
     ModelUsageDraft draft =
         new ModelUsageDraft(
-            7L,
-            9L,
-            ProviderType.OPENAI,
+            "provider",
             "model-x",
+            ProviderType.OPENAI,
             PromptCacheMode.AFFINITY,
             PromptCacheRetention.SHORT,
             true,
@@ -85,10 +84,9 @@ class PostgresqlModelUsageRecordStoreTest {
     row.setSessionId(22L);
     row.setThreadId(33L);
     row.setAssistantEntryId(44L);
-    row.setProviderResourceId(7L);
-    row.setModelResourceId(9L);
+    row.setProviderName("provider");
+    row.setModelName("model-x");
     row.setProviderType("OPENAI");
-    row.setProviderModelId("model-x");
     row.setPromptCacheMode("AFFINITY");
     row.setPromptCacheRetention("SHORT");
     row.setCacheEligible(true);

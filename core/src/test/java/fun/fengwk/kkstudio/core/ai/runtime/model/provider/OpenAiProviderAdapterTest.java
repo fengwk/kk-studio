@@ -86,10 +86,9 @@ class OpenAiProviderAdapterTest {
         new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
-            1L,
-            2L,
-            ProviderType.OPENAI,
+            "provider",
             "proxy-model",
+            ProviderType.OPENAI,
             true,
             reasoning,
             new ModelPricing(

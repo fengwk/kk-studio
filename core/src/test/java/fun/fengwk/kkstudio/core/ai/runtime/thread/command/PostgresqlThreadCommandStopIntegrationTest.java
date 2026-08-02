@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.RuntimeEntryInputPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -50,7 +51,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** Stop 只终结尚未执行的 Invocation，RUNNING 依赖 epoch fence 丢失 ownership。 */
   @Test
   void stopClearsProcessorLeaseAndCancelsOnlySafeInvocationStates() throws Exception {
-    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "stop-matrix", BASE);
+    TestThreads.Created boot = TestThreads.create(transactions, "stop-matrix", BASE);
     long sessionId = boot.sessionId();
     long threadId = boot.threadId();
     long epoch = boot.executionEpoch();
@@ -130,7 +131,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** Input insert 被数据库拒绝时，先发生的 sequence/runnable 更新必须一起回滚。 */
   @Test
   void enqueueRollsBackThreadMutationWhenInputInsertIsSuppressed() throws Exception {
-    TestThreads.Bootstrapped boot = TestThreads.bootstrap(transactions, "rollback", BASE);
+    TestThreads.Created boot = TestThreads.create(transactions, "rollback", BASE);
     long threadId = boot.threadId();
     try (Connection connection = newConnection();
         Statement statement = connection.createStatement()) {
@@ -167,7 +168,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
   /** 不存在的 idempotency key 也必须持有 Thread 行锁，串行化随后 live snapshot resolve。 */
   @Test
   void missingIdempotencyLookupSerializesOnThreadLock() throws Exception {
-    long threadId = TestThreads.bootstrap(transactions, "lock", BASE).threadId();
+    long threadId = TestThreads.create(transactions, "lock", BASE).threadId();
     CountDownLatch firstLocked = new CountDownLatch(1);
     CountDownLatch releaseFirst = new CountDownLatch(1);
     TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
@@ -479,7 +480,9 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
         new MessageEntryPayload(
             new AgentMessage(
                 AgentMessageRole.USER,
-                List.<AgentMessageContent>of(new TextMessageContent(content)))));
+                List.<AgentMessageContent>of(new TextMessageContent(content))),
+            new TurnSettings("agent", null, false),
+            null));
   }
 
   private static void await(CountDownLatch latch) {

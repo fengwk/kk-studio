@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordIdGenerator;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 
@@ -50,40 +51,46 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  void exposesSessionAndModelPathsWithStringLargeIds() throws Exception {
+  void exposesSessionAndNameBasedModelPaths() throws Exception {
     insertThreadPath();
     recordStore.insert(
         new ModelUsageRecord(
-            recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(LARGE_ID), NOW));
+            recordIds.newModelUsageRecordId(), LARGE_ID, LARGE_ID, LARGE_ID, draft(), NOW));
 
-    for (String scope : List.of("sessions", "models")) {
-      String scopeType = scope.substring(0, scope.length() - 1);
-      mockMvc
-          .perform(get("/api/ai/runtime/usage/{scope}/{id}", scope, Long.toString(LARGE_ID)))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data.scopeType").value(scopeType))
-          .andExpect(jsonPath("$.data.scopeId").value(Long.toString(LARGE_ID)))
-          .andExpect(jsonPath("$.data.recordCount").value(1))
-          .andExpect(jsonPath("$.data.inputTokens").value(10))
-          .andExpect(jsonPath("$.data.cacheReadTokens").value(30))
-          .andExpect(jsonPath("$.data.cacheEligibleRecordCount").value(1))
-          .andExpect(jsonPath("$.data.cacheHitRecordCount").value(1))
-          .andExpect(jsonPath("$.data.cacheHitRatio").value(1.000000))
-          .andExpect(jsonPath("$.data.tokenReadRatio").value(0.750000))
-          .andExpect(jsonPath("$.data.unamortizedCacheWriteTokens").value(0))
-          .andExpect(jsonPath("$.data.costs[0].currency").value("USD"));
-    }
+    assertSummary("/api/ai/runtime/usage/sessions/" + LARGE_ID, "session", Long.toString(LARGE_ID));
+    assertSummary("/api/ai/runtime/usage/models/openai%2Fmodel", "model", "openai/model");
   }
 
   @Test
-  void rejectsInvalidIdsOnAllPaths() throws Exception {
-    for (String scope : List.of("sessions", "models")) {
-      for (String invalid : List.of("abc", "0", "-1", "9223372036854775808")) {
-        mockMvc
-            .perform(get("/api/ai/runtime/usage/{scope}/{id}", scope, invalid))
-            .andExpect(status().isBadRequest());
-      }
+  void rejectsInvalidIdsAndModelReferences() throws Exception {
+    for (String invalid : List.of("abc", "0", "-1", "9223372036854775808")) {
+      mockMvc
+          .perform(get("/api/ai/runtime/usage/sessions/{sessionId}", invalid))
+          .andExpect(status().isBadRequest());
     }
+    for (String invalid : List.of("abc", "%2Fmodel", "provider%2F")) {
+      mockMvc
+          .perform(get(URI.create("/api/ai/runtime/usage/models/" + invalid)))
+          .andExpect(status().isBadRequest());
+    }
+  }
+
+  private void assertSummary(String path, String scopeType, String expectedScopeId)
+      throws Exception {
+    mockMvc
+        .perform(get(URI.create(path)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.scopeType").value(scopeType))
+        .andExpect(jsonPath("$.data.scopeId").value(expectedScopeId))
+        .andExpect(jsonPath("$.data.recordCount").value(1))
+        .andExpect(jsonPath("$.data.inputTokens").value(10))
+        .andExpect(jsonPath("$.data.cacheReadTokens").value(30))
+        .andExpect(jsonPath("$.data.cacheEligibleRecordCount").value(1))
+        .andExpect(jsonPath("$.data.cacheHitRecordCount").value(1))
+        .andExpect(jsonPath("$.data.cacheHitRatio").value(1.000000))
+        .andExpect(jsonPath("$.data.tokenReadRatio").value(0.750000))
+        .andExpect(jsonPath("$.data.unamortizedCacheWriteTokens").value(0))
+        .andExpect(jsonPath("$.data.costs[0].currency").value("USD"));
   }
 
   private void insertThreadPath() {
@@ -138,7 +145,7 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
         + "\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"0\"}}}";
   }
 
-  private static ModelUsageDraft draft(long modelResourceId) {
+  private static ModelUsageDraft draft() {
     ModelUsage usage = new ModelUsage(10, 0, 30, 5, 0, 0, 45);
     ModelPricing pricing =
         new ModelPricing(
@@ -154,10 +161,9 @@ class StudioModelUsageControllerTest extends WebPostgresTestSupport {
             BigDecimal.ZERO.setScale(12),
             BigDecimal.ZERO.setScale(12));
     return new ModelUsageDraft(
-        1L,
-        modelResourceId,
-        ProviderType.OPENAI,
+        "openai",
         "model",
+        ProviderType.OPENAI,
         PromptCacheMode.AUTOMATIC,
         PromptCacheRetention.NONE,
         true,
