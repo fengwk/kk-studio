@@ -1,449 +1,221 @@
 # Prompt Cache、Usage 与 Cost Ledger
 
-本文描述 Harness 当前生效的提示缓存控制、模型用量归一化、成本快照、原子账本和聚合查询方案。一次成功的 Provider 调用以冻结 `ModelInvocationRequest.providerRequest()` 和完成时 `ProviderResponse` 为输入，生成 Assistant Entry 与一条不可变 `harness_model_usage` 账本；聚合层再按 Thread、Session 或 Model 读取账本。
+本文描述当前提示缓存控制、模型用量归一化、价格快照、不可变账本和聚合 API。一次 Provider 调用使用冻结 `ModelInvocationRequest.providerRequest()` 与 `ProviderResponse` 生成 Assistant Entry 和一条 `harness_model_usage` 记录。
 
-## 端到端链路
+## 1. 端到端链路
 
 ```mermaid
 flowchart LR
-    A[ModelInvocationPlanner<br/>标准 ProviderRequest<br/>cacheControl = NONE] --> C[PromptCacheRequestFinalizer]
-    C --> R[冻结 ModelInvocationRequest<br/>写入 ModelInvocation]
-    R --> D[ModelWorker / Provider Adapter]
-    D --> E[ProviderResponse<br/>usage metadata]
-    E --> F[ModelUsageDraft]
-    F --> G[Assistant Entry + harness_model_usage<br/>Reconciler apply 事务]
-    G --> H[Thread / Session / Model 聚合 API]
+    A[ModelInvocationPlanner<br/>ProviderRequest + cache NONE]
+    B[PromptCacheRequestFinalizer]
+    C[冻结 ModelInvocationRequest]
+    D[ModelWorker / Provider Adapter]
+    E[ProviderResponse]
+    F[ModelUsageDraft]
+    G[Assistant Entry + harness_model_usage]
+    H[Thread / Session / Model 聚合]
+
+    A --> B --> C --> D --> E --> F --> G --> H
 ```
 
-链路中的事实边界如下：
+事实边界：
 
-1. `ModelInvocationPlanner` 先构造 `cacheControl = NONE` 的标准请求。
-2. 同一步骤直接调用绑定 `sessionId` 的 `PromptCacheRequestFinalizer`，由它独占最终 cache control 的生成。
-3. 最终请求与同一 ModelInvocation 的 toolBindings、skillSnapshots、yoloEnabled 一起组成冻结 `ModelInvocationRequest`；`ModelWorker` 只回放其中的 `providerRequest()`。
-4. Provider Adapter 只接收冻结后的控制结果。
-5. Provider 完成后，`ModelUsageDraft.from(...)` 从该请求和响应冻结缓存、模型、用量、成本与 Provider metadata。
-6. `ModelWorker` 先提交 ModelInvocation terminal 并标记 Thread runnable；`ThreadReconciler` 在 processor fencing 下原子提交 Assistant Entry、`harness_model_usage`、可选 ToolInvocations 与 head。
+1. Planner 先生成包含 `ProviderCacheControl.none()` 的 ProviderRequest。
+2. `PromptCacheRequestFinalizer` 是最终 cache control 的唯一生成点，保留 model、variant、messages 和 tools。
+3. `ModelInvocationRequest` 同时冻结 ProviderRequest、ToolBinding、SkillBinding 与 YOLO。
+4. ModelWorker 只使用冻结 ProviderRequest。
+5. `ModelUsageDraft.from(finalRequest, response)` 从最终 request 和 ProviderResponse 生成 ledger facts。
+6. Reconciler 在 Assistant Entry、Usage、ToolInvocation 与 head 的同一事务中提交完成事实。
 
-## Prompt Cache 控制
+## 2. Prompt Cache
 
-### Policy、Capability 与最终 Control
+### Capability 与 policy
 
-`ModelDescriptor.promptCachePolicy` 由 `PromptCacheCapability` 和请求采用的 `PromptCacheRetention` 组成：
+`PromptCacheCapability` 描述 Provider 的能力：
 
-- `UNKNOWN`、`UNSUPPORTED`、`AUTOMATIC` 的 capability 不声明 retention 或 breakpoint；`NONE` retention 始终合法。
-- `AFFINITY` 至少支持一个非 `NONE` retention，且不声明 breakpoint。
-- `BREAKPOINTS` 至少支持一个非 `NONE` retention，并声明 `SYSTEM`、`TOOLS` 中至少一项。
+| capability | 语义 |
+| --- | --- |
+| `UNKNOWN` / `UNSUPPORTED` | 只使用 `NONE` |
+| `AUTOMATIC` | Provider 自动处理缓存 |
+| `AFFINITY` | 通过 affinity key 复用前缀 |
+| `BREAKPOINTS` | 通过 SYSTEM/TOOLS breakpoint 标记前缀 |
 
-`ProviderCacheControl` 是交给 Adapter 的最终不可变快照：
+`ProviderCacheControl` 约束：
 
-- retention 为 `NONE` 时，`affinityKey = null` 且 `breakpoints` 为空。
-- retention 非 `NONE` 时，`affinityKey` 必须非空白。
-- `AFFINITY` control 的 `breakpoints` 为空。
-- `BREAKPOINTS` control 至少包含一个 breakpoint。
+- `NONE` 没有 affinity key 和 breakpoint；
+- 非 `NONE` 必须有非空 affinity key；
+- `AFFINITY` 不携带 breakpoint；
+- `BREAKPOINTS` 至少携带一个能力允许且实际存在的 breakpoint。
 
-### Session Finalizer
+Finalizer 的规则：
 
-`PromptCacheRequestFinalizer` 是 `ModelInvocationPlanner` 冻结 `ModelInvocationRequest` 前唯一可信的 cache control 生成点。它始终覆盖请求中已有的 control，并写入冻结 request 的 `providerRequest`：
-
-| Policy 状态 | 最终 control |
+| 情况 | 最终 control |
 | --- | --- |
 | retention 为 `NONE` | `ProviderCacheControl.none()` |
-| capability 为 `UNKNOWN`、`UNSUPPORTED`、`AUTOMATIC` | `ProviderCacheControl.none()` |
-| `AFFINITY` | 生成 affinity key；即使没有 SYSTEM 消息和 tools 也启用 |
-| `BREAKPOINTS` | capability 支持项与当前请求实际内容求交集；交集为空时返回 `none()`，否则生成 key 和 breakpoint 集合 |
+| capability 为 `UNKNOWN`、`UNSUPPORTED` 或 `AUTOMATIC` | `none()` |
+| `AFFINITY` | 生成 affinity key |
+| `BREAKPOINTS` | capability 与当前 SYSTEM/TOOLS 内容求交集；空交集为 `none()` |
 
-`BREAKPOINTS` 的有效范围为：
+### Affinity key
 
-- `SYSTEM`：请求第一条消息必须是 `SYSTEM`，且 capability 支持 `SYSTEM`。
-- `TOOLS`：请求 tools 列表必须非空，且 capability 支持 `TOOLS`。
-
-Finalizer 只替换 `cacheControl`，保留 planner 已构造的 model、variant、messages 和 tools。
-
-### Affinity Key
-
-Affinity key 格式固定为：
+格式固定为：
 
 ```text
 pc1-<SHA-256 Base64URL without padding>
 ```
 
-SHA-256 编码部分为 43 个 Base64URL 字符。每个 digest 字段都以独立二进制长度帧写入：
+digest 使用独立长度帧，输入包括：
 
-```text
-type: 1 byte
-nameLength: 4-byte big-endian
-name: UTF-8 bytes
-valueLength: 4-byte big-endian
-value: UTF-8 bytes
-```
+1. key format version；
+2. `sessionId`；
+3. `providerName`、`modelName`、`providerType`；
+4. 连续 leading SYSTEM messages 的完整 typed content；
+5. 请求顺序中的所有 tool definition 的 name、description、input schema。
 
-长度帧使字段值可以包含 NUL，且不会因字符串分隔或跨字段拼接产生边界歧义。
+动态 USER/ASSISTANT/TOOL history 与 sampling 参数不进入 key。独立长度帧允许字段值包含 NUL，避免跨字段拼接歧义。
 
-Digest 输入按确定顺序包含：
+### Provider 映射
 
-1. key format version。
-2. `sessionId`。
-3. `providerResourceId`、`modelResourceId`。
-4. `providerType`、Provider API 使用的 `modelId`。
-5. 从消息索引 0 开始的连续 leading SYSTEM 消息。
-6. 请求顺序中的全部 tool definitions。
-
-连续 leading SYSTEM 范围在遇到第一条非 SYSTEM 消息时结束。每条 SYSTEM 消息写入 role、content 数量和每个 typed content 的完整字段；合法内容类型为：
-
-| Content 类型 | 进入 digest 的字段 |
-| --- | --- |
-| `TEXT` | `text` |
-| `IMAGE` | `mediaType`、`source` |
-| `AUDIO` | `mediaType`、`source` |
-| `VIDEO` | `mediaType`、`source` |
-| `THINKING` | `thinking` |
-| `JSON` | `json` |
-
-每个 tool definition 写入 `name`、`description`、`inputSchemaJson`，并保留请求中的 tool 顺序。动态 `USER`、`ASSISTANT`、`TOOL` 历史和 sampling 参数不进入 affinity key。
-
-### Provider Capability 与映射
-
-Core 内置 Provider factory 暴露可信的 prompt cache capability；Adapter 对最终 control 再做协议形态校验后映射到 SDK：
-
-| ProviderType | Capability | 最终请求映射 | Usage 中的缓存事实 |
+| ProviderType | capability | adapter 形态 | ledger 缓存事实 |
 | --- | --- | --- | --- |
-| `OPENAI` | `AFFINITY + SHORT` | Chat Completions custom parameter `prompt_cache_key = affinityKey` | cached input 归入 `cacheReadTokens`；cache write 为 0 |
-| `OPENAI_RESPONSES` | `AFFINITY + SHORT` | Responses SDK `promptCacheKey(affinityKey)` | cached input 归入 `cacheReadTokens`；cache write 为 0 |
-| `ANTHROPIC` | `BREAKPOINTS + SHORT + SYSTEM/TOOLS` | `SYSTEM` 映射为 system `cache_control: {type: ephemeral}`；`TOOLS` 映射为 tools `cache_control: {type: ephemeral}` | `cacheCreationInputTokens` 归入 `cacheWriteTokens`，`cacheReadInputTokens` 归入 `cacheReadTokens` |
-| `GOOGLE` | `AUTOMATIC` | 不发送 cached-content resource、cache hint 或显式 control，由 Provider 自动处理 | 只从 usage 读取 `cachedContentTokenCount` 并归入 `cacheReadTokens`；cache write 为 0 |
+| `OPENAI` | `AFFINITY + SHORT` | Chat Completions `prompt_cache_key` | cached input → `cacheReadTokens` |
+| `OPENAI_RESPONSES` | `AFFINITY + SHORT` | Responses `promptCacheKey` | cached input → `cacheReadTokens` |
+| `ANTHROPIC` | `BREAKPOINTS + SHORT + SYSTEM/TOOLS` | system/tools `cache_control` | creation/read 分别归入 write/read |
+| `GOOGLE` | `AUTOMATIC` | 不发送显式 cache control | Provider cached count → `cacheReadTokens` |
 
-OpenAI 的非 `NONE` control 必须是 `SHORT` 且 breakpoint 为空。Anthropic 的非 `NONE` control 必须是 `SHORT` 且至少包含 `SYSTEM` 或 `TOOLS`。Google Adapter 忽略 control，finalizer 对 `AUTOMATIC` policy 输出 `NONE`，账本仍将该调用标记为 cache eligible，以便统计 Provider 自动报告的缓存读取。
-
-## ModelUsage 与 Provider Usage 归一化
-
-### 七类用量
+## 3. Usage 归一化
 
 `ModelUsage` 包含七个非负 token 字段：
 
 | 字段 | 语义 |
 | --- | --- |
-| `inputTokens` | 扣除独立 cache 类别后计费的输入 token |
-| `outputTokens` | 扣除独立 reasoning 类别后计费的输出 token |
-| `cacheReadTokens` | 从提示缓存读取的 token |
-| `cacheWriteTokens` | 写入短期提示缓存的 token |
-| `cacheWriteLongTokens` | 写入长期提示缓存的 token |
-| `reasoningTokens` | 独立计费的 reasoning/thoughts token |
-| `providerTotalTokens` | Provider 或 SDK 原样报告的 total token |
+| `inputTokens` | 普通输入 token |
+| `outputTokens` | 普通输出 token |
+| `cacheReadTokens` | 从提示缓存读取 |
+| `cacheWriteTokens` | 写入短期缓存 |
+| `cacheWriteLongTokens` | 写入长期缓存 |
+| `reasoningTokens` | reasoning/thoughts token |
+| `providerTotalTokens` | Provider 原样报告的 total |
 
-前六项是互斥计费类别，`categorizedTokens()` 使用 `Math.addExact` 汇总。`providerTotalTokens` 是独立观测值，`totalTokens()` 原样返回该字段；当 Provider 没有报告 total 时为 0，不使用前六项求和补造 total。
+前六项是互斥计费类别；`providerTotalTokens` 是独立观测值，不由前六项补造。
 
-### Provider 归一化规则
-
-| Provider | 归一化规则 |
+| Provider | 归一化 |
 | --- | --- |
-| OpenAI Chat / Responses | `inputTokens = input - cached`；`outputTokens = output - reasoning`；cached 和 reasoning 分别进入独立类别；`providerTotalTokens` 只取 SDK total |
-| Google Gemini | `inputTokens = input - cachedContentTokenCount`；`outputTokens = output - thoughtsTokenCount`；cached 进入 `cacheReadTokens`，thoughts 进入 `reasoningTokens`；total 只取 SDK total |
-| Anthropic | input/output 原样保留；cache creation 进入 `cacheWriteTokens`；cache read 进入 `cacheReadTokens`；`cacheWriteLongTokens`、`reasoningTokens`、`providerTotalTokens` 为 0 |
-| Provider 类型与 typed usage 不匹配 | 使用通用 `TokenUsage`：input/output 原样，其余五个计费类别为 0，total 只取 SDK total |
+| OpenAI Chat/Responses | cached 从 input 分离，reasoning 从 output 分离 |
+| Google Gemini | `cachedContentTokenCount` 从 input 分离，`thoughtsTokenCount` 从 output 分离 |
+| Anthropic | input/output 原样；cache creation/read 分别计入 write/read |
+| 类型与 typed usage 不匹配 | 使用通用 input/output，其他分类为 0，total 只取 Provider total |
 
-SDK 负值、cached 大于 input、reasoning/thoughts 大于 output 都在归一化边界失败。
+负值、cached 大于 input、reasoning 大于 output 都在归一化边界失败。`rawUsageJson` 只保存 usage metadata；缺失时为 `{}`，且必须是 JSON object 或 array。
 
-### Raw Usage 边界
+## 4. Pricing 与 Cost
 
-`rawUsageJson` 只保存 usage metadata，必须是 JSON object 或 array；无 usage 时规范化为 `{}`。它不保存 prompt、响应正文、choices、content blocks 或 OpenAI Responses 的完整 output。
-
-- OpenAI Chat 与 Anthropic：从 SSE JSON 中递归提取名为 `usage` 的 object/array。一个节点直接保存，多个节点保存为 array；无节点时按 Provider API 字段名从 typed usage 生成 fallback。
-- OpenAI Responses：只序列化 `rawResponse().usage()`；缺失时使用 typed usage fallback。
-- Google：按 `promptTokenCount`、`candidatesTokenCount`、`cachedContentTokenCount`、`thoughtsTokenCount`、`totalTokenCount` 生成 usage object。
-
-`requestId` 来自 response metadata id，空白转为 `null`。`reportedServiceTier` 只从 OpenAI Chat/Responses typed metadata 读取，其他 Provider 为 `null`。
-
-## ModelPricing 与 ModelCost
-
-### Pricing Snapshot
-
-`ModelPricing` 是一次请求实际生效的不可变价格快照，包含：
-
-- `currency`
-- `pricingTier`
-- `serviceTier`
-- `serviceTierMultiplier`
-- `version`
-- 六类每百万 token 单价：`inputPerMillionTokens`、`outputPerMillionTokens`、`cacheReadPerMillionTokens`、`cacheWritePerMillionTokens`、`cacheWriteLongPerMillionTokens`、`reasoningPerMillionTokens`
-
-币种、tier、service tier 和 version 必须非空白；multiplier 必须大于 0；所有单价必须非负。
-
-### 六分项成本
-
-`ModelCost` 包含 `currency`、六个分项和 `total`：
+`ModelPricing` 是请求使用的不可变价格快照：
 
 ```text
-input, output, cacheRead, cacheWrite, cacheWriteLong, reasoning
+currency
+pricingTier
+serviceTier
+serviceTierMultiplier
+version
+inputPerMillionTokens
+outputPerMillionTokens
+cacheReadPerMillionTokens
+cacheWritePerMillionTokens
+cacheWriteLongPerMillionTokens
+reasoningPerMillionTokens
 ```
 
-每个分项独立计算：
+六个成本分项按：
 
 ```text
 pricePerMillionTokens * tokens / 1_000_000 * serviceTierMultiplier
 ```
 
-计算规则为：
+计算使用 scale 12、`HALF_UP`；`total` 是六个已舍入分项之和。聚合按 currency 分组，不跨币种相加。
 
-1. 除以一百万时使用 scale 12、`HALF_UP`。
-2. 乘 `serviceTierMultiplier` 后再次使用 scale 12、`HALF_UP`。
-3. `total` 是六个已舍入分项之和，并规范化为 scale 12、`HALF_UP`。
-4. `ModelCost` 构造时要求 `total` 与六分项之和按数值相等。
-5. cost currency 从 pricing currency 复制；`ModelUsageDraft` 再校验两者相等，并重新计算成本核对全部分项。
+## 5. Ledger
 
-聚合时成本按 currency 分组，币种之间不相加；`costs[]` 按币种字符串稳定排序。
-
-## Ledger 模型与原子提交
-
-### ModelUsageDraft
-
-`ModelUsageDraft` 冻结一次成功 Provider 完成的全部账本事实：
+`ModelUsageDraft` 保存：
 
 ```text
-providerResourceId, modelResourceId, providerType, providerModelId,
-promptCacheMode, promptCacheRetention, cacheEligible, cacheAffinityKey,
-stopReason, usage, cost, pricing,
-requestId, reportedServiceTier, rawUsageJson
+providerName
+modelName
+providerType
+promptCacheMode
+promptCacheRetention
+cacheEligible
+cacheAffinityKey
+stopReason
+usage
+cost
+pricing
+requestId
+reportedServiceTier
+rawUsageJson
 ```
 
-`cacheEligible` 的精确规则是：
+`ModelUsageRecord` 再增加：
 
 ```text
-mode == AUTOMATIC
-or
-mode in {AFFINITY, BREAKPOINTS} and retention != NONE
+id
+sessionId
+threadId
+assistantEntryId
+createdAt
 ```
 
-Draft 从冻结 `ModelInvocationRequest.providerRequest()` 读取 model、cache mode、最终 retention 和 affinity key，从 `ProviderResponse` 读取 stop reason、usage、cost 和 Provider metadata。
+`harness_model_usage` 以 `assistant_entry_id` 唯一保证每个 Assistant Entry 一条账本。账本持久化 `provider_name`、`model_name`、Provider type、Usage token、cache facts、pricing snapshot 与 metadata；这些名称是历史事实，不随 Catalog 当前内容变化。账本不对 Catalog 建 FK。
 
-### ModelUsageRecord 与 Assistant Entry
+成本分项在读取账本时由 `ModelCost.calculate(pricing, usage)` 重建，物理表保存 pricing 与 usage 原子事实。
 
-`ModelUsageRecord` 在 Draft 外增加：
+## 6. 聚合 API
 
-```text
-id, sessionId, threadId, assistantEntryId, createdAt
-```
-
-Assistant Entry 的 `AssistantMessageMetadata` 同时保存 `stopReason` 和 `ModelUsage`；`ModelCost` 在读账本时由 `ModelCost.calculate(ModelPricing, ModelUsage)` 重建，不在 Entry payload 中持久化。Assistant metadata 必须且只能出现在 ASSISTANT message 中；账本通过 `assistantEntryId` 与该 Entry 一一关联。
-
-Model terminal 由 worker 写入 `harness_model_invocation`；Assistant/账本物化由 Reconciler apply 事务提交：
-
-```text
-lock Thread and verify processor token + execution epoch
--> append Assistant Entry
--> insert harness_model_usage with the same assistantEntryId
--> optional: insert Tool Invocations
--> advance Thread head with processor fencing
--> set ModelInvocation.appliedAt
-```
-
-原子性规则：
-
-- Thread 不存在或 processor token / epoch 不匹配时，apply 失败，不写 Assistant Entry、账本或 Tool Invocation。
-- Assistant Entry 和账本同事务；head fencing 失败则整事务回滚，禁止留下孤儿 Entry 或账本。
-- 工具准备路径中的 Invocation 唯一键冲突同样回滚。
-- Provider 调用属于外部 at-least-once 边界；持久提交以 processor token、唯一 `assistant_entry_id` 和 Invocation 唯一键阻止同一成功事实重复落库。
-
-账本由数据库唯一键保证每个成功完成事实只写一次：
-
-- `unique (assistant_entry_id)` on `harness_model_usage`
-
-## `harness_model_usage` Schema
-
-权威 DDL 见 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)。除可空 cache/request metadata 字段外，归属与用量主字段均为 `NOT NULL`。
-
-| 分组 | 字段 | PostgreSQL 类型 |
+| 范围 | Endpoint | 查询 |
 | --- | --- | --- |
-| 标识 | `id` | `bigint` |
-| 归属 | `session_id` | `bigint` |
-| 归属 | `thread_id` | `bigint` |
-| 归属 | `assistant_entry_id` | `bigint` |
-| Provider | `provider_resource_id` | `bigint` |
-| Model | `model_resource_id` | `bigint` |
-| Provider | `provider_type` | `varchar(64)` |
-| Model | `provider_model_id` | `varchar(256)` |
-| Cache | `prompt_cache_mode` | `varchar(32)` |
-| Cache | `prompt_cache_retention` | `varchar(16)` |
-| Cache | `cache_eligible` | `boolean` |
-| Cache | `cache_affinity_key` | `varchar(512) null` |
-| 完成 | `stop_reason` | `varchar(32)` |
-| Usage | `usage_input_tokens` | `bigint` |
-| Usage | `usage_output_tokens` | `bigint` |
-| Usage | `usage_cache_read_tokens` | `bigint` |
-| Usage | `usage_cache_write_tokens` | `bigint` |
-| Usage | `usage_cache_write_long_tokens` | `bigint` |
-| Usage | `usage_reasoning_tokens` | `bigint` |
-| Usage | `usage_provider_total_tokens` | `bigint` |
-| Pricing | `pricing_*` | `varchar` / `numeric(32,12)` |
-| Provider metadata | `request_id` / `reported_service_tier` / `raw_usage` | 可空 varchar / jsonb |
-| 时间 | `created_at` | `timestamptz(3)` |
+| Thread | `GET /api/ai/runtime/threads/{threadId}/snapshot` 的 `usage` 字段 | 当前 head path 上的 Assistant Entry |
+| Session | `GET /api/ai/runtime/usage/sessions/{sessionId}` | Session 全部账本 |
+| Model | `GET /api/ai/runtime/usage/models/{modelRef}` | `ModelRef.parse` 后按 `(providerName, modelName)` 查询 |
 
-成本分项 `ModelCost` **不在物理层持久化** —— 读取账本时由 `ModelCost.calculate(pricing, usage)` 重建；API 与聚合 response shape 不变。
-
-约束与查询索引：
+Model endpoint 的 `{modelRef}` 是 `providerName/modelName`，只切第一个 `/`。聚合响应包含：
 
 ```text
-primary key (id)
-unique (assistant_entry_id)
-index (thread_id, id)
-index (session_id, id)
-index (model_resource_id, id)
+scopeType
+scopeId
+recordCount
+inputTokens / outputTokens
+cacheReadTokens / cacheWriteTokens / cacheWriteLongTokens
+reasoningTokens / providerTotalTokens
+cacheEligibleRecordCount
+cacheHitRecordCount
+cacheHitRatio
+tokenReadRatio
+unamortizedCacheWriteTokens
+costs[]
 ```
 
-## 聚合 API 与指标
+`cacheHitRatio`、`tokenReadRatio` 使用 scale 6、`HALF_UP`；空 scope 返回零值与空 costs。不同 affinity key 的 cache write/read 不互相抵消。
 
-### Endpoint
+## 7. Model config 与运行时解析
 
-Session 与 Model 聚合 API 接受正 `long` 路径参数并返回 `Result<ModelUsageSummaryDTO>`；Thread usage
-只作为 `GET /api/ai/runtime/threads/{threadId}/snapshot` 的 `usage` 字段返回，以保持 chat runtime 的单一一致投影。
+Model config 写入时严格校验：
 
-| Scope | Endpoint | Store 查询 | `scopeType` |
-| --- | --- | --- | --- |
-| Session | `GET /api/ai/runtime/usage/sessions/{sessionId}` | `listBySessionId` | `session` |
-| Model | `GET /api/ai/runtime/usage/models/{modelId}` | `listByModelResourceId` | `model` |
+- `limit.context`、`limit.output` 为正整数且 output 不超过 context；
+- `abilities.tools`、`abilities.reasoning` 为 boolean；
+- `inputModalities` 非空且只包含受支持 enum；
+- `variants` 非空、variant id 唯一且命中 `defaultVariant`；
+- pricing 字段完整，单价非负，multiplier 为正。
 
-`scopeId` 使用十进制字符串返回，以保留超过 JavaScript safe integer 范围的 ID。
+Agent config 的 tools/skills 也在写入时校验。每次 planning 由 `DatabaseTurnExecutionResolver` 重新读取最新 Agent、Provider、Model、Variant 与 READY Environment，并把结果冻结进 ModelInvocationRequest。缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 写入 `ASSISTANT_ERROR`，不创建 Provider 调用。
 
-### Response
+## 8. 实现与测试入口
 
-`ModelUsageSummaryDTO` 包含：
-
-```text
-scopeType, scopeId, recordCount,
-inputTokens, outputTokens, cacheReadTokens,
-cacheWriteTokens, cacheWriteLongTokens, reasoningTokens,
-providerTotalTokens,
-cacheEligibleRecordCount, cacheHitRecordCount,
-cacheHitRatio, tokenReadRatio,
-unamortizedCacheWriteTokens,
-costs
-```
-
-`costs[]` 按 currency 隔离，每项包含：
-
-```text
-currency, input, output, cacheRead,
-cacheWrite, cacheWriteLong, reasoning, total
-```
-
-### Ratio 与 Cache Waste
-
-缓存指标只统计 `cacheEligible = true` 的记录。
-
-命中记录数与命中率：
-
-```text
-cacheHitRecordCount = count(eligible record where cacheReadTokens > 0)
-
-cacheHitRatio = cacheHitRecordCount / cacheEligibleRecordCount
-```
-
-Token 读取率：
-
-```text
-tokenReadRatio =
-  sum(eligible.cacheReadTokens)
-  /
-  sum(eligible.inputTokens + eligible.cacheReadTokens)
-```
-
-两个 ratio 均使用 scale 6、`HALF_UP`；分母为 0 时返回 `0.000000`。
-
-`unamortizedCacheWriteTokens` 是 token 数量，不是 ratio。计算过程为：
-
-1. eligible 记录按 `cacheAffinityKey` 分桶。
-2. `cacheAffinityKey = null` 时，每条记录按自身 record id 形成独立桶。
-3. 每个桶计算：
-
-   ```text
-   writes = sum(cacheWriteTokens + cacheWriteLongTokens)
-   reads = sum(cacheReadTokens)
-   unamortized = max(writes - reads, 0)
-   ```
-
-4. 汇总所有桶的 `unamortized`。不同 affinity key 的读取不能抵消其他 key 的写入。
-
-所有 token 聚合使用 `Math.addExact`，溢出时失败；空 scope 返回正确的 `scopeType`、字符串 `scopeId`、零 token、`0.000000` ratios 和空 `costs`。
-
-## Executable Model 配置解析
-
-持久 `agent_model.config` JSONB 是结构化 Model 配置的数据库载体，必须在 mutation 阶段和 Turn 启动时同时验证，确保模型 ID、变体、缓存策略、价格快照和工具绑定都能被 runtime 实际执行。能力由 `config.abilities` 直接派生。
-
-### 必需字段
-
-`config` 必须是合法 JSON object，固定包含：
-
-- `limit.context` / `limit.output`：正整数，`limit.output <= limit.context`。
-- `abilities.tools` / `abilities.reasoning`：boolean。
-- `abilities.inputModalities`：非空 `AgentModelInputModality` 列表，限定为 `TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT`。
-- `variants`：非空列表，每项至少包含无首尾空白的非空 `id`，可选 `reasoningEffort/maxOutputTokens/temperature/topP/topK/frequencyPenalty/presencePenalty/stopSequences`，且 `variant.maxOutputTokens <= limit.output`，`id` 在 list 内唯一。`reasoningEffort` 为空或 `off` 时不下发该参数。
-- `defaultVariant`：字符串，必须命中 `variants[].id`。
-- `pricing.currency/pricingTier/serviceTier/serviceTierMultiplier/version` 全部非空且 `serviceTierMultiplier > 0`；六类每百万 token 单价 `inputPerMillionTokens/outputPerMillionTokens/cacheReadPerMillionTokens/cacheWritePerMillionTokens/cacheWriteLongPerMillionTokens/reasoningPerMillionTokens` 均为非负有限数。
-
-runtime 仅从 `config.abilities` 派生 `tools` / `reasoning`，并直接投影到 `ModelDescriptor`；`inputModalities` 保留为 Model Definition 元数据，`variants` 仅用于 resolver 选择 effective variant，二者都不进入 runtime `ModelDescriptor`。
-
-### API 契约
-
-公开 `AgentModelDTO` 暴露单一嵌套 `config: AgentModelConfigDTO`（含 `limit / abilities / pricing / defaultVariant / variants`）。模型资源 ID 始终为字符串 `AgentResourceId`。前端 `AgentModelView` 通过 Provider 列表补充 `providerName`，不属于后端契约。`AgentModelVariantDTO.id` 是 Variant 的唯一标识；前端表单同样使用 `id`，仅额外保留客户端 React key `draftId`。
-
-### 解析失败语义
-
-缺失或类型错误的必要字段、未知字段、标量类型强制转换、尾随 JSON、`limit.output > limit.context`、未知 enum 值、重复变体 `id`、未匹配 `defaultVariant` 等任何不合规输入都会在 `AgentModelMutationFactory`（写入阶段）或 `RuntimeConfigSnapshotResolver / ModelExecutionResolver`（Turn 启动阶段）抛出 `IllegalArgumentException`，并阻止 Provider Turn。任何可以写库但不能执行的 `agent_model` 记录都被视为非法，立即失败。
-
-### 模型 CRUD 契约
-
-`AgentModelMutationFactory` 在 create 与 update 路径上通过 typed 校验与持久化编码，使 `newModel(...)` 或 `update(...)` 不会产生不可执行记录。运行时从 `RUNTIME_CONFIG` 与持久 Provider/Model 资源解析 `ModelDescriptor` / `ModelVariant`。
-
-## Resource 解析与进程生命周期
-
-执行资源来自冻结 `RuntimeConfigSnapshot` 与持久 Provider/Model 配置，不 live 重建 Agent。
-
-### Provider Factory 调用
-
-只通过 `ProviderFactories.lookup(ProviderType)` 拉取可信工厂（[`ProviderFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactories.java) 在 [`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java) 由 `ObjectProvider<ProviderFactory>` 装配）：
-
-- `ProviderFactory.create(credential, configJson)` 构造 `ProviderAdapter`
-- 工厂暴露的 `PromptCacheCapability` 决定 `PromptCachePolicy`；cache 事实由 `ProviderResponse` usage 归一化读取
-
-`ProviderAdapter` 必须与请求 `ProviderType` 匹配；timeout 配置缺失时回退为合理默认值。
-
-### Tool Binding 解析
-
-Agent 配置中的 `tools` 仅为短名。`RuntimeCapabilityResolver` 依据统一 `ToolCatalog`、Thread 的 `environmentName` 和 live Environment registry 解析本次 request 的 `ToolBinding`；绑定的 `environmentName == null` 时使用本地 runtime，否则使用对应 RemoteTool。runtime-managed `load_skill` 从冻结 request 的 `skillSnapshots` 解析，不由 Agent tools 选择；远程目标在发送前不可用则 ToolInvocation 为 `FAILED`，发送结果不确定则为 `UNKNOWN`。
-
-### 进程生命周期
-
-- `PostgresqlExecutionTargetDispatcher` 对 Thread target 调用 `ThreadReconciler.activate()`；Reconciler 是 Entry/head 唯一写者。
-- `ModelWorker` / 统一 `ToolWorker` 只写 Invocation 事实与 realtime projection。
-- Provider 调用使用冻结 `ProviderRequest` 的 total/idle deadline；worker lease heartbeat 不是 progress activity。
-- Provider terminal 后 worker 写 ModelInvocation 并标记 Thread runnable；Reconciler apply 写 Assistant Entry 与 `harness_model_usage`。
-- PostgreSQL durable target + listener/dispatcher wake 是唯一 activation 路径；没有 runnable、lease 或 due retry 的周期性全表 scan。
-
-## 组件与文件地图
-
-| 层次 | 组件 | 文件 |
-| --- | --- | --- |
-| Cache domain | capability、policy、最终 control | [`PromptCacheCapability.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/PromptCacheCapability.java)、[`PromptCachePolicy.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/PromptCachePolicy.java)、[`ProviderCacheControl.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/ProviderCacheControl.java) |
-| Request freeze | Planner 冻结 request 与 finalizer | [`ModelInvocationPlanner.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlanner.java)、[`PromptCacheRequestFinalizer.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java)、[`PromptCacheAffinityKeyFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) |
-| Provider capability | Core factory 注册 | [`ModelExecutionConfiguration.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java)、[`ProviderFactory.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactory.java) |
-| Provider mapping | control 校验与 OpenAI、Anthropic、Google Adapter | [`CacheRequestValidator.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/CacheRequestValidator.java)、[`OpenAiProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/OpenAiProviderAdapter.java)、[`OpenAiResponsesProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/OpenAiResponsesProviderAdapter.java)、[`AnthropicProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/AnthropicProviderAdapter.java)、[`GoogleProviderAdapter.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/GoogleProviderAdapter.java) |
-| Usage normalization | 七类 usage、metadata、raw usage | [`ProviderUsageNormalizer.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/ProviderUsageNormalizer.java)、[`ProviderResponse.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) |
-| Pricing/cost | 请求价格与成本快照 | [`ModelUsage.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelUsage.java)、[`ModelPricing.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelPricing.java)、[`ModelCost.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelCost.java) |
-| Ledger domain | Draft、Record、Store port | [`ModelUsageDraft.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java)、[`ModelUsageRecord.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecord.java)、[`ModelUsageRecordStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordStore.java) |
-| Ledger persistence | PostgreSQL MyBatis | [`PostgresqlModelUsageRecordStore.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/PostgresqlModelUsageRecordStore.java)、[`ModelUsageRecordMapper.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/mapper/ModelUsageRecordMapper.java) |
-| Schema | PostgreSQL DDL | [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) |
-| Aggregation/API | scope 聚合、Controller、DTO | [`ModelUsageAggregationServiceImpl.java`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/service/impl/ModelUsageAggregationServiceImpl.java)、[`StudioModelUsageController.java`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java)、[`ModelUsageSummaryDTO.java`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/ModelUsageSummaryDTO.java) |
-| Frontend contract | Thread snapshot API client 与 usage 展示适配 | [`ai-runtime.ts`](../../frontend/src/shared/api/contracts/ai-runtime.ts)、[`harness-service.ts`](../../frontend/src/shared/api/harness-service.ts)、[`usage-adapter.ts`](../../frontend/src/features/ai/chat/chat-workspace-pane/usage-adapter.ts) |
-
-## 验证面
-
-| 验证目标 | 测试文件 |
+| 能力 | 文件 |
 | --- | --- |
-| Affinity key 格式、输入范围、动态历史排除、NUL 与字段边界 | [`PromptCacheAffinityKeyFactoryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactoryTest.java) |
-| Finalizer 覆盖 mode/retention、SYSTEM/TOOLS 交集 | [`PromptCacheRequestFinalizerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizerTest.java) |
-| Planner 冻结 request 与 finalizer 行为 | [`ModelInvocationPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlannerTest.java) |
-| Provider capability 与 HTTP cache 字段映射 | [`ProviderFactoriesTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java)、[`ProviderAdapterContractTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/ProviderAdapterContractTest.java) |
-| 七类 usage、provider total、raw usage 正文隔离 | [`ProviderUsageNormalizerTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/provider/ProviderUsageNormalizerTest.java) |
-| 六分项成本、multiplier、scale 与公共不变量 | [`ModelContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/ModelContractTest.java)、[`ModelUsageDraftTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraftTest.java) |
-| Model worker / reconcile 与 usage 提交路径 | [`ModelWorkerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/worker/ModelWorkerTest.java)、[`PostgresqlModelInvocationTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/worker/PostgresqlModelInvocationTransactionsIntegrationTest.java)、[`PostgresqlThreadReconcileTransactionsIntegrationTest.java`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/thread/reconcile/PostgresqlThreadReconcileTransactionsIntegrationTest.java) |
-| Record 的 Thread 归属、不变量与正 ID | [`ModelUsageRecordTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageRecordTest.java) |
-| 前端 Thread snapshot 路径、十进制字符串 ID 与 usage 展示投影 | [`harness-service.test.ts`](../../frontend/src/shared/api/harness-service.test.ts)、[`usage-adapter.test.ts`](../../frontend/src/features/ai/chat/chat-workspace-pane/usage-adapter.test.ts) |
+| Cache affinity | [`PromptCacheAffinityKeyFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) |
+| Cache finalizer | [`PromptCacheRequestFinalizer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java) |
+| Request planner | [`ModelInvocationPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlanner.java) |
+| Usage draft | [`ModelUsageDraft`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/usage/ModelUsageDraft.java) |
+| Usage store | [`PostgresqlModelUsageRecordStore`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/usage/store/PostgresqlModelUsageRecordStore.java) |
+| Usage controller | [`StudioModelUsageController`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioModelUsageController.java) |
+| Usage schema | [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql) |

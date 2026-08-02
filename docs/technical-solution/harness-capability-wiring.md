@@ -1,52 +1,31 @@
 # Harness 能力装配
 
-本文描述 Harness Runtime 当前生效的直接能力装配：Core 通过 Spring `ObjectProvider` 收集所有 `ProviderFactory` / `ToolFactory` / `BeforeToolCallInterceptor` / `AfterToolCallInterceptor` bean，并把它们装配到 typed collection、统一 ToolCatalog 与 interceptor chain。
+Core 通过 Spring `ObjectProvider` 直接收集 ProviderFactory、ToolFactory 与 Tool interceptor，并装配成不可变集合、统一 ToolCatalog 和 interceptor chain。
 
-## 设计目标
+## 1. 装配图
 
-- 单一来源：能力由 Spring 容器声明并按类型直接收集。
-- 构造期可验证：重复 provider type、重复 `(name, version)`、null descriptor 在集合构造阶段被拒绝。
-- 唯一权限边界：`PermissionEvaluator` 是 `ToolInterceptorChain` 中唯一的 `PermissionBoundaryInterceptor`。
-
-## 模块边界
-
-| 模块 | 职责 |
-| --- | --- |
-| `harness.runtime.model.provider` | `ProviderFactory`、`ProviderFactories`、`ProviderType` 等 Provider 适配契约 |
-| `harness.runtime.tool` | `ToolFactory`、`ToolFactories`、`BeforeToolCallInterceptor`、`AfterToolCallInterceptor`、`PermissionBoundaryInterceptor`、`ToolInterceptorChain` |
-| `harness.runtime.tool.worker` | `ToolWorker`、`ToolRegistry`、`ToolInvocationTransactions` 等持久执行模型 |
-
-## 装配图
-
-```
+```text
 ModelExecutionConfiguration
-        │
-        ├─ ProviderFactory beans (openai/openai_responses/anthropic/google)
-        │
-        ▼ ObjectProvider<ProviderFactory>
-        └─ ProviderFactories ──► DatabaseProviderResolutionService
+  -> ProviderFactory beans
+  -> ProviderFactories
+  -> DatabaseProviderResolutionService
 
 RuntimeToolsConfiguration
-        │
-        ├─ ToolFactory beans (per platform Tool)
-        │
-        ▼ ObjectProvider<ToolFactory>
-        └─ ToolFactories ──► ToolCatalog
-                           ├─► AgentDefinitionConfigValidator
-                           ├─► RuntimeConfigSnapshotResolver
-                           └─► StudioToolCatalogController
+  -> ToolFactory beans
+  -> ToolFactories
+  -> ToolCatalog
+       -> AgentDefinitionConfigValidator
+       -> DatabaseTurnExecutionResolver
+       -> StudioToolCatalogController
 
-BeforeToolCallInterceptor beans (incl. PermissionEvaluator)
-AfterToolCallInterceptor beans
-        │
-        ▼ ObjectProvider<...>
-HarnessToolConfiguration ──► ToolInterceptorChain
-
+BeforeToolCallInterceptor / AfterToolCallInterceptor
+  -> HarnessToolConfiguration
+  -> ToolInterceptorChain
 ```
 
-## ProviderFactory
+## 2. Provider
 
-[`ProviderFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactory.java) 描述单个 Provider 类型的工厂：
+[`ProviderFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactory.java) 描述一个 ProviderType 的 adapter 工厂：
 
 ```java
 public interface ProviderFactory {
@@ -56,91 +35,89 @@ public interface ProviderFactory {
 }
 ```
 
-`ProviderFactory.of(type, capability, ctor)` 是一个直接构造助手：固定 `ProviderType`、固定 cache capability、并通过 `BiFunction<String, String, ProviderAdapter>` 构造 adapter；每次 `create` 时校验返回的 adapter 报告的 `ProviderType` 与工厂一致。
+当前 Core 装配：
 
-### Core composition
-
-[`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java) 暴露四个 named `ProviderFactory` bean：
-
-| Bean name | ProviderType | Cache capability |
+| Bean | ProviderType | cache capability |
 | --- | --- | --- |
-| `openaiProviderFactory` | `OPENAI` | `affinity(SHORT)` |
-| `openaiResponsesProviderFactory` | `OPENAI_RESPONSES` | `affinity(SHORT)` |
-| `anthropicProviderFactory` | `ANTHROPIC` | `breakpoints(SHORT, {SYSTEM, TOOLS})` |
-| `googleProviderFactory` | `GOOGLE` | `automatic()` |
+| `openaiProviderFactory` | `OPENAI` | affinity |
+| `openaiResponsesProviderFactory` | `OPENAI_RESPONSES` | affinity |
+| `anthropicProviderFactory` | `ANTHROPIC` | breakpoints |
+| `googleProviderFactory` | `GOOGLE` | automatic |
 
-每个 bean 都按 bean name 触发 `@ConditionalOnMissingBean(name=...)`，避免 Spring 按返回类型匹配时把四个同名 `ProviderFactory` bean 互相覆盖。
+[`ProviderFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactories.java) 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。`ModelExecutionConfiguration` 通过 `ObjectProvider<ProviderFactory>` 收集全部 ProviderFactory。
 
-### `ProviderFactories`
+Provider 资源本身由 Catalog 的 `name`、`providerType`、base URL、credential 和 JSON config 描述；ProviderFactory 只负责把当前请求解析成 adapter，不改变 Catalog 身份。
 
-[`ProviderFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactories.java) 是不可变的 `ProviderFactory` 集合，按 `ProviderType` 索引。同一 `ProviderType` 上两条注册在构造时以 `IllegalArgumentException` 失败。adapter 的 providerType 一致性只能在 `ProviderFactory#create` 时验证。
+## 3. ToolCatalog
 
-`ModelExecutionConfiguration` 通过 `ObjectProvider<ProviderFactory>` 收集 Spring 容器中的所有 `ProviderFactory` bean 并装配到 `ProviderFactories`。
+[`ToolFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactory.java) 以冻结 descriptor 创建本地 Tool。`ToolFactories` 按 `(name, version)` 索引，重复 key 或 descriptor 漂移在装配/创建时失败。
 
-消费方：
-- [`DatabaseProviderResolutionService`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseProviderResolutionService.java) 用 `ProviderFactories.lookup(ProviderType)` 解析持久化 Provider 行对应的 adapter。
+[`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 合并：
 
-## ToolFactory
+- Core 本地 ToolFactory；
+- 固定的十个 Environment Tool descriptor；
+- runtime-managed `load_skill`。
 
-[`ToolFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactory.java) 按冻结 descriptor 创建工具：
+Agent config 保存 Tool/Skill 名称集合，不保存 Tool 实例或 Environment 连接。`GET /api/ai/catalog/tools` 只返回可由 Agent 选择的目录；`load_skill` 由 Runtime 根据 selected Skill binding 注入。
 
-```java
-public interface ToolFactory {
-  ToolDescriptor descriptor();
-  Tool create();
+当前 Environment Tool 名称为：
 
-  static ToolFactory singleton(Tool tool) { ... }
-}
+```text
+read
+write
+edit
+apply_patch
+bash
+grep
+find
+lsp_goto_definition
+lsp_workspace_symbols
+lsp_java_decompile
 ```
 
-`ToolFactory.singleton(tool)` 把现成 `Tool` 包成 `ToolFactory`，descriptor 在闭包内冻结；`create()` 返回前校验当前 Tool 的 name/version 仍与冻结 descriptor 一致。
+## 4. Per-turn resolver
 
-### Core composition
+[`DatabaseTurnExecutionResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnExecutionResolver.java) 是每次 planning 的 Catalog/Environment 边界。输入只有 `TurnSettings`：
 
-[`RuntimeToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsConfiguration.java) 暴露 4 个具体 `Tool` bean（`CreateGoalTool` / `GetGoalTool` / `UpdateGoalTool` / `LoadSkillTool`）以及对应的 `ToolFactory` bean（`createGoalToolFactory` / `getGoalToolFactory` / `updateGoalToolFactory` / `loadSkillToolFactory`）。
-
-### `ToolFactories`
-
-[`ToolFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactories.java) 是不可变的 `ToolFactory` 集合，按 `(name, version)` 索引。提供两个对外方法：
-
-- `descriptors()`：注册顺序的冻结 descriptor 列表，供 resolver/validator 校验 tool name。
-- `find(name, version)`：`ToolRegistry` 友好的查询；未注册即返回 `Optional.empty()`；descriptor mismatch 抛 `IllegalArgumentException`。
-
-重复 `(name, version)` 在构造时以 `IllegalArgumentException` 失败；重复 tool 名下的多个版本同样在 `find` 时维持各自 key。
-
-`RuntimeToolsConfiguration` 通过 `ObjectProvider<ToolFactory>` 装配。
-
-消费方：
-- [`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 将本地 ToolFactory descriptor 与固定十个 `EnvironmentToolCatalog` descriptor 合并，并把 `load_skill` 保留为 runtime-managed tool。
-- [`AgentDefinitionConfigValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidator.java) 通过 `ToolCatalog` 校验 Agent 的短名 tools；runtime-managed `load_skill` 不可由 Agent 选择。
-- [`RuntimeConfigSnapshotResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolver.java) 依据 Agent 的 tools/skills、Thread Environment 和 live registry 解析每次 ModelInvocation 的 binding 与 skill snapshot。
-- [`HarnessToolWorkerConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/worker/HarnessToolWorkerConfiguration.java) 把本地 `ToolFactories.find(name, version)` 暴露为 `ToolRegistry`。
-- [`ToolCatalogQueryService`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/ToolCatalogQueryService.java) 为 `GET /api/ai/catalog/tools` 投影可选目录。
-
-`EnvironmentToolCatalog` 是 `harness-tool` 中的固定单一来源，包含 `read`、`write`、`edit`、`apply_patch`、`bash`、`grep`、`find`、`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile` 十个版本化 descriptor。生产 `DaemonRuntime` 校验本地注册表与该目录完全相等并冻结注册表，Gateway 以同一目录校验远程调用。
-
-## ToolInterceptorChain
-
-[`ToolInterceptorChain`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolInterceptorChain.java) 按输入顺序执行 before / after interceptor，并把唯一的 `PermissionBoundaryInterceptor` 移到 before 链末尾。
-
-[`HarnessToolConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/service/HarnessToolConfiguration.java) 通过 `ObjectProvider<BeforeToolCallInterceptor>` / `ObjectProvider<AfterToolCallInterceptor>` 直接装配：
-
-```java
-@Bean
-public ToolInterceptorChain toolInterceptorChain(
-    ObjectProvider<BeforeToolCallInterceptor> beforeInterceptors,
-    ObjectProvider<AfterToolCallInterceptor> afterInterceptors) {
-  return new ToolInterceptorChain(
-      beforeInterceptors.orderedStream().toList(), afterInterceptors.orderedStream().toList());
-}
+```text
+agentName
+environmentName
+yoloEnabled
 ```
 
-`PermissionEvaluator` 作为唯一的 `PermissionBoundaryInterceptor` 由同一容器显式提供，保持为唯一权限边界。
+解析顺序为 Agent → Provider → `(providerName, modelName)` Model → Variant → READY Environment → Tools → Skills → ProviderFactory。Resolver 同时读取 Model config、Agent config、ToolCatalog 与 live registry，返回本轮的 `ResolvedTurnExecution`。
 
-## 测试覆盖
+缺失或不可用资源返回明确 `PlanningFailure`：
 
-- [`ProviderFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java)：重复 provider type、null ctor、adapter type mismatch、cache capability 透传、create 一次性调用。
-- [`ToolFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactoriesTest.java)：重复 (name, version) 拒绝、descriptor 顺序、find 命中/缺席、descriptor mismatch 与 singleton descriptor 漂移拒绝。
-- [`ModelExecutionConfigurationTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfigurationTest.java)：四个 named ProviderFactory bean 全部进入 `ProviderFactories`，并创建各自对应的 adapter。
-- [`RuntimeToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsWiringTest.java) / [`ToolCatalogTest`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolCatalogTest.java)：runtime tools、固定 Environment 工具、runtime-managed `load_skill` 与冲突校验。
-- [`AgentDefinitionConfigValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidatorTest.java) / [`RuntimeConfigSnapshotResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/RuntimeConfigSnapshotResolverTest.java) / [`DatabaseModelExecutionResolverTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/model/DatabaseModelExecutionResolverTest.java)：消费者通过统一 ToolCatalog 解析 Agent 配置与 ModelInvocation 资源。
+```text
+AGENT_NOT_FOUND
+PROVIDER_NOT_FOUND
+MODEL_NOT_FOUND
+VARIANT_NOT_FOUND
+ENVIRONMENT_NOT_FOUND
+TOOL_NOT_FOUND
+SKILL_NOT_FOUND
+INVALID_TURN_SETTINGS
+```
+
+Reconciler 把该结果写成 `ASSISTANT_ERROR`，不创建伪 request，也不切换到其他 Agent、Provider、Model、Environment、Tool 或 Skill。
+
+## 5. Interceptor chain
+
+`HarnessToolConfiguration` 通过 `ObjectProvider<BeforeToolCallInterceptor>` 与 `ObjectProvider<AfterToolCallInterceptor>` 按顺序构造 `ToolInterceptorChain`。唯一的 `PermissionBoundaryInterceptor` 位于 before chain 末端，在 Tool registry lookup、RemoteTool send 和 `Tool.execute` 之前完成 ALLOW/ASK/DENY。
+
+Permission 结果写入 ToolInvocation。批准继续执行原 binding；拒绝写入失败终态并唤醒 owning Thread。
+
+## 6. 代码与测试
+
+| 目标 | 入口 |
+| --- | --- |
+| ProviderFactory 装配 | [`ModelExecutionConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/model/ModelExecutionConfiguration.java) |
+| ToolFactory 装配 | [`RuntimeToolsConfiguration`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsConfiguration.java) |
+| Tool 目录 | [`EnvironmentToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/EnvironmentToolCatalog.java) |
+| Agent config 校验 | [`AgentDefinitionConfigValidator`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidator.java) |
+| Planner | [`ModelInvocationPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlanner.java) |
+| Provider wiring test | [`ProviderFactoriesTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactoriesTest.java) |
+| Tool wiring test | [`RuntimeToolsWiringTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/runtime/tool/RuntimeToolsWiringTest.java) |
+| Agent config test | [`AgentDefinitionConfigValidatorTest`](../../core/src/test/java/fun/fengwk/kkstudio/core/ai/catalog/definition/service/impl/AgentDefinitionConfigValidatorTest.java) |
+| Planner test | [`ModelInvocationPlannerTest`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/model/plan/ModelInvocationPlannerTest.java) |
