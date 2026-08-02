@@ -22,6 +22,7 @@ public class HarnessThreadDtoConverter {
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(Long.toString(thread.id()));
     dto.setExecutionEpoch(thread.executionEpoch());
+    dto.setEnvironmentName(thread.environmentName());
     dto.setRevision(Long.toString(thread.revision()));
     dto.setHeadEntryId(Long.toString(thread.headEntryId()));
     dto.setStatus(status(thread));

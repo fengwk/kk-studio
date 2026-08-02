@@ -67,8 +67,9 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
 
   @Test
   void snapshotProjectsQueuedInputWithItsTurnSettings() throws Exception {
-    TestThreads.Created created = TestThreads.create(transactions, "input-query", NOW);
-    TurnSettings settings = new TurnSettings("agent-a", "environment-a", true);
+    TestThreads.Created created =
+        TestThreads.create(transactions, "input-query", "environment-a", NOW);
+    TurnSettings settings = new TurnSettings("agent-a", true);
     RuntimeEntryInputPayload payload =
         new RuntimeEntryInputPayload(
             ThreadInputType.USER_MESSAGE,
@@ -86,8 +87,8 @@ class PostgresqlHarnessQueryServiceIntegrationTest extends PostgresSpringTestSup
     assertEquals("USER_MESSAGE", input.getInputType());
     assertEquals("QUEUED", input.getStatus());
     assertEquals("input-1", input.getClientMessageId());
+    assertEquals("environment-a", snapshot.getThread().getEnvironmentName());
     assertEquals("agent-a", turnSettings.path("agentName").asText());
-    assertEquals("environment-a", turnSettings.path("environmentName").asText());
     assertTrue(turnSettings.path("yoloEnabled").asBoolean());
     assertEquals(1, snapshot.getEntries().size());
     assertEquals(

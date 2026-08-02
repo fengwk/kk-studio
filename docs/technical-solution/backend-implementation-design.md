@@ -21,7 +21,7 @@ flowchart LR
 | `share` | DTO、JSON 字段、分页与错误边界 |
 | `web` | 路由、参数校验、HTTP 状态、SSE emitter、WebSocket adapter |
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
-| `core.ai.chat` | Chat CRUD、可见发送设置与 Chat↔Thread 关系 |
+| `core.ai.chat` | Chat CRUD、`agentName`/`yoloEnabled` 可见发送设置、Thread Environment 初始绑定与 Chat↔Thread 关系 |
 | `core.ai.runtime` | PostgreSQL command/query、resolver、worker、dispatcher、Redis 与 Provider adapter |
 | `harness-runtime` | Thread、Entry、Input、Reconciler、Invocation 与 Interaction 契约 |
 | `harness-tool` | Tool API、descriptor、RemoteTool 与 Daemon wire |
@@ -50,7 +50,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | PUT/DELETE | `/api/ai/catalog/models?providerName=&modelName=` | Model 全量更新/按复合名称删除 |
 | GET/POST | `/api/ai/catalog/agents` | Agent 分页查询/创建 |
 | PUT/DELETE | `/api/ai/catalog/agents/{name}` | Agent 全量更新/按版本删除 |
-| GET | `/api/ai/catalog/tools` | 统一可选 ToolCatalog |
+| GET | `/api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog；不返回内部 `load_skill` |
 
 ### Chat 与 Thread
 
@@ -59,18 +59,30 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | GET/POST | `/api/ai/chat` | Chat 列表/创建 |
 | GET/PUT/DELETE | `/api/ai/chat/{chatId}` | Chat 读取/部分设置更新/按版本删除 |
 | GET | `/api/ai/chat/{chatId}/threads?sort&cursor&limit` | Chat 关系的 opaque keyset 分页 |
-| POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、已绑定 Thread 并关联 Chat |
+| POST | `/api/ai/chat/{chatId}/threads` | 可携带 nullable `environmentName`，原子创建 Session、ROOT、已绑定 Thread 并关联 Chat |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
 | GET | `/api/ai/runtime/threads?sort&cursor&limit` | 全局 Thread 分页 |
 | GET | `/api/ai/runtime/threads/{threadId}` | Thread 运行事实投影 |
 | GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、Entries、Inputs、Invocation、Interaction 与 Usage |
+| PUT | `/api/ai/runtime/threads/{threadId}/environment` | 静止 Thread 以 `expectedExecutionEpoch` CAS 设置或清除当前 Environment |
 | PUT | `/api/ai/runtime/threads/{threadId}/head` | 静止 Thread 的非空 head 重定位 |
 | POST | `/api/ai/runtime/threads/{threadId}/messages` | USER message 入队，202 |
 | POST | `/api/ai/runtime/threads/{threadId}/messages/custom` | SYSTEM/USER custom message 入队，202 |
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | epoch fence、取消可取消事实并生成 stop barrier |
 | GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision 与 Redis realtime SSE |
 
-Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 与 Thread，Thread 的 `headEntryId` 非空且直接指向 ROOT。
+Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 与 Thread，Thread 的 `headEntryId` 非空且直接指向 ROOT；请求可同时原子指定 nullable `environmentName`。
+
+`PUT /api/ai/runtime/threads/{threadId}/environment` 的请求体为：
+
+```json
+{
+  "environmentName": null,
+  "expectedExecutionEpoch": 3
+}
+```
+
+命令只接受静止 Thread；epoch 匹配时写入新 Environment 或 `null`，并同时递增 `executionEpoch` 与 `revision`。Thread 运行中或 epoch 陈旧统一返回 `409`。
 
 ### 查询与设置
 
@@ -93,7 +105,7 @@ Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 
 
 ## 4. 请求与错误
 
-Chat 的唯一可见发送设置是 `agentName`、`environmentName`、`yoloEnabled`。前端提交任一设置时会暂时阻止该 Chat 的全部 pane 发送，只有服务端确认并刷新 Chat 后才允许下一条消息。每个 message/custom message 请求还包含 `content`、`clientMessageId` 与 `expectedExecutionEpoch`。Reconcile 时从 payload 中的 `TurnSettings` 解析本轮实际能力。
+Chat 的唯一可见发送设置是 `agentName` 与 `yoloEnabled`。前端提交任一设置时会暂时阻止该 Chat 的全部 pane 发送，只有服务端确认并刷新 Chat 后才允许下一条消息。每个 message/custom message 请求包含 `content`、`agentName`、`yoloEnabled`、`clientMessageId` 与 `expectedExecutionEpoch`，不携带 `environmentName`；Reconcile 时从消息 payload 的 `TurnSettings` 读取名称/开关，并从 Thread 读取当前 Environment。
 
 `PUT /head` 请求包含非空 `headEntryId` 与 `expectedExecutionEpoch`。head 重定位要求当前 Thread 无 processor lease、无 runnable work、无 queued Input、无当前 epoch 的非终态 Invocation/OPEN Interaction；成功后递增 epoch 并清理 lease。
 
@@ -103,7 +115,7 @@ Chat 的唯一可见发送设置是 `agentName`、`environmentName`、`yoloEnabl
 | --- | --- |
 | DTO、名称格式、Model config、Model ref 或请求体中的 Catalog 引用非法 | `400` |
 | 作为请求目标的 Thread、Session、Entry 或 Catalog 名称不存在 | `404` |
-| Chat version 或 execution epoch 过期，或 Thread 尚未静止 | `409` |
+| Chat version 或 execution epoch 过期，或 Thread 尚未静止；Thread Environment 更新时运行中或 epoch 陈旧 | `409` |
 | message/custom message 被接受进入 mailbox | `202` |
 | Chat-scoped Thread 创建成功 | `201` |
 
@@ -114,16 +126,16 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | 组件 | 职责 |
 | --- | --- |
 | `ChatThreadServiceImpl` | 在一个事务中调用 Thread command 创建 Session/ROOT/Thread，写入 Chat 关系并返回查询投影 |
-| `ThreadCommandCoordinator` | 创建 Thread、非空 head 重定位、消息 payload 构造、幂等短路与 stop |
-| `PostgresqlThreadCommandTransactions` | Session/ROOT/Thread 原子写入、head CAS、Input enqueue、stop |
-| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称在同一 PostgreSQL repeatable-read snapshot 中读取 active Agent、Model、Provider 与 Variant，并把 active Provider version 冻结进 ModelDescriptor；读取当前 READY Environment；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
+| `ThreadCommandCoordinator` | 创建带初始 Environment 的 Thread、Environment/head CAS 更新、消息 payload 构造、幂等短路与 stop |
+| `PostgresqlThreadCommandTransactions` | Session/ROOT/Thread 原子写入、Environment/head CAS、Input enqueue、stop |
+| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称和 Thread 当前 Environment 在同一 PostgreSQL repeatable-read snapshot 中读取最新 Agent、Model、Provider、ToolCatalog 与 Variant，并把 active Provider version 冻结进 ModelDescriptor；READY Environment 才贡献 Environment Tool/Skill；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
 | `DatabaseProviderResolutionService` | 只按冻结的 `(providerName, providerVersion)` 读取 `agent_provider_revision`；不读取当前 Provider 行，因此更新/软删除不影响已有 invocation 的首次 dispatch 与 retry |
 | `ThreadReconciler` | TURN_INPUT_BATCH、planning、Model/Tool terminal apply、Entry/head 推进 |
 | `ModelWorker` | 回放冻结 ProviderRequest，写 ModelInvocation terminal 与 realtime |
-| `ToolWorker` | 按冻结 ToolBinding 执行本地或 RemoteTool |
+| `ToolWorker` | 按冻结 descriptor/type/environmentName ToolBinding 执行本地 Platform Tool 或指定 Environment 的 RemoteTool |
 | `PostgresqlExecutionTargetDispatcher` | 根据 durable execution target 唤醒 Thread、Model、Tool worker |
 
-缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 时，resolver 返回 `PlanningFailure`；Reconciler 追加 `ASSISTANT_ERROR`，不创建伪 ModelInvocation，也不切换到隐式资源。
+Resolver 对缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 `PlanningFailure`；Platform Tool 总可候选，READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集，null、stale 或 offline Environment 只产生零 Environment Tool/Skill，不返回 Environment/Skill 缺失错误。Reconciler 追加 `ASSISTANT_ERROR`，不创建伪 ModelInvocation，也不切换到隐式资源。Provider 返回本次 invocation 不可见的 Tool 时，产生包含请求名称和本次可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不创建 ToolInvocation，Reconciler 可继续处理后续输入。
 
 ## 6. Snapshot-first SSE
 

@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
@@ -56,10 +57,8 @@ import java.util.Set;
 class ModelInvocationPlannerTest {
 
   private static final long SESSION_ID = 41L;
-  private static final TurnSettings USER_SETTINGS =
-      new TurnSettings("agent-user", "env-user", false);
-  private static final TurnSettings CUSTOM_SETTINGS =
-      new TurnSettings("agent-custom", "env-custom", true);
+  private static final TurnSettings USER_SETTINGS = new TurnSettings("agent-user", false);
+  private static final TurnSettings CUSTOM_SETTINGS = new TurnSettings("agent-custom", true);
 
   @Test
   void callsLatestResolverForEverySeparatePlanCall() {
@@ -71,8 +70,8 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
     List<SessionEntry> path = path(new RootEntryPayload(), user("question", USER_SETTINGS));
 
-    ModelInvocationPlan first = planned(planner.plan(SESSION_ID, 2L, path));
-    ModelInvocationPlan second = planned(planner.plan(SESSION_ID, 2L, path));
+    ModelInvocationPlan first = planned(plan(planner, SESSION_ID, 2L, path));
+    ModelInvocationPlan second = planned(plan(planner, SESSION_ID, 2L, path));
 
     assertEquals(2, resolver.settings.size());
     assertEquals(USER_SETTINGS, resolver.settings.get(0));
@@ -92,9 +91,11 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
 
     planned(
-        planner.plan(SESSION_ID, 2L, path(new RootEntryPayload(), user("nearest", USER_SETTINGS))));
+        plan(
+            planner, SESSION_ID, 2L, path(new RootEntryPayload(), user("nearest", USER_SETTINGS))));
     planned(
-        planner.plan(
+        plan(
+            planner,
             SESSION_ID,
             4L,
             path(
@@ -115,7 +116,8 @@ class ModelInvocationPlannerTest {
 
     ModelInvocationPlan plan =
         planned(
-            planner.plan(
+            plan(
+                planner,
                 SESSION_ID,
                 4L,
                 path(
@@ -136,7 +138,8 @@ class ModelInvocationPlannerTest {
 
   @Test
   void materializesResolvedPromptModelVariantToolsSkillsAndYoloExactly() {
-    ToolBinding tool = ToolBinding.of(tool("lookup", "look up facts"), "environment-tools");
+    ToolBinding tool =
+        ToolBinding.of(tool("lookup", "look up facts"), ToolType.ENVIRONMENT, "environment-tools");
     SkillBinding skill = new SkillBinding("research", "Research facts", "environment-skills");
     ResolvedTurnExecution execution =
         execution("model-live", "resolved system", List.of(tool), List.of(skill), true);
@@ -144,11 +147,11 @@ class ModelInvocationPlannerTest {
 
     ModelInvocationRequest request =
         planned(
-                new ModelInvocationPlanner(resolver)
-                    .plan(
-                        SESSION_ID,
-                        2L,
-                        path(new RootEntryPayload(), user("question", USER_SETTINGS))))
+                plan(
+                    new ModelInvocationPlanner(resolver),
+                    SESSION_ID,
+                    2L,
+                    path(new RootEntryPayload(), user("question", USER_SETTINGS))))
             .request();
 
     assertEquals(execution.model(), request.providerRequest().model());
@@ -176,16 +179,18 @@ class ModelInvocationPlannerTest {
     ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
 
     assertInstanceOf(
-        PlanningResult.NoDebt.class, planner.plan(SESSION_ID, 1L, path(new RootEntryPayload())));
+        PlanningResult.NoDebt.class, plan(planner, SESSION_ID, 1L, path(new RootEntryPayload())));
     assertInstanceOf(
         PlanningResult.NoDebt.class,
-        planner.plan(
+        plan(
+            planner,
             SESSION_ID,
             3L,
             path(new RootEntryPayload(), user("question", USER_SETTINGS), assistant("answer"))));
     assertInstanceOf(
         PlanningResult.NoDebt.class,
-        planner.plan(
+        plan(
+            planner,
             SESSION_ID,
             3L,
             path(
@@ -195,7 +200,8 @@ class ModelInvocationPlannerTest {
                     new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad request")))));
     assertInstanceOf(
         PlanningResult.NoDebt.class,
-        planner.plan(
+        plan(
+            planner,
             SESSION_ID,
             3L,
             path(
@@ -228,9 +234,11 @@ class ModelInvocationPlannerTest {
     PlanningResult.Failed result =
         assertInstanceOf(
             PlanningResult.Failed.class,
-            new ModelInvocationPlanner(resolver)
-                .plan(
-                    SESSION_ID, 2L, path(new RootEntryPayload(), user("question", USER_SETTINGS))));
+            plan(
+                new ModelInvocationPlanner(resolver),
+                SESSION_ID,
+                2L,
+                path(new RootEntryPayload(), user("question", USER_SETTINGS))));
 
     assertEquals(failure, result.failure());
   }
@@ -244,8 +252,11 @@ class ModelInvocationPlannerTest {
     PlanningResult.Failed result =
         assertInstanceOf(
             PlanningResult.Failed.class,
-            new ModelInvocationPlanner(resolver)
-                .plan(SESSION_ID, 2L, path(new RootEntryPayload(), toolResult("call-1"))));
+            plan(
+                new ModelInvocationPlanner(resolver),
+                SESSION_ID,
+                2L,
+                path(new RootEntryPayload(), toolResult("call-1"))));
 
     assertEquals(PlanningFailureKind.MISSING_TURN_SETTINGS, result.failure().kind());
     assertEquals(List.of(), resolver.settings);
@@ -264,7 +275,8 @@ class ModelInvocationPlannerTest {
 
     ModelInvocationPlan plan =
         planned(
-            planner.plan(
+            plan(
+                planner,
                 SESSION_ID,
                 6L,
                 path(
@@ -304,14 +316,14 @@ class ModelInvocationPlannerTest {
         new ArrayList<>(path(new RootEntryPayload(), user("question", USER_SETTINGS)));
     List<SessionEntry> before = List.copyOf(mutable);
 
-    ModelInvocationPlan plan = planned(planner.plan(SESSION_ID, 2L, mutable));
+    ModelInvocationPlan plan = planned(plan(planner, SESSION_ID, 2L, mutable));
 
     assertEquals(before, mutable);
     mutable.clear();
     assertEquals("question", text(plan.request().providerRequest().messages().get(1)));
-    assertThrows(IllegalArgumentException.class, () -> planner.plan(0L, 2L, before));
-    assertThrows(IllegalArgumentException.class, () -> planner.plan(SESSION_ID, 1L, before));
-    assertThrows(NullPointerException.class, () -> planner.plan(SESSION_ID, 2L, null));
+    assertThrows(IllegalArgumentException.class, () -> plan(planner, 0L, 2L, before));
+    assertThrows(IllegalArgumentException.class, () -> plan(planner, SESSION_ID, 1L, before));
+    assertThrows(NullPointerException.class, () -> plan(planner, SESSION_ID, 2L, null));
   }
 
   private static ModelInvocationPlan planned(PlanningResult result) {
@@ -343,6 +355,7 @@ class ModelInvocationPlannerTest {
     return new ToolDescriptor(
         name,
         "v1",
+        ToolType.ENVIRONMENT,
         name + " description",
         name,
         new ToolParamsSchema(
@@ -444,6 +457,11 @@ class ModelInvocationPlannerTest {
             BigDecimal.ZERO));
   }
 
+  private static PlanningResult plan(
+      ModelInvocationPlanner planner, long sessionId, long headEntryId, List<SessionEntry> path) {
+    return planner.plan(sessionId, headEntryId, "env-user", path);
+  }
+
   private static List<SessionEntry> path(EntryPayload... payloads) {
     List<SessionEntry> entries = new ArrayList<>(payloads.length);
     for (int index = 0; index < payloads.length; index++) {
@@ -469,7 +487,7 @@ class ModelInvocationPlannerTest {
     }
 
     @Override
-    public Resolution resolve(TurnSettings turnSettings) {
+    public Resolution resolve(TurnSettings turnSettings, String environmentName) {
       settings.add(turnSettings);
       if (failure != null) {
         return new Resolution.Failed(failure);

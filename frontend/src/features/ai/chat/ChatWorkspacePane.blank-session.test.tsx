@@ -43,6 +43,7 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     sessionId: 's1',
     sessionTitle: null,
     headEntryId: 'h1',
+    environmentName: null,
     executionEpoch: 0,
     status: 'IDLE',
     inputSequence: 0,
@@ -72,9 +73,7 @@ const agents = [
 function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onAgentChange?: (agentName: string) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   agentName?: string
-  environmentName?: string | null
   yoloEnabled?: boolean
 }) {
   const queryClient = new QueryClient({
@@ -82,8 +81,6 @@ function renderBlankPane(overrides?: {
   })
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
-  const onEnvironmentChange =
-    overrides?.onEnvironmentChange ?? vi.fn(async () => undefined)
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
@@ -91,7 +88,6 @@ function renderBlankPane(overrides?: {
           id: 'chat-1',
           title: 'C',
           agentName: overrides?.agentName === undefined ? 'assistant' : overrides.agentName,
-          environmentName: overrides?.environmentName ?? null,
           yoloEnabled: overrides?.yoloEnabled ?? false,
           version: '1',
           createTime: null,
@@ -111,12 +107,11 @@ function renderBlankPane(overrides?: {
         onSessionSortChange={() => undefined}
         onThreadSortChange={() => undefined}
         onAgentChange={onAgentChange}
-        onEnvironmentChange={onEnvironmentChange}
         onYoloChange={vi.fn(async () => undefined)}
       />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onAgentChange, onEnvironmentChange }
+  return { onThreadChange, onAgentChange }
 }
 
 describe('BlankComposerPane /thread and agent error handling', () => {
@@ -157,10 +152,9 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
   })
 
-  it('sets and clears the visible Chat Environment from the blank command and footer', async () => {
+  it('keeps Environment selection as a local blank-pane draft', async () => {
     const user = userEvent.setup()
-    const onEnvironmentChange = vi.fn(async () => undefined)
-    renderBlankPane({ onEnvironmentChange })
+    renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -169,34 +163,49 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(screen.getByRole('button', { name: 'local' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'local' }))
-    await waitFor(() => expect(onEnvironmentChange).toHaveBeenCalledWith('local'))
+    expect(screen.getByRole('button', { name: '环境：local' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
+    await user.click(screen.getByRole('button', { name: '环境：local' }))
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(
       within(screen.getByLabelText('选择 Environment')).getByRole('button', {
         name: /（无）/,
       }),
     )
-    await waitFor(() => expect(onEnvironmentChange).toHaveBeenLastCalledWith(null))
+    expect(screen.getByRole('button', { name: '环境：（无）' })).toBeInTheDocument()
   })
 
-  it('keeps the blank Environment selector open and shows the callback error', async () => {
+  it('passes the blank Environment draft only to Thread creation', async () => {
     const user = userEvent.setup()
-    const onEnvironmentChange = vi.fn(async () => {
-      throw new Error('Chat Environment update failed')
+    vi.mocked(chatService.createChatThread).mockResolvedValue(
+      thread({ threadId: 't-created', environmentName: 'local' }),
+    )
+    vi.mocked(harnessService.submitThreadMessage).mockResolvedValue({
+      inputId: 'i-created',
+      threadId: 't-created',
+      sequence: 1,
+      inputType: 'USER_MESSAGE',
+      payloadJson: '{}',
+      clientMessageId: 'cid-created',
+      status: 'QUEUED',
+      resolvedAt: null,
+      createTime: null,
     })
-    renderBlankPane({ onEnvironmentChange })
+    renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    await user.click(composer)
-    await user.keyboard('/environment{Enter}')
+    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
     await user.click(screen.getByRole('button', { name: 'local' }))
+    await user.type(composer, 'hello with local environment')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => {
-      expect(screen.getByText('Chat Environment update failed')).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(chatService.createChatThread).toHaveBeenCalledWith('chat-1', {
+        environmentName: 'local',
+      }),
+    )
+    const messageRequest = vi.mocked(harnessService.submitThreadMessage).mock.calls[0]?.[1]
+    expect(messageRequest).not.toHaveProperty('environmentName')
   })
 
   it('opens the global /thread picker and only switches the pane target', async () => {

@@ -1,8 +1,10 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
+  createChatThread,
   createConfiguredChatThread,
   threadPageData,
+  updateThreadEnvironment,
 } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
@@ -305,60 +307,57 @@ registerCase({
 registerCase({
   id: 'crud.chat.visible_settings',
   level: 'L1',
-  title: 'Chat 可见 Environment/YOLO 创建、更新与清除',
-  docs: 'Chat 是唯一可见发送配置；environmentName 显式 null 清除，yoloEnabled 可即时更新',
+  title: 'Chat 仅保存 Agent/YOLO；Thread 独立保存 Environment',
+  docs: 'Chat CRUD 不含 Environment；Chat-scoped Thread POST 设置 Environment，静止 Thread PUT 可更换或清除并递增 epoch/revision',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
     const initialEnvironment = `e2e-chat-env-${suffix}`
     const updatedEnvironment = `e2e-chat-env-updated-${suffix}`
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/ai/chat', {
-          title: `e2e-invalid-chat-env-${suffix}`,
-          agentName: agent.name,
-          environmentName: ` invalid-${suffix} `,
-          yoloEnabled: false,
-        }),
-      { status: 400, messageIncludes: /environmentName|whitespace|canonical/i },
-    )
     let chat = envelopeData(
       (
         await ctx.call('POST', '/api/ai/chat', {
           title: `e2e-chat-env-${suffix}`,
           agentName: agent.name,
-          environmentName: initialEnvironment,
           yoloEnabled: false,
         })
       ).json,
     )
     try {
       assert(
-        chat.environmentName === initialEnvironment && chat.yoloEnabled === false,
+        chat.agentName === agent.name
+          && chat.yoloEnabled === false
+          && !Object.hasOwn(chat, 'environmentName'),
         JSON.stringify(chat),
       )
       chat = envelopeData(
         (
           await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
-            environmentName: updatedEnvironment,
             yoloEnabled: true,
             expectedVersion: chat.version,
           })
         ).json,
       )
       assert(
-        chat.environmentName === updatedEnvironment && chat.yoloEnabled === true,
+        chat.agentName === agent.name
+          && chat.yoloEnabled === true
+          && !Object.hasOwn(chat, 'environmentName'),
         JSON.stringify(chat),
       )
-      chat = envelopeData(
-        (
-          await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
-            environmentName: null,
-            expectedVersion: chat.version,
-          })
-        ).json,
+      await expectHttpError(
+        () =>
+          ctx.call('POST', `/api/ai/chat/${encodeURIComponent(chat.id)}/threads`, {
+            environmentName: ` invalid-${suffix} `,
+          }),
+        { status: 400, messageIncludes: /environmentName|whitespace|canonical/i },
       )
-      assert(chat.environmentName == null && chat.yoloEnabled === true, JSON.stringify(chat))
+      let thread = await createChatThread(ctx, chat.id, {
+        environmentName: initialEnvironment,
+      })
+      assert(thread.environmentName === initialEnvironment, JSON.stringify(thread))
+      thread = await updateThreadEnvironment(ctx, thread, updatedEnvironment)
+      thread = await updateThreadEnvironment(ctx, thread, null)
+      assert(thread.environmentName == null, JSON.stringify(thread))
     } finally {
       await deleteChat(ctx, chat)
     }
@@ -431,7 +430,7 @@ registerCase({
     const target = await createConfiguredChatThread(ctx, {
       title: `e2e-chat-thread-${suffix}`,
       agentName: agent.name,
-      environmentName: `e2e-chat-thread-env-${suffix}`,
+      threadEnvironmentName: `e2e-chat-thread-env-${suffix}`,
       yoloEnabled: true,
     })
     const source = await createConfiguredChatThread(ctx, {

@@ -89,7 +89,10 @@ public final class ModelInvocationPlanner {
    * ASSISTANT_ERROR} barrier.
    */
   public PlanningResult plan(
-      long sessionId, long sourceHeadEntryId, List<SessionEntry> rootToHead) {
+      long sessionId,
+      long sourceHeadEntryId,
+      String environmentName,
+      List<SessionEntry> rootToHead) {
     if (sessionId <= 0) {
       throw new IllegalArgumentException("sessionId must be positive");
     }
@@ -112,7 +115,8 @@ public final class ModelInvocationPlanner {
     }
 
     TurnExecutionResolver.Resolution resolution =
-        Objects.requireNonNull(executionResolver.resolve(settings.get()), "resolver resolution");
+        Objects.requireNonNull(
+            executionResolver.resolve(settings.get(), environmentName), "resolver resolution");
     if (resolution instanceof TurnExecutionResolver.Resolution.Failed failed) {
       return new PlanningResult.Failed(failed.failure());
     }

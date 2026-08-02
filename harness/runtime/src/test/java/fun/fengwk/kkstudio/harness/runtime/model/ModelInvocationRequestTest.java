@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ReconcileTestSupport
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
@@ -89,7 +90,10 @@ class ModelInvocationRequestTest {
 
   private static ModelInvocationRequest request() {
     ToolBinding binding =
-        ToolBinding.of(binding("lookup", "Look up facts").descriptor(), "environment-tools");
+        ToolBinding.of(
+            environmentDescriptor("lookup", "Look up facts"),
+            ToolType.ENVIRONMENT,
+            "environment-tools");
     SkillBinding skill = new SkillBinding("research", "Research facts", "environment-skills");
     return new ModelInvocationRequest(
         providerRequest(List.of(providerTool(binding))), List.of(binding), List.of(skill), true);
@@ -109,19 +113,27 @@ class ModelInvocationRequestTest {
   }
 
   private static ToolBinding binding(String name, String description) {
-    ToolDescriptor descriptor =
-        new ToolDescriptor(
-            name,
-            "1",
-            description,
-            name,
-            new ToolParamsSchema(
-                "lookup input",
-                Map.of("query", new ToolStringSchema("query")),
-                Set.of("query"),
-                false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(1));
-    return ToolBinding.of(descriptor);
+    return ToolBinding.of(platformDescriptor(name, description));
+  }
+
+  private static ToolDescriptor platformDescriptor(String name, String description) {
+    return descriptor(name, description, ToolType.PLATFORM);
+  }
+
+  private static ToolDescriptor environmentDescriptor(String name, String description) {
+    return descriptor(name, description, ToolType.ENVIRONMENT);
+  }
+
+  private static ToolDescriptor descriptor(String name, String description, ToolType type) {
+    return new ToolDescriptor(
+        name,
+        "1",
+        type,
+        description,
+        name,
+        new ToolParamsSchema(
+            "lookup input", Map.of("query", new ToolStringSchema("query")), Set.of("query"), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(1));
   }
 }

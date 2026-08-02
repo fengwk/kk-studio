@@ -3,20 +3,16 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 import java.util.Objects;
 
 /**
- * Immutable name reference carried by one response-producing turn.
+ * Immutable Agent reference carried by one response-producing turn.
  *
- * <p>This value deliberately contains no expanded Agent, Model, Tool, or Skill definition. Those
- * definitions are resolved afresh while planning each provider request.
+ * <p>This value deliberately contains no expanded Agent, Model, Tool, Skill, or Environment
+ * definition. The Thread-selected Environment is resolved afresh while planning each provider
+ * request.
  */
-public record TurnSettings(String agentName, String environmentName, boolean yoloEnabled) {
+public record TurnSettings(String agentName, boolean yoloEnabled) {
 
   public TurnSettings {
     agentName = canonicalName(agentName, "agentName");
-    environmentName = canonicalNullableName(environmentName, "environmentName");
-  }
-
-  private static String canonicalNullableName(String value, String field) {
-    return value == null ? null : canonicalName(value, field);
   }
 
   private static String canonicalName(String value, String field) {

@@ -52,13 +52,13 @@ Provider 资源本身由 Catalog revision 的 `(name, providerVersion)`、`provi
 
 [`ToolFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/tool/ToolFactory.java) 以冻结 descriptor 创建本地 Tool。`ToolFactories` 按 `(name, version)` 索引，重复 key 或 descriptor 漂移在装配/创建时失败。
 
-[`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 合并：
+[`ToolCatalog`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCatalog.java) 只使用两类产品级 Tool，并维护 Agent 可选择目录与内部 Platform Tool 目录的分离：
 
-- Core 本地 ToolFactory；
-- 固定的十个 Environment Tool descriptor；
-- runtime-managed `load_skill`。
+- Core 提供的 Agent 可选择 Platform ToolFactory；
+- 固定的十个 `ENVIRONMENT` Tool descriptor；
+- 内部 `PLATFORM` Tool `load_skill`，不出现在 Agent 可选择目录中。
 
-Agent config 保存 Tool/Skill 名称集合，不保存 Tool 实例或 Environment 连接。`GET /api/ai/catalog/tools` 只返回可由 Agent 选择的目录；`load_skill` 由 Runtime 根据 selected Skill binding 注入。
+Agent config 保存可选择 Tool/Skill 名称集合，不保存 Tool 实例或 Environment 连接。`GET /api/ai/catalog/tools` 只返回 Agent 可选择的 Platform/Environment 目录；`load_skill` 随本次 Skill binding 由 Runtime 隐式注入，仍属于 Platform Tool。
 
 当前 Environment Tool 名称为：
 
@@ -77,35 +77,34 @@ lsp_java_decompile
 
 ## 4. Per-turn resolver
 
-[`DatabaseTurnExecutionResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnExecutionResolver.java) 是每次 planning 的 Catalog/Environment 边界。输入只有 `TurnSettings`：
+[`DatabaseTurnExecutionResolver`](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnExecutionResolver.java) 是每次 planning 的 Catalog/Environment 边界。输入是消息的 `TurnSettings` 与 Thread 当前 `environmentName`：
 
 ```text
+TurnSettings
 agentName
-environmentName
 yoloEnabled
+
+HarnessThread
+environmentName
 ```
 
-解析顺序为 active Agent → active Provider → `(providerName, modelName)` Model → Variant → READY Environment → Tools → Skills → ProviderFactory。Resolver 同时读取 Model config、Agent config、ToolCatalog 与 live registry，返回本轮含 Provider version 的 `ResolvedTurnExecution`。
+解析顺序为最新 Agent → Provider → `(providerName, modelName)` Model → Variant → ToolCatalog/Thread Environment → Tools → Skills → ProviderFactory。Resolver 同时读取 Model config、Agent config、ToolCatalog 与 live registry，返回本轮含 Provider version 的 `ResolvedTurnExecution`。每次新 ModelInvocation 都重新读取这些最新事实。
 
-缺失或不可用资源返回明确 `PlanningFailure`：
+真正阻止 planning 的 `PlanningFailure` 为：
 
 ```text
+MISSING_TURN_SETTINGS
 AGENT_NOT_FOUND
 PROVIDER_NOT_FOUND
 MODEL_NOT_FOUND
 VARIANT_NOT_FOUND
-ENVIRONMENT_REQUIRED
-ENVIRONMENT_NOT_FOUND
 TOOL_NOT_FOUND
-SKILL_NOT_FOUND
 INVALID_TURN_SETTINGS
 ```
 
-`environmentName == null` 本身合法；但 Agent 配置了 Environment Tool 或 Skill 时，Resolver
-返回 `ENVIRONMENT_REQUIRED`，绝不静默移除能力。已选择的 Environment 不存在、未 READY
-或连接已关闭时返回携带具体名称的 `ENVIRONMENT_NOT_FOUND`。
+Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`。Platform Tool 总可候选；Thread 的 `environmentName` 为 null、stale 或对应 Environment 非 READY/offline 时，只返回零 Environment Tool/Skill。当前 Environment 不提供的 Environment Tool/Skill 只被交集过滤，不产生 Environment 或 Skill 缺失错误。
 
-Reconciler 把该结果写成 `ASSISTANT_ERROR`，不创建伪 request，也不切换到其他 Agent、Provider、Model、Environment、Tool 或 Skill。
+有 Skill binding 时，Resolver 追加内部 Platform `load_skill` binding；Reconciler 把 planning failure 写成 `ASSISTANT_ERROR`，不创建伪 request，也不切换到其他 Agent、Provider、Model、Environment、Tool 或 Skill。Provider 返回本次 request 不可见的 Tool 时，写入包含请求名称和可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不物化 ToolInvocation，Reconciler 不会卡住。
 
 ## 5. Interceptor chain
 

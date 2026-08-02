@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -45,6 +46,7 @@ public final class LoadSkillTool implements Tool {
       new ToolDescriptor(
           NAME,
           VERSION,
+          ToolType.PLATFORM,
           GoalToolPrompts.load("load_skill.md"),
           NAME,
           new ToolParamsSchema(

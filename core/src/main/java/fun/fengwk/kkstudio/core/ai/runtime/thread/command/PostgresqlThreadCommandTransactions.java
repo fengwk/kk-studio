@@ -71,7 +71,8 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public HarnessThread createThread(String title, Instant now) {
+  public HarnessThread createThread(String title, String environmentName, Instant now) {
+    environmentName = HarnessThread.canonicalEnvironmentName(environmentName);
     Instant persistedNow = persistenceInstant(now);
     long sessionId = idGenerator.nextSessionId();
     long rootEntryId = idGenerator.nextEntryId();
@@ -88,9 +89,10 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             ENTRY_CODEC.encode(new RootEntryPayload()),
             timestamp),
         "insert root entry");
-    requireAffected(mapper.insertThread(threadId, rootEntryId, timestamp), "insert thread");
+    requireAffected(
+        mapper.insertThread(threadId, rootEntryId, environmentName, timestamp), "insert thread");
     return new HarnessThread(
-        threadId, rootEntryId, 0, false, 0, 0, null, persistedNow, persistedNow);
+        threadId, rootEntryId, environmentName, 0, false, 0, 0, null, persistedNow, persistedNow);
   }
 
   @Override
@@ -105,6 +107,37 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
       throw new IllegalArgumentException("unknown entry: " + headEntryId);
     }
     return rebind(thread, expectedExecutionEpoch, headEntryId, persistedNow);
+  }
+
+  @Override
+  @Transactional(isolation = Isolation.READ_COMMITTED)
+  public HarnessThread updateEnvironment(
+      long threadId, long expectedExecutionEpoch, String environmentName, Instant now) {
+    requirePositive(threadId, "threadId");
+    environmentName = HarnessThread.canonicalEnvironmentName(environmentName);
+    Instant persistedNow = persistenceInstant(now);
+    ThreadCommandRow thread = lockRebindableThread(threadId, expectedExecutionEpoch, persistedNow);
+    long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
+    executionTargetStore.deleteIfExists(ExecutionTargetKind.THREAD, thread.getId());
+    requireAffected(
+        mapper.rebindEnvironment(
+            thread.getId(),
+            expectedExecutionEpoch,
+            nextEpoch,
+            environmentName,
+            offset(persistedNow)),
+        "rebind thread environment");
+    return new HarnessThread(
+        thread.getId(),
+        thread.getHeadEntryId(),
+        environmentName,
+        thread.getInputSequence(),
+        false,
+        nextEpoch,
+        Math.addExact(thread.getRevision(), 1),
+        null,
+        thread.getCreatedAt().toInstant(),
+        persistedNow);
   }
 
   /**
@@ -146,6 +179,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     return new HarnessThread(
         thread.getId(),
         headEntryId,
+        thread.getEnvironmentName(),
         thread.getInputSequence(),
         false,
         nextEpoch,

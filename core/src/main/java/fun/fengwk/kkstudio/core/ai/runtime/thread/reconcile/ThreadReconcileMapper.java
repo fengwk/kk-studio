@@ -37,7 +37,7 @@ public interface ThreadReconcileMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Select(
-      "select t.id, e.session_id as sessionId, t.head_entry_id as headEntryId, t.input_sequence as inputSequence, t.runnable, t.execution_epoch as executionEpoch, t.revision as revision, t.processor_token as processorToken, t.processor_until as processorUntil, t.created_at as createdAt, t.updated_at as updatedAt "
+      "select t.id, e.session_id as sessionId, t.head_entry_id as headEntryId, t.environment_name as environmentName, t.input_sequence as inputSequence, t.runnable, t.execution_epoch as executionEpoch, t.revision as revision, t.processor_token as processorToken, t.processor_until as processorUntil, t.created_at as createdAt, t.updated_at as updatedAt "
           + "from harness_thread t join harness_entry e on e.id = t.head_entry_id where t.id = #{threadId} for no key update of t")
   OwnedThreadRow lockThread(@Param("threadId") long threadId);
 

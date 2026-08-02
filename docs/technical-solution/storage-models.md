@@ -19,10 +19,10 @@ Provider 创建写入 revision `0`；每次成功更新在同一事务写入 `ex
 
 | 表 | 字段与职责 |
 | --- | --- |
-| `chat` | `id`、`title`、`agent_name`、`environment_name`、`yolo_enabled`、`version`、时间；三项名称/开关是 Chat 唯一可见发送设置 |
+| `chat` | `id`、`title`、`agent_name`、`yolo_enabled`、`version`、时间；两项名称/开关是 Chat 唯一可见发送设置 |
 | `chat_thread` | `(chat_id, thread_id)` 主键，表示 Chat 与 Thread 的历史多对多关系 |
 
-Chat 的 `agent_name`、`environment_name` 与 `yolo_enabled` 不复制到 Thread。发送请求从当前 Chat 读取这三项并写入该消息的 `TurnSettings`。
+Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；每条消息捕获这两项并写入该消息的 `TurnSettings`。Thread 自己保存 nullable `environment_name`，它不是 Chat 字段，也不由消息 DTO 携带。
 
 ## 3. Session、Entry、Thread
 
@@ -30,7 +30,7 @@ Chat 的 `agent_name`、`environment_name` 与 `yolo_enabled` 不复制到 Threa
 | --- | --- |
 | `harness_session` | `id`、`title`、`created_at`；只作为 Entry Tree 容器 |
 | `harness_entry` | `id`、`session_id`、`parent_entry_id`、`entry_type`、`payload`、`created_at`；ROOT 无 parent，其余 Entry 有 parent |
-| `harness_thread` | `id`、非空 `head_entry_id`、`input_sequence`、`runnable`、`execution_epoch`、`revision`、processor lease、时间 |
+| `harness_thread` | `id`、非空 `head_entry_id`、nullable `environment_name`、`input_sequence`、`runnable`、`execution_epoch`、`revision`、processor lease、时间 |
 | `harness_thread_input` | `thread_id`、sequence、`input_type`、payload、幂等键、状态、时间 |
 
 `harness_entry.entry_type` 只允许：
@@ -50,7 +50,7 @@ USER_MESSAGE
 CUSTOM_MESSAGE
 ```
 
-Chat-scoped Thread 创建事务按 Session → ROOT → Thread 的顺序写入，Thread head 直接指向 ROOT。`PUT /head` 的 `head_entry_id` 是必填非空引用，并用 `expectedExecutionEpoch` 做静止校验与 CAS fencing。
+Chat-scoped Thread 创建事务按 Session → ROOT → Thread 的顺序写入，Thread head 直接指向 ROOT，并可在同一事务原子写入初始 `environment_name`。`PUT /head` 的 `head_entry_id` 是必填非空引用，并用 `expectedExecutionEpoch` 做静止校验与 CAS fencing。`PUT /api/ai/runtime/threads/{threadId}/environment` 只允许静止 Thread 设置或清除 `environment_name`，请求体携带 `expectedExecutionEpoch`；成功递增 `execution_epoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。
 
 USER/CUSTOM Input 的 payload 与 harvest 后的对应 Entry 都保存：
 
@@ -58,24 +58,23 @@ USER/CUSTOM Input 的 payload 与 harvest 后的对应 Entry 都保存：
 {
   "turnSettings": {
     "agentName": "agent-name",
-    "environmentName": "environment-name-or-null",
     "yoloEnabled": false
   }
 }
 ```
 
-这份引用不展开 Agent、Model、Provider、Tool 或 Skill 定义。规划阶段再读取当前 Catalog 与 READY Environment。
+这份引用不展开 Agent、Model、Provider、Tool 或 Skill 定义。规划阶段再读取最新 Agent、Provider、Model、ToolCatalog 与 Thread 当前 Environment。
 
 ## 4. Invocation 与 activation
 
 | 表 | 关键事实 |
 | --- | --- |
 | `harness_model_invocation` | source head、epoch、完整 `ModelInvocationRequest`、状态、attempt、lease、deadline、result/error、`applied_at` 与安全流快照 |
-| `harness_tool_invocation` | Assistant Entry、Model Invocation、ordinal、tool call、descriptor/arguments、`environment_name`、权限、YOLO、状态、lease、结果 |
+| `harness_tool_invocation` | Assistant Entry、Model Invocation、ordinal、tool call、descriptor/type/arguments、`environment_name`、权限、YOLO、状态、lease、结果 |
 | `harness_interaction` | Tool permission 的 request/response、`OPEN/RESOLVED` 与 version |
 | `harness_execution_target` | Thread、Model、Tool target 的唯一 durable activation queue；`dispatch_enabled` 控制可调度性 |
 
-`ModelInvocationRequest` 的 `providerRequest`、`toolBindings`、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。`providerRequest.model` 还冻结 `providerName` 与非负 `providerVersion`。Retry 只改变 invocation attempt 与调度时间，按该版本的 Provider revision 重放相同 request；ToolWorker 使用 request 中的原 binding。
+`ModelInvocationRequest` 的 `providerRequest`、exact `toolBindings`（descriptor/type/environmentName）、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。`providerRequest.model` 还冻结 `providerName` 与非负 `providerVersion`。Retry 只改变 invocation attempt 与调度时间，按该版本的 Provider revision 重放相同 request；ToolWorker 使用 request 中的原 binding，不重新选择 Environment。Provider 返回本次 request 不可见的 Tool 时，Reconciler 写入包含请求名称和本次可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不物化 `harness_tool_invocation`。
 
 ## 5. Usage ledger
 

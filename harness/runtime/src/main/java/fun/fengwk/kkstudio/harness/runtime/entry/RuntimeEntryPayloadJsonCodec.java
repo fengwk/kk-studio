@@ -77,8 +77,7 @@ public final class RuntimeEntryPayloadJsonCodec {
       orderedSet("type", "artifactId", "mediaType", "preview");
 
   private static final Set<String> MESSAGE_INNER_FIELDS = orderedSet("role", "contents");
-  private static final Set<String> TURN_SETTINGS_FIELDS =
-      orderedSet("agentName", "environmentName", "yoloEnabled");
+  private static final Set<String> TURN_SETTINGS_FIELDS = orderedSet("agentName", "yoloEnabled");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
@@ -249,11 +248,6 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static ObjectNode encodeTurnSettings(TurnSettings settings) {
     ObjectNode node = NODES.objectNode();
     node.put("agentName", settings.agentName());
-    if (settings.environmentName() == null) {
-      node.putNull("environmentName");
-    } else {
-      node.put("environmentName", settings.environmentName());
-    }
     node.put("yoloEnabled", settings.yoloEnabled());
     return node;
   }
@@ -261,14 +255,8 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static TurnSettings decodeTurnSettings(JsonNode value) {
     ObjectNode node = requireObject(value, "turnSettings");
     requireExactFields(node, TURN_SETTINGS_FIELDS, "turnSettings");
-    JsonNode environmentNode = node.get("environmentName");
-    String environmentName =
-        environmentNode.isNull()
-            ? null
-            : requiredText(environmentNode, "environmentName", "turnSettings");
     return new TurnSettings(
         requiredText(node, "agentName", "turnSettings"),
-        environmentName,
         requiredBoolean(node, "yoloEnabled", "turnSettings"));
   }
 

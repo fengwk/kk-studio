@@ -1,3 +1,5 @@
+import { once } from 'node:events'
+import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 
@@ -9,6 +11,7 @@ import {
   pageResults,
   cid,
 } from '../lib/http.mjs'
+import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
   createConfiguredChatThread,
   getThread,
@@ -18,6 +21,7 @@ import {
   snapshotInputs,
   threadPageData,
   updateThreadHead,
+  waitForQuiescentThread,
   waitForThreadInputApplied,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
@@ -127,17 +131,18 @@ registerCase({
   id: 'thread.chat_scoped_create_atomic',
   level: 'L1',
   title: 'Chat-scoped Thread 原子创建 Session/ROOT',
-  docs: '创建 Chat 后 POST /threads => 201；Thread 已绑定 Session/ROOT，epoch=0，且不投影独立 active config',
+  docs: '创建 Chat 后 POST /threads body={environmentName} => 201；Thread 已绑定 Session/ROOT，epoch=0，并直接返回当前 environmentName',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     const { chat, thread, session } = await createConfiguredChatThread(ctx, {
       title: `e2e-thread-${cid().slice(0, 8)}`,
       agentName: ctx.vars.agent.name,
-      environmentName: null,
+      threadEnvironmentName: null,
       yoloEnabled: false,
     })
     assert(thread.status === 'IDLE', JSON.stringify(thread))
     assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
+    assert(thread.environmentName === null, JSON.stringify(thread))
     assert(thread.sessionId === session.sessionId && thread.headEntryId, JSON.stringify(thread))
     for (const hidden of [
       'activeAgentDefinitionId',
@@ -177,7 +182,6 @@ registerCase({
       () =>
         ctx.call('POST', `/api/ai/runtime/threads/${rebound.threadId}/messages`, {
           agentName: ctx.vars.agent.name,
-          environmentName: null,
           yoloEnabled: false,
           content: 'stale',
           clientMessageId: cid(),
@@ -252,7 +256,7 @@ registerCase({
   id: 'thread.stop_then_rebind',
   level: 'L1',
   title: 'stop 后 Thread 立即可 rebind',
-  docs: '消息直接携带可见 Chat 配置；stop 递增 epoch 并取消执行，随后 PUT /head 成功',
+  docs: '消息直接携带 agentName/yoloEnabled；stop 递增 epoch 并取消执行，随后 PUT /head 成功',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     const { thread } = await createConfiguredChatThread(ctx, {
@@ -261,7 +265,6 @@ registerCase({
     })
     await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
       agentName: ctx.vars.agent.name,
-      environmentName: null,
       yoloEnabled: false,
       content: 'e2e stop then rebind',
       clientMessageId: cid(),
@@ -288,7 +291,7 @@ registerCase({
   id: 'thread.turn_settings_wysiwyg_failure',
   level: 'L1',
   title: '每条消息冻结可见名称引用并显式报告解析失败',
-  docs: 'USER_MESSAGE 直接携带 agentName/environmentName/yoloEnabled；不存在 Agent => ASSISTANT_ERROR，且不创建伪 ModelInvocation',
+  docs: 'USER_MESSAGE 直接携带 agentName/yoloEnabled；不存在 Agent => ASSISTANT_ERROR，且不创建伪 ModelInvocation',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     const { thread } = await createConfiguredChatThread(ctx, {
@@ -302,7 +305,6 @@ registerCase({
       `/api/ai/runtime/threads/${thread.threadId}/messages`,
       {
         agentName: missingAgentName,
-        environmentName: null,
         yoloEnabled: true,
         content: 'must fail before provider invocation',
         clientMessageId,
@@ -315,7 +317,6 @@ registerCase({
     assert(
       isDeepStrictEqual(payload.turnSettings, {
         agentName: missingAgentName,
-        environmentName: null,
         yoloEnabled: true,
       }),
       JSON.stringify(payload),
@@ -338,7 +339,6 @@ registerCase({
       `/api/ai/runtime/threads/${thread.threadId}/messages`,
       {
         agentName: ctx.vars.agent.name,
-        environmentName: 'ignored-environment',
         yoloEnabled: false,
         content: 'ignored retry body',
         clientMessageId,
@@ -354,61 +354,189 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.environment_required_failure',
+  id: 'thread.environment_capability_projection',
   level: 'L1',
-  title: 'Agent 需要 Environment 能力时拒绝 null Environment',
-  docs: 'environmentName=null 本身合法；Agent 配置 Environment Tool/Skill 时显式写 ENVIRONMENT_REQUIRED，且不创建 ModelInvocation',
+  title: '非 READY Environment 只投影 Platform Tool',
+  docs:
+    'Agent 可配置 Environment Tool/Skill；null、stale、offline Thread Environment 均不阻断 planning，只向 fake Provider 暴露 Platform Tool；Provider 返回不可见 read 时写入明确 ASSISTANT_ERROR 且不物化 ToolInvocation',
   async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    const agentName = `e2e-environment-required-${cid().slice(0, 8)}`
-    const agent = envelopeData(
-      (
-        await ctx.call('POST', '/api/ai/catalog/agents', {
-          name: agentName,
-          description: 'Requires an Environment tool for planning-boundary verification.',
-          systemPrompt: 'You are an E2E planning-boundary assistant.',
-          model: ctx.vars.agent.model,
-          variant: ctx.vars.agent.variant,
-          config: { tools: ['read'], skills: [] },
-        })
-      ).json,
-    )
-    const { thread } = await createConfiguredChatThread(ctx, {
-      title: `e2e-environment-required-${cid().slice(0, 8)}`,
-      agentName: agent.name,
-      environmentName: null,
-      yoloEnabled: false,
-    })
-    const { json: messageJson } = await ctx.call(
-      'POST',
-      `/api/ai/runtime/threads/${thread.threadId}/messages`,
-      {
-        agentName: agent.name,
-        environmentName: null,
-        yoloEnabled: false,
-        content: 'must require an Environment before provider invocation',
-        clientMessageId: cid(),
-        expectedExecutionEpoch: Number(thread.executionEpoch),
-      },
-    )
-    const input = envelopeData(messageJson)
-    await waitForThreadInputApplied(ctx, thread.threadId, input.inputId)
-    const snapshot = await getThreadSnapshot(ctx, thread.threadId)
-    const errorEntry = (snapshot.entries || []).find((entry) => entry.entryType === 'ASSISTANT_ERROR')
-    assert(errorEntry, JSON.stringify(snapshot.entries))
-    const errorPayload = JSON.parse(errorEntry.payloadJson)
-    const errorMessage = String(errorPayload.error?.message || '')
-    assert(errorMessage.includes('ENVIRONMENT_REQUIRED'), JSON.stringify(errorPayload))
-    assert(errorMessage.includes('requires a READY Environment'), JSON.stringify(errorPayload))
-    assert(!errorMessage.includes(': null'), JSON.stringify(errorPayload))
+    const suffix = cid().slice(0, 8)
+    const environmentToolName = 'read'
+    const tools = pageResults((await ctx.call('GET', '/api/ai/catalog/tools')).json)
+    const platformTool = tools.find((tool) => tool.type === 'PLATFORM')
+    assert(platformTool?.name, `missing selectable Platform Tool: ${JSON.stringify(tools)}`)
     assert(
-      (snapshot.modelInvocations || []).length === 0,
-      `Environment planning failure created ModelInvocation: ${JSON.stringify(snapshot.modelInvocations)}`,
+      tools.find((tool) => tool.name === environmentToolName)?.type === 'ENVIRONMENT',
+      `read must be an Environment Tool: ${JSON.stringify(tools)}`,
     )
-    await ctx.call(
-      'DELETE',
-      `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
-    )
+
+    const fakeProvider = await startUnavailableToolProvider(environmentToolName)
+    let provider = null
+    let model = null
+    let agent = null
+    const chats = []
+    try {
+      provider = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/providers', {
+            ...providerCreateBody(`visibility-${suffix}`),
+            baseUrl: fakeProvider.baseUrl,
+            providerType: 'openai',
+          })
+        ).json,
+      )
+      model = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/models', {
+            providerName: provider.name,
+            name: `e2e-visibility-model-${suffix}`,
+            description: 'E2E fake provider model for Environment visibility.',
+            config: baseModelConfig({
+              abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+              variants: [{ id: 'default' }],
+              defaultVariant: 'default',
+            }),
+          })
+        ).json,
+      )
+      agent = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-visibility-agent-${suffix}`,
+            description: 'E2E Agent with Platform and Environment capabilities.',
+            systemPrompt: 'Return the requested tool call exactly as supplied by the provider.',
+            model: `${provider.name}/${model.name}`,
+            variant: model.config.defaultVariant,
+            config: {
+              tools: [platformTool.name, environmentToolName],
+              skills: [`e2e-visibility-skill-${suffix}`],
+            },
+          })
+        ).json,
+      )
+
+      // L1 does not start a daemon; unique named bindings exercise the same non-READY projection
+      // used by stale/offline Environments without inventing a daemon lifecycle API.
+      for (const scenario of [
+        { name: 'null', environmentName: null },
+        { name: 'stale', environmentName: `e2e-stale-${suffix}` },
+        { name: 'offline', environmentName: `e2e-offline-${suffix}` },
+      ]) {
+        const requestCount = fakeProvider.requests.length
+        const { chat, thread } = await createConfiguredChatThread(ctx, {
+          title: `e2e-capability-${scenario.name}-${suffix}`,
+          agentName: agent.name,
+          threadEnvironmentName: scenario.environmentName,
+          yoloEnabled: false,
+        })
+        chats.push(chat)
+        assert(
+          (thread.environmentName ?? null) === scenario.environmentName,
+          JSON.stringify({ scenario, thread }),
+        )
+
+        const { json: messageJson } = await ctx.call(
+          'POST',
+          `/api/ai/runtime/threads/${thread.threadId}/messages`,
+          {
+            agentName: agent.name,
+            yoloEnabled: false,
+            content: `request invisible ${environmentToolName} for ${scenario.name}`,
+            clientMessageId: cid(),
+            expectedExecutionEpoch: Number(thread.executionEpoch),
+          },
+        )
+        const input = envelopeData(messageJson)
+        await waitForThreadInputApplied(ctx, thread.threadId, input.inputId, {
+          timeoutMs: 60_000,
+        })
+        await waitForQuiescentThread(ctx, thread.threadId, { timeoutMs: 60_000 })
+        const snapshot = await getThreadSnapshot(ctx, thread.threadId)
+        const errorEntry = [...(snapshot.entries || [])]
+          .reverse()
+          .find((entry) => entry.entryType === 'ASSISTANT_ERROR')
+        assert(errorEntry, JSON.stringify(snapshot.entries))
+        const errorPayload = JSON.parse(errorEntry.payloadJson)
+        const errorMessage = String(errorPayload.error?.message || '')
+        assert(
+          errorMessage.includes(
+            `tool is not available in this model invocation: ${environmentToolName}`,
+          ),
+          JSON.stringify(errorPayload),
+        )
+        assert(
+          errorMessage.includes(`available tools: [${platformTool.name}]`),
+          JSON.stringify(errorPayload),
+        )
+        assert(
+          (snapshot.toolInvocations || []).length === 0,
+          `invisible Tool must not materialize ToolInvocation: ${JSON.stringify(snapshot)}`,
+        )
+        assert(
+          (snapshot.modelInvocations || []).length >= 1,
+          `Provider call must create a ModelInvocation: ${JSON.stringify(snapshot)}`,
+        )
+        const persistedRequest = JSON.parse(snapshot.modelInvocations.at(-1).requestJson)
+        const persistedTools = (persistedRequest.toolBindings || []).map(
+          (binding) => binding.descriptor?.name,
+        )
+        assert(
+          isDeepStrictEqual(persistedTools, [platformTool.name])
+            && (persistedRequest.skillBindings || []).length === 0,
+          `ModelInvocation persisted unavailable capabilities: ${JSON.stringify(persistedRequest)}`,
+        )
+        assert(
+          fakeProvider.requests.length > requestCount,
+          `fake Provider was not called for ${scenario.name}: ${JSON.stringify(fakeProvider.requests)}`,
+        )
+        const providerRequest = fakeProvider.requests.at(-1)
+        const requestedTools = (providerRequest.tools || []).map(
+          (tool) => tool.function?.name || tool.name,
+        )
+        assert(
+          isDeepStrictEqual(requestedTools, [platformTool.name]),
+          `Environment capability leaked into Provider request: ${JSON.stringify({
+            scenario,
+            requestedTools,
+            providerRequest,
+          })}`,
+        )
+      }
+    } finally {
+      for (const chat of chats.reverse()) {
+        await ignoreCleanupError(() =>
+          ctx.call(
+            'DELETE',
+            `/api/ai/chat/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          ),
+        )
+      }
+      if (agent?.name) {
+        await ignoreCleanupError(() =>
+          ctx.call(
+            'DELETE',
+            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          ),
+        )
+      }
+      if (model?.providerName && model?.name) {
+        await ignoreCleanupError(() =>
+          ctx.call(
+            `DELETE`,
+            `/api/ai/catalog/models?providerName=${encodeURIComponent(model.providerName)}&modelName=${encodeURIComponent(model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+          ),
+        )
+      }
+      if (provider?.name) {
+        await ignoreCleanupError(() =>
+          ctx.call(
+            'DELETE',
+            `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+          ),
+        )
+      }
+      await ignoreCleanupError(() => fakeProvider.close())
+    }
   },
 })
 
@@ -431,7 +559,6 @@ registerCase({
         role: 'system',
         content: 'custom context',
         agentName: missingAgentName,
-        environmentName: 'local',
         yoloEnabled: false,
         clientMessageId: cid(),
         expectedExecutionEpoch: Number(thread.executionEpoch),
@@ -443,7 +570,6 @@ registerCase({
     assert(
       isDeepStrictEqual(payload.turnSettings, {
         agentName: missingAgentName,
-        environmentName: 'local',
         yoloEnabled: false,
       }),
       JSON.stringify(payload),
@@ -547,4 +673,87 @@ registerCase({
 
 function compareModel(left, right) {
   return `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)
+}
+
+async function startUnavailableToolProvider(toolName) {
+  const requests = []
+  let callSequence = 0
+  const server = createServer(async (request, response) => {
+    const body = await readRequestBody(request)
+    if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
+      response.end('not found')
+      return
+    }
+    requests.push(JSON.parse(body))
+    const callId = `e2e-hidden-${++callSequence}`
+    const base = {
+      id: `e2e-chat-${callSequence}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: 'e2e-visibility-model',
+    }
+    const firstChunk = {
+      ...base,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: [
+              {
+                index: 0,
+                id: callId,
+                type: 'function',
+                function: { name: toolName, arguments: '{}' },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    }
+    const terminalChunk = {
+      ...base,
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+    }
+    const payload =
+      `data: ${JSON.stringify(firstChunk)}\n\n`
+      + `data: ${JSON.stringify(terminalChunk)}\n\n`
+      + 'data: [DONE]\n\n'
+    response.writeHead(200, {
+      'Cache-Control': 'no-cache',
+      Connection: 'close',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+    })
+    response.end(payload)
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const address = server.address()
+  assert(address && typeof address === 'object', `fake Provider did not bind: ${address}`)
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    async close() {
+      if (!server.listening) return
+      await new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+    },
+  }
+}
+
+async function readRequestBody(request) {
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function ignoreCleanupError(action) {
+  try {
+    await action()
+  } catch {
+    // Preserve the primary case failure; the matrix uses an isolated E2E database.
+  }
 }

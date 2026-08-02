@@ -68,6 +68,8 @@ export interface HarnessThreadDTO {
   sessionId: string
   sessionTitle: string | null
   headEntryId: string
+  /** Current Thread Environment; null means platform tools only. */
+  environmentName: string | null
   /** CAS fencing token; every external mutation must echo the currently known value. */
   executionEpoch: BackendLong
   /** PostgreSQL durable snapshot cursor, always a decimal bigint string. */
@@ -78,6 +80,10 @@ export interface HarnessThreadDTO {
   processing: boolean
   createTime: BackendDateTime
   updateTime: BackendDateTime
+}
+
+export interface HarnessThreadCreateDTO {
+  environmentName: string | null
 }
 
 export type ThreadListSort = 'recent' | 'created'
@@ -96,7 +102,6 @@ export interface HarnessThreadHeadUpdateDTO extends HarnessThreadEpochGuardDTO {
 export interface HarnessThreadMessageCreateDTO extends HarnessThreadEpochGuardDTO {
   content: string
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   clientMessageId: string
 }
@@ -105,9 +110,12 @@ export interface HarnessThreadCustomMessageCreateDTO extends HarnessThreadEpochG
   role: 'system' | 'user'
   content: string
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   clientMessageId: string
+}
+
+export interface HarnessThreadEnvironmentUpdateDTO extends HarnessThreadEpochGuardDTO {
+  environmentName: string | null
 }
 
 export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO

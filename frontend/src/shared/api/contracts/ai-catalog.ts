@@ -130,6 +130,7 @@ export interface ToolCatalogEntryDTO {
   name: string
   version: string | null
   description: string | null
+  type: 'PLATFORM' | 'ENVIRONMENT'
 }
 
 /** Public global Agent definition; model/variant + config are Thread-runtime inputs. */

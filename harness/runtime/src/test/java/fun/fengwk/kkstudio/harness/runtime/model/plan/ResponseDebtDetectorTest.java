@@ -32,7 +32,7 @@ import java.util.List;
 /** Response debt is a pure semantic-entry calculation and never needs a live resolver. */
 class ResponseDebtDetectorTest {
 
-  private static final TurnSettings SETTINGS = new TurnSettings("agent", "environment", false);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", false);
   private final ResponseDebtDetector detector = new ResponseDebtDetector();
 
   @Test

@@ -4,6 +4,7 @@ import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
   HarnessThreadCustomMessageCreateDTO,
+  HarnessThreadEnvironmentUpdateDTO,
   HarnessThreadPage,
   HarnessThreadHeadUpdateDTO,
   HarnessThreadInputDTO,
@@ -38,6 +39,11 @@ export function createHarnessService(client: HttpClient = apiClient) {
       client.get(`/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`),
     updateThreadHead: (threadId: string, data: HarnessThreadHeadUpdateDTO): Promise<HarnessThreadDTO> =>
       client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/head`, data),
+    updateThreadEnvironment: (
+      threadId: string,
+      data: HarnessThreadEnvironmentUpdateDTO,
+    ): Promise<HarnessThreadDTO> =>
+      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/environment`, data),
     submitThreadMessage: (threadId: string, data: HarnessThreadMessageCreateDTO): Promise<HarnessThreadInputDTO> =>
       client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/messages`, data),
     submitCustomMessage: (

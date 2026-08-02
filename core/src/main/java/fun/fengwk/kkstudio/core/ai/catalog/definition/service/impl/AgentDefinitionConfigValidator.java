@@ -28,10 +28,11 @@ final class AgentDefinitionConfigValidator {
 
   private void validateTools(List<String> names) {
     for (String name : names) {
-      if ("load_skill".equals(name)) {
-        throw new IllegalArgumentException("load_skill is runtime-managed and cannot be selected");
+      if (toolCatalog.findInternal(name).isPresent()) {
+        throw new IllegalArgumentException(
+            "internal platform tool cannot be selected by an Agent: " + name);
       }
-      if (toolCatalog.find(name).isEmpty()) {
+      if (toolCatalog.findSelectable(name).isEmpty()) {
         throw new IllegalArgumentException("unknown agent tool: " + name);
       }
     }

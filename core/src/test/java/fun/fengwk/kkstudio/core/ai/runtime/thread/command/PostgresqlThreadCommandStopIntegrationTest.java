@@ -481,7 +481,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
             new AgentMessage(
                 AgentMessageRole.USER,
                 List.<AgentMessageContent>of(new TextMessageContent(content))),
-            new TurnSettings("agent", null, false),
+            new TurnSettings("agent", false),
             null));
   }
 

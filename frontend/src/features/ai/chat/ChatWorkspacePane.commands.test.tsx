@@ -7,6 +7,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -29,6 +30,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionEntries: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     updateThreadHead: vi.fn(),
+    updateThreadEnvironment: vi.fn(),
     submitThreadMessage: vi.fn(),
     stopThread: vi.fn(),
   },
@@ -47,6 +49,7 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     sessionId: 's1',
     sessionTitle: 'S1',
     headEntryId: 'e-assistant',
+    environmentName: 'local',
     executionEpoch: 5,
     status: 'IDLE',
     inputSequence: 1,
@@ -144,12 +147,10 @@ const agents = [
 function renderBoundPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onAgentChange?: (agentName: string) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
 }) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
-  const onEnvironmentChange = overrides?.onEnvironmentChange ?? vi.fn(async () => undefined)
   const onYoloChange = overrides?.onYoloChange ?? vi.fn(async () => undefined)
   const onSessionSortChange = vi.fn()
   const onThreadSortChange = vi.fn()
@@ -157,7 +158,7 @@ function renderBoundPane(overrides?: {
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
-        chat={{ id: 'chat-1', title: 'C', agentName: 'assistant', environmentName: 'local', yoloEnabled: false, version: '1', createTime: null, updateTime: null }}
+        chat={{ id: 'chat-1', title: 'C', agentName: 'assistant', yoloEnabled: false, version: '1', createTime: null, updateTime: null }}
         agents={agents}
         environments={[
           { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
@@ -173,12 +174,18 @@ function renderBoundPane(overrides?: {
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
         onAgentChange={onAgentChange}
-        onEnvironmentChange={onEnvironmentChange}
         onYoloChange={onYoloChange}
       />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onSessionSortChange, onThreadSortChange, onAgentChange, onEnvironmentChange, onYoloChange }
+  return {
+    queryClient,
+    onThreadChange,
+    onSessionSortChange,
+    onThreadSortChange,
+    onAgentChange,
+    onYoloChange,
+  }
 }
 
 describe('ChatWorkspacePane commands', () => {
@@ -232,6 +239,18 @@ describe('ChatWorkspacePane commands', () => {
       sessionEntries(sessionId),
     )
     vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
+    let environmentEpoch = 5
+    let environmentRevision = 0
+    vi.mocked(harnessService.updateThreadEnvironment).mockImplementation(async (_threadId, data) => {
+      environmentEpoch += 1
+      environmentRevision += 1
+      return {
+        threadId: 't1',
+        environmentName: data.environmentName,
+        executionEpoch: environmentEpoch,
+        revision: String(environmentRevision),
+      } as HarnessThreadDTO
+    })
   })
 
   it('updates the visible Chat Agent without mutating the Thread', async () => {
@@ -257,7 +276,7 @@ describe('ChatWorkspacePane commands', () => {
 
   it('switches Environment through /environment and the footer, offering only READY targets', async () => {
     const user = userEvent.setup()
-    const { onEnvironmentChange } = renderBoundPane()
+    const { queryClient } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -267,20 +286,37 @@ describe('ChatWorkspacePane commands', () => {
     expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'remote' }))
 
-    await waitFor(() => expect(onEnvironmentChange).toHaveBeenCalledWith('remote'))
+    await waitFor(() =>
+      expect(harnessService.updateThreadEnvironment).toHaveBeenCalledWith('t1', {
+        environmentName: 'remote',
+        expectedExecutionEpoch: 5,
+      }),
+    )
+    expect(screen.getByRole('button', { name: '环境：remote' })).toBeInTheDocument()
+    expect(
+      queryClient.getQueryData<ReturnType<typeof snapshot>>(
+        queryKeys.threads.snapshot('t1'),
+      )?.thread.sessionId,
+    ).toBe('s1')
 
-    await user.click(screen.getByRole('button', { name: '环境：local' }))
+    await user.click(screen.getByRole('button', { name: '环境：remote' }))
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '（无）' }))
-    await waitFor(() => expect(onEnvironmentChange).toHaveBeenLastCalledWith(null))
+    await waitFor(() =>
+      expect(harnessService.updateThreadEnvironment).toHaveBeenLastCalledWith('t1', {
+        environmentName: null,
+        expectedExecutionEpoch: 6,
+      }),
+    )
+    expect(screen.getByRole('button', { name: '环境：（无）' })).toBeInTheDocument()
   })
 
   it('keeps the Environment selector open when a bound mutation fails', async () => {
     const user = userEvent.setup()
-    const onEnvironmentChange = vi.fn(async () => {
-      throw new ApiError('thread is not idle', 409)
-    })
-    renderBoundPane({ onEnvironmentChange })
+    vi.mocked(harnessService.updateThreadEnvironment).mockRejectedValueOnce(
+      new ApiError('thread is not idle', 409),
+    )
+    renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -289,6 +325,29 @@ describe('ChatWorkspacePane commands', () => {
 
     await waitFor(() => expect(screen.getByText(/thread is not idle/)).toBeInTheDocument())
     expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
+  })
+
+  it('blocks message submission while the Thread Environment update is pending', async () => {
+    const user = userEvent.setup()
+    let resolveUpdate!: (value: HarnessThreadDTO) => void
+    vi.mocked(harnessService.updateThreadEnvironment).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUpdate = resolve
+      }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    await user.click(screen.getByRole('button', { name: 'remote' }))
+
+    await waitFor(() => expect(composer).toBeDisabled())
+    await user.keyboard('must not submit{Enter}')
+    expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
+
+    resolveUpdate(thread({ environmentName: 'remote', executionEpoch: 6, revision: '1' }))
+    await waitFor(() => expect(composer).not.toBeDisabled())
   })
 
   it('/thread only switches the pane target and never mutates a Thread', async () => {

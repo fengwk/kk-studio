@@ -30,7 +30,10 @@ import { useChatSessionPicker } from '@/features/ai/chat/useChatSessionPicker'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessSessionEntryDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import { isConflictError, isNotFoundError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -47,12 +50,19 @@ function rebindErrorMessage(error: unknown): string {
   return errorMessage(error, translate('ai.runtime.action.rebindFailed'))
 }
 
+function revisionAfter(left: string, right: string): boolean {
+  try {
+    return BigInt(left) > BigInt(right)
+  } catch {
+    return false
+  }
+}
+
 export function BoundThreadPane({
   chatId,
   agents,
   environments = [],
   agentName,
-  environmentName,
   yoloEnabled,
   settingsPending,
   isSettingsMutationLocked = () => false,
@@ -66,7 +76,6 @@ export function BoundThreadPane({
   onSessionSortChange,
   onThreadSortChange,
   onAgentChange,
-  onEnvironmentChange,
   onYoloChange,
   initialReplay,
   onReplayInitialized,
@@ -75,7 +84,6 @@ export function BoundThreadPane({
   agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   settingsPending: boolean
   isSettingsMutationLocked?: () => boolean
@@ -89,7 +97,6 @@ export function BoundThreadPane({
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   onAgentChange: (agentName: string) => Promise<void>
-  onEnvironmentChange: (environmentName: string | null) => Promise<void>
   onYoloChange: (yoloEnabled: boolean) => Promise<void>
   initialReplay?: ThreadMessageReplay
   onReplayInitialized?: () => void
@@ -100,7 +107,7 @@ export function BoundThreadPane({
     threadId,
     initialReplay?.content ?? '',
     initialReplay,
-    { agentName, environmentName, yoloEnabled },
+    { agentName, yoloEnabled },
   )
   const sessionId = controller.sessionId
   const queryClient = useQueryClient()
@@ -167,6 +174,45 @@ export function BoundThreadPane({
       setBranchDraft(branchTarget(entry).draft)
     },
   })
+  const environmentMutation = useMutation({
+    mutationFn: (environmentName: string | null) => {
+      if (!controller.thread) {
+        return Promise.reject(new Error(t('ai.runtime.action.threadNotLoaded')))
+      }
+      if (!canRebindThread(controller.thread)) {
+        return Promise.reject(new Error(t('ai.runtime.action.threadRunning')))
+      }
+      return harnessService.updateThreadEnvironment(threadId, {
+        environmentName,
+        expectedExecutionEpoch: controller.thread.executionEpoch,
+      })
+    },
+    onSuccess: async (updatedThread) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
+      ])
+      queryClient.setQueryData<HarnessThreadSnapshotDTO>(
+        queryKeys.threads.snapshot(threadId),
+        (current) => {
+          if (!current || revisionAfter(current.revision, updatedThread.revision)) {
+            return current
+          }
+          return {
+            ...current,
+            revision: updatedThread.revision,
+            thread: {
+              ...current.thread,
+              ...updatedThread,
+              // Environment updates preserve the head, so its Session projection is unchanged.
+              sessionId: current.thread.sessionId,
+              sessionTitle: current.thread.sessionTitle,
+            },
+          }
+        },
+      )
+    },
+  })
 
   const threadItems = threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))
 
@@ -200,16 +246,25 @@ export function BoundThreadPane({
   }
 
   async function selectEnvironment(environmentName: string | null): Promise<boolean> {
-    if (settingsPending || isSettingsMutationLocked()) {
+    setRebindBlockedReason(null)
+    if (!controller.thread) {
+      setRebindBlockedReason(t('ai.runtime.action.threadNotLoaded'))
       return false
     }
-    setRebindBlockedReason(null)
+    if (!canRebindThread(controller.thread)) {
+      setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
+      return false
+    }
     try {
-      await onEnvironmentChange(environmentName)
+      await environmentMutation.mutateAsync(environmentName)
       setEnvironmentModalOpen(false)
       return true
     } catch (error) {
-      setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
+      setRebindBlockedReason(
+        isConflictError(error)
+          ? rebindErrorMessage(error)
+          : errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')),
+      )
       return false
     }
   }
@@ -252,7 +307,7 @@ export function BoundThreadPane({
         setAgentModalOpen(true)
         return
       case 'environment':
-        setEnvironmentModalOpen(true)
+        openRebindTarget(() => setEnvironmentModalOpen(true))
         return
       case 'yolo':
         void toggleYolo()
@@ -286,11 +341,11 @@ export function BoundThreadPane({
   }
   const composer: ChatPanelComposerInput = {
     draft: controller.draft,
-    pending: controller.pending || settingsPending,
-    disabled: controller.disabled || settingsPending,
+    pending: controller.pending || settingsPending || environmentMutation.isPending,
+    disabled: controller.disabled || settingsPending || environmentMutation.isPending,
     onDraftChange: controller.setDraft,
     onSubmit: () => {
-      if (isSettingsMutationLocked()) {
+      if (isSettingsMutationLocked() || environmentMutation.isPending) {
         return
       }
       void controller.submitMessage()
@@ -311,7 +366,7 @@ export function BoundThreadPane({
     onVariantClick: undefined,
     onEnvironmentClick: () => {
       onFocus()
-      setEnvironmentModalOpen(true)
+      openRebindTarget(() => setEnvironmentModalOpen(true))
     },
   }
   const activity: ChatPanelActivityInput = {
@@ -401,8 +456,8 @@ export function BoundThreadPane({
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentName={environmentName}
-        selectionPending={settingsPending}
+        selectedEnvironmentName={controller.thread?.environmentName ?? null}
+        selectionPending={environmentMutation.isPending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {
           void selectEnvironment(environmentName)

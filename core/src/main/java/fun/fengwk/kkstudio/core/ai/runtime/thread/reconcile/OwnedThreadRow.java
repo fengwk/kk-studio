@@ -10,6 +10,7 @@ public class OwnedThreadRow {
   private long id;
   private long sessionId;
   private long headEntryId;
+  private String environmentName;
   private long inputSequence;
   private boolean runnable;
   private long executionEpoch;

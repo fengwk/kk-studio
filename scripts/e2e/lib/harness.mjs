@@ -38,15 +38,17 @@ function listData(json, description) {
 }
 
 /** Chat-scoped POST atomically creates Session, ROOT, Thread, and association. */
-export async function createChatThread(ctx, chatId) {
+export async function createChatThread(ctx, chatId, { environmentName = null } = {}) {
   const { status, json } = await ctx.call(
     'POST',
     `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
+    { environmentName },
   )
   assert(status === 201, `create Chat thread status ${status}: ${JSON.stringify(json)}`)
   const thread = envelopeData(json)
   threadIdOf(thread)
   executionEpochOf(thread)
+  assert(Object.hasOwn(thread, 'environmentName'), `Thread omitted environmentName: ${JSON.stringify(thread)}`)
   assert(thread.status === 'IDLE', `Chat thread must be bound: ${JSON.stringify(thread)}`)
   assert(
     thread.sessionId && thread.headEntryId,
@@ -59,13 +61,15 @@ export async function createConfiguredChatThread(ctx, options) {
   const { status: chatStatus, json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
     title: options?.title,
     agentName: options?.agentName,
-    environmentName: options?.environmentName ?? null,
     yoloEnabled: Boolean(options?.yoloEnabled),
   })
   assert(chatStatus === 201, `create Chat status ${chatStatus}: ${JSON.stringify(chatJson)}`)
   const chat = envelopeData(chatJson)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  const thread = await createChatThread(ctx, chat.id)
+  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
+  const thread = await createChatThread(ctx, chat.id, {
+    environmentName: options?.threadEnvironmentName ?? null,
+  })
   return {
     chat,
     thread,
@@ -78,6 +82,7 @@ export async function getThread(ctx, threadId) {
   const thread = envelopeData(json)
   threadIdOf(thread)
   executionEpochOf(thread)
+  assert(Object.hasOwn(thread, 'environmentName'), `Thread omitted environmentName: ${JSON.stringify(thread)}`)
   return thread
 }
 
@@ -87,6 +92,10 @@ export async function getThreadSnapshot(ctx, threadId) {
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
   executionEpochOf(snapshot.thread)
+  assert(
+    Object.hasOwn(snapshot.thread, 'environmentName'),
+    `Thread snapshot omitted environmentName: ${JSON.stringify(snapshot)}`,
+  )
   return snapshot
 }
 
@@ -105,6 +114,35 @@ export async function updateThreadHead(ctx, thread, headEntryId) {
   assert(status === 200, `update head status ${status}: ${JSON.stringify(json)}`)
   const updated = envelopeData(json)
   assert(threadIdOf(updated) === threadId, `head update changed thread: ${JSON.stringify(updated)}`)
+  return updated
+}
+
+export async function updateThreadEnvironment(ctx, thread, environmentName) {
+  const threadId = threadIdOf(thread)
+  const expectedExecutionEpoch = executionEpochOf(thread)
+  const { status, json } = await ctx.call(
+    'PUT',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/environment`,
+    {
+      environmentName: environmentName ?? null,
+      expectedExecutionEpoch,
+    },
+  )
+  assert(status === 200, `update environment status ${status}: ${JSON.stringify(json)}`)
+  const updated = envelopeData(json)
+  assert(threadIdOf(updated) === threadId, `environment update changed thread: ${JSON.stringify(updated)}`)
+  assert(
+    Number(updated.executionEpoch) === expectedExecutionEpoch + 1,
+    `environment update must advance epoch: ${JSON.stringify({ thread, updated })}`,
+  )
+  assert(
+    Number(updated.revision) === Number(thread.revision) + 1,
+    `environment update must advance revision: ${JSON.stringify({ thread, updated })}`,
+  )
+  assert(
+    (updated.environmentName ?? null) === (environmentName ?? null),
+    `environment update did not persist binding: ${JSON.stringify({ thread, updated, environmentName })}`,
+  )
   return updated
 }
 

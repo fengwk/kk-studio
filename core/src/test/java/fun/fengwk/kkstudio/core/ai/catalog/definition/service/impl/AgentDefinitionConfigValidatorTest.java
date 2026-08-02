@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -31,7 +33,7 @@ import java.util.Set;
 class AgentDefinitionConfigValidatorTest {
 
   @Test
-  void acceptsStaticEnvironmentToolAndLocalToolNames() {
+  void acceptsEnvironmentAndPlatformToolNames() {
     String envTool = EnvironmentToolCatalog.descriptors().get(0).name();
     try (Fixture fixture = new Fixture(List.of(platformTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
@@ -69,13 +71,15 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void rejectsRuntimeManagedLoadSkillSelection() {
+  void rejectsInternalPlatformToolSelection() {
     try (Fixture fixture = new Fixture(List.of(platformTool("create_goal", "1")))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of("load_skill"));
       config.setSkills(List.of());
 
-      assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
+      IllegalArgumentException error =
+          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
+      assertTrue(error.getMessage().contains("internal platform tool"));
     }
   }
 
@@ -103,6 +107,7 @@ class AgentDefinitionConfigValidatorTest {
     return new ToolDescriptor(
         name,
         version,
+        ToolType.PLATFORM,
         name + " tool",
         name,
         new ToolParamsSchema("", Map.of(), Set.of(), false),
@@ -130,7 +135,10 @@ class AgentDefinitionConfigValidatorTest {
     private final AgentDefinitionConfigValidator validator;
 
     private Fixture(List<Tool> tools) {
-      this.toolFactories = new ToolFactories(tools.stream().map(ToolFactory::singleton).toList());
+      List<Tool> registeredTools = new ArrayList<>(tools);
+      registeredTools.add(platformTool("load_skill", "1"));
+      this.toolFactories =
+          new ToolFactories(registeredTools.stream().map(ToolFactory::singleton).toList());
       this.validator =
           new AgentDefinitionConfigValidator(
               new ToolCatalog(toolFactories.descriptors(), Set.of("load_skill")));

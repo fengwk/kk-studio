@@ -4,7 +4,6 @@ import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import { filterChats } from '@/features/ai/chat/chat-utils'
 import { useChatListController } from '@/features/ai/chat/useChatListController'
 import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
@@ -17,13 +16,8 @@ export function useChatPageController() {
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
   })
-  const environmentsQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
-  })
   const agents = agentsQuery.data?.results ?? []
-  const environments = environmentsQuery.data ?? []
-  const chatController = useChatListController(agents, environments, true)
+  const chatController = useChatListController(agents, true)
   const chats = useMemo(
     () => filterChats(chatController.chats, deferredSearch),
     [chatController.chats, deferredSearch],
@@ -40,8 +34,8 @@ export function useChatPageController() {
   return {
     search,
     setSearch,
-    busy: agentsQuery.isLoading || environmentsQuery.isLoading || chatController.chatsQuery.isLoading,
-    error: agentsQuery.error ?? environmentsQuery.error ?? chatController.chatsQuery.error ?? null,
+    busy: agentsQuery.isLoading || chatController.chatsQuery.isLoading,
+    error: agentsQuery.error ?? chatController.chatsQuery.error ?? null,
     mutationError,
     chatPanelProps: {
       chats,

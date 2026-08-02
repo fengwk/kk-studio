@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.runtime.session.support.HarnessIds;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadQueryService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
@@ -45,9 +46,10 @@ public class ChatThreadServiceImpl implements ChatThreadService {
 
   @Override
   @Transactional
-  public HarnessThreadDTO createThread(String chatId) {
+  public HarnessThreadDTO createThread(String chatId, HarnessThreadCreateDTO dto) {
     Chat chat = chatGuard.requireChat(chatId);
-    HarnessThreadDTO created = threadCommandService.createThread(chat.getTitle());
+    String environmentName = dto == null ? null : dto.getEnvironmentName();
+    HarnessThreadDTO created = threadCommandService.createThread(chat.getTitle(), environmentName);
     long threadId = HarnessIds.parsePositive(created.getThreadId(), "threadId");
     if (!chatThreadRepository.associate(chat.getId(), threadId)) {
       throw new IllegalStateException("new Thread association was not inserted: " + threadId);

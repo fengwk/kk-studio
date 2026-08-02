@@ -4,7 +4,10 @@
 
 ## 职责与边界
 
-Environment 是**服务器内存**中的实时资源，按非空 `environmentName` 唯一。它保存当前 READY Daemon 连接、固定十个工具的目录、Daemon READY 上报的 skills 与 lastSeen 时间戳。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
+产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，按非空
+`environmentName` 唯一。它保存当前 READY Daemon 连接、固定十个 Environment Tool 的目录、Daemon
+READY 上报的 skills 与 lastSeen 时间戳。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket
+连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
 
 | 层 | 职责 |
 | --- | --- |
@@ -66,11 +69,13 @@ GET /api/ai/environment
 
 返回 `name` / `status` / `lastSeen` / `tools` / `skills`。无 create/update/delete API。
 
-Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。runtime-managed 的 `load_skill` 是本地 Tool；它只读取当前 ModelInvocationRequest 中冻结的 selected skill metadata，再向对应 Environment 请求正文。
+Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。`load_skill` 是内部 `PLATFORM` Tool，不出现在
+Agent 可选择目录中；Runtime 随 Skill binding 隐式注入它。它读取当前
+ModelInvocationRequest 中冻结的 selected skill metadata，再向对应 Environment 请求正文。
 
 ## Invocation 分发
 
-`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 只通过 `TOOL_INVOCATION` durable target 分发指定 Invocation；`PostgresqlExecutionTargetDispatcher` 仅在该 Environment 位于当前 READY snapshot 时领取 due route head。READY event 只调用 dispatcher wake，使其重新读取 route eligibility 与 durable FIFO target。非空目标经 `RemoteTool` 与 Gateway transport 分发，空目标由本地 ToolRegistry 执行。发送前发现 Environment unavailable 时，worker 将 Invocation 终结为 `FAILED`；发送结果不确定时终结为 `UNKNOWN`，不得重放可能已经发生的副作用。
+`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 只通过 `TOOL_INVOCATION` durable target 分发指定 Invocation；`PostgresqlExecutionTargetDispatcher` 仅在该 Environment 位于当前 READY snapshot 时领取 due route head。READY event 只调用 dispatcher wake，使其重新读取 route eligibility 与 durable FIFO target。`PLATFORM` binding 由本地 ToolRegistry 执行，`ENVIRONMENT` binding 经 `RemoteTool` 与 Gateway transport 分发到冻结 Environment。发送前发现 Environment unavailable 时，worker 将 Invocation 终结为 `FAILED`；发送结果不确定时终结为 `UNKNOWN`，不得重放可能已经发生的副作用。
 
 ```mermaid
 sequenceDiagram

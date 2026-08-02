@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadCommandSe
 import fun.fengwk.kkstudio.core.ai.runtime.thread.service.HarnessThreadQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
@@ -92,6 +93,14 @@ public class StudioHarnessThreadController {
       @PathVariable String threadId, @RequestBody HarnessThreadHeadUpdateDTO request) {
     return Results.ok(
         withMissingResourceTranslation(() -> commandService.updateHead(threadId, request)));
+  }
+
+  /** 在 Thread 静止期间以 expectedExecutionEpoch CAS 更新当前 Environment。 */
+  @PutMapping("/{threadId}/environment")
+  public Result<HarnessThreadDTO> updateEnvironment(
+      @PathVariable String threadId, @RequestBody HarnessThreadEnvironmentUpdateDTO request) {
+    return Results.ok(
+        withMissingResourceTranslation(() -> commandService.updateEnvironment(threadId, request)));
   }
 
   /** 将用户消息异步入队；202 仅表示消息已接受，不代表模型已完成。 */

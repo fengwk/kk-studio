@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,7 +29,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
   @Autowired private ObjectMapper objectMapper;
 
   @Test
-  void createsBoundThreadAcceptsNameReferenceTurnsAndOmitsActiveConfiguration() throws Exception {
+  void createsBoundThreadAndAcceptsNameReferenceTurns() throws Exception {
     JsonNode chat = createChat("thread-http");
     String chatId = chat.path("id").asText();
 
@@ -40,10 +42,7 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
               .andExpect(jsonPath("$.data.status").value("IDLE"))
               .andExpect(jsonPath("$.data.sessionId").isString())
               .andExpect(jsonPath("$.data.headEntryId").isString())
-              .andExpect(jsonPath("$.data.activeAgentName").doesNotExist())
-              .andExpect(jsonPath("$.data.activeEnvironmentName").doesNotExist())
-              .andExpect(jsonPath("$.data.modelId").doesNotExist())
-              .andExpect(jsonPath("$.data.yoloEnabled").doesNotExist())
+              .andExpect(jsonPath("$.data.environmentName").value(nullValue()))
               .andReturn();
       JsonNode thread = data(created);
       String threadId = thread.path("threadId").asText();
@@ -60,7 +59,6 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
                           {
                             "content": "hello",
                             "agentName": "default-assistant",
-                            "environmentName": "web-environment",
                             "yoloEnabled": true,
                             "clientMessageId": "user-1",
                             "expectedExecutionEpoch": 0
@@ -151,15 +149,13 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
           .perform(get("/api/ai/runtime/threads/{threadId}", threadId))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.sessionId").value(thread.path("sessionId").asText()))
-          .andExpect(jsonPath("$.data.activeAgentName").doesNotExist())
-          .andExpect(jsonPath("$.data.activeEnvironmentName").doesNotExist());
+          .andExpect(jsonPath("$.data.environmentName").value(nullValue()));
 
       mockMvc
           .perform(get("/api/ai/runtime/threads/{threadId}/snapshot", threadId))
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.inputs.length()").value(2))
-          .andExpect(jsonPath("$.data.thread.activeAgentName").doesNotExist())
-          .andExpect(jsonPath("$.data.thread.modelId").doesNotExist());
+          .andExpect(jsonPath("$.data.thread.environmentName").value(nullValue()));
 
       mockMvc
           .perform(
@@ -169,6 +165,54 @@ class StudioHarnessThreadControllerTest extends WebPostgresTestSupport {
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.executionEpoch").value("1"))
           .andExpect(jsonPath("$.data.cancelledInputs.length()").value(2));
+    } finally {
+      mockMvc
+          .perform(delete("/api/ai/chat/{chatId}", chatId).param("expectedVersion", "0"))
+          .andExpect(status().isNoContent());
+    }
+  }
+
+  @Test
+  void createsAndFencedUpdatesThreadEnvironment() throws Exception {
+    JsonNode chat = createChat("thread-environment-http");
+    String chatId = chat.path("id").asText();
+
+    try {
+      JsonNode thread =
+          data(
+              mockMvc
+                  .perform(
+                      post("/api/ai/chat/{chatId}/threads", chatId)
+                          .contentType(MediaType.APPLICATION_JSON)
+                          .content("{\"environmentName\":\"local\"}"))
+                  .andExpect(status().isCreated())
+                  .andExpect(jsonPath("$.data.environmentName").value("local"))
+                  .andExpect(jsonPath("$.data.executionEpoch").value("0"))
+                  .andReturn());
+      String threadId = thread.path("threadId").asText();
+
+      mockMvc
+          .perform(
+              put("/api/ai/runtime/threads/{threadId}/environment", threadId)
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{\"environmentName\":null,\"expectedExecutionEpoch\":0}"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.environmentName").value(nullValue()))
+          .andExpect(jsonPath("$.data.executionEpoch").value("1"))
+          .andExpect(jsonPath("$.data.revision").value("1"));
+
+      mockMvc
+          .perform(
+              put("/api/ai/runtime/threads/{threadId}/environment", threadId)
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{\"environmentName\":\"remote\",\"expectedExecutionEpoch\":0}"))
+          .andExpect(status().isConflict());
+
+      mockMvc
+          .perform(get("/api/ai/runtime/threads/{threadId}", threadId))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data.environmentName").value(nullValue()))
+          .andExpect(jsonPath("$.data.executionEpoch").value("1"));
     } finally {
       mockMvc
           .perform(delete("/api/ai/chat/{chatId}", chatId).param("expectedVersion", "0"))

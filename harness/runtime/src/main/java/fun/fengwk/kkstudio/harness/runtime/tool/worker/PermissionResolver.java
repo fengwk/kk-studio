@@ -162,7 +162,8 @@ final class PermissionResolver {
     }
     // Route stability: the permission boundary must not silently move an active target across
     // ENVIRONMENT routes. PLATFORM (null route) is preserved. Descriptor/arguments may change.
-    if (!Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
+    if (decision.binding().type() != binding.type()
+        || !Objects.equals(decision.binding().environmentName(), binding.environmentName())) {
       return terminalFailure(
           claimed,
           new ToolInvocationError(
@@ -255,16 +256,15 @@ final class PermissionResolver {
    * routes remotely, even when a local registry contains a same-named descriptor.
    */
   Optional<Tool> resolveTool(ToolBinding binding) {
-    if (binding.environmentName() != null) {
-      return Optional.of(
+    return switch (binding.type()) {
+      case ENVIRONMENT -> Optional.of(
           new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport));
-    }
-    Optional<Tool> local =
-        registry.find(binding.descriptor().name(), binding.descriptor().version());
-    if (local.isPresent() && descriptorMatches(binding, local.get())) {
-      return local;
-    }
-    return Optional.empty();
+      case PLATFORM -> {
+        Optional<Tool> local =
+            registry.find(binding.descriptor().name(), binding.descriptor().version());
+        yield local.filter(tool -> descriptorMatches(binding, tool));
+      }
+    };
   }
 
   /**
@@ -298,7 +298,8 @@ final class PermissionResolver {
   }
 
   private static ToolBinding bindingFor(ToolInvocation invocation) {
-    return ToolBinding.of(invocation.descriptor(), invocation.environmentName());
+    return ToolBinding.of(
+        invocation.descriptor(), invocation.descriptor().type(), invocation.environmentName());
   }
 
   private static boolean descriptorMatches(ToolBinding binding, Tool tool) {

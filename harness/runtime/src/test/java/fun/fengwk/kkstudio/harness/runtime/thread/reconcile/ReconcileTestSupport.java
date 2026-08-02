@@ -45,7 +45,7 @@ public final class ReconcileTestSupport {
 
   static HarnessThread thread(long threadId, long epoch, String token, long headEntryId) {
     Lease lease = new Lease(token, NOW.plusSeconds(60));
-    return new HarnessThread(threadId, headEntryId, 0L, true, epoch, 0L, lease, NOW, NOW);
+    return new HarnessThread(threadId, headEntryId, null, 0L, true, epoch, 0L, lease, NOW, NOW);
   }
 
   static ThreadOwnership ownership(long threadId, long epoch, String token) {
@@ -53,7 +53,7 @@ public final class ReconcileTestSupport {
   }
 
   static ThreadInput input(long threadId, long sequence, ThreadInputType type) {
-    TurnSettings settings = new TurnSettings("agent-" + threadId, "environment", false);
+    TurnSettings settings = new TurnSettings("agent-" + threadId, false);
     ThreadInputPayload payload =
         switch (type) {
           case USER_MESSAGE -> new RuntimeEntryInputPayload(
