@@ -65,12 +65,6 @@ final class AgentModelReferenceResolver {
     }
   }
 
-  void ensureNameAvailable(String providerName, String currentName, String nextName) {
-    if (!currentName.equals(nextName)) {
-      ensureNameAvailable(providerName, nextName);
-    }
-  }
-
   void ensureDeletable(String providerName, String name) {
     if (agentModelRepository.hasAgents(providerName, name)) {
       throw new AiInUseException(

@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.core.ai.runtime.usage.service.ModelUsageAggregationService;
@@ -27,9 +28,11 @@ public class StudioModelUsageController {
         aggregationService.summarizeSession(parsePositiveLong(sessionId, "sessionId")));
   }
 
-  @GetMapping("/models/{modelRef}")
-  public Result<ModelUsageSummaryDTO> summarizeModel(@PathVariable("modelRef") String modelRef) {
-    return Results.ok(aggregationService.summarizeModel(ModelRef.parse(modelRef)));
+  @GetMapping("/models")
+  public Result<ModelUsageSummaryDTO> summarizeModel(
+      @RequestParam("providerName") String providerName,
+      @RequestParam("modelName") String modelName) {
+    return Results.ok(aggregationService.summarizeModel(new ModelRef(providerName, modelName)));
   }
 
   private static long parsePositiveLong(String raw, String name) {

@@ -180,14 +180,13 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     requireNonBlank(idempotencyKey, "idempotencyKey");
     Instant persistedNow = persistenceInstant(now);
     ThreadCommandRow thread = lockThread(threadId);
-    requireEpoch(thread, expectedExecutionEpoch);
-    if (!payload.type().isMessage() || !(payload instanceof RuntimeEntryInputPayload)) {
-      throw new IllegalArgumentException("thread input payload must be a USER/CUSTOM message");
-    }
-
     ThreadCommandRow existing = mapper.findInputByKeyForUpdate(threadId, idempotencyKey);
     if (existing != null) {
       return new EnqueueResult(toInput(existing));
+    }
+    requireEpoch(thread, expectedExecutionEpoch);
+    if (!payload.type().isMessage() || !(payload instanceof RuntimeEntryInputPayload)) {
+      throw new IllegalArgumentException("thread input payload must be a USER/CUSTOM message");
     }
 
     long sequence = Math.addExact(thread.getInputSequence(), 1);

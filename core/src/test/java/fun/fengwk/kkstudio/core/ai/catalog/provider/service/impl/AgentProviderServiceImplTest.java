@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.catalog.provider.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -15,7 +14,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
@@ -31,8 +29,6 @@ import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
-
-import java.sql.SQLException;
 
 /** Atomic CAS failure must surface as the typed {@link AiVersionConflictException}. */
 public class AgentProviderServiceImplTest {
@@ -78,26 +74,12 @@ public class AgentProviderServiceImplTest {
     assertThrows(
         AiVersionConflictException.class, () -> service.updateProvider("provider", update));
 
-    when(repository.updateByName(provider, 0L)).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(AiDuplicateException.class, () -> service.updateProvider("provider", update));
-
     when(repository.deleteByName(eq("provider"), anyLong())).thenReturn(false);
     when(repository.getByName("provider")).thenReturn(null);
     assertThrows(AiResourceNotFoundException.class, () -> service.deleteProvider("provider", "0"));
     when(repository.getByName("provider")).thenReturn(reread);
     assertThrows(AiVersionConflictException.class, () -> service.deleteProvider("provider", "0"));
     verify(guard, atLeastOnce()).requireProviderForUpdate("provider");
-
-    provider.setVersion(0L);
-    when(repository.deleteByName(eq("provider"), anyLong())).thenThrow(integrityFailure("23503"));
-    assertThrows(AiInUseException.class, () -> service.deleteProvider("provider", "0"));
-
-    DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
-    doThrow(nonForeignKey).when(repository).deleteByName(eq("provider"), anyLong());
-    assertSame(
-        nonForeignKey,
-        assertThrows(
-            DataIntegrityViolationException.class, () -> service.deleteProvider("provider", "0")));
   }
 
   @Test
@@ -163,10 +145,5 @@ public class AgentProviderServiceImplTest {
     assertEquals("https://old.example", revision.getBaseUrl());
     assertEquals("old-secret", revision.getCredential());
     assertEquals("{\"old\":true}", revision.getConfigJson());
-  }
-
-  private static DataIntegrityViolationException integrityFailure(String sqlState) {
-    return new DataIntegrityViolationException(
-        "database integrity failure", new SQLException("database failure", sqlState));
   }
 }

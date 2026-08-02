@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
@@ -18,4 +19,9 @@ public class AgentProviderEditablePropertiesDTO {
 
   private Long modelCallTimeoutMillis;
   private Long modelCallIdleTimeoutMillis;
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("unknown Agent Provider field: " + name);
+  }
 }

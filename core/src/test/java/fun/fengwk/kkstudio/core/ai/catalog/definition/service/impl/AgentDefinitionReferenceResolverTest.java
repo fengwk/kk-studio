@@ -28,6 +28,5 @@ public class AgentDefinitionReferenceResolverTest {
 
     when(definitions.getByName("duplicate")).thenReturn(new AgentDefinition());
     assertThrows(AiDuplicateException.class, () -> resolver.ensureNameAvailable("duplicate"));
-    resolver.ensureNameAvailable("same", "same");
   }
 }
