@@ -55,6 +55,7 @@ export function BoundThreadPane({
   environmentName,
   yoloEnabled,
   settingsPending,
+  isSettingsMutationLocked = () => false,
   paneId,
   threadId,
   focused,
@@ -77,6 +78,7 @@ export function BoundThreadPane({
   environmentName: string | null
   yoloEnabled: boolean
   settingsPending: boolean
+  isSettingsMutationLocked?: () => boolean
   paneId: string
   threadId: string
   focused: boolean
@@ -185,7 +187,7 @@ export function BoundThreadPane({
   }
 
   async function selectAgent(selectedAgentName: string) {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return
     }
     setRebindBlockedReason(null)
@@ -198,7 +200,7 @@ export function BoundThreadPane({
   }
 
   async function selectEnvironment(environmentName: string | null): Promise<boolean> {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return false
     }
     setRebindBlockedReason(null)
@@ -213,7 +215,7 @@ export function BoundThreadPane({
   }
 
   async function toggleYolo() {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return
     }
     setRebindBlockedReason(null)
@@ -288,6 +290,9 @@ export function BoundThreadPane({
     disabled: controller.disabled || settingsPending,
     onDraftChange: controller.setDraft,
     onSubmit: () => {
+      if (isSettingsMutationLocked()) {
+        return
+      }
       void controller.submitMessage()
     },
     onCommand: handleCommand,

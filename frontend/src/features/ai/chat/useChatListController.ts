@@ -6,7 +6,8 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { chatService } from '@/shared/api/chat-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { mergeChatList } from '@/features/ai/chat/chat-utils'
 import { useI18n } from '@/shared/i18n'
 
 function resolveChatAgentName(
@@ -30,6 +31,7 @@ export function useChatListController(
 ) {
   const navigate = useNavigate()
   const { t } = useI18n()
+  const queryClient = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
   const [selectedAgentName, setSelectedAgentName] = useState('')
   const [selectedEnvironmentName, setSelectedEnvironmentName] = useState('')
@@ -39,7 +41,11 @@ export function useChatListController(
 
   const chatsQuery = useQuery({
     queryKey: queryKeys.chats.list,
-    queryFn: () => chatService.listChats(),
+    queryFn: async () => {
+      const incoming = await chatService.listChats()
+      const current = queryClient.getQueryData<ChatDTO[]>(queryKeys.chats.list)
+      return mergeChatList(current, incoming)
+    },
     enabled,
   })
 

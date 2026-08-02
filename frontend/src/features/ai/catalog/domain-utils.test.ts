@@ -16,6 +16,7 @@ import {
 } from '@/shared/lib/search-utils'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import {
   emptyAgentDraft,
   emptyModelDraft,
@@ -339,13 +340,40 @@ describe('AI domain utilities', () => {
     expect(
       filterChats(
         [
-           { id: '2', title: 'beta', agentName: 'missing', environmentName: null, version: '1', createTime: '2026-06-21T00:00:00', updateTime: '2026-06-21T00:00:00' },
-           { id: '1', title: 'alpha', agentName: 'missing', environmentName: null, version: '1', createTime: '2026-06-22T00:00:00', updateTime: '2026-06-20T00:00:00' },
+          {
+            id: '2',
+            title: 'beta',
+            agentName: 'missing',
+            environmentName: null,
+            yoloEnabled: false,
+            version: '1',
+            createTime: '2026-06-21T00:00:00',
+            updateTime: '2026-06-21T00:00:00',
+          } satisfies ChatDTO,
+          {
+            id: '1',
+            title: 'alpha',
+            agentName: 'missing',
+            environmentName: null,
+            yoloEnabled: false,
+            version: '1',
+            createTime: '2026-06-22T00:00:00',
+            updateTime: '2026-06-20T00:00:00',
+          } satisfies ChatDTO,
         ],
         '',
       ).map((item) => item.title),
     ).toEqual(['alpha', 'beta'])
-      expect(filterChats([{ id: '1', title: 'alpha', agentName: 'missing', environmentName: null, version: '1', createTime: null, updateTime: null }], 'alp')).toHaveLength(1)
+      expect(filterChats([{
+        id: '1',
+        title: 'alpha',
+        agentName: 'missing',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '1',
+        createTime: null,
+        updateTime: null,
+      } satisfies ChatDTO], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
     expect(includesSearch('MiniMax', '')).toBe(true)

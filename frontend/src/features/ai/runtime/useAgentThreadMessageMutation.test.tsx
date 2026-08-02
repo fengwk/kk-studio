@@ -13,6 +13,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     submitThreadMessage: vi.fn(),
+    submitCustomMessage: vi.fn(),
   },
 }))
 
@@ -26,6 +27,7 @@ function wrapper({ children }: { children: ReactNode }) {
 describe('useAgentThreadMessageMutation', () => {
   beforeEach(() => {
     vi.mocked(harnessService.submitThreadMessage).mockReset()
+    vi.mocked(harnessService.submitCustomMessage).mockReset()
   })
 
   it('submits with a stable clientMessageId and invalidates thread data on success', async () => {
@@ -43,6 +45,9 @@ describe('useAgentThreadMessageMutation', () => {
     await act(async () => {
       await result.current.mutateAsync({
         content: 'hello',
+        agentName: 'assistant',
+        environmentName: null,
+        yoloEnabled: false,
         clientMessageId: 'cid-1',
         expectedExecutionEpoch: 2,
       })
@@ -51,6 +56,9 @@ describe('useAgentThreadMessageMutation', () => {
     // The caller-supplied epoch is forwarded verbatim as the CAS fencing token.
     expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t1', {
       content: 'hello',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 2,
     })
@@ -67,21 +75,70 @@ describe('useAgentThreadMessageMutation', () => {
     const clientMessageId = createClientMessageId()
     await act(async () => {
       await expect(
-        result.current.mutateAsync({ content: 'retry', clientMessageId, expectedExecutionEpoch: 5 }),
+        result.current.mutateAsync({
+          content: 'retry',
+          agentName: 'assistant',
+          environmentName: null,
+          yoloEnabled: false,
+          clientMessageId,
+          expectedExecutionEpoch: 5,
+        }),
       ).rejects.toThrow('network')
     })
     await act(async () => {
-      await result.current.mutateAsync({ content: 'retry', clientMessageId, expectedExecutionEpoch: 5 })
+      await result.current.mutateAsync({
+        content: 'retry',
+        agentName: 'assistant',
+        environmentName: null,
+        yoloEnabled: false,
+        clientMessageId,
+        expectedExecutionEpoch: 5,
+      })
     })
 
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(1, 't1', {
       content: 'retry',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
       clientMessageId,
       expectedExecutionEpoch: 5,
     })
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(2, 't1', {
       content: 'retry',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
       clientMessageId,
+      expectedExecutionEpoch: 5,
+    })
+  })
+
+  it('uses the custom-message endpoint and preserves the semantic role', async () => {
+    vi.mocked(harnessService.submitCustomMessage).mockResolvedValue(input('custom-1', 'system prompt'))
+
+    const { result } = renderHook(() => useAgentThreadMessageMutation('t1'), { wrapper })
+    await act(async () => {
+      await result.current.mutateAsync({
+        kind: 'CUSTOM_MESSAGE',
+        role: 'system',
+        content: 'system prompt',
+        agentName: 'assistant',
+        environmentName: 'local',
+        yoloEnabled: true,
+        firstSendContext: null,
+        clientMessageId: 'cid-custom',
+        expectedExecutionEpoch: 5,
+      })
+    })
+
+    expect(harnessService.submitCustomMessage).toHaveBeenCalledWith('t1', {
+      role: 'system',
+      content: 'system prompt',
+      agentName: 'assistant',
+      environmentName: 'local',
+      yoloEnabled: true,
+      clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 5,
     })
   })

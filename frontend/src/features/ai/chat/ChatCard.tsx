@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ChevronRight, MessageSquare } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
@@ -18,7 +19,19 @@ export function ChatCard({
   const agent = chat.agentName
     ? agents.find((item) => item.name === chat.agentName)
     : undefined
-  const agentLabel = agent?.name || chat.agentName || t('ai.chat.missingAgent')
+  const staleAgent = Boolean(chat.agentName) && !agent
+  const agentLabel = staleAgent ? (
+    <span
+      className="chat-card-agent-unavailable"
+      aria-disabled="true"
+      aria-label={`${chat.agentName} ${t('ai.chat.missingAgent')}`}
+    >
+      <span>{chat.agentName}</span>
+      <span className="chat-card-agent-unavailable-label">{t('ai.chat.missingAgent')}</span>
+    </span>
+  ) : (
+    agent?.name || chat.agentName || t('ai.chat.missingAgent')
+  )
 
   return (
     <article className="info-card">
@@ -52,7 +65,7 @@ export function ChatCard({
   )
 }
 
-function MetaRow({ label, value }: { label: string; value: string }) {
+function MetaRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="meta-row">
       <span className="lbl">{label}</span>

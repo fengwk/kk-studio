@@ -690,6 +690,18 @@ textarea::placeholder {
   font-variant-numeric: tabular-nums;
 }
 
+.chat-card-agent-unavailable {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.chat-card-agent-unavailable-label {
+  color: var(--danger);
+  font-size: 11px;
+}
+
 .meta-row .val.is-wrap {
   white-space: normal;
   display: -webkit-box;

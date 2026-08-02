@@ -19,6 +19,7 @@ vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
     submitThreadMessage: vi.fn(),
+    submitCustomMessage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     stopThread: vi.fn(),
   },
@@ -119,6 +120,17 @@ describe('useAgentThreadController', () => {
       resolvedAt: null,
       createTime: null,
     })
+    vi.mocked(harnessService.submitCustomMessage).mockResolvedValue({
+      inputId: 'custom-i1',
+      threadId: '1',
+      sequence: 1,
+      inputType: 'CUSTOM_MESSAGE',
+      payloadJson: '{}',
+      clientMessageId: 'cid',
+      status: 'QUEUED',
+      resolvedAt: null,
+      createTime: null,
+    })
     vi.mocked(harnessService.stopThread).mockResolvedValue({ executionEpoch: 8, cancelledInputs: [] })
   })
 
@@ -187,6 +199,16 @@ describe('useAgentThreadController', () => {
         useAgentThreadController('1', 'retry me', {
           content: 'retry me',
           clientMessageId: 'cid-first-send',
+          kind: 'USER_MESSAGE',
+          role: 'user',
+          agentName: 'assistant',
+          environmentName: null,
+          yoloEnabled: false,
+          firstSendContext: { chatId: 'chat-1' },
+        }, {
+          agentName: 'assistant',
+          environmentName: null,
+          yoloEnabled: false,
         }),
       { wrapper },
     )
@@ -217,6 +239,69 @@ describe('useAgentThreadController', () => {
         clientMessageId: 'cid-first-send',
       }),
     )
+  })
+
+  it('retries an identical CUSTOM_MESSAGE with the same id and role', async () => {
+    vi.mocked(harnessService.submitCustomMessage)
+      .mockRejectedValueOnce(new Error('custom response lost'))
+      .mockResolvedValueOnce({
+        inputId: 'custom-retry',
+        threadId: '1',
+        sequence: 2,
+        inputType: 'CUSTOM_MESSAGE',
+        payloadJson: '{}',
+        clientMessageId: 'cid-custom',
+        status: 'QUEUED',
+        resolvedAt: null,
+        createTime: null,
+      })
+
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          '1',
+          'system instruction',
+          {
+            kind: 'CUSTOM_MESSAGE',
+            role: 'system',
+            content: 'system instruction',
+            agentName: 'assistant',
+            environmentName: null,
+            yoloEnabled: false,
+            firstSendContext: null,
+            clientMessageId: 'cid-custom',
+          },
+          { agentName: 'assistant', environmentName: null, yoloEnabled: false },
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    expect(harnessService.submitCustomMessage).toHaveBeenNthCalledWith(1, '1', {
+      role: 'system',
+      content: 'system instruction',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
+      clientMessageId: 'cid-custom',
+      expectedExecutionEpoch: 7,
+    })
+    expect(harnessService.submitCustomMessage).toHaveBeenNthCalledWith(2, '1', {
+      role: 'system',
+      content: 'system instruction',
+      agentName: 'assistant',
+      environmentName: null,
+      yoloEnabled: false,
+      clientMessageId: 'cid-custom',
+      expectedExecutionEpoch: 7,
+    })
   })
 
   it('allows concurrent submits with distinct clientMessageIds and tracks pending across overlap', async () => {
@@ -481,6 +566,67 @@ describe('useAgentThreadController', () => {
     })
     expect(harnessService.submitThreadMessage).toHaveBeenCalledTimes(3)
     expect(vi.mocked(harnessService.submitThreadMessage).mock.calls[2][1].clientMessageId).not.toBe(firstId)
+  })
+
+  it('mints a new id and sends visible settings when a failed retry settings change', async () => {
+    vi.mocked(harnessService.submitThreadMessage)
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({
+        inputId: 'i2',
+        threadId: '1',
+        sequence: 2,
+        inputType: 'USER_MESSAGE',
+        payloadJson: '{}',
+        clientMessageId: 'retry-with-new-settings',
+        status: 'QUEUED',
+        resolvedAt: null,
+        createTime: null,
+      })
+
+    const { result, rerender } = renderHook(
+      ({ environmentName, yoloEnabled }) =>
+        useAgentThreadController(
+          '1',
+          'retry me',
+          {
+            content: 'retry me',
+            clientMessageId: 'cid-original',
+            kind: 'USER_MESSAGE',
+            role: 'user',
+            agentName: 'assistant',
+            environmentName: null,
+            yoloEnabled: false,
+            firstSendContext: { chatId: 'chat-1' },
+          },
+          { agentName: 'assistant', environmentName, yoloEnabled },
+        ),
+      {
+        initialProps: { environmentName: null as string | null, yoloEnabled: false },
+        wrapper,
+      },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    const originalId = vi.mocked(harnessService.submitThreadMessage).mock.calls[0][1].clientMessageId
+    expect(originalId).toBe('cid-original')
+    expect(result.current.draft).toBe('retry me')
+
+    rerender({ environmentName: 'local', yoloEnabled: true })
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    const changedCall = vi.mocked(harnessService.submitThreadMessage).mock.calls[1][1]
+    expect(changedCall.clientMessageId).not.toBe(originalId)
+    expect(changedCall).toMatchObject({
+      content: 'retry me',
+      agentName: 'assistant',
+      environmentName: 'local',
+      yoloEnabled: true,
+    })
   })
 
   it('resolves footer model labels from agent catalog without unknown-model', async () => {

@@ -2,7 +2,74 @@ import { includesSearch } from '@/shared/lib/search-utils'
 import type {
   ChatDTO,
 } from '@/shared/api/contracts/ai-chat'
-import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
+import type {
+  BackendDateTime,
+  CatalogVersion,
+  InstantTimestamp,
+} from '@/shared/api/contracts/base'
+
+function catalogVersionValue(version: CatalogVersion): bigint {
+  try {
+    return BigInt(version)
+  } catch {
+    return 0n
+  }
+}
+
+export function compareCatalogVersions(
+  left: CatalogVersion,
+  right: CatalogVersion,
+): number {
+  const delta = catalogVersionValue(left) - catalogVersionValue(right)
+  if (delta < 0n) {
+    return -1
+  }
+  if (delta > 0n) {
+    return 1
+  }
+  return 0
+}
+
+export function preferNewerChat(
+  current: ChatDTO | undefined,
+  incoming: ChatDTO,
+): ChatDTO {
+  if (!current || compareCatalogVersions(current.version, incoming.version) <= 0) {
+    return incoming
+  }
+  return current
+}
+
+/** Merge a server list response without allowing an older Chat version to regress the cache. */
+export function mergeChatList(
+  current: ChatDTO[] | undefined,
+  incoming: ChatDTO[],
+): ChatDTO[] {
+  if (!current) {
+    return incoming
+  }
+  const currentById = new Map(current.map((chat) => [chat.id, chat]))
+  return incoming.map((chat) => preferNewerChat(currentById.get(chat.id), chat))
+}
+
+/** Apply an authoritative Chat response to an already loaded list cache. */
+export function mergeChatIntoList(
+  current: ChatDTO[] | undefined,
+  incoming: ChatDTO,
+): ChatDTO[] | undefined {
+  if (!current) {
+    return current
+  }
+  let found = false
+  const merged = current.map((chat) => {
+    if (chat.id !== incoming.id) {
+      return chat
+    }
+    found = true
+    return preferNewerChat(chat, incoming)
+  })
+  return found ? merged : [...merged, incoming]
+}
 
 function backendTimeValue(value: BackendDateTime | unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) {

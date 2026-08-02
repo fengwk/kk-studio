@@ -15,6 +15,13 @@ export {
 } from '@/features/ai/runtime/ChatPanel'
 export { createClientMessageId } from '@/features/ai/runtime/useAgentThreadMessageMutation'
 export {
-  useAgentThreadController,
+  sameThreadMessagePayload,
+  type ThreadMessageFirstSendContext,
+  type ThreadMessageKind,
+  type ThreadMessagePayload,
   type ThreadMessageReplay,
+  type ThreadMessageRole,
+} from '@/features/ai/runtime/thread-message-retry'
+export {
+  useAgentThreadController,
 } from '@/features/ai/runtime/useAgentThreadController'

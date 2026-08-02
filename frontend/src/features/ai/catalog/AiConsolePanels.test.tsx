@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/ai/catalog/AiConsolePanels'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 
 const baseConfig = {
   limit: { context: 128000, output: 8192 },
@@ -54,10 +55,11 @@ describe('AiConsolePanels', () => {
               title: 'One',
               agentName: 'missing',
               environmentName: null,
+              yoloEnabled: false,
               version: '1',
               createTime: null,
               updateTime: null,
-            },
+            } satisfies ChatDTO,
           ]}
           agents={[]}
           onCreate={onCreate}

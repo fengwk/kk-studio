@@ -81,6 +81,7 @@ export function BlankComposerPane({
   environmentName,
   yoloEnabled,
   settingsPending,
+  isSettingsMutationLocked = () => false,
   onAgentChange,
   onEnvironmentChange = async () => undefined,
   onYoloChange = async () => undefined,
@@ -98,6 +99,7 @@ export function BlankComposerPane({
   environmentName: string | null
   yoloEnabled: boolean
   settingsPending: boolean
+  isSettingsMutationLocked?: () => boolean
   onAgentChange: (agentName: string) => Promise<void>
   onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
@@ -161,7 +163,13 @@ export function BlankComposerPane({
 
   async function handleSubmit() {
     const content = draft.trim()
-    if (!content || content.startsWith('/') || pending || settingsPending) {
+    if (
+      !content
+      || content.startsWith('/')
+      || pending
+      || settingsPending
+      || isSettingsMutationLocked()
+    ) {
       return
     }
     onFocus()
@@ -216,7 +224,7 @@ export function BlankComposerPane({
   }
 
   async function handleAgentSelected(selectedAgentName: string) {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return
     }
     const content = pendingContent?.trim()
@@ -236,7 +244,7 @@ export function BlankComposerPane({
   }
 
   async function handleEnvironmentSelected(environmentName: string | null) {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return
     }
     setActionError(null)
@@ -249,7 +257,7 @@ export function BlankComposerPane({
   }
 
   async function toggleYolo() {
-    if (settingsPending) {
+    if (settingsPending || isSettingsMutationLocked()) {
       return
     }
     setActionError(null)

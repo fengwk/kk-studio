@@ -140,6 +140,12 @@ describe('performBlankPaneFirstSend', () => {
         threadId: 't-replay',
         content: 'retry me',
         clientMessageId: 'cid-replay',
+        kind: 'USER_MESSAGE',
+        role: 'user',
+        agentName: 'assistant',
+        environmentName: null,
+        yoloEnabled: false,
+        firstSendContext: { chatId: 'chat-1' },
       },
       thread: {
         threadId: 't-replay',
