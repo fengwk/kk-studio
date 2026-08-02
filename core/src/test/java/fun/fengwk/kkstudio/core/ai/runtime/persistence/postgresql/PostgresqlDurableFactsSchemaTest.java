@@ -203,7 +203,7 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into harness_model_usage (session_id, thread_id, assistant_entry_id,"
-                + " provider_resource_id, model_resource_id, provider_type, provider_model_id,"
+                + " provider_name, model_name, provider_type,"
                 + " prompt_cache_mode, prompt_cache_retention, cache_eligible, stop_reason,"
                 + " usage_input_tokens, usage_output_tokens, usage_cache_read_tokens,"
                 + " usage_cache_write_tokens, usage_cache_write_long_tokens,"
@@ -215,7 +215,7 @@ class PostgresqlDurableFactsSchemaTest extends PostgresSchemaSupport {
                 + " pricing_cache_write_per_million_tokens,"
                 + " pricing_cache_write_long_per_million_tokens,"
                 + " pricing_reasoning_per_million_tokens, raw_usage, created_at) values"
-                + " (?, ?, ?, 1, 1, 'openai', 'stub-model', 'NONE', 'NONE', false, 'STOP',"
+                + " (?, ?, ?, 'provider', 'stub-model', 'openai', 'NONE', 'NONE', false, 'STOP',"
                 + " 0, 0, 0, 0, 0, 0, 0, 'USD', 'test', 'default', 1, 'v1', 0, 0, 0, 0, 0, 0,"
                 + " '{}'::jsonb, current_timestamp)")) {
       ps.setLong(1, sessionId);

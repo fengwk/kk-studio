@@ -28,7 +28,7 @@ class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
 
   @BeforeEach
   void clean() {
-    // Session/main-thread FK is DEFERRABLE; bootstrap must commit in one transaction.
+    // The Session/Thread setup uses a deferrable FK and must commit in one transaction.
     transactionTemplate.executeWithoutResult(
         status -> {
           jdbc.update("delete from harness_thread_goal");

@@ -19,9 +19,7 @@ class CoreHarnessArchitectureTest {
   private static final String CORE = "fun.fengwk.kkstudio.core.ai.";
 
   private static final List<String> COMMAND_BOUNDARY_FORBIDDEN_IMPORTS =
-      List.of(
-          HARNESS_RUNTIME + "configuration." + "RuntimeConfigSource",
-          HARNESS_RUNTIME + "thread." + "ThreadCommandTransactions");
+      List.of(HARNESS_RUNTIME + "thread." + "ThreadCommandTransactions");
 
   private static final List<String> INTERACTION_BOUNDARY_FORBIDDEN_IMPORTS =
       List.of(HARNESS_RUNTIME + "interaction." + "InteractionTransactions");

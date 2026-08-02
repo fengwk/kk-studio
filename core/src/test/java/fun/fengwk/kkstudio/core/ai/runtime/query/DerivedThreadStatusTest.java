@@ -11,7 +11,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.function.Consumer;
 
-/** 派生状态规则：RUNNING &gt; WAITING &gt; RUNNABLE &gt; UNBOUND &gt; IDLE。 */
+/** 派生状态规则：RUNNING &gt; WAITING &gt; RUNNABLE &gt; IDLE。 */
 class DerivedThreadStatusTest {
 
   private static final Instant NOW = Instant.parse("2026-07-24T12:00:00Z");
@@ -60,34 +60,6 @@ class DerivedThreadStatusTest {
     assertEquals(DerivedThreadStatus.IDLE, DerivedThreadStatus.derive(row, NOW));
     assertFalse(
         DerivedThreadStatus.isProcessing(row.getProcessorToken(), row.getProcessorUntil(), NOW));
-  }
-
-  /** 一个静止且尚未绑定 head Entry 的 Thread 是 UNBOUND，而不是 IDLE。 */
-  @Test
-  void unboundWhenQuiescentWithoutHeadEntry() {
-    HarnessQueryRow row = base();
-    row.setHeadEntryId(null);
-    assertEquals(DerivedThreadStatus.UNBOUND, DerivedThreadStatus.derive(row, NOW));
-  }
-
-  /** 执行事实优先于 UNBOUND：即使 head 为空，仍在跑的代际必须显示为真实执行状态。 */
-  @Test
-  void executionFactsOutrankUnbound() {
-    HarnessQueryRow running = base();
-    running.setHeadEntryId(null);
-    running.setProcessorToken("tok");
-    running.setProcessorUntil(OffsetDateTime.ofInstant(NOW.plusSeconds(30), ZoneOffset.UTC));
-    assertEquals(DerivedThreadStatus.RUNNING, DerivedThreadStatus.derive(running, NOW));
-
-    HarnessQueryRow waiting = base();
-    waiting.setHeadEntryId(null);
-    waiting.setHasOpenInteraction(true);
-    assertEquals(DerivedThreadStatus.WAITING, DerivedThreadStatus.derive(waiting, NOW));
-
-    HarnessQueryRow runnable = base();
-    runnable.setHeadEntryId(null);
-    runnable.setRunnable(true);
-    assertEquals(DerivedThreadStatus.RUNNABLE, DerivedThreadStatus.derive(runnable, NOW));
   }
 
   /** 默认基线是一个已绑定 head Entry 的 Thread。 */

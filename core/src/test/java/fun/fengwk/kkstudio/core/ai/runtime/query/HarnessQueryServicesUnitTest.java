@@ -96,19 +96,6 @@ class HarnessQueryServicesUnitTest {
   }
 
   @Test
-  void unboundThreadIsVisible() {
-    HarnessQueryRow unbound = thread(31L, null, null, false, false);
-    when(queryMapper.findThreadView(31L)).thenReturn(unbound);
-    when(queryMapper.listThreadViews(null, "recent", null, null, 21)).thenReturn(List.of(unbound));
-
-    HarnessThreadDTO dto = threadQuery.getThread("31");
-    assertEquals("UNBOUND", dto.getStatus());
-    assertNull(dto.getSessionId());
-    assertNull(dto.getHeadEntryId());
-    assertEquals(1, threadQuery.listAll("recent", null, 20).getItems().size());
-  }
-
-  @Test
   void observabilityProjectsModelInteractionsAndRejectsUnknownInputs() {
     when(queryMapper.findThreadView(21L)).thenReturn(thread(21L, 1L, 10L, false, false));
     ModelInvocationDO model = new ModelInvocationDO();

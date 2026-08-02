@@ -1,47 +1,43 @@
 package fun.fengwk.kkstudio.core.ai.runtime.thread.command;
 
-import fun.fengwk.kkstudio.harness.runtime.configuration.RuntimeConfigSnapshot;
+import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.newConnection;
+
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandTransactions;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 
-/**
- * Bootstrap helper for final-schema tests: Threads are created UNBOUND and only become usable after
- * an explicit bootstrap that creates the Session/ROOT/RUNTIME_CONFIG bundle and binds the head.
- */
+/** Test helper for the atomic Session + ROOT + bound Thread command. */
 public final class TestThreads {
+
   private TestThreads() {}
 
-  /** UNBOUND Thread + freshly bootstrapped Session bundle, with the post-bootstrap epoch. */
-  public record Bootstrapped(
-      long threadId,
-      long executionEpoch,
-      long sessionId,
-      long rootEntryId,
-      long configEntryId,
-      HarnessThread thread) {}
+  public record Created(
+      long threadId, long executionEpoch, long sessionId, long rootEntryId, HarnessThread thread) {}
 
-  public static Bootstrapped bootstrap(
-      ThreadCommandTransactions transactions, String title, Instant now) {
-    return bootstrap(transactions, title, TestRuntimeConfigs.bootstrap(), now);
+  public static Created create(ThreadCommandTransactions transactions, String title, Instant now) {
+    HarnessThread thread = transactions.createThread(title, now);
+    long sessionId = sessionId(thread.headEntryId());
+    return new Created(
+        thread.id(), thread.executionEpoch(), sessionId, thread.headEntryId(), thread);
   }
 
-  public static Bootstrapped bootstrap(
-      ThreadCommandTransactions transactions,
-      String title,
-      RuntimeConfigSnapshot initialConfig,
-      Instant now) {
-    HarnessThread unbound = transactions.createThread(now);
-    ThreadCommandTransactions.BootstrapResult result =
-        transactions.bootstrapThread(
-            unbound.id(), unbound.executionEpoch(), title, initialConfig, now);
-    return new Bootstrapped(
-        result.thread().id(),
-        result.thread().executionEpoch(),
-        result.session().id(),
-        result.rootEntry().id(),
-        result.configEntry().id(),
-        result.thread());
+  private static long sessionId(long rootEntryId) {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select session_id from harness_entry where id = ?")) {
+      statement.setLong(1, rootEntryId);
+      try (var result = statement.executeQuery()) {
+        if (!result.next()) {
+          throw new AssertionError("created Thread root entry is missing: " + rootEntryId);
+        }
+        return result.getLong(1);
+      }
+    } catch (SQLException exception) {
+      throw new AssertionError("cannot read created Thread session", exception);
+    }
   }
 }

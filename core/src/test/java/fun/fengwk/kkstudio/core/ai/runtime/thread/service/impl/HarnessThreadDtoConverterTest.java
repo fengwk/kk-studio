@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.ai.runtime.thread.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,37 +9,48 @@ import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Set;
 
-/** Verifies nullable head and durable execution state projection at the Core DTO boundary. */
+/** Verifies the bound Thread projection and its stateless query shape. */
 class HarnessThreadDtoConverterTest {
 
   private static final Instant CREATED_AT = Instant.parse("2026-07-24T00:00:00Z");
   private static final Instant UPDATED_AT = Instant.parse("2026-07-24T00:00:01Z");
 
-  /**
-   * The three non-processing states are derived only from runnable and nullable head durable facts.
-   */
   @Test
-  void projectsUnboundIdleAndRunnableStates() {
+  void projectsBoundIdleAndRunnableStates() {
     HarnessThreadDtoConverter converter = new HarnessThreadDtoConverter();
 
-    HarnessThreadDTO unbound =
-        converter.convert(
-            new HarnessThread(1L, null, 2L, false, 3L, 0L, null, CREATED_AT, UPDATED_AT));
     HarnessThreadDTO idle =
         converter.convert(
-            new HarnessThread(2L, 10L, 4L, false, 5L, 0L, null, CREATED_AT, UPDATED_AT));
+            new HarnessThread(1L, 10L, 0L, false, 0L, 0L, null, CREATED_AT, UPDATED_AT));
     HarnessThreadDTO runnable =
         converter.convert(
-            new HarnessThread(3L, 11L, 6L, true, 7L, 0L, null, CREATED_AT, UPDATED_AT));
+            new HarnessThread(2L, 11L, 3L, true, 1L, 4L, null, CREATED_AT, UPDATED_AT));
 
-    assertEquals("UNBOUND", unbound.getStatus());
-    assertNull(unbound.getHeadEntryId());
-    assertEquals(3L, unbound.getExecutionEpoch());
-    assertFalse(unbound.getProcessing());
     assertEquals("IDLE", idle.getStatus());
     assertEquals("10", idle.getHeadEntryId());
+    assertEquals("0", idle.getRevision());
     assertEquals("RUNNABLE", runnable.getStatus());
     assertEquals("11", runnable.getHeadEntryId());
+    assertEquals(3L, runnable.getInputSequence());
+  }
+
+  @Test
+  void queryProjectionContainsNoActiveRuntimeConfigurationFields() {
+    Set<String> obsoleteFields =
+        Set.of(
+            "activeAgentDefinitionId",
+            "activeAgentName",
+            "activeEnvironmentName",
+            "modelId",
+            "variant",
+            "yoloEnabled");
+
+    assertFalse(
+        Arrays.stream(HarnessThreadDTO.class.getDeclaredFields())
+            .map(field -> field.getName())
+            .anyMatch(obsoleteFields::contains));
   }
 }

@@ -37,6 +37,8 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("web-chat");
     create.setAgentName("default-assistant");
+    create.setEnvironmentName("web-environment");
+    create.setYoloEnabled(true);
 
     MvcResult createResult =
         mockMvc
@@ -48,6 +50,8 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.title").value("web-chat"))
             .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
+            .andExpect(jsonPath("$.data.environmentName").value("web-environment"))
+            .andExpect(jsonPath("$.data.yoloEnabled").value(true))
             .andExpect(jsonPath("$.data.version").value("0"))
             .andReturn();
 
@@ -126,7 +130,7 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  public void shouldCreateAssociateAndPageChatThreads() throws Exception {
+  public void shouldCreateAndPageChatThreadsByChatNameReferences() throws Exception {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("thread-picker-chat");
     create.setAgentName("default-assistant");
@@ -149,25 +153,17 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
               .andExpect(status().isCreated())
               .andExpect(jsonPath("$.data.threadId").isString())
               .andExpect(jsonPath("$.data.status").value("IDLE"))
-              .andExpect(jsonPath("$.data.executionEpoch").value("1"))
+              .andExpect(jsonPath("$.data.executionEpoch").value("0"))
               .andReturn();
       String scopedThreadId = data(scopedCreate).path("threadId").asText();
 
-      MvcResult globalCreate =
+      MvcResult secondCreate =
           mockMvc
-              .perform(post("/api/ai/runtime/threads"))
+              .perform(post("/api/ai/chat/{chatId}/threads", chatId))
               .andExpect(status().isCreated())
               .andExpect(jsonPath("$.data.threadId").isString())
               .andReturn();
-      String globalThreadId = data(globalCreate).path("threadId").asText();
-
-      mockMvc
-          .perform(put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, globalThreadId))
-          .andExpect(status().isNoContent());
-      // The relation endpoint is idempotent.
-      mockMvc
-          .perform(put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, globalThreadId))
-          .andExpect(status().isNoContent());
+      String secondThreadId = data(secondCreate).path("threadId").asText();
 
       mockMvc
           .perform(
@@ -177,21 +173,24 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
           .andExpect(status().isOk())
           .andExpect(jsonPath("$.data.items").isArray())
           .andExpect(jsonPath("$.data.items[?(@.threadId=='" + scopedThreadId + "')]").exists())
-          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + globalThreadId + "')]").exists())
+          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + secondThreadId + "')]").exists())
           .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
 
-      MvcResult firstGlobalPage =
+      MvcResult firstPage =
           mockMvc
-              .perform(get("/api/ai/runtime/threads").param("sort", "recent").param("limit", "1"))
+              .perform(
+                  get("/api/ai/chat/{chatId}/threads", chatId)
+                      .param("sort", "recent")
+                      .param("limit", "1"))
               .andExpect(status().isOk())
               .andExpect(jsonPath("$.data.items").isArray())
               .andExpect(jsonPath("$.data.items.length()").value(1))
               .andExpect(jsonPath("$.data.nextCursor").isString())
               .andReturn();
-      String nextCursor = data(firstGlobalPage).path("nextCursor").asText();
+      String nextCursor = data(firstPage).path("nextCursor").asText();
       mockMvc
           .perform(
-              get("/api/ai/runtime/threads")
+              get("/api/ai/chat/{chatId}/threads", chatId)
                   .param("sort", "recent")
                   .param("cursor", nextCursor)
                   .param("limit", "1"))

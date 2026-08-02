@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecord;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageRecordStore;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageCostSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelUsageSummaryDTO;
 
@@ -137,14 +138,15 @@ class ModelUsageAggregationServiceImplTest {
     when(queryMapper.loadPath(44L, 410L)).thenReturn(List.of(pathEntry(44L, 410L)));
     when(recordStore.listBySessionId(44L)).thenReturn(List.of());
     when(recordStore.listBySessionId(42L)).thenReturn(List.of());
-    when(recordStore.listByModelResourceId(43L)).thenReturn(List.of());
+    when(recordStore.listByModel("provider", "model")).thenReturn(List.of());
 
     assertEmpty(service.summarizeThread(41L), "thread", "41");
     assertEmpty(service.summarizeSession(42L), "session", "42");
-    assertEmpty(service.summarizeModel(43L), "model", "43");
+    assertEmpty(
+        service.summarizeModel(new ModelRef("provider", "model")), "model", "provider/model");
     verify(recordStore).listBySessionId(44L);
     verify(recordStore).listBySessionId(42L);
-    verify(recordStore).listByModelResourceId(43L);
+    verify(recordStore).listByModel("provider", "model");
   }
 
   /** Thread 用量必须来自真实 head 路径，不接受孤立账本伪装成 Thread 摘要。 */
@@ -228,10 +230,9 @@ class ModelUsageAggregationServiceImplTest {
       ModelUsage usage) {
     ModelPricing pricing = pricing(currency);
     return new ModelUsageDraft(
-        1L,
-        2L,
-        ProviderType.OPENAI,
+        "provider",
         "model",
+        ProviderType.OPENAI,
         mode,
         retention,
         eligible,

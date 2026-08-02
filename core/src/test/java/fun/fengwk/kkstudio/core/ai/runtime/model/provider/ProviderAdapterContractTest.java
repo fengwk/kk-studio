@@ -632,10 +632,9 @@ class ProviderAdapterContractTest {
         new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), reasoningEffort);
     ModelDescriptor model =
         new ModelDescriptor(
-            1L,
-            2L,
-            modelType,
+            "provider",
             "MiniMax-M2.7",
+            modelType,
             true,
             true,
             new ModelPricing(

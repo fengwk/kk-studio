@@ -10,13 +10,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
 /**
- * Maps runtime {@link Session} aggregates created as part of Thread bootstrap to the {@link
- * HarnessSessionDTO} returned by the bootstrap endpoint.
+ * Maps runtime {@link Session} aggregates created with a Thread to the {@link HarnessSessionDTO}
+ * returned by the Session API.
  */
 @Component
 public class HarnessSessionDtoConverter {
 
-  /** Runtime Session → bootstrap response DTO 投影。 */
+  /** Runtime Session → response DTO 投影。 */
   public HarnessSessionDTO convert(Session source) {
     if (source == null) {
       return null;

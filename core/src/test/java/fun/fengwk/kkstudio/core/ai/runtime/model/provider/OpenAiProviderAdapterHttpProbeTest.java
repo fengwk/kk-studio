@@ -146,10 +146,9 @@ class OpenAiProviderAdapterHttpProbeTest {
         new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), null);
     ModelDescriptor model =
         new ModelDescriptor(
-            1L,
-            2L,
-            ProviderType.OPENAI,
+            "provider",
             "MiniMax-M2.7",
+            ProviderType.OPENAI,
             true,
             true,
             new ModelPricing(

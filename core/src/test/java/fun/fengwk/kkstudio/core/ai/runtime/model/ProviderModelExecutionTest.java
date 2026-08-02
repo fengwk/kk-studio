@@ -465,10 +465,9 @@ class ProviderModelExecutionTest {
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     ModelDescriptor descriptor =
         new ModelDescriptor(
-            22L,
-            11L,
-            ProviderType.OPENAI,
+            "provider",
             "frozen-model",
+            ProviderType.OPENAI,
             true,
             false,
             new ModelPricing(

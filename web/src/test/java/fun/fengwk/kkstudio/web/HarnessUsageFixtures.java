@@ -40,10 +40,9 @@ public final class HarnessUsageFixtures {
             new BigDecimal("4.500000000000"),
             new BigDecimal("5.600000000000"));
     return new ModelUsageDraft(
-        101L,
-        202L,
-        ProviderType.ANTHROPIC,
+        "fixture-provider",
         "claude-fixture",
+        ProviderType.ANTHROPIC,
         PromptCacheMode.BREAKPOINTS,
         PromptCacheRetention.LONG,
         true,
