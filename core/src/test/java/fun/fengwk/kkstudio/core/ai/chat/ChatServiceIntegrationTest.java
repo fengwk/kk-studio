@@ -101,8 +101,18 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
+
+      ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
+      staleAgentUpdate.setTitle("still editable");
+      staleAgentUpdate.setEnvironmentName(null);
+      staleAgentUpdate.setYoloEnabled(false);
+      staleAgentUpdate.setExpectedVersion("1");
+      ChatDTO updatedWithStaleAgent = chatService.updateChat(chatId, staleAgentUpdate);
+      assertEquals("default-assistant", updatedWithStaleAgent.getAgentName());
+      assertEquals("still editable", updatedWithStaleAgent.getTitle());
+      assertEquals(false, updatedWithStaleAgent.isYoloEnabled());
     } finally {
-      chatService.deleteChat(chatId, "1");
+      chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
       assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
     }
   }

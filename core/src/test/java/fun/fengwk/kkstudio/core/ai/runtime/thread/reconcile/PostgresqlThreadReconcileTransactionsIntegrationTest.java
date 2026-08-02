@@ -2,14 +2,20 @@ package fun.fengwk.kkstudio.core.ai.runtime.thread.reconcile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotSerializeTransactionException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.ai.runtime.thread.command.TestThreads;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
@@ -22,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelInvocationRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.ResolvedTurnExecution;
@@ -41,14 +46,21 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ApplyOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ModelCreationOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileTransactions;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** PostgreSQL regression for resolver-driven planning and typed failure persistence. */
 class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSpringTestSupport {
@@ -62,10 +74,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   @Autowired private ThreadCommandTransactions commands;
   @Autowired private ThreadReconcileTransactions transactions;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private PlatformTransactionManager transactionManager;
   @MockitoBean private TurnExecutionResolver executionResolver;
 
   @Test
-  void resolvesTurnSettingsAndFreezesTheSuccessfulRequest() {
+  void creationTransactionResolvesAndFreezesTheLatestDefinitions() {
     TurnSettings settings = new TurnSettings("agent-a", "environment-a", true);
     ResolvedTurnExecution first = execution("provider-a", "model-a", true);
     ResolvedTurnExecution later = execution("provider-b", "model-b", false);
@@ -75,29 +88,23 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     Prepared prepared = prepareUserTurn(settings);
     ThreadReconcileSnapshot snapshot =
         transactions.loadOwnedSnapshot(prepared.ownership(), NOW).orElseThrow();
-    CreateModelInvocation create =
-        assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
-    ModelInvocationPlan plan = create.plan();
-    assertEquals(first.model(), plan.request().providerRequest().model());
-    assertEquals(first.variant(), plan.request().providerRequest().variant());
-    assertTrue(plan.request().yoloEnabled());
-
-    ModelCreationOutcome.Created created =
-        assertInstanceOf(
-            ModelCreationOutcome.Created.class,
-            transactions.createModelInvocationAndRelease(
-                prepared.ownership(), plan, NOW.plusSeconds(1)));
+    assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
 
     when(executionResolver.resolve(settings))
         .thenReturn(new TurnExecutionResolver.Resolution.Resolved(later));
+    ModelCreationOutcome.Created created =
+        assertInstanceOf(
+            ModelCreationOutcome.Created.class,
+            transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
+
     String requestJson =
         jdbc.queryForObject(
             "select request::text from harness_model_invocation where id = ?",
             String.class,
             created.target().id());
-    assertEquals(first.model(), REQUEST_CODEC.decode(requestJson).providerRequest().model());
-    assertEquals(first.variant(), REQUEST_CODEC.decode(requestJson).providerRequest().variant());
-    assertTrue(REQUEST_CODEC.decode(requestJson).yoloEnabled());
+    assertEquals(later.model(), REQUEST_CODEC.decode(requestJson).providerRequest().model());
+    assertEquals(later.variant(), REQUEST_CODEC.decode(requestJson).providerRequest().variant());
+    assertTrue(!REQUEST_CODEC.decode(requestJson).yoloEnabled());
     verify(executionResolver).resolve(settings);
   }
 
@@ -112,14 +119,11 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
     Prepared prepared = prepareUserTurn(settings);
     ThreadReconcileSnapshot snapshot =
         transactions.loadOwnedSnapshot(prepared.ownership(), NOW).orElseThrow();
-    ApplyPlanningFailure apply =
-        assertInstanceOf(ApplyPlanningFailure.class, snapshot.primaryWork().orElseThrow());
-    assertEquals(failure, apply.failure());
+    assertInstanceOf(CreateModelInvocation.class, snapshot.primaryWork().orElseThrow());
 
-    assertEquals(
-        ApplyOutcome.PROGRESSED,
-        transactions.applyPlanningFailure(
-            prepared.ownership(), apply.failure(), NOW.plusSeconds(1)));
+    assertInstanceOf(
+        ModelCreationOutcome.PlanningFailureApplied.class,
+        transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
     assertEquals(
         0L,
         jdbc.queryForObject(
@@ -144,6 +148,187 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
                     headEntryId)));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.error().kind());
     assertTrue(error.error().message().contains("AGENT_NOT_FOUND"));
+  }
+
+  @Test
+  void creationTransactionResolvesCatalogReadsFromOneDatabaseSnapshot() {
+    String providerName = "snapshot-provider";
+    jdbc.update(
+        """
+        insert into agent_provider (name, provider_type, description, config)
+        values (?, 'openai', 'before', '{}'::jsonb)
+        """,
+        providerName);
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    List<String> observedDescriptions = new CopyOnWriteArrayList<>();
+    when(executionResolver.resolve(settings))
+        .thenAnswer(
+            ignored -> {
+              observedDescriptions.add(providerDescription(providerName));
+              CompletableFuture.runAsync(
+                      () ->
+                          jdbc.update(
+                              "update agent_provider set description = 'after' where name = ?",
+                              providerName))
+                  .join();
+              observedDescriptions.add(providerDescription(providerName));
+              return new TurnExecutionResolver.Resolution.Resolved(
+                  execution(providerName, "model-a", false));
+            });
+
+    Prepared prepared = prepareUserTurn(settings);
+    assertInstanceOf(
+        ModelCreationOutcome.Created.class,
+        transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
+
+    assertEquals(List.of("before", "before"), observedDescriptions);
+    assertEquals("after", providerDescription(providerName));
+  }
+
+  @Test
+  void creationReturnsLostOwnershipAfterRelease() {
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    when(executionResolver.resolve(settings))
+        .thenReturn(
+            new TurnExecutionResolver.Resolution.Resolved(
+                execution("provider-a", "model-a", false)));
+    Prepared prepared = prepareUserTurn(settings);
+    assertInstanceOf(
+        ModelCreationOutcome.Created.class,
+        transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
+
+    assertInstanceOf(
+        ModelCreationOutcome.LostOwnership.class,
+        transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(2)));
+
+    verify(executionResolver).resolve(settings);
+  }
+
+  @Test
+  void creationRejectsMissingResponseDebt() {
+    Prepared prepared = prepareUserTurn(new TurnSettings("agent-a", null, false));
+    Long rootEntryId =
+        jdbc.queryForObject(
+            "select id from harness_entry where session_id = "
+                + "(select session_id from harness_thread where id = ?) "
+                + "and parent_entry_id is null",
+            Long.class,
+            prepared.threadId());
+    jdbc.update(
+        "update harness_thread set head_entry_id = ? where id = ?",
+        rootEntryId,
+        prepared.threadId());
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                transactions.createModelInvocationAndRelease(
+                    prepared.ownership(), NOW.plusSeconds(1)));
+
+    assertTrue(failure.getMessage().contains("response debt disappeared"));
+    verifyNoInteractions(executionResolver);
+  }
+
+  @Test
+  void creationRetriesAfterConcurrentThreadUpdateInvalidatesItsFirstSnapshot() throws Exception {
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    when(executionResolver.resolve(settings))
+        .thenReturn(
+            new TurnExecutionResolver.Resolution.Resolved(
+                execution("provider-a", "model-a", false)));
+    Prepared prepared = prepareUserTurn(settings);
+    TransactionTemplate concurrentCommand = new TransactionTemplate(transactionManager);
+    CountDownLatch rowUpdated = new CountDownLatch(1);
+    CountDownLatch releaseCommand = new CountDownLatch(1);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<?> command =
+          executor.submit(
+              () ->
+                  concurrentCommand.executeWithoutResult(
+                      ignored -> {
+                        jdbc.queryForObject(
+                            "select id from harness_thread where id = ? for no key update",
+                            Long.class,
+                            prepared.threadId());
+                        jdbc.update(
+                            "update harness_thread set revision = revision + 1 where id = ?",
+                            prepared.threadId());
+                        rowUpdated.countDown();
+                        await(releaseCommand);
+                      }));
+      assertTrue(rowUpdated.await(5, TimeUnit.SECONDS));
+
+      Future<ModelCreationOutcome> creation =
+          executor.submit(
+              () ->
+                  transactions.createModelInvocationAndRelease(
+                      prepared.ownership(), NOW.plusSeconds(1)));
+      assertTrue(awaitCreationThreadLock());
+      releaseCommand.countDown();
+
+      assertInstanceOf(ModelCreationOutcome.Created.class, creation.get(10, TimeUnit.SECONDS));
+      command.get(10, TimeUnit.SECONDS);
+      verify(executionResolver).resolve(settings);
+    } finally {
+      releaseCommand.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void creationRetriesSqlStateSerializationFailureFromCauseChain() {
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    when(executionResolver.resolve(settings))
+        .thenThrow(new RuntimeException(new SQLException("serialization failure", "40001")))
+        .thenReturn(
+            new TurnExecutionResolver.Resolution.Resolved(
+                execution("provider-a", "model-a", false)));
+    Prepared prepared = prepareUserTurn(settings);
+
+    assertInstanceOf(
+        ModelCreationOutcome.Created.class,
+        transactions.createModelInvocationAndRelease(prepared.ownership(), NOW.plusSeconds(1)));
+
+    verify(executionResolver, times(2)).resolve(settings);
+  }
+
+  @Test
+  void creationStopsAfterSerializationRetryLimit() {
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    CannotSerializeTransactionException failure =
+        new CannotSerializeTransactionException("serialization failure");
+    when(executionResolver.resolve(settings)).thenThrow(failure);
+    Prepared prepared = prepareUserTurn(settings);
+
+    assertEquals(
+        failure,
+        assertThrows(
+            CannotSerializeTransactionException.class,
+            () ->
+                transactions.createModelInvocationAndRelease(
+                    prepared.ownership(), NOW.plusSeconds(1))));
+
+    verify(executionResolver, times(3)).resolve(settings);
+  }
+
+  @Test
+  void creationDoesNotRetryNonSerializationFailure() {
+    TurnSettings settings = new TurnSettings("agent-a", null, false);
+    IllegalStateException failure = new IllegalStateException("resolver failure");
+    when(executionResolver.resolve(settings)).thenThrow(failure);
+    Prepared prepared = prepareUserTurn(settings);
+
+    assertEquals(
+        failure,
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                transactions.createModelInvocationAndRelease(
+                    prepared.ownership(), NOW.plusSeconds(1))));
+
+    verify(executionResolver).resolve(settings);
   }
 
   private Prepared prepareUserTurn(TurnSettings settings) {
@@ -210,6 +395,44 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
   private String entryType(long entryId) {
     return jdbc.queryForObject(
         "select entry_type from harness_entry where id = ?", String.class, entryId);
+  }
+
+  private String providerDescription(String providerName) {
+    return jdbc.queryForObject(
+        "select description from agent_provider where name = ?", String.class, providerName);
+  }
+
+  private boolean awaitCreationThreadLock() throws InterruptedException {
+    for (int attempt = 0; attempt < 100; attempt++) {
+      Integer waiting =
+          jdbc.queryForObject(
+              """
+              select count(*)::int
+              from pg_stat_activity
+              where datname = current_database()
+                and pid <> pg_backend_pid()
+                and wait_event_type = 'Lock'
+                and lower(query) like '%for no key update of t%'
+              """,
+              Integer.class);
+      if (waiting != null && waiting > 0) {
+        return true;
+      }
+      Thread.sleep(25);
+    }
+    return false;
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(10, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for concurrent transaction");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(
+          "interrupted while waiting for concurrent transaction", error);
+    }
   }
 
   private record Prepared(long threadId, ThreadOwnership ownership) {}

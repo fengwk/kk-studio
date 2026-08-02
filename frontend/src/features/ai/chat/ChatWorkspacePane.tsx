@@ -21,6 +21,7 @@ export function ChatWorkspacePane({
   agents,
   environments = [],
   pane,
+  settingsPending = false,
   focused,
   sessionSort,
   threadSort,
@@ -36,6 +37,7 @@ export function ChatWorkspacePane({
   agents: AgentDefinitionDTO[]
   environments?: LiveEnvironmentDTO[]
   pane: ChatPane
+  settingsPending?: boolean
   focused: boolean
   sessionSort: PaneSortPreference
   threadSort: PaneSortPreference
@@ -70,6 +72,7 @@ export function ChatWorkspacePane({
         agentName={chat?.agentName ?? ''}
         environmentName={chat?.environmentName ?? null}
         yoloEnabled={chat?.yoloEnabled ?? false}
+        settingsPending={settingsPending}
         paneId={pane.id}
         threadId={pane.threadId}
         focused={focused}
@@ -105,6 +108,7 @@ export function ChatWorkspacePane({
       agentName={chat?.agentName ?? ''}
       environmentName={chat?.environmentName ?? null}
       yoloEnabled={chat?.yoloEnabled ?? false}
+      settingsPending={settingsPending}
       onAgentChange={onAgentChange}
       onEnvironmentChange={onEnvironmentChange}
       onYoloChange={onYoloChange}

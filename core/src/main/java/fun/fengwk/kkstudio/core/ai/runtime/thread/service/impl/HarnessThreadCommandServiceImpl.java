@@ -61,6 +61,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
+    var existing = coordinator.findExistingInput(id, createDTO.getClientMessageId());
+    if (existing.isPresent()) {
+      return converter.convert(existing.orElseThrow().input());
+    }
     return converter.convert(
         coordinator
             .submitUserMessage(
@@ -81,6 +85,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
       String threadId, HarnessThreadCustomMessageCreateDTO createDTO) {
     Objects.requireNonNull(createDTO, "createDTO");
     long id = HarnessIds.parsePositive(threadId, "threadId");
+    var existing = coordinator.findExistingInput(id, createDTO.getClientMessageId());
+    if (existing.isPresent()) {
+      return converter.convert(existing.orElseThrow().input());
+    }
     return converter.convert(
         coordinator
             .submitCustomMessage(

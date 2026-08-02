@@ -9,7 +9,7 @@ import {
 } from '@/features/ai/runtime/thread-panel'
 import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/runtime/thread-timeline-types'
 
-/** Stable runtime/model identity surfaced in the footer; all fields optional for unbound panes. */
+/** Stable runtime/model identity surfaced in the footer; fields may be absent while a pane is blank. */
 export interface ChatPanelLabels {
   agentName?: string
   providerName?: string

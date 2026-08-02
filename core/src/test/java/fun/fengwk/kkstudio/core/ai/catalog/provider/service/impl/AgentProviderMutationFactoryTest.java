@@ -89,6 +89,10 @@ public class AgentProviderMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newProvider(oversizedName.getName(), oversizedName));
+    AgentProviderCreateDTO pathBreakingName = provider("provider/name", null);
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newProvider(pathBreakingName.getName(), pathBreakingName));
     AgentProviderCreateDTO oversizedCredential = provider("provider", "c".repeat(513));
     assertThrows(
         AiValidationException.class,

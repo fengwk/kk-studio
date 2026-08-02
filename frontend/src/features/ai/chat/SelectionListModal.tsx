@@ -147,12 +147,14 @@ export function SelectionListModal({
 export function AgentSelectionModal({
   open,
   agents,
+  selectionPending = false,
   onSelect,
   onClose,
 }: {
   open: boolean
   agents: Array<{ name: string; description?: string | null }>
-  onSelect: (agentName: string) => void
+  selectionPending?: boolean
+  onSelect: (agentName: string) => void | Promise<void>
   onClose: () => void
 }) {
   const { t } = useI18n()
@@ -168,13 +170,18 @@ export function AgentSelectionModal({
       >
         <ModalHeader title={t('ai.chat.selectAgentTitle')} onClose={onClose} />
         <div className="modal-body">
-          <ul className="selection-list">
+          <ul className="selection-list" aria-busy={selectionPending}>
             {agents.length === 0 ? (
               <li className="selection-empty">{t('ai.chat.noAgents')}</li>
             ) : null}
             {agents.map((agent) => (
               <li key={agent.name}>
-                <button type="button" className="selection-item" onClick={() => onSelect(agent.name)}>
+                <button
+                  type="button"
+                  className="selection-item"
+                  disabled={selectionPending}
+                  onClick={() => void onSelect(agent.name)}
+                >
                   <span className="selection-item-title">{agent.name}</span>
                   {agent.description ? <span className="selection-item-subtitle">{agent.description}</span> : null}
                 </button>

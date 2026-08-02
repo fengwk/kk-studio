@@ -64,6 +64,9 @@ final class AgentDefinitionMutationFactory {
     if (normalizedName == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
+    if (normalizedName.indexOf('/') >= 0) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
+    }
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     // null/blank = no override; runtime/thread apply resolves model.defaultVariant.

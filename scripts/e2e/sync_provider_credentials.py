@@ -13,10 +13,10 @@ No secrets are printed to stdout/stderr.
 import argparse
 import json
 import os
+import urllib.parse
 import urllib.request
 
 
-MINIMAX_PROVIDER_ID = 1
 MINIMAX_PROVIDER_NAME = "minimax"
 MINIMAX_PROVIDER_DESCRIPTION = "MiniMax (OpenAI Responses)."
 MINIMAX_PROVIDER_TYPE = "openai_response"
@@ -42,14 +42,15 @@ def get_providers(backend_url, urlopen=None):
         f"{backend_url}/api/ai/catalog/providers?pageNumber=1&pageSize=50")
 
 
-def put_provider(backend_url, provider_id, payload, urlopen=None):
+def put_provider(backend_url, provider_name, payload, urlopen=None):
     """Update a single provider on the backend."""
     if urlopen is None:
         urlopen = _default_urlopen
     data = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
+    encoded_name = urllib.parse.quote(provider_name, safe="")
     return urlopen(
-        f"{backend_url}/api/ai/catalog/providers/{provider_id}",
+        f"{backend_url}/api/ai/catalog/providers/{encoded_name}",
         data=data, headers=headers)
 
 
@@ -67,7 +68,6 @@ def _default_urlopen(url, data=None, timeout=30, headers=None):
 def build_payload(base_url, api_key, current):
     """Construct the complete deterministic MiniMax provider update payload."""
     return {
-        "name": MINIMAX_PROVIDER_NAME,
         "description": MINIMAX_PROVIDER_DESCRIPTION,
         "providerType": MINIMAX_PROVIDER_TYPE,
         "baseUrl": base_url,
@@ -107,19 +107,19 @@ def sync_minimax(backend_url, env=None, urlopen=None):
         (
             row
             for row in rows
-            if str(row.get("id")) == str(MINIMAX_PROVIDER_ID)
-            and row.get("name") == MINIMAX_PROVIDER_NAME
+            if row.get("name") == MINIMAX_PROVIDER_NAME
         ),
         None)
     if current is None:
         raise RuntimeError(
-            "E2E seed is missing deterministic MiniMax provider id=1 name=minimax")
+            "E2E seed is missing deterministic MiniMax provider name=minimax")
     if current.get("version") is None or not str(current["version"]).strip():
         raise RuntimeError(
             "E2E seed MiniMax provider is missing the required version")
 
     payload = build_payload(normalize_minimax_base_url(base_url), api_key, current)
-    body = put_provider(backend_url, MINIMAX_PROVIDER_ID, payload, urlopen=urlopen)
+    body = put_provider(
+        backend_url, MINIMAX_PROVIDER_NAME, payload, urlopen=urlopen)
     data = body.get("data") or {}
     return [
         "minimax: "

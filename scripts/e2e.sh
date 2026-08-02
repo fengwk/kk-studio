@@ -60,7 +60,7 @@ Env:
   BACKEND_PORT=18081
   FRONTEND_PORT=5173
   TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  # the complete MiniMax pair is synchronized to seed provider id=1 after backend readiness
+  # the complete MiniMax pair is synchronized to seed provider name=minimax after backend readiness
   # the base URL is normalized to end with /v1
   JAVA_HOME_21=...
 EOF

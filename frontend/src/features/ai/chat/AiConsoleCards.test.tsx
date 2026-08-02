@@ -17,7 +17,7 @@ describe('ChatCard', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/chats/chat-1')
   })
 
-  it('uses the Chat id when the title is absent and marks missing default agent', () => {
+  it('uses the Chat id when the title is absent and marks a missing Agent', () => {
     render(
       <MemoryRouter>
         <ChatCard chat={{ ...chat(), title: null, agentName: 'missing', environmentName: null }} agents={[]} />

@@ -43,7 +43,7 @@ const environments = [
 ]
 
 describe('useChatListController', () => {
-  it('creates chat through the selected default agent', async () => {
+  it('creates a Chat with the selected Agent', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>

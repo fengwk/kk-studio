@@ -157,7 +157,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'new')?.disabled).toBe(true)
   })
 
-  it('sets and clears the Chat default Environment from the blank command and footer', async () => {
+  it('sets and clears the visible Chat Environment from the blank command and footer', async () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => undefined)
     renderBlankPane({ onEnvironmentChange })
@@ -184,7 +184,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
   it('keeps the blank Environment selector open and shows the callback error', async () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => {
-      throw new Error('default environment update failed')
+      throw new Error('Chat Environment update failed')
     })
     renderBlankPane({ onEnvironmentChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -194,7 +194,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(screen.getByRole('button', { name: 'local' }))
 
     await waitFor(() => {
-      expect(screen.getByText('default environment update failed')).toBeInTheDocument()
+      expect(screen.getByText('Chat Environment update failed')).toBeInTheDocument()
     })
     expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
   })
@@ -283,10 +283,10 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(screen.getByText('选择 Thread')).toBeInTheDocument()
   })
 
-  it('surfaces rejected default-agent update without unhandled rejection', async () => {
+  it('surfaces a rejected Chat Agent update without an unhandled rejection', async () => {
     const user = userEvent.setup()
     const onAgentChange = vi.fn(async () => {
-      throw new Error('default agent update failed')
+      throw new Error('Chat Agent update failed')
     })
     renderBlankPane({ agentName: 'missing', onAgentChange })
 
@@ -297,7 +297,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(screen.getByRole('button', { name: /assistant/ }))
 
     await waitFor(() => {
-      expect(screen.getByText('default agent update failed')).toBeInTheDocument()
+      expect(screen.getByText('Chat Agent update failed')).toBeInTheDocument()
     })
     expect(onAgentChange).toHaveBeenCalledWith('assistant')
     expect(chatService.createChatThread).not.toHaveBeenCalled()

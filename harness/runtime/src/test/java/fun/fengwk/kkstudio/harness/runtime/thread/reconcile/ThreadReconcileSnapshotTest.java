@@ -10,9 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -24,8 +21,7 @@ import java.util.Optional;
 
 /**
  * {@link ThreadReconcileSnapshot} 构造约束：ownership / thread 一致性、{@link
- * ThreadReconcileSnapshot.PrimaryWork} 四种变体各自正确、blocker owner/kind 不变量、plan head 一致性、queued inputs
- * 严格递增等不变量的测试。
+ * ThreadReconcileSnapshot.PrimaryWork} 四种变体各自正确、blocker owner/kind 不变量、queued inputs 严格递增等不变量的测试。
  */
 class ThreadReconcileSnapshotTest {
 
@@ -145,40 +141,17 @@ class ThreadReconcileSnapshotTest {
   @Test
   void constructsWithCreateModelInvocation() {
     ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
+    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
     ThreadReconcileSnapshot.PrimaryWork work =
-        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
+        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation();
 
     ThreadReconcileSnapshot snapshot =
         new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
 
     assertTrue(snapshot.primaryWork().isPresent());
-    ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation cmi =
-        assertInstanceOf(
-            ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation.class,
-            snapshot.primaryWork().get());
-    assertEquals(plan, cmi.plan());
-  }
-
-  @Test
-  void constructsWithApplyPlanningFailure() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok");
-    PlanningFailure failure =
-        new PlanningFailure(PlanningFailureKind.ENVIRONMENT_NOT_FOUND, "environment missing");
-    ThreadReconcileSnapshot.PrimaryWork work =
-        new ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure(failure);
-
-    ThreadReconcileSnapshot snapshot =
-        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
-
-    ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure applied =
-        assertInstanceOf(
-            ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure.class,
-            snapshot.primaryWork().orElseThrow());
-    assertEquals(failure, applied.failure());
+    assertInstanceOf(
+        ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation.class,
+        snapshot.primaryWork().get());
   }
 
   @Test
@@ -227,13 +200,6 @@ class ThreadReconcileSnapshotTest {
     assertThrows(
         NullPointerException.class,
         () -> new ThreadReconcileSnapshot.PrimaryWork.SuspendForBlocker(null));
-  }
-
-  @Test
-  void rejectsNullPlan() {
-    assertThrows(
-        NullPointerException.class,
-        () -> new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(null));
   }
 
   @Test
@@ -286,19 +252,6 @@ class ThreadReconcileSnapshotTest {
     assertEquals(blocker, sb.blocker());
   }
 
-  @Test
-  void rejectsPlanWithMismatchedHead() {
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 1L);
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(999L, ReconcileTestSupport.modelInvocationRequest());
-    ThreadReconcileSnapshot.PrimaryWork work =
-        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of()));
-  }
-
   // Optional<PrimaryWork> 的结构保证至多一个主要动作，因此不再需要运行时“多于一项”的校验。
   // 以下测试专注于 queuedInputs 不变量。
 
@@ -349,21 +302,6 @@ class ThreadReconcileSnapshotTest {
 
     assertTrue(snapshot.primaryWork().isEmpty());
     assertEquals(1, snapshot.queuedInputs().size());
-  }
-
-  @Test
-  void planPrimaryWorkRequiresMatchingHead() {
-    // plan 的 sourceHeadEntryId 必须等于 thread head，否则构造失败
-    ThreadOwnership ownership = ReconcileTestSupport.ownership(1L, 0L, "tok");
-    HarnessThread thread = ReconcileTestSupport.thread(1L, 0L, "tok", 5L);
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(5L, ReconcileTestSupport.modelInvocationRequest());
-    ThreadReconcileSnapshot.PrimaryWork work =
-        new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan);
-    // 匹配 head：5L == 5L，应成功
-    ThreadReconcileSnapshot snapshot =
-        new ThreadReconcileSnapshot(ownership, thread, Optional.of(work), List.of());
-    assertTrue(snapshot.primaryWork().isPresent());
   }
 
   private static ThreadInput appliedInput() {

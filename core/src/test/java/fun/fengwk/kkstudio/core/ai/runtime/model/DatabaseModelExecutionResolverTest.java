@@ -73,22 +73,19 @@ import java.util.function.Consumer;
  */
 class DatabaseModelExecutionResolverTest {
 
-  private static final long PROVIDER_ID = 22L;
-  private static final long MODEL_ID = 11L;
   private static final String CONFIG_JSON =
       "{\"modelCallTimeoutMillis\":45000,\"modelCallIdleTimeoutMillis\":3000}";
-  private static final ProviderRequest REQUEST =
-      request(MODEL_ID, PROVIDER_ID, ProviderType.OPENAI);
+  private static final ProviderRequest REQUEST = request(ProviderType.OPENAI);
 
   @Test
-  void resolvesFrozenProviderRequestUsingOnlyProviderIdLookup() {
+  void resolvesFrozenProviderRequestUsingOnlyProviderNameLookup() {
     CapturingProviderFactory factory =
         new CapturingProviderFactory(
             ProviderType.OPENAI,
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
 
       ModelExecutionResource resource = fixture.resolver.resolve(REQUEST);
 
@@ -137,7 +134,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.anthropic));
+      fixture.provider(provider(AgentProviderType.anthropic));
 
       IllegalArgumentException error =
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST));
@@ -163,7 +160,7 @@ class DatabaseModelExecutionResolverTest {
   @Test
   void rejectsMissingProviderFactoryForFrozenType() {
     try (Fixture fixture = new Fixture(null)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
 
       IllegalArgumentException error =
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST));
@@ -179,7 +176,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider invalid = provider(PROVIDER_ID, AgentProviderType.openai);
+      AgentProvider invalid = provider(AgentProviderType.openai);
       invalid.setConfigJson("{\"modelCallTimeoutMillis\":0}");
       fixture.provider(invalid);
 
@@ -197,7 +194,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      fixture.provider(provider(PROVIDER_ID, null));
+      fixture.provider(provider(null));
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST))
               .getMessage()
@@ -205,7 +202,7 @@ class DatabaseModelExecutionResolverTest {
     }
 
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider missingEndpoint = provider(PROVIDER_ID, AgentProviderType.openai);
+      AgentProvider missingEndpoint = provider(AgentProviderType.openai);
       missingEndpoint.setBaseUrl(" ");
       fixture.provider(missingEndpoint);
       assertTrue(
@@ -222,7 +219,7 @@ class DatabaseModelExecutionResolverTest {
               throw new IllegalStateException("cannot decrypt credential");
             });
     try (Fixture fixture = new Fixture(failingFactory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST))
               .getMessage()
@@ -235,7 +232,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             ignored -> null);
     try (Fixture fixture = new Fixture(nullAdapterFactory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST))
               .getMessage()
@@ -250,7 +247,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             ignored -> wrongType);
     try (Fixture fixture = new Fixture(wrongAdapterFactory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST))
               .getMessage()
@@ -269,7 +266,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             ignored -> nullProviderAdapter);
     try (Fixture fixture = new Fixture(nullProviderFactory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
       ProviderResolutionService.ResolvedExecution resolved = fixture.resolution.resolve(REQUEST);
       assertTrue(
           assertThrows(
@@ -289,7 +286,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             ignored -> failingProviderAdapter);
     try (Fixture fixture = new Fixture(failingProviderFactory)) {
-      fixture.provider(provider(PROVIDER_ID, AgentProviderType.openai));
+      fixture.provider(provider(AgentProviderType.openai));
       ProviderResolutionService.ResolvedExecution resolved = fixture.resolution.resolve(REQUEST);
       assertTrue(
           assertThrows(
@@ -308,7 +305,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider persisted = provider(PROVIDER_ID, AgentProviderType.openai);
+      AgentProvider persisted = provider(AgentProviderType.openai);
       persisted.setConfigJson("{}");
       fixture.provider(persisted);
 
@@ -326,10 +323,9 @@ class DatabaseModelExecutionResolverTest {
     CapturingProviderFactory factory =
         new CapturingProviderFactory(frozenType, capabilityFor(frozenType), adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      fixture.provider(provider(PROVIDER_ID, persistedType));
+      fixture.provider(provider(persistedType));
 
-      ModelExecutionResource resource =
-          fixture.resolver.resolve(request(MODEL_ID, PROVIDER_ID, frozenType));
+      ModelExecutionResource resource = fixture.resolver.resolve(request(frozenType));
 
       assertNotNull(resource.executor());
       assertEquals(
@@ -360,7 +356,7 @@ class DatabaseModelExecutionResolverTest {
     };
   }
 
-  private static AgentProvider provider(long id, AgentProviderType type) {
+  private static AgentProvider provider(AgentProviderType type) {
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
     provider.setProviderType(type);
@@ -370,7 +366,7 @@ class DatabaseModelExecutionResolverTest {
     return provider;
   }
 
-  private static ProviderRequest request(long modelId, long providerId, ProviderType type) {
+  private static ProviderRequest request(ProviderType type) {
     ModelVariant variant =
         new ModelVariant("quality", 1024, 0.7, null, null, null, null, List.of(), null);
     ModelDescriptor descriptor =

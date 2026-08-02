@@ -36,5 +36,8 @@ class ModelRefTest {
     assertThrows(IllegalArgumentException.class, () -> new ModelRef("provider", null));
     assertThrows(IllegalArgumentException.class, () -> new ModelRef(" ", "model"));
     assertThrows(IllegalArgumentException.class, () -> new ModelRef("provider", " "));
+    assertThrows(IllegalArgumentException.class, () -> new ModelRef("provider/name", "model"));
+    assertThrows(IllegalArgumentException.class, () -> new ModelRef("\tprovider\t", "model"));
+    assertThrows(IllegalArgumentException.class, () -> new ModelRef("provider", "\u2003model"));
   }
 }

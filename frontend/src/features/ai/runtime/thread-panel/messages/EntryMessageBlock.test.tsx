@@ -25,19 +25,16 @@ describe('EntryMessageBlock', () => {
     const { container } = render(
       <>
         <EntryMessageBlock message={event('root', '会话开始')} />
-        <EntryMessageBlock message={event('runtime_config', '运行配置已记录')} />
         <EntryMessageBlock message={event('unsupported_message', '无法识别消息 Entry')} />
         <EntryMessageBlock message={event('unknown_entry', '未识别 Entry')} />
       </>,
     )
 
     expect(screen.getByText('会话开始')).toBeInTheDocument()
-    expect(screen.getByText('运行配置已记录')).toBeInTheDocument()
     expect(screen.getByText('无法识别消息 Entry')).toBeInTheDocument()
     expect(screen.getByText('未识别 Entry')).toBeInTheDocument()
-    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(4)
+    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(3)
     expect(container.querySelector('[data-entry-kind="root"] svg')).toBeInTheDocument()
-    expect(container.querySelector('[data-entry-kind="runtime_config"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unsupported_message"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unknown_entry"] svg')).toBeInTheDocument()
   })

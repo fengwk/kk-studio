@@ -28,7 +28,7 @@ class ChatMutationFactoryTest {
     ChatMutationFactory factory = factory(true);
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("t".repeat(256));
-    create.setAgentName(" assistant ");
+    create.setAgentName("\u2003assistant\u2003");
     Chat chat = factory.newChat(create);
 
     assertEquals("t".repeat(256), chat.getTitle());

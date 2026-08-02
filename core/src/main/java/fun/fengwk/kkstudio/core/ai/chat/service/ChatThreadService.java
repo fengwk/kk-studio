@@ -9,7 +9,7 @@ public interface ChatThreadService {
   CursorPageDTO<HarnessThreadDTO> listThreads(
       String chatId, String sort, String cursor, Integer limit);
 
-  /** Atomically creates and associates a Thread from the Chat defaults. */
+  /** Atomically creates and associates a Thread for the Chat. */
   HarnessThreadDTO createThread(String chatId);
 
   /** Idempotently associates an existing global Thread with a Chat. */

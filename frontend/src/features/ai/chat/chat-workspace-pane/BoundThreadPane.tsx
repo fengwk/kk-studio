@@ -54,6 +54,7 @@ export function BoundThreadPane({
   agentName,
   environmentName,
   yoloEnabled,
+  settingsPending,
   paneId,
   threadId,
   focused,
@@ -75,6 +76,7 @@ export function BoundThreadPane({
   agentName: string
   environmentName: string | null
   yoloEnabled: boolean
+  settingsPending: boolean
   paneId: string
   threadId: string
   focused: boolean
@@ -110,7 +112,6 @@ export function BoundThreadPane({
   const [branchDraft, setBranchDraft] = useState('')
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [threadAssociationPending, setThreadAssociationPending] = useState(false)
-  const [environmentPending, setEnvironmentPending] = useState(false)
   const sessionPicker = useChatSessionPicker(sessionModalOpen, sessionSort)
   const threadPicker = useChatThreadPicker(chatId, threadModalOpen, threadSort)
   const rebindable = canRebindThread(controller.thread)
@@ -183,8 +184,24 @@ export function BoundThreadPane({
     }
   }
 
+  async function selectAgent(selectedAgentName: string) {
+    if (settingsPending) {
+      return
+    }
+    setRebindBlockedReason(null)
+    try {
+      await onAgentChange(selectedAgentName)
+      setAgentModalOpen(false)
+    } catch (error) {
+      setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
+    }
+  }
+
   async function selectEnvironment(environmentName: string | null): Promise<boolean> {
-    setEnvironmentPending(true)
+    if (settingsPending) {
+      return false
+    }
+    setRebindBlockedReason(null)
     try {
       await onEnvironmentChange(environmentName)
       setEnvironmentModalOpen(false)
@@ -192,8 +209,18 @@ export function BoundThreadPane({
     } catch (error) {
       setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
       return false
-    } finally {
-      setEnvironmentPending(false)
+    }
+  }
+
+  async function toggleYolo() {
+    if (settingsPending) {
+      return
+    }
+    setRebindBlockedReason(null)
+    try {
+      await onYoloChange(!yoloEnabled)
+    } catch (error) {
+      setRebindBlockedReason(errorMessage(error, t('ai.runtime.action.updateYoloFailed')))
     }
   }
 
@@ -226,7 +253,7 @@ export function BoundThreadPane({
         setEnvironmentModalOpen(true)
         return
       case 'yolo':
-        void onYoloChange(!yoloEnabled)
+        void toggleYolo()
         return
       case 'tree':
         openRebindTarget(() => setHistorySessionId(sessionId || null))
@@ -257,8 +284,8 @@ export function BoundThreadPane({
   }
   const composer: ChatPanelComposerInput = {
     draft: controller.draft,
-    pending: controller.pending,
-    disabled: controller.disabled,
+    pending: controller.pending || settingsPending,
+    disabled: controller.disabled || settingsPending,
     onDraftChange: controller.setDraft,
     onSubmit: () => {
       void controller.submitMessage()
@@ -358,21 +385,19 @@ export function BoundThreadPane({
       />
       <AgentSelectionModal
         open={agentModalOpen}
+        selectionPending={settingsPending}
         agents={agents.map((agent) => ({
           name: agent.name,
           description: agent.description,
         }))}
         onClose={() => setAgentModalOpen(false)}
-        onSelect={(selectedAgentName) => {
-          setAgentModalOpen(false)
-          void onAgentChange(selectedAgentName)
-        }}
+        onSelect={selectAgent}
       />
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
         selectedEnvironmentName={environmentName}
-        selectionPending={environmentPending}
+        selectionPending={settingsPending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {
           void selectEnvironment(environmentName)

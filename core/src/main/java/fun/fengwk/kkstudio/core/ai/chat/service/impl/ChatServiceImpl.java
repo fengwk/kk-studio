@@ -74,8 +74,11 @@ public class ChatServiceImpl implements ChatService {
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
     Chat existing = guard.requireChat(id);
     ensureExpectedVersion(existing, id, rawExpected, expected);
+    boolean agentNameProvided = updateDTO.getAgentName() != null;
     mutationFactory.apply(existing, updateDTO);
-    guard.ensureAgentExists(existing.getAgentName());
+    if (agentNameProvided) {
+      guard.ensureAgentExists(existing.getAgentName());
+    }
     if (!repository.updateById(existing, expected)) {
       Chat reread = repository.getById(existing.getId());
       if (reread == null) {

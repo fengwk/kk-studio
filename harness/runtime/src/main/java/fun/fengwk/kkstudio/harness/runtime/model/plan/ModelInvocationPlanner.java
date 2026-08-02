@@ -138,6 +138,12 @@ public final class ModelInvocationPlanner {
         new ModelInvocationPlan(sourceHeadEntryId, invocationRequest));
   }
 
+  /** Returns whether the current durable path owes a model response without resolving live data. */
+  public boolean hasResponseDebt(long sourceHeadEntryId, List<SessionEntry> rootToHead) {
+    List<SessionEntry> path = validatePath(sourceHeadEntryId, rootToHead);
+    return debtDetector.findDebtIndex(path).isPresent();
+  }
+
   private static List<SessionEntry> validatePath(
       long sourceHeadEntryId, List<SessionEntry> rootToHead) {
     Objects.requireNonNull(rootToHead, "rootToHead");

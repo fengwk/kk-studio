@@ -12,6 +12,9 @@ public record ModelRef(String providerName, String modelName) {
 
   public ModelRef {
     providerName = requireCanonicalPart(providerName, "providerName");
+    if (providerName.indexOf('/') >= 0) {
+      throw new IllegalArgumentException("providerName must not contain '/'");
+    }
     modelName = requireCanonicalPart(modelName, "modelName");
   }
 
@@ -36,7 +39,7 @@ public record ModelRef(String providerName, String modelName) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(field + " must not be blank");
     }
-    if (!value.equals(value.trim())) {
+    if (!value.equals(value.strip())) {
       throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
     }
     return value;

@@ -68,9 +68,9 @@ export function CreateChatModal({
             {nameError ? <span className="field-error">{nameError}</span> : null}
           </label>
           <label className="form-group">
-            <FieldLabel required>{t('ai.chat.defaultAgent')}</FieldLabel>
+            <FieldLabel required>{t('ai.chat.agent')}</FieldLabel>
             <FormSelect
-              aria-label={t('ai.chat.defaultAgent')}
+              aria-label={t('ai.chat.agent')}
               value={selectedAgentName}
               placeholder={t('ai.chat.selectAgent')}
               options={agents.map((agent) => ({ value: agent.name, label: agent.name }))}
@@ -78,9 +78,9 @@ export function CreateChatModal({
             />
           </label>
           <label className="form-group">
-            <FieldLabel>{t('ai.chat.defaultEnvironment')}</FieldLabel>
+            <FieldLabel>{t('ai.chat.environment')}</FieldLabel>
             <FormSelect
-              aria-label={t('ai.chat.defaultEnvironment')}
+              aria-label={t('ai.chat.environment')}
               value={selectedEnvironmentName}
               placeholder={t('ai.chat.noneEnvironment')}
               options={[
