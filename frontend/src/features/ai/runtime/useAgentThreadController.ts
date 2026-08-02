@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   extractContextWindow,
   formatModelRef,
+  modelRef,
   type AgentModelView,
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
@@ -17,8 +18,7 @@ import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThread
 import { useHarnessThreadObservability } from '@/features/ai/runtime/useHarnessThreadObservability'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { BackendLong } from '@/shared/api/contracts/base'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
@@ -38,10 +38,21 @@ export interface ThreadMessageReplay {
   clientMessageId: string
 }
 
+export interface ThreadTurnSettings {
+  agentName: string
+  environmentName: string | null
+  yoloEnabled: boolean
+}
+
 export function useAgentThreadController(
   threadId: string,
   initialDraft = '',
   initialReplay?: ThreadMessageReplay,
+  visibleSettings: ThreadTurnSettings = {
+    agentName: '',
+    environmentName: null,
+    yoloEnabled: false,
+  },
 ) {
   const { t } = useI18n()
   const [draft, setDraftState] = useState(initialDraft)
@@ -57,7 +68,6 @@ export function useAgentThreadController(
   const {
     agents,
     models,
-    providers,
     thread,
     sessionId,
     entries,
@@ -67,9 +77,7 @@ export function useAgentThreadController(
     toolInvocations,
     usage,
   } = useAgentThreadQueries(threadId)
-  // UNBOUND Threads accept bind/bootstrap only; every mailbox mutation needs a bound head.
-  const bound = Boolean(thread && thread.status !== 'UNBOUND')
-  const executionEpoch = thread?.executionEpoch
+  const bound = Boolean(thread)
   const createMessageMutation = useAgentThreadMessageMutation(threadId)
   const modelStream = useHarnessThreadRealtime(
     threadId,
@@ -79,11 +87,8 @@ export function useAgentThreadController(
   )
   const timeline = buildThreadTimeline(entries, inputs, modelStream)
   const working = isThreadWorking(thread, timeline)
-  const agentsById = new Map(agents.map((agent) => [String(agent.id), agent]))
-  const currentAgent = thread?.activeAgentDefinitionId
-    ? agentsById.get(String(thread.activeAgentDefinitionId))
-    : undefined
-  const runtimeLabels = resolveRuntimeLabels(thread, currentAgent, models, providers)
+  const currentAgent = agents.find((agent) => agent.name === visibleSettings.agentName)
+  const runtimeLabels = resolveRuntimeLabels(visibleSettings, currentAgent, models)
   const observability = useHarnessThreadObservability(threadId, usage, toolInvocations)
 
   useChatTranscriptAutoScroll(
@@ -105,47 +110,6 @@ export function useAgentThreadController(
   const stopMutation = useMutation({
     mutationFn: (expectedExecutionEpoch: BackendLong) =>
       harnessService.stopThread(threadId, { expectedExecutionEpoch }),
-  })
-  const setAgentMutation = useMutation({
-    mutationFn: (payload: { agentDefinitionId: string; expectedExecutionEpoch: BackendLong }) =>
-      harnessService.setThreadAgent(threadId, {
-        agentDefinitionId: payload.agentDefinitionId,
-        clientMessageId: createClientMessageId(),
-        expectedExecutionEpoch: payload.expectedExecutionEpoch,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    },
-  })
-  const setModelMutation = useMutation({
-    mutationFn: (payload: {
-      modelId: string
-      variant: string
-      expectedExecutionEpoch: BackendLong
-    }) =>
-      harnessService.setThreadModel(threadId, {
-        modelId: payload.modelId,
-        variant: payload.variant,
-        clientMessageId: createClientMessageId(),
-        expectedExecutionEpoch: payload.expectedExecutionEpoch,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    },
-  })
-  const setEnvironmentMutation = useMutation({
-    mutationFn: (payload: {
-      environmentName: string | null
-      expectedExecutionEpoch: BackendLong
-    }) =>
-      harnessService.setThreadEnvironment(threadId, {
-        environmentName: payload.environmentName,
-        clientMessageId: createClientMessageId(),
-        expectedExecutionEpoch: payload.expectedExecutionEpoch,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    },
   })
 
   /**
@@ -182,7 +146,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     if (!bound) {
-      setActionError(t('ai.runtime.action.unboundThread'))
+      setActionError(t('ai.runtime.action.threadNotLoaded'))
       return Promise.resolve()
     }
     setActionError(null)
@@ -196,7 +160,14 @@ export function useAgentThreadController(
     // Per-call mutateAsync Promise: do not rely on mutate() observer callbacks under overlap.
     // Catch settles the returned promise so concurrent fire-and-forget callers stay safe.
     return createMessageMutation
-      .mutateAsync({ content, clientMessageId, expectedExecutionEpoch: thread.executionEpoch })
+      .mutateAsync({
+        content,
+        agentName: visibleSettings.agentName,
+        environmentName: visibleSettings.environmentName,
+        yoloEnabled: visibleSettings.yoloEnabled,
+        clientMessageId,
+        expectedExecutionEpoch: thread.executionEpoch,
+      })
       .then(() => {
         // Only clear identity when it still belongs to this completing request.
         if (clientMessageIdRef.current === clientMessageId) {
@@ -226,14 +197,6 @@ export function useAgentThreadController(
   function runCommand(command: ThreadCommand) {
     setActionError(null)
     switch (command.id) {
-      case 'yolo': {
-        if (!requireBoundThread('ai.runtime.action.switchYoloFailed')) {
-          return
-        }
-        const enabled = !(thread?.yoloEnabled ?? false)
-        observability.setYolo(enabled, executionEpoch!)
-        return
-      }
       case 'stop':
         void stopThread()
         return
@@ -242,12 +205,12 @@ export function useAgentThreadController(
     }
   }
 
-  /** UNBOUND Threads reject every mailbox Input; block the request before it reaches the server. */
+  /** Block mailbox actions until the durable Thread snapshot has loaded. */
   function requireBoundThread(actionKey: string): boolean {
     if (bound) {
       return true
     }
-    setActionError(t('ai.runtime.action.unboundAction', { action: t(actionKey) }))
+    setActionError(t('ai.runtime.action.threadNotLoaded', { action: t(actionKey) }))
     return false
   }
 
@@ -270,52 +233,10 @@ export function useAgentThreadController(
       .catch((error: unknown) => reportMutationError(error, 'ai.runtime.action.stopFailed'))
   }
 
-  function setThreadAgent(agentDefinitionId: string): Promise<void> {
-    if (!thread || !requireBoundThread('ai.runtime.action.switchAgentFailed')) {
-      return Promise.resolve()
-    }
-    setActionError(null)
-    return setAgentMutation
-      .mutateAsync({ agentDefinitionId, expectedExecutionEpoch: thread.executionEpoch })
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.switchAgentFailed')
-      })
-  }
-
-  function setThreadModel(modelId: string, variant: string): Promise<void> {
-    if (!thread || !requireBoundThread('ai.runtime.action.switchModelFailed')) {
-      return Promise.resolve()
-    }
-    setActionError(null)
-    return setModelMutation
-      .mutateAsync({ modelId, variant, expectedExecutionEpoch: thread.executionEpoch })
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.switchModelFailed')
-      })
-  }
-
-  function setThreadEnvironment(environmentName: string | null): Promise<boolean> {
-    if (!thread || !requireBoundThread('ai.runtime.action.switchEnvironmentFailed')) {
-      return Promise.resolve(false)
-    }
-    setActionError(null)
-    return setEnvironmentMutation
-      .mutateAsync({ environmentName, expectedExecutionEpoch: thread.executionEpoch })
-      .then(() => true)
-      .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.switchEnvironmentFailed')
-        return false
-      })
-  }
-
   return {
     sessionId,
     agents,
-    agentsById,
     models,
-    providers,
     thread,
     bound,
     title: thread?.sessionTitle || thread?.threadId || t('ai.chat.chatLabel'),
@@ -329,51 +250,38 @@ export function useAgentThreadController(
     draft,
     // Overlapping submits keep pending accurate via local count, not mutation observer alone.
     pending: inFlightSubmissions > 0,
-    // UNBOUND Threads are a legal UI state but cannot send messages or change configuration.
+    // A Thread must be loaded before it can accept a message.
     disabled: !bound,
     observability: {
       ...observability,
-      yolo: { enabled: Boolean(thread?.yoloEnabled) },
+      yolo: { enabled: visibleSettings.yoloEnabled },
     },
     actionError,
     dismissActionError: () => setActionError(null),
     setDraft,
     submitMessage,
     stopThread,
-    setThreadAgent,
-    setThreadModel,
-    setThreadEnvironment,
     runCommand,
   }
 }
 
 function resolveRuntimeLabels(
-  thread: HarnessThreadDTO | undefined,
+  visibleSettings: ThreadTurnSettings,
   agent: AgentDefinitionDTO | undefined,
   models: AgentModelView[],
-  providers: AgentProviderDTO[],
 ) {
-  const modelId = firstNonEmpty(thread?.modelId, agent?.modelId)
-  const model = models.find((item) => String(item.id) === modelId) ?? models.find((item) => item.name === modelId)
-  const provider = model
-    ? providers.find((item) => String(item.id) === String(model.providerId))
-    : undefined
+  const model = models.find((item) => modelRef(item) === agent?.model)
   const contextWindow = extractContextWindow(model)
 
-  const providerName = firstNonEmpty(provider?.name, model?.providerName)
-  const bareModelName = firstNonEmpty(model?.name, modelId)
+  const providerName = firstNonEmpty(model?.providerName)
+  const bareModelName = firstNonEmpty(model?.name, agent?.model)
   return {
-    agentName: firstNonEmpty(
-      thread?.activeAgentName,
-      agent?.name,
-      thread?.activeAgentDefinitionId,
-      translate('ai.runtime.action.blankAgent'),
-    ),
+    agentName: firstNonEmpty(visibleSettings.agentName, translate('ai.runtime.action.blankAgent')),
     providerName,
     // Canonical display identity is provider/model.
     modelName: formatModelRef(providerName, bareModelName),
-    variantName: firstNonEmpty(thread?.variant, agent?.variant),
-    environmentName: firstNonEmpty(thread?.activeEnvironmentName),
+    variantName: firstNonEmpty(agent?.variant),
+    environmentName: firstNonEmpty(visibleSettings.environmentName),
     contextWindow,
   }
 }

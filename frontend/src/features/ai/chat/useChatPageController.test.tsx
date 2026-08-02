@@ -36,8 +36,9 @@ describe('useChatPageController', () => {
     vi.mocked(chatService.createChat).mockResolvedValue({
       id: 'chat-1',
       title: '新的 Chat',
-      defaultAgentId: 'agent-1',
-      defaultEnvironmentName: null,
+      agentName: 'default-assistant',
+      environmentName: null,
+      yoloEnabled: false,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -72,7 +73,7 @@ describe('useChatPageController', () => {
 
     act(() => {
       result.current.createChatModal.onTitleChange('新的 Chat')
-      result.current.createChatModal.onSelectAgent('agent-1')
+      result.current.createChatModal.onSelectAgent('default-assistant')
       result.current.createChatModal.onSelectEnvironment('local')
     })
     act(() => {
@@ -82,8 +83,8 @@ describe('useChatPageController', () => {
     await waitFor(() =>
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: '新的 Chat',
-        defaultAgentId: 'agent-1',
-        defaultEnvironmentName: 'local',
+        agentName: 'default-assistant',
+        environmentName: 'local',
       }),
     )
   })
@@ -117,11 +118,10 @@ function page<T>(results: T[]) {
 
 function agent() {
   return {
-    id: 'agent-1',
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
-    modelId: 'model-1',
+    model: 'minimax/MiniMax',
     variant: 'default',
     config: {
       tools: [],

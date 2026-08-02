@@ -32,8 +32,6 @@ const baseConfig: AgentModelConfigDTO = {
 
 function modelWithVariants(): AgentModelView {
   return {
-    id: 'm1',
-    providerId: 'p1',
     providerName: 'minimax',
     name: 'MiniMax',
     description: null,

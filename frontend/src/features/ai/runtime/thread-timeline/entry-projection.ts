@@ -5,7 +5,6 @@ import { contentText, toArtifactAttachment } from '@/features/ai/runtime/thread-
 import {
   projectEmptyMessageEntry,
   projectRootEntry,
-  projectRuntimeConfigEntry,
   projectUnknownEntry,
   projectUnsupportedMessageEntry,
 } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
@@ -21,10 +20,6 @@ export function projectDurableEntry(
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
     messages.push(projectRootEntry(entry))
-    return
-  }
-  if (entryType === 'RUNTIME_CONFIG') {
-    messages.push(projectRuntimeConfigEntry(entry, payload))
     return
   }
   if (entryType === 'ASSISTANT_ERROR') {

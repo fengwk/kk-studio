@@ -87,16 +87,19 @@ export function ChatWorkspacePage() {
 
   const updateChatMutation = useMutation({
     mutationFn: ({
-      defaultAgentId,
-      defaultEnvironmentName,
+      agentName,
+      environmentName,
+      yoloEnabled,
       expectedVersion,
     }: {
-      defaultAgentId?: string
-      defaultEnvironmentName?: string | null
+      agentName?: string
+      environmentName?: string | null
+      yoloEnabled?: boolean
       expectedVersion: string
     }) => chatService.updateChat(chatId, {
-      ...(defaultAgentId === undefined ? {} : { defaultAgentId }),
-      ...(defaultEnvironmentName === undefined ? {} : { defaultEnvironmentName }),
+      ...(agentName === undefined ? {} : { agentName }),
+      ...(environmentName === undefined ? {} : { environmentName }),
+      ...(yoloEnabled === undefined ? {} : { yoloEnabled }),
       expectedVersion,
     }),
     onSuccess: async () => {
@@ -187,15 +190,21 @@ export function ChatWorkspacePage() {
             onThreadChange={(threadId) => setThread(pane.id, threadId)}
             onSessionSortChange={setSessionSort}
             onThreadSortChange={setThreadSort}
-            onDefaultAgentChange={async (agentId) => {
+            onAgentChange={async (agentName) => {
               await updateChatMutation.mutateAsync({
-                defaultAgentId: agentId,
+                agentName,
                 expectedVersion: chat.version,
               })
             }}
-            onDefaultEnvironmentChange={async (environmentName) => {
+            onEnvironmentChange={async (environmentName) => {
               await updateChatMutation.mutateAsync({
-                defaultEnvironmentName: environmentName,
+                environmentName,
+                expectedVersion: chat.version,
+              })
+            }}
+            onYoloChange={async (yoloEnabled) => {
+              await updateChatMutation.mutateAsync({
+                yoloEnabled,
                 expectedVersion: chat.version,
               })
             }}

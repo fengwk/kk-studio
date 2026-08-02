@@ -14,7 +14,6 @@ import type {
   AgentModelPricingDTO,
   AgentModelVariantDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId } from '@/shared/api/contracts/base'
 
 const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
   'TEXT',
@@ -46,10 +45,10 @@ function defaultPricingDraft(): ModelPricingDraft {
 }
 
 export function emptyModelDraft(
-  provider?: { id: AgentResourceId } | null,
+  provider?: { name: string } | null,
 ): ModelDraft {
   return {
-    providerId: provider?.id ?? '',
+    providerName: provider?.name ?? '',
     name: '',
     description: '',
     contextWindow: '128000',
@@ -99,7 +98,7 @@ export function toModelDraft(model: AgentModelDTO): ModelDraft {
   const config = model.config
 
   return {
-    providerId: model.providerId,
+    providerName: model.providerName,
     name: model.name,
     description: model.description || '',
     contextWindow: String(config.limit.context),
@@ -344,16 +343,16 @@ function requirePositiveNumber(value: string, field: string): number {
 }
 
 export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
-  const providerId = draft.providerId.trim()
-  if (!providerId) {
-    throw new Error('providerId is required')
+  const providerName = draft.providerName.trim()
+  if (!providerName) {
+    throw new Error('providerName is required')
   }
   const name = draft.name.trim()
   if (!name) {
     throw new Error('name must not be blank')
   }
   return {
-    providerId,
+    providerName,
     name,
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),
@@ -361,12 +360,7 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
 }
 
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelEditablePropertiesDTO {
-  const name = draft.name.trim()
-  if (!name) {
-    throw new Error('name must not be blank')
-  }
   return {
-    name,
     description: trimToNull(draft.description),
     config: buildModelConfig(draft),
   }

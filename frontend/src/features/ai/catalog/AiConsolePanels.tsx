@@ -1,7 +1,7 @@
 import { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
 import { ModelResourceCard } from '@/features/ai/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/ai/catalog/AiProviderResourceCard'
-import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import type {
   AgentDefinitionDTO,
@@ -34,7 +34,7 @@ export function AgentsPanel({
       />
       {agents.map((agent) => (
         <AgentResourceCard
-          key={agent.id}
+          key={agent.name}
           agent={agent}
           models={models}
           onEdit={() => onEdit(agent)}
@@ -69,7 +69,7 @@ export function ModelsPanel({
       />
       {models.map((model) => (
         <ModelResourceCard
-          key={model.id}
+          key={modelRef(model)}
           model={model}
           onEdit={() => onEdit(model)}
           onDelete={() => onDelete(model)}
@@ -103,7 +103,7 @@ export function ProvidersPanel({
       />
       {providers.map((provider) => (
         <ProviderResourceCard
-          key={provider.id}
+          key={provider.name}
           provider={provider}
           onEdit={() => onEdit(provider)}
           onDelete={() => onDelete(provider)}

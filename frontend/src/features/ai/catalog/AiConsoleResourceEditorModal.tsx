@@ -92,6 +92,7 @@ export function ResourceEditorModal({
           {modal.kind === 'agent' && (
             <AgentForm
               draft={agentDraft}
+              mode={modal.mode}
               models={models}
               agents={agents}
               toolCatalog={toolCatalog}

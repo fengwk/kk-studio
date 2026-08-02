@@ -48,6 +48,9 @@ export class FirstSendMessageError extends Error {
 export async function performBlankPaneFirstSend(options: {
   chatId: string
   content: string
+  agentName: string
+  environmentName: string | null
+  yoloEnabled: boolean
   createChatThread?: typeof chatService.createChatThread
   submitThreadMessage?: typeof harnessService.submitThreadMessage
   createIds?: () => { userMessageId: string }
@@ -64,6 +67,9 @@ export async function performBlankPaneFirstSend(options: {
   try {
     userMessageInput = await submitThreadMessage(created.threadId, {
       content: options.content,
+      agentName: options.agentName,
+      environmentName: options.environmentName,
+      yoloEnabled: options.yoloEnabled,
       clientMessageId: ids.userMessageId,
       expectedExecutionEpoch: created.executionEpoch,
     })

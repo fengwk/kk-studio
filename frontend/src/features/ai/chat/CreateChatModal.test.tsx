@@ -4,11 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 
 const agent = {
-  id: 'a1',
   name: 'assistant',
   description: null,
   systemPrompt: null,
-  modelId: 'm1',
+  model: 'minimax/MiniMax',
   variant: 'default',
   config: {
     tools: [],
@@ -26,7 +25,7 @@ describe('CreateChatModal', () => {
         open={false}
         agents={[]}
         environments={[]}
-        selectedAgentId=""
+        selectedAgentName=""
         selectedEnvironmentName=""
         title=""
         pending={false}
@@ -52,7 +51,7 @@ describe('CreateChatModal', () => {
         environments={[
           { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
         ]}
-        selectedAgentId=""
+        selectedAgentName=""
         selectedEnvironmentName=""
         title=""
         pending={false}
@@ -74,8 +73,8 @@ describe('CreateChatModal', () => {
 
     await user.type(screen.getByPlaceholderText('Chat 名称（可重名）'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
-    await user.selectOptions(screen.getByLabelText('Default Agent'), 'a1')
-    expect(onSelectAgent).toHaveBeenCalledWith('a1')
+    await user.selectOptions(screen.getByLabelText('Default Agent'), 'assistant')
+    expect(onSelectAgent).toHaveBeenCalledWith('assistant')
     await user.selectOptions(screen.getByLabelText('Default Environment'), 'local')
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()

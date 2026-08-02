@@ -119,7 +119,7 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Default Model')).toHaveValue('model-1')
+    expect(screen.getByLabelText('Default Model')).toHaveValue('minimax/MiniMax-M2.7')
     // empty override = use model.defaultVariant at runtime
     expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
 
@@ -135,7 +135,7 @@ describe('AiResourceForms', () => {
           name: '',
           description: '',
           systemPrompt: '',
-          modelId: '',
+          model: '',
           variant: 'default',
           tools: [],
           skills: [],
@@ -165,7 +165,7 @@ function ProviderFormHarness({ mode = 'create' }: { mode?: 'create' | 'edit' }) 
 function ModelFormHarness() {
   const [draft, setDraft] = useState<ModelDraft>({
     ...emptyModelDraft(),
-    providerId: 'provider-1',
+    providerName: 'minimax',
     reasoning: true,
   })
   return (
@@ -174,7 +174,6 @@ function ModelFormHarness() {
       mode="create"
       providers={[
         {
-          id: 'provider-1',
           name: 'minimax',
           description: null,
           providerType: 'openai',
@@ -196,7 +195,7 @@ function AgentFormHarness() {
     name: '',
     description: '',
     systemPrompt: '',
-    modelId: '',
+    model: '',
     variant: 'default',
     tools: [],
     skills: [],
@@ -206,8 +205,6 @@ function AgentFormHarness() {
       draft={draft}
       models={[
         {
-          id: 'model-1',
-          providerId: 'provider-1',
           providerName: 'minimax',
           name: 'MiniMax-M2.7',
           description: null,
@@ -234,8 +231,6 @@ function AgentFormHarness() {
           updateTime: '2026-06-20T02:00:00',
         },
         {
-          id: 'model-2',
-          providerId: 'provider-2',
           providerName: 'anthropic',
           name: 'Claude-Sonnet-4.5',
           description: null,

@@ -10,7 +10,7 @@ export function CreateChatModal({
   open,
   agents,
   environments,
-  selectedAgentId,
+  selectedAgentName,
   selectedEnvironmentName,
   title,
   pending,
@@ -25,14 +25,14 @@ export function CreateChatModal({
   open: boolean
   agents: AgentDefinitionDTO[]
   environments: LiveEnvironmentDTO[]
-  selectedAgentId: string
+  selectedAgentName: string
   selectedEnvironmentName: string
   title: string
   pending: boolean
   formError?: string
   nameError?: string
   onClose: () => void
-  onSelectAgent: (agentId: string) => void
+  onSelectAgent: (agentName: string) => void
   onSelectEnvironment: (environmentName: string) => void
   onTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
@@ -71,9 +71,9 @@ export function CreateChatModal({
             <FieldLabel required>{t('ai.chat.defaultAgent')}</FieldLabel>
             <FormSelect
               aria-label={t('ai.chat.defaultAgent')}
-              value={selectedAgentId}
+              value={selectedAgentName}
               placeholder={t('ai.chat.selectAgent')}
-              options={agents.map((agent) => ({ value: String(agent.id), label: agent.name }))}
+              options={agents.map((agent) => ({ value: agent.name, label: agent.name }))}
               onChange={onSelectAgent}
             />
           </label>

@@ -9,8 +9,6 @@ import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contract
 
 function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {
-    id: 'model-1',
-    providerId: 'provider-1',
     providerName: 'minimax',
     name: 'MiniMax',
     description: 'model description',
@@ -42,11 +40,10 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
 
 function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO {
   return {
-    id: 'agent-1',
     name: 'assistant',
     description: 'agent description',
     systemPrompt: 'prompt',
-    modelId: 'model-1',
+    model: 'minimax/MiniMax',
     variant: 'quality',
     config: {
       tools: ['read', 'bash', 'grep'],
@@ -61,7 +58,6 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
 
 function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
   return {
-    id: 'provider-1',
     name: 'minimax',
     description: null,
     providerType: 'openai',
@@ -105,7 +101,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           description: null,
-          modelId: 'missing-model',
+          model: 'missing-model',
           config: {
             tools: [],
             skills: [],
@@ -131,7 +127,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('provider-1/MiniMax')).toBeInTheDocument()
+    expect(screen.getByText('minimax/MiniMax')).toBeInTheDocument()
     expect(screen.getAllByText('assistant')).toHaveLength(2)
   })
 
@@ -169,8 +165,8 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    // provider deleted: still keep unique providerId/model ref
-    expect(screen.getAllByText('provider-1/MiniMax').length).toBeGreaterThanOrEqual(1)
+    // provider deleted: still keep unique providerName/model ref
+    expect(screen.getAllByText('MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3)
   })
 

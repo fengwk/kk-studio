@@ -22,7 +22,7 @@ export function buildResourceSubmitPlan(
       return {
         kind: 'provider',
         mode: 'edit',
-        id: modal.id,
+        name: modal.name,
         data: { ...toEditableProviderUpdate(drafts.providerDraft), expectedVersion: modal.expectedVersion },
       }
     }
@@ -38,7 +38,8 @@ export function buildResourceSubmitPlan(
       return {
         kind: 'model',
         mode: 'edit',
-        id: modal.id,
+        providerName: modal.providerName,
+        name: modal.name,
         data: { ...toEditableModelUpdate(drafts.modelDraft), expectedVersion: modal.expectedVersion },
       }
     }
@@ -53,7 +54,7 @@ export function buildResourceSubmitPlan(
     return {
       kind: 'agent',
       mode: 'edit',
-      id: modal.id,
+      name: modal.name,
       data: { ...toEditableAgentUpdate(drafts.agentDraft), expectedVersion: modal.expectedVersion },
     }
   }

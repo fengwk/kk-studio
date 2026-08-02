@@ -6,7 +6,6 @@ import {
   validateResourceDraft,
   type ResourceFieldKey,
 } from '@/features/ai/catalog/ai-resource-form-validation'
-import type { AgentResourceId } from '@/shared/api/contracts/base'
 import { useAiConsoleResourceEditorState } from '@/features/ai/catalog/useAiConsoleResourceEditorState'
 import { useAiConsoleResourceMutations } from '@/features/ai/catalog/useAiConsoleResourceMutations'
 import {
@@ -41,20 +40,19 @@ export function useAiConsoleResourceController(
     onDeleteCompleted: closeDeleteConfirm,
   })
 
-  function deleteProvider(providerName: string, providerId: AgentResourceId, expectedVersion: string) {
+  function deleteProvider(providerName: string, expectedVersion: string) {
     setDeleteConfirm({
       title: t('ai.catalog.deleteProviderTitle'),
       description: t('ai.catalog.deleteProviderDescription', { name: providerName }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
-      onConfirm: () => mutations.deleteProvider(providerId, expectedVersion),
+      onConfirm: () => mutations.deleteProvider(providerName, expectedVersion),
     })
   }
 
   function deleteModel(
     providerName: string,
     modelName: string,
-    modelId: AgentResourceId,
     expectedVersion: string,
   ) {
     setDeleteConfirm({
@@ -64,17 +62,17 @@ export function useAiConsoleResourceController(
       }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
-      onConfirm: () => mutations.deleteModel(modelId, expectedVersion),
+      onConfirm: () => mutations.deleteModel(providerName, modelName, expectedVersion),
     })
   }
 
-  function deleteAgent(agentName: string, agentId: AgentResourceId, expectedVersion: string) {
+  function deleteAgent(agentName: string, expectedVersion: string) {
     setDeleteConfirm({
       title: t('ai.catalog.deleteAgentTitle'),
       description: t('ai.catalog.deleteAgentDescription', { name: agentName }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
-      onConfirm: () => mutations.deleteAgent(agentId, expectedVersion),
+      onConfirm: () => mutations.deleteAgent(agentName, expectedVersion),
     })
   }
 
@@ -135,7 +133,7 @@ export function useAiConsoleResourceController(
 
     if (plan.kind === 'provider') {
       if (plan.mode === 'edit') {
-        mutations.updateProvider(plan.id, plan.data)
+        mutations.updateProvider(plan.name, plan.data)
       } else {
         mutations.createProvider(plan.data)
       }
@@ -144,7 +142,7 @@ export function useAiConsoleResourceController(
 
     if (plan.kind === 'model') {
       if (plan.mode === 'edit') {
-        mutations.updateModel(plan.id, plan.data)
+        mutations.updateModel(plan.providerName, plan.name, plan.data)
       } else {
         mutations.createModel(plan.data)
       }
@@ -152,7 +150,7 @@ export function useAiConsoleResourceController(
     }
 
     if (plan.mode === 'edit') {
-      mutations.updateAgent(plan.id, plan.data)
+      mutations.updateAgent(plan.name, plan.data)
     } else {
       mutations.createAgent(plan.data)
     }

@@ -33,12 +33,6 @@ function thread(
     executionEpoch: 3,
     status,
     inputSequence: 0,
-    activeAgentDefinitionId: null,
-    activeAgentName: null,
-    activeEnvironmentName: null,
-    modelId: null,
-    variant: null,
-    yoloEnabled: false,
     processing,
     createTime: null,
     updateTime: null,
@@ -50,13 +44,11 @@ describe('chat-session-picker', () => {
     expect(isRunningThread(thread('s', 't', 'IDLE', true))).toBe(true)
     expect(isRunningThread(thread('s', 't', 'IDLE', false))).toBe(false)
     expect(isRunningThread(thread('s', 't', 'RUNNABLE', false))).toBe(true)
-    expect(isRunningThread(thread(null, 't', 'UNBOUND', false))).toBe(false)
     expect(isSessionRunning([thread('s', 't1', 'IDLE'), thread('s', 't2', 'WAITING')])).toBe(true)
     expect(isSessionRunning([])).toBe(false)
   })
 
-  it('allows rebind only for quiescent UNBOUND/IDLE Threads', () => {
-    expect(canRebindThread(thread(null, 't', 'UNBOUND'))).toBe(true)
+  it('allows rebind only for quiescent IDLE Threads', () => {
     expect(canRebindThread(thread('s', 't', 'IDLE'))).toBe(true)
     // ACTIVE statuses are rejected so an in-flight execution can never be moved underneath.
     expect(canRebindThread(thread('s', 't', 'RUNNING'))).toBe(false)
@@ -67,12 +59,11 @@ describe('chat-session-picker', () => {
     expect(canRebindThread(undefined)).toBe(false)
   })
 
-  it('groups globally listed Threads by derived Session and drops UNBOUND ones', () => {
+  it('groups globally listed Threads by derived Session', () => {
     const grouped = groupThreadsBySessionId([
       thread('s1', 't1', 'IDLE'),
       thread('s1', 't2', 'RUNNING'),
       thread('s2', 't3', 'IDLE'),
-      thread(null, 't-unbound', 'UNBOUND'),
     ])
     expect([...grouped.keys()].sort()).toEqual(['s1', 's2'])
     expect(grouped.get('s1')?.map((item) => item.threadId)).toEqual(['t1', 't2'])
@@ -107,19 +98,12 @@ describe('chat-session-picker', () => {
     expect(item.subtitle).not.toContain('Main')
   })
 
-  it('projects Thread rows with UNBOUND kept selectable and labelled', () => {
+  it('projects Thread rows with their session context', () => {
     expect(toThreadSelectionItem(thread('s1', 't1', 'RUNNING'))).toEqual({
       id: 't1',
       title: 't1',
       subtitle: 's1',
       badge: 'RUNNING',
-    })
-    // UNBOUND is a legal state: the row stays listed so /session or /tree can bind it.
-    expect(toThreadSelectionItem(thread(null, 't-unbound', 'UNBOUND'))).toEqual({
-      id: 't-unbound',
-      title: 't-unbound',
-      subtitle: '未绑定 Session',
-      badge: 'UNBOUND',
     })
   })
 
@@ -133,6 +117,6 @@ describe('chat-session-picker', () => {
       'created',
     )
     expect(item.subtitle).toContain('2026-07-21 08:30')
-    expect(toThreadSelectionItem(thread(null, 't-no-time', 'UNBOUND')).subtitle).toBe('未绑定 Session')
+    expect(toThreadSelectionItem(thread(null, 't-no-time', 'IDLE')).subtitle).toBe('t-no-time')
   })
 })

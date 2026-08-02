@@ -1010,20 +1010,12 @@ export const aiCatalog = {
     'zh-CN': '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
   },
   'ai.runtime.command.agent': {
-    'en-US': 'Switch Agent (change the blank pane default or enqueue SET_AGENT in a conversation)',
-    'zh-CN': '切换 Agent（空白页改默认 Agent；对话中入队 SET_AGENT）',
+    'en-US': 'Change this Chat’s visible Agent; the next message uses it',
+    'zh-CN': '修改当前 Chat 可见的 Agent；下一条消息直接使用',
   },
   'ai.runtime.command.environment': {
-    'en-US': 'Switch Environment (change the blank pane default or enqueue SET_ENVIRONMENT in a conversation)',
-    'zh-CN': '切换 Environment（空白页改默认 Environment；对话中入队 SET_ENVIRONMENT）',
-  },
-  'ai.runtime.command.model': {
-    'en-US': 'Switch Model (enqueue SET_MODEL)',
-    'zh-CN': '切换 Model（入队 SET_MODEL）',
-  },
-  'ai.runtime.command.variant': {
-    'en-US': 'Switch Variant (enqueue SET_MODEL)',
-    'zh-CN': '切换 Variant（入队 SET_MODEL）',
+    'en-US': 'Change this Chat’s visible Environment; the next message uses it',
+    'zh-CN': '修改当前 Chat 可见的 Environment；下一条消息直接使用',
   },
   'ai.runtime.command.yolo': {
     'en-US': 'Toggle automatic approval of Tool calls',
@@ -1056,14 +1048,6 @@ export const aiCatalog = {
   'ai.runtime.command.environmentLabel': {
     'en-US': 'environment',
     'zh-CN': 'environment',
-  },
-  'ai.runtime.command.modelLabel': {
-    'en-US': 'model',
-    'zh-CN': 'model',
-  },
-  'ai.runtime.command.variantLabel': {
-    'en-US': 'variant',
-    'zh-CN': 'variant',
   },
   'ai.runtime.command.yoloLabel': {
     'en-US': 'yolo',
@@ -1420,22 +1404,6 @@ export const aiCatalog = {
   'ai.runtime.action.stopFailed': {
     'en-US': 'Stop failed',
     'zh-CN': '停止失败',
-  },
-  'ai.runtime.action.switchYoloFailed': {
-    'en-US': 'Failed to switch YOLO',
-    'zh-CN': '切换 YOLO 失败',
-  },
-  'ai.runtime.action.switchAgentFailed': {
-    'en-US': 'Failed to switch Agent',
-    'zh-CN': '切换 Agent 失败',
-  },
-  'ai.runtime.action.switchModelFailed': {
-    'en-US': 'Failed to switch Model',
-    'zh-CN': '切换 Model 失败',
-  },
-  'ai.runtime.action.switchEnvironmentFailed': {
-    'en-US': 'Failed to switch Environment',
-    'zh-CN': '切换 Environment 失败',
   },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',

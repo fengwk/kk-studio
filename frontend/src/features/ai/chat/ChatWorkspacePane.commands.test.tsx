@@ -29,10 +29,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionEntries: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
     updateThreadHead: vi.fn(),
-    setThreadAgent: vi.fn(),
-    setThreadModel: vi.fn(),
-    setThreadEnvironment: vi.fn(),
-    setThreadYolo: vi.fn(),
     submitThreadMessage: vi.fn(),
     stopThread: vi.fn(),
   },
@@ -55,12 +51,6 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
     status: 'IDLE',
     inputSequence: 1,
     revision: '0',
-    activeAgentDefinitionId: 'a1',
-    activeAgentName: 'assistant',
-    activeEnvironmentName: 'local',
-    modelId: 'm1',
-    variant: 'default',
-    yoloEnabled: false,
     processing: false,
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-02T00:00:00Z',
@@ -130,22 +120,20 @@ function sessionEntries(sessionId: string): HarnessSessionEntryDTO[] {
 
 const agents = [
   {
-    id: 'a1',
     name: 'assistant',
     description: null,
     systemPrompt: null,
-    modelId: 'm1',
+    model: 'minimax/MiniMax',
     variant: 'default',
     config: { tools: [], skills: [] },
     createTime: null,
     updateTime: null,
   },
   {
-    id: 'a2',
     name: 'coder',
     description: null,
     systemPrompt: null,
-    modelId: 'm1',
+    model: 'minimax/MiniMax',
     variant: 'default',
     config: { tools: [], skills: [] },
     createTime: null,
@@ -153,15 +141,23 @@ const agents = [
   },
 ]
 
-function renderBoundPane(overrides?: { onThreadChange?: (threadId: string | null) => void }) {
+function renderBoundPane(overrides?: {
+  onThreadChange?: (threadId: string | null) => void
+  onAgentChange?: (agentName: string) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  onYoloChange?: (yoloEnabled: boolean) => Promise<void>
+}) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
+  const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
+  const onEnvironmentChange = overrides?.onEnvironmentChange ?? vi.fn(async () => undefined)
+  const onYoloChange = overrides?.onYoloChange ?? vi.fn(async () => undefined)
   const onSessionSortChange = vi.fn()
   const onThreadSortChange = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
-        chat={{ id: 'chat-1', title: 'C', defaultAgentId: 'a1', defaultEnvironmentName: null, version: '1', createTime: null, updateTime: null }}
+        chat={{ id: 'chat-1', title: 'C', agentName: 'assistant', environmentName: 'local', yoloEnabled: false, version: '1', createTime: null, updateTime: null }}
         agents={agents}
         environments={[
           { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
@@ -176,11 +172,13 @@ function renderBoundPane(overrides?: { onThreadChange?: (threadId: string | null
         onThreadChange={onThreadChange}
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
-        onDefaultAgentChange={async () => undefined}
+        onAgentChange={onAgentChange}
+        onEnvironmentChange={onEnvironmentChange}
+        onYoloChange={onYoloChange}
       />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onSessionSortChange, onThreadSortChange }
+  return { onThreadChange, onSessionSortChange, onThreadSortChange, onAgentChange, onEnvironmentChange, onYoloChange }
 }
 
 describe('ChatWorkspacePane commands', () => {
@@ -188,7 +186,7 @@ describe('ChatWorkspacePane commands', () => {
     vi.clearAllMocks()
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
     vi.mocked(agentService.listModels).mockResolvedValue(page([{
-      id: 'm1', providerId: 'p1', providerName: 'minimax', name: 'MiniMax', description: null,
+      providerName: 'minimax', name: 'MiniMax', description: null,
       config: {
         limit: { context: 128000, output: 8192 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
@@ -209,10 +207,6 @@ describe('ChatWorkspacePane commands', () => {
         variants: [{ id: 'default' }],
       },
       createTime: null, updateTime: null,
-    }]))
-    vi.mocked(agentService.listProviders).mockResolvedValue(page([{
-      id: 'p1', name: 'minimax', description: null, providerType: 'openai', baseUrl: null, configured: true,
-      modelCallTimeoutMillis: 1, modelCallIdleTimeoutMillis: 1, createTime: null, updateTime: null,
     }]))
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
@@ -238,19 +232,11 @@ describe('ChatWorkspacePane commands', () => {
       sessionEntries(sessionId),
     )
     vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
-    vi.mocked(harnessService.setThreadAgent).mockResolvedValue({
-      inputId: 'i', threadId: 't1', sequence: 1, inputType: 'SET_AGENT', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null, createTime: null,
-    })
-    vi.mocked(harnessService.setThreadModel).mockResolvedValue({
-      inputId: 'm', threadId: 't1', sequence: 2, inputType: 'SET_MODEL', payloadJson: '{}',
-      clientMessageId: 'c', status: 'QUEUED', resolvedAt: null, createTime: null,
-    })
   })
 
-  it('queues epoch-fenced setThreadAgent / setThreadModel from the config pickers', async () => {
+  it('updates the visible Chat Agent without mutating the Thread', async () => {
     const user = userEvent.setup()
-    const { onThreadSortChange } = renderBoundPane()
+    const { onThreadSortChange, onAgentChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -265,40 +251,13 @@ describe('ChatWorkspacePane commands', () => {
     await user.keyboard('/agent{Enter}')
     expect(await screen.findByText('选择 Agent')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /coder/ }))
-    await waitFor(() => expect(harnessService.setThreadAgent).toHaveBeenCalled())
-    expect(harnessService.setThreadAgent.mock.calls[0][0]).toBe('t1')
-    expect(harnessService.setThreadAgent.mock.calls[0][1]).toMatchObject({
-      agentDefinitionId: 'a2',
-      expectedExecutionEpoch: 5,
-    })
-
-    await user.click(screen.getByLabelText('给 AI 发送消息'))
-    await user.keyboard('/model{Enter}')
-    expect(await screen.findByText('选择 Model')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '最近更新' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'minimax/MiniMax' }))
-    await waitFor(() =>
-      expect(harnessService.setThreadModel).toHaveBeenCalledWith(
-        't1',
-        expect.objectContaining({ modelId: 'm1', variant: 'default', expectedExecutionEpoch: 5 }),
-      ),
-    )
-
-    await user.click(screen.getByLabelText('给 AI 发送消息'))
-    await user.keyboard('/variant{Enter}')
-    expect(await screen.findByText('选择 Variant')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^default/ }))
-    await waitFor(() =>
-      expect(harnessService.setThreadModel).toHaveBeenLastCalledWith(
-        't1',
-        expect.objectContaining({ modelId: 'm1', variant: 'default', expectedExecutionEpoch: 5 }),
-      ),
-    )
+    await waitFor(() => expect(onAgentChange).toHaveBeenCalledWith('coder'))
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
   })
 
   it('switches Environment through /environment and the footer, offering only READY targets', async () => {
     const user = userEvent.setup()
-    renderBoundPane()
+    const { onEnvironmentChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -308,43 +267,27 @@ describe('ChatWorkspacePane commands', () => {
     expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'remote' }))
 
-    await waitFor(() =>
-      expect(harnessService.setThreadEnvironment).toHaveBeenCalledWith(
-        't1',
-        expect.objectContaining({
-          environmentName: 'remote',
-          expectedExecutionEpoch: 5,
-        }),
-      ),
-    )
+    await waitFor(() => expect(onEnvironmentChange).toHaveBeenCalledWith('remote'))
 
     await user.click(screen.getByRole('button', { name: '环境：local' }))
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '（无）' }))
-    await waitFor(() =>
-      expect(harnessService.setThreadEnvironment).toHaveBeenLastCalledWith(
-        't1',
-        expect.objectContaining({
-          environmentName: null,
-          expectedExecutionEpoch: 5,
-        }),
-      ),
-    )
+    await waitFor(() => expect(onEnvironmentChange).toHaveBeenLastCalledWith(null))
   })
 
   it('keeps the Environment selector open when a bound mutation fails', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.setThreadEnvironment).mockRejectedValueOnce(
-      new ApiError('thread is not idle', 409),
-    )
-    renderBoundPane()
+    const onEnvironmentChange = vi.fn(async () => {
+      throw new ApiError('thread is not idle', 409)
+    })
+    renderBoundPane({ onEnvironmentChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
     await user.click(screen.getByRole('button', { name: 'remote' }))
 
-    await waitFor(() => expect(screen.getByText(/切换 Environment 失败/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/thread is not idle/)).toBeInTheDocument())
     expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
   })
 

@@ -26,8 +26,6 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     listThreads: vi.fn(),
-    createThread: vi.fn(),
-    bootstrapThread: vi.fn(),
     submitThreadMessage: vi.fn(),
     createThreadRealtimeStream: vi.fn(),
   },
@@ -42,18 +40,12 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
   return {
     threadId: 't1',
     revision: '0',
-    sessionId: null,
+    sessionId: 's1',
     sessionTitle: null,
-    headEntryId: null,
+    headEntryId: 'h1',
     executionEpoch: 0,
-    status: 'UNBOUND',
+    status: 'IDLE',
     inputSequence: 0,
-    activeAgentDefinitionId: null,
-    activeAgentName: null,
-    activeEnvironmentName: null,
-    modelId: null,
-    variant: null,
-    yoloEnabled: false,
     processing: false,
     createTime: null,
     updateTime: null,
@@ -63,11 +55,10 @@ function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
 
 const agents = [
   {
-    id: 'a1',
     name: 'assistant',
     description: null,
     systemPrompt: null,
-    modelId: 'm1',
+    model: 'minimax/MiniMax',
     variant: 'default',
     config: {
       tools: [],
@@ -80,26 +71,28 @@ const agents = [
 
 function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
-  onDefaultAgentChange?: (agentId: string) => Promise<void>
-  onDefaultEnvironmentChange?: (environmentName: string | null) => Promise<void>
-  defaultAgentId?: string
-  defaultEnvironmentName?: string | null
+  onAgentChange?: (agentName: string) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
+  agentName?: string
+  environmentName?: string | null
+  yoloEnabled?: boolean
 }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
-  const onDefaultAgentChange = overrides?.onDefaultAgentChange ?? vi.fn(async () => undefined)
-  const onDefaultEnvironmentChange =
-    overrides?.onDefaultEnvironmentChange ?? vi.fn(async () => undefined)
+  const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
+  const onEnvironmentChange =
+    overrides?.onEnvironmentChange ?? vi.fn(async () => undefined)
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
         chat={{
           id: 'chat-1',
           title: 'C',
-          defaultAgentId: overrides?.defaultAgentId === undefined ? 'a1' : overrides.defaultAgentId,
-          defaultEnvironmentName: overrides?.defaultEnvironmentName ?? null,
+          agentName: overrides?.agentName === undefined ? 'assistant' : overrides.agentName,
+          environmentName: overrides?.environmentName ?? null,
+          yoloEnabled: overrides?.yoloEnabled ?? false,
           version: '1',
           createTime: null,
           updateTime: null,
@@ -117,12 +110,13 @@ function renderBlankPane(overrides?: {
         onThreadChange={onThreadChange}
         onSessionSortChange={() => undefined}
         onThreadSortChange={() => undefined}
-        onDefaultAgentChange={onDefaultAgentChange}
-        onDefaultEnvironmentChange={onDefaultEnvironmentChange}
+        onAgentChange={onAgentChange}
+        onEnvironmentChange={onEnvironmentChange}
+        onYoloChange={vi.fn(async () => undefined)}
       />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onDefaultAgentChange, onDefaultEnvironmentChange }
+  return { onThreadChange, onAgentChange, onEnvironmentChange }
 }
 
 describe('BlankComposerPane /thread and agent error handling', () => {
@@ -145,8 +139,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'thread',
       'agent',
       'environment',
-      'model',
-      'variant',
       'yolo',
       'tree',
       'stop',
@@ -158,6 +150,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'thread',
       'agent',
       'environment',
+      'yolo',
     ])
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'session')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)
@@ -166,8 +159,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   it('sets and clears the Chat default Environment from the blank command and footer', async () => {
     const user = userEvent.setup()
-    const onDefaultEnvironmentChange = vi.fn(async () => undefined)
-    renderBlankPane({ onDefaultEnvironmentChange })
+    const onEnvironmentChange = vi.fn(async () => undefined)
+    renderBlankPane({ onEnvironmentChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -176,7 +169,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(screen.getByRole('button', { name: 'local' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'local' }))
-    await waitFor(() => expect(onDefaultEnvironmentChange).toHaveBeenCalledWith('local'))
+    await waitFor(() => expect(onEnvironmentChange).toHaveBeenCalledWith('local'))
 
     await user.click(screen.getByRole('button', { name: '环境：（无）' }))
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
@@ -185,15 +178,15 @@ describe('BlankComposerPane /thread and agent error handling', () => {
         name: /（无）/,
       }),
     )
-    await waitFor(() => expect(onDefaultEnvironmentChange).toHaveBeenLastCalledWith(null))
+    await waitFor(() => expect(onEnvironmentChange).toHaveBeenLastCalledWith(null))
   })
 
   it('keeps the blank Environment selector open and shows the callback error', async () => {
     const user = userEvent.setup()
-    const onDefaultEnvironmentChange = vi.fn(async () => {
+    const onEnvironmentChange = vi.fn(async () => {
       throw new Error('default environment update failed')
     })
-    renderBlankPane({ onDefaultEnvironmentChange })
+    renderBlankPane({ onEnvironmentChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
@@ -232,7 +225,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
           updateTime: '2026-07-19T12:00:00Z',
           createTime: '2026-07-19T12:00:00Z',
         }),
-        thread({ threadId: 't-unbound', updateTime: '2026-07-18T12:00:00Z', createTime: '2026-07-18T12:00:00Z' }),
       ],
       nextCursor: null,
     })
@@ -254,8 +246,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const items = await screen.findAllByRole('button', { name: /^t-/ })
     expect(items[0]).toHaveTextContent('t-idle')
     expect(items[0]).toHaveTextContent('2026-07-20 12:00')
-    // UNBOUND Threads remain selectable so /session or /tree can bind them later.
-    expect(items.some((item) => item.textContent?.includes('UNBOUND'))).toBe(true)
 
     await user.click(screen.getByRole('button', { name: /t-running/ }))
     expect(onThreadChange).toHaveBeenCalledWith('t-running')
@@ -263,7 +253,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(events).toEqual(['associate', 'bind'])
     // Selecting a Thread never mutates it and never runs the first-send path.
     expect(chatService.createChatThread).not.toHaveBeenCalled()
-    expect(harnessService.bootstrapThread).not.toHaveBeenCalled()
     expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
   })
 
@@ -296,10 +285,10 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   it('surfaces rejected default-agent update without unhandled rejection', async () => {
     const user = userEvent.setup()
-    const onDefaultAgentChange = vi.fn(async () => {
+    const onAgentChange = vi.fn(async () => {
       throw new Error('default agent update failed')
     })
-    renderBlankPane({ defaultAgentId: 'missing', onDefaultAgentChange })
+    renderBlankPane({ agentName: 'missing', onAgentChange })
 
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'hello need agent')
@@ -310,14 +299,14 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => {
       expect(screen.getByText('default agent update failed')).toBeInTheDocument()
     })
-    expect(onDefaultAgentChange).toHaveBeenCalledWith('a1')
+    expect(onAgentChange).toHaveBeenCalledWith('assistant')
     expect(chatService.createChatThread).not.toHaveBeenCalled()
   })
 
   it('restores the draft and reports the failure when atomic Thread creation rejects', async () => {
     const user = userEvent.setup()
     vi.mocked(chatService.createChatThread).mockRejectedValue(
-      new Error('unknown agent definition: a1'),
+      new Error('unknown agent definition: assistant'),
     )
 
     const { onThreadChange } = renderBlankPane()
@@ -325,7 +314,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.type(composer, 'first message')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(screen.getByText('unknown agent definition: a1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('unknown agent definition: assistant')).toBeInTheDocument())
     expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
     // The pane stays blank so the user can retry after fixing the Agent.
     expect(onThreadChange).not.toHaveBeenCalled()

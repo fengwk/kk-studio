@@ -3,9 +3,9 @@ import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelV
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { translate, useI18n } from '@/shared/i18n'
 
-function formatAgentModelLabel(model: AgentModelView | undefined, modelId: string): string {
+function formatAgentModelLabel(model: AgentModelView | undefined, modelName: string): string {
   if (!model) {
-    return modelId.trim() || translate('ai.catalog.card.unknownModel')
+    return modelName.trim() || translate('ai.catalog.card.unknownModel')
   }
   return modelRef(model)
 }
@@ -24,8 +24,8 @@ export function AgentResourceCard({
   deletePending: boolean
 }) {
   const { t } = useI18n()
-  const model = models.find((item) => String(item.id) === String(agent.modelId))
-  const modelLabel = formatAgentModelLabel(model, agent.modelId)
+  const model = models.find((item) => modelRef(item) === agent.model)
+  const modelLabel = formatAgentModelLabel(model, agent.model)
   const tools = agent.config.tools
   const skills = agent.config.skills
 

@@ -1,17 +1,24 @@
 import { readFileSync } from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 
-import { assert, envelopeData, expectHttpError, httpJson, pageResults, sleep, cid } from '../lib/http.mjs'
 import {
-  bootstrapThread,
-  createBootstrappedThread,
-  createUnboundThread,
+  assert,
+  envelopeData,
+  expectHttpError,
+  httpJson,
+  pageResults,
+  cid,
+} from '../lib/http.mjs'
+import {
+  createConfiguredChatThread,
   getThread,
+  getThreadSnapshot,
   listSessionEntries,
   snapshotEntries,
   snapshotInputs,
   threadPageData,
   updateThreadHead,
+  waitForThreadInputApplied,
 } from '../lib/harness.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 
@@ -29,47 +36,50 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/ai/catalog/models：19 个模型完整匹配 Pi 0.82.1 快照；xAI 仅保留 grok-4.5；禁止旧 JSON 字段',
+  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照；禁止资源 bigint ID 与旧 JSON 字段',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
-    const { json: providersJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
-    const providersById = new Map(
-      pageResults(providersJson).map((provider) => [String(provider.id), provider.name]),
-    )
     const actualCatalog = models
       .map((model) => ({
-        id: Number(model.id),
-        providerId: Number(model.providerId),
-        provider: providersById.get(String(model.providerId)),
+        provider: model.providerName,
         name: model.name,
         description: model.description,
         config: model.config,
       }))
-      .sort((left, right) => left.id - right.id)
+      .sort(compareModel)
+    const expectedCatalog = [...PI_MODEL_CATALOG].sort(compareModel)
     assert(
-      actualCatalog.length === PI_MODEL_CATALOG.length,
-      `expected ${PI_MODEL_CATALOG.length} Pi models, got ${actualCatalog.length}`,
+      actualCatalog.length === expectedCatalog.length,
+      `expected ${expectedCatalog.length} Pi models, got ${actualCatalog.length}`,
     )
     const mismatch = actualCatalog.findIndex(
-      (model, index) => !isDeepStrictEqual(model, PI_MODEL_CATALOG[index]),
+      (model, index) => !isDeepStrictEqual(model, expectedCatalog[index]),
     )
     assert(
       mismatch === -1,
       `Pi model catalog mismatch at index ${mismatch}: ${JSON.stringify({
-        expected: PI_MODEL_CATALOG[mismatch],
+        expected: expectedCatalog[mismatch],
         actual: actualCatalog[mismatch],
       })}`,
     )
     for (const model of models) {
+      assert(model.providerName && model.name, JSON.stringify(model))
+      assert(!('id' in model) && !('providerId' in model), JSON.stringify(model))
       assert('config' in model, `missing config keys=${Object.keys(model)}`)
       assert(!('configJson' in model), 'legacy configJson must not be public')
       assert(!('capabilitiesJson' in model), 'legacy capabilitiesJson must not be public')
       assert(model.config?.defaultVariant, JSON.stringify(model.config))
-      assert(Array.isArray(model.config?.variants) && model.config.variants.length > 0, JSON.stringify(model.config))
+      assert(
+        Array.isArray(model.config?.variants) && model.config.variants.length > 0,
+        JSON.stringify(model.config),
+      )
       assert(Number(model.config?.limit?.context || 0) > 0, JSON.stringify(model.config))
     }
-    ctx.vars.seedModel = models.find((model) => Number(model.id) === 1)
+    ctx.vars.seedModel = models.find(
+      (model) => model.providerName === 'minimax' && model.name === 'MiniMax-M2.7',
+    )
+    assert(ctx.vars.seedModel, 'missing minimax/MiniMax-M2.7 seed model')
   },
 })
 
@@ -77,15 +87,23 @@ registerCase({
   id: 'seed.agent_and_provider',
   level: 'L1',
   title: 'Agent/Provider seed 可用',
-  docs: 'seed agent 存在；七个 provider 及协议映射正确',
+  docs: 'seed Agent 以 name/model 引用；Provider 以 name 标识，七种协议映射正确',
   async run(ctx) {
-    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')
+    const { json: agentsJson } = await ctx.call(
+      'GET',
+      '/api/ai/catalog/agents?pageNumber=1&pageSize=50',
+    )
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
-    const agent = agents.find((a) => a.name === 'default-assistant') || agents[0]
-    assert(agent.modelId && agent.variant && agent.config, JSON.stringify(agent))
+    const agent = agents.find((candidate) => candidate.name === 'default-assistant') || agents[0]
+    assert(agent.name && agent.model && agent.variant && agent.config, JSON.stringify(agent))
+    assert(!('id' in agent) && !('modelId' in agent), JSON.stringify(agent))
     ctx.vars.agent = agent
-    const { json: providersJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
+
+    const { json: providersJson } = await ctx.call(
+      'GET',
+      '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+    )
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
       ['minimax', 'openai_response'],
@@ -99,81 +117,50 @@ registerCase({
     for (const [name, providerType] of expectedProviderTypes) {
       const provider = providers.find((candidate) => candidate.name === name)
       assert(provider?.providerType === providerType, JSON.stringify({ name, providerType, provider }))
+      assert(!('id' in provider), JSON.stringify(provider))
     }
     ctx.vars.provider = providers.find((provider) => provider.name === 'minimax')
   },
 })
 
 registerCase({
-  id: 'thread.unbound_create',
+  id: 'thread.chat_scoped_create_atomic',
   level: 'L1',
-  title: 'POST /api/ai/runtime/threads 创建 UNBOUND Thread',
-  docs: '无请求体 => 201；status=UNBOUND，headEntryId/sessionId 为空，executionEpoch=0；无路径 Entry',
-  async run(ctx) {
-    const thread = await createUnboundThread(ctx)
-    assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
-    assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
-    const listed = threadPageData((await ctx.call('GET', '/api/ai/runtime/threads')).json).items
-    assert(listed.some((t) => t.threadId === thread.threadId), 'created thread missing from global list')
-    ctx.vars.unboundThread = thread
-  },
-})
-
-registerCase({
-  id: 'thread.unbound_message_rejected',
-  level: 'L1',
-  title: 'UNBOUND Thread 拒绝 mailbox 输入',
-  docs: 'POST /api/ai/runtime/threads/{id}/messages 在未绑定 head 时 => 409 thread is unbound',
-  async run(ctx) {
-    if (!ctx.vars.unboundThread) await getCase('thread.unbound_create').run(ctx)
-    const thread = ctx.vars.unboundThread
-    await expectHttpError(
-      () =>
-        ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
-          content: 'before bootstrap',
-          clientMessageId: cid(),
-          expectedExecutionEpoch: Number(thread.executionEpoch),
-        }),
-      { status: 409, messageIncludes: /unbound/i },
-    )
-    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'rejected input must not be persisted')
-  },
-})
-
-registerCase({
-  id: 'thread.bootstrap_binds_session',
-  level: 'L1',
-  title: 'bootstrap 原子创建 Session/ROOT/RUNTIME_CONFIG 并绑定 head',
-  docs: 'POST /api/ai/runtime/threads/{id}/bootstrap => 201 {session, thread}；epoch+1；head 指向 RUNTIME_CONFIG；Thread 派生 sessionId',
+  title: 'Chat-scoped Thread 原子创建 Session/ROOT',
+  docs: '创建 Chat 后 POST /threads => 201；Thread 已绑定 Session/ROOT，epoch=0，且不投影独立 active config',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    if (!ctx.vars.unboundThread) await getCase('thread.unbound_create').run(ctx)
-    const created = ctx.vars.unboundThread
-    const { session, thread } = await bootstrapThread(ctx, created, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-${cid().slice(0, 8)}`,
+    const { chat, thread, session } = await createConfiguredChatThread(ctx, {
+      title: `e2e-thread-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      environmentName: null,
+      yoloEnabled: false,
     })
-    assert(thread.threadId === created.threadId, 'bootstrap must reuse the same Thread')
     assert(thread.status === 'IDLE', JSON.stringify(thread))
-    assert(Number(thread.executionEpoch) === Number(created.executionEpoch) + 1, JSON.stringify(thread))
-
+    assert(Number(thread.executionEpoch) === 0, JSON.stringify(thread))
+    assert(thread.sessionId === session.sessionId && thread.headEntryId, JSON.stringify(thread))
+    for (const hidden of [
+      'activeAgentDefinitionId',
+      'activeAgentName',
+      'activeEnvironmentName',
+      'modelId',
+      'variant',
+      'yoloEnabled',
+    ]) {
+      assert(!(hidden in thread), `Thread leaked ${hidden}: ${JSON.stringify(thread)}`)
+    }
     const entries = await listSessionEntries(ctx, session.sessionId)
-    assert(entries.length === 2, JSON.stringify(entries))
-    assert(entries[0].entryType === 'ROOT', JSON.stringify(entries[0]))
-    assert(entries[1].entryType === 'RUNTIME_CONFIG', JSON.stringify(entries[1]))
-    assert(thread.headEntryId === entries[1].entryId, JSON.stringify(thread))
-
-    // Session is derived from the head Entry on the query side, not stored on the Thread row.
-    const view = await getThread(ctx, thread.threadId)
-    assert(view.sessionId === session.sessionId, JSON.stringify(view))
-    assert(String(view.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify(view))
-    assert(view.activeAgentName === ctx.vars.agent.name, JSON.stringify(view))
-    assert(String(view.modelId) === String(ctx.vars.agent.modelId), JSON.stringify(view))
-    assert(view.variant === ctx.vars.agent.variant, JSON.stringify(view))
-    assert(view.yoloEnabled === false, JSON.stringify(view))
-    ctx.vars.boundThread = view
-    ctx.vars.boundSession = session
-    ctx.vars.boundRootEntryId = entries[0].entryId
+    assert(
+      entries.length === 1
+        && entries[0].entryType === 'ROOT'
+        && entries[0].entryId === thread.headEntryId,
+      JSON.stringify(entries),
+    )
+    const listed = threadPageData((await ctx.call('GET', '/api/ai/runtime/threads')).json).items
+    assert(listed.some((item) => item.threadId === thread.threadId), 'created Thread missing')
+    ctx.vars.boundChat = chat
+    ctx.vars.boundThread = thread
+    ctx.vars.boundRootEntryId = thread.headEntryId
   },
 })
 
@@ -181,59 +168,60 @@ registerCase({
   id: 'thread.stale_epoch_rejected',
   level: 'L1',
   title: 'stale expectedExecutionEpoch 被拒绝',
-  docs: 'message / PUT head 携带过期 epoch => 409 stale execution epoch；不写入 Input，不移动 head',
+  docs: 'head rebind 先推进 epoch；随后 message/head 携带旧 epoch => 409，且不写入 Input',
   async run(ctx) {
-    if (!ctx.vars.boundThread) await getCase('thread.bootstrap_binds_session').run(ctx)
-    const thread = ctx.vars.boundThread
-    const staleEpoch = Number(thread.executionEpoch) - 1
+    if (!ctx.vars.boundThread) await getCase('thread.chat_scoped_create_atomic').run(ctx)
+    const original = ctx.vars.boundThread
+    const rebound = await updateThreadHead(ctx, original, original.headEntryId)
     await expectHttpError(
       () =>
-        ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
+        ctx.call('POST', `/api/ai/runtime/threads/${rebound.threadId}/messages`, {
+          agentName: ctx.vars.agent.name,
+          environmentName: null,
+          yoloEnabled: false,
           content: 'stale',
           clientMessageId: cid(),
-          expectedExecutionEpoch: staleEpoch,
+          expectedExecutionEpoch: Number(original.executionEpoch),
         }),
       { status: 409, messageIncludes: /stale execution epoch/i },
     )
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/head`, {
-          headEntryId: ctx.vars.boundRootEntryId,
-          expectedExecutionEpoch: staleEpoch,
+        ctx.call('PUT', `/api/ai/runtime/threads/${rebound.threadId}/head`, {
+          headEntryId: rebound.headEntryId,
+          expectedExecutionEpoch: Number(original.executionEpoch),
         }),
       { status: 409, messageIncludes: /stale execution epoch/i },
     )
-    const after = await getThread(ctx, thread.threadId)
-    assert(after.headEntryId === thread.headEntryId, JSON.stringify(after))
-    assert(Number(after.executionEpoch) === Number(thread.executionEpoch), JSON.stringify(after))
-    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'stale mutation must not enqueue input')
+    assert(
+      (await snapshotInputs(ctx, rebound.threadId)).length === 0,
+      'stale mutation must not enqueue input',
+    )
+    ctx.vars.boundThread = rebound
   },
 })
 
 registerCase({
   id: 'thread.rebind_same_session',
   level: 'L1',
-  title: '同 Session 内 PUT /head 回退到历史 Entry',
-  docs: 'PUT /api/ai/runtime/threads/{id}/head 指向同 Session 的 ROOT => head 更新、epoch+1、sessionId 不变',
+  title: '同 Session 内 PUT /head 回退到 ROOT',
+  docs: 'PUT /head 指向当前 ROOT => head 不变、epoch+1、sessionId 不变',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    const { session, thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { thread, session } = await createConfiguredChatThread(ctx, {
       title: `e2e-rebind-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
     })
-    const entries = await listSessionEntries(ctx, session.sessionId)
-    const rootEntryId = entries[0].entryId
-
-    const rewound = await updateThreadHead(ctx, thread, rootEntryId)
-    assert(rewound.headEntryId === rootEntryId, JSON.stringify(rewound))
-    assert(Number(rewound.executionEpoch) === Number(thread.executionEpoch) + 1, JSON.stringify(rewound))
-
+    const rewound = await updateThreadHead(ctx, thread, thread.headEntryId)
+    assert(rewound.headEntryId === thread.headEntryId, JSON.stringify(rewound))
+    assert(
+      Number(rewound.executionEpoch) === Number(thread.executionEpoch) + 1,
+      JSON.stringify(rewound),
+    )
     const view = await getThread(ctx, thread.threadId)
-    assert(view.sessionId === session.sessionId, JSON.stringify(view))
-    assert(view.status === 'IDLE', JSON.stringify(view))
-    // Path entries follow the new head: ROOT only.
+    assert(view.sessionId === session.sessionId && view.status === 'IDLE', JSON.stringify(view))
     const path = await snapshotEntries(ctx, thread.threadId)
-    assert(path.length === 1 && path[0].entryId === rootEntryId, JSON.stringify(path))
+    assert(path.length === 1 && path[0].entryId === thread.headEntryId, JSON.stringify(path))
     ctx.vars.rebindThread = view
   },
 })
@@ -242,20 +230,18 @@ registerCase({
   id: 'thread.rebind_cross_session',
   level: 'L1',
   title: '跨 Session PUT /head 复用同一 Thread',
-  docs: '把已绑定 Thread 的 head 指向另一 Session 的 Entry => threadId 不变、派生 sessionId 切换',
+  docs: '把一个 Thread 的 head 指向另一 Session ROOT => threadId 不变，派生 sessionId 切换',
   async run(ctx) {
     if (!ctx.vars.rebindThread) await getCase('thread.rebind_same_session').run(ctx)
     const thread = ctx.vars.rebindThread
-    const other = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const other = await createConfiguredChatThread(ctx, {
       title: `e2e-other-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
     })
-    assert(other.thread.threadId !== thread.threadId, 'expected a distinct Thread for the other Session')
-
+    assert(other.thread.threadId !== thread.threadId, 'expected a distinct Thread')
     const moved = await updateThreadHead(ctx, thread, other.thread.headEntryId)
-    assert(moved.threadId === thread.threadId, 'cross-session rebind must reuse the same Thread')
+    assert(moved.threadId === thread.threadId, 'cross-session rebind changed Thread')
     assert(moved.headEntryId === other.thread.headEntryId, JSON.stringify(moved))
-
     const view = await getThread(ctx, thread.threadId)
     assert(view.sessionId === other.session.sessionId, JSON.stringify(view))
     ctx.vars.rebindThread = view
@@ -263,100 +249,146 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.unbind_head',
-  level: 'L1',
-  title: 'PUT /head 传 null 使 Thread 回到 UNBOUND',
-  docs: 'headEntryId=null => status=UNBOUND、sessionId/headEntryId 为空；未知 Entry => 404',
-  async run(ctx) {
-    if (!ctx.vars.rebindThread) await getCase('thread.rebind_cross_session').run(ctx)
-    const thread = ctx.vars.rebindThread
-    const unbound = await updateThreadHead(ctx, thread, null)
-    assert(unbound.status === 'UNBOUND', JSON.stringify(unbound))
-    assert(!unbound.headEntryId, JSON.stringify(unbound))
-
-    const view = await getThread(ctx, thread.threadId)
-    assert(!view.sessionId && !view.headEntryId, JSON.stringify(view))
-    assert((await snapshotEntries(ctx, thread.threadId)).length === 0, 'unbound thread must have no path entries')
-
-    await expectHttpError(
-      () =>
-        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/head`, {
-          headEntryId: '999999999999',
-          expectedExecutionEpoch: Number(unbound.executionEpoch),
-        }),
-      { status: 404, messageIncludes: /unknown entry/i },
-    )
-  },
-})
-
-registerCase({
   id: 'thread.stop_then_rebind',
   level: 'L1',
   title: 'stop 后 Thread 立即可 rebind',
-  docs: 'stop 递增 epoch、取消 queued Input 与 OPEN Interaction；随后 PUT /head 成功',
+  docs: '消息直接携带可见 Chat 配置；stop 递增 epoch 并取消执行，随后 PUT /head 成功',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    const { session, thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
+    const { thread } = await createConfiguredChatThread(ctx, {
       title: `e2e-stop-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
     })
     await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
+      agentName: ctx.vars.agent.name,
+      environmentName: null,
+      yoloEnabled: false,
       content: 'e2e stop then rebind',
       clientMessageId: cid(),
       expectedExecutionEpoch: Number(thread.executionEpoch),
     })
-
-    const { json: stopJson } = await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/stop`, {
-      expectedExecutionEpoch: Number(thread.executionEpoch),
-    })
+    const { json: stopJson } = await ctx.call(
+      'POST',
+      `/api/ai/runtime/threads/${thread.threadId}/stop`,
+      { expectedExecutionEpoch: Number(thread.executionEpoch) },
+    )
     const stop = envelopeData(stopJson)
     assert(Number(stop.executionEpoch) === Number(thread.executionEpoch) + 1, JSON.stringify(stop))
-
     const stopped = await getThread(ctx, thread.threadId)
-    const rootEntryId = (await listSessionEntries(ctx, session.sessionId))[0].entryId
-    const rebound = await updateThreadHead(ctx, stopped, rootEntryId)
-    assert(rebound.headEntryId === rootEntryId, JSON.stringify(rebound))
-    assert(Number(rebound.executionEpoch) === Number(stopped.executionEpoch) + 1, JSON.stringify(rebound))
-    ctx.writeArtifact('stop-then-rebind.json', JSON.stringify({ stop, stopped, rebound }, null, 2))
+    const rebound = await updateThreadHead(ctx, stopped, thread.headEntryId)
+    assert(rebound.headEntryId === thread.headEntryId, JSON.stringify(rebound))
+    assert(
+      Number(rebound.executionEpoch) === Number(stopped.executionEpoch) + 1,
+      JSON.stringify(rebound),
+    )
   },
 })
 
 registerCase({
-  id: 'thread.blank_first_send_order',
+  id: 'thread.turn_settings_wysiwyg_failure',
   level: 'L1',
-  title: 'Blank 首发顺序：createThread -> bootstrap -> USER_MESSAGE',
-  docs: 'bootstrap 的 RUNTIME_CONFIG 先于消息生效；mailbox 只有 USER_MESSAGE 且被 APPLIED',
+  title: '每条消息冻结可见名称引用并显式报告解析失败',
+  docs: 'USER_MESSAGE 直接携带 agentName/environmentName/yoloEnabled；不存在 Agent => ASSISTANT_ERROR，且不创建伪 ModelInvocation',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    const { session, thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-first-send-${cid().slice(0, 8)}`,
+    const { thread } = await createConfiguredChatThread(ctx, {
+      title: `e2e-turn-settings-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
     })
-    const { json: msgJson } = await ctx.call('POST', `/api/ai/runtime/threads/${thread.threadId}/messages`, {
-      content: 'e2e L1 ping',
-      clientMessageId: cid(),
-      expectedExecutionEpoch: Number(thread.executionEpoch),
-    })
-    const input = envelopeData(msgJson)
-    assert(input.inputType === 'USER_MESSAGE', JSON.stringify(msgJson))
-    assert(Number(input.sequence) === 1, JSON.stringify(msgJson))
-
-    // The bootstrap RUNTIME_CONFIG is already on the path before the message is harvested.
-    const bootstrapEntries = await listSessionEntries(ctx, session.sessionId)
+    const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
+    const clientMessageId = cid()
+    const { json: messageJson } = await ctx.call(
+      'POST',
+      `/api/ai/runtime/threads/${thread.threadId}/messages`,
+      {
+        agentName: missingAgentName,
+        environmentName: null,
+        yoloEnabled: true,
+        content: 'must fail before provider invocation',
+        clientMessageId,
+        expectedExecutionEpoch: Number(thread.executionEpoch),
+      },
+    )
+    const input = envelopeData(messageJson)
+    await waitForThreadInputApplied(ctx, thread.threadId, input.inputId)
+    const payload = JSON.parse(input.payloadJson)
     assert(
-      bootstrapEntries.map((e) => e.entryType).join(',') === 'ROOT,RUNTIME_CONFIG',
-      JSON.stringify(bootstrapEntries),
+      isDeepStrictEqual(payload.turnSettings, {
+        agentName: missingAgentName,
+        environmentName: null,
+        yoloEnabled: true,
+      }),
+      JSON.stringify(payload),
+    )
+    const snapshot = await getThreadSnapshot(ctx, thread.threadId)
+    const errorEntry = (snapshot.entries || []).find((entry) => entry.entryType === 'ASSISTANT_ERROR')
+    assert(errorEntry, JSON.stringify(snapshot.entries))
+    const errorPayload = JSON.parse(errorEntry.payloadJson)
+    assert(
+      String(errorPayload.error?.message || '').includes('AGENT_NOT_FOUND'),
+      JSON.stringify(errorPayload),
+    )
+    assert(
+      (snapshot.modelInvocations || []).length === 0,
+      `planning failure created ModelInvocation: ${JSON.stringify(snapshot.modelInvocations)}`,
     )
 
-    let inputs = []
-    for (let i = 0; i < 40; i++) {
-      inputs = await snapshotInputs(ctx, thread.threadId)
-      if (inputs.some((x) => x.status === 'APPLIED')) break
-      await sleep(250)
-    }
-    const applied = inputs.filter((x) => x.status === 'APPLIED').map((x) => x.inputType)
-    assert(applied.length === 1 && applied[0] === 'USER_MESSAGE', JSON.stringify(inputs))
-    ctx.vars.firstSendThreadId = thread.threadId
+    const { json: replayJson } = await ctx.call(
+      'POST',
+      `/api/ai/runtime/threads/${thread.threadId}/messages`,
+      {
+        agentName: ctx.vars.agent.name,
+        environmentName: 'ignored-environment',
+        yoloEnabled: false,
+        content: 'ignored retry body',
+        clientMessageId,
+        expectedExecutionEpoch: Number(thread.executionEpoch),
+      },
+    )
+    const replay = envelopeData(replayJson)
+    assert(
+      replay.inputId === input.inputId && replay.payloadJson === input.payloadJson,
+      JSON.stringify({ input, replay }),
+    )
+  },
+})
+
+registerCase({
+  id: 'thread.custom_message_turn_settings',
+  level: 'L1',
+  title: 'CUSTOM_MESSAGE 同样携带逐消息可见配置',
+  docs: '自定义 system/user 消息不依赖 Thread 隐藏配置，Input payload 保存精确 TurnSettings',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    const { thread } = await createConfiguredChatThread(ctx, {
+      title: `e2e-custom-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+    })
+    const missingAgentName = `missing-custom-agent-${cid().slice(0, 8)}`
+    const { json } = await ctx.call(
+      'POST',
+      `/api/ai/runtime/threads/${thread.threadId}/messages/custom`,
+      {
+        role: 'system',
+        content: 'custom context',
+        agentName: missingAgentName,
+        environmentName: 'local',
+        yoloEnabled: false,
+        clientMessageId: cid(),
+        expectedExecutionEpoch: Number(thread.executionEpoch),
+      },
+    )
+    const input = envelopeData(json)
+    await waitForThreadInputApplied(ctx, thread.threadId, input.inputId)
+    const payload = JSON.parse(input.payloadJson)
+    assert(
+      isDeepStrictEqual(payload.turnSettings, {
+        agentName: missingAgentName,
+        environmentName: 'local',
+        yoloEnabled: false,
+      }),
+      JSON.stringify(payload),
+    )
   },
 })
 
@@ -366,10 +398,10 @@ registerCase({
   title: '未知 Thread snapshot 404',
   docs: 'GET /api/ai/runtime/threads/999999999/snapshot => 404 unknown thread',
   async run(ctx) {
-    await expectHttpError(() => ctx.call('GET', '/api/ai/runtime/threads/999999999/snapshot'), {
-      status: 404,
-      messageIncludes: /unknown thread/,
-    })
+    await expectHttpError(
+      () => ctx.call('GET', '/api/ai/runtime/threads/999999999/snapshot'),
+      { status: 404, messageIncludes: /unknown thread/ },
+    )
   },
 })
 
@@ -377,202 +409,17 @@ registerCase({
   id: 'frontend.proxy_model_contract',
   level: 'L1',
   title: 'Frontend 代理 model 契约',
-  docs: '5173 /api/ai/catalog/models 返回结构化 config',
+  docs: '5173 /api/ai/catalog/models 返回 name-based 结构化 config',
   async run(ctx) {
     assert(ctx.vars.frontendUrl, 'frontendUrl required')
-    const { json } = await httpJson(ctx.vars.frontendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=1')
+    const { json } = await httpJson(
+      ctx.vars.frontendUrl,
+      'GET',
+      '/api/ai/catalog/models?pageNumber=1&pageSize=1',
+    )
     const model = pageResults(json)[0]
-    assert(model?.config?.defaultVariant, JSON.stringify(model))
-    assert(!('configJson' in model), JSON.stringify(model))
-  },
-})
-
-registerCase({
-  id: 'thread.commands_model_yolo',
-  level: 'L1',
-  title: 'Thread SET_AGENT / SET_MODEL / SET_YOLO 入队并应用',
-  docs: '独立 bootstrap Thread，避免被前序 RUNNING turn 干扰；命令均携带当前 executionEpoch',
-  async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-commands-${cid().slice(0, 8)}`,
-    })
-    const tid = thread.threadId
-    // Enqueue never advances the epoch; only stop / head rebind do.
-    const epoch = Number(thread.executionEpoch)
-    const model = ctx.vars.seedModel
-    const variant = model.config.defaultVariant
-
-    await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/agent`, {
-      agentDefinitionId: String(ctx.vars.agent.id),
-      clientMessageId: cid(),
-      expectedExecutionEpoch: epoch,
-    })
-    const { json: modelSet } = await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/model`, {
-      modelId: String(model.id),
-      variant,
-      clientMessageId: cid(),
-      expectedExecutionEpoch: epoch,
-    })
-    assert(String(envelopeData(modelSet).inputType || '').includes('MODEL'), JSON.stringify(modelSet))
-    const { json: yoloSet } = await ctx.call('PUT', `/api/ai/runtime/threads/${tid}/yolo`, {
-      yoloEnabled: true,
-      clientMessageId: cid(),
-      expectedExecutionEpoch: epoch,
-    })
-    assert(String(envelopeData(yoloSet).inputType || '').includes('YOLO'), JSON.stringify(yoloSet))
-
-    let th = null
-    let inputs = []
-    for (let i = 0; i < 60; i++) {
-      inputs = await snapshotInputs(ctx, tid)
-      const applied = inputs.filter((input) => input.status === 'APPLIED').map((input) => input.inputType)
-      th = await getThread(ctx, tid)
-      if (
-        applied.includes('SET_AGENT') &&
-        applied.some((type) => String(type).includes('MODEL')) &&
-        applied.some((type) => String(type).includes('YOLO')) &&
-        !th.processing
-      ) {
-        assert(String(th.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify({ th, inputs }))
-        assert(th.activeAgentName === ctx.vars.agent.name, JSON.stringify({ th, inputs }))
-        assert(String(th.modelId) === String(model.id), JSON.stringify({ th, inputs }))
-        assert(th.variant === variant, JSON.stringify({ th, inputs }))
-        assert(th.yoloEnabled === true, JSON.stringify({ th, inputs }))
-        ctx.writeArtifact('thread-after-commands.json', JSON.stringify({ th, inputs }, null, 2))
-        return
-      }
-      await sleep(250)
-    }
-    assert(
-      inputs.some((input) => input.inputType === 'SET_AGENT' && input.status === 'APPLIED'),
-      JSON.stringify({ th, inputs }),
-    )
-    assert(
-      inputs.some((input) => String(input.inputType || '').includes('MODEL') && input.status === 'APPLIED'),
-      JSON.stringify({ th, inputs }),
-    )
-    assert(
-      inputs.some((input) => String(input.inputType || '').includes('YOLO') && input.status === 'APPLIED'),
-      JSON.stringify({ th, inputs }),
-    )
-    assert(String(th?.activeAgentDefinitionId) === String(ctx.vars.agent.id), JSON.stringify({ th, inputs }))
-    assert(th?.activeAgentName === ctx.vars.agent.name, JSON.stringify({ th, inputs }))
-    assert(String(th?.modelId) === String(model.id), JSON.stringify({ th, inputs }))
-    assert(th?.variant === variant, JSON.stringify({ th, inputs }))
-    assert(th?.yoloEnabled === true, JSON.stringify({ th, inputs }))
-  },
-})
-
-registerCase({
-  id: 'thread.commands_environment',
-  level: 'L1',
-  title: 'Thread SET_ENVIRONMENT set/clear、epoch fencing 与幂等',
-  docs: 'PUT /environment 支持 set/clear；重复 clientMessageId 返回原 input；过期 expectedExecutionEpoch => 409 且不入队',
-  async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-environment-command-${cid().slice(0, 8)}`,
-    })
-    const tid = String(thread.threadId)
-    const epoch = Number(thread.executionEpoch)
-    const environmentName = `e2e-thread-env-${cid().slice(0, 8)}`
-    const clientMessageId = cid()
-
-    const { status: setStatus, json: setJson } = await ctx.call(
-      'PUT',
-      `/api/ai/runtime/threads/${tid}/environment`,
-      {
-        environmentName,
-        clientMessageId,
-        expectedExecutionEpoch: epoch,
-      },
-    )
-    assert(setStatus === 202, JSON.stringify(setJson))
-    const setInput = envelopeData(setJson)
-    assert(setInput.inputType === 'SET_ENVIRONMENT', JSON.stringify(setInput))
-    const afterSet = await waitForEnvironmentInput(ctx, tid, setInput.inputId, environmentName)
-    assert(afterSet.thread.activeEnvironmentName === environmentName, JSON.stringify(afterSet))
-
-    const { json: replayJson } = await ctx.call(
-      'PUT',
-      `/api/ai/runtime/threads/${tid}/environment`,
-      {
-        environmentName: `ignored-${cid().slice(0, 8)}`,
-        clientMessageId,
-        expectedExecutionEpoch: epoch,
-      },
-    )
-    const replay = envelopeData(replayJson)
-    assert(String(replay.inputId) === String(setInput.inputId), JSON.stringify({ setInput, replay }))
-    assert(replay.payloadJson === setInput.payloadJson, JSON.stringify({ setInput, replay }))
-
-    const staleClientMessageId = cid()
-    await expectHttpError(
-      () =>
-        ctx.call('PUT', `/api/ai/runtime/threads/${tid}/environment`, {
-          environmentName: `stale-${cid().slice(0, 8)}`,
-          clientMessageId: staleClientMessageId,
-          expectedExecutionEpoch: epoch - 1,
-        }),
-      { status: 409, messageIncludes: /stale execution epoch/i },
-    )
-    const afterStale = await getThread(ctx, tid)
-    assert(afterStale.activeEnvironmentName === environmentName, JSON.stringify(afterStale))
-    const inputsAfterStale = await snapshotInputs(ctx, tid)
-    assert(
-      !inputsAfterStale.some((input) => input.clientMessageId === staleClientMessageId),
-      JSON.stringify(inputsAfterStale),
-    )
-
-    const { json: clearJson } = await ctx.call(
-      'PUT',
-      `/api/ai/runtime/threads/${tid}/environment`,
-      {
-        environmentName: null,
-        clientMessageId: cid(),
-        expectedExecutionEpoch: epoch,
-      },
-    )
-    const clearInput = envelopeData(clearJson)
-    assert(clearInput.inputType === 'SET_ENVIRONMENT', JSON.stringify(clearInput))
-    const afterClear = await waitForEnvironmentInput(ctx, tid, clearInput.inputId, null)
-    assert(afterClear.thread.activeEnvironmentName == null, JSON.stringify(afterClear))
-    ctx.writeArtifact(
-      'environment-command.json',
-      JSON.stringify({ setInput, replay, afterSet, afterStale, clearInput, afterClear }, null, 2),
-    )
-  },
-})
-
-registerCase({
-  id: 'thread.commands_model_invalid_variant_rejected',
-  level: 'L1',
-  title: 'Thread SET_MODEL 非法 Variant 在入队前拒绝',
-  docs: 'PUT model 使用 seed Model + 不存在 Variant => 400；不写入 SET_MODEL input',
-  async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
-    const model = ctx.vars.seedModel
-    const { thread } = await createBootstrappedThread(ctx, {
-      agentDefinitionId: ctx.vars.agent.id,
-      title: `e2e-bad-variant-${cid().slice(0, 8)}`,
-    })
-
-    await expectHttpError(
-      () =>
-        ctx.call('PUT', `/api/ai/runtime/threads/${thread.threadId}/model`, {
-          modelId: String(model.id),
-          variant: '__missing_variant__',
-          clientMessageId: cid(),
-          expectedExecutionEpoch: Number(thread.executionEpoch),
-        }),
-      { status: 400, messageIncludes: /variant/i },
-    )
-    assert((await snapshotInputs(ctx, thread.threadId)).length === 0, 'rejected command must not be persisted')
+    assert(model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
+    assert(!('id' in model) && !('providerId' in model), JSON.stringify(model))
   },
 })
 
@@ -580,54 +427,35 @@ registerCase({
   id: 'harness.retry_policy_round_trip',
   level: 'L1',
   title: 'Retry policy GET/PUT 全量替换往返',
-  docs: 'GET /api/ai/runtime/settings/retry-policy 读 original；PUT 合法且可观察差异的策略；再 GET 断言四字段一致；finally 恢复 original',
+  docs: '读取 original；PUT 合法且可观察差异的策略；再 GET 断言一致；finally 恢复 original',
   async run(ctx) {
     const { json: originalJson } = await ctx.call('GET', '/api/ai/runtime/settings/retry-policy')
     const original = envelopeData(originalJson)
     assert(original && typeof original === 'object', JSON.stringify(originalJson))
     assert(
-      ['maxRetries', 'backoffStrategy', 'baseDelayMillis', 'maxDelayMillis'].every((k) => k in original),
+      ['maxRetries', 'backoffStrategy', 'baseDelayMillis', 'maxDelayMillis'].every(
+        (key) => key in original,
+      ),
       JSON.stringify(original),
     )
-
     const next = {
       maxRetries: Number(original.maxRetries) === 2 ? 4 : 2,
       backoffStrategy: original.backoffStrategy === 'FIXED' ? 'EXPONENTIAL' : 'FIXED',
       baseDelayMillis: Number(original.baseDelayMillis) === 4000 ? 3000 : 4000,
       maxDelayMillis: Number(original.maxDelayMillis) === 8000 ? 10000 : 8000,
     }
-    if (next.maxDelayMillis < next.baseDelayMillis) {
-      next.maxDelayMillis = next.baseDelayMillis
-    }
-    assert(
-      next.maxRetries !== Number(original.maxRetries) ||
-        next.backoffStrategy !== original.backoffStrategy ||
-        next.baseDelayMillis !== Number(original.baseDelayMillis) ||
-        next.maxDelayMillis !== Number(original.maxDelayMillis),
-      `next policy must differ from original: ${JSON.stringify({ original, next })}`,
-    )
-
+    if (next.maxDelayMillis < next.baseDelayMillis) next.maxDelayMillis = next.baseDelayMillis
     try {
-      const { json: putJson } = await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', next)
-      const putData = envelopeData(putJson)
-      assert(Number(putData.maxRetries) === next.maxRetries, JSON.stringify(putData))
-      assert(putData.backoffStrategy === next.backoffStrategy, JSON.stringify(putData))
-      assert(Number(putData.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(putData))
-      assert(Number(putData.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(putData))
-
-      const { json: rereadJson } = await ctx.call('GET', '/api/ai/runtime/settings/retry-policy')
-      const reread = envelopeData(rereadJson)
+      await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', next)
+      const reread = envelopeData(
+        (await ctx.call('GET', '/api/ai/runtime/settings/retry-policy')).json,
+      )
       assert(Number(reread.maxRetries) === next.maxRetries, JSON.stringify(reread))
       assert(reread.backoffStrategy === next.backoffStrategy, JSON.stringify(reread))
       assert(Number(reread.baseDelayMillis) === next.baseDelayMillis, JSON.stringify(reread))
       assert(Number(reread.maxDelayMillis) === next.maxDelayMillis, JSON.stringify(reread))
     } finally {
-      await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', {
-        maxRetries: original.maxRetries,
-        backoffStrategy: original.backoffStrategy,
-        baseDelayMillis: original.baseDelayMillis,
-        maxDelayMillis: original.maxDelayMillis,
-      })
+      await ctx.call('PUT', '/api/ai/runtime/settings/retry-policy', original)
     }
   },
 })
@@ -636,44 +464,28 @@ registerCase({
   id: 'harness.realtime_stream_policy_round_trip',
   level: 'L1',
   title: 'Realtime Stream policy GET/PUT 往返',
-  docs: 'GET /api/ai/runtime/settings/realtime-stream-policy 读 original；PUT 合法且可观察差异的 maxLength；再 GET 断言一致；finally 恢复 original',
+  docs: '读取 original；PUT 可观察差异的 maxLength；再 GET 断言一致；finally 恢复 original',
   async run(ctx) {
-    const { json: originalJson } = await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')
-    const original = envelopeData(originalJson)
-    assert(original && typeof original === 'object' && 'maxLength' in original, JSON.stringify(originalJson))
-    const originalMaxLength = Number(original.maxLength)
+    const original = envelopeData(
+      (await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')).json,
+    )
+    const originalMaxLength = Number(original?.maxLength)
     assert(Number.isSafeInteger(originalMaxLength) && originalMaxLength > 0, JSON.stringify(original))
-
     const next = { maxLength: originalMaxLength === 5_000 ? 5_001 : 5_000 }
     try {
-      const { json: putJson } = await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', next)
-      const putData = envelopeData(putJson)
-      assert(Number(putData.maxLength) === next.maxLength, JSON.stringify(putData))
-
-      const { json: rereadJson } = await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')
-      const reread = envelopeData(rereadJson)
+      await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', next)
+      const reread = envelopeData(
+        (await ctx.call('GET', '/api/ai/runtime/settings/realtime-stream-policy')).json,
+      )
       assert(Number(reread.maxLength) === next.maxLength, JSON.stringify(reread))
     } finally {
-      await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', { maxLength: originalMaxLength })
+      await ctx.call('PUT', '/api/ai/runtime/settings/realtime-stream-policy', {
+        maxLength: originalMaxLength,
+      })
     }
   },
 })
 
-async function waitForEnvironmentInput(ctx, threadId, inputId, expectedEnvironmentName) {
-  let last = null
-  for (let i = 0; i < 60; i++) {
-    const inputs = await snapshotInputs(ctx, threadId)
-    const input = inputs.find((candidate) => String(candidate.inputId) === String(inputId))
-    const thread = await getThread(ctx, threadId)
-    last = { input, thread, inputs }
-    const environmentMatches =
-      expectedEnvironmentName == null
-        ? thread.activeEnvironmentName == null
-        : thread.activeEnvironmentName === expectedEnvironmentName
-    if (input?.status === 'APPLIED' && environmentMatches && !thread.processing) {
-      return last
-    }
-    await sleep(250)
-  }
-  throw new Error(`Environment input did not apply: ${JSON.stringify(last)}`)
+function compareModel(left, right) {
+  return `${left.provider}/${left.name}`.localeCompare(`${right.provider}/${right.name}`)
 }

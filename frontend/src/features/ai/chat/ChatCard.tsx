@@ -15,12 +15,10 @@ export function ChatCard({
   const navigate = useNavigate()
   const { t } = useI18n()
   const label = chat.title || chat.id
-  const defaultAgent = chat.defaultAgentId
-    ? agents.find((agent) => String(agent.id) === String(chat.defaultAgentId))
+  const agent = chat.agentName
+    ? agents.find((item) => item.name === chat.agentName)
     : undefined
-  const agentLabel = defaultAgent
-      ? defaultAgent.name
-      : t('ai.chat.missingAgent')
+  const agentLabel = agent?.name || chat.agentName || t('ai.chat.missingAgent')
 
   return (
     <article className="info-card">

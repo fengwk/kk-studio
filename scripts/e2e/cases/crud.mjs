@@ -1,17 +1,16 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
+import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
-  baseModelConfig,
-  providerCreateBody,
-  providerUpdateBody,
-} from '../lib/fixtures.mjs'
-import { createUnboundThread, threadPageData } from '../lib/harness.mjs'
+  createConfiguredChatThread,
+  threadPageData,
+} from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
-  id: 'crud.provider.invalid_blank_base_url_type_ok_name_only_fails',
+  id: 'crud.provider.invalid_blank_name',
   level: 'L1',
-  title: 'Provider 空白 name 拒绝（创建校验）',
-  docs: '与 lifecycle 中断言互补：仅 name 空白即可 400',
+  title: 'Provider 空白 name 拒绝',
+  docs: 'POST /api/ai/catalog/providers name 空白 => 400',
   async run(ctx) {
     await expectHttpError(
       () =>
@@ -53,37 +52,41 @@ registerCase({
 registerCase({
   id: 'crud.model.invalid_update_config',
   level: 'L1',
-  title: 'Model 更新为非法 config 被拒绝且不破坏原配置',
-  docs: '先创建合法 model，再 PUT 非法 defaultVariant；期望 400，随后 GET 仍为合法配置',
+  title: 'Model 非法更新不破坏原配置',
+  docs: 'name identity 通过 query 指定；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const { json: pJson } = await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))
-    const provider = envelopeData(pJson)
-    const providerId = String(provider.id)
-    const { json: mJson } = await ctx.call('POST', '/api/ai/catalog/models', {
-      providerId,
-      name: `e2e-model-invupd-${suffix}`,
-      description: 'ok',
-      config: baseModelConfig(),
-    })
-    const model = envelopeData(mJson)
-    const modelId = String(model.id)
+    const provider = envelopeData(
+      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+    )
+    const modelName = `e2e-model-invupd-${suffix}`
+    const model = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/models', {
+          providerName: provider.name,
+          name: modelName,
+          description: 'ok',
+          config: baseModelConfig(),
+        })
+      ).json,
+    )
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/ai/catalog/models/${modelId}`, {
-          name: `e2e-model-invupd-${suffix}`,
-          description: 'bad',
-          config: baseModelConfig({ defaultVariant: 'nope' }),
-          expectedVersion: model.version,
-        }),
+        ctx.call(
+          'PUT',
+          modelPath(provider.name, modelName),
+          {
+            description: 'bad',
+            config: baseModelConfig({ defaultVariant: 'nope' }),
+            expectedVersion: model.version,
+          },
+        ),
       { status: 400, messageIncludes: /defaultVariant/i },
     )
-    const { json: getList } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100')
-    const still = pageResults(getList).find((m) => String(m.id) === modelId)
-    assert(still, 'model disappeared after rejected update')
-    assert(still.config?.defaultVariant === 'default', JSON.stringify(still.config))
-    await ctx.call('DELETE', `/api/ai/catalog/models/${modelId}?expectedVersion=${encodeURIComponent(model.version)}`)
-    await ctx.call('DELETE', `/api/ai/catalog/providers/${providerId}?expectedVersion=${encodeURIComponent(provider.version)}`)
+    const still = await findModel(ctx, provider.name, modelName)
+    assert(still?.config?.defaultVariant === 'default', JSON.stringify(still))
+    await deleteModel(ctx, still)
+    await deleteProvider(ctx, provider)
   },
 })
 
@@ -93,15 +96,14 @@ registerCase({
   title: 'Agent 空白 name 拒绝',
   docs: 'POST /api/ai/catalog/agents name 空白 => 400',
   async run(ctx) {
-    const { json: modelsJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=5')
-    const model = pageResults(modelsJson)[0]
+    const model = await firstModel(ctx)
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/ai/catalog/agents', {
           name: '  ',
           description: 'd',
           systemPrompt: 's',
-          modelId: String(model.id),
+          model: modelRef(model),
           variant: model.config.defaultVariant,
           config: { tools: [], skills: [] },
         }),
@@ -116,15 +118,14 @@ registerCase({
   title: 'Agent 不存在的 Variant 拒绝',
   docs: 'POST /api/ai/catalog/agents variant 不属于所选 Model => 400',
   async run(ctx) {
-    const { json: modelsJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=5')
-    const model = pageResults(modelsJson)[0]
+    const model = await firstModel(ctx)
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/ai/catalog/agents', {
           name: `e2e-invalid-variant-${cid().slice(0, 8)}`,
           description: 'd',
           systemPrompt: 's',
-          modelId: String(model.id),
+          model: modelRef(model),
           variant: '__missing_variant__',
           config: { tools: [], skills: [] },
         }),
@@ -136,72 +137,72 @@ registerCase({
 registerCase({
   id: 'crud.provider.lifecycle',
   level: 'L1',
-  title: 'Provider 创建/读列表/更新/删除',
-  docs: `POST/GET/PUT/DELETE /api/ai/catalog/providers
-断言：创建后出现在列表；更新 name；删除后列表不存在；空白 name 创建失败`,
+  title: 'Provider name identity 创建/更新/删除',
+  docs: 'name 创建后不可修改；PUT 仅更新 editable properties；按 name path 删除',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const createBody = providerCreateBody(suffix)
-    const { status: createStatus, json: createJson } = await ctx.call('POST', '/api/ai/catalog/providers', createBody)
-    assert([200, 201].includes(createStatus), `create status ${createStatus}`)
-    const created = envelopeData(createJson)
-    assert(created?.id, JSON.stringify(createJson))
-    const id = String(created.id)
-    ctx.writeArtifact('provider-created.json', JSON.stringify(created, null, 2))
-
-    const { json: listJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
-    const listed = pageResults(listJson).some((p) => String(p.id) === id)
-    assert(listed, 'created provider not listed')
-
-    const { json: updateJson } = await ctx.call(
-      'PUT',
-      `/api/ai/catalog/providers/${id}`,
-      { ...providerUpdateBody(`e2e-provider-upd-${suffix}`), expectedVersion: created.version },
+    const created = envelopeData(
+      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
     )
-    const updated = envelopeData(updateJson)
-    assert(updated.name === `e2e-provider-upd-${suffix}`, JSON.stringify(updated))
+    assert(created?.name && !('id' in created), JSON.stringify(created))
+    const listed = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+    )
+    assert(listed.some((provider) => provider.name === created.name), 'created Provider not listed')
+
+    const updated = envelopeData(
+      (
+        await ctx.call(
+          'PUT',
+          `/api/ai/catalog/providers/${encodeURIComponent(created.name)}`,
+          {
+            description: 'e2e provider updated',
+            providerType: 'openai',
+            baseUrl: 'https://example.com/v2',
+            credential: '',
+            modelCallTimeoutMillis: 1_800_000,
+            modelCallIdleTimeoutMillis: 120_000,
+            expectedVersion: created.version,
+          },
+        )
+      ).json,
+    )
+    assert(updated.name === created.name, JSON.stringify(updated))
+    assert(updated.baseUrl === 'https://example.com/v2', JSON.stringify(updated))
     assert(updated.configured === true, 'empty credential should keep configured')
-
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/ai/catalog/providers', {
-          name: ' ',
-          providerType: 'openai',
-          baseUrl: 'https://example.com/v1',
-          credential: 'x',
-          modelCallTimeoutMillis: 1000,
-          modelCallIdleTimeoutMillis: 1000,
-        }),
-      { status: 400, messageIncludes: /name must not be blank/i },
+    await deleteProvider(ctx, updated)
+    const after = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
     )
-
-    await ctx.call('DELETE', `/api/ai/catalog/providers/${id}?expectedVersion=${encodeURIComponent(updated.version)}`)
-    const { json: listAfter } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
-    assert(!pageResults(listAfter).some((p) => String(p.id) === id), 'provider still listed after delete')
+    assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
   },
 })
 
 registerCase({
   id: 'crud.model.lifecycle',
   level: 'L1',
-  title: 'Model 创建/更新/删除（依赖临时 Provider）',
-  docs: `在临时 provider 上 create/update/delete model；更新完整 config body`,
+  title: 'Model 复合 name identity 创建/更新/删除',
+  docs: 'Model 由 providerName/name 标识；PUT 不修改 identity；modelName 可包含 /',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
-    const { json: pJson } = await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))
-    const provider = envelopeData(pJson)
-    const providerId = String(provider.id)
-    const createBody = {
-      providerId,
-      name: `e2e-model-${suffix}`,
-      description: 'create',
-      config: baseModelConfig(),
-    }
-    const { json: mJson } = await ctx.call('POST', '/api/ai/catalog/models', createBody)
-    const model = envelopeData(mJson)
-    assert(model?.id && model.config?.defaultVariant === 'default', JSON.stringify(mJson))
-    const modelId = String(model.id)
-
+    const provider = envelopeData(
+      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+    )
+    const name = `vendor/e2e-model-${suffix}`
+    const model = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/models', {
+          providerName: provider.name,
+          name,
+          description: 'create',
+          config: baseModelConfig(),
+        })
+      ).json,
+    )
+    assert(
+      model?.providerName === provider.name && model.name === name && !('id' in model),
+      JSON.stringify(model),
+    )
     const updatedConfig = baseModelConfig({
       limit: { context: 8192, output: 1024 },
       abilities: { tools: false, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
@@ -211,162 +212,145 @@ registerCase({
         { id: 'quality', temperature: 0.4, reasoningEffort: 'high' },
       ],
     })
-    const { json: uJson } = await ctx.call('PUT', `/api/ai/catalog/models/${modelId}`, {
-      name: `e2e-model-upd-${suffix}`,
-      description: 'updated',
-      config: updatedConfig,
-      expectedVersion: model.version,
-    })
-    const updated = envelopeData(uJson)
-    assert(updated.name === `e2e-model-upd-${suffix}`, JSON.stringify(updated))
+    const updated = envelopeData(
+      (
+        await ctx.call('PUT', modelPath(provider.name, name), {
+          description: 'updated',
+          config: updatedConfig,
+          expectedVersion: model.version,
+        })
+      ).json,
+    )
+    assert(updated.providerName === provider.name && updated.name === name, JSON.stringify(updated))
     assert(updated.config.defaultVariant === 'fast', JSON.stringify(updated.config))
-    assert(updated.config.limit.context === 8192, JSON.stringify(updated.config))
-    ctx.writeArtifact('model-updated.json', JSON.stringify(updated, null, 2))
-
-    await ctx.call('DELETE', `/api/ai/catalog/models/${modelId}?expectedVersion=${encodeURIComponent(updated.version)}`)
-    const { json: listJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100')
-    assert(!pageResults(listJson).some((m) => String(m.id) === modelId), 'model still listed')
-    await ctx.call('DELETE', `/api/ai/catalog/providers/${providerId}?expectedVersion=${encodeURIComponent(provider.version)}`)
+    await deleteModel(ctx, updated)
+    assert(!(await findModel(ctx, provider.name, name)), 'Model still listed')
+    await deleteProvider(ctx, provider)
   },
 })
 
 registerCase({
   id: 'crud.agent.lifecycle',
   level: 'L1',
-  title: 'Agent 创建/更新/删除',
-  docs: `基于 seed model 创建 agent；更新 systemPrompt/config；删除`,
+  title: 'Agent name identity 创建/更新/删除',
+  docs: 'Agent name/model 创建后不可修改；PUT 仅更新 prompt/variant/config 等 editable properties',
   async run(ctx) {
-    const { json: modelsJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')
-    const model = pageResults(modelsJson)[0]
-    assert(model?.id, 'need seeded model')
-    const variant = model.config.defaultVariant
-    const suffix = cid().slice(0, 8)
-    const createBody = {
-      name: `e2e-agent-${suffix}`,
-      description: 'create',
-      systemPrompt: 'you are e2e',
-      modelId: String(model.id),
-      variant,
-      config: {
-        tools: [],
-        skills: [],
-      },
-    }
-    const { json: aJson } = await ctx.call('POST', '/api/ai/catalog/agents', createBody)
-    const agent = envelopeData(aJson)
-    assert(agent?.id, JSON.stringify(aJson))
-    const agentId = String(agent.id)
-
-    const { json: uJson } = await ctx.call('PUT', `/api/ai/catalog/agents/${agentId}`, {
-      name: `e2e-agent-upd-${suffix}`,
-      description: 'updated',
-      systemPrompt: 'updated prompt',
-      modelId: String(model.id),
-      variant,
-      config: {
-        tools: [],
-        skills: [],
-      },
-      expectedVersion: agent.version,
-    })
-    const updated = envelopeData(uJson)
-    assert(updated.name === `e2e-agent-upd-${suffix}`, JSON.stringify(updated))
-    assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
-    const updatedConfig = updated.config || {}
-    assert(
-      Array.isArray(updatedConfig.tools)
-        && updatedConfig.tools.length === 0
-        && Array.isArray(updatedConfig.skills)
-        && updatedConfig.skills.length === 0
-        && Object.keys(updatedConfig).sort().join(',') === 'skills,tools'
-        && !('allowedSubagents' in updatedConfig)
-        && !('executionPolicy' in updatedConfig),
-      JSON.stringify(updatedConfig),
+    const model = await firstModel(ctx)
+    const name = `e2e-agent-${cid().slice(0, 8)}`
+    const agent = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/agents', {
+          name,
+          description: 'create',
+          systemPrompt: 'you are e2e',
+          model: modelRef(model),
+          variant: model.config.defaultVariant,
+          config: { tools: [], skills: [] },
+        })
+      ).json,
     )
-    ctx.writeArtifact('agent-updated.json', JSON.stringify(updated, null, 2))
-
-    await ctx.call('DELETE', `/api/ai/catalog/agents/${agentId}?expectedVersion=${encodeURIComponent(updated.version)}`)
-    const { json: listJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')
-    assert(!pageResults(listJson).some((a) => String(a.id) === agentId), 'agent still listed')
+    assert(agent?.name === name && agent.model === modelRef(model) && !('id' in agent), JSON.stringify(agent))
+    const updated = envelopeData(
+      (
+        await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(name)}`, {
+          description: 'updated',
+          systemPrompt: 'updated prompt',
+          variant: model.config.defaultVariant,
+          config: { tools: [], skills: [] },
+          expectedVersion: agent.version,
+        })
+      ).json,
+    )
+    assert(updated.name === name && updated.model === modelRef(model), JSON.stringify(updated))
+    assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
+    await ctx.call(
+      'DELETE',
+      `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
+    )
+    const agents = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+    )
+    assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
   },
 })
 
 registerCase({
-  id: 'crud.chat.invalid_agent_id',
+  id: 'crud.chat.invalid_agent_name',
   level: 'L1',
-  title: 'Chat 非法 defaultAgentId 拒绝',
-  docs: 'POST /api/ai/chat defaultAgentId 非正整数字符串 => 400',
+  title: 'Chat 不存在 Agent name 拒绝',
+  docs: 'POST /api/ai/chat agentName 必须引用现有 Agent',
   async run(ctx) {
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/ai/chat', {
           title: 'bad-agent',
-          defaultAgentId: 'not-a-number',
+          agentName: `missing-${cid().slice(0, 8)}`,
+          yoloEnabled: false,
         }),
-      { status: 400, messageIncludes: /defaultAgentId|positive|blank|invalid/i },
+      { status: 404, messageIncludes: /agent|not found/i },
     )
   },
 })
 
 registerCase({
-  id: 'crud.chat.default_environment',
+  id: 'crud.chat.visible_settings',
   level: 'L1',
-  title: 'Chat defaultEnvironmentName 创建/更新/清除',
-  docs: 'create/update 只接受 canonical Environment name；显式 null 清除；空白或带首尾空格 => 400',
+  title: 'Chat 可见 Environment/YOLO 创建、更新与清除',
+  docs: 'Chat 是唯一可见发送配置；environmentName 显式 null 清除，yoloEnabled 可即时更新',
   async run(ctx) {
-    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
-    const agent = pageResults(agentsJson)[0]
-    assert(agent?.id, 'need seeded agent')
+    const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
     const initialEnvironment = `e2e-chat-env-${suffix}`
     const updatedEnvironment = `e2e-chat-env-updated-${suffix}`
-
     await expectHttpError(
       () =>
         ctx.call('POST', '/api/ai/chat', {
           title: `e2e-invalid-chat-env-${suffix}`,
-          defaultAgentId: String(agent.id),
-          defaultEnvironmentName: ` invalid-${suffix} `,
+          agentName: agent.name,
+          environmentName: ` invalid-${suffix} `,
+          yoloEnabled: false,
         }),
-      { status: 400, messageIncludes: /defaultEnvironmentName|whitespace|canonical/i },
+      { status: 400, messageIncludes: /environmentName|whitespace|canonical/i },
     )
-
-    const { json: createJson } = await ctx.call('POST', '/api/ai/chat', {
-      title: `e2e-chat-env-${suffix}`,
-      defaultAgentId: String(agent.id),
-      defaultEnvironmentName: initialEnvironment,
-    })
-    let chat = envelopeData(createJson)
-    const chatId = String(chat.id)
-    assert(chat.defaultEnvironmentName === initialEnvironment, JSON.stringify(chat))
+    let chat = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/chat', {
+          title: `e2e-chat-env-${suffix}`,
+          agentName: agent.name,
+          environmentName: initialEnvironment,
+          yoloEnabled: false,
+        })
+      ).json,
+    )
     try {
-      await expectHttpError(
-        () =>
-          ctx.call('PUT', `/api/ai/chat/${chatId}`, {
-            defaultEnvironmentName: ' ',
+      assert(
+        chat.environmentName === initialEnvironment && chat.yoloEnabled === false,
+        JSON.stringify(chat),
+      )
+      chat = envelopeData(
+        (
+          await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+            environmentName: updatedEnvironment,
+            yoloEnabled: true,
             expectedVersion: chat.version,
-          }),
-        { status: 400, messageIncludes: /defaultEnvironmentName|blank/i },
+          })
+        ).json,
       )
-
-      const { json: updateJson } = await ctx.call('PUT', `/api/ai/chat/${chatId}`, {
-        defaultEnvironmentName: updatedEnvironment,
-        expectedVersion: chat.version,
-      })
-      chat = envelopeData(updateJson)
-      assert(chat.defaultEnvironmentName === updatedEnvironment, JSON.stringify(chat))
-
-      const { json: clearJson } = await ctx.call('PUT', `/api/ai/chat/${chatId}`, {
-        defaultEnvironmentName: null,
-        expectedVersion: chat.version,
-      })
-      chat = envelopeData(clearJson)
-      assert(chat.defaultEnvironmentName == null, JSON.stringify(chat))
+      assert(
+        chat.environmentName === updatedEnvironment && chat.yoloEnabled === true,
+        JSON.stringify(chat),
+      )
+      chat = envelopeData(
+        (
+          await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+            environmentName: null,
+            expectedVersion: chat.version,
+          })
+        ).json,
+      )
+      assert(chat.environmentName == null && chat.yoloEnabled === true, JSON.stringify(chat))
     } finally {
-      await ctx.call(
-        'DELETE',
-        `/api/ai/chat/${chatId}?expectedVersion=${encodeURIComponent(chat.version)}`,
-      )
+      await deleteChat(ctx, chat)
     }
   },
 })
@@ -375,12 +359,16 @@ registerCase({
   id: 'crud.model.delete_unknown_rejected',
   level: 'L1',
   title: '删除不存在 Model 被拒绝',
-  docs: 'DELETE /api/ai/catalog/models/999999999?expectedVersion=0 => 404 resource_not_found',
+  docs: 'DELETE 使用 providerName/modelName query；未知复合 identity => 404',
   async run(ctx) {
-    await expectHttpError(() => ctx.call('DELETE', '/api/ai/catalog/models/999999999?expectedVersion=0'), {
-      status: 404,
-      messageIncludes: /not found|unknown|model/i,
-    })
+    await expectHttpError(
+      () =>
+        ctx.call(
+          'DELETE',
+          '/api/ai/catalog/models?providerName=missing-provider&modelName=missing-model&expectedVersion=0',
+        ),
+      { status: 404, messageIncludes: /not found|unknown|model/i },
+    )
   },
 })
 
@@ -388,224 +376,157 @@ registerCase({
   id: 'crud.chat.lifecycle',
   level: 'L1',
   title: 'Chat 创建/更新/删除',
-  docs: `POST/PUT/DELETE chat；空白 title 400；删后 404。Chat 不持有 Session。`,
+  docs: 'POST/PUT/DELETE Chat；Agent name 稳定引用；空白 title 400；删除后 404',
   async run(ctx) {
-    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
-    const agent = pageResults(agentsJson)[0]
-    const { json: cJson } = await ctx.call('POST', '/api/ai/chat', {
-      title: 'e2e-chat',
-      defaultAgentId: String(agent.id),
-    })
-    const chat = envelopeData(cJson)
-    const chatId = String(chat.id)
-    const { json: uJson } = await ctx.call('PUT', `/api/ai/chat/${chatId}`, {
-      title: 'e2e-chat-upd',
-      defaultAgentId: String(agent.id),
-      expectedVersion: chat.version,
-    })
-    const updated = envelopeData(uJson)
-    assert(updated.title === 'e2e-chat-upd', JSON.stringify(uJson))
+    const agent = await firstAgent(ctx)
+    const chat = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/chat', {
+          title: 'e2e-chat',
+          agentName: agent.name,
+          yoloEnabled: false,
+        })
+      ).json,
+    )
+    const updated = envelopeData(
+      (
+        await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+          title: 'e2e-chat-upd',
+          expectedVersion: chat.version,
+        })
+      ).json,
+    )
+    assert(updated.title === 'e2e-chat-upd' && updated.agentName === agent.name, JSON.stringify(updated))
     await expectHttpError(
-      () => ctx.call('PUT', `/api/ai/chat/${chatId}`, { title: '   ', expectedVersion: updated.version }),
+      () =>
+        ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
+          title: '   ',
+          expectedVersion: updated.version,
+        }),
       { status: 400, messageIncludes: /title.*blank/i },
     )
-
-    await ctx.call('DELETE', `/api/ai/chat/${chatId}?expectedVersion=${encodeURIComponent(updated.version)}`)
-    await expectHttpError(() => ctx.call('GET', `/api/ai/chat/${chatId}`), { status: 404 })
+    await deleteChat(ctx, updated)
+    await expectHttpError(() => ctx.call('GET', `/api/ai/chat/${chat.id}`), { status: 404 })
   },
 })
 
 registerCase({
   id: 'crud.chat.thread_association_pagination',
   level: 'L1',
-  title: 'Chat 关联 Thread 并按 opaque cursor 分页',
-  docs: 'Chat-scoped POST 原子创建/关联/bootstrap 并返回绑定 Thread；stale Agent 失败无全局/Chat Thread 残留；全局 Thread 关联幂等；列表返回 {items,nextCursor}',
+  title: 'Chat 原子建 Thread、跨 Chat 关联与 opaque cursor 分页',
+  docs: 'Chat-scoped POST 直接返回 bound Thread；PUT association 幂等；Chat/global 列表均使用 {items,nextCursor}',
   async run(ctx) {
-    const { json: agentsJson } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')
-    const agent = pageResults(agentsJson)[0]
-    assert(agent?.id, 'need seeded agent')
-    const { json: modelsJson } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')
-    const model = pageResults(modelsJson)[0]
-    assert(model?.id, 'need seeded model')
+    const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
-    const defaultEnvironmentName = `e2e-chat-thread-env-${suffix}`
-
-    let staleAgent = null
-    let staleChat = null
-    let staleAgentDeleted = false
-    try {
-      const { json: staleAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
-        name: `e2e-stale-agent-${suffix}`,
-        description: 'Temporary Agent for Chat-scoped bootstrap rollback coverage.',
-        systemPrompt: 'Temporary stale Agent for E2E rollback coverage.',
-        modelId: String(model.id),
-        variant: model.config.defaultVariant,
-        config: {
-          tools: [],
-          skills: [],
-        },
-      })
-      staleAgent = envelopeData(staleAgentJson)
-      assert(staleAgent?.id, JSON.stringify(staleAgentJson))
-
-      const { json: staleChatJson } = await ctx.call('POST', '/api/ai/chat', {
-        title: `e2e-stale-chat-${suffix}`,
-        defaultAgentId: String(staleAgent.id),
-      })
-      staleChat = envelopeData(staleChatJson)
-      assert(staleChat?.id, JSON.stringify(staleChatJson))
-
-      const beforeGlobalThreadIds = await listAllThreadIds(ctx, '/api/ai/runtime/threads')
-      const beforeChatThreadIds = await listAllThreadIds(
-        ctx,
-        `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
-      )
-      assert(beforeChatThreadIds.length === 0, JSON.stringify(beforeChatThreadIds))
-
-      try {
-        await ctx.call(
-          'DELETE',
-          `/api/ai/catalog/agents/${staleAgent.id}?expectedVersion=${encodeURIComponent(staleAgent.version)}`,
-        )
-        staleAgentDeleted = true
-      } catch (error) {
-        throw new Error(`stale Agent rollback probe could not delete temporary Agent: ${error.message}`)
-      }
-
-      await expectHttpError(
-        () =>
-          ctx.call(
-            'POST',
-            `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
-          ),
-        {},
-      )
-
-      const afterGlobalThreadIds = await listAllThreadIds(ctx, '/api/ai/runtime/threads')
-      const afterChatThreadIds = await listAllThreadIds(
-        ctx,
-        `/api/ai/chat/${encodeURIComponent(staleChat.id)}/threads`,
-      )
-      assert(
-        JSON.stringify(afterGlobalThreadIds) === JSON.stringify(beforeGlobalThreadIds),
-        `stale bootstrap changed global Thread list: ${JSON.stringify({
-          before: beforeGlobalThreadIds,
-          after: afterGlobalThreadIds,
-        })}`,
-      )
-      assert(
-        JSON.stringify(afterChatThreadIds) === JSON.stringify(beforeChatThreadIds),
-        `stale bootstrap changed Chat Thread list: ${JSON.stringify({
-          before: beforeChatThreadIds,
-          after: afterChatThreadIds,
-        })}`,
-      )
-    } finally {
-      if (staleChat?.id) {
-        try {
-          await ctx.call(
-            'DELETE',
-            `/api/ai/chat/${staleChat.id}?expectedVersion=${encodeURIComponent(staleChat.version)}`,
-          )
-        } catch {
-          // Preserve the primary assertion failure.
-        }
-      }
-      if (staleAgent?.id && !staleAgentDeleted) {
-        try {
-          await ctx.call(
-            'DELETE',
-            `/api/ai/catalog/agents/${staleAgent.id}?expectedVersion=${encodeURIComponent(staleAgent.version)}`,
-          )
-        } catch {
-          // Preserve the primary assertion failure.
-        }
-      }
-    }
-
-    const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
+    const target = await createConfiguredChatThread(ctx, {
       title: `e2e-chat-thread-${suffix}`,
-      defaultAgentId: String(agent.id),
-      defaultEnvironmentName,
+      agentName: agent.name,
+      environmentName: `e2e-chat-thread-env-${suffix}`,
+      yoloEnabled: true,
     })
-    const chat = envelopeData(chatJson)
-    const chatId = String(chat.id)
+    const source = await createConfiguredChatThread(ctx, {
+      title: `e2e-source-thread-${suffix}`,
+      agentName: agent.name,
+    })
     try {
-      const { json: scopedCreateJson } = await ctx.call(
-        'POST',
-        `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
-      )
-      const scopedThread = envelopeData(scopedCreateJson)
-      assert(scopedThread.status === 'IDLE', JSON.stringify(scopedThread))
-      assert(Number(scopedThread.executionEpoch) === 1, JSON.stringify(scopedThread))
-      assert(scopedThread.sessionId && scopedThread.headEntryId, JSON.stringify(scopedThread))
-      assert(
-        scopedThread.activeEnvironmentName === defaultEnvironmentName,
-        JSON.stringify(scopedThread),
-      )
-
-      const globalThread = await createUnboundThread(ctx)
+      assert(target.thread.status === 'IDLE', JSON.stringify(target.thread))
+      assert(Number(target.thread.executionEpoch) === 0, JSON.stringify(target.thread))
+      assert(target.thread.sessionId && target.thread.headEntryId, JSON.stringify(target.thread))
       await ctx.call(
         'PUT',
-        `/api/ai/chat/${encodeURIComponent(chatId)}/threads/${encodeURIComponent(globalThread.threadId)}`,
+        `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads/${encodeURIComponent(source.thread.threadId)}`,
       )
       await ctx.call(
         'PUT',
-        `/api/ai/chat/${encodeURIComponent(chatId)}/threads/${encodeURIComponent(globalThread.threadId)}`,
+        `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads/${encodeURIComponent(source.thread.threadId)}`,
       )
-
-      const { json: scopedPageJson } = await ctx.call(
-        'GET',
-        `/api/ai/chat/${encodeURIComponent(chatId)}/threads?sort=created&limit=100`,
+      const scopedPage = threadPageData(
+        (
+          await ctx.call(
+            'GET',
+            `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads?sort=created&limit=100`,
+          )
+        ).json,
+        'Chat Thread page',
       )
-      const scopedPage = threadPageData(scopedPageJson, 'Chat Thread page')
       const scopedIds = new Set(scopedPage.items.map((thread) => String(thread.threadId)))
-      assert(scopedIds.has(String(scopedThread.threadId)), 'Chat-scoped create missing from Chat list')
-      assert(scopedIds.has(String(globalThread.threadId)), 'associated global Thread missing from Chat list')
-      assert(scopedPage.nextCursor == null, 'limit=100 should contain this Chat fixture in one page')
+      assert(scopedIds.has(String(target.thread.threadId)), 'target Thread missing')
+      assert(scopedIds.has(String(source.thread.threadId)), 'associated Thread missing')
 
-      const { json: firstGlobalJson } = await ctx.call(
-        'GET',
-        '/api/ai/runtime/threads?sort=recent&limit=1',
+      const firstGlobal = threadPageData(
+        (await ctx.call('GET', '/api/ai/runtime/threads?sort=recent&limit=1')).json,
       )
-      const firstGlobal = threadPageData(firstGlobalJson)
-      assert(firstGlobal.items.length === 1, JSON.stringify(firstGlobal))
-      assert(firstGlobal.nextCursor, 'global page must expose an opaque cursor when more rows exist')
-      const { json: secondGlobalJson } = await ctx.call(
-        'GET',
-        `/api/ai/runtime/threads?sort=recent&cursor=${encodeURIComponent(firstGlobal.nextCursor)}&limit=1`,
+      assert(firstGlobal.items.length === 1 && firstGlobal.nextCursor, JSON.stringify(firstGlobal))
+      const secondGlobal = threadPageData(
+        (
+          await ctx.call(
+            'GET',
+            `/api/ai/runtime/threads?sort=recent&cursor=${encodeURIComponent(firstGlobal.nextCursor)}&limit=1`,
+          )
+        ).json,
       )
-      const secondGlobal = threadPageData(secondGlobalJson)
       const firstIds = new Set(firstGlobal.items.map((thread) => String(thread.threadId)))
       assert(
         secondGlobal.items.every((thread) => !firstIds.has(String(thread.threadId))),
         'keyset pages must be disjoint',
       )
     } finally {
-      await ctx.call(
-        'DELETE',
-        `/api/ai/chat/${encodeURIComponent(chatId)}?expectedVersion=${encodeURIComponent(chat.version)}`,
-      )
+      await deleteChat(ctx, target.chat)
+      await deleteChat(ctx, source.chat)
     }
   },
 })
 
-async function listAllThreadIds(ctx, basePath) {
-  const ids = []
-  const cursors = new Set()
-  let cursor = null
-  while (true) {
-    const separator = basePath.includes('?') ? '&' : '?'
-    const cursorQuery = cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
-    const { json } = await ctx.call(
-      'GET',
-      `${basePath}${separator}sort=created&limit=100${cursorQuery}`,
-    )
-    const page = threadPageData(json, `Thread list ${basePath}`)
-    ids.push(...page.items.map((thread) => String(thread.threadId)))
-    if (!page.nextCursor) return ids
-    assert(!cursors.has(page.nextCursor), `repeated Thread list cursor: ${page.nextCursor}`)
-    cursors.add(page.nextCursor)
-    cursor = page.nextCursor
-  }
+async function firstModel(ctx) {
+  const models = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')).json,
+  )
+  assert(models[0]?.providerName && models[0]?.name, 'need seeded Model')
+  return models[0]
+}
+
+async function firstAgent(ctx) {
+  const agents = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')).json,
+  )
+  assert(agents[0]?.name, 'need seeded Agent')
+  return agents[0]
+}
+
+async function findModel(ctx, providerName, name) {
+  const models = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100')).json,
+  )
+  return models.find(
+    (model) => model.providerName === providerName && model.name === name,
+  )
+}
+
+function modelRef(model) {
+  return `${model.providerName}/${model.name}`
+}
+
+function modelPath(providerName, name) {
+  return `/api/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(name)}`
+}
+
+async function deleteModel(ctx, model) {
+  await ctx.call(
+    'DELETE',
+    `${modelPath(model.providerName, model.name)}&expectedVersion=${encodeURIComponent(model.version)}`,
+  )
+}
+
+async function deleteProvider(ctx, provider) {
+  await ctx.call(
+    'DELETE',
+    `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+  )
+}
+
+async function deleteChat(ctx, chat) {
+  await ctx.call(
+    'DELETE',
+    `/api/ai/chat/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+  )
 }

@@ -16,8 +16,6 @@ describe('ThreadComposer and commands', () => {
       'thread',
       'agent',
       'environment',
-      'model',
-      'variant',
       'yolo',
       'tree',
       'stop',
@@ -31,10 +29,10 @@ describe('ThreadComposer and commands', () => {
       'thread',
       'agent',
       'environment',
+      'yolo',
     ])
     expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
-    expect(blank.find((c) => c.id === 'model')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
     expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])

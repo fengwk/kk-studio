@@ -16,12 +16,12 @@ describe('chatService', () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChats()
-    await service.createChat({ title: 'A', defaultAgentId: '9', defaultEnvironmentName: 'local' })
+    await service.createChat({ title: 'A', agentName: '9', environmentName: 'local' })
     await service.getChat('chat /1')
     await service.updateChat('chat /1', {
       title: 'B',
-      defaultAgentId: '',
-      defaultEnvironmentName: null,
+      agentName: '',
+      environmentName: null,
       expectedVersion: '4',
     })
     await service.deleteChat('chat /1', '5')
@@ -29,14 +29,14 @@ describe('chatService', () => {
     expect(client.get).toHaveBeenNthCalledWith(1, '/ai/chat')
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/chat', {
       title: 'A',
-      defaultAgentId: '9',
-      defaultEnvironmentName: 'local',
+      agentName: '9',
+      environmentName: 'local',
     })
     expect(client.get).toHaveBeenNthCalledWith(2, '/ai/chat/chat%20%2F1')
     expect(client.put).toHaveBeenNthCalledWith(1, '/ai/chat/chat%20%2F1', {
       title: 'B',
-      defaultAgentId: '',
-      defaultEnvironmentName: null,
+      agentName: '',
+      environmentName: null,
       expectedVersion: '4',
     })
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/chat/chat%20%2F1', { params: { expectedVersion: '5' } })

@@ -43,5 +43,12 @@ export function toEditableProvider(draft: ProviderDraft): AgentProviderCreateDTO
 }
 
 export function toEditableProviderUpdate(draft: ProviderDraft): AgentProviderEditablePropertiesDTO {
-  return toEditableProvider(draft)
+  return {
+    description: trimToNull(draft.description),
+    providerType: draft.providerType.trim(),
+    baseUrl: trimToNull(draft.baseUrl),
+    credential: trimToNull(draft.credential),
+    modelCallTimeoutMillis: numberToNull(draft.modelCallTimeoutMillis),
+    modelCallIdleTimeoutMillis: numberToNull(draft.modelCallIdleTimeoutMillis),
+  }
 }

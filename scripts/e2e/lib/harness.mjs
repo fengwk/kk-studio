@@ -37,16 +37,7 @@ function listData(json, description) {
   return data
 }
 
-export async function createUnboundThread(ctx) {
-  const { status, json } = await ctx.call('POST', '/api/ai/runtime/threads')
-  assert(status === 201, `create thread status ${status}: ${JSON.stringify(json)}`)
-  const thread = envelopeData(json)
-  threadIdOf(thread)
-  executionEpochOf(thread)
-  return thread
-}
-
-/** Chat-scoped POST performs create, association and bootstrap atomically. */
+/** Chat-scoped POST atomically creates Session, ROOT, Thread, and association. */
 export async function createChatThread(ctx, chatId) {
   const { status, json } = await ctx.call(
     'POST',
@@ -62,6 +53,24 @@ export async function createChatThread(ctx, chatId) {
     `Chat thread must have a session/head: ${JSON.stringify(thread)}`,
   )
   return thread
+}
+
+export async function createConfiguredChatThread(ctx, options) {
+  const { status: chatStatus, json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
+    title: options?.title,
+    agentName: options?.agentName,
+    environmentName: options?.environmentName ?? null,
+    yoloEnabled: Boolean(options?.yoloEnabled),
+  })
+  assert(chatStatus === 201, `create Chat status ${chatStatus}: ${JSON.stringify(chatJson)}`)
+  const chat = envelopeData(chatJson)
+  assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
+  const thread = await createChatThread(ctx, chat.id)
+  return {
+    chat,
+    thread,
+    session: { sessionId: thread.sessionId },
+  }
 }
 
 export async function getThread(ctx, threadId) {
@@ -81,39 +90,15 @@ export async function getThreadSnapshot(ctx, threadId) {
   return snapshot
 }
 
-export async function bootstrapThread(ctx, unboundThread, options) {
-  const threadId = threadIdOf(unboundThread)
-  const agentDefinitionId = String(options?.agentDefinitionId || '')
-  assert(/^\d+$/.test(agentDefinitionId), `expected decimal agentDefinitionId: ${agentDefinitionId}`)
-  const { status, json } = await ctx.call(
-    'POST',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/bootstrap`,
-    {
-      title: options?.title,
-      agentDefinitionId,
-      yoloEnabled: Boolean(options?.yoloEnabled),
-      expectedExecutionEpoch: executionEpochOf(unboundThread),
-    },
-  )
-  assert(status === 201, `bootstrap status ${status}: ${JSON.stringify(json)}`)
-  const result = envelopeData(json)
-  assert(result?.session?.sessionId, `bootstrap missing session: ${JSON.stringify(result)}`)
-  assert(threadIdOf(result?.thread) === threadId, `bootstrap changed thread: ${JSON.stringify(result)}`)
-  return result
-}
-
-export async function createBootstrappedThread(ctx, options) {
-  const unboundThread = await createUnboundThread(ctx)
-  return bootstrapThread(ctx, unboundThread, options)
-}
-
 export async function updateThreadHead(ctx, thread, headEntryId) {
   const threadId = threadIdOf(thread)
+  const targetHeadEntryId = String(headEntryId || '')
+  assert(/^\d+$/.test(targetHeadEntryId), `expected decimal headEntryId: ${headEntryId}`)
   const { status, json } = await ctx.call(
     'PUT',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/head`,
     {
-      headEntryId: headEntryId == null ? null : String(headEntryId),
+      headEntryId: targetHeadEntryId,
       expectedExecutionEpoch: executionEpochOf(thread),
     },
   )

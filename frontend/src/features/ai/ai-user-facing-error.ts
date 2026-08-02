@@ -22,7 +22,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /topP/i, key: 'ai.catalog.validation.topP' },
     { match: /topK/i, key: 'ai.catalog.validation.topK' },
     { match: /frequencyPenalty|presencePenalty/i, key: 'ai.catalog.validation.penalty' },
-    { match: /providerId|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
+    { match: /providerName|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
     {
       match: /agent model name already exists( under this provider)?:?\s*(.*)$/i,
       key: 'ai.catalog.validation.duplicateModel',
@@ -36,7 +36,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
       key: 'ai.catalog.validation.duplicateAgent',
     },
     { match: /pricing|PerMillion|serviceTier|must not be negative|must be a number/i, key: 'ai.catalog.validation.pricing' },
-    { match: /modelId|请选择 Model|Default Model/i, key: 'ai.catalog.validation.model' },
+    { match: /modelName|请选择 Model|Default Model/i, key: 'ai.catalog.validation.model' },
     { match: /baseUrl/i, key: 'ai.catalog.validation.baseUrl' },
     { match: /tools.*重名|tools/i, key: 'ai.catalog.validation.toolsConflict' },
     { match: /skills.*重名|skills/i, key: 'ai.catalog.validation.skillsConflict' },

@@ -1,11 +1,12 @@
 import type { CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
-/** Persistent Chat collection; defaultAgentId is required but may be stale after Agent deletion. */
+/** Persistent Chat collection; agentName is required but may be stale after Agent deletion. */
 export interface ChatDTO {
   id: string
   title: string | null
-  defaultAgentId: string
-  defaultEnvironmentName: string | null
+  agentName: string
+  environmentName: string | null
+  yoloEnabled: boolean
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
@@ -13,14 +14,16 @@ export interface ChatDTO {
 
 export interface ChatCreateDTO {
   title?: string
-  defaultAgentId: string
-  defaultEnvironmentName?: string
+  agentName: string
+  environmentName?: string | null
+  yoloEnabled?: boolean
 }
 
-/** Partial update: omitted fields preserve; explicit null clears defaultEnvironmentName. */
+/** Partial update: omitted fields preserve; explicit null clears environmentName. */
 export interface ChatUpdateDTO {
   title?: string | null
-  defaultAgentId?: string
-  defaultEnvironmentName?: string | null
+  agentName?: string
+  environmentName?: string | null
+  yoloEnabled?: boolean
   expectedVersion: CatalogVersion
 }

@@ -21,7 +21,13 @@ export function ProviderForm({
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="minimax" required />
+        <input
+          value={draft.name}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
+          placeholder="minimax"
+          readOnly={mode === 'edit'}
+          required
+        />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">

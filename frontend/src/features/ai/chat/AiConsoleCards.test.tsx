@@ -20,11 +20,11 @@ describe('ChatCard', () => {
   it('uses the Chat id when the title is absent and marks missing default agent', () => {
     render(
       <MemoryRouter>
-        <ChatCard chat={{ ...chat(), title: null, defaultAgentId: 'missing', defaultEnvironmentName: null }} agents={[]} />
+        <ChatCard chat={{ ...chat(), title: null, agentName: 'missing', environmentName: null }} agents={[]} />
       </MemoryRouter>,
     )
     expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()
-    expect(screen.getByText('（已删除/缺失）')).toBeInTheDocument()
+    expect(screen.getByText('missing')).toBeInTheDocument()
   })
 })
 
@@ -36,8 +36,8 @@ function chat() {
   return {
     id: 'chat-1',
     title: 'Draft',
-     defaultAgentId: 'missing',
-    defaultEnvironmentName: null,
+     agentName: 'missing',
+    environmentName: null,
     version: '1',
     createTime: null,
     updateTime: null,

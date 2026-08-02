@@ -24,6 +24,7 @@ function toggleName(items: string[], name: string): string[] {
 
 export function AgentForm({
   draft,
+  mode = 'create',
   models,
   toolCatalog = [],
   environments = [],
@@ -31,6 +32,7 @@ export function AgentForm({
   onChange,
 }: {
   draft: AgentDraft
+  mode?: 'create' | 'edit'
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
@@ -39,7 +41,7 @@ export function AgentForm({
   onChange: (draft: AgentDraft) => void
 }) {
   const { t } = useI18n()
-  const selectedModel = models.find((model) => String(model.id) === draft.modelId)
+  const selectedModel = models.find((model) => modelRef(model) === draft.model)
   const variantOptions = variantOptionsFromModel(selectedModel)
   const selectedVariant = draft.variant.trim()
   const toolCandidates = withSelectedOrphans(
@@ -55,7 +57,13 @@ export function AgentForm({
     <>
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <input value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} placeholder="default-assistant" required />
+        <input
+          value={draft.name}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
+          placeholder="default-assistant"
+          readOnly={mode === 'edit'}
+          required
+        />
         {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
       </label>
       <label className="form-group">
@@ -66,19 +74,20 @@ export function AgentForm({
           placeholder={t('ai.catalog.form.descriptionPlaceholder')}
         />
       </label>
-      <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
+      <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <FormSelect
           aria-label={t('ai.catalog.form.defaultModel')}
-          value={draft.modelId}
+          value={draft.model}
           required
+          disabled={mode === 'edit'}
           options={models.map((model) => ({
-            value: String(model.id),
+            value: modelRef(model),
             label: modelRef(model),
           }))}
-          onChange={(modelId) => onChange(applyAgentModelSelection(draft, modelId, models))}
+          onChange={(model) => onChange(applyAgentModelSelection(draft, model, models))}
         />
-        {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
+        {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
       </label>
       <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
         <FieldLabel>{t('ai.catalog.form.defaultVariantOverride')}</FieldLabel>
@@ -132,7 +141,7 @@ export function AgentForm({
           {t('ai.catalog.form.needModel')}
         </div>
       )}
-      {models.length > 0 && !draft.modelId && (
+      {models.length > 0 && !draft.model && (
         <button className="ghost-inline-btn" type="button" onClick={() => onChange(emptyAgentDraft(models[0]))}>
           {t('ai.catalog.form.fillFirstModel')}
         </button>

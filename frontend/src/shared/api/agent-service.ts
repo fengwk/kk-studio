@@ -11,7 +11,7 @@ import type {
   AgentProviderUpdateDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { AgentResourceId, PageResult } from '@/shared/api/contracts/base'
+import type { PageResult } from '@/shared/api/contracts/base'
 
 export function createAgentService(client: HttpClient = apiClient) {
   return {
@@ -21,11 +21,11 @@ export function createAgentService(client: HttpClient = apiClient) {
     createProvider: (data: AgentProviderCreateDTO): Promise<AgentProviderDTO> =>
       client.post('/ai/catalog/providers', data),
 
-    updateProvider: (id: AgentResourceId, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
-      client.put(`/ai/catalog/providers/${encodeURIComponent(id)}`, data),
+    updateProvider: (name: string, data: AgentProviderUpdateDTO): Promise<AgentProviderDTO> =>
+      client.put(`/ai/catalog/providers/${encodeURIComponent(name)}`, data),
 
-    deleteProvider: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
-      client.delete(`/ai/catalog/providers/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
+    deleteProvider: (name: string, expectedVersion: string): Promise<void> =>
+      client.delete(`/ai/catalog/providers/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
 
     listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
       client.get('/ai/catalog/models', { params: { pageNumber, pageSize } }),
@@ -33,11 +33,24 @@ export function createAgentService(client: HttpClient = apiClient) {
     createModel: (data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
       client.post('/ai/catalog/models', data),
 
-    updateModel: (id: AgentResourceId, data: AgentModelUpdateDTO): Promise<AgentModelDTO> =>
-      client.put(`/ai/catalog/models/${encodeURIComponent(id)}`, data),
+    updateModel: (
+      providerName: string,
+      modelName: string,
+      data: AgentModelUpdateDTO,
+    ): Promise<AgentModelDTO> =>
+      client.put(
+        `/ai/catalog/models?providerName=${encodeURIComponent(providerName)}&modelName=${encodeURIComponent(modelName)}`,
+        data,
+      ),
 
-    deleteModel: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
-      client.delete(`/ai/catalog/models/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
+    deleteModel: (
+      providerName: string,
+      modelName: string,
+      expectedVersion: string,
+    ): Promise<void> =>
+      client.delete('/ai/catalog/models', {
+        params: { providerName, modelName, expectedVersion },
+      }),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/ai/catalog/agents', { params: { pageNumber, pageSize } }),
@@ -47,11 +60,11 @@ export function createAgentService(client: HttpClient = apiClient) {
     createAgent: (data: AgentDefinitionCreateDTO): Promise<AgentDefinitionDTO> =>
       client.post('/ai/catalog/agents', data),
 
-    updateAgent: (id: AgentResourceId, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
-      client.put(`/ai/catalog/agents/${encodeURIComponent(id)}`, data),
+    updateAgent: (name: string, data: AgentDefinitionUpdateDTO): Promise<AgentDefinitionDTO> =>
+      client.put(`/ai/catalog/agents/${encodeURIComponent(name)}`, data),
 
-    deleteAgent: (id: AgentResourceId, expectedVersion: string): Promise<void> =>
-      client.delete(`/ai/catalog/agents/${encodeURIComponent(id)}`, { params: { expectedVersion } }),
+    deleteAgent: (name: string, expectedVersion: string): Promise<void> =>
+      client.delete(`/ai/catalog/agents/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
 
   }
 }
