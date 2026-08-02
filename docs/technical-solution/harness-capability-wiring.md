@@ -46,7 +46,7 @@ public interface ProviderFactory {
 
 [`ProviderFactories`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderFactories.java) 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。`ModelExecutionConfiguration` 通过 `ObjectProvider<ProviderFactory>` 收集全部 ProviderFactory。
 
-Provider 资源本身由 Catalog 的 `name`、`providerType`、base URL、credential 和 JSON config 描述；ProviderFactory 只负责把当前请求解析成 adapter，不改变 Catalog 身份。
+Provider 资源本身由 Catalog revision 的 `(name, providerVersion)`、`providerType`、base URL、credential 和 JSON config 描述；ProviderFactory 只负责把冻结 revision 解析成 adapter，不读取或回退到当前 Catalog Provider 行。credential 只在写入 DTO 反序列化与 revision 内部 dispatch 使用，不进入 response 或 invocation JSON。
 
 ## 3. ToolCatalog
 
@@ -85,7 +85,7 @@ environmentName
 yoloEnabled
 ```
 
-解析顺序为 Agent → Provider → `(providerName, modelName)` Model → Variant → READY Environment → Tools → Skills → ProviderFactory。Resolver 同时读取 Model config、Agent config、ToolCatalog 与 live registry，返回本轮的 `ResolvedTurnExecution`。
+解析顺序为 active Agent → active Provider → `(providerName, modelName)` Model → Variant → READY Environment → Tools → Skills → ProviderFactory。Resolver 同时读取 Model config、Agent config、ToolCatalog 与 live registry，返回本轮含 Provider version 的 `ResolvedTurnExecution`。
 
 缺失或不可用资源返回明确 `PlanningFailure`：
 

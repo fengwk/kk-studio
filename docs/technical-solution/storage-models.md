@@ -6,11 +6,14 @@ PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。�
 
 | 表 | 身份与关键约束 |
 | --- | --- |
-| `agent_provider` | `name` 主键；Provider/Agent 使用名称引用 |
-| `agent_model` | `(provider_name, name)` 复合主键；`provider_name` 外键到 `agent_provider(name)` |
-| `agent_definition` | `name` 主键；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
+| `agent_provider` | `name` 主键永久保留；`deleted_at` 软删除；Provider/Agent 使用名称引用 |
+| `agent_provider_revision` | `(provider_name, provider_version)` 复合主键；append-only 保存 Provider 类型、endpoint、credential 与 config |
+| `agent_model` | `(provider_name, name)` 复合主键永久保留；`deleted_at` 软删除；`provider_name` 外键到 `agent_provider(name)` |
+| `agent_definition` | `name` 主键永久保留；`deleted_at` 软删除；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
 
-Catalog 表不使用 bigint resource ID。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
+Catalog 表不使用 bigint resource ID。普通 page/get/runtime 查询只返回 `deleted_at is null` 的行；删除是带版本递增的 soft-delete，原名称不能重新创建。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
+
+Provider 创建写入 revision `0`；每次成功更新在同一事务写入 `expectedVersion + 1`。Provider 删除不创建新 revision，已冻结的 invocation 仍可通过旧 revision 重放。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。
 
 ## 2. Chat 与关系
 
@@ -72,7 +75,7 @@ USER/CUSTOM Input 的 payload 与 harvest 后的对应 Entry 都保存：
 | `harness_interaction` | Tool permission 的 request/response、`OPEN/RESOLVED` 与 version |
 | `harness_execution_target` | Thread、Model、Tool target 的唯一 durable activation queue；`dispatch_enabled` 控制可调度性 |
 
-`ModelInvocationRequest` 的 `providerRequest`、`toolBindings`、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。Retry 只改变 invocation attempt 与调度时间，重放相同 request；ToolWorker 使用 request 中的原 binding。
+`ModelInvocationRequest` 的 `providerRequest`、`toolBindings`、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。`providerRequest.model` 还冻结 `providerName` 与非负 `providerVersion`。Retry 只改变 invocation attempt 与调度时间，按该版本的 Provider revision 重放相同 request；ToolWorker 使用 request 中的原 binding。
 
 ## 5. Usage ledger
 

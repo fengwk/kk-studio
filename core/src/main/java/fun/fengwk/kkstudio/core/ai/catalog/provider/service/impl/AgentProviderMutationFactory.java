@@ -98,15 +98,22 @@ final class AgentProviderMutationFactory {
   }
 
   private String requireName(String name) {
-    String normalized = editableSupport.trimToNull(name);
-    if (normalized == null) {
+    if (name == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
-    if (normalized.indexOf('/') >= 0) {
+    String canonical = name.strip();
+    if (canonical.isEmpty()) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    if (!name.equals(canonical)) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
+    }
+    if (canonical.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
     }
-    editableSupport.validateMaxLength(RESOURCE, "name", normalized, NAME_MAX_LENGTH);
-    return normalized;
+    editableSupport.validateMaxLength(RESOURCE, "name", canonical, NAME_MAX_LENGTH);
+    return canonical;
   }
 
   record Mutation(

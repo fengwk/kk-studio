@@ -30,11 +30,11 @@ flowchart LR
 
 Runtime durable ID 在 HTTP 中编码为十进制字符串。Catalog 不使用 bigint resource ID：
 
-- Provider 和 Agent 的 identity 是 immutable `name`。
-- Model 的 identity 是 `(providerName, name)`。
-- 所有名称必须非空、无首尾空白；Provider/Agent 名称还必须是单路径段，禁止包含 `/`。
+- Provider 和 Agent 的 identity 是永久保留的 immutable `name`，删除只写 `deleted_at`。
+- Model 的 identity 是永久保留的 `(providerName, name)`。
+- 所有名称必须非空、拒绝首尾 Unicode whitespace；Provider/Agent 名称还必须是单路径段，禁止包含 `/`。
 - API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分，因此 Model 名称可以包含 `/`。
-- Catalog version 是独立的并发 token，以十进制字符串传输。
+- Catalog version 是独立的并发 token，以十进制字符串传输。Provider 的每个成功版本另有 append-only revision，runtime 只按 `(providerName, providerVersion)` dispatch。
 
 Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `name` 两个字段。Provider、Model、Agent 的 PUT/DELETE 都用名称定位并携带 `expectedVersion`。
 
@@ -116,7 +116,8 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ChatThreadServiceImpl` | 在一个事务中调用 Thread command 创建 Session/ROOT/Thread，写入 Chat 关系并返回查询投影 |
 | `ThreadCommandCoordinator` | 创建 Thread、非空 head 重定位、消息 payload 构造、幂等短路与 stop |
 | `PostgresqlThreadCommandTransactions` | Session/ROOT/Thread 原子写入、head CAS、Input enqueue、stop |
-| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称在同一 PostgreSQL repeatable-read snapshot 中读取 Agent、Model、Provider 与 Variant，并读取当前 READY Environment；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
+| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称在同一 PostgreSQL repeatable-read snapshot 中读取 active Agent、Model、Provider 与 Variant，并把 active Provider version 冻结进 ModelDescriptor；读取当前 READY Environment；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
+| `DatabaseProviderResolutionService` | 只按冻结的 `(providerName, providerVersion)` 读取 `agent_provider_revision`；不读取当前 Provider 行，因此更新/软删除不影响已有 invocation 的首次 dispatch 与 retry |
 | `ThreadReconciler` | TURN_INPUT_BATCH、planning、Model/Tool terminal apply、Entry/head 推进 |
 | `ModelWorker` | 回放冻结 ProviderRequest，写 ModelInvocation terminal 与 realtime |
 | `ToolWorker` | 按冻结 ToolBinding 执行本地或 RemoteTool |

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -76,6 +77,7 @@ class ProviderRequestJsonCodecTest {
     ProviderRequest decoded = codec.decode(encoded);
 
     assertEquals(expectedJson, encoded);
+    assertFalse(encoded.contains("credential"));
     assertEquals(request, decoded);
     assertEquals(encoded, codec.encode(decoded));
     assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
@@ -354,6 +356,7 @@ class ProviderRequestJsonCodecTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "openai",
+            0L,
             "gpt-5-mini",
             ProviderType.OPENAI,
             true,
@@ -422,6 +425,7 @@ class ProviderRequestJsonCodecTest {
     ModelDescriptor updatedModel =
         new ModelDescriptor(
             model.providerName(),
+            model.providerVersion(),
             model.modelName(),
             model.providerType(),
             model.tools(),

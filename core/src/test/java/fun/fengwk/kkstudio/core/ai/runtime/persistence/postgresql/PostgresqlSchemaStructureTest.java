@@ -32,6 +32,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static final List<String> EXPECTED_TABLES =
       Arrays.asList(
           "agent_provider",
+          "agent_provider_revision",
           "agent_model",
           "agent_definition",
           "flyway_schema_history",
@@ -102,7 +103,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version");
+        "version",
+        "deleted_at");
+    assertColumns(
+        "agent_provider_revision",
+        "provider_name",
+        "provider_version",
+        "provider_type",
+        "base_url",
+        "credential",
+        "config",
+        "created_at");
     assertColumns(
         "agent_model",
         "provider_name",
@@ -111,7 +122,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version");
+        "version",
+        "deleted_at");
     assertColumns(
         "agent_definition",
         "name",
@@ -123,7 +135,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version");
+        "version",
+        "deleted_at");
     assertColumns(
         "comfyui_workflow_api",
         "id",
@@ -237,6 +250,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_entry", "payload");
     assertColumnType("jsonb", "harness_thread_input", "payload");
     assertColumnType("jsonb", "agent_provider", "config");
+    assertColumnType("jsonb", "agent_provider_revision", "config");
     assertColumnType("jsonb", "agent_model", "config");
     assertColumnType("jsonb", "agent_definition", "config");
     assertColumnType("jsonb", "harness_model_invocation", "request");
@@ -252,6 +266,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "harness_thread_input", "applied_at");
     assertColumnType("timestamp with time zone", "harness_thread_input", "created_at");
     assertColumnType("timestamp with time zone", "harness_execution_target", "available_at");
+    assertColumnType("timestamp with time zone", "agent_provider_revision", "created_at");
   }
 
   @Test

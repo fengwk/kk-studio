@@ -228,7 +228,7 @@ class PromptCacheRequestFinalizerTest {
 
   private static ModelDescriptor baseModel(PromptCachePolicy policy) {
     return new ModelDescriptor(
-        "provider", "m1", ProviderType.OPENAI, true, false, pricing(), policy);
+        "provider", 0L, "m1", ProviderType.OPENAI, true, false, pricing(), policy);
   }
 
   private static ModelDescriptor affinityModel() {

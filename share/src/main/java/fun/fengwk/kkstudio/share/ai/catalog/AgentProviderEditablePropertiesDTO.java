@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 /**
@@ -11,7 +12,10 @@ public class AgentProviderEditablePropertiesDTO {
   private String description;
   private String providerType;
   private String baseUrl;
+
+  @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
   private String credential;
+
   private Long modelCallTimeoutMillis;
   private Long modelCallIdleTimeoutMillis;
 }

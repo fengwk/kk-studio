@@ -2,19 +2,24 @@ package fun.fengwk.kkstudio.core.ai.chat;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.core.ai.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.core.ai.runtime.thread.command.DatabaseTurnExecutionResolver;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
+import fun.fengwk.kkstudio.harness.runtime.model.plan.TurnExecutionResolver;
+import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
@@ -26,7 +31,8 @@ import java.util.List;
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
-  @Autowired private JdbcTemplate jdbc;
+  @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private DatabaseTurnExecutionResolver turnExecutionResolver;
 
   @Override
   protected void migrateDatabase(Connection conn) {
@@ -97,10 +103,15 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         chatService.deleteChat(second.getId(), "0");
       }
 
-      jdbc.update("delete from agent_definition where name = 'default-assistant'");
+      agentDefinitionService.deleteAgent("default-assistant", "0");
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
+      TurnExecutionResolver.Resolution resolution =
+          turnExecutionResolver.resolve(new TurnSettings("default-assistant", null, false));
+      TurnExecutionResolver.Resolution.Failed failure =
+          assertInstanceOf(TurnExecutionResolver.Resolution.Failed.class, resolution);
+      assertEquals(PlanningFailureKind.AGENT_NOT_FOUND, failure.failure().kind());
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");

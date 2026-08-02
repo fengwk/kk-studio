@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -29,7 +30,20 @@ class ModelContractTest {
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
+                "provider",
+                -1L,
+                "model",
+                ProviderType.OPENAI,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
                 "",
+                0L,
                 "model",
                 ProviderType.OPENAI,
                 true,
@@ -41,6 +55,7 @@ class ModelContractTest {
         () ->
             new ModelDescriptor(
                 "provider",
+                0L,
                 "",
                 ProviderType.OPENAI,
                 true,
@@ -51,12 +66,20 @@ class ModelContractTest {
         NullPointerException.class,
         () ->
             new ModelDescriptor(
-                "provider", "model", null, true, false, pricing(), PromptCachePolicy.disabled()));
+                "provider",
+                0L,
+                "model",
+                null,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelDescriptor(
                 "provider",
+                0L,
                 "model",
                 ProviderType.OPENAI,
                 true,
@@ -67,7 +90,42 @@ class ModelContractTest {
         NullPointerException.class,
         () ->
             new ModelDescriptor(
-                "provider", "model", ProviderType.OPENAI, true, false, pricing(), null));
+                "provider", 0L, "model", ProviderType.OPENAI, true, false, pricing(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
+                "\u2003provider",
+                0L,
+                "model",
+                ProviderType.OPENAI,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
+                "provider/alias",
+                0L,
+                "model",
+                ProviderType.OPENAI,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
+    assertDoesNotThrow(
+        () ->
+            new ModelDescriptor(
+                "provider",
+                0L,
+                "model/with/slash",
+                ProviderType.OPENAI,
+                true,
+                false,
+                pricing(),
+                PromptCachePolicy.disabled()));
   }
 
   /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */

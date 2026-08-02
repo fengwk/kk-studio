@@ -60,9 +60,16 @@ final class AgentDefinitionMutationFactory {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String normalizedName = editableSupport.trimToNull(name);
-    if (normalizedName == null) {
+    if (name == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    String normalizedName = name.strip();
+    if (normalizedName.isEmpty()) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    if (!name.equals(normalizedName)) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     if (normalizedName.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");

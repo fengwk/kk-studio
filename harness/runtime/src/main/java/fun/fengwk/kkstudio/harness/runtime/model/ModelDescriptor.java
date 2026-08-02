@@ -16,6 +16,7 @@ import java.util.Objects;
  */
 public record ModelDescriptor(
     String providerName,
+    long providerVersion,
     String modelName,
     ProviderType providerType,
     boolean tools,
@@ -25,6 +26,9 @@ public record ModelDescriptor(
 
   public ModelDescriptor {
     providerName = requireName(providerName, "providerName");
+    if (providerVersion < 0) {
+      throw new IllegalArgumentException("providerVersion must not be negative");
+    }
     modelName = requireName(modelName, "modelName");
     providerType = Objects.requireNonNull(providerType, "providerType");
     pricing = Objects.requireNonNull(pricing, "pricing");
@@ -35,8 +39,11 @@ public record ModelDescriptor(
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(name + " must not be blank");
     }
-    if (!value.equals(value.trim())) {
+    if (!value.equals(value.strip())) {
       throw new IllegalArgumentException(name + " must not contain surrounding whitespace");
+    }
+    if (name.equals("providerName") && value.indexOf('/') >= 0) {
+      throw new IllegalArgumentException(name + " must not contain '/'");
     }
     return value;
   }

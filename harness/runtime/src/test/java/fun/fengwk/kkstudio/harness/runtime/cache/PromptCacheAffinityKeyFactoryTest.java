@@ -506,6 +506,7 @@ class PromptCacheAffinityKeyFactoryTest {
   private static ModelDescriptor model(String providerName, String modelName, ProviderType type) {
     return new ModelDescriptor(
         providerName,
+        0L,
         modelName,
         type,
         true,

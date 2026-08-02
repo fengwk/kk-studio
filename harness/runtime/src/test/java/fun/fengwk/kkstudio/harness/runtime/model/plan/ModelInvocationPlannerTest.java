@@ -327,6 +327,7 @@ class ModelInvocationPlannerTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
+            0L,
             modelName,
             ProviderType.OPENAI,
             !tools.isEmpty() || !skills.isEmpty(),

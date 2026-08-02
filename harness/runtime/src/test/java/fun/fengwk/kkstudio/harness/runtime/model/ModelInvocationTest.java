@@ -390,6 +390,7 @@ class ModelInvocationTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
+            0L,
             "model",
             ProviderType.OPENAI,
             false,

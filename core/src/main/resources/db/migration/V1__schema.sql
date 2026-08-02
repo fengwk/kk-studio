@@ -35,6 +35,7 @@ create table agent_provider (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
+    deleted_at      timestamptz(3),
     constraint ck_agent_provider_name check (
         name !~ '^[[:space:]]'
         and name !~ '[[:space:]]$'
@@ -42,6 +43,20 @@ create table agent_provider (
         and position('/' in name) = 0
     ),
     constraint ck_agent_provider_version_nonneg check (version >= 0)
+);
+
+create table agent_provider_revision (
+    provider_name     varchar(64)  not null,
+    provider_version  bigint       not null,
+    provider_type     varchar(64)  not null,
+    base_url          varchar(512),
+    credential        varchar(512),
+    config            jsonb        not null,
+    created_at        timestamptz(3) not null default current_timestamp,
+    constraint pk_agent_provider_revision primary key (provider_name, provider_version),
+    constraint fk_agent_provider_revision_provider foreign key (provider_name)
+        references agent_provider (name),
+    constraint ck_agent_provider_revision_version_nonneg check (provider_version >= 0)
 );
 
 create table agent_model (
@@ -52,6 +67,7 @@ create table agent_model (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
+    deleted_at      timestamptz(3),
     constraint pk_agent_model primary key (provider_name, name),
     constraint ck_agent_model_name check (
         name !~ '^[[:space:]]'
@@ -74,6 +90,7 @@ create table agent_definition (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
+    deleted_at      timestamptz(3),
     constraint ck_agent_definition_name check (
         name !~ '^[[:space:]]'
         and name !~ '[[:space:]]$'
@@ -84,6 +101,9 @@ create table agent_definition (
         references agent_model (provider_name, name),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
+
+create index idx_agent_definition_model
+    on agent_definition (model_provider_name, model_name);
 
 create table comfyui_workflow_api (
     id                bigint        primary key default nextval('kk_studio_id_seq'),

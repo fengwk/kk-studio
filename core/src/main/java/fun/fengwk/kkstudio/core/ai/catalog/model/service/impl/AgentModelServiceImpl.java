@@ -49,7 +49,7 @@ public class AgentModelServiceImpl implements AgentModelService {
         parseRef(
             createDTO == null ? null : createDTO.getProviderName(),
             createDTO == null ? null : createDTO.getName());
-    referenceResolver.requireProvider(ref.providerName());
+    referenceResolver.requireProviderForUpdate(ref.providerName());
     AgentModel model =
         modelMutationFactory.newModel(ref.providerName(), ref.modelName(), createDTO);
     referenceResolver.ensureNameAvailable(ref.providerName(), ref.modelName());
@@ -109,7 +109,7 @@ public class AgentModelServiceImpl implements AgentModelService {
   public void deleteModel(String providerName, String modelName, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     ModelRef ref = parseRef(providerName, modelName);
-    AgentModel model = referenceResolver.requireModel(ref.providerName(), ref.modelName());
+    AgentModel model = referenceResolver.requireModelForUpdate(ref.providerName(), ref.modelName());
     ensureExpectedVersion(model, ref, expectedVersion, expected);
     referenceResolver.ensureDeletable(ref.providerName(), ref.modelName());
     try {

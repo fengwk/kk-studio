@@ -210,6 +210,7 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
     ModelDescriptor descriptor =
         new ModelDescriptor(
             providerName,
+            requireProviderVersion(provider),
             modelName,
             providerType,
             parsedModel.tools(),
@@ -318,6 +319,13 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
       throw new IllegalArgumentException(description + " reference is blank");
     }
     return value;
+  }
+
+  private static long requireProviderVersion(AgentProvider provider) {
+    if (provider.getVersion() == null || provider.getVersion() < 0) {
+      throw new IllegalArgumentException("provider version must be non-negative");
+    }
+    return provider.getVersion();
   }
 
   private static ProviderType toProviderType(AgentProviderType type) {

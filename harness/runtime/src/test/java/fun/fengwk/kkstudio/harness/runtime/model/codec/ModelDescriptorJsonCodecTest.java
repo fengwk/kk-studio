@@ -94,6 +94,7 @@ class ModelDescriptorJsonCodecTest {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
+            0L,
             "claude",
             ProviderType.ANTHROPIC,
             true,
@@ -151,6 +152,7 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(
         List.of(
             "providerName",
+            "providerVersion",
             "modelName",
             "providerType",
             "tools",
@@ -164,7 +166,8 @@ class ModelDescriptorJsonCodecTest {
             names.get(3).asText(),
             names.get(4).asText(),
             names.get(5).asText(),
-            names.get(6).asText()));
+            names.get(6).asText(),
+            names.get(7).asText()));
   }
 
   // ---------- Strict rejection ----------
@@ -295,6 +298,14 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
   }
 
+  /** providerVersion 只能是非负整数。 */
+  @Test
+  void rejectsNegativeProviderVersion() {
+    ObjectNode node = canonicalDescriptorNode();
+    node.put("providerVersion", -1L);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
+  }
+
   // ---------- Cross-codec consistency ----------
 
   /**
@@ -360,6 +371,7 @@ class ModelDescriptorJsonCodecTest {
   private static ModelDescriptor canonicalDescriptor() {
     return new ModelDescriptor(
         "openai",
+        0L,
         "gpt-5-mini",
         ProviderType.OPENAI,
         true,

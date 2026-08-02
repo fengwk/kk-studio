@@ -26,6 +26,14 @@ final class AgentProviderGuard {
     return provider;
   }
 
+  AgentProvider requireProviderForUpdate(String name) {
+    AgentProvider provider = agentProviderRepository.getByNameForUpdate(name);
+    if (provider == null) {
+      throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
+    }
+    return provider;
+  }
+
   void ensureNameAvailable(String name) {
     if (agentProviderRepository.getByName(name) != null) {
       throw new AiDuplicateException(RESOURCE, RESOURCE + " name already exists: " + name);

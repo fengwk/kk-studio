@@ -51,7 +51,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   @Transactional
   public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
     ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel());
-    referenceResolver.requireModel(modelRef.providerName(), modelRef.modelName());
+    referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
     String name = createDTO == null ? null : createDTO.getName();
     AgentDefinition definition =
         definitionMutationFactory.newAgent(
@@ -119,7 +119,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   @Transactional
   public void deleteAgent(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentDefinition definition = referenceResolver.requireAgent(name);
+    AgentDefinition definition = referenceResolver.requireAgentForUpdate(name);
     ensureExpectedVersion(definition, name, expectedVersion, expected);
     if (!agentDefinitionRepository.deleteByName(name, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getByName(name);

@@ -466,6 +466,7 @@ class ProviderModelExecutionTest {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
+            0L,
             "frozen-model",
             ProviderType.OPENAI,
             true,

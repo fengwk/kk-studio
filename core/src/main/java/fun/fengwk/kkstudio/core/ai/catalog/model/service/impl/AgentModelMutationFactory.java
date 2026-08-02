@@ -52,9 +52,16 @@ final class AgentModelMutationFactory {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String normalizedName = editableSupport.trimToNull(name);
-    if (normalizedName == null) {
+    if (name == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    String normalizedName = name.strip();
+    if (normalizedName.isEmpty()) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    if (!name.equals(normalizedName)) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " name must not contain surrounding whitespace");
     }
     String description = editableSupport.trimToNull(properties.getDescription());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);

@@ -79,7 +79,11 @@ public class AgentProviderMutationFactoryTest {
   @Test
   public void shouldEnforceProviderSchemaStringLimitsAfterNormalization() {
     AgentProviderMutationFactory factory = factory();
-    AgentProviderCreateDTO accepted = provider(" " + "n".repeat(64) + " ", "c".repeat(512));
+    AgentProviderCreateDTO surrounded = provider("\u2003provider\u2003", "c".repeat(512));
+    assertThrows(
+        AiValidationException.class, () -> factory.newProvider(surrounded.getName(), surrounded));
+
+    AgentProviderCreateDTO accepted = provider("n".repeat(64), "c".repeat(512));
     accepted.setDescription("d".repeat(512));
     accepted.setBaseUrl("u".repeat(512));
     AgentProvider persisted = factory.newProvider(accepted.getName(), accepted);

@@ -34,6 +34,11 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
   }
 
   @Override
+  public AgentProvider getByNameForUpdate(String name) {
+    return convert(agentProviderMapper.getByNameForUpdate(name));
+  }
+
+  @Override
   public boolean create(AgentProvider provider) {
     return agentProviderMapper.insert(convert(provider)) == 1;
   }
@@ -81,6 +86,7 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     result.setVersion(provider.getVersion());
     result.setCreateTime(provider.getCreateTime());
     result.setUpdateTime(provider.getUpdateTime());
+    result.setDeletedAt(provider.getDeletedAt());
     return result;
   }
 }
