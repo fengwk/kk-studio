@@ -28,4 +28,7 @@ public class AgentModelDO {
 
   /** 更新时间（映射 {@code updated_at} timestamptz）。 */
   private Instant updateTime;
+
+  /** 软删除时间（映射 {@code deleted_at} timestamptz）。 */
+  private Instant deletedAt;
 }

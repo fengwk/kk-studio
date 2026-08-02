@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.catalog.model.repo.impl.mapper;
 
 import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
-import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -20,15 +19,16 @@ public interface AgentModelMapper extends BaseMapper {
 
   String COLUMNS =
       "provider_name, name, description, config, version, "
-          + "created_at as create_time, updated_at as update_time";
+          + "created_at as create_time, updated_at as update_time, deleted_at";
 
-  @Select("select count(*) from agent_model")
+  @Select("select count(*) from agent_model where deleted_at is null")
   long count();
 
   @Select(
       "select "
           + COLUMNS
-          + " from agent_model order by provider_name asc, name asc limit #{limit} offset #{offset}")
+          + " from agent_model where deleted_at is null"
+          + " order by provider_name asc, name asc limit #{limit} offset #{offset}")
   @Results(
       id = "agentModelResultMap",
       value = {
@@ -38,16 +38,27 @@ public interface AgentModelMapper extends BaseMapper {
         @Result(column = "config", property = "configJson"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
-        @Result(column = "update_time", property = "updateTime")
+        @Result(column = "update_time", property = "updateTime"),
+        @Result(column = "deleted_at", property = "deletedAt")
       })
   List<AgentModelDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
   @Select(
       "select "
           + COLUMNS
-          + " from agent_model where provider_name = #{providerName} and name = #{name}")
+          + " from agent_model where provider_name = #{providerName} and name = #{name}"
+          + " and deleted_at is null")
   @ResultMap("agentModelResultMap")
   AgentModelDO getByProviderNameAndName(
+      @Param("providerName") String providerName, @Param("name") String name);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from agent_model where provider_name = #{providerName} and name = #{name}"
+          + " and deleted_at is null for update")
+  @ResultMap("agentModelResultMap")
+  AgentModelDO getByProviderNameAndNameForUpdate(
       @Param("providerName") String providerName, @Param("name") String name);
 
   @Insert(
@@ -68,14 +79,19 @@ public interface AgentModelMapper extends BaseMapper {
       set description = #{model.description}, config = cast(#{model.configJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where provider_name = #{model.providerName} and name = #{model.name}
-        and version = #{expectedVersion}
+        and version = #{expectedVersion} and deleted_at is null
       """)
   int updateByName(
       @Param("model") AgentModelDO model, @Param("expectedVersion") long expectedVersion);
 
-  @Delete(
-      "delete from agent_model where provider_name = #{providerName} and name = #{name} "
-          + "and version = #{expectedVersion}")
+  @Update(
+      """
+      update agent_model
+      set deleted_at = current_timestamp,
+          updated_at = greatest(updated_at, current_timestamp), version = version + 1
+      where provider_name = #{providerName} and name = #{name}
+        and version = #{expectedVersion} and deleted_at is null
+      """)
   int deleteByName(
       @Param("providerName") String providerName,
       @Param("name") String name,
@@ -83,7 +99,7 @@ public interface AgentModelMapper extends BaseMapper {
 
   @Select(
       "select count(*) from agent_definition where model_provider_name = #{providerName} "
-          + "and model_name = #{name}")
+          + "and model_name = #{name} and deleted_at is null")
   long countAgentsByModelName(
       @Param("providerName") String providerName, @Param("name") String name);
 }

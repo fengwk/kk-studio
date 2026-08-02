@@ -34,6 +34,11 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
+  public AgentModel getByProviderNameAndNameForUpdate(String providerName, String name) {
+    return convert(agentModelMapper.getByProviderNameAndNameForUpdate(providerName, name));
+  }
+
+  @Override
   public boolean create(AgentModel model) {
     return agentModelMapper.insert(convert(model)) == 1;
   }
@@ -77,6 +82,7 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
     result.setVersion(model.getVersion());
     result.setCreateTime(model.getCreateTime());
     result.setUpdateTime(model.getUpdateTime());
+    result.setDeletedAt(model.getDeletedAt());
     return result;
   }
 }

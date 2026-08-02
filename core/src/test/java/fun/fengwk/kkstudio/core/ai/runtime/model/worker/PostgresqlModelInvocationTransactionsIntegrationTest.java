@@ -1583,6 +1583,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
+            0L,
             "acceptance-stub",
             ProviderType.OPENAI,
             true,

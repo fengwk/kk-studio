@@ -380,6 +380,7 @@ class PostgresqlThreadReconcileTransactionsIntegrationTest extends PostgresSprin
         "system prompt",
         new ModelDescriptor(
             providerName,
+            0L,
             modelName,
             ProviderType.OPENAI,
             false,

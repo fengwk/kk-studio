@@ -9,9 +9,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRevisionRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
@@ -31,6 +33,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   private static final String RESOURCE = "agent_provider";
 
   private final AgentProviderRepository agentProviderRepository;
+  private final AgentProviderRevisionRepository agentProviderRevisionRepository;
   private final AgentProviderConverter agentProviderConverter;
   private final AgentProviderMutationFactory providerMutationFactory;
   private final AgentProviderGuard providerGuard;
@@ -49,6 +52,9 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     try {
       if (!agentProviderRepository.create(provider)) {
         throw new IllegalStateException("create agent provider failed");
+      }
+      if (!agentProviderRevisionRepository.create(newRevision(provider, 0L))) {
+        throw new IllegalStateException("create agent provider revision failed");
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
@@ -78,6 +84,9 @@ public class AgentProviderServiceImpl implements AgentProviderService {
         throw new AiVersionConflictException(
             RESOURCE, name, rawExpected, CatalogVersions.format(reread.getVersion()));
       }
+      if (!agentProviderRevisionRepository.create(newRevision(provider, expected + 1))) {
+        throw new IllegalStateException("create agent provider revision failed");
+      }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
           RESOURCE, "agent provider name already exists: " + provider.getName(), error);
@@ -90,7 +99,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   @Transactional
   public void deleteProvider(String name, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    AgentProvider provider = providerGuard.requireProvider(name);
+    AgentProvider provider = providerGuard.requireProviderForUpdate(name);
     ensureExpectedVersion(provider, name, expectedVersion, expected);
     providerGuard.ensureDeletable(name);
     try {
@@ -116,5 +125,16 @@ public class AgentProviderServiceImpl implements AgentProviderService {
       throw new AiVersionConflictException(
           RESOURCE, name, expectedVersion, CatalogVersions.format(provider.getVersion()));
     }
+  }
+
+  private static AgentProviderRevision newRevision(AgentProvider provider, long providerVersion) {
+    AgentProviderRevision revision = new AgentProviderRevision();
+    revision.setProviderName(provider.getName());
+    revision.setProviderVersion(providerVersion);
+    revision.setProviderType(provider.getProviderType());
+    revision.setBaseUrl(provider.getBaseUrl());
+    revision.setCredential(provider.getCredential());
+    revision.setConfigJson(provider.getConfigJson());
+    return revision;
   }
 }

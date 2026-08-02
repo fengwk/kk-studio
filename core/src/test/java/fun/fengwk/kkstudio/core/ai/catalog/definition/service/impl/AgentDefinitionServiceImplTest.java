@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.catalog.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -47,6 +48,7 @@ public class AgentDefinitionServiceImplTest {
 
     when(repository.create(definition)).thenThrow(new DuplicateKeyException("duplicate"));
     assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
+    verify(resolver, atLeastOnce()).requireModelForUpdate("provider", "model");
 
     AgentDefinitionUpdateDTO update = update("0");
     AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();

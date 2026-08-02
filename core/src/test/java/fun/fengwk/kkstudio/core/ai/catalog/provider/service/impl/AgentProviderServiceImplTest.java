@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.core.ai.catalog.provider.service.impl;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -11,18 +14,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRevisionRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.sql.SQLException;
@@ -33,15 +40,17 @@ public class AgentProviderServiceImplTest {
   @Test
   public void shouldRejectFailedRepositoryMutations() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
+    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
 
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
     provider.setVersion(0L);
+    when(guard.requireProviderForUpdate("provider")).thenReturn(provider);
     AgentProviderCreateDTO create = new AgentProviderCreateDTO();
     create.setName("provider");
     when(factory.newProvider("provider", create)).thenReturn(provider);
@@ -60,6 +69,7 @@ public class AgentProviderServiceImplTest {
     when(repository.getByName("provider")).thenReturn(null);
     assertThrows(
         AiResourceNotFoundException.class, () -> service.updateProvider("provider", update));
+    verify(revisions, never()).create(any());
 
     AgentProvider reread = new AgentProvider();
     reread.setName("provider");
@@ -76,6 +86,7 @@ public class AgentProviderServiceImplTest {
     assertThrows(AiResourceNotFoundException.class, () -> service.deleteProvider("provider", "0"));
     when(repository.getByName("provider")).thenReturn(reread);
     assertThrows(AiVersionConflictException.class, () -> service.deleteProvider("provider", "0"));
+    verify(guard, atLeastOnce()).requireProviderForUpdate("provider");
 
     provider.setVersion(0L);
     when(repository.deleteByName(eq("provider"), anyLong())).thenThrow(integrityFailure("23503"));
@@ -92,15 +103,17 @@ public class AgentProviderServiceImplTest {
   @Test
   public void shouldPrioritizeStaleVersionOverDeletionChecks() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
+    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
     provider.setVersion(1L);
     when(guard.requireProvider("provider")).thenReturn(provider);
+    when(guard.requireProviderForUpdate("provider")).thenReturn(provider);
 
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setExpectedVersion("0");
@@ -113,6 +126,43 @@ public class AgentProviderServiceImplTest {
         .ensureDeletable("provider");
     assertThrows(AiVersionConflictException.class, () -> service.deleteProvider("provider", "0"));
     verify(guard, never()).ensureDeletable("provider");
+  }
+
+  @Test
+  public void shouldWriteTheNextProviderRevisionOnlyAfterSuccessfulCas() {
+    AgentProviderRepository repository = mock(AgentProviderRepository.class);
+    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
+    AgentProviderConverter converter = mock(AgentProviderConverter.class);
+    AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
+    AgentProviderGuard guard = mock(AgentProviderGuard.class);
+    AgentProviderServiceImpl service =
+        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
+
+    AgentProvider provider = new AgentProvider();
+    provider.setName("provider");
+    provider.setVersion(4L);
+    provider.setProviderType(AgentProviderType.openai);
+    provider.setBaseUrl("https://old.example");
+    provider.setCredential("old-secret");
+    provider.setConfigJson("{\"old\":true}");
+    when(guard.requireProvider("provider")).thenReturn(provider);
+    when(repository.updateByName(provider, 4L)).thenReturn(true);
+    when(revisions.create(any())).thenReturn(true);
+    when(repository.getByName("provider")).thenReturn(provider);
+
+    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
+    update.setExpectedVersion("4");
+    service.updateProvider("provider", update);
+
+    ArgumentCaptor<AgentProviderRevision> captor =
+        ArgumentCaptor.forClass(AgentProviderRevision.class);
+    verify(revisions).create(captor.capture());
+    AgentProviderRevision revision = captor.getValue();
+    assertEquals("provider", revision.getProviderName());
+    assertEquals(Long.valueOf(5L), revision.getProviderVersion());
+    assertEquals("https://old.example", revision.getBaseUrl());
+    assertEquals("old-secret", revision.getCredential());
+    assertEquals("{\"old\":true}", revision.getConfigJson());
   }
 
   private static DataIntegrityViolationException integrityFailure(String sqlState) {

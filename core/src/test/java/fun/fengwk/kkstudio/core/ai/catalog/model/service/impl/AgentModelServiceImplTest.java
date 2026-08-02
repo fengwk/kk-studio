@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -43,6 +44,7 @@ public class AgentModelServiceImplTest {
     model.setProviderName("provider");
     model.setName("model");
     model.setVersion(0L);
+    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
     AgentModelCreateDTO create = new AgentModelCreateDTO();
     create.setProviderName("provider");
     create.setName("model");
@@ -90,6 +92,7 @@ public class AgentModelServiceImplTest {
     when(repository.deleteByName(eq("provider"), eq("model"), anyLong()))
         .thenThrow(integrityFailure("23503"));
     assertThrows(AiInUseException.class, () -> service.deleteModel("provider", "model", "0"));
+    verify(resolver, atLeastOnce()).requireModelForUpdate("provider", "model");
 
     DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
     doThrow(nonForeignKey).when(repository).create(model);
@@ -111,6 +114,7 @@ public class AgentModelServiceImplTest {
     model.setName("model");
     model.setVersion(1L);
     when(resolver.requireModel("provider", "model")).thenReturn(model);
+    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setExpectedVersion("0");

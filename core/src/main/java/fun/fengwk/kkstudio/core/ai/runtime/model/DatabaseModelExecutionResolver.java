@@ -19,8 +19,9 @@ import java.util.concurrent.ExecutorService;
  * timeout policy) and freezes the resulting {@link ProviderResolutionService.ResolvedExecution}
  * into a {@link ProviderCallExecutor} closure. That closure is what gets returned as the {@link
  * ModelExecutionResource#executor()}, so each dispatch pays exactly one {@code
- * AgentProviderRepository.getByName} and exactly one SDK {@code ProviderFactory.create} call;
- * {@link ProviderCallExecutor#execute} never touches the database again.
+ * AgentProviderRevisionRepository.getByProviderNameAndVersion} and exactly one SDK {@code
+ * ProviderFactory.create} call; {@link ProviderCallExecutor#execute} never touches the database
+ * again.
  *
  * <p>Any failure inside {@link ProviderResolutionService#resolve} surfaces as an {@link
  * IllegalArgumentException} so the durable Model worker fails the claim with a clear setup failure.

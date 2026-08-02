@@ -12,6 +12,11 @@ public interface AgentProviderRepository {
 
   AgentProvider getByName(String name);
 
+  /**
+   * Returns the active provider while holding its row lock until the surrounding transaction ends.
+   */
+  AgentProvider getByNameForUpdate(String name);
+
   boolean create(AgentProvider provider);
 
   /**
@@ -20,7 +25,7 @@ public interface AgentProviderRepository {
    */
   boolean updateByName(AgentProvider provider, long expectedVersion);
 
-  /** Atomic CAS delete on (name, expectedVersion). */
+  /** Atomic soft-delete CAS on (name, expectedVersion). */
   boolean deleteByName(String name, long expectedVersion);
 
   boolean hasModels(String providerName);

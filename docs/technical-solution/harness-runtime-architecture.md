@@ -111,14 +111,14 @@ TURN_INPUT_BATCH 的边界是 activation 开始时读取的全部 queued Input�
 
 `ModelInvocationPlanner` 从 root-to-head path 找到 response debt，并定位最近的 USER/CUSTOM TurnSettings。每次 plan 都调用 `DatabaseTurnExecutionResolver`：
 
-1. 按 `agentName` 读取最新 Agent；
+1. 按 `agentName` 读取 active Agent；
 2. 从 Agent 读取 `providerName`、`modelName` 与 variant；
-3. 按名称读取 Provider 和 `(providerName, modelName)` Model；
+3. 按名称读取 active Provider 和 `(providerName, modelName)` Model，并读取 Provider 当前 version；
 4. 解析 Model config 与 effective Variant；
 5. 读取指定且 READY 的 Environment；
 6. 按 Agent tools/skills 解析本地或 Environment ToolBinding/SkillBinding；
 7. 读取 ProviderFactory 的 cache capability 与 pricing；
-8. 返回本轮的 system prompt、ModelDescriptor、Variant、bindings 与 YOLO。
+8. 返回本轮的 system prompt、带冻结 `providerVersion` 的 ModelDescriptor、Variant、bindings 与 YOLO。
 
 缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 typed `PlanningFailure`。Reconciler 追加 `ASSISTANT_ERROR` barrier；不会创建虚假的 ProviderRequest 或 ModelInvocation。
 
@@ -134,7 +134,7 @@ public record ModelInvocationRequest(
     boolean yoloEnabled) {}
 ```
 
-`providerRequest` 是 exact Provider transport payload。Provider tools 与 `toolBindings` 按顺序、名称、描述和 schema 一一对应；SkillBinding 和 YOLO 同时冻结。写入 `harness_model_invocation.request` 后，ModelWorker 只回放这份 request。
+`providerRequest` 是 exact Provider transport payload。ModelDescriptor 的 `providerName/providerVersion` 是 Provider revision identity。Provider tools 与 `toolBindings` 按顺序、名称、描述和 schema 一一对应；SkillBinding 和 YOLO 同时冻结。写入 `harness_model_invocation.request` 后，ModelWorker 只回放这份 request，retry 也只解析同一 Provider revision。
 
 Model Invocation 状态为 `QUEUED`、`RUNNING`、`RETRY_WAIT`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`UNKNOWN`。retry 仍属于同一个 Invocation，只增加 attempt 并重新调度相同 request。Provider 已开始但 ownership 不确定时写 `UNKNOWN`。
 

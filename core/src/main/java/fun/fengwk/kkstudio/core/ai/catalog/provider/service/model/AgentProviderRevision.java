@@ -6,18 +6,15 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.time.Instant;
 
-/** Global Agent provider resource. */
+/** Immutable provider connection snapshot used by runtime dispatch. */
 @Data
-public class AgentProvider {
+public class AgentProviderRevision {
 
-  private String name;
-  private String description;
+  private String providerName;
+  private Long providerVersion;
   private AgentProviderType providerType;
   private String baseUrl;
   private String credential;
   private String configJson;
-  private Long version;
   private Instant createTime;
-  private Instant updateTime;
-  private Instant deletedAt;
 }

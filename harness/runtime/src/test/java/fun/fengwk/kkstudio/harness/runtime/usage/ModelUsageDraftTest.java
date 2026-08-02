@@ -266,7 +266,8 @@ class ModelUsageDraftTest {
       ProviderType providerType,
       ModelPricing pricing,
       PromptCachePolicy policy) {
-    return new ModelDescriptor(providerName, modelName, providerType, true, false, pricing, policy);
+    return new ModelDescriptor(
+        providerName, 0L, modelName, providerType, true, false, pricing, policy);
   }
 
   private static PromptCachePolicy affinityPolicy() {

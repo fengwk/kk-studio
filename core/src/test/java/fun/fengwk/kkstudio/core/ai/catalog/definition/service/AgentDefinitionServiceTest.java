@@ -80,6 +80,9 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     agentDefinitionService.deleteAgent(name, updated.getVersion());
     assertThrows(
+        AiDuplicateException.class,
+        () -> agentDefinitionService.createAgent(agent(modelRef, name)));
+    assertThrows(
         AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
     agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());

@@ -96,6 +96,13 @@ public class ChatMutationFactory {
     if (trimmed.isEmpty()) {
       throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
+    if (!raw.equals(trimmed)) {
+      throw new AiValidationException(
+          RESOURCE, "agentName must not contain surrounding whitespace");
+    }
+    if (trimmed.indexOf('/') >= 0) {
+      throw new AiValidationException(RESOURCE, "agentName must not contain '/'");
+    }
     editableSupport.validateMaxLength(RESOURCE, "agentName", trimmed, 64);
     return trimmed;
   }

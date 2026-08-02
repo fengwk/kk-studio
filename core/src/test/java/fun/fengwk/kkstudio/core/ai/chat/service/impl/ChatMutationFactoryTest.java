@@ -29,6 +29,9 @@ class ChatMutationFactoryTest {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("t".repeat(256));
     create.setAgentName("\u2003assistant\u2003");
+    assertThrows(AiValidationException.class, () -> factory.newChat(create));
+
+    create.setAgentName("assistant");
     Chat chat = factory.newChat(create);
 
     assertEquals("t".repeat(256), chat.getTitle());

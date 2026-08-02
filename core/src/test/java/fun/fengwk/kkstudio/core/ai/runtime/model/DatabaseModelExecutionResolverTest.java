@@ -6,10 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,8 +15,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRevisionRepository;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -65,10 +63,10 @@ import java.util.function.Consumer;
 
 /**
  * Validates that the production {@link DatabaseModelExecutionResolver} routes only through the
- * {@link AgentProviderRepository#getByName(String)} path, mirrors the persisted {@link
- * AgentProviderType} onto the frozen {@link ProviderType}, fails when the persisted type or the
- * Harness factory is missing or the persisted configuration is invalid, and produces a {@link
- * ModelExecutionResource} carrying the shared executor plus the frozen {@link
+ * {@link AgentProviderRevisionRepository#getByProviderNameAndVersion(String, long)} path, mirrors
+ * the persisted {@link AgentProviderType} onto the frozen {@link ProviderType}, fails when the
+ * persisted type or the Harness factory is missing or the persisted configuration is invalid, and
+ * produces a {@link ModelExecutionResource} carrying the shared executor plus the frozen {@link
  * ModelCallTimeoutPolicy} read from the persisted JSON.
  */
 class DatabaseModelExecutionResolverTest {
@@ -108,13 +106,8 @@ class DatabaseModelExecutionResolverTest {
       assertEquals("provider", factory.lastDescriptor.providerName());
       assertEquals(ProviderType.OPENAI, factory.lastDescriptor.type());
       assertEquals("https://provider.test/v1", factory.lastDescriptor.endpoint());
-      verify(fixture.providers, atLeastOnce()).getByName("provider");
-      // Other AgentProviderRepository methods must never be called from this slice.
-      verify(fixture.providers, never()).page(any());
-      verify(fixture.providers, never()).create(any());
-      verify(fixture.providers, never()).updateByName(any(), anyLong());
-      verify(fixture.providers, never()).deleteByName(any(), anyLong());
-      verify(fixture.providers, never()).hasModels(any());
+      verify(fixture.providers, atLeastOnce())
+          .getByProviderNameAndVersion("provider", REQUEST.model().providerVersion());
     }
   }
 
@@ -153,7 +146,7 @@ class DatabaseModelExecutionResolverTest {
     try (Fixture fixture = new Fixture(factory)) {
       IllegalArgumentException error =
           assertThrows(IllegalArgumentException.class, () -> fixture.resolver.resolve(REQUEST));
-      assertTrue(error.getMessage().contains("persisted provider not found"));
+      assertTrue(error.getMessage().contains("persisted provider revision not found"));
     }
   }
 
@@ -176,7 +169,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider invalid = provider(AgentProviderType.openai);
+      AgentProviderRevision invalid = provider(AgentProviderType.openai);
       invalid.setConfigJson("{\"modelCallTimeoutMillis\":0}");
       fixture.provider(invalid);
 
@@ -202,7 +195,7 @@ class DatabaseModelExecutionResolverTest {
     }
 
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider missingEndpoint = provider(AgentProviderType.openai);
+      AgentProviderRevision missingEndpoint = provider(AgentProviderType.openai);
       missingEndpoint.setBaseUrl(" ");
       fixture.provider(missingEndpoint);
       assertTrue(
@@ -305,7 +298,7 @@ class DatabaseModelExecutionResolverTest {
             PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
             adapter -> adapter);
     try (Fixture fixture = new Fixture(factory)) {
-      AgentProvider persisted = provider(AgentProviderType.openai);
+      AgentProviderRevision persisted = provider(AgentProviderType.openai);
       persisted.setConfigJson("{}");
       fixture.provider(persisted);
 
@@ -356,14 +349,15 @@ class DatabaseModelExecutionResolverTest {
     };
   }
 
-  private static AgentProvider provider(AgentProviderType type) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName("provider");
-    provider.setProviderType(type);
-    provider.setBaseUrl("https://provider.test/v1");
-    provider.setCredential("secret");
-    provider.setConfigJson(CONFIG_JSON);
-    return provider;
+  private static AgentProviderRevision provider(AgentProviderType type) {
+    AgentProviderRevision revision = new AgentProviderRevision();
+    revision.setProviderName("provider");
+    revision.setProviderVersion(0L);
+    revision.setProviderType(type);
+    revision.setBaseUrl("https://provider.test/v1");
+    revision.setCredential("secret");
+    revision.setConfigJson(CONFIG_JSON);
+    return revision;
   }
 
   private static ProviderRequest request(ProviderType type) {
@@ -372,6 +366,7 @@ class DatabaseModelExecutionResolverTest {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
+            0L,
             "provider-api-model",
             type,
             true,
@@ -404,7 +399,8 @@ class DatabaseModelExecutionResolverTest {
 
   private static final class Fixture implements AutoCloseable {
 
-    private final AgentProviderRepository providers = mock(AgentProviderRepository.class);
+    private final AgentProviderRevisionRepository providers =
+        mock(AgentProviderRevisionRepository.class);
     private final DatabaseProviderResolutionService resolution;
     private final ExecutorService executor;
     private final DatabaseModelExecutionResolver resolver;
@@ -420,8 +416,10 @@ class DatabaseModelExecutionResolverTest {
       resolver = new DatabaseModelExecutionResolver(resolution, executor, Clock.systemUTC());
     }
 
-    private void provider(AgentProvider provider) {
-      when(providers.getByName(provider.getName())).thenReturn(provider);
+    private void provider(AgentProviderRevision provider) {
+      when(providers.getByProviderNameAndVersion(
+              provider.getProviderName(), provider.getProviderVersion()))
+          .thenReturn(provider);
     }
 
     @Override

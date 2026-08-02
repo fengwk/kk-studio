@@ -60,6 +60,7 @@ public final class ModelDescriptorJsonCodec {
   private static final Set<String> DESCRIPTOR_FIELDS =
       orderedSet(
           "providerName",
+          "providerVersion",
           "modelName",
           "providerType",
           "tools",
@@ -166,6 +167,7 @@ public final class ModelDescriptorJsonCodec {
   private static ObjectNode writeDescriptor(ModelDescriptor descriptor) {
     ObjectNode node = NODES.objectNode();
     node.put("providerName", descriptor.providerName());
+    node.put("providerVersion", descriptor.providerVersion());
     node.put("modelName", descriptor.modelName());
     node.put("providerType", descriptor.providerType().name());
     node.put("tools", descriptor.tools());
@@ -184,13 +186,14 @@ public final class ModelDescriptorJsonCodec {
       throw new IllegalArgumentException("unknown providerType", exception);
     }
     String providerName = text(node, "providerName");
+    long providerVersion = nonNegativeLong(node, "providerVersion");
     String modelName = text(node, "modelName");
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
     ModelPricing pricing = readPricing(node.get("pricing"));
     PromptCachePolicy policy = readCachePolicy(node.get("promptCachePolicy"));
     return new ModelDescriptor(
-        providerName, modelName, providerType, tools, reasoning, pricing, policy);
+        providerName, providerVersion, modelName, providerType, tools, reasoning, pricing, policy);
   }
 
   // ---------- ModelVariant ----------
@@ -382,6 +385,18 @@ public final class ModelDescriptorJsonCodec {
       throw new IllegalArgumentException(field + " must be boolean");
     }
     return value.booleanValue();
+  }
+
+  static long nonNegativeLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new IllegalArgumentException(field + " must be an integer");
+    }
+    long parsed = value.longValue();
+    if (parsed < 0) {
+      throw new IllegalArgumentException(field + " must not be negative");
+    }
+    return parsed;
   }
 
   static long positiveLong(ObjectNode node, String field) {

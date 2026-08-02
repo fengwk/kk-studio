@@ -4,7 +4,7 @@
 
 ## 1. 模块与 ID
 
-Runtime 模块包含 `session`、`entry`、`thread`、`model`、`tool`、`reconcile`、`interaction`、`usage`、`retry` 与 `realtime`。Runtime 内部使用 `long` durable ID；HTTP 边界使用十进制字符串。Catalog 资源使用名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`。
+Runtime 模块包含 `session`、`entry`、`thread`、`model`、`tool`、`reconcile`、`interaction`、`usage`、`retry` 与 `realtime`。Runtime 内部使用 `long` durable ID；HTTP 边界使用十进制字符串。Catalog 资源使用永久名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`；普通 lookup 只看 active 行。
 
 ## 2. Session、Entry、Thread
 
@@ -82,14 +82,14 @@ public interface TurnExecutionResolver {
 TurnSettings.agentName
   -> AgentDefinition
   -> providerName/modelName
-  -> AgentProvider
+  -> active AgentProvider
   -> AgentModel
   -> effective Variant
   -> READY LiveEnvironment
   -> ToolBinding / SkillBinding
 ```
 
-缺失项对应 `PlanningFailureKind`：
+Planning 成功时 ModelDescriptor 额外冻结当前 Provider 的非负 `providerVersion`。ModelWorker 随后只按 `(providerName, providerVersion)` 读取 append-only Provider revision；Provider 更新或软删除不会改变已持久化 invocation 的首次 dispatch/retry。缺失项对应 `PlanningFailureKind`：
 
 ```text
 MISSING_TURN_SETTINGS

@@ -1,6 +1,7 @@
 {
   "model": {
     "providerName": "openai",
+    "providerVersion": 0,
     "modelName": "gpt-5-mini",
     "providerType": "OPENAI",
     "tools": true,

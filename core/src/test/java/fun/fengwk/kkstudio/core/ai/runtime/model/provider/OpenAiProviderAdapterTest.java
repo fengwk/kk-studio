@@ -87,6 +87,7 @@ class OpenAiProviderAdapterTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
+            0L,
             "proxy-model",
             ProviderType.OPENAI,
             true,

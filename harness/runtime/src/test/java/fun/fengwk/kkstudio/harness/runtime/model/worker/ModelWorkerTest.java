@@ -1463,6 +1463,7 @@ class ModelWorkerTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
+            0L,
             "model",
             ProviderType.OPENAI,
             false,

@@ -103,6 +103,7 @@ public final class ReconcileTestSupport {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider-test",
+            0L,
             "model-test",
             ProviderType.OPENAI,
             false,

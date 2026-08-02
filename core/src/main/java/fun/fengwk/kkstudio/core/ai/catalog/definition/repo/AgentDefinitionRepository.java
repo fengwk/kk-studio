@@ -12,11 +12,14 @@ public interface AgentDefinitionRepository {
 
   AgentDefinition getByName(String name);
 
+  /** Returns the active Agent while holding its row lock until the surrounding transaction ends. */
+  AgentDefinition getByNameForUpdate(String name);
+
   boolean create(AgentDefinition agentDefinition);
 
   /** Atomic CAS update on (name, expectedVersion). */
   boolean updateByName(AgentDefinition agentDefinition, long expectedVersion);
 
-  /** Atomic CAS delete on (name, expectedVersion). */
+  /** Atomic soft-delete CAS on (name, expectedVersion). */
   boolean deleteByName(String name, long expectedVersion);
 }

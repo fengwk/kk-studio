@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.core.ai.runtime.model;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRevisionRepository;
+import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
@@ -14,19 +14,20 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.util.Objects;
 
-/** Resolves the current persisted Provider connection for a frozen name-based model request. */
+/** Resolves the immutable persisted Provider revision for a frozen model request. */
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
 
-  private final AgentProviderRepository providerRepository;
+  private final AgentProviderRevisionRepository providerRevisionRepository;
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
   private final ProviderFactories providerFactories;
 
   public DatabaseProviderResolutionService(
-      AgentProviderRepository providerRepository,
+      AgentProviderRevisionRepository providerRevisionRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec,
       ProviderFactories providerFactories) {
-    this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
+    this.providerRevisionRepository =
+        Objects.requireNonNull(providerRevisionRepository, "providerRevisionRepository");
     this.providerConfigurationCodec =
         Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
@@ -36,12 +37,15 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   public ResolvedExecution resolve(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
     String providerName = request.model().providerName();
-    AgentProvider provider = providerRepository.getByName(providerName);
-    if (provider == null) {
-      throw new IllegalArgumentException("persisted provider not found: " + providerName);
+    long providerVersion = request.model().providerVersion();
+    AgentProviderRevision revision =
+        providerRevisionRepository.getByProviderNameAndVersion(providerName, providerVersion);
+    if (revision == null) {
+      throw new IllegalArgumentException(
+          "persisted provider revision not found: " + providerName + "@" + providerVersion);
     }
     ProviderType requestedType = request.model().providerType();
-    ProviderType persistedType = toProviderType(provider.getProviderType());
+    ProviderType persistedType = toProviderType(revision.getProviderType());
     if (persistedType != requestedType) {
       throw new IllegalArgumentException(
           "persisted provider type "
@@ -49,8 +53,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
               + " does not match frozen request type "
               + requestedType);
     }
-    var timeoutPolicy = providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
-    new ProviderDescriptor(providerName, requestedType, provider.getBaseUrl(), timeoutPolicy);
+    var timeoutPolicy = providerConfigurationCodec.readTimeoutPolicy(revision.getConfigJson());
+    new ProviderDescriptor(providerName, requestedType, revision.getBaseUrl(), timeoutPolicy);
     var factory =
         providerFactories
             .lookup(requestedType)
@@ -60,7 +64,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                         "ProviderFactory is not registered for " + requestedType));
     ProviderAdapter adapter;
     try {
-      adapter = factory.create(provider.getCredential(), provider.getConfigJson());
+      adapter = factory.create(revision.getCredential(), revision.getConfigJson());
     } catch (RuntimeException error) {
       throw new IllegalArgumentException(
           "cannot create provider adapter for " + providerName, error);
@@ -81,7 +85,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         effectiveTimeoutPolicy -> {
           ProviderDescriptor descriptor =
               new ProviderDescriptor(
-                  providerName, requestedType, provider.getBaseUrl(), effectiveTimeoutPolicy);
+                  providerName, requestedType, revision.getBaseUrl(), effectiveTimeoutPolicy);
           try {
             var modelProvider = adapter.create(descriptor);
             if (modelProvider == null) {

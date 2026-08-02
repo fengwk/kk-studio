@@ -30,8 +30,27 @@ final class AgentDefinitionReferenceResolver {
     return definition;
   }
 
+  AgentDefinition requireAgentForUpdate(String name) {
+    AgentDefinition definition = agentDefinitionRepository.getByNameForUpdate(name);
+    if (definition == null) {
+      throw new AiResourceNotFoundException(
+          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " not found: " + name);
+    }
+    return definition;
+  }
+
   AgentModel requireModel(String providerName, String modelName) {
     AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
+    if (model == null) {
+      throw new AiResourceNotFoundException(
+          MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
+    }
+    return model;
+  }
+
+  AgentModel requireModelForUpdate(String providerName, String modelName) {
+    AgentModel model =
+        agentModelRepository.getByProviderNameAndNameForUpdate(providerName, modelName);
     if (model == null) {
       throw new AiResourceNotFoundException(
           MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);

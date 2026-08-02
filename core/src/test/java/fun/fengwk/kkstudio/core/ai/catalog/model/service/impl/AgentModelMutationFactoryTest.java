@@ -107,6 +107,9 @@ public class AgentModelMutationFactoryTest {
 
     assertThrows(
         AiValidationException.class,
+        () -> factory.newModel("provider", "\u2003model\u2003", create("model", null)));
+    assertThrows(
+        AiValidationException.class,
         () -> factory.newModel("provider", "n".repeat(129), create("n".repeat(129), null)));
     assertThrows(
         AiValidationException.class,

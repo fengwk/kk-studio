@@ -75,6 +75,14 @@ public class AgentDefinitionMutationFactoryTest {
         () -> factory.newAgent(" ", "provider", "model", new AgentDefinitionCreateDTO()));
     assertThrows(
         AiValidationException.class,
+        () ->
+            factory.newAgent(
+                "\u2003agent\u2003",
+                "provider",
+                "model",
+                create("\u2003agent\u2003", "provider/model", config(List.of(), List.of()), null)));
+    assertThrows(
+        AiValidationException.class,
         () -> factory.newAgent("agent", " ", "model", new AgentDefinitionCreateDTO()));
 
     AgentDefinitionCreateDTO incomplete = create("agent", "provider/model", null, null);
