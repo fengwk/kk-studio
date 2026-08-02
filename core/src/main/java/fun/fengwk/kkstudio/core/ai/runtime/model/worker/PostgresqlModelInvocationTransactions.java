@@ -4,7 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivationStore;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocation;
@@ -23,23 +23,22 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * final-schema PostgreSQL 适配器，实现 Runtime {@link ModelInvocationTransactions}。
+ * 最终 schema 的 PostgreSQL 适配器，实现 Runtime {@link ModelInvocationTransactions}。
  *
- * <p>所有 mutation 走单一 Spring {@code @Transactional} 边界；锁顺序固定为 Thread → ModelInvocation → {@code
- * harness_execution_target}；SQL CAS 谓词与 Java 双重检验。所有失败模式（stale
- * token/attempt/epoch/lease/status/duplicate terminal）以 {@link
- * ModelInvocationUpdateOutcome#LOST_OWNERSHIP} 形式返回；数据库 invariant breach（缺失外键、无法 markRunnable、目标行在
- * owned mutation 中消失）抛运行时异常让 Spring 回滚。
+ * <p>所有变更都经过单一 Spring {@code @Transactional} 边界；锁顺序固定为 Thread → ModelInvocation → {@code
+ * harness_execution_activation}；SQL CAS 谓词与 Java 双重检验。所有过期 token、attempt、epoch、lease、status
+ * 以及重复终态等失败模式都以 {@link ModelInvocationUpdateOutcome#LOST_OWNERSHIP} 形式返回；数据库约束被破坏 （缺失外键、无法
+ * markRunnable、目标行在已持有期间消失）时抛出运行时异常，让 Spring 回滚。
  *
- * <p>{@code harness_execution_target} 是 ModelInvocation 调度的唯一事实：
+ * <p>{@code harness_execution_activation} 是 ModelInvocation 调度的唯一持久化事实：
  *
  * <ul>
- *   <li>{@link #claim} 在完整重校验后 {@code lockDue(MODEL_INVOCATION, id, now)}，验证目标存在且 due；非 due/缺失 返回
- *       {@link Optional#empty()} 且不动 invocation；CAS 成功后把目标 reschedule 到 worker lease until。
- *   <li>{@link #renew} 在 owned 写 lease 成功之后 {@code lock(MODEL_INVOCATION, id)}（any due/future）并
- *       reschedule 到新 until；目标缺失抛异常回滚。
- *   <li>terminal mutation 在写完 status 与 markRunnable 之后 {@code deleteLocked(MODEL_INVOCATION, id)}，再
- *       {@code schedule(THREAD, threadId, null, now)}（THREAD 返回 0 表示已有更早，不报错）。
+ *   <li>{@link #claim} 在完整重校验后 {@code lockDue(MODEL_INVOCATION, id, now)}，验证目标存在且已到期；未到期或缺失时返回
+ *       {@link Optional#empty()} 且不修改 invocation；CAS 成功后把目标 reschedule 到 worker lease until。
+ *   <li>{@link #renew} 在持有权写入 lease 成功之后 {@code lock(MODEL_INVOCATION, id)}（不论目标已到期还是未来到期）并
+ *       reschedule 到新的 until；目标缺失时抛异常回滚。
+ *   <li>终态变更在写完 status 与 markRunnable 之后 {@code deleteLocked(MODEL_INVOCATION, id)}，再 {@code
+ *       schedule(THREAD, threadId, null, now)}（THREAD 返回 0 表示已有更早记录，不报错）。
  *   <li>{@link #scheduleRetry} 在写完 RETRY_WAIT 之后 {@code lock(MODEL_INVOCATION, id)} 并 reschedule 到
  *       {@code nextAttemptAt}。
  *   <li>{@link #recordActivity} 与 {@link #recordSafeStreamSnapshot} 不触碰目标。
@@ -55,19 +54,19 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
 
   private final ModelInvocationMapper invocationMapper;
   private final HarnessModelInvocationThreadMapper threadMapper;
-  private final ExecutionTargetStore executionTargetStore;
+  private final ExecutionActivationStore executionActivationStore;
 
   public PostgresqlModelInvocationTransactions(
       ModelInvocationMapper invocationMapper,
       HarnessModelInvocationThreadMapper threadMapper,
-      ExecutionTargetStore executionTargetStore) {
+      ExecutionActivationStore executionActivationStore) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
-    this.executionTargetStore =
-        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.executionActivationStore =
+        Objects.requireNonNull(executionActivationStore, "executionActivationStore");
   }
 
-  // ---------- read paths ----------
+  // ---------- 读取路径 ----------
 
   @Override
   @Transactional(readOnly = true)
@@ -119,7 +118,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
       return Optional.empty();
     }
 
-    // 2) 锁 Thread（FOR UPDATE）；缺失则视为 invariant breach。
+    // 2) 锁 Thread（FOR UPDATE）；缺失则视为约束破坏。
     HarnessModelInvocationThreadDO threadRow = threadMapper.findForUpdate(peek.getThreadId());
     if (threadRow == null) {
       throw new IllegalStateException("owning thread missing for invocation " + invocationId);
@@ -139,9 +138,9 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     int expectedAttempt = row.getAttempt();
     OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(now);
 
-    // 4) 锁 target（FOR UPDATE）+ due 校验：claim 当前拿到的 due 信号来自这张目标行；非 due 或缺失视为不可 claim，
+    // 4) 锁定目标（FOR UPDATE）并校验到期：claim 当前拿到的到期信号来自这张目标行；未到期或缺失视为不可 claim，
     // 直接返回 empty，绝不修改 invocation。
-    if (executionTargetStore
+    if (executionActivationStore
         .lockDue(ExecutionTargetKind.MODEL_INVOCATION, invocationId, now)
         .isEmpty()) {
       return Optional.empty();
@@ -169,12 +168,12 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
               expectedAttempt);
       if (updated != 1) {
         throw new IllegalStateException(
-            "queued model claim mutated " + updated + " rows after the target gate passed");
+            "queued model claim mutated " + updated + " rows after the activation gate passed");
       }
-      requireTargetAffected(
-          executionTargetStore.rescheduleLocked(
-              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), null, leaseUntil.toInstant()),
-          "reschedule model invocation target after claim");
+      requireActivationAffected(
+          executionActivationStore.rescheduleLocked(
+              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), leaseUntil.toInstant()),
+          "reschedule model invocation activation after claim");
       return loadClaimed(row.getId(), row.getThreadId(), workerToken, false);
     }
     if (status == InvocationStatus.RETRY_WAIT) {
@@ -195,12 +194,12 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
               nowOffset);
       if (updated != 1) {
         throw new IllegalStateException(
-            "retry model claim mutated " + updated + " rows after the target gate passed");
+            "retry model claim mutated " + updated + " rows after the activation gate passed");
       }
-      requireTargetAffected(
-          executionTargetStore.rescheduleLocked(
-              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), null, leaseUntil.toInstant()),
-          "reschedule model invocation target after retry claim");
+      requireActivationAffected(
+          executionActivationStore.rescheduleLocked(
+              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), leaseUntil.toInstant()),
+          "reschedule model invocation activation after retry claim");
       return loadClaimed(row.getId(), row.getThreadId(), workerToken, false);
     }
     if (status == InvocationStatus.RUNNING) {
@@ -222,18 +221,18 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
               nowOffset);
       if (updated != 1) {
         throw new IllegalStateException(
-            "recovered model claim mutated " + updated + " rows after the target gate passed");
+            "recovered model claim mutated " + updated + " rows after the activation gate passed");
       }
-      requireTargetAffected(
-          executionTargetStore.rescheduleLocked(
-              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), null, leaseUntil.toInstant()),
-          "reschedule model invocation target after lease recovery");
+      requireActivationAffected(
+          executionActivationStore.rescheduleLocked(
+              ExecutionTargetKind.MODEL_INVOCATION, row.getId(), leaseUntil.toInstant()),
+          "reschedule model invocation activation after lease recovery");
       return loadClaimed(row.getId(), row.getThreadId(), workerToken, true);
     }
     return Optional.empty();
   }
 
-  // ---------- claim-following mutations ----------
+  // ---------- claim 后的变更 ----------
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -249,7 +248,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     if (row == null) {
       return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    lockOwnedTarget(row.getId());
+    lockOwnedActivation(row.getId());
     OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(now);
     OffsetDateTime requestedLeaseUntil =
         addAtPersistencePrecision(
@@ -270,13 +269,12 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     if (updated != 1) {
       return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
             ExecutionTargetKind.MODEL_INVOCATION,
             claimed.invocation().id(),
-            null,
             leaseUntil.toInstant()),
-        "reschedule model invocation target after renew");
+        "reschedule model invocation activation after renew");
     return ModelInvocationUpdateOutcome.APPLIED;
   }
 
@@ -363,7 +361,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     if (row == null) {
       return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    lockOwnedTarget(row.getId());
+    lockOwnedActivation(row.getId());
     Instant durableActivity =
         Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
     Instant observedActivity =
@@ -393,13 +391,12 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     if (updated != 1) {
       return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
             ExecutionTargetKind.MODEL_INVOCATION,
             claimed.invocation().id(),
-            null,
             persistedNextAttemptAt),
-        "reschedule model invocation target after retry");
+        "reschedule model invocation activation after retry");
     return ModelInvocationUpdateOutcome.APPLIED;
   }
 
@@ -421,8 +418,8 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     if (row == null) {
       return ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // 在 Thread + Invocation 行锁内读取当前 durable 快照，按 prefix-单调判定输入：延长用输入、旧输入保留 durable、
-    // 分叉视为非法 invocation state 而显式拒绝；任何情形下都不允许较短 snapshot 覆盖较长 durable snapshot。
+    // 在 Thread + Invocation 行锁内读取当前持久化快照，按前缀单调性判定输入：延长使用输入、旧内容保留持久化值，
+    // 分叉视为非法 invocation state 并显式拒绝；任何情形下都不允许较短 snapshot 覆盖较长持久化 snapshot。
     SafeStreamSnapshot durableSnapshot =
         row.getSafeStreamSnapshotJson() == null
             ? SafeStreamSnapshot.EMPTY
@@ -434,7 +431,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
       throw new IllegalStateException(
           "safe stream snapshot fork for invocation " + claimed.invocation().id(), error);
     }
-    // SQL CAS 已校验 RUNNING + attempt + lease；防止同一 attempt 内的 race，再补一层单调检查。
+    // SQL CAS 已校验 RUNNING + attempt + lease；为防止同一 attempt 内的并发竞争，再补一层单调检查。
     Instant persistedActivity = ModelInvocationRowConverter.toPersistenceInstant(activityAt);
     Instant durableActivity =
         Objects.requireNonNull(row.getLastActivityAt(), "lastActivityAt").toInstant();
@@ -455,7 +452,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
         : ModelInvocationUpdateOutcome.LOST_OWNERSHIP;
   }
 
-  // ---------- helpers ----------
+  // ---------- 辅助方法 ----------
 
   private ModelInvocationDO lockAndValidateOwned(ClaimedModelInvocation claimed, Instant now) {
     long threadId = claimed.invocation().threadId();
@@ -554,7 +551,7 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     OffsetDateTime lastObservedOffset =
         ModelInvocationRowConverter.toUtcOffsetDateTime(persistedObserved);
     OffsetDateTime nowOffset = ModelInvocationRowConverter.toUtcOffsetDateTime(persistedNow);
-    lockOwnedTarget(row.getId());
+    lockOwnedActivation(row.getId());
 
     int updated;
     if (kind == TerminalKind.SUCCESS) {
@@ -612,32 +609,34 @@ public class PostgresqlModelInvocationTransactions implements ModelInvocationTra
     int markRunnable =
         threadMapper.markRunnable(row.getThreadId(), row.getExecutionEpoch(), finishedOffset);
     if (markRunnable != 1) {
-      // 这是真正的 invariant breach（FK 缺失、Thread execution_epoch 不匹配），让 Spring 回滚。
+      // 这是真正的约束破坏（FK 缺失、Thread execution_epoch 不匹配），让 Spring 回滚。
       throw new IllegalStateException(
           "cannot mark thread "
               + row.getThreadId()
               + " runnable while finalising invocation "
               + row.getId());
     }
-    // Durable target wiring: 与上面三个写入同事务内（i）删除 MODEL_INVOCATION target，（ii）schedule
-    // THREAD target。deleteLocked 必须 affected==1；schedule 返回 0 表示已经有更早 THREAD target，符合
-    // earliest-wins 语义，不视为错误。
-    requireTargetAffected(
-        executionTargetStore.deleteLocked(ExecutionTargetKind.MODEL_INVOCATION, row.getId()),
-        "delete model invocation target after terminal");
-    executionTargetStore.schedule(
+    // 持久化激活配线与上面三个写入处于同一事务内：（i）删除 MODEL_INVOCATION 激活，（ii）schedule
+    // THREAD 激活。deleteLocked 必须 affected==1；schedule 返回 0 表示已经有更早 THREAD 激活，符合
+    // 最早时间优先语义，不视为错误。
+    requireActivationAffected(
+        executionActivationStore.deleteLocked(ExecutionTargetKind.MODEL_INVOCATION, row.getId()),
+        "delete model invocation activation after terminal");
+    executionActivationStore.schedule(
         ExecutionTargetKind.THREAD, row.getThreadId(), null, persistedNow);
     return ModelInvocationUpdateOutcome.APPLIED;
   }
 
-  private void lockOwnedTarget(long invocationId) {
-    if (executionTargetStore.lock(ExecutionTargetKind.MODEL_INVOCATION, invocationId).isEmpty()) {
+  private void lockOwnedActivation(long invocationId) {
+    if (executionActivationStore
+        .lock(ExecutionTargetKind.MODEL_INVOCATION, invocationId)
+        .isEmpty()) {
       throw new IllegalStateException(
-          "owned model invocation is missing its watchdog target: " + invocationId);
+          "owned model invocation is missing its watchdog activation: " + invocationId);
     }
   }
 
-  private static void requireTargetAffected(int affected, String operation) {
+  private static void requireActivationAffected(int affected, String operation) {
     if (affected != 1) {
       throw new IllegalStateException(operation + " affected " + affected + " rows");
     }

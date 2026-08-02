@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
  *
  * <p>{@link HarnessRedisProperties} always registers and adapters lazily resolve the Redis template
  * through {@link ObjectProvider}. Redis carries only lossy realtime projection; durable Harness
- * activation is owned by the PostgreSQL execution-target dispatcher.
+ * activation is owned by the PostgreSQL ExecutionActivation dispatcher.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessRedisProperties.class)

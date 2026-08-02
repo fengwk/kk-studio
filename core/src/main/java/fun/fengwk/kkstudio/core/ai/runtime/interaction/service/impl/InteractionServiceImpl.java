@@ -16,7 +16,7 @@ import java.util.Objects;
 /**
  * Thin Core Tool permission Interaction boundary for decimal-string/DTO mapping. Domain projection
  * and approval resolution live in {@link InteractionCoordinator}; its transaction writes wake the
- * durable execution-target queue directly.
+ * durable ExecutionActivation queue directly.
  */
 @Service
 public class InteractionServiceImpl implements InteractionService {

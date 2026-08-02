@@ -32,7 +32,7 @@ flowchart TD
 | 2 | [domain-map.md](domain-map.md) | Harness/Studio 词汇与前后端映射 |
 | 3 | [harness-runtime-architecture.md](harness-runtime-architecture.md) | Thread、规划、Invocation 与 activation |
 | 4 | [harness-runtime-contracts.md](harness-runtime-contracts.md) | Runtime 类型、状态机、端口与事务 |
-| 5 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL durable facts、执行目标与 Redis realtime |
+| 5 | [harness-storage-runtime.md](harness-storage-runtime.md) | PostgreSQL durable facts、持久化激活与 Redis realtime |
 | 6 | [backend-implementation-design.md](backend-implementation-design.md) | `share` / `core` / `web` 的 HTTP、SSE 与 WebSocket 边界 |
 | 7 | [storage-models.md](storage-models.md) | 表结构、名称引用与账本事实 |
 | 8 | [frontend-implementation-design.md](frontend-implementation-design.md) | Chat 设置、逐消息请求、Pane 与 transcript |

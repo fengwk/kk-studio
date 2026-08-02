@@ -26,21 +26,14 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
-/**
- * Production composition for the sole durable Harness activation path.
- *
- * <p>The PostgreSQL listener only wakes the single target dispatcher. The dispatcher obtains due
- * rows from {@code harness_execution_target}, filters ENVIRONMENT routes by the local READY
- * snapshot, then delegates each row to the Runtime entry point that re-locks the durable facts.
- * Redis is intentionally absent from this composition.
- */
+/** Harness ExecutionActivation 的生产配线。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)
-public class HarnessExecutionTargetConfiguration {
+public class HarnessExecutionActivationConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public ExecutionTargetRouteEligibility executionTargetRouteEligibility(
+  public ExecutionActivationEnvironmentEligibility executionActivationEnvironmentEligibility(
       LiveEnvironmentRegistry environmentRegistry) {
     return () ->
         environmentRegistry.listReady().stream()
@@ -48,38 +41,34 @@ public class HarnessExecutionTargetConfiguration {
             .collect(Collectors.toUnmodifiableSet());
   }
 
-  /**
-   * Breaks the Gateway -> ToolWorker -> dispatcher construction cycle with a lazy dispatcher
-   * lookup. READY only wakes a durable scan; route eligibility is read from the registry at drain
-   * time.
-   */
+  /** READY 事件只唤醒持久化扫描，实际 Environment 快照在分发器扫描时重新读取。 */
   @Bean
   @ConditionalOnMissingBean
   public EnvironmentReadyListener environmentReadyListener(
-      ObjectProvider<PostgresqlExecutionTargetDispatcher> dispatcherProvider) {
-    return ignored -> dispatcherProvider.ifAvailable(PostgresqlExecutionTargetDispatcher::wake);
+      ObjectProvider<PostgresqlExecutionActivationDispatcher> dispatcherProvider) {
+    return ignored -> dispatcherProvider.ifAvailable(PostgresqlExecutionActivationDispatcher::wake);
   }
 
-  @Bean(name = "executionTargetDrainExecutor", destroyMethod = "shutdown")
+  @Bean(name = "executionActivationDrainExecutor", destroyMethod = "shutdown")
   @ConditionalOnProperty(
       prefix = "kk-studio.harness.runtime",
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public ExecutorService executionTargetDrainExecutor() {
+  public ExecutorService executionActivationDrainExecutor() {
     return Executors.newSingleThreadExecutor(
-        Thread.ofPlatform().name("execution-target-drain-", 0L).daemon(true).factory());
+        Thread.ofPlatform().name("execution-activation-drain-", 0L).daemon(true).factory());
   }
 
-  @Bean(name = "executionTargetWakeExecutor", destroyMethod = "shutdown")
+  @Bean(name = "executionActivationWakeExecutor", destroyMethod = "shutdown")
   @ConditionalOnProperty(
       prefix = "kk-studio.harness.runtime",
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public ScheduledExecutorService executionTargetWakeExecutor() {
+  public ScheduledExecutorService executionActivationWakeExecutor() {
     return Executors.newSingleThreadScheduledExecutor(
-        Thread.ofPlatform().name("execution-target-wake-", 0L).daemon(true).factory());
+        Thread.ofPlatform().name("execution-activation-wake-", 0L).daemon(true).factory());
   }
 
   @Bean
@@ -88,9 +77,9 @@ public class HarnessExecutionTargetConfiguration {
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public ExecutionTargetHandler executionTargetHandler(
+  public ExecutionActivationHandler executionActivationHandler(
       ThreadReconciler threadReconciler, ModelWorker modelWorker, ToolWorker toolWorker) {
-    return new HarnessExecutionTargetHandler(threadReconciler, modelWorker, toolWorker);
+    return new HarnessExecutionActivationHandler(threadReconciler, modelWorker, toolWorker);
   }
 
   @Bean
@@ -99,20 +88,19 @@ public class HarnessExecutionTargetConfiguration {
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public PostgresqlExecutionTargetDispatcher postgresqlExecutionTargetDispatcher(
-      ExecutionTargetStore executionTargetStore,
-      ExecutionTargetRouteEligibility routeEligibility,
-      ExecutionTargetHandler executionTargetHandler,
-      @Qualifier("executionTargetDrainExecutor") ExecutorService executionTargetDrainExecutor,
-      @Qualifier("executionTargetWakeExecutor")
-          ScheduledExecutorService executionTargetWakeExecutor) {
-    return new PostgresqlExecutionTargetDispatcher(
-        executionTargetStore,
-        routeEligibility,
-        executionTargetHandler,
+  public PostgresqlExecutionActivationDispatcher postgresqlExecutionActivationDispatcher(
+      ExecutionActivationStore executionActivationStore,
+      ExecutionActivationEnvironmentEligibility environmentEligibility,
+      ExecutionActivationHandler executionActivationHandler,
+      @Qualifier("executionActivationDrainExecutor") ExecutorService drainExecutor,
+      @Qualifier("executionActivationWakeExecutor") ScheduledExecutorService wakeExecutor) {
+    return new PostgresqlExecutionActivationDispatcher(
+        executionActivationStore,
+        environmentEligibility,
+        executionActivationHandler,
         Clock.systemUTC(),
-        executionTargetDrainExecutor,
-        executionTargetWakeExecutor);
+        drainExecutor,
+        wakeExecutor);
   }
 
   @Bean
@@ -121,35 +109,32 @@ public class HarnessExecutionTargetConfiguration {
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public PostgresqlExecutionTargetListener postgresqlExecutionTargetListener(
-      DataSource dataSource, PostgresqlExecutionTargetDispatcher dispatcher) {
-    return new PostgresqlExecutionTargetListener(dataSource, dispatcher);
+  public PostgresqlExecutionActivationListener postgresqlExecutionActivationListener(
+      DataSource dataSource, PostgresqlExecutionActivationDispatcher dispatcher) {
+    return new PostgresqlExecutionActivationListener(dataSource, dispatcher);
   }
 
-  /**
-   * Starts durable activation only after the application context has initialized its data sources
-   * and worker composition. This avoids binding LISTEN to a transient datasource during startup hot
-   * replacement.
-   */
   @Bean
   @ConditionalOnProperty(
       prefix = "kk-studio.harness.runtime",
       name = "workers-enabled",
       havingValue = "true",
       matchIfMissing = true)
-  public SmartLifecycle harnessExecutionTargetLifecycle(
-      PostgresqlExecutionTargetDispatcher dispatcher, PostgresqlExecutionTargetListener listener) {
-    return new ExecutionTargetLifecycle(dispatcher, listener);
+  public SmartLifecycle harnessExecutionActivationLifecycle(
+      PostgresqlExecutionActivationDispatcher dispatcher,
+      PostgresqlExecutionActivationListener listener) {
+    return new ExecutionActivationLifecycle(dispatcher, listener);
   }
 
-  private static final class ExecutionTargetLifecycle implements SmartLifecycle {
-    private final PostgresqlExecutionTargetDispatcher dispatcher;
-    private final PostgresqlExecutionTargetListener listener;
+  private static final class ExecutionActivationLifecycle implements SmartLifecycle {
+
+    private final PostgresqlExecutionActivationDispatcher dispatcher;
+    private final PostgresqlExecutionActivationListener listener;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    private ExecutionTargetLifecycle(
-        PostgresqlExecutionTargetDispatcher dispatcher,
-        PostgresqlExecutionTargetListener listener) {
+    private ExecutionActivationLifecycle(
+        PostgresqlExecutionActivationDispatcher dispatcher,
+        PostgresqlExecutionActivationListener listener) {
       this.dispatcher = dispatcher;
       this.listener = listener;
     }

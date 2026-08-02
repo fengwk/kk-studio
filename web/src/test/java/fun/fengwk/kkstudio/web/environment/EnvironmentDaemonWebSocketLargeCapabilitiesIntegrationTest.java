@@ -62,7 +62,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ArtifactStore artifactStore;
-  // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
+  // The Gateway's READY wake is wired by the ExecutionActivation dispatcher slice; suppress here.
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   /**

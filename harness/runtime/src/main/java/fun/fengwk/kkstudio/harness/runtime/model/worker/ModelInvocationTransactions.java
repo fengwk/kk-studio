@@ -86,7 +86,7 @@ public interface ModelInvocationTransactions {
   /**
    * 原子转入 RETRY_WAIT，清除 worker lease 并保留首次 RUNNING 建立的总 deadline。
    *
-   * <p>retry 到期前不标记 owning Thread runnable；成功后调用方只应 reschedule MODEL_INVOCATION durable target。
+   * <p>retry 到期前不标记 owning Thread runnable；成功后调用方只应 reschedule MODEL_INVOCATION durable activation。
    */
   ModelInvocationUpdateOutcome scheduleRetry(
       ClaimedModelInvocation claimed,

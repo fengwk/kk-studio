@@ -7,7 +7,7 @@
  * ModelExecutionCallback}. That callback owns listener lifecycle and watchdogs; {@code
  * ModelStreamAccumulator} reconciles stream deltas; {@code ModelTerminalCompleter} owns terminal
  * and retry mutations. Terminal state is committed only through the transaction port; the port
- * atomically marks the owning Thread runnable and schedules its durable target.
+ * atomically marks the owning Thread runnable and schedules its durable activation.
  *
  * <p>Delta is a bounded realtime projection only. Worker lease heartbeat and real Provider activity
  * are deliberately separate: only Provider delta is eligible to advance {@code lastActivityAt}. A

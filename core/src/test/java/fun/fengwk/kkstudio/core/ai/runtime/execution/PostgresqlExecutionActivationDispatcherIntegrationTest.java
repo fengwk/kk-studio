@@ -34,21 +34,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Integration tests for {@link PostgresqlExecutionTargetDispatcher}: startup drain, route-aware
- * wait + READY wake, nearest-due timer, convergence of two dispatcher instances, wake-during-drain
- * coalescing, and timer serialization (no overlapping drain iterations).
- */
-class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringTestSupport {
+/** 验证分发器的启动扫描、Environment READY、最近 wakeAt 和并发收敛行为。 */
+class PostgresqlExecutionActivationDispatcherIntegrationTest extends PostgresSpringTestSupport {
 
   private static final Instant BASE = Instant.parse("2026-07-24T00:00:00Z");
 
-  @Autowired private PostgresqlExecutionTargetStore store;
+  @Autowired private PostgresqlExecutionActivationStore store;
   @Autowired private PlatformTransactionManager txm;
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   @Test
-  void startupDrainProcessesPreExistingDueTargets() throws Exception {
+  void startupDrainProcessesPreExistingDueActivations() throws Exception {
     store.schedule(ExecutionTargetKind.THREAD, 1L, null, BASE.minus(Duration.ofMinutes(1)));
     store.schedule(
         ExecutionTargetKind.MODEL_INVOCATION, 2L, null, BASE.minus(Duration.ofMinutes(2)));
@@ -60,18 +56,17 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     ScheduledExecutorService drain = singleThread("dispatcher-startup-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-startup-wake");
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
+            ExecutionActivationEnvironmentEligibility.empty(),
             handler.wrap(processed),
             clock,
             drain,
             wake);
     try {
       dispatcher.start();
-      assertTrue(
-          processed.await(5, TimeUnit.SECONDS), "startup drain must process pre-existing due rows");
+      assertTrue(processed.await(5, TimeUnit.SECONDS), "启动 drain 必须处理已有 due 激活");
     } finally {
       dispatcher.stop();
       shutdown(drain);
@@ -82,26 +77,26 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   @Test
-  void offlineEnvironmentTargetWaitsAndIsDispatchedAfterReady() throws Exception {
+  void offlineEnvironmentActivationWaitsAndIsDispatchedAfterReady() throws Exception {
     store.schedule(
         ExecutionTargetKind.TOOL_INVOCATION, 10L, "env-a", BASE.minus(Duration.ofMinutes(1)));
 
     RecordingHandler handler = new RecordingHandler(new TransactionTemplate(txm), store);
     CountDownLatch firstReady = new CountDownLatch(1);
 
-    AtomicReference<ExecutionTargetRouteEligibility> eligibility =
-        new AtomicReference<>(ExecutionTargetRouteEligibility.empty());
+    AtomicReference<ExecutionActivationEnvironmentEligibility> eligibility =
+        new AtomicReference<>(ExecutionActivationEnvironmentEligibility.empty());
     Clock clock = Clock.fixed(BASE, ZoneOffset.UTC);
-    ScheduledExecutorService drain = singleThread("dispatcher-route-drain");
-    ScheduledExecutorService wake = singleThread("dispatcher-route-wake");
+    ScheduledExecutorService drain = singleThread("dispatcher-environment-drain");
+    ScheduledExecutorService wake = singleThread("dispatcher-environment-wake");
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            new ExecutionTargetRouteEligibility() {
+            new ExecutionActivationEnvironmentEligibility() {
               @Override
-              public Set<String> readyRouteKeys() {
-                return eligibility.get().readyRouteKeys();
+              public Set<String> readyEnvironmentNames() {
+                return eligibility.get().readyEnvironmentNames();
               }
             },
             handler.wrap(firstReady),
@@ -112,16 +107,14 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
       dispatcher.start();
       assertFalse(
           firstReady.await(500, TimeUnit.MILLISECONDS),
-          "offline environment target must not be claimed while env is not READY");
+          "Environment 未 READY 时不得领取 durable activation");
       assertTrue(
-          store.findAll().stream().anyMatch(r -> r.targetId() == 10L),
-          "offline target must remain durable");
+          store.findAll().stream().anyMatch(activation -> activation.targetId() == 10L),
+          "未 READY 的 activation 必须保留");
 
-      eligibility.set(ExecutionTargetRouteEligibility.of(Set.of("env-a")));
+      eligibility.set(ExecutionActivationEnvironmentEligibility.of(Set.of("env-a")));
       dispatcher.wake();
-      assertTrue(
-          firstReady.await(5, TimeUnit.SECONDS),
-          "READY must allow the durable target to be claimed");
+      assertTrue(firstReady.await(5, TimeUnit.SECONDS), "READY 后必须允许领取 durable activation");
       assertEquals(List.of(10L), handler.handled);
     } finally {
       dispatcher.stop();
@@ -131,7 +124,7 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   @Test
-  void parkedTargetIsInvisibleToDispatcherUntilNormalSchedulingEnablesIt() throws Exception {
+  void parkedActivationIsInvisibleUntilExplicitActivation() throws Exception {
     store.park(
         ExecutionTargetKind.TOOL_INVOCATION, 11L, "env-a", BASE.minus(Duration.ofMinutes(1)));
 
@@ -139,35 +132,44 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     CountDownLatch processed = new CountDownLatch(1);
     ScheduledExecutorService drain = singleThread("dispatcher-parked-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-parked-wake");
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.of(Set.of("env-a")),
+            ExecutionActivationEnvironmentEligibility.of(Set.of("env-a")),
             handler.wrap(processed),
             Clock.fixed(BASE, ZoneOffset.UTC),
             drain,
             wake);
     try {
       dispatcher.start();
-      assertFalse(
-          processed.await(500, TimeUnit.MILLISECONDS),
-          "disabled target must not reach the dispatcher");
-      assertFalse(
+      assertFalse(processed.await(500, TimeUnit.MILLISECONDS), "PARKED activation 不得进入 dispatcher");
+      assertEquals(
+          ActivationState.PARKED,
           store.findAll().stream()
-              .filter(row -> row.targetId() == 11L)
+              .filter(activation -> activation.targetId() == 11L)
               .findFirst()
               .orElseThrow()
-              .dispatchEnabled());
+              .activationState());
 
       assertEquals(
-          1,
+          0,
           store.schedule(
               ExecutionTargetKind.TOOL_INVOCATION,
               11L,
               "env-a",
               BASE.minus(Duration.ofMinutes(1))));
+      assertFalse(
+          processed.await(500, TimeUnit.MILLISECONDS), "schedule 不得隐式唤醒已有 PARKED activation");
+
+      new TransactionTemplate(txm)
+          .execute(
+              status -> {
+                store.lock(ExecutionTargetKind.TOOL_INVOCATION, 11L).orElseThrow();
+                return store.activateLocked(
+                    ExecutionTargetKind.TOOL_INVOCATION, 11L, BASE.minus(Duration.ofMinutes(1)));
+              });
       dispatcher.wake();
-      assertTrue(processed.await(5, TimeUnit.SECONDS), "enabled target must be dispatched");
+      assertTrue(processed.await(5, TimeUnit.SECONDS), "显式 activate 后必须分发");
     } finally {
       dispatcher.stop();
       shutdown(drain);
@@ -176,9 +178,9 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   @Test
-  void nearestDueTimerFiresOnceWithoutIncidentalSignal() throws Exception {
-    Instant dueAt = BASE.plus(Duration.ofMillis(500));
-    store.schedule(ExecutionTargetKind.THREAD, 30L, null, dueAt);
+  void nearestWakeTimerFiresWithoutIncidentalSignal() throws Exception {
+    Instant wakeAt = BASE.plus(Duration.ofMillis(500));
+    store.schedule(ExecutionTargetKind.THREAD, 30L, null, wakeAt);
 
     RecordingHandler handler = new RecordingHandler(new TransactionTemplate(txm), store);
     CountDownLatch handled = new CountDownLatch(1);
@@ -187,20 +189,18 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     ScheduledExecutorService drain = singleThread("dispatcher-timer-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-timer-wake");
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
+            ExecutionActivationEnvironmentEligibility.empty(),
             handler.wrap(handled),
             clock,
             drain,
             wake);
     try {
       dispatcher.start();
-      clock.advanceTo(dueAt.plusMillis(1));
-      assertTrue(
-          handled.await(5, TimeUnit.SECONDS),
-          "nearest-due timer must fire without external signal");
+      clock.advanceTo(wakeAt.plusMillis(1));
+      assertTrue(handled.await(5, TimeUnit.SECONDS), "最近 wakeAt 定时器必须触发分发");
       assertEquals(List.of(30L), handler.handled);
     } finally {
       dispatcher.stop();
@@ -219,13 +219,11 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     AtomicInteger duplicateCount = new AtomicInteger();
     CountDownLatch allHandled = new CountDownLatch(3);
 
-    // Each handler call is wrapped in its own transaction (the handler has
-    // access to the dispatcher-bound store and the platform tx manager).
     TransactionTemplate tx = new TransactionTemplate(txm);
-    ExecutionTargetHandler handler =
-        row -> {
-          boolean claimed = claimAndDelete(tx, store, row);
-          if (claimed && globalHandled.add(row.targetId())) {
+    ExecutionActivationHandler handler =
+        activation -> {
+          boolean claimed = claimAndDelete(tx, store, activation);
+          if (claimed && globalHandled.add(activation.targetId())) {
             allHandled.countDown();
             return true;
           }
@@ -241,24 +239,31 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     ScheduledExecutorService drain2 = singleThread("dispatcher-converge-2-drain");
     ScheduledExecutorService wake2 = singleThread("dispatcher-converge-2-wake");
 
-    PostgresqlExecutionTargetDispatcher a =
-        new PostgresqlExecutionTargetDispatcher(
-            store, ExecutionTargetRouteEligibility.empty(), handler, clock, drain1, wake1);
-    PostgresqlExecutionTargetDispatcher b =
-        new PostgresqlExecutionTargetDispatcher(
-            store, ExecutionTargetRouteEligibility.empty(), handler, clock, drain2, wake2);
+    PostgresqlExecutionActivationDispatcher first =
+        new PostgresqlExecutionActivationDispatcher(
+            store,
+            ExecutionActivationEnvironmentEligibility.empty(),
+            handler,
+            clock,
+            drain1,
+            wake1);
+    PostgresqlExecutionActivationDispatcher second =
+        new PostgresqlExecutionActivationDispatcher(
+            store,
+            ExecutionActivationEnvironmentEligibility.empty(),
+            handler,
+            clock,
+            drain2,
+            wake2);
     try {
-      a.start();
-      b.start();
-      assertTrue(allHandled.await(5, TimeUnit.SECONDS), "all targets must be handled exactly once");
+      first.start();
+      second.start();
+      assertTrue(allHandled.await(5, TimeUnit.SECONDS), "所有 activation 必须只成功处理一次");
       assertEquals(Set.of(1L, 2L, 3L), globalHandled);
-      assertEquals(
-          0,
-          duplicateCount.get(),
-          "deleteIfExists CAS must prevent duplicate successful handler invocations");
+      assertEquals(0, duplicateCount.get());
     } finally {
-      a.stop();
-      b.stop();
+      first.stop();
+      second.stop();
       shutdown(drain1);
       shutdown(drain2);
       shutdown(wake1);
@@ -267,10 +272,7 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   @Test
-  void wakeDuringDrainTriggersAnotherDrainWithoutLosingRequest() throws Exception {
-    // The first handler blocks. A second target is inserted while that drain is in flight and a
-    // wake is registered. The second target was not in the first scan, so only a correctly
-    // retained wake can process it.
+  void wakeDuringDrainTriggersAnotherDrain() throws Exception {
     store.schedule(ExecutionTargetKind.THREAD, 100L, null, BASE.minus(Duration.ofMinutes(1)));
 
     CountDownLatch firstEntered = new CountDownLatch(1);
@@ -279,42 +281,39 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     AtomicBoolean secondSaw = new AtomicBoolean();
     TransactionTemplate tx = new TransactionTemplate(txm);
 
-    ExecutionTargetHandler handler =
-        row -> {
+    ExecutionActivationHandler handler =
+        activation -> {
           twoHandlerInvocations.countDown();
-          if (row.targetId() == 100L) {
+          if (activation.targetId() == 100L) {
             firstEntered.countDown();
             try {
-              assertTrue(
-                  releaseFirst.await(5, TimeUnit.SECONDS), "release latch must arrive within 5s");
-            } catch (InterruptedException ie) {
+              assertTrue(releaseFirst.await(5, TimeUnit.SECONDS), "release latch must arrive");
+            } catch (InterruptedException error) {
               Thread.currentThread().interrupt();
               return false;
             }
           } else {
             secondSaw.set(true);
           }
-          return claimAndDelete(tx, store, row);
+          return claimAndDelete(tx, store, activation);
         };
 
     Clock clock = Clock.fixed(BASE, ZoneOffset.UTC);
     ScheduledExecutorService drain = singleThread("dispatcher-coalesce-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-coalesce-wake");
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
-            store, ExecutionTargetRouteEligibility.empty(), handler, clock, drain, wake);
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
+            store, ExecutionActivationEnvironmentEligibility.empty(), handler, clock, drain, wake);
     try {
       dispatcher.start();
-      assertTrue(firstEntered.await(5, TimeUnit.SECONDS), "first handler must enter");
+      assertTrue(firstEntered.await(5, TimeUnit.SECONDS), "首条 handler 必须进入");
       store.schedule(
           ExecutionTargetKind.MODEL_INVOCATION, 101L, null, BASE.minus(Duration.ofMinutes(2)));
       dispatcher.wake();
       releaseFirst.countDown();
-      assertTrue(
-          twoHandlerInvocations.await(5, TimeUnit.SECONDS),
-          "wake during drain must trigger a second handler invocation");
-      assertTrue(secondSaw.get(), "the second target must be handled");
+      assertTrue(twoHandlerInvocations.await(5, TimeUnit.SECONDS), "drain 内唤醒不得丢失");
+      assertTrue(secondSaw.get(), "第二条 activation 必须被处理");
     } finally {
       dispatcher.stop();
       shutdown(drain);
@@ -324,34 +323,25 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
 
   @Test
   void timerSerializationRunsDrainOnlyOnDrainExecutor() throws Exception {
-    // Use a real scheduled executor for the timer. Schedule a row that is
-    // due far enough in the future that the dispatcher arms its timer.
-    Instant dueAt = Instant.now().plusMillis(300);
-    store.schedule(ExecutionTargetKind.THREAD, 200L, null, dueAt);
+    Instant wakeAt = Instant.now().plusMillis(300);
+    store.schedule(ExecutionTargetKind.THREAD, 200L, null, wakeAt);
 
     RecordingHandler handler = new RecordingHandler(new TransactionTemplate(txm), store);
     CountDownLatch handled = new CountDownLatch(1);
-
-    Clock clock = Clock.systemUTC();
     ScheduledExecutorService drain = singleThread("dispatcher-timer-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-timer-wake");
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
+            ExecutionActivationEnvironmentEligibility.empty(),
             handler.wrap(handled),
-            clock,
+            Clock.systemUTC(),
             drain,
             wake);
     try {
       dispatcher.start();
-      assertTrue(
-          handled.await(10, TimeUnit.SECONDS),
-          "nearest-due timer must wake the dispatcher and the handler must run");
-      // The handler ran, so the timer -> wake -> drain chain is verified.
-      // We assert that the handler saw the row exactly once because the
-      // dispatcher uses single-executor drain semantics.
+      assertTrue(handled.await(10, TimeUnit.SECONDS), "最近 wakeAt 定时器必须唤醒 dispatcher");
       assertEquals(List.of(200L), handler.handled);
     } finally {
       dispatcher.stop();
@@ -361,7 +351,7 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   @Test
-  void handlerFailureDoesNotDiscardOtherDueWorkOrTheFailedTarget() throws Exception {
+  void handlerFailureDoesNotDiscardOtherDueWork() throws Exception {
     store.schedule(ExecutionTargetKind.THREAD, 300L, null, BASE.minus(Duration.ofMinutes(1)));
     store.schedule(
         ExecutionTargetKind.MODEL_INVOCATION, 301L, null, BASE.minus(Duration.ofMinutes(2)));
@@ -369,12 +359,12 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
     AtomicInteger failingAttempts = new AtomicInteger();
     CountDownLatch completed = new CountDownLatch(2);
     TransactionTemplate tx = new TransactionTemplate(txm);
-    ExecutionTargetHandler handler =
-        row -> {
-          if (row.targetId() == 300L && failingAttempts.getAndIncrement() == 0) {
-            throw new IllegalStateException("transient handler failure");
+    ExecutionActivationHandler handler =
+        activation -> {
+          if (activation.targetId() == 300L && failingAttempts.getAndIncrement() == 0) {
+            throw new IllegalStateException("transient activation handler failure");
           }
-          boolean claimed = claimAndDelete(tx, store, row);
+          boolean claimed = claimAndDelete(tx, store, activation);
           if (claimed) {
             completed.countDown();
           }
@@ -382,21 +372,19 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
         };
     ScheduledExecutorService drain = singleThread("dispatcher-handler-failure-drain");
     ScheduledExecutorService wake = singleThread("dispatcher-handler-failure-wake");
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
+            ExecutionActivationEnvironmentEligibility.empty(),
             handler,
             Clock.fixed(BASE, ZoneOffset.UTC),
             drain,
             wake);
     try {
       dispatcher.start();
-      assertTrue(
-          completed.await(5, TimeUnit.SECONDS),
-          "a failed handler must leave its target durable while later due work still proceeds");
-      assertEquals(2, failingAttempts.get(), "the failed target must be retried by the timer");
-      assertTrue(store.findAll().isEmpty(), "both targets must eventually be claimed exactly once");
+      assertTrue(completed.await(5, TimeUnit.SECONDS), "失败 handler 不得丢失其他 due work");
+      assertEquals(2, failingAttempts.get(), "失败 activation 必须被定时重试");
+      assertTrue(store.findAll().isEmpty(), "两条 activation 最终都应被领取");
     } finally {
       dispatcher.stop();
       shutdown(drain);
@@ -406,41 +394,38 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
 
   private static ScheduledExecutorService singleThread(String name) {
     return Executors.newSingleThreadScheduledExecutor(
-        r -> {
-          Thread t = new Thread(r, name);
-          t.setDaemon(true);
-          return t;
+        runnable -> {
+          Thread thread = new Thread(runnable, name);
+          thread.setDaemon(true);
+          return thread;
         });
   }
 
-  private static void shutdown(ExecutorService es) {
-    es.shutdownNow();
+  private static void shutdown(ExecutorService executor) {
+    executor.shutdownNow();
     try {
-      es.awaitTermination(1, TimeUnit.SECONDS);
+      executor.awaitTermination(1, TimeUnit.SECONDS);
     } catch (InterruptedException ignored) {
       Thread.currentThread().interrupt();
     }
   }
 
-  /**
-   * Records every row the dispatcher hands to the handler. The handler implementation runs in its
-   * own transaction so the store can be mutated outside the dispatcher's no-transaction path.
-   */
   private static final class RecordingHandler {
+
     final List<Long> handled = Collections.synchronizedList(new ArrayList<>());
     private final TransactionTemplate tx;
-    private final PostgresqlExecutionTargetStore store;
+    private final PostgresqlExecutionActivationStore store;
 
-    RecordingHandler(TransactionTemplate tx, PostgresqlExecutionTargetStore store) {
+    RecordingHandler(TransactionTemplate tx, PostgresqlExecutionActivationStore store) {
       this.tx = tx;
       this.store = store;
     }
 
-    ExecutionTargetHandler wrap(CountDownLatch latch) {
-      return row -> {
-        boolean claimed = claimAndDelete(tx, store, row);
+    ExecutionActivationHandler wrap(CountDownLatch latch) {
+      return activation -> {
+        boolean claimed = claimAndDelete(tx, store, activation);
         if (claimed) {
-          handled.add(row.targetId());
+          handled.add(activation.targetId());
           latch.countDown();
         }
         return claimed;
@@ -449,6 +434,7 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   private static final class SettableClock extends Clock {
+
     private volatile Instant now;
 
     SettableClock(Instant start) {
@@ -476,12 +462,14 @@ class PostgresqlExecutionTargetDispatcherIntegrationTest extends PostgresSpringT
   }
 
   private static boolean claimAndDelete(
-      TransactionTemplate tx, PostgresqlExecutionTargetStore store, ExecutionTargetRow row) {
+      TransactionTemplate tx,
+      PostgresqlExecutionActivationStore store,
+      ExecutionActivation activation) {
     return Boolean.TRUE.equals(
         tx.execute(
             status ->
                 store
-                    .lockDue(row.targetKind(), row.targetId(), row.availableAt())
+                    .lockDue(activation.targetKind(), activation.targetId(), activation.wakeAt())
                     .map(
                         locked -> {
                           assertEquals(

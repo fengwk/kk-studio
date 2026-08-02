@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.share.ai.runtime.InteractionResponseDTO;
 /**
  * Tool permission Interaction query/response application boundary.
  *
- * <p>Implementations own decimal/DTO adaptation. Domain orchestration and durable target mutation
- * are delegated to harness-runtime and its PostgreSQL transaction adapter.
+ * <p>Implementations own decimal/DTO adaptation. Domain orchestration and durable activation
+ * mutation are delegated to harness-runtime and its PostgreSQL transaction adapter.
  */
 public interface InteractionService {
 

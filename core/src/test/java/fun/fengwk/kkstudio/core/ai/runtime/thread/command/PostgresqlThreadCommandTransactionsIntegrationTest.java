@@ -121,7 +121,7 @@ class PostgresqlThreadCommandTransactionsIntegrationTest extends PostgresSpringT
     assertEquals(
         1L,
         jdbc.queryForObject(
-            "select count(*) from harness_execution_target"
+            "select count(*) from harness_execution_activation"
                 + " where target_kind = 'THREAD' and target_id = ?",
             Long.class,
             thread.id()));

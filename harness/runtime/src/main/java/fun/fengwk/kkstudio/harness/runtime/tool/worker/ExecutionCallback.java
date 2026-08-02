@@ -407,7 +407,7 @@ final class ExecutionCallback implements ToolExecutionListener {
       if (retryable
           && transactions.scheduleRetry(claimed, nextAttemptAt, lastObservedActivityAt(), now)
               == ToolInvocationUpdateOutcome.APPLIED) {
-        // A retry re-arms the durable target; the row is no longer RUNNING here, so the local
+        // A retry re-arms the durable activation; the row is no longer RUNNING here, so the local
         // handle must be torn down deterministically to free the environment slot.
         return;
       }

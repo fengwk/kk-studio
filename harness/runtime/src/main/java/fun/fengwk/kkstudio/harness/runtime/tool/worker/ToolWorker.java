@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * Location-agnostic durable Tool worker driven by the single harness_execution_target queue.
+ * Location-agnostic durable Tool worker driven by the single harness_execution_activation queue.
  *
  * <p>The worker is the small orchestration entry point of the Tool execution lifecycle. The three
  * cohesive responsibilities are delegated to package-private collaborators:
@@ -52,7 +52,7 @@ import java.util.function.Supplier;
  *
  * <ol>
  *   <li>The synchronous durable claim in {@link #dispatch(long)}: the caller (the future PostgreSQL
- *       execution-target dispatcher thread) runs {@code transactions.claim(...)}.
+ *       ExecutionActivation dispatcher thread) runs {@code transactions.claim(...)}.
  *   <li>The post-claim hand-off to the injected {@link Executor}: the caller never blocks on
  *       external Tool I/O after a successful claim.
  *   <li>The per-invocation pending-dispatch ticket fence: the conditional-remove gate around {@code
@@ -66,7 +66,7 @@ import java.util.function.Supplier;
  * <p>Threading: durable claim on the caller; external Tool execution on {@code executor}; watchdogs
  * on {@code scheduler}; realtime projections are best-effort. The owner's map is the sole
  * process-local gate for {@code hasActiveExecution}; the durable FIFO gate remains the PostgreSQL
- * {@code harness_execution_target} queue.
+ * {@code harness_execution_activation} queue.
  */
 @Slf4j
 public final class ToolWorker {
@@ -131,10 +131,10 @@ public final class ToolWorker {
   }
 
   /**
-   * Process a single durable ToolInvocation dispatch. The caller (the execution-target dispatcher
-   * thread) runs the durable {@code transactions.claim(...)} synchronously; post-claim external
-   * Tool execution is handed off to the injected {@link Executor} so the caller never blocks on
-   * Tool I/O after a successful claim.
+   * Process a single durable ToolInvocation dispatch. The caller (the ExecutionActivation
+   * dispatcher thread) runs the durable {@code transactions.claim(...)} synchronously; post-claim
+   * external Tool execution is handed off to the injected {@link Executor} so the caller never
+   * blocks on Tool I/O after a successful claim.
    *
    * @return {@code true} when this process successfully claimed an invocation and either submitted
    *     the local execution or durably converged a submission rejection; {@code false} only when

@@ -6,7 +6,7 @@
 PostgreSQL
   -> Entry / Session / Thread / Input / Invocation / Interaction / Usage / Artifact / Goal
   -> retry policy / realtime policy
-  -> harness_execution_target durable activation queue
+  -> harness_execution_activation durable activation queue
 
 Redis Streams
   -> 有界、可丢失的 realtime projection
@@ -45,7 +45,7 @@ ASSISTANT_ABORTED
 
 字段为 `id`、非空 `head_entry_id`、`input_sequence`、`runnable`、`execution_epoch`、`revision`、processor lease 与时间戳。Thread 行不保存 Chat 设置、Agent、Model、Variant、Tool 或 Skill 投影；当前 Session 由 head Entry 派生。
 
-`PUT /api/ai/runtime/threads/{threadId}/head` 只能写入非空 Entry 引用。命令先锁 Thread、校验静止条件和 `expectedExecutionEpoch`，再递增 epoch 并清理 processor lease 与 Thread target。
+`PUT /api/ai/runtime/threads/{threadId}/head` 只能写入非空 Entry 引用。命令先锁 Thread、校验静止条件和 `expectedExecutionEpoch`，再递增 epoch 并清理 processor lease 与 Thread ExecutionActivation。
 
 ## 3. Thread Input
 
@@ -58,7 +58,7 @@ USER_MESSAGE
 CUSTOM_MESSAGE
 ```
 
-enqueue 在同一事务内分配 sequence、写 Input、设置 `runnable=true` 并确保 Thread execution target。Input payload 中的 `TurnSettings` 只有：
+enqueue 在同一事务内分配 sequence、写 Input、设置 `runnable=true` 并确保 Thread ExecutionActivation。Input payload 中的 `TurnSettings` 只有：
 
 ```text
 agentName
@@ -88,29 +88,34 @@ yoloEnabled
 
 ## 5. Durable activation
 
-`harness_execution_target` 对每个 Thread、Model Invocation 和 Tool Invocation 保留唯一行：
+`harness_execution_activation` 对每个 Thread、Model Invocation 和 Tool Invocation 保留唯一行：
 
 ```text
-(target_kind, target_id) -> route_key, dispatch_enabled, available_at
+(target_kind, target_id) -> environment_name, activation_state, wake_at
 ```
 
-- Thread 与本地 Tool target 直接 schedule 为 enabled。
-- Environment Tool target 先以 route key park，完成同一批 materialization 后只 enable 该 route 的 FIFO head。
-- due scan、nearest-due timer 只读取 enabled row；ownership 查询仍能看到 parked row。
-- enabled insert、enable transition 或更早的 reschedule 由 PostgreSQL trigger 在 commit 后发送 NOTIFY。
+- Thread、Model Invocation 与 Platform Tool 直接创建为 `SCHEDULED` Activation。
+- Environment Tool 先创建为 `PARKED` Activation；同一批 materialization 完成后，由
+  `EnvironmentToolActivationQueue` 依据 ToolInvocation `target_id` 顺序推进 FIFO 队头。
+- `SCHEDULED` 记录参与 due scan 和 nearest-wake timer；`PARKED` 记录仍可被所有权检查读取。
+- Environment 在 Activation 创建后保持不变；retry、续租、权限等待和批准只修改 `wake_at`
+  或 `activation_state`。
+- SCHEDULED 插入、PARKED→SCHEDULED 以及已 SCHEDULED 记录严格提前 `wake_at` 时，由
+  PostgreSQL trigger 在提交后发送 NOTIFY。
 
 生产链路：
 
 ```text
-durable target mutation
+durable activation mutation
   -> PostgreSQL NOTIFY
-  -> PostgresqlExecutionTargetListener
-  -> PostgresqlExecutionTargetDispatcher.wake()
-  -> due target claim
+  -> PostgresqlExecutionActivationListener
+  -> PostgresqlExecutionActivationDispatcher.wake()
+  -> due activation claim
   -> ThreadReconciler / ModelWorker / ToolWorker
 ```
 
-dispatcher 在启动、数据库重连、NOTIFY、Environment READY 和 nearest-due timer 时 coalesced wake。每次 handler 都重新锁定 durable target 与领域事实；通知丢失不改变正确性。
+dispatcher 在启动、数据库重连、NOTIFY、Environment READY 和 nearest-wake timer 时合并
+wake。每次 handler 都重新锁定 durable Activation 与领域事实；通知丢失不改变正确性。
 
 ## 6. Redis realtime
 
@@ -142,7 +147,7 @@ Stop 和 head 重定位都在 Thread 行锁内校验 `expectedExecutionEpoch` �
 1. 按当前 head 的 response debt 读取安全 text/thinking snapshot；
 2. 有安全内容时追加 `ASSISTANT_ABORTED`，否则追加 `ASSISTANT_ERROR(CANCELLED)`；
 3. 取消 queued Input、可安全取消的 Invocation 与 OPEN Interaction；
-4. 清理 lease、更新 Thread target 并 fence 旧 epoch。
+4. 清理 lease、更新 Thread ExecutionActivation 并 fence 旧 epoch。
 
 head 重定位要求 Thread 逻辑静止：没有有效 processor lease、runnable work、queued Input、当前 epoch 的非终态 Invocation 或 OPEN Interaction。成功后旧 epoch 的 terminal callback 通过 CAS 被拒绝。
 
@@ -152,14 +157,14 @@ Invocation 保存 `attempt`、`next_attempt_at`、`deadline_at` 与 `last_activi
 
 | 故障 | durable 处理 |
 | --- | --- |
-| PostgreSQL NOTIFY 丢失 | 后续 wake、重连 wake 或 nearest-due timer 重新读取 target |
+| PostgreSQL NOTIFY 丢失 | 后续 wake、重连 wake 或 nearest-wake timer 重新读取 Activation |
 | Redis Stream 丢失 | 客户端重新获取 snapshot |
 | Runtime 进程退出 | 已提交的 Entry、Input、Invocation 与 ledger 保留 |
-| Tool 目标在发送前不可用 | Tool Invocation `FAILED` |
+| Tool Activation 在发送前不可用 | Tool Invocation `FAILED` |
 | Tool 发送结果不确定 | Tool Invocation `UNKNOWN` |
 | terminal callback 重复 | invocation token、attempt 与 terminal CAS |
 | Stop/head 与 terminal 并发 | execution epoch fencing |
 
 ## 9. 验证入口
 
-Runtime 单元测试覆盖状态机、TURN_INPUT_BATCH、response debt、lease 与 fencing；PostgreSQL 集成测试覆盖 recursive path、atomic enqueue、terminal apply、stop 和 target claim；Redis 集成测试覆盖 Stream cursor 与 snapshot-first SSE。E2E 入口见 [e2e-regression.md](e2e-regression.md)。
+Runtime 单元测试覆盖状态机、TURN_INPUT_BATCH、response debt、lease 与 fencing；PostgreSQL 集成测试覆盖 recursive path、atomic enqueue、terminal apply、stop 和 activation claim；Redis 集成测试覆盖 Stream cursor 与 snapshot-first SSE。E2E 入口见 [e2e-regression.md](e2e-regression.md)。

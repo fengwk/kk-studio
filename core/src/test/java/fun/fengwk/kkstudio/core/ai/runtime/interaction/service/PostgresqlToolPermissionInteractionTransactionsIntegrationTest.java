@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ActivationState;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.interaction.Interaction;
@@ -60,7 +61,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   }
 
   @Test
-  void approvesPlatformToolFromDatabaseOwnerAndActivatesItsParkedTarget() {
+  void approvesPlatformToolFromDatabaseOwnerAndActivatesItsParkedActivation() {
     ThreadContext unrelated = newThread(false);
     WaitingInteraction fixture = newWaiting(null, BASE, unrelated.threadId());
     Instant resolvedAt = BASE.plusSeconds(1);
@@ -81,13 +82,14 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         resolvedAt);
     assertTrue(transactions.findOpenByToolInvocation(fixture.toolId()).isEmpty());
     assertEquals(new ToolState("QUEUED", "ALLOWED", null), toolState(fixture.toolId()));
-    TargetState target = targetState(ExecutionTargetKind.TOOL_INVOCATION, fixture.toolId());
-    assertNull(target.routeKey());
-    assertTrue(target.dispatchEnabled());
-    assertEquals(resolvedAt, target.availableAt());
+    ActivationStateRecord activation =
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, fixture.toolId());
+    assertNull(activation.environmentName(), "PLATFORM 激活必须不携带 environment_name");
+    assertEquals(ActivationState.SCHEDULED, activation.activationState());
+    assertEquals(resolvedAt, activation.wakeAt());
     assertFalse(threadRunnable(fixture.ownerThreadId()));
     assertFalse(threadRunnable(unrelated.threadId()));
-    assertFalse(targetExists(ExecutionTargetKind.THREAD, unrelated.threadId()));
+    assertFalse(activationExists(ExecutionTargetKind.THREAD, unrelated.threadId()));
   }
 
   @Test
@@ -103,9 +105,12 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         BASE.plusSeconds(2));
 
     assertEquals(new ToolState("QUEUED", "ALLOWED", null), toolState(first.toolId()));
-    assertTrue(targetState(ExecutionTargetKind.TOOL_INVOCATION, first.toolId()).dispatchEnabled());
-    assertFalse(
-        targetState(ExecutionTargetKind.TOOL_INVOCATION, second.toolId()).dispatchEnabled(),
+    assertEquals(
+        ActivationState.SCHEDULED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, first.toolId()).activationState());
+    assertEquals(
+        ActivationState.PARKED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, second.toolId()).activationState(),
         "the later environment member must remain behind the durable FIFO head");
   }
 
@@ -129,13 +134,16 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     assertEquals("FAILED", denied.status());
     assertEquals("DENIED", denied.permissionState());
     assertEquals("PERMISSION_DENIED", errorKind(denied.errorJson()));
-    assertFalse(targetExists(ExecutionTargetKind.TOOL_INVOCATION, first.toolId()));
+    assertFalse(activationExists(ExecutionTargetKind.TOOL_INVOCATION, first.toolId()));
     assertTrue(threadRunnable(first.ownerThreadId()));
-    assertTrue(targetState(ExecutionTargetKind.THREAD, first.ownerThreadId()).dispatchEnabled());
+    assertEquals(
+        ActivationState.SCHEDULED,
+        activationState(ExecutionTargetKind.THREAD, first.ownerThreadId()).activationState());
     assertFalse(threadRunnable(unrelated.threadId()));
-    assertFalse(targetExists(ExecutionTargetKind.THREAD, unrelated.threadId()));
-    assertTrue(
-        targetState(ExecutionTargetKind.TOOL_INVOCATION, second.toolId()).dispatchEnabled(),
+    assertFalse(activationExists(ExecutionTargetKind.THREAD, unrelated.threadId()));
+    assertEquals(
+        ActivationState.SCHEDULED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, second.toolId()).activationState(),
         "removing the denied FIFO head must activate the next queued environment Tool");
   }
 
@@ -177,8 +185,9 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     assertEquals(BASE.plusSeconds(10), resolvedAfterStaleRetry.createdAt());
     assertEquals(BASE.plusSeconds(11), resolvedAfterStaleRetry.resolvedAt());
     assertEquals(new ToolState("QUEUED", "ALLOWED", null), toolState(resolved.toolId()));
-    assertTrue(
-        targetState(ExecutionTargetKind.TOOL_INVOCATION, resolved.toolId()).dispatchEnabled());
+    assertEquals(
+        ActivationState.SCHEDULED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, resolved.toolId()).activationState());
 
     WaitingInteraction invalidOwner =
         newWaiting(null, BASE.plusSeconds(20), newThread(false).threadId());
@@ -198,29 +207,31 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         InteractionStatus.OPEN,
         transactions.find(invalidOwner.interactionId()).orElseThrow().status());
     assertEquals(new ToolState("QUEUED", "ALLOWED", null), toolState(invalidOwner.toolId()));
-    assertFalse(
-        targetState(ExecutionTargetKind.TOOL_INVOCATION, invalidOwner.toolId()).dispatchEnabled());
+    assertEquals(
+        ActivationState.PARKED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, invalidOwner.toolId())
+            .activationState());
 
-    WaitingInteraction missingTarget =
+    WaitingInteraction missingActivation =
         newWaiting(null, BASE.plusSeconds(30), newThread(false).threadId());
     jdbc.update(
-        "delete from harness_execution_target where target_kind = 'TOOL_INVOCATION' and target_id = ?",
-        missingTarget.toolId());
+        "delete from harness_execution_activation where target_kind = 'TOOL_INVOCATION' and target_id = ?",
+        missingActivation.toolId());
     assertThrows(
         IllegalStateException.class,
         () ->
             transactions.resolve(
-                missingTarget.interactionId(),
+                missingActivation.interactionId(),
                 0L,
                 new InteractionResponse("{\"approved\":true}"),
                 ToolPermissionDecision.APPROVE,
                 BASE.plusSeconds(31)));
     assertEquals(
         InteractionStatus.OPEN,
-        transactions.find(missingTarget.interactionId()).orElseThrow().status());
+        transactions.find(missingActivation.interactionId()).orElseThrow().status());
     assertEquals(
-        new ToolState("WAITING_INTERACTION", "ASKED", null), toolState(missingTarget.toolId()));
-    assertFalse(threadRunnable(missingTarget.ownerThreadId()));
+        new ToolState("WAITING_INTERACTION", "ASKED", null), toolState(missingActivation.toolId()));
+    assertFalse(threadRunnable(missingActivation.ownerThreadId()));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -256,10 +267,10 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
   }
 
   @Test
-  void rejectsDispatchableOrMisroutedPermissionTargetsWithoutResolvingInteraction() {
+  void rejectsDispatchableOrMisroutedPermissionActivationsWithoutResolvingInteraction() {
     WaitingInteraction dispatchable = newWaiting(null, BASE, newThread(false).threadId());
     jdbc.update(
-        "update harness_execution_target set dispatch_enabled = true"
+        "update harness_execution_activation set activation_state = 'SCHEDULED'"
             + " where target_kind = 'TOOL_INVOCATION' and target_id = ?",
         dispatchable.toolId());
     assertThrows(
@@ -278,7 +289,7 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     WaitingInteraction misrouted =
         newWaiting("env-a", BASE.plusSeconds(10), newThread(false).threadId());
     jdbc.update(
-        "update harness_execution_target set route_key = 'wrong-env'"
+        "update harness_execution_activation set environment_name = 'wrong-env'"
             + " where target_kind = 'TOOL_INVOCATION' and target_id = ?",
         misrouted.toolId());
     assertThrows(
@@ -298,7 +309,12 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     ThreadContext owner = newThread(false);
     long toolId = ids.incrementAndGet();
     insertTool(toolId, owner, environmentName, "WAITING_INTERACTION", "ASKED", createdAt);
-    insertTarget(ExecutionTargetKind.TOOL_INVOCATION, toolId, environmentName, false, createdAt);
+    insertActivation(
+        ExecutionTargetKind.TOOL_INVOCATION,
+        toolId,
+        environmentName,
+        ActivationState.PARKED,
+        createdAt);
     String requestJson =
         """
         {"invocationId":%d,"threadId":%d,"tool":"fixture-tool","workdir":"/workspace","arguments":"{}"}
@@ -312,7 +328,12 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     ThreadContext owner = newThread(false);
     long toolId = ids.incrementAndGet();
     insertTool(toolId, owner, environmentName, "QUEUED", "PENDING", createdAt);
-    insertTarget(ExecutionTargetKind.TOOL_INVOCATION, toolId, environmentName, false, createdAt);
+    insertActivation(
+        ExecutionTargetKind.TOOL_INVOCATION,
+        toolId,
+        environmentName,
+        ActivationState.PARKED,
+        createdAt);
     return new QueuedTool(toolId);
   }
 
@@ -377,20 +398,23 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         timestamp(createdAt));
   }
 
-  private void insertTarget(
+  /**
+   * 直接向 {@code harness_execution_activation} 写入 fixture 行；生产构造不允许重复 activation，所以这里手工绕过通用 store。
+   */
+  private void insertActivation(
       ExecutionTargetKind kind,
       long targetId,
-      String routeKey,
-      boolean dispatchEnabled,
-      Instant availableAt) {
+      String environmentName,
+      ActivationState activationState,
+      Instant wakeAt) {
     jdbc.update(
-        "insert into harness_execution_target (target_kind, target_id, route_key, dispatch_enabled,"
-            + " available_at) values (?, ?, ?, ?, ?)",
+        "insert into harness_execution_activation (target_kind, target_id, environment_name,"
+            + " activation_state, wake_at) values (?, ?, ?, ?, ?)",
         kind.name(),
         targetId,
-        routeKey,
-        dispatchEnabled,
-        timestamp(availableAt));
+        environmentName,
+        activationState.name(),
+        timestamp(wakeAt));
   }
 
   private long insertOpenInteraction(long toolId, String requestJson, Instant createdAt) {
@@ -416,23 +440,23 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
         toolId);
   }
 
-  private TargetState targetState(ExecutionTargetKind kind, long targetId) {
+  private ActivationStateRecord activationState(ExecutionTargetKind kind, long targetId) {
     return jdbc.queryForObject(
-        "select route_key, dispatch_enabled, available_at from harness_execution_target"
+        "select environment_name, activation_state, wake_at from harness_execution_activation"
             + " where target_kind = ? and target_id = ?",
         (resultSet, rowNum) ->
-            new TargetState(
-                resultSet.getString("route_key"),
-                resultSet.getBoolean("dispatch_enabled"),
-                resultSet.getObject("available_at", OffsetDateTime.class).toInstant()),
+            new ActivationStateRecord(
+                resultSet.getString("environment_name"),
+                ActivationState.valueOf(resultSet.getString("activation_state")),
+                resultSet.getObject("wake_at", OffsetDateTime.class).toInstant()),
         kind.name(),
         targetId);
   }
 
-  private boolean targetExists(ExecutionTargetKind kind, long targetId) {
+  private boolean activationExists(ExecutionTargetKind kind, long targetId) {
     Integer count =
         jdbc.queryForObject(
-            "select count(*) from harness_execution_target where target_kind = ? and target_id = ?",
+            "select count(*) from harness_execution_activation where target_kind = ? and target_id = ?",
             Integer.class,
             kind.name(),
             targetId);
@@ -450,8 +474,9 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
     assertEquals(
         InteractionStatus.OPEN, transactions.find(fixture.interactionId()).orElseThrow().status());
     assertEquals(new ToolState("WAITING_INTERACTION", "ASKED", null), toolState(fixture.toolId()));
-    assertFalse(
-        targetState(ExecutionTargetKind.TOOL_INVOCATION, fixture.toolId()).dispatchEnabled());
+    assertEquals(
+        ActivationState.PARKED,
+        activationState(ExecutionTargetKind.TOOL_INVOCATION, fixture.toolId()).activationState());
     assertFalse(threadRunnable(fixture.ownerThreadId()));
   }
 
@@ -500,5 +525,6 @@ class PostgresqlToolPermissionInteractionTransactionsIntegrationTest
 
   private record ToolState(String status, String permissionState, String errorJson) {}
 
-  private record TargetState(String routeKey, boolean dispatchEnabled, Instant availableAt) {}
+  private record ActivationStateRecord(
+      String environmentName, ActivationState activationState, Instant wakeAt) {}
 }

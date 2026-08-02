@@ -121,7 +121,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ThreadReconciler` | TURN_INPUT_BATCH、planning、Model/Tool terminal apply、Entry/head 推进 |
 | `ModelWorker` | 回放冻结 ProviderRequest，写 ModelInvocation terminal 与 realtime |
 | `ToolWorker` | 按冻结 ToolBinding 执行本地或 RemoteTool |
-| `PostgresqlExecutionTargetDispatcher` | 根据 durable execution target 唤醒 Thread、Model、Tool worker |
+| `PostgresqlExecutionActivationDispatcher` | 根据 durable ExecutionActivation 唤醒 Thread、Model、Tool worker |
 
 缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 时，resolver 返回 `PlanningFailure`；Reconciler 追加 `ASSISTANT_ERROR`，不创建伪 ModelInvocation，也不切换到隐式资源。
 

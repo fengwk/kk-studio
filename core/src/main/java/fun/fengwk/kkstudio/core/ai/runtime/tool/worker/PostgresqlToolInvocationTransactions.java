@@ -7,7 +7,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.EnvironmentToolActivationQueue;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivation;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivationStore;
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.mapper.InteractionMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.model.InteractionDO;
 import fun.fengwk.kkstudio.core.ai.runtime.model.worker.HarnessModelInvocationThreadDO;
@@ -35,26 +37,21 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * PostgreSQL ToolInvocation worker transaction adapter that drives durable scheduling through the
- * single {@code harness_execution_target} queue and the durable Tool permission state machine.
+ * PostgreSQL ToolInvocation worker 事务适配器，通过唯一的 {@code harness_execution_activation} 队列驱动持久化调度和 Tool
+ * 权限状态机。
  *
- * <p>Lock order is Thread → ToolInvocation → target; every mutation acquires the durable target row
- * in the same transaction. Terminal mutations additionally mark the owning Thread runnable and
- * reschedule the durable Thread target.
+ * <p>锁顺序为 Thread → ToolInvocation → 激活记录；每次变更都在同一事务中获取持久化激活行锁。终态变更还会将所属 Thread 标记为
+ * runnable，并重新安排持久化 Thread 激活。
  *
- * <p>Tool permission state is durable on the invocation row and the OPEN interaction written for
- * ASK. ASK must atomically: persist the final plan, flip permission state to ASKED, transition the
- * row to {@code WAITING_INTERACTION}, clear worker clocks, insert exactly one OPEN interaction
- * owned by the Tool, and park the durable target so the FIFO gate is preserved. ALLOW must
- * atomically overwrite the final plan and flip permission state to ALLOWED. DENY must atomically
- * flip permission state to DENIED, terminalize the row to FAILED with error kind {@code
- * PERMISSION_DENIED}, mark the owning Thread runnable, delete the target, schedule the Thread
- * target, and activate the next environment head.
+ * <p>Tool 权限状态持久化在 invocation 行中，ASK 写入的 OPEN Interaction 也是持久化事实。ASK 必须原子地完成：保存最终计划， 将 permission
+ * state 切换为 ASKED，将记录切换为 {@code WAITING_INTERACTION}，清除 worker 时钟，插入恰好一条由 Tool 所有的 OPEN
+ * Interaction，并停放持久化激活以保持 FIFO 闸门。ALLOW 必须原子地覆盖最终计划并将 permission state 切换为 ALLOWED。DENY 必须原子地将
+ * permission state 切换为 DENIED，将记录以 {@code PERMISSION_DENIED} 错误终止为 FAILED，标记所属 Thread
+ * runnable，删除当前激活，安排 Thread 激活，并推进下一个 Environment 队头。
  *
- * <p>Claim returns {@link Optional#empty()} when the target is absent or not due; a RUNNING/PENDING
- * row whose lease has expired is reset to initial QUEUED/PENDING, the existing target is
- * rescheduled to now, and the call returns {@link Optional#empty()} so the dispatcher can
- * re-dispatch. A RUNNING/ALLOWED expired lease retains the existing conservative UNKNOWN behavior.
+ * <p>目标缺失或尚未到期时，claim 返回 {@link Optional#empty()}；RUNNING/PENDING 记录的 lease 过期时会重置为初始
+ * QUEUED/PENDING 状态，将已有激活重新安排到当前时间，并返回 {@link Optional#empty()}，由分发器重新分发。 RUNNING/ALLOWED 的过期 lease
+ * 保持现有的保守 UNKNOWN 行为。
  */
 @Service
 public class PostgresqlToolInvocationTransactions implements ToolInvocationTransactions {
@@ -63,7 +60,8 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
   private static final Duration DEFAULT_EXECUTION_TIMEOUT = Duration.ofMinutes(5);
   private final PostgresqlToolInvocationMapper invocationMapper;
   private final HarnessModelInvocationThreadMapper threadMapper;
-  private final ExecutionTargetStore executionTargetStore;
+  private final ExecutionActivationStore executionActivationStore;
+  private final EnvironmentToolActivationQueue environmentToolActivationQueue;
   private final InteractionMapper interactionMapper;
   private final HarnessIdGenerator idGenerator;
   private final ObjectMapper objectMapper;
@@ -73,14 +71,17 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
   public PostgresqlToolInvocationTransactions(
       PostgresqlToolInvocationMapper invocationMapper,
       HarnessModelInvocationThreadMapper threadMapper,
-      ExecutionTargetStore executionTargetStore,
+      ExecutionActivationStore executionActivationStore,
+      EnvironmentToolActivationQueue environmentToolActivationQueue,
       InteractionMapper interactionMapper,
       HarnessIdGenerator idGenerator,
       ObjectMapper objectMapper) {
     this.invocationMapper = Objects.requireNonNull(invocationMapper, "invocationMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
-    this.executionTargetStore =
-        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.executionActivationStore =
+        Objects.requireNonNull(executionActivationStore, "executionActivationStore");
+    this.environmentToolActivationQueue =
+        Objects.requireNonNull(environmentToolActivationQueue, "environmentToolActivationQueue");
     this.interactionMapper = Objects.requireNonNull(interactionMapper, "interactionMapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -95,7 +96,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     requirePositive(workerLeaseDuration, "workerLeaseDuration");
     Instant persistedNow = persistence(now);
 
-    // Step 1: thread row lock + epoch pre-read.
+    // 第一步：锁定 Thread 行并预读 epoch。
     ToolInvocationDO peek = invocationMapper.findClaimable(invocationId, offset(persistedNow));
     if (peek == null) {
       return Optional.empty();
@@ -108,7 +109,7 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       return Optional.empty();
     }
 
-    // Step 2: tool invocation row lock + validation (no mutation yet).
+    // 第二步：锁定 ToolInvocation 行并校验，此时不修改任何记录。
     ToolInvocationDO row = invocationMapper.findForUpdate(invocationId, peek.getThreadId());
     if (row == null || !Objects.equals(row.getExecutionEpoch(), thread.getExecutionEpoch())) {
       return Optional.empty();
@@ -134,15 +135,17 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       return Optional.empty();
     }
 
-    // Step 3: target gate. If the target row is absent or not yet due, the transaction commits
-    // with no row mutations, leaving the QUEUED / RETRY_WAIT / RUNNING invocation unchanged.
-    if (executionTargetStore
-        .lockDue(ExecutionTargetKind.TOOL_INVOCATION, invocationId, persistedNow)
-        .isEmpty()) {
+    // 第三步：校验激活闸门。激活行缺失或尚未到期时，事务不修改任何记录并提交，
+    // QUEUED / RETRY_WAIT / RUNNING invocation 保持不变。
+    Optional<ExecutionActivation> activation =
+        executionActivationStore.lockDue(
+            ExecutionTargetKind.TOOL_INVOCATION, invocationId, persistedNow);
+    if (activation.isEmpty()) {
       return Optional.empty();
     }
+    requireActivationEnvironment(row, activation.orElseThrow());
 
-    // Step 4: status transition (status transition is now conditional on target lockDue success).
+    // 第四步：状态切换；状态切换现在以激活 lockDue 成功为前提。
     OffsetDateTime nowOffset = offset(persistedNow);
     OffsetDateTime leaseUntil = advance(persistedNow, workerLeaseDuration, "workerLeaseDuration");
     int affected;
@@ -174,12 +177,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               leaseUntil,
               nowOffset);
     } else if (permissionState == ToolPermissionState.PENDING) {
-      // RUNNING/PENDING whose lease expired (or any pre-allow RUNNING with no successful
-      // external I/O because permission decision had not yet been persisted): the worker has
-      // provably not entered external Tool I/O (the ALLOW path persists ALLOWED first). Reset
-      // the row to its initial QUEUED/PENDING shape, reschedule the target to {@code now}, and
-      // return Optional.empty() so the dispatcher re-dispatches the row. The standard claim
-      // precondition will then surface the freshly-due target on the next attempt.
+      // RUNNING/PENDING 的 lease 已过期（或尚未完成 ALLOW 持久化、因此没有成功进行外部 I/O 的预允许 RUNNING）：
+      // 可以确定 worker 尚未进入外部 Tool I/O（ALLOW 路径会先持久化 ALLOWED）。将记录重置为初始 QUEUED/PENDING
+      // 形态，把激活重新安排到 {@code now}，并返回 Optional.empty()，由分发器重新分发。标准 claim 前置条件会在
+      // 下一次尝试时发现刚刚到期的激活。
       int recoveredAffected =
           invocationMapper.recoverPendingLease(
               row.getId(),
@@ -190,16 +191,15 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
               nowOffset);
       if (recoveredAffected != 1) {
         throw new IllegalStateException(
-            "PENDING recovery affected " + recoveredAffected + " rows after the target gate");
+            "PENDING recovery affected " + recoveredAffected + " rows after the activation gate");
       }
-      requireTargetAffected(
-          executionTargetStore.rescheduleLocked(
-              ExecutionTargetKind.TOOL_INVOCATION, invocationId, routeKey(row), persistedNow),
-          "reschedule tool invocation target after PENDING recovery");
+      requireActivationAffected(
+          executionActivationStore.rescheduleLocked(
+              ExecutionTargetKind.TOOL_INVOCATION, invocationId, persistedNow),
+          "reschedule tool invocation activation after PENDING recovery");
       return Optional.empty();
     } else {
-      // RUNNING/ALLOWED: external Tool I/O may have run; use the existing conservative token-only
-      // re-claim and converge the row to UNKNOWN on completion.
+      // RUNNING/ALLOWED：外部 Tool I/O 可能已经执行；沿用保守的仅 token 重新 claim，并在完成时将记录收敛到 UNKNOWN。
       affected =
           invocationMapper.recoverExpired(
               row.getId(),
@@ -214,10 +214,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     }
     if (affected != 1) {
       throw new IllegalStateException(
-          "claim mutated " + affected + " rows after the target gate passed");
+          "claim mutated " + affected + " rows after the activation gate passed");
     }
 
-    // Step 5: target advance + final ownership check.
+    // 第五步：推进激活并进行最终所有权校验。
     ToolInvocationDO claimed = invocationMapper.findForUpdate(row.getId(), row.getThreadId());
     if (claimed == null) {
       throw new IllegalStateException("claimed invocation disappeared: " + row.getId());
@@ -228,13 +228,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || !aggregate.workerLease().token().equals(workerToken)) {
       throw new IllegalStateException("claim result does not match requested ownership");
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION,
-            invocationId,
-            routeKey(row),
-            aggregate.workerLease().until()),
-        "reschedule tool invocation target after claim");
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocationId, aggregate.workerLease().until()),
+        "reschedule tool invocation activation after claim");
     return Optional.of(new ClaimedToolInvocation(aggregate, status, recovered));
   }
 
@@ -268,10 +265,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION, row.getId(), routeKey(row), leaseDeadline),
-        "reschedule tool invocation target after renew");
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, row.getId(), leaseDeadline),
+        "reschedule tool invocation activation after renew");
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
@@ -395,10 +392,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (outcome != ToolInvocationUpdateOutcome.APPLIED) {
       return outcome;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), routeKey(row), next),
-        "reschedule tool invocation target after scheduleRetry");
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), next),
+        "reschedule tool invocation activation after scheduleRetry");
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
@@ -421,9 +418,9 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || invocation.permissionState() != ToolPermissionState.PENDING) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    if (!routeStable(row, finalBinding)) {
+    if (!environmentStable(row, finalBinding)) {
       throw new IllegalArgumentException(
-          "persistPermissionAllowed rejected route change: locked row is "
+          "persistPermissionAllowed rejected environment change: locked row is "
               + row.getEnvironmentName()
               + " but final binding is "
               + finalBinding.environmentName());
@@ -442,13 +439,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION,
-            invocation.id(),
-            routeKey(row),
-            invocation.workerLease().until()),
-        "reschedule tool invocation target after persistPermissionAllowed");
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), invocation.workerLease().until()),
+        "reschedule tool invocation activation after persistPermissionAllowed");
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
@@ -473,10 +467,10 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || invocation.permissionState() != ToolPermissionState.PENDING) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // Route stability: the final binding's Environment target must equal the locked row's.
-    if (!routeStable(row, finalBinding)) {
+    // Environment 稳定性：最终 binding 的 Environment 必须等于已锁定记录的 Environment。
+    if (!environmentStable(row, finalBinding)) {
       throw new IllegalArgumentException(
-          "awaitPermission rejected route change: locked row is "
+          "awaitPermission rejected environment change: locked row is "
               + row.getEnvironmentName()
               + " but final binding is "
               + finalBinding.environmentName());
@@ -495,9 +489,8 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     if (outcome(affected) != ToolInvocationUpdateOutcome.APPLIED) {
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
-    // Insert exactly one OPEN Tool permission interaction. The DB partial unique index on
-    // tool_invocation_id where status = 'OPEN' guarantees the uniqueness invariant; a
-    // concurrent insert with the same key would surface as a 0 affected count.
+    // 插入恰好一条 OPEN Tool 权限 Interaction。数据库中 status = 'OPEN' 条件下按 tool_invocation_id
+    // 建立的部分唯一索引保证唯一性；相同 key 的并发插入会表现为受影响行数为 0。
     long interactionId = idGenerator.nextInteractionId();
     String requestJson = encodeToolPermissionRequest(invocation, prompt);
     InteractionDO interactionRow = new InteractionDO();
@@ -510,25 +503,18 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       throw new IllegalStateException(
           "failed to create tool-permission interaction for invocation " + invocation.id());
     }
-    // Park the durable target while the prompt is outstanding. WAITING_INTERACTION is a
-    // durable queue-member status: activateOldestEnvironment in the FIFO activation SQL
-    // filters on status = 'QUEUED' (not on dispatch_enabled), so a parked ASK row at the
-    // FIFO head still blocks later siblings and prevents them from being activated while the
-    // user response is pending. The locked row's route key is the canonical one for both
-    // PLATFORM (null) and ENVIRONMENT rows.
-    Instant originalAvailableAt =
+    // 权限等待期间将激活记录置为 PARKED。WAITING_INTERACTION 仍是 FIFO 队列成员状态，
+    // 专用 FIFO SQL 只允许 QUEUED 队头激活，因此当前队头会继续阻塞后续兄弟。
+    Instant originalWakeAt =
         row.getWorkerUntil() == null
             ? persistence(now)
             : max(persistence(now), row.getWorkerUntil().toInstant());
     int parkAffected =
-        executionTargetStore.parkLocked(
-            ExecutionTargetKind.TOOL_INVOCATION,
-            invocation.id(),
-            routeKey(row),
-            originalAvailableAt);
+        executionActivationStore.parkLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, invocation.id(), originalWakeAt);
     if (parkAffected != 1) {
       throw new IllegalStateException(
-          "parkLocked tool invocation target after awaitPermission affected " + parkAffected);
+          "parkLocked tool invocation activation after awaitPermission affected " + parkAffected);
     }
     return ToolInvocationUpdateOutcome.APPLIED;
   }
@@ -547,10 +533,9 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
       return ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     }
     Instant persistedNow = persistence(now);
-    // Preserve valid actual running clocks: startedAt and deadlineAt are immutable for the
-    // lifetime of a RUNNING row, finishedAt is the max of now and lastActivityAt to keep the
-    // invariant finishedAt >= lastActivityAt, startedAt <= finishedAt, and finishedAt >=
-    // createdAt.
+    // 保留有效的实际运行时钟：RUNNING 记录整个生命周期内 startedAt 和 deadlineAt 不可变，finishedAt 取 now
+    // 与 lastActivityAt 的较大值，以保持 finishedAt >= lastActivityAt、startedAt <= finishedAt 以及
+    // finishedAt >= createdAt。
     Instant startedAt = Objects.requireNonNull(row.getStartedAt(), "startedAt").toInstant();
     Instant deadlineAt = Objects.requireNonNull(row.getDeadlineAt(), "deadlineAt").toInstant();
     Instant lastActivityAt =
@@ -578,19 +563,19 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         != 1) {
       throw new IllegalStateException("cannot mark owning thread runnable after deny");
     }
-    requireTargetAffected(
-        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
-        "delete tool invocation target after deny");
-    executionTargetStore.schedule(
+    requireActivationAffected(
+        executionActivationStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
+        "delete tool invocation activation after deny");
+    executionActivationStore.schedule(
         ExecutionTargetKind.THREAD, invocation.threadId(), null, persistedNow);
-    String route = routeKey(row);
-    if (route != null) {
-      executionTargetStore.activateOldestEnvironment(route, persistedNow);
+    String environmentName = row.getEnvironmentName();
+    if (environmentName != null) {
+      environmentToolActivationQueue.activateOldestTool(environmentName, persistedNow);
     }
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
-  private static boolean routeStable(ToolInvocationDO row, ToolBinding finalBinding) {
+  private static boolean environmentStable(ToolInvocationDO row, ToolBinding finalBinding) {
     return Objects.equals(row.getEnvironmentName(), finalBinding.environmentName());
   }
 
@@ -667,24 +652,23 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         != 1) {
       throw new IllegalStateException("cannot mark owning thread runnable");
     }
-    requireTargetAffected(
-        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
-        "delete tool invocation target after terminal write");
-    // THREAD target scheduling is best-effort: an earlier due time wins and is acceptable.
-    executionTargetStore.schedule(
+    requireActivationAffected(
+        executionActivationStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()),
+        "delete tool invocation activation after terminal write");
+    // THREAD 激活安排遵循 wakeAt 最早优先，已有更早记录时无需报错。
+    executionActivationStore.schedule(
         ExecutionTargetKind.THREAD, invocation.threadId(), null, persistedNow);
-    String route = routeKey(row);
-    if (route != null) {
-      executionTargetStore.activateOldestEnvironment(route, persistedNow);
+    String environmentName = row.getEnvironmentName();
+    if (environmentName != null) {
+      environmentToolActivationQueue.activateOldestTool(environmentName, persistedNow);
     }
     return ToolInvocationUpdateOutcome.APPLIED;
   }
 
   /**
-   * Acquire the lock chain Thread -> ToolInvocation -> target and verify the caller still owns the
-   * invocation. Returns {@code null} when ownership has been lost (token/attempt/epoch/lease drift,
-   * thread mismatch). Throws {@link IllegalStateException} when the invocation is owned but its
-   * target row is missing, so the transaction rolls back rather than silently persisting.
+   * 按 Thread -> ToolInvocation -> 激活记录的顺序加锁，并校验调用方仍拥有该 invocation。token、attempt、epoch、lease 漂移或
+   * Thread 不匹配时返回 {@code null}。调用方仍拥有 invocation 但激活行缺失时抛出 {@link
+   * IllegalStateException}，使事务回滚而不是静默持久化。
    */
   private LockedTool lockOwned(ClaimedToolInvocation claimed, Instant now) {
     Objects.requireNonNull(claimed, "claimed");
@@ -705,10 +689,23 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
         || !row.getWorkerUntil().toInstant().isAfter(persistence(now))) {
       return null;
     }
-    if (executionTargetStore.lock(ExecutionTargetKind.TOOL_INVOCATION, invocation.id()).isEmpty()) {
-      throw new IllegalStateException("owned invocation is missing its target: " + invocation.id());
-    }
+    ExecutionActivation activation =
+        executionActivationStore
+            .lock(ExecutionTargetKind.TOOL_INVOCATION, invocation.id())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "owned invocation is missing its activation: " + invocation.id()));
+    requireActivationEnvironment(row, activation);
     return new LockedTool(row);
+  }
+
+  private static void requireActivationEnvironment(
+      ToolInvocationDO row, ExecutionActivation activation) {
+    if (!Objects.equals(row.getEnvironmentName(), activation.environmentName())) {
+      throw new IllegalStateException(
+          "tool invocation environment does not match activation: " + row.getId());
+    }
   }
 
   private String encodeToolPermissionRequest(
@@ -727,17 +724,13 @@ public class PostgresqlToolInvocationTransactions implements ToolInvocationTrans
     }
   }
 
-  private static String routeKey(ToolInvocationDO row) {
-    return row.getEnvironmentName();
-  }
-
   private static ToolInvocationUpdateOutcome outcome(int affected) {
     return affected == 1
         ? ToolInvocationUpdateOutcome.APPLIED
         : ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
   }
 
-  private static void requireTargetAffected(int affected, String operation) {
+  private static void requireActivationAffected(int affected, String operation) {
     if (affected != 1) {
       throw new IllegalStateException(operation + " affected " + affected + " rows");
     }

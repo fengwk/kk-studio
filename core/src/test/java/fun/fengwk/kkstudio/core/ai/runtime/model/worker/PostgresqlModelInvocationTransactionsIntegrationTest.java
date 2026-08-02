@@ -61,7 +61,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 真实 PostgreSQL 17 集成测试：覆盖 claim/heartbeat/activity/terminal/retry/due scan 全部 fence 与状态机的负例。
+ * 真实 PostgreSQL 17 集成测试：覆盖 claim/heartbeat/activity/terminal/retry/到期扫描的全部 fence 与状态机负例。
  *
  * <p>每个测试构造合法 Session+Main Thread+ROOT Entry 与合法 QUEUED Invocation；{@link
  * PostgresqlModelInvocationTransactions} 在事务内完成 fence。运行依赖 Docker（{@link
@@ -81,13 +81,12 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
   @Autowired private PostgresqlModelInvocationTransactions transactions;
 
-  // The unrelated tool slice owns the production {@link EnvironmentReadyListener} bean; this model
-  // integration test does not exercise that path, so the dependency is satisfied with a mock.
+  // 独立的 Tool 切片拥有生产 {@link EnvironmentReadyListener} bean；本模型集成测试不覆盖该路径，因此使用 mock 满足依赖。
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   private final AtomicLong ids = new AtomicLong(20_000_000L);
 
-  // ---------- success path baseline ----------
+  // ---------- 成功路径基线 ----------
 
   /**
    * QUEUED -> RUNNING 完整建立 started/deadline/lastActivity/lease；attempts 不变；Thread executionEpoch
@@ -178,7 +177,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertEquals("RUNNING", row.getStatus());
     assertEquals(2, row.getAttempt());
     assertEquals(token, row.getWorkerToken());
-    // sanity check lease expiry respected retry-preparation
+    // 验证 lease 过期时间符合 retry 准备阶段的预期。
     assertNotNull(leaseUntil);
     assertTrue(row.getWorkerUntil().toInstant().isAfter(leaseUntil.minusSeconds(1)));
   }
@@ -218,7 +217,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertEquals(newToken, row.getWorkerToken());
   }
 
-  // ---------- exclusion ----------
+  // ---------- 排除路径 ----------
 
   /** 持有 lease 的 active RUNNING 不在 findClaimable 内；not-due RETRY_WAIT 也不在。 */
   @Test
@@ -305,7 +304,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
   // ---------- renew / activity ----------
 
-  /** renew 不得缩短 lease 或 watchdog target，且不改 last_activity_at。 */
+  /** renew 不得缩短 lease 或 watchdog activation，且不改 last_activity_at。 */
   @Test
   void renewMonotonicExtensionLeavesActivityUntouched() throws Exception {
     Fixture fx = newQueued();
@@ -330,8 +329,8 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         "renew must not shorten the durable lease");
     assertEquals(
         firstLease.until().truncatedTo(ChronoUnit.MILLIS),
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
-        "watchdog target must match the durable lease after a non-extending renew");
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
+        "watchdog activation must match the durable lease after a non-extending renew");
 
     renewNow = now.plus(Duration.ofMillis(20));
     ModelInvocationUpdateOutcome out =
@@ -345,8 +344,8 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertTrue(row.getWorkerUntil().toInstant().isAfter(renewNow));
     assertEquals(
         row.getWorkerUntil().toInstant().truncatedTo(ChronoUnit.MILLIS),
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
-        "watchdog target must match the durable lease after an extending renew");
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId).truncatedTo(ChronoUnit.MILLIS),
+        "watchdog activation must match the durable lease after an extending renew");
     assertEquals(
         firstActivity,
         row.getLastActivityAt().toInstant(),
@@ -387,7 +386,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         "newer activity must refresh lastActivityAt");
   }
 
-  // ---------- terminals ----------
+  // ---------- 终态 ----------
 
   /** success 把 invocation 变 SUCCEEDED；Thread runnable=true；finished_at >= lastObserved。 */
   @Test
@@ -618,10 +617,10 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
                 now.plus(Duration.ofMillis(10))));
   }
 
-  // ---------- due scan order ----------
+  // ---------- 到期扫描顺序 ----------
 
   /** expired RUNNING > due RETRY_WAIT > QUEUED。每次 pick 之后调用方都 claim 该行，模拟 worker 真实节奏。 */
-  // ---------- fence negatives ----------
+  // ---------- fence 负例 ----------
 
   /** Thread executionEpoch 被并发推进后 claim 返回 empty；持有旧 claim 的 mutation 返回 LOST_OWNERSHIP。 */
   @Test
@@ -863,12 +862,9 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         claimable.isEmpty(), "findClaimable must filter out when Thread epoch != Invocation epoch");
   }
 
-  // ---------- safe stream snapshot path ----------
+  // ---------- safe stream snapshot 路径 ----------
 
-  /**
-   * The fenced snapshot write is persisted as JSON and is readable from the row; a second extending
-   * write uses prefix-monotone merge so the stored snapshot grows monotonically.
-   */
+  /** 带 fence 的快照写入以 JSON 持久化并可从记录读取；第二次扩展写入使用前缀单调合并，使存储快照单调增长。 */
   @Test
   void recordSafeStreamSnapshotFencedWriteExtendsAndIsReadable() throws Exception {
     Fixture fx = newQueued();
@@ -910,10 +906,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         "snapshot-visible invocation status changes must advance Thread revision");
   }
 
-  /**
-   * Snapshot fence never overwrites a longer durable snapshot with a shorter incoming prefix; the
-   * durable side wins when it strictly extends the incoming side.
-   */
+  /** 快照 fence 不会用较短的输入前缀覆盖较长的持久化快照；当持久化侧严格更长时，以持久化侧为准。 */
   @Test
   void recordSafeStreamSnapshotKeepsLongerDurableOverShorterIncoming() throws Exception {
     Fixture fx = newQueued();
@@ -939,10 +932,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertEquals(durable, stored);
   }
 
-  /**
-   * Snapshot fork in a single field is treated as an illegal invocation state; the partial abort
-   * path is expected to bubble this up as a fatal error rather than silently overwriting.
-   */
+  /** 单字段快照分叉视为非法 invocation 状态；部分终止路径应将其作为致命错误抛出，而不是静默覆盖。 */
   @Test
   void recordSafeStreamSnapshotForkIsIllegalInvocationState() throws Exception {
     Fixture fx = newQueued();
@@ -965,8 +955,8 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
   }
 
   /**
-   * A retry claim from RETRY_WAIT must clear the prior attempt's safe stream snapshot so the next
-   * attempt's Provider context is not polluted by partial fragments of the aborted attempt.
+   * 从 RETRY_WAIT 重新 claim 时必须清除上一次 attempt 的 safe stream snapshot，避免下一次 attempt 的 Provider 上下文被已中止
+   * attempt 的残留片段污染。
    */
   @Test
   void retryClaimClearsPriorAttemptSafeStreamSnapshot() throws Exception {
@@ -1004,7 +994,7 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         "retry claim must drop previous attempt's safe stream snapshot");
   }
 
-  // ---------- invariant breaches ----------
+  // ---------- 约束破坏 ----------
 
   /** Thread runnable 更新被数据库拒绝时，terminal Invocation 必须随同一事务一起回滚。 */
   @Test
@@ -1058,14 +1048,14 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertFalse(threadRow(fx.threadId).getRunnable(), "Thread must remain non-runnable");
   }
 
-  // ---------- single-path execution-target wiring ----------
+  // ---------- single-path execution-activation wiring ----------
 
   /**
    * claim 必须 lockDue(MODEL_INVOCATION) → CAS → reschedule 到 lease until，目标行从 due-now 推进到 lease
-   * 之后；不留下任何早于 lease 的 available_at。
+   * 之后；不留下任何早于 lease 的 wake_at。
    */
   @Test
-  void claimReschedulesModelInvocationTargetToWorkerLease() throws Exception {
+  void claimReschedulesModelInvocationActivationToWorkerLease() throws Exception {
     Fixture fx = newQueued();
     Instant now = now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1073,28 +1063,28 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
             fx.invocationId, "tok-watch", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
 
-    Instant availableAt = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+    Instant wakeAt = activationWakeAt("MODEL_INVOCATION", fx.invocationId);
     Instant leaseUntil = claimed.get().invocation().workerLease().until();
     assertEquals(
         leaseUntil,
-        availableAt,
-        "claim must reschedule MODEL_INVOCATION target to the worker lease deadline");
+        wakeAt,
+        "claim must reschedule MODEL_INVOCATION activation to the worker lease deadline");
   }
 
   /**
-   * claim 在 due target 缺失时必须直接返回 empty，绝不动 invocation：execution_epoch/status/attempt/ worker_token
-   * 全部保持 QUEUED 初始值。
+   * claim 在 due activation 缺失时必须直接返回 empty，绝不动
+   * invocation：execution_epoch/status/attempt/worker_token 全部保持 QUEUED 初始值。
    */
   @Test
-  void claimReturnsEmptyWhenModelInvocationTargetMissing() throws Exception {
+  void claimReturnsEmptyWhenModelInvocationActivationMissing() throws Exception {
     Fixture fx = newQueued();
-    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+    deleteActivation("MODEL_INVOCATION", fx.invocationId);
     Instant now = now();
 
     Optional<ClaimedModelInvocation> claimed =
         transactions.claim(
             fx.invocationId, "tok-missing", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
-    assertTrue(claimed.isEmpty(), "missing target must not yield a claim");
+    assertTrue(claimed.isEmpty(), "missing activation must not yield a claim");
 
     ModelInvocationDO row = rowFor(fx.invocationId);
     assertEquals("QUEUED", row.getStatus());
@@ -1103,21 +1093,21 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertNull(row.getStartedAt());
   }
 
-  /** 远期 not-due 目标：claim 同样返回 empty。available_at 保持原值，invocation 不被修改。 */
+  /** 远期 not-due 激活：claim 同样返回 empty。wake_at 保持原值，invocation 不被修改。 */
   @Test
-  void claimReturnsEmptyWhenModelInvocationTargetNotDue() throws Exception {
+  void claimReturnsEmptyWhenModelInvocationActivationNotDue() throws Exception {
     Fixture fx = newQueued();
     Instant future = now().plus(Duration.ofMinutes(5));
-    rescheduleTarget("MODEL_INVOCATION", fx.invocationId, future);
+    rescheduleActivation("MODEL_INVOCATION", fx.invocationId, future);
 
     Optional<ClaimedModelInvocation> claimed =
         transactions.claim(
             fx.invocationId, "tok-future", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now());
-    assertTrue(claimed.isEmpty(), "future-due target must not yield a claim");
+    assertTrue(claimed.isEmpty(), "future-due activation must not yield a claim");
     assertEquals(
         future.truncatedTo(ChronoUnit.MILLIS),
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
-        "not-due target must keep its original available_at");
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId),
+        "not-due activation must keep its original wake_at");
 
     ModelInvocationDO row = rowFor(fx.invocationId);
     assertEquals("QUEUED", row.getStatus());
@@ -1125,11 +1115,10 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
   }
 
   /**
-   * renew 必须 lock + reschedule MODEL_INVOCATION target 到新 lease until；任何一次 renew 都同步刷新 目标行；目标消失属于
-   * invariant breach。
+   * renew 必须 lock + reschedule MODEL_INVOCATION 激活到新 lease until；任何一次 renew 都同步刷新激活行；激活消失属于约束破坏。
    */
   @Test
-  void renewReschedulesModelInvocationTargetToExtendedLease() throws Exception {
+  void renewReschedulesModelInvocationActivationToExtendedLease() throws Exception {
     Fixture fx = newQueued();
     Instant now = Instant.now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1147,18 +1136,18 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         transactions.renew(claimed.get(), Duration.ofMinutes(3), renewNow);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, out);
 
-    Instant targetAt = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+    Instant activationAt = activationWakeAt("MODEL_INVOCATION", fx.invocationId);
     assertTrue(
-        targetAt.isAfter(firstLease),
-        "renew must push MODEL_INVOCATION target past the prior lease deadline");
+        activationAt.isAfter(firstLease),
+        "renew must push MODEL_INVOCATION activation past the prior lease deadline");
     assertTrue(
-        targetAt.isAfter(renewNow),
-        "renew must push MODEL_INVOCATION target past the renewal instant");
+        activationAt.isAfter(renewNow),
+        "renew must push MODEL_INVOCATION activation past the renewal instant");
   }
 
-  /** renew 在 owned mutation 中目标行消失：抛 IllegalStateException 让 Spring 回滚 invocation lease 写入。 */
+  /** renew 在 owned mutation 中激活行消失：抛 IllegalStateException 让 Spring 回滚 invocation lease 写入。 */
   @Test
-  void renewRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+  void renewRollsBackWhenModelInvocationActivationIsMissing() throws Exception {
     Fixture fx = newQueued();
     Instant now = Instant.now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1171,15 +1160,15 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertTrue(claimed.isPresent());
     Instant leaseBefore = claimed.get().invocation().workerLease().until();
 
-    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+    deleteActivation("MODEL_INVOCATION", fx.invocationId);
 
     IllegalStateException ex =
         assertThrows(
             IllegalStateException.class,
             () -> transactions.renew(claimed.get(), Duration.ofMinutes(2), now.plusSeconds(1)));
     assertTrue(
-        ex.getMessage() != null && ex.getMessage().contains("watchdog target"),
-        "missing watchdog target must surface the invariant breach");
+        ex.getMessage() != null && ex.getMessage().contains("watchdog activation"),
+        "missing watchdog activation must surface the invariant breach");
     // lease 不能被延长（renew 整事务回滚）
     ModelInvocationDO row = rowFor(fx.invocationId);
     assertEquals(
@@ -1189,11 +1178,11 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
   }
 
   /**
-   * scheduleRetry 在 owned mutation 中：把 MODEL_INVOCATION target reschedule 到 nextAttemptAt；目标
-   * 缺失抛异常回滚 RETRY_WAIT 写入。
+   * scheduleRetry 在 owned mutation 中：把 MODEL_INVOCATION activation reschedule 到
+   * nextAttemptAt；激活缺失抛异常回滚 RETRY_WAIT 写入。
    */
   @Test
-  void scheduleRetryReschedulesModelInvocationTargetToNextAttempt() throws Exception {
+  void scheduleRetryReschedulesModelInvocationActivationToNextAttempt() throws Exception {
     Fixture fx = newQueued();
     Instant now = Instant.now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1209,13 +1198,13 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
     assertEquals(
         nextAttemptAt.truncatedTo(ChronoUnit.MILLIS),
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
-        "retry must reschedule MODEL_INVOCATION target to nextAttemptAt");
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId),
+        "retry must reschedule MODEL_INVOCATION activation to nextAttemptAt");
   }
 
-  /** scheduleRetry 在目标行消失时必须抛 IllegalStateException 并完整回滚 RETRY_WAIT 写入。 */
+  /** scheduleRetry 在激活行消失时必须抛 IllegalStateException 并完整回滚 RETRY_WAIT 写入。 */
   @Test
-  void scheduleRetryRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+  void scheduleRetryRollsBackWhenModelInvocationActivationIsMissing() throws Exception {
     Fixture fx = newQueued();
     Instant now = Instant.now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1223,14 +1212,14 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
             fx.invocationId, "tok-retry", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
 
-    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+    deleteActivation("MODEL_INVOCATION", fx.invocationId);
 
     Instant nextAttemptAt = now.plus(Duration.ofMinutes(2));
     IllegalStateException ex =
         assertThrows(
             IllegalStateException.class,
             () -> transactions.scheduleRetry(claimed.get(), nextAttemptAt, now, now));
-    assertTrue(ex.getMessage() != null && ex.getMessage().contains("watchdog target"));
+    assertTrue(ex.getMessage() != null && ex.getMessage().contains("watchdog activation"));
 
     ModelInvocationDO row = rowFor(fx.invocationId);
     assertEquals(
@@ -1238,43 +1227,42 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     assertNotNull(row.getWorkerToken(), "lease must be restored by rollback");
   }
 
-  /**
-   * recordActivity 与 recordSafeStreamSnapshot 都不能触碰 MODEL_INVOCATION target 行：available_at 必须保持原值。
-   */
+  /** recordActivity 与 recordSafeStreamSnapshot 都不能触碰 MODEL_INVOCATION 激活行：wake_at 必须保持原值。 */
   @Test
-  void recordActivityAndSafeStreamSnapshotDoNotTouchModelInvocationTarget() throws Exception {
+  void recordActivityAndSafeStreamSnapshotDoNotTouchModelInvocationActivation() throws Exception {
     Fixture fx = newQueued();
     Instant now = Instant.now();
     Optional<ClaimedModelInvocation> claimed =
         transactions.claim(
             fx.invocationId, "tok-act", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
-    Instant beforeTarget = targetAvailableAt("MODEL_INVOCATION", fx.invocationId);
+    Instant beforeActivation = activationWakeAt("MODEL_INVOCATION", fx.invocationId);
 
     ModelInvocationUpdateOutcome act =
         transactions.recordActivity(claimed.get(), now.plus(Duration.ofMinutes(2)), now);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, act);
     assertEquals(
-        beforeTarget,
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
-        "recordActivity must not move the MODEL_INVOCATION target row");
+        beforeActivation,
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId),
+        "recordActivity must not move the MODEL_INVOCATION activation row");
 
     ModelInvocationUpdateOutcome snap =
         transactions.recordSafeStreamSnapshot(
             claimed.get(), new SafeStreamSnapshot("hello", "", 1L), now.plusMillis(20), now);
     assertSame(ModelInvocationUpdateOutcome.APPLIED, snap);
     assertEquals(
-        beforeTarget,
-        targetAvailableAt("MODEL_INVOCATION", fx.invocationId),
-        "recordSafeStreamSnapshot must not move the MODEL_INVOCATION target row");
+        beforeActivation,
+        activationWakeAt("MODEL_INVOCATION", fx.invocationId),
+        "recordSafeStreamSnapshot must not move the MODEL_INVOCATION activation row");
   }
 
   /**
    * terminal success 必须同一事务内 deleteLocked(MODEL_INVOCATION) + markRunnable(Thread) +
-   * schedule(THREAD, threadId, null, now)：MODEL_INVOCATION 目标消失，THREAD 目标出现且最早为 now。
+   * schedule(THREAD, threadId, null, now)：MODEL_INVOCATION 激活消失，THREAD 激活出现且最早为 now。
    */
   @Test
-  void completeSuccessAtomicallyDeletesModelTargetAndSchedulesThreadTarget() throws Exception {
+  void completeSuccessAtomicallyDeletesModelActivationAndSchedulesThreadActivation()
+      throws Exception {
     Fixture fx = newQueued();
     Instant now = now();
     Optional<ClaimedModelInvocation> claimed =
@@ -1291,33 +1279,33 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
 
     assertEquals(
         0,
-        targetCount("MODEL_INVOCATION", fx.invocationId),
-        "terminal success must delete the MODEL_INVOCATION target row");
+        activationCount("MODEL_INVOCATION", fx.invocationId),
+        "terminal success must delete the MODEL_INVOCATION activation row");
     assertTrue(
-        targetCount("THREAD", fx.threadId) >= 1,
-        "terminal success must schedule the THREAD target row");
-    Instant threadAvailableAt = targetAvailableAt("THREAD", fx.threadId);
+        activationCount("THREAD", fx.threadId) >= 1,
+        "terminal success must schedule the THREAD activation row");
+    Instant threadWakeAt = activationWakeAt("THREAD", fx.threadId);
     assertTrue(
-        !threadAvailableAt.isAfter(finishedInstant),
-        "THREAD target.available_at must be no later than finishedInstant");
+        !threadWakeAt.isAfter(finishedInstant),
+        "THREAD activation.wake_at must be no later than finishedInstant");
     assertTrue(threadRow(fx.threadId).getRunnable(), "Thread must be marked runnable");
   }
 
   /**
-   * 终态在目标行已不存在时：owned target lock 返回 empty → IllegalStateException → 整个事务回滚，invocation 必须仍是
-   * RUNNING、Thread 不可 runnable、THREAD target 也没有被新建。
+   * 终态在激活行已不存在时：owned activation lock 返回 empty → IllegalStateException → 整个事务回滚，invocation 必须仍是
+   * RUNNING、Thread 不可 runnable、THREAD activation 也没有被新建。
    */
   @Test
-  void completeSuccessRollsBackWhenModelInvocationTargetIsMissing() throws Exception {
+  void completeSuccessRollsBackWhenModelInvocationActivationIsMissing() throws Exception {
     Fixture fx = newQueued();
     Instant now = now();
     Optional<ClaimedModelInvocation> claimed =
         transactions.claim(
             fx.invocationId, "tok-roll", ModelCallTimeoutPolicy.DEFAULT, LONG_LEASE, now);
     assertTrue(claimed.isPresent());
-    int threadTargetsBefore = targetCount("THREAD", fx.threadId);
+    int threadActivationsBefore = activationCount("THREAD", fx.threadId);
 
-    deleteTarget("MODEL_INVOCATION", fx.invocationId);
+    deleteActivation("MODEL_INVOCATION", fx.invocationId);
 
     IllegalStateException ex =
         assertThrows(
@@ -1326,20 +1314,20 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
                 transactions.completeSuccess(
                     claimed.get(), sampleResponse(), now.plusSeconds(1), now.plusSeconds(2)));
     assertTrue(
-        ex.getMessage() != null && ex.getMessage().contains("missing its watchdog target"),
-        "missing owned target must surface the invariant breach");
+        ex.getMessage() != null && ex.getMessage().contains("missing its watchdog activation"),
+        "missing owned activation must surface the invariant breach");
 
     ModelInvocationDO row = rowFor(fx.invocationId);
     assertEquals("RUNNING", row.getStatus(), "terminal success must be rolled back");
     assertEquals("tok-roll", row.getWorkerToken(), "worker lease must be restored by rollback");
     assertFalse(threadRow(fx.threadId).getRunnable(), "Thread must remain non-runnable");
     assertEquals(
-        threadTargetsBefore,
-        targetCount("THREAD", fx.threadId),
-        "THREAD target must not be created on rollback");
+        threadActivationsBefore,
+        activationCount("THREAD", fx.threadId),
+        "THREAD activation must not be created on rollback");
   }
 
-  // ---------- helpers ----------
+  // ---------- 辅助方法 ----------
 
   private Fixture newQueued(Instant createdAt) throws SQLException {
     return newQueued(createdAt, 1L);
@@ -1403,15 +1391,13 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
           ps.setObject(6, createdOffset);
           ps.executeUpdate();
         }
-        // Always seed a due MODEL_INVOCATION target so claim/renew/retry/terminal flows exercise
-        // the
-        // single-path target wiring. The fixture's "due" instant mirrors createdAt, which is
-        // already
-        // truncated to millis.
+        // 始终播种一条 due MODEL_INVOCATION 激活，使 claim/renew/retry/terminal 流程覆盖单路径
+        // 激活 wiring。fixture 的 "due" 时刻与 createdAt 对齐，createdAt 已截断到毫秒。
         try (PreparedStatement ps =
             conn.prepareStatement(
-                "insert into harness_execution_target (target_kind, target_id, available_at)"
-                    + " values ('MODEL_INVOCATION', ?, ?)")) {
+                "insert into harness_execution_activation"
+                    + " (target_kind, target_id, environment_name, activation_state, wake_at)"
+                    + " values ('MODEL_INVOCATION', ?, null, 'SCHEDULED', ?)")) {
           ps.setLong(1, invocationId);
           ps.setObject(2, createdOffset);
           ps.executeUpdate();
@@ -1608,13 +1594,13 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
         "done", "", List.of(), ProviderStopReason.COMPLETED, usage, cost, "req-1", null, "{}");
   }
 
-  // ---------- target inspection helpers ----------
+  // ---------- 激活检查辅助方法 ----------
 
-  private static int targetCount(String kind, long id) throws SQLException {
+  private static int activationCount(String kind, long id) throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "select count(*) from harness_execution_target"
+                "select count(*) from harness_execution_activation"
                     + " where target_kind = ? and target_id = ?")) {
       ps.setString(1, kind);
       ps.setLong(2, id);
@@ -1625,26 +1611,26 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     }
   }
 
-  private static Instant targetAvailableAt(String kind, long id) throws SQLException {
+  private static Instant activationWakeAt(String kind, long id) throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "select available_at from harness_execution_target"
+                "select wake_at from harness_execution_activation"
                     + " where target_kind = ? and target_id = ?")) {
       ps.setString(1, kind);
       ps.setLong(2, id);
       try (ResultSet rs = ps.executeQuery()) {
-        assertTrue(rs.next(), "target row must exist: " + kind + "/" + id);
+        assertTrue(rs.next(), "activation row must exist: " + kind + "/" + id);
         return rs.getTimestamp(1).toInstant();
       }
     }
   }
 
-  private static void deleteTarget(String kind, long id) throws SQLException {
+  private static void deleteActivation(String kind, long id) throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "delete from harness_execution_target"
+                "delete from harness_execution_activation"
                     + " where target_kind = ? and target_id = ?")) {
       ps.setString(1, kind);
       ps.setLong(2, id);
@@ -1652,14 +1638,14 @@ public class PostgresqlModelInvocationTransactionsIntegrationTest
     }
   }
 
-  private static void rescheduleTarget(String kind, long id, Instant availableAt)
+  private static void rescheduleActivation(String kind, long id, Instant wakeAt)
       throws SQLException {
     OffsetDateTime ts =
-        OffsetDateTime.ofInstant(availableAt.truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
+        OffsetDateTime.ofInstant(wakeAt.truncatedTo(ChronoUnit.MILLIS), ZoneOffset.UTC);
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
-                "update harness_execution_target set available_at = ?"
+                "update harness_execution_activation set wake_at = ?"
                     + " where target_kind = ? and target_id = ?")) {
       ps.setObject(1, ts);
       ps.setString(2, kind);

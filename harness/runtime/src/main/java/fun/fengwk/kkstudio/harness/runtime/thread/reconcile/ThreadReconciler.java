@@ -24,8 +24,8 @@ import java.util.concurrent.RejectedExecutionException;
  * Thread Reconciler：一次 activation 内收敛 durable facts 并返回 {@link StepResult}。
  *
  * <p>它不是常驻 Java 线程。用户 Input、Tool 终态、Interaction 与 Model 完成先在各自事务中提交 durable facts 和 {@code
- * harness_execution_target} 的 wake 条件；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor lease +
- * fencing token 保证；PostgreSQL dispatcher 的重复或丢失 wake 不会改变 durable facts。
+ * harness_execution_activation} 的 wake 条件；HTTP/SSE/Provider 回调本身都不是待执行工作队列。跨节点单飞由数据库 processor
+ * lease + fencing token 保证；PostgreSQL dispatcher 的重复或丢失 wake 不会改变 durable facts。
  *
  * <p>严格按以下优先级推进 owned Thread，之间用 bounded step loop 防止死循环：
  *
@@ -95,7 +95,7 @@ public final class ThreadReconciler {
   }
 
   /**
-   * Requests one process-local reconciliation activation for a durable Thread target.
+   * Requests one process-local reconciliation activation for a durable Thread activation.
    *
    * <p>Concurrent requests for the same Thread are coalesced to one active task plus one rerun
    * edge. Each pass obtains a fresh processor token and lets {@link #reconcile(long, String)}

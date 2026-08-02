@@ -89,13 +89,13 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
         3,
         epoch,
         "WAITING_INTERACTION");
-    insertTarget("MODEL_INVOCATION", modelQueued);
-    insertTarget("MODEL_INVOCATION", modelRetry);
-    insertTarget("MODEL_INVOCATION", modelRunning);
-    insertTarget("TOOL_INVOCATION", toolQueued);
-    insertTarget("TOOL_INVOCATION", toolRetry);
-    insertTarget("TOOL_INVOCATION", toolRunning);
-    insertTarget("TOOL_INVOCATION", toolWaitingPermission);
+    insertActivation("MODEL_INVOCATION", modelQueued);
+    insertActivation("MODEL_INVOCATION", modelRetry);
+    insertActivation("MODEL_INVOCATION", modelRunning);
+    insertActivation("TOOL_INVOCATION", toolQueued);
+    insertActivation("TOOL_INVOCATION", toolRetry);
+    insertActivation("TOOL_INVOCATION", toolRunning);
+    insertActivation("TOOL_INVOCATION", toolWaitingPermission);
     insertOpenToolPermissionInteraction(94_001L, toolWaitingPermission);
 
     ThreadCommandTransactions.StopResult result =
@@ -213,15 +213,21 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     }
   }
 
-  private static void insertTarget(String kind, long id) throws SQLException {
+  /**
+   * 插入一条 SCHEDULED 激活；这是 stop 矩阵里激活记录应保持的初始状态。{@code environment_name} 在非 TOOL_INVOCATION 上必须为
+   * NULL。
+   */
+  private static void insertActivation(String kind, long id) throws SQLException {
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "insert into harness_execution_target (target_kind, target_id, available_at)"
-                    + " values (?, ?, ?)")) {
+                "insert into harness_execution_activation"
+                    + " (target_kind, target_id, environment_name, activation_state, wake_at)"
+                    + " values (?, ?, ?, 'SCHEDULED', ?)")) {
       statement.setString(1, kind);
       statement.setLong(2, id);
-      statement.setTimestamp(3, Timestamp.from(BASE));
+      statement.setString(3, null);
+      statement.setTimestamp(4, Timestamp.from(BASE));
       assertEquals(1, statement.executeUpdate());
     }
   }
@@ -395,7 +401,7 @@ class PostgresqlThreadCommandStopIntegrationTest extends PostgresSpringTestSuppo
     try (Connection connection = newConnection();
         PreparedStatement statement =
             connection.prepareStatement(
-                "select count(*) from harness_execution_target where target_kind = ? and target_id = ?")) {
+                "select count(*) from harness_execution_activation where target_kind = ? and target_id = ?")) {
       statement.setString(1, kind);
       statement.setLong(2, id);
       try (ResultSet result = statement.executeQuery()) {

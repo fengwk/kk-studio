@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.interaction;
 
 import java.util.Objects;
 
-/** Completed atomic Interaction lifecycle transition with its target mutation already committed. */
+/** Completed atomic Interaction lifecycle transition with its activation mutation committed. */
 public record InteractionTransition(Interaction interaction) {
   public InteractionTransition {
     interaction = Objects.requireNonNull(interaction, "interaction");

@@ -10,7 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.EnvironmentToolActivationQueue;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivationStore;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -89,10 +90,10 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * PostgreSQL final-schema {@link ThreadReconcileTransactions} implementation.
+ * PostgreSQL 最终 schema 的 {@link ThreadReconcileTransactions} 实现。
  *
- * <p>每个 mutation 先锁 Thread，再读取/修改 Invocation；完整 epoch/token lease fence 在 SQL 中重验。ModelInvocation
- * 创建前按 turn 携带的名称引用解析 live definitions，并把结果冻结为 durable request。
+ * <p>每个变更先锁 Thread，再读取或修改 Invocation；完整 epoch/token lease fence 在 SQL 中重验。ModelInvocation 创建前按 turn
+ * 携带的名称引用解析当前定义，并把结果冻结为持久化 request。
  */
 @Service
 public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTransactions {
@@ -115,7 +116,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private final HarnessIdGenerator ids;
   private final ModelInvocationPlanner planner;
   private final Duration leaseDuration;
-  private final ExecutionTargetStore executionTargetStore;
+  private final ExecutionActivationStore executionActivationStore;
+  private final EnvironmentToolActivationQueue environmentToolActivationQueue;
   private final TransactionTemplate modelCreationTransaction;
 
   @Autowired
@@ -123,7 +125,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       ThreadReconcileMapper mapper,
       HarnessIdGenerator ids,
       HarnessRuntimeProperties properties,
-      ExecutionTargetStore executionTargetStore,
+      ExecutionActivationStore executionActivationStore,
+      EnvironmentToolActivationQueue environmentToolActivationQueue,
       TurnExecutionResolver executionResolver,
       PlatformTransactionManager transactionManager) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
@@ -132,8 +135,10 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         new ModelInvocationPlanner(Objects.requireNonNull(executionResolver, "executionResolver"));
     this.leaseDuration =
         Objects.requireNonNull(properties, "properties").getThreadReconcileLeaseDuration();
-    this.executionTargetStore =
-        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.executionActivationStore =
+        Objects.requireNonNull(executionActivationStore, "executionActivationStore");
+    this.environmentToolActivationQueue =
+        Objects.requireNonNull(environmentToolActivationQueue, "environmentToolActivationQueue");
     this.modelCreationTransaction =
         repeatableReadTransaction(Objects.requireNonNull(transactionManager, "transactionManager"));
     if (leaseDuration.isZero() || leaseDuration.isNegative()) {
@@ -151,7 +156,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (!claimable(thread, observedAt)) {
       return Optional.empty();
     }
-    if (executionTargetStore.lockDue(ExecutionTargetKind.THREAD, threadId, observedAt).isEmpty()) {
+    if (executionActivationStore
+        .lockDue(ExecutionTargetKind.THREAD, threadId, observedAt)
+        .isEmpty()) {
       return Optional.empty();
     }
     Instant leaseUntil = observedAt.plus(leaseDuration);
@@ -160,9 +167,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (epoch == null) {
       return Optional.empty();
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.THREAD, threadId, null, leaseUntil),
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(ExecutionTargetKind.THREAD, threadId, leaseUntil),
         "reschedule thread watchdog");
     return Optional.of(new ThreadOwnership(threadId, epoch, processorToken));
   }
@@ -177,9 +183,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       return false;
     }
     Instant leaseUntil = observedAt.plus(leaseDuration);
-    if (executionTargetStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
+    if (executionActivationStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
       throw new IllegalStateException(
-          "owned thread is missing its watchdog target: " + ownership.threadId());
+          "owned thread is missing its watchdog activation: " + ownership.threadId());
     }
     if (mapper.renew(
             ownership.threadId(),
@@ -190,9 +196,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != 1) {
       return false;
     }
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.THREAD, ownership.threadId(), null, leaseUntil),
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.THREAD, ownership.threadId(), leaseUntil),
         "reschedule thread watchdog");
     return true;
   }
@@ -362,8 +368,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       return SuspendOutcome.LOST_OWNERSHIP;
     }
     Optional<ContinuationRef> current = blocker(thread, ownership.executionEpoch());
-    // The expected blocker is not immediate work by itself. Only its replacement/disappearance,
-    // terminal siblings, or new mailbox work means this activation must continue.
+    // 预期 blocker 本身不是立即工作。只有 blocker 被替换或消失、出现终态兄弟，或 mailbox 有新工作时，
+    // 当前激活才需要继续推进。
     if (!expectedBlocker.equals(current.orElse(null))
         || hasWorkExceptExpected(thread, expectedBlocker)) {
       return SuspendOutcome.WORK_AVAILABLE;
@@ -412,10 +418,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   }
 
   /**
-   * Uses one repeatable-read snapshot for the resolver's Agent, Provider, and Model queries so the
-   * frozen request cannot combine catalog versions that were never committed together. PostgreSQL
-   * serialization failures are retried outside the rolled-back transaction; every retry rechecks
-   * ownership, path, and live definitions.
+   * 使用同一个 repeatable-read 快照读取 resolver 所需的 Agent、Provider 和 Model，避免冻结的 request
+   * 组合从未共同提交过的目录版本。PostgreSQL serialization failure 在回滚事务外重试；每次重试都会重新检查所有权、路径和当前定义。
    */
   @Override
   public ModelCreationOutcome createModelInvocationAndRelease(
@@ -462,7 +466,8 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != 1) {
       throw new IllegalStateException("cannot create model invocation");
     }
-    executionTargetStore.schedule(ExecutionTargetKind.MODEL_INVOCATION, id, null, persisted(now));
+    executionActivationStore.schedule(
+        ExecutionTargetKind.MODEL_INVOCATION, id, null, persisted(now));
     if (!release(ownership, false, now)) {
       throw new IllegalStateException("cannot release created model invocation");
     }
@@ -596,7 +601,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       ModelInvocationRequest request,
       Instant now) {
     Instant persistedNow = persisted(now);
-    LinkedHashSet<String> environmentRoutes = new LinkedHashSet<>();
+    LinkedHashSet<String> environmentNames = new LinkedHashSet<>();
     for (int ordinal = 0; ordinal < response.toolCalls().size(); ordinal++) {
       var call = response.toolCalls().get(ordinal);
       ToolBinding binding =
@@ -624,23 +629,23 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         throw new IllegalStateException("cannot materialize tool invocation");
       }
       if (binding.environmentName() != null) {
-        requireTargetAffected(
-            executionTargetStore.park(
+        requireActivationAffected(
+            executionActivationStore.park(
                 ExecutionTargetKind.TOOL_INVOCATION,
                 invocationId,
                 binding.environmentName(),
                 persistedNow),
             "park tool invocation");
-        environmentRoutes.add(binding.environmentName());
+        environmentNames.add(binding.environmentName());
       } else {
-        requireTargetAffected(
-            executionTargetStore.schedule(
+        requireActivationAffected(
+            executionActivationStore.schedule(
                 ExecutionTargetKind.TOOL_INVOCATION, invocationId, null, persistedNow),
             "schedule tool invocation");
       }
     }
-    for (String routeKey : environmentRoutes) {
-      executionTargetStore.activateOldestEnvironment(routeKey, persistedNow);
+    for (String environmentName : environmentNames) {
+      environmentToolActivationQueue.activateOldestTool(environmentName, persistedNow);
     }
   }
 
@@ -814,9 +819,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
 
   private boolean release(ThreadOwnership ownership, boolean runnable, Instant now) {
     Instant observedAt = persisted(now);
-    if (executionTargetStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
+    if (executionActivationStore.lock(ExecutionTargetKind.THREAD, ownership.threadId()).isEmpty()) {
       throw new IllegalStateException(
-          "owned thread is missing its watchdog target: " + ownership.threadId());
+          "owned thread is missing its watchdog activation: " + ownership.threadId());
     }
     if (mapper.release(
             ownership.threadId(),
@@ -828,14 +833,14 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       return false;
     }
     if (runnable) {
-      requireTargetAffected(
-          executionTargetStore.rescheduleLocked(
-              ExecutionTargetKind.THREAD, ownership.threadId(), null, observedAt),
-          "reactivate thread target");
+      requireActivationAffected(
+          executionActivationStore.rescheduleLocked(
+              ExecutionTargetKind.THREAD, ownership.threadId(), observedAt),
+          "reactivate thread activation");
     } else {
-      requireTargetAffected(
-          executionTargetStore.deleteLocked(ExecutionTargetKind.THREAD, ownership.threadId()),
-          "delete thread target");
+      requireActivationAffected(
+          executionActivationStore.deleteLocked(ExecutionTargetKind.THREAD, ownership.threadId()),
+          "delete thread activation");
     }
     return true;
   }
@@ -894,7 +899,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return OffsetDateTime.ofInstant(persisted(instant), ZoneOffset.UTC);
   }
 
-  private static void requireTargetAffected(int affected, String operation) {
+  private static void requireActivationAffected(int affected, String operation) {
     if (affected != 1) {
       throw new IllegalStateException(operation + " affected " + affected + " rows");
     }

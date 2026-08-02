@@ -33,9 +33,9 @@ import java.util.function.Supplier;
  * CAS only tears down the process-local handle. The worker never writes Entry/head/Usage directly.
  * {@code workerTokenSupplier} must return a fresh non-blank token for every claim.
  *
- * <p>调度完全由 {@code harness_execution_target} 统一表达：transaction adapter 在同一事务内原子写入 Invocation
- * 与目标行（claim reschedule / renew reschedule / scheduleRetry reschedule / terminal delete+schedule
- * Thread）。本 worker 因此没有 outbound activation dependency，也不本地调度 retry
+ * <p>调度完全由 {@code harness_execution_activation} 统一表达：transaction adapter 在同一事务内原子写入 Invocation 与
+ * ExecutionActivation（claim reschedule / renew reschedule / scheduleRetry reschedule / terminal
+ * delete+schedule Thread）。本 worker 因此没有 outbound activation dependency，也不本地调度 retry
  * wake；lease/deadline/idle/activity-flush watchdog 仍是 process-local best-effort。
  */
 @Slf4j
@@ -90,8 +90,8 @@ public final class ModelWorker {
    * Claims one durable ModelInvocation on the caller thread and starts Provider I/O on this
    * worker's scheduler.
    *
-   * <p>Execution-target dispatchers use this method so their durable claim is complete before the
-   * target scan proceeds, while no Provider I/O runs on the dispatcher thread.
+   * <p>ExecutionActivation dispatchers use this method so their durable claim is complete before
+   * the activation scan proceeds, while no Provider I/O runs on the dispatcher thread.
    *
    * @return {@code true} only when this process successfully claimed an Invocation and either
    *     queued its local execution or durably converged a pre-I/O failure; {@code false} when no

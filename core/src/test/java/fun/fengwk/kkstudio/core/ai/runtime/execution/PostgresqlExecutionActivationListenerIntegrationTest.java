@@ -35,16 +35,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
-/**
- * Integration tests for {@link PostgresqlExecutionTargetListener}: NOTIFY reaches the dispatcher,
- * and the listener holds a single long-lived connection across multiple wake events (no reconnect
- * churn).
- */
-class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTestSupport {
+/** 验证 PostgreSQL NOTIFY 到 dispatcher 的唤醒链路和 listener 连接复用。 */
+class PostgresqlExecutionActivationListenerIntegrationTest extends PostgresSpringTestSupport {
 
   private static final Instant BASE = Instant.parse("2026-07-24T00:00:00Z");
 
-  @Autowired private PostgresqlExecutionTargetStore store;
+  @Autowired private PostgresqlExecutionActivationStore store;
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager txm;
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
@@ -55,26 +51,26 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
 
     ScheduledExecutorService drain =
         Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              Thread t = new Thread(r, "listener-it-drain");
-              t.setDaemon(true);
-              return t;
+            runnable -> {
+              Thread thread = new Thread(runnable, "listener-it-drain");
+              thread.setDaemon(true);
+              return thread;
             });
     ScheduledExecutorService wake =
         Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              Thread t = new Thread(r, "listener-it-wake");
-              t.setDaemon(true);
-              return t;
+            runnable -> {
+              Thread thread = new Thread(runnable, "listener-it-wake");
+              thread.setDaemon(true);
+              return thread;
             });
 
     TransactionTemplate tx = new TransactionTemplate(txm);
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
-            row -> {
-              boolean deleted = claimAndDelete(tx, store, row);
+            ExecutionActivationEnvironmentEligibility.empty(),
+            activation -> {
+              boolean deleted = claimAndDelete(tx, store, activation);
               if (deleted) {
                 handlerInvoked.countDown();
               }
@@ -83,19 +79,14 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
             Clock.fixed(BASE, ZoneOffset.UTC),
             drain,
             wake);
-    // Short poll so the test runs quickly.
-    PostgresqlExecutionTargetListener listener =
-        new PostgresqlExecutionTargetListener(dataSource, dispatcher, 100L, 200L);
+    PostgresqlExecutionActivationListener listener =
+        new PostgresqlExecutionActivationListener(dataSource, dispatcher, 100L, 200L);
     try {
       dispatcher.start();
       listener.start();
-
-      // Pre-existing due row also exercises the startup wake.
       store.schedule(ExecutionTargetKind.THREAD, 1L, null, BASE.minus(Duration.ofMinutes(1)));
 
-      assertTrue(
-          handlerInvoked.await(5, TimeUnit.SECONDS),
-          "listener must wake the dispatcher on insert NOTIFY");
+      assertTrue(handlerInvoked.await(5, TimeUnit.SECONDS), "NOTIFY 必须唤醒 dispatcher");
     } finally {
       listener.stop();
       dispatcher.stop();
@@ -106,20 +97,19 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
 
   @Test
   void successiveNotificationsEachWakeDispatcher() throws Exception {
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        mock(PostgresqlExecutionTargetDispatcher.class);
-    PostgresqlExecutionTargetListener listener =
-        new PostgresqlExecutionTargetListener(dataSource, dispatcher, 100L, 200L);
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        mock(PostgresqlExecutionActivationDispatcher.class);
+    PostgresqlExecutionActivationListener listener =
+        new PostgresqlExecutionActivationListener(dataSource, dispatcher, 100L, 200L);
     try {
       listener.start();
       verify(dispatcher, timeout(5_000).times(1)).wake();
       clearInvocations(dispatcher);
 
-      // The first NOTIFY must not block the listener or consume the next one without a wake.
-      notifyExecutionTarget();
+      notifyExecutionActivation();
       verify(dispatcher, timeout(5_000).times(1)).wake();
 
-      notifyExecutionTarget();
+      notifyExecutionActivation();
       verify(dispatcher, timeout(5_000).times(2)).wake();
     } finally {
       listener.stop();
@@ -130,49 +120,42 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
   void listenerHoldsSingleConnectionAcrossMultipleWakeEvents() throws Exception {
     ScheduledExecutorService drain =
         Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              Thread t = new Thread(r, "listener-churn-drain");
-              t.setDaemon(true);
-              return t;
+            runnable -> {
+              Thread thread = new Thread(runnable, "listener-churn-drain");
+              thread.setDaemon(true);
+              return thread;
             });
     ScheduledExecutorService wake =
         Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              Thread t = new Thread(r, "listener-churn-wake");
-              t.setDaemon(true);
-              return t;
+            runnable -> {
+              Thread thread = new Thread(runnable, "listener-churn-wake");
+              thread.setDaemon(true);
+              return thread;
             });
 
-    CountingDataSource countingDs = new CountingDataSource(dataSource);
+    CountingDataSource countingDataSource = new CountingDataSource(dataSource);
     TransactionTemplate tx = new TransactionTemplate(txm);
 
-    PostgresqlExecutionTargetDispatcher dispatcher =
-        new PostgresqlExecutionTargetDispatcher(
+    PostgresqlExecutionActivationDispatcher dispatcher =
+        new PostgresqlExecutionActivationDispatcher(
             store,
-            ExecutionTargetRouteEligibility.empty(),
-            row -> claimAndDelete(tx, store, row),
+            ExecutionActivationEnvironmentEligibility.empty(),
+            activation -> claimAndDelete(tx, store, activation),
             Clock.fixed(BASE, ZoneOffset.UTC),
             drain,
             wake);
-    // We replace the dispatcher's dataSource view with our counting one
-    // for the listener's perspective only.
-    PostgresqlExecutionTargetListener listener =
-        new PostgresqlExecutionTargetListener(countingDs, dispatcher, 200L, 500L);
+    PostgresqlExecutionActivationListener listener =
+        new PostgresqlExecutionActivationListener(countingDataSource, dispatcher, 200L, 500L);
     try {
       dispatcher.start();
       listener.start();
-      // Generate several NOTIFY events spaced apart.
-      for (int i = 0; i < 5; i++) {
+      for (int index = 0; index < 5; index++) {
         store.schedule(
-            ExecutionTargetKind.THREAD, 1000L + i, null, BASE.minus(Duration.ofMinutes(1)));
+            ExecutionTargetKind.THREAD, 1000L + index, null, BASE.minus(Duration.ofMinutes(1)));
         Thread.sleep(150);
       }
-      // Allow the listener to drain a few notifications.
       Thread.sleep(800);
-      assertEquals(
-          1,
-          countingDs.count(),
-          "listener must hold a single connection for its lifetime; got " + countingDs.count());
+      assertEquals(1, countingDataSource.count(), "listener 生命周期内必须复用单连接");
     } finally {
       listener.stop();
       dispatcher.stop();
@@ -182,24 +165,27 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
   }
 
   private static boolean claimAndDelete(
-      TransactionTemplate tx, PostgresqlExecutionTargetStore store, ExecutionTargetRow row) {
+      TransactionTemplate tx,
+      PostgresqlExecutionActivationStore store,
+      ExecutionActivation activation) {
     return Boolean.TRUE.equals(
         tx.execute(
             status ->
                 store
-                    .lockDue(row.targetKind(), row.targetId(), row.availableAt())
+                    .lockDue(activation.targetKind(), activation.targetId(), activation.wakeAt())
                     .map(locked -> store.deleteLocked(locked.targetKind(), locked.targetId()) == 1)
                     .orElse(false)));
   }
 
-  private void notifyExecutionTarget() throws SQLException {
-    try (Connection conn = dataSource.getConnection();
-        Statement stmt = conn.createStatement()) {
-      stmt.execute("select pg_notify('" + PostgresqlExecutionTargetListener.CHANNEL + "', 'test')");
+  private void notifyExecutionActivation() throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute(
+          "select pg_notify('" + PostgresqlExecutionActivationListener.CHANNEL + "', 'test')");
     }
   }
 
-  /** Wraps a {@link DataSource} to count {@code getConnection()} invocations. */
+  /** 只统计 DataSource 建立连接的次数。 */
   private static final class CountingDataSource implements DataSource {
 
     private final DataSource delegate;
@@ -231,13 +217,13 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
     }
 
     @Override
-    public void setLogWriter(PrintWriter out) throws SQLException {}
+    public void setLogWriter(PrintWriter out) {}
 
     @Override
-    public void setLoginTimeout(int seconds) throws SQLException {}
+    public void setLoginTimeout(int seconds) {}
 
     @Override
-    public int getLoginTimeout() throws SQLException {
+    public int getLoginTimeout() {
       return 0;
     }
 
@@ -247,12 +233,12 @@ class PostgresqlExecutionTargetListenerIntegrationTest extends PostgresSpringTes
     }
 
     @Override
-    public <T> T unwrap(Class<T> iface) throws SQLException {
+    public <T> T unwrap(Class<T> iface) {
       return null;
     }
 
     @Override
-    public boolean isWrapperFor(Class<?> iface) throws SQLException {
+    public boolean isWrapperFor(Class<?> iface) {
       return false;
     }
   }

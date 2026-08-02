@@ -5,7 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivationStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantAbortedEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.AssistantErrorEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
@@ -56,17 +56,17 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
 
   private final ThreadCommandMapper mapper;
   private final HarnessIdGenerator idGenerator;
-  private final ExecutionTargetStore executionTargetStore;
+  private final ExecutionActivationStore executionActivationStore;
 
   @Autowired
   public PostgresqlThreadCommandTransactions(
       ThreadCommandMapper mapper,
       HarnessIdGenerator idGenerator,
-      ExecutionTargetStore executionTargetStore) {
+      ExecutionActivationStore executionActivationStore) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
-    this.executionTargetStore =
-        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.executionActivationStore =
+        Objects.requireNonNull(executionActivationStore, "executionActivationStore");
   }
 
   @Override
@@ -138,7 +138,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
       long headEntryId,
       Instant persistedNow) {
     long nextEpoch = Math.addExact(expectedExecutionEpoch, 1);
-    executionTargetStore.deleteIfExists(ExecutionTargetKind.THREAD, thread.getId());
+    executionActivationStore.deleteIfExists(ExecutionTargetKind.THREAD, thread.getId());
     requireAffected(
         mapper.rebindHead(
             thread.getId(), expectedExecutionEpoch, nextEpoch, headEntryId, offset(persistedNow)),
@@ -215,7 +215,7 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
             InputStatus.QUEUED,
             persistedNow,
             null);
-    ensureThreadTarget(thread, persistedNow);
+    ensureThreadActivation(thread, persistedNow);
     return new EnqueueResult(input);
   }
 
@@ -285,23 +285,23 @@ public class PostgresqlThreadCommandTransactions implements ThreadCommandTransac
     mapper.cancelSafeToolInvocations(threadId, timestamp);
     // A stopped Tool can no longer answer a permission prompt, so discard its OPEN product fact.
     mapper.deleteOpenToolPermissionInteractions(threadId);
-    mapper.deleteExecutionTargetsForStoppedThread(threadId);
+    mapper.deleteActivationsForStoppedThread(threadId);
     return new StopResult(nextEpoch, cancelled);
   }
 
-  private void ensureThreadTarget(ThreadCommandRow thread, Instant now) {
+  private void ensureThreadActivation(ThreadCommandRow thread, Instant now) {
     boolean activeProcessor =
         thread.getProcessorToken() != null
             && thread.getProcessorUntil() != null
             && thread.getProcessorUntil().toInstant().isAfter(now);
     if (activeProcessor) {
-      if (executionTargetStore.lock(ExecutionTargetKind.THREAD, thread.getId()).isEmpty()) {
+      if (executionActivationStore.lock(ExecutionTargetKind.THREAD, thread.getId()).isEmpty()) {
         throw new IllegalStateException(
-            "active thread processor is missing its watchdog target: " + thread.getId());
+            "active thread processor is missing its watchdog activation: " + thread.getId());
       }
       return;
     }
-    executionTargetStore.schedule(ExecutionTargetKind.THREAD, thread.getId(), null, now);
+    executionActivationStore.schedule(ExecutionTargetKind.THREAD, thread.getId(), null, now);
   }
 
   /** 把 {@code harness_entry} 路径还原成 {@link SessionEntry}（仅用于纯 response debt 检测，不被持久化）。 */
