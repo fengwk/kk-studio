@@ -1,73 +1,127 @@
 # Prompt 到 Artifact 数据流
 
-本文描述 Harness 从已持久化的对话上下文构造 Provider 请求，到 Tool Result/Artifact 回到 Session Entry 并在浏览器呈现的完整事实链。Studio 资源与 ComfyUI/S3 对象边界保持独立。
+本文描述 Harness 从消息和当前可见发送设置构造 Provider request，到 Tool Result/Artifact 回到 Entry 并在浏览器呈现的事实链。
 
-## 数据流
+## 1. 数据流
 
 ```mermaid
 flowchart LR
-    Input[ThreadInput USER_MESSAGE]
-    Entry[User Session Entry]
-    Plan[ModelInvocationPlanner]
-    Provider[Frozen ModelInvocationRequest]
-    MI[ModelInvocation]
+    Input[USER/CUSTOM Input<br/>TurnSettings]
+    Entry[Session Entry]
+    Planner[ModelInvocationPlanner]
+    Resolver[DatabaseTurnExecutionResolver]
+    Request[Frozen ModelInvocationRequest]
+    Model[ModelInvocation]
     Assistant[Assistant Entry + Usage]
-    Invocation[ToolInvocation]
+    Tool[ToolInvocation<br/>original binding]
     Result[Tool Result]
     Artifact[Artifact Store]
-    ToolEntry[Tool Result Session Entry]
-    UI[REST snapshot + realtime SSE]
+    UI[REST snapshot + SSE]
 
-    Input --> Entry --> Plan --> Provider --> MI --> Assistant --> Invocation --> Result
+    Input --> Entry
+    Entry --> Planner
+    Planner --> Resolver
+    Resolver --> Request
+    Request --> Model
+    Model --> Assistant
+    Assistant --> Tool
+    Tool --> Result
     Result --> Artifact
-    Result --> ToolEntry --> Plan
+    Result --> Entry
     Assistant --> UI
-    Invocation --> UI
-    ToolEntry --> UI
+    Tool --> UI
     Artifact --> UI
 ```
 
-## Prompt 构建
+## 2. Input 与 Entry
 
-1. 用户或自定义消息通过 `POST /api/ai/runtime/threads/{threadId}/messages` 写入 `ThreadInput`（202，幂等键）。`ThreadReconciler` 在
-   无 primary work 时将 snapshot 中全部 queued Input 按 TURN_INPUT_BATCH 原子 harvest，物化 Entry 并推进 head；snapshot
-   后到达者留给下一 turn。
-2. 有效运行配置来自路径上最近完整 `RUNTIME_CONFIG` Entry，不从 live Definition 补齐历史。`ModelInvocationPlanner` 从 root-to-head path 判定 response debt，投影语义消息、组装 Skill system section 与冻结 Tool definitions，再经 `PromptCacheRequestFinalizer` 得到 `ModelInvocationRequest` 的最终 `providerRequest`；bindings、skill snapshots 和 yolo 同时冻结。
-3. Agent tools 只保存统一 ToolCatalog 中的短名。`RuntimeCapabilityResolver` 依据 Thread 的可空 `environmentName` 解析本次 ToolBinding：空值使用本地 runtime，非空值绑定指定 RemoteTool；固定十个 Environment 工具的 descriptor 来自 `EnvironmentToolCatalog`。
-4. Provider 执行只回放冻结 request 中的 `providerRequest()`；`load_skill` 只从冻结 `skillSnapshots` 解析。发送前远程目标不可用时 ToolInvocation 为 `FAILED`，发送结果不确定时为 `UNKNOWN`。
+用户消息通过：
 
-Provider 流式 delta 写入 Redis realtime projection。Assistant 完成时，`ModelWorker` 先把 terminal 写入 `harness_model_invocation` 并标记 Thread runnable；`ThreadReconciler` 再原子提交 Assistant Entry、`harness_model_usage`、可选 ToolInvocations 与 head。
+```text
+POST /api/ai/runtime/threads/{threadId}/messages
+```
 
-## Tool 执行与上下文回流
+自定义 SYSTEM/USER 消息通过：
 
-Provider Tool Call 先作为 `QUEUED + PENDING` 写入 `harness_tool_invocation`。ToolWorker 在任何外部 Tool I/O 前运行 Binding/interceptor/Permission Boundary：ALLOW 持久化最终计划与 `ALLOWED`；ASK 原子写 `WAITING_INTERACTION + ASKED`、`tool-permission` Interaction 和 parked target；DENY 写 `FAILED + DENIED`。用户批准只恢复 `QUEUED + ALLOWED` 并通过原 target route FIFO gate 调度，不会重新评估或改变已经冻结的计划。
+```text
+POST /api/ai/runtime/threads/{threadId}/messages/custom
+```
 
-统一 `ToolWorker` 从数据库 claim Invocation：
+请求携带：
 
-- `environmentName == null` → 本地 `Tool`
-- `environmentName != null` → `RemoteTool` → transport → Daemon → 同一 Tool API
+```text
+content
+agentName
+environmentName
+yoloEnabled
+clientMessageId
+expectedExecutionEpoch
+```
 
-partial 写 Redis realtime；terminal 写 Invocation。当前 Tool batch 全部终态后，Reconciler 按 ordinal 物化 Tool Result Entry 并推进 head。下一轮 Provider 请求只读持久 Entry。
+服务端先做幂等键短路，再把 payload 写成 `USER_MESSAGE` 或 `CUSTOM_MESSAGE` Input。Reconciler 按 TURN_INPUT_BATCH harvest，Entry 追加与 Input 标记 `APPLIED` 在同一事务完成。
 
-## Artifact 边界
+Entry 只允许 `ROOT`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`。USER `MESSAGE` 与 `CUSTOM_MESSAGE` 保存 compact `TurnSettings`；Assistant、Tool result 与错误 Entry 保存各自的语义事实。
 
-- 大型 Tool 输出可外置为全局 Artifact；Session Entry 只保存 artifact 引用与可选 preview。
-- Environment daemon 的 artifact wire content 经 Gateway 校验后写入 Artifact Store。
-- Artifact Store 保存不可变 bytes、media type、encoding、size、SHA-256。
-- ComfyUI/S3 对象走固定 bucket 预签名，不复用 Tool Artifact Store。
-- Studio Canvas 是 Harness / AI 之外独立领域；Artifact 不进入 Canvas domain。
+## 3. Per-turn Prompt 构建
 
-`GET /api/ai/runtime/artifacts/{id}` 返回原始 bytes 与有效 media type；异常 media 降级为 `application/octet-stream`。响应带 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox`。
+1. `ModelInvocationPlanner` 从完整 root-to-head path 检测 response debt。
+2. 从 debt 前缀中找到最近的 USER/CUSTOM `TurnSettings`。
+3. `DatabaseTurnExecutionResolver` 读取最新 Agent、Provider、Model、Variant 和 READY Environment。
+4. Resolver 依据 Agent 的 tools/skills 与 ToolCatalog 生成本次 `ToolBinding`、`SkillBinding` 和 system prompt。
+5. Planner 投影语义消息、生成 Provider tool definitions，并通过 `PromptCacheRequestFinalizer` 生成最终 cache control。
+6. Planner 冻结 `ModelInvocationRequest`：
 
-## 前端投影
+```text
+providerRequest
+toolBindings
+skillBindings
+yoloEnabled
+```
 
-前端读取 Thread 路径 Entries 为基线，叠加 QUEUED inputs 与 Redis realtime 覆盖层。SSE `realtime` 事件没有 id；浏览器只用 durable Thread revision 恢复 snapshot，重连后从 Redis live edge 接收新 delta。
+缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 `PlanningFailure`。Reconciler 追加 `ASSISTANT_ERROR` barrier，不创建 ModelInvocation，也不静默使用其他资源。
 
-Tool Result 中的 artifact 引用投影为 `/api/ai/runtime/artifacts/{artifactId}`。浏览器不接收 Tool Artifact 的 JSON/Base64 副本，也不把 artifact 重新上传到 S3。
+## 4. Model 执行
 
-## 恢复约束
+`harness_model_invocation.request` 保存 exact request。ModelWorker 只回放其中的 `providerRequest`；retry 仍使用同一 invocation request，只改变 attempt 和调度时间。
 
-- 数据库记录是 Prompt、Thread、Tool、Artifact、Usage 的唯一恢复来源。
-- Entry 保存完整语义；Redis realtime 保存可丢失进度覆盖层。
-- daemon connection、worker 与 EventSource 可替换或重连，不能创建内存唯一状态或伪造 terminal Result。
-- 事务锁序：Thread → Invocation/Interaction → Entry/Input。
+Provider streaming delta 写入 Redis realtime。Provider terminal 先写 ModelInvocation terminal 并唤醒 Thread；Reconciler 再在 processor fencing 下原子写入 Assistant Entry、Usage、ToolInvocation materialization 与 head。
+
+## 5. Tool 执行与上下文回流
+
+Provider Tool Call 根据冻结 request 的 tool name 找到对应 ToolBinding，按 ordinal 写入 ToolInvocation：
+
+```text
+environmentName == null
+  -> local Tool
+
+environmentName != null
+  -> RemoteTool -> Gateway -> Daemon -> Tool
+```
+
+Tool worker 在外部 I/O 前完成 permission boundary。ALLOW 持久化 `ALLOWED` 与最终 descriptor/arguments；ASK 持久化 OPEN Interaction 并等待；DENY 写 `FAILED + DENIED`。用户批准只恢复同一 ToolInvocation 的执行，不重新读取 Agent 或 Environment。
+
+Tool partial 写 Redis realtime；terminal 写 ToolInvocation。当前 Assistant 的全部 Tool sibling terminal 后，Reconciler 按 ordinal 追加 Tool Result `MESSAGE` Entry，推进 head，下一次 planning 只读取持久 Entry。
+
+## 6. Artifact
+
+- 大型 Tool 输出写入不可变 `harness_artifact`，Entry 只保存 artifact ref 与可选 preview。
+- Daemon wire 的 bytes 经 Gateway 校验后写入 Artifact Store。
+- Artifact 保存 bytes、media type、encoding、size 与 SHA-256。
+- `GET /api/ai/runtime/artifacts/{id}` 返回原始 bytes 和有效 media type，并带 `nosniff` 与 sandbox 响应头。
+- ComfyUI/S3 使用独立对象存储边界，不复用 Tool Artifact 表。
+
+## 7. 前端投影与恢复
+
+前端先读取 Thread snapshot，再叠加：
+
+```text
+path Entries
+  + QUEUED USER/CUSTOM inputs
+  + Redis realtime text/thinking overlay
+```
+
+revision SSE 使用 durable cursor；Redis realtime 没有 SSE id。重连时重新读取 snapshot，从 Redis live edge 接收新 delta。
+
+Tool Result 的 artifact ref 通过 `/api/ai/runtime/artifacts/{artifactId}` 读取。浏览器不复制 Tool Artifact 的 JSON/Base64 内容，也不把 Tool Artifact 重新上传到 S3。
+
+恢复来源始终是 PostgreSQL 的 Entry、Input、Invocation、Interaction、Artifact 与 Usage；daemon connection、worker 和 EventSource 都可以重连或替换。
