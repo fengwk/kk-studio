@@ -140,6 +140,19 @@ describe('ai-resource-editor-open-plans', () => {
     expect(plan.modal).toMatchObject({ mode: 'edit', name: 'a1', expectedVersion: '1' })
   })
 
+  it('keeps an Agent edit plan identity when its Model is deleted or off-page', () => {
+    const agents = [agent('a1', 'deleted/Original-Model')]
+    const plan = editAgentEditorPlan(agents, [model('Unrelated', 'other-provider')], 'a1')
+
+    expect(plan).not.toBeNull()
+    if (!plan) return
+    expect(plan.agentDraft.model).toBe('deleted/Original-Model')
+    expect(plan.modal).toMatchObject({
+      mode: 'edit',
+      model: 'deleted/Original-Model',
+    })
+  })
+
   it('builds a provider edit plan', () => {
     const providers = [provider('p1', 'minimax')]
     const plan = editProviderEditorPlan(providers, 'minimax')

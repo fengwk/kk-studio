@@ -92,6 +92,45 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Default Variant')).toHaveValue('creative')
   })
 
+  it.each(['deleted-provider', 'off-page-provider'])(
+    'shows an edit model provider identity as unavailable for %s',
+    (providerName) => {
+      const draft: ModelDraft = {
+        ...emptyModelDraft({ name: providerName }),
+        providerName,
+        name: 'orphaned-model',
+      }
+      render(
+        <ModelForm
+          draft={draft}
+          mode="edit"
+          providers={[
+            {
+              name: 'loaded-provider',
+              description: null,
+              providerType: 'openai',
+              baseUrl: null,
+              configured: true,
+              modelCallTimeoutMillis: 1800000,
+              modelCallIdleTimeoutMillis: 120000,
+              version: '1',
+              createTime: null,
+              updateTime: null,
+            },
+          ]}
+          onChange={() => undefined}
+        />,
+      )
+
+      const providerSelect = screen.getByLabelText('Provider')
+      expect(providerSelect).toHaveValue(providerName)
+      expect(providerSelect).toBeDisabled()
+      expect(providerSelect).toHaveAttribute('aria-describedby', 'model-provider-identity-status')
+      expect(screen.getByRole('option', { name: `${providerName} (不可用)` })).toBeDisabled()
+      expect(screen.getByRole('status')).toHaveTextContent('不可用；保存其他字段时仍保留原始身份。')
+    },
+  )
+
   it('keeps default variant aligned and hides reasoning effort when reasoning is disabled', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)

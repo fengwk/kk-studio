@@ -15,6 +15,7 @@ export function FormSelect({
   required = false,
   placeholder,
   'aria-label': ariaLabel,
+  'aria-describedby': ariaDescribedBy,
 }: {
   value: string
   options: FormSelectOption[]
@@ -23,6 +24,7 @@ export function FormSelect({
   required?: boolean
   placeholder?: string
   'aria-label'?: string
+  'aria-describedby'?: string
 }) {
   const { t } = useI18n()
   const selected = options.some((option) => option.value === value)
@@ -38,6 +40,7 @@ export function FormSelect({
         required={required}
         disabled={disabled}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         onChange={(event) => onChange(event.target.value)}
       >
         {!selected && effectivePlaceholder ? (

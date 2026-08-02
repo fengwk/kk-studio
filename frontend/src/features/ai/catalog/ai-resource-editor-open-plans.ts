@@ -92,7 +92,13 @@ export function editAgentEditorPlan(
   }
   return {
     kind: 'agent',
-    modal: { kind: 'agent', mode: 'edit', name: agent.name, expectedVersion: agent.version },
+    modal: {
+      kind: 'agent',
+      mode: 'edit',
+      name: agent.name,
+      model: agent.model,
+      expectedVersion: agent.version,
+    },
     agentDraft: normalizeAgentDraftDefaultVariant(toAgentDraft(agent), models),
   }
 }

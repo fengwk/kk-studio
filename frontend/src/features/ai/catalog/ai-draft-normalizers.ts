@@ -18,7 +18,7 @@ export function normalizeModelDraftDefaultVariant(draft: ModelDraft): ModelDraft
   return defaultVariant === draft.defaultVariant ? draft : { ...draft, defaultVariant }
 }
 
-export function normalizeModelDraftProvider(
+export function normalizeCreateModelDraftProvider(
   draft: ModelDraft,
   providers: AgentProviderDTO[],
   preferredProviderName?: string | null,
@@ -38,6 +38,28 @@ export function normalizeModelDraftProvider(
     return draft
   }
   return { ...draft, providerName: fallbackProviderName }
+}
+
+/**
+ * Edit mode owns the persisted provider identity. The provider list is only a display source and
+ * may not contain the immutable identity when a provider is deleted or outside the current page.
+ */
+export function normalizeEditModelDraftProvider(
+  draft: ModelDraft,
+  immutableProviderName: string,
+): ModelDraft {
+  return draft.providerName === immutableProviderName
+    ? draft
+    : { ...draft, providerName: immutableProviderName }
+}
+
+/** Backwards-compatible create-mode entry point for callers that do not carry an edit modal. */
+export function normalizeModelDraftProvider(
+  draft: ModelDraft,
+  providers: AgentProviderDTO[],
+  preferredProviderName?: string | null,
+): ModelDraft {
+  return normalizeCreateModelDraftProvider(draft, providers, preferredProviderName)
 }
 
 export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelView[]): AgentDraft {
@@ -60,7 +82,7 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
   return currentVariant === draft.variant ? draft : { ...draft, variant: currentVariant }
 }
 
-export function normalizeAgentDraftSelection(
+export function normalizeCreateAgentDraftSelection(
   draft: AgentDraft,
   models: AgentModelView[],
   preferredModel?: string | null,
@@ -97,6 +119,34 @@ export function normalizeAgentDraftSelection(
     },
     models,
   )
+}
+
+/**
+ * Edit mode owns the persisted model reference. When that model is not loaded, leave variant
+ * untouched because there is no trustworthy model config from which to derive options.
+ */
+export function normalizeEditAgentDraftSelection(
+  draft: AgentDraft,
+  immutableModelRef: string,
+  models: AgentModelView[],
+): AgentDraft {
+  const identityDraft =
+    draft.model === immutableModelRef
+      ? draft
+      : { ...draft, model: immutableModelRef }
+  const selectedModel = models.find((model) => modelRef(model) === immutableModelRef)
+  return selectedModel
+    ? normalizeAgentDraftDefaultVariant(identityDraft, models)
+    : identityDraft
+}
+
+/** Backwards-compatible create-mode entry point for callers that do not carry an edit modal. */
+export function normalizeAgentDraftSelection(
+  draft: AgentDraft,
+  models: AgentModelView[],
+  preferredModel?: string | null,
+): AgentDraft {
+  return normalizeCreateAgentDraftSelection(draft, models, preferredModel)
 }
 
 export function applyAgentModelSelection(

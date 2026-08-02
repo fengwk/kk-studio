@@ -9,7 +9,13 @@ import {
 } from '@/features/ai/catalog/ai-resource-editor-open-plans'
 import type { ResourceEditorPlan } from '@/features/ai/catalog/ai-resource-editor-plan-types'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/catalog/ai-console-types'
-import { normalizeAgentDraftSelection, normalizeModelDraftDefaultVariant, normalizeModelDraftProvider } from '@/features/ai/catalog/ai-draft-normalizers'
+import {
+  normalizeCreateAgentDraftSelection,
+  normalizeCreateModelDraftProvider,
+  normalizeEditAgentDraftSelection,
+  normalizeEditModelDraftProvider,
+  normalizeModelDraftDefaultVariant,
+} from '@/features/ai/catalog/ai-draft-normalizers'
 import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
@@ -36,32 +42,24 @@ export function useAiConsoleResourceEditorState({
     }
 
     if (resourceModal.kind === 'model') {
-      // Edit mode keeps the persisted provider name so the user never silently rewires a Model
-      // between providers; create mode has no preference and falls back to providers[0].
-      const preferredProviderName =
-        resourceModal.mode === 'edit'
-          ? models.find(
-            (model) =>
-              model.providerName === resourceModal.providerName &&
-              model.name === resourceModal.name,
-          )?.providerName
-          : undefined
-      setModelDraft((currentDraft) =>
-        normalizeModelDraftDefaultVariant(
-          normalizeModelDraftProvider(currentDraft, providers, preferredProviderName),
-        ),
-      )
+      setModelDraft((currentDraft) => {
+        const normalizedProvider =
+          resourceModal.mode === 'edit'
+            ? normalizeEditModelDraftProvider(currentDraft, resourceModal.providerName)
+            : normalizeCreateModelDraftProvider(currentDraft, providers)
+        return normalizeModelDraftDefaultVariant(normalizedProvider)
+      })
       return
     }
 
     if (resourceModal.kind === 'agent') {
-      const preferredModel =
+      setAgentDraft((currentDraft) =>
         resourceModal.mode === 'edit'
-          ? agents.find((agent) => agent.name === resourceModal.name)?.model
-          : undefined
-      setAgentDraft((currentDraft) => normalizeAgentDraftSelection(currentDraft, models, preferredModel))
+          ? normalizeEditAgentDraftSelection(currentDraft, resourceModal.model, models)
+          : normalizeCreateAgentDraftSelection(currentDraft, models),
+      )
     }
-  }, [agents, models, providers, resourceModal])
+  }, [models, providers, resourceModal])
 
   function closeResourceModal() {
     setResourceModal(null)

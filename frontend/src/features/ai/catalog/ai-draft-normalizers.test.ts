@@ -3,10 +3,12 @@ import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import {
   applyAgentModelSelection,
+  normalizeCreateAgentDraftSelection,
+  normalizeCreateModelDraftProvider,
   normalizeAgentDraftDefaultVariant,
-  normalizeAgentDraftSelection,
+  normalizeEditAgentDraftSelection,
+  normalizeEditModelDraftProvider,
   normalizeModelDraftDefaultVariant,
-  normalizeModelDraftProvider,
   variantOptionsFromDraft,
   variantOptionsFromModel,
 } from '@/features/ai/catalog/ai-draft-normalizers'
@@ -185,30 +187,37 @@ describe('ai-draft-normalizers', () => {
     })
   })
 
-  /** Provider normalization preserves the existing draft's provider when it matches. */
+  /** Create-mode provider normalization preserves the existing draft's provider when it matches. */
   it('preserves a valid existing provider on the draft', () => {
     const draft = { ...emptyModelDraft(), providerName: 'minimax' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
-    const result = normalizeModelDraftProvider(draft, providers)
+    const result = normalizeCreateModelDraftProvider(draft, providers)
     expect(result).toBe(draft)
   })
 
-  /** When draft provider is missing, fall back to preferred name then to providers[0]. */
+  /** Create mode may fall back to the preferred name and then to providers[0]. */
   it('falls back to preferred provider name, then to first provider', () => {
     const draft = { ...emptyModelDraft(), providerName: '' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
 
-    const withPreferred = normalizeModelDraftProvider(draft, providers, 'anthropic')
+    const withPreferred = normalizeCreateModelDraftProvider(draft, providers, 'anthropic')
     expect(withPreferred.providerName).toBe('anthropic')
 
-    const withFallback = normalizeModelDraftProvider(draft, providers, 'missing-name')
+    const withFallback = normalizeCreateModelDraftProvider(draft, providers, 'missing-name')
     expect(withFallback.providerName).toBe('minimax')
 
-    const withNoProviders = normalizeModelDraftProvider(draft, [])
+    const withNoProviders = normalizeCreateModelDraftProvider(draft, [])
     expect(withNoProviders.providerName).toBe('')
   })
 
-  /** normalizeAgentDraftSelection picks preferred, then fallback model[0]. */
+  it('keeps an edit model provider identity even when it is not loaded', () => {
+    const draft = { ...emptyModelDraft(), providerName: 'first-loaded-provider' }
+    const result = normalizeEditModelDraftProvider(draft, 'deleted-provider')
+
+    expect(result.providerName).toBe('deleted-provider')
+  })
+
+  /** Create mode picks the preferred model, then fallback model[0]. */
   it('picks preferred model id then first available model', () => {
     const draft: AgentDraft = { ...emptyAgentDraft(), model: 'gone', variant: '' }
     const models = [
@@ -216,15 +225,73 @@ describe('ai-draft-normalizers', () => {
       model({ providerName: 'anthropic', name: 'Claude-Sonnet-4.5', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
     ]
 
-    const preferred = normalizeAgentDraftSelection(draft, models, 'anthropic/Claude-Sonnet-4.5')
+    const preferred = normalizeCreateAgentDraftSelection(draft, models, 'anthropic/Claude-Sonnet-4.5')
     expect(preferred.model).toBe('anthropic/Claude-Sonnet-4.5')
     expect(preferred.variant).toBe('')
 
-    const fallback = normalizeAgentDraftSelection(draft, models)
+    const fallback = normalizeCreateAgentDraftSelection(draft, models)
     expect(fallback.model).toBe('minimax/MiniMax-M2.7')
     expect(fallback.variant).toBe('')
 
-    const empty = normalizeAgentDraftSelection(draft, [])
+    const empty = normalizeCreateAgentDraftSelection(draft, [])
     expect(empty.model).toBe('gone')
+  })
+
+  it('keeps an edit Agent model identity and its variant when the model is off-page', () => {
+    const draft: AgentDraft = {
+      ...emptyAgentDraft(),
+      model: 'loaded/old-model',
+      variant: 'persisted-override',
+    }
+    const unrelatedModel = model({
+      providerName: 'unrelated',
+      name: 'different-model',
+      config: modelConfig({
+        variants: [{ id: 'unrelated-variant' }],
+        defaultVariant: 'unrelated-variant',
+      }),
+    })
+
+    const result = normalizeEditAgentDraftSelection(
+      draft,
+      'deleted/original-model',
+      [unrelatedModel],
+    )
+
+    expect(result.model).toBe('deleted/original-model')
+    expect(result.variant).toBe('persisted-override')
+  })
+
+  it('derives edit variants only from the persisted loaded model', () => {
+    const draft: AgentDraft = {
+      ...emptyAgentDraft(),
+      model: 'original/original-model',
+      variant: 'unrelated-variant',
+    }
+    const originalModel = model({
+      providerName: 'original',
+      name: 'original-model',
+      config: modelConfig({
+        variants: [{ id: 'original-variant' }],
+        defaultVariant: 'original-variant',
+      }),
+    })
+    const unrelatedModel = model({
+      providerName: 'unrelated',
+      name: 'different-model',
+      config: modelConfig({
+        variants: [{ id: 'unrelated-variant' }],
+        defaultVariant: 'unrelated-variant',
+      }),
+    })
+
+    const result = normalizeEditAgentDraftSelection(
+      draft,
+      'original/original-model',
+      [unrelatedModel, originalModel],
+    )
+
+    expect(result.model).toBe('original/original-model')
+    expect(result.variant).toBe('')
   })
 })

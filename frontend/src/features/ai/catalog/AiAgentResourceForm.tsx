@@ -42,8 +42,33 @@ export function AgentForm({
 }) {
   const { t } = useI18n()
   const selectedModel = models.find((model) => modelRef(model) === draft.model)
+  const modelUnavailable =
+    mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
   const variantOptions = variantOptionsFromModel(selectedModel)
   const selectedVariant = draft.variant.trim()
+  const modelOptions = modelUnavailable
+    ? [
+        {
+          value: draft.model,
+          label: `${draft.model} (${t('ai.catalog.form.unavailable')})`,
+          disabled: true,
+        },
+        ...models.map((model) => ({ value: modelRef(model), label: modelRef(model) })),
+      ]
+    : models.map((model) => ({ value: modelRef(model), label: modelRef(model) }))
+  const variantSelectOptions = [
+    { value: '', label: t('ai.catalog.form.useModelDefault') },
+    ...(modelUnavailable && selectedVariant
+      ? [
+          {
+            value: selectedVariant,
+            label: `${selectedVariant} (${t('ai.catalog.form.unavailable')})`,
+            disabled: true,
+          },
+        ]
+      : []),
+    ...variantOptions.map((variantName) => ({ value: variantName, label: variantName })),
+  ]
   const toolCandidates = withSelectedOrphans(
     buildToolCandidates(toolCatalog),
     draft.tools,
@@ -78,15 +103,18 @@ export function AgentForm({
         <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <FormSelect
           aria-label={t('ai.catalog.form.defaultModel')}
+          aria-describedby={modelUnavailable ? 'agent-model-identity-status' : undefined}
           value={draft.model}
           required
           disabled={mode === 'edit'}
-          options={models.map((model) => ({
-            value: modelRef(model),
-            label: modelRef(model),
-          }))}
+          options={modelOptions}
           onChange={(model) => onChange(applyAgentModelSelection(draft, model, models))}
         />
+        {modelUnavailable ? (
+          <span id="agent-model-identity-status" className="inline-hint" role="status">
+            {t('ai.catalog.form.unavailableIdentityHint')}
+          </span>
+        ) : null}
         {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
       </label>
       <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
@@ -94,14 +122,17 @@ export function AgentForm({
         <FormSelect
           aria-label={t('ai.catalog.form.defaultVariantOverride')}
           value={selectedVariant}
-          disabled={models.length === 0}
+          disabled={selectedModel === undefined}
           placeholder={t('ai.catalog.form.useModelDefault')}
-          options={[
-            { value: '', label: t('ai.catalog.form.useModelDefault') },
-            ...variantOptions.map((variantName) => ({ value: variantName, label: variantName })),
-          ]}
+          aria-describedby={modelUnavailable ? 'agent-model-variant-status' : undefined}
+          options={variantSelectOptions}
           onChange={(variant) => onChange({ ...draft, variant })}
         />
+        {modelUnavailable ? (
+          <span id="agent-model-variant-status" className="inline-hint" role="status">
+            {t('ai.catalog.form.unavailableModelVariants')}
+          </span>
+        ) : null}
         {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
       </label>
       <label className="form-group">

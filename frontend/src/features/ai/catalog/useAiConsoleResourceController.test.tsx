@@ -97,7 +97,7 @@ describe('useAiConsoleResourceController', () => {
     expect(screen.getByTestId('agent-model')).toHaveValue('stub/acceptance-stub')
   })
 
-  it('keeps unsaved agent fields while synchronizing a stale model binding', async () => {
+  it('keeps unsaved Agent fields and the persisted model binding across query refreshes', async () => {
     const user = userEvent.setup()
     const { queryClient } = renderHarness()
 
@@ -118,7 +118,7 @@ describe('useAiConsoleResourceController', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-model')).toHaveValue('stub-v2/acceptance-stub-v2')
+      expect(screen.getByTestId('agent-model')).toHaveValue('stub/acceptance-stub')
     })
     expect(screen.getByTestId('agent-description')).toHaveValue('edited description')
   })
