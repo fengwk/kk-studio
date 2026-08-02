@@ -78,10 +78,10 @@ thread_snapshot.unknown_thread_404
 frontend.proxy_model_contract
 harness.retry_policy_round_trip
 harness.realtime_stream_policy_round_trip
-crud.provider.invalid_blank_name
+crud.provider.invalid_name
 crud.provider.invalid_missing_type
 crud.model.invalid_update_config
-crud.agent.invalid_blank_name
+crud.agent.invalid_name
 crud.agent.invalid_variant
 crud.provider.lifecycle
 crud.model.lifecycle
@@ -126,7 +126,7 @@ L1 的关键语义断言：
 - 每条 USER/CUSTOM message 携带精确 TurnSettings；
 - 缺失能力产生 `ASSISTANT_ERROR`，不产生 ModelInvocation；
 - `PUT /head` 只使用非空 Entry 和当前 epoch；
-- stale version/epoch、未知 resource 与 invalid DTO 分别验证 `409`、`404`、`400`；
+- stale version/epoch、未知请求目标与 invalid DTO/请求体引用分别验证 `409`、`404`、`400`；
 - retry/realtime policy 通过 GET → PUT → GET 往返验证；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 
@@ -170,7 +170,7 @@ GET /api/ai/catalog/tools
 - Model response 使用 `providerName`、`name`、结构化 `config`；
 - Model ref 为 `providerName/modelName`，只切第一个 `/`；
 - Catalog PUT/DELETE 的 `expectedVersion` 使用十进制字符串；
-- 空白名称、缺字段、非法 variant、非法 config 和未知字段返回 `400`；
+- 空白名称、Provider/Agent 名称含 `/`、缺字段、非法 variant、非法 config 和未知字段返回 `400`；
 - 未知名称返回 `404`，版本冲突返回 `409`。
 
 ### Chat 与 Thread

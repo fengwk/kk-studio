@@ -73,9 +73,9 @@ describe('CreateChatModal', () => {
 
     await user.type(screen.getByPlaceholderText('Chat 名称（可重名）'), 'My Chat')
     expect(onTitleChange).toHaveBeenCalled()
-    await user.selectOptions(screen.getByLabelText('Default Agent'), 'assistant')
+    await user.selectOptions(screen.getByLabelText('Agent'), 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    await user.selectOptions(screen.getByLabelText('Default Environment'), 'local')
+    await user.selectOptions(screen.getByLabelText('Environment'), 'local')
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
   })

@@ -545,12 +545,12 @@ async function main(argv) {
 
   await run('ui.chat.blank_workspace_shell', '进入 Chat 空白工作区并校验 blank pane shell', async (caseArt) => {
     const title = `e2e-ui-blank-${stamp}`
-    // 创建带默认 agent 的 chat，便于 blank 首发
+    // 创建带 Agent 的 Chat，便于 blank 首发
     await goto('/chats')
     await page.getByText('新建 Chat', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
     // 选 default-assistant
-    const agentSelect = page.getByLabel('Default Agent')
+    const agentSelect = page.getByLabel('Agent')
     await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
       // FormSelect 可能是 native select
       await agentSelect.selectOption({ index: 1 })
@@ -579,7 +579,7 @@ async function main(argv) {
       await goto('/chats')
       await page.getByText('新建 Chat', { exact: true }).click()
       await page.getByRole('textbox', { name: 'Name', exact: true }).fill(title)
-      const agentSelect = page.getByLabel('Default Agent')
+      const agentSelect = page.getByLabel('Agent')
       await agentSelect.selectOption({ label: 'default-assistant' }).catch(async () => {
         await agentSelect.selectOption({ index: 1 })
       })

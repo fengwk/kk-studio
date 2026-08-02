@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/features/ai/chat/chat-pane-state'
 import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -47,6 +48,21 @@ vi.mock('@/shared/api/harness-service', () => ({
 }))
 
 const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
+
+const assistantAgent = {
+  name: 'assistant',
+  description: null,
+  systemPrompt: null,
+  model: 'minimax/MiniMax',
+  variant: 'default',
+  config: {
+    tools: [],
+    skills: [],
+  },
+  version: '0',
+  createTime: null,
+  updateTime: null,
+}
 
 class FakeEventSource {
   close = vi.fn()
@@ -102,24 +118,7 @@ describe('ChatWorkspacePage', () => {
     vi.clearAllMocks()
     localStorage.clear()
     setLocale('zh-CN')
-    vi.mocked(agentService.listAgents).mockResolvedValue(
-      page([
-        {
-          name: 'assistant',
-          description: null,
-          systemPrompt: null,
-          model: 'minimax/MiniMax',
-          variant: 'default',
-          config: {
-            tools: [],
-            skills: [],
-          },
-          version: '0',
-          createTime: null,
-          updateTime: null,
-        },
-      ]),
-    )
+    vi.mocked(agentService.listAgents).mockResolvedValue(page([assistantAgent]))
     vi.mocked(agentService.listModels).mockResolvedValue(page([]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -148,7 +147,7 @@ describe('ChatWorkspacePage', () => {
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
   })
 
-  it('renders blank pane with chat default agent and switches layouts while retaining targets', async () => {
+  it('renders a blank pane with the Chat Agent and retains pane targets across layouts', async () => {
     const user = userEvent.setup()
     const seeded = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
     seeded.panes[0].threadId = 't1'
@@ -164,9 +163,6 @@ describe('ChatWorkspacePage', () => {
         revision: '0',
         status: 'IDLE',
         inputSequence: 0,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -189,13 +185,14 @@ describe('ChatWorkspacePage', () => {
     expect(document.querySelector('.chat-pane-grid.layout-single')).toBeTruthy()
   })
 
-  it('opens agent selector when blank pane has missing default agent', async () => {
+  it('opens the Agent selector when the blank pane references a missing Agent', async () => {
     const user = userEvent.setup()
     vi.mocked(chatService.getChat).mockResolvedValue({
       id: 'chat-1',
       title: 'Workspace',
       agentName: 'missing',
       environmentName: null,
+      yoloEnabled: false,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -208,7 +205,7 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
   })
 
-  it('updates the Chat default Environment with the exact nullable request shape', async () => {
+  it('updates the visible Chat Environment with the exact nullable request shape', async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
@@ -236,7 +233,7 @@ describe('ChatWorkspacePage', () => {
     )
   })
 
-  it('reselects a stale default Agent before creating the first Chat Thread', async () => {
+  it('reselects a stale Chat Agent before creating the first Chat Thread', async () => {
     const user = userEvent.setup()
     const events: string[] = []
     vi.mocked(chatService.getChat).mockResolvedValue({
@@ -244,6 +241,7 @@ describe('ChatWorkspacePage', () => {
       title: 'Workspace',
       agentName: 'missing',
       environmentName: null,
+      yoloEnabled: false,
       version: '1',
       createTime: null,
       updateTime: null,
@@ -266,14 +264,11 @@ describe('ChatWorkspacePage', () => {
         threadId: 't-stale-agent',
         sessionId: 's-stale-agent',
         sessionTitle: null,
-        headEntryId: 'e-config',
+        headEntryId: 'e-root',
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
         inputSequence: 0,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -298,14 +293,11 @@ describe('ChatWorkspacePage', () => {
         threadId: 't-stale-agent',
         sessionId: 's-stale-agent',
         sessionTitle: null,
-        headEntryId: 'e-config',
+        headEntryId: 'e-root',
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
         inputSequence: 1,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -326,6 +318,97 @@ describe('ChatWorkspacePage', () => {
       agentName: 'assistant',
       expectedVersion: '1',
     })
+    expect(harnessService.submitThreadMessage).toHaveBeenCalledWith(
+      't-stale-agent',
+      expect.objectContaining({ agentName: 'assistant' }),
+    )
+  })
+
+  it('blocks pane sends until an Agent update is confirmed and then sends the confirmed setting', async () => {
+    const user = userEvent.setup()
+    const state = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
+    state.panes[0].threadId = 't1'
+    state.panes[1].threadId = 't2'
+    saveChatPaneState('chat-1', state)
+    vi.mocked(agentService.listAgents).mockResolvedValue(
+      page([
+        assistantAgent,
+        {
+          name: 'coder',
+          description: null,
+          systemPrompt: null,
+          model: 'minimax/MiniMax',
+          variant: 'default',
+          config: { tools: [], skills: [] },
+          version: '0',
+          createTime: null,
+          updateTime: null,
+        },
+      ]),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
+      snapshot({
+        threadId,
+        sessionId: `session-${threadId}`,
+        sessionTitle: null,
+        headEntryId: `head-${threadId}`,
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
+        inputSequence: 0,
+        processing: false,
+        createTime: null,
+        updateTime: null,
+      }),
+    )
+    vi.mocked(harnessService.submitThreadMessage).mockResolvedValue({
+      inputId: 'input-1',
+      threadId: 't2',
+      sequence: 1,
+      inputType: 'USER_MESSAGE',
+      payloadJson: '{}',
+      clientMessageId: 'client-1',
+      status: 'QUEUED',
+      resolvedAt: null,
+      createTime: null,
+    })
+    let currentChat = await vi.mocked(chatService.getChat)('chat-1')
+    vi.mocked(chatService.getChat).mockImplementation(async () => currentChat)
+    let resolveUpdate!: (chat: ChatDTO) => void
+    const updatePromise = new Promise<ChatDTO>((resolve) => {
+      resolveUpdate = resolve
+    })
+    vi.mocked(chatService.updateChat).mockReturnValue(updatePromise)
+
+    renderWorkspace()
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.type(composers[0], '/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: 'coder' }))
+
+    await waitFor(() => {
+      expect(composers[0]).toBeDisabled()
+      expect(composers[1]).toBeDisabled()
+    })
+    expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
+
+    const updatedChat = { ...currentChat, agentName: 'coder', version: '2' }
+    currentChat = updatedChat
+    await act(async () => {
+      resolveUpdate(updatedChat)
+      await updatePromise
+    })
+    await waitFor(() => expect(composers[1]).not.toBeDisabled())
+    await user.type(composers[1], 'confirmed agent{Enter}')
+
+    await waitFor(() =>
+      expect(harnessService.submitThreadMessage).toHaveBeenCalledWith(
+        't2',
+        expect.objectContaining({
+          content: 'confirmed agent',
+          agentName: 'coder',
+        }),
+      ),
+    )
   })
 
   it('detaches a stale persisted thread when its snapshot is not found', async () => {
@@ -360,7 +443,7 @@ describe('ChatWorkspacePage', () => {
     expect(loadChatPaneState('chat-1').panes[0].threadId).toBe('temporarily-unavailable')
   })
 
-  it('performs atomic createThread/message order for blank pane with default agent', async () => {
+  it('performs atomic createThread/message order for a blank pane', async () => {
     const user = userEvent.setup()
     const order: string[] = []
     vi.mocked(chatService.createChatThread).mockImplementation(async () => {
@@ -369,14 +452,11 @@ describe('ChatWorkspacePage', () => {
         threadId: 't-new',
         sessionId: 's-new',
         sessionTitle: null,
-        headEntryId: 'e-config',
+        headEntryId: 'e-root',
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
         inputSequence: 0,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -401,14 +481,11 @@ describe('ChatWorkspacePage', () => {
         threadId: 't-new',
         sessionId: 's-new',
         sessionTitle: null,
-        headEntryId: 'e-config',
+        headEntryId: 'e-root',
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
         inputSequence: 2,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -445,14 +522,11 @@ describe('ChatWorkspacePage', () => {
       threadId: 't-replay',
       sessionId: 's-replay',
       sessionTitle: null,
-      headEntryId: 'e-config',
+      headEntryId: 'e-root',
       executionEpoch: 1,
       revision: '0',
       status: 'IDLE' as const,
       inputSequence: 0,
-      model: 'm1',
-      variant: 'default',
-      yoloEnabled: false,
       processing: false,
       createTime: null,
       updateTime: null,
@@ -497,27 +571,23 @@ describe('ChatWorkspacePage', () => {
     expect(chatService.createChatThread).toHaveBeenCalledOnce()
   })
 
-  it('migrates deduplicated persisted Thread bindings once despite layout-only changes', async () => {
+  it('does not infer Chat associations from persisted pane state', async () => {
     const user = userEvent.setup()
     const state = loadChatPaneState('chat-1')
-    state.panes[0].threadId = 'legacy-1'
-    state.panes[1].threadId = 'legacy-1'
-    state.panes[2].threadId = 'legacy-2'
+    state.panes[0].threadId = 'stored-1'
+    state.panes[1].threadId = 'stored-1'
+    state.panes[2].threadId = 'stored-2'
     saveChatPaneState('chat-1', state)
-    vi.mocked(chatService.associateThread).mockResolvedValue(undefined)
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot({
-        threadId: 'legacy-1',
-        sessionId: 's-legacy',
-        sessionTitle: 'Legacy',
-        headEntryId: 'h-legacy',
+        threadId: 'stored-1',
+        sessionId: 's-stored',
+        sessionTitle: 'Stored',
+        headEntryId: 'h-stored',
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
         inputSequence: 0,
-        model: 'm1',
-        variant: 'default',
-        yoloEnabled: false,
         processing: false,
         createTime: null,
         updateTime: null,
@@ -525,15 +595,12 @@ describe('ChatWorkspacePage', () => {
     )
 
     renderWorkspace()
-    await waitFor(() => expect(chatService.associateThread).toHaveBeenCalledTimes(2))
-    expect(chatService.associateThread.mock.calls).toEqual([
-      ['chat-1', 'legacy-1'],
-      ['chat-1', 'legacy-2'],
-    ])
+    expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(chatService.associateThread).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: '6' }))
     await user.click(screen.getByRole('button', { name: '1' }))
     await user.click(screen.getByRole('button', { name: '8' }))
-    expect(chatService.associateThread).toHaveBeenCalledTimes(2)
+    expect(chatService.associateThread).not.toHaveBeenCalled()
   })
 })

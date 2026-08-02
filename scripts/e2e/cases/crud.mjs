@@ -7,24 +7,29 @@ import {
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
-  id: 'crud.provider.invalid_blank_name',
+  id: 'crud.provider.invalid_name',
   level: 'L1',
-  title: 'Provider 空白 name 拒绝',
-  docs: 'POST /api/ai/catalog/providers name 空白 => 400',
+  title: 'Provider 非法 name 拒绝',
+  docs: 'POST /api/ai/catalog/providers name 空白或包含 / => 400',
   async run(ctx) {
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/ai/catalog/providers', {
-          name: '',
-          description: 'x',
-          providerType: 'openai',
-          baseUrl: 'https://example.com/v1',
-          credential: 'sk',
-          modelCallTimeoutMillis: 1000,
-          modelCallIdleTimeoutMillis: 1000,
-        }),
-      { status: 400, messageIncludes: /name must not be blank/i },
-    )
+    for (const [name, messageIncludes] of [
+      ['', /name must not be blank/i],
+      ['provider/name', /name must not contain/i],
+    ]) {
+      await expectHttpError(
+        () =>
+          ctx.call('POST', '/api/ai/catalog/providers', {
+            name,
+            description: 'x',
+            providerType: 'openai',
+            baseUrl: 'https://example.com/v1',
+            credential: 'sk',
+            modelCallTimeoutMillis: 1000,
+            modelCallIdleTimeoutMillis: 1000,
+          }),
+        { status: 400, messageIncludes },
+      )
+    }
   },
 })
 
@@ -91,24 +96,29 @@ registerCase({
 })
 
 registerCase({
-  id: 'crud.agent.invalid_blank_name',
+  id: 'crud.agent.invalid_name',
   level: 'L1',
-  title: 'Agent 空白 name 拒绝',
-  docs: 'POST /api/ai/catalog/agents name 空白 => 400',
+  title: 'Agent 非法 name 拒绝',
+  docs: 'POST /api/ai/catalog/agents name 空白或包含 / => 400',
   async run(ctx) {
     const model = await firstModel(ctx)
-    await expectHttpError(
-      () =>
-        ctx.call('POST', '/api/ai/catalog/agents', {
-          name: '  ',
-          description: 'd',
-          systemPrompt: 's',
-          model: modelRef(model),
-          variant: model.config.defaultVariant,
-          config: { tools: [], skills: [] },
-        }),
-      { status: 400, messageIncludes: /name|blank/i },
-    )
+    for (const [name, messageIncludes] of [
+      ['  ', /name|blank/i],
+      ['agent/name', /name must not contain/i],
+    ]) {
+      await expectHttpError(
+        () =>
+          ctx.call('POST', '/api/ai/catalog/agents', {
+            name,
+            description: 'd',
+            systemPrompt: 's',
+            model: modelRef(model),
+            variant: model.config.defaultVariant,
+            config: { tools: [], skills: [] },
+          }),
+        { status: 400, messageIncludes },
+      )
+    }
   },
 })
 
@@ -278,7 +288,7 @@ registerCase({
   id: 'crud.chat.invalid_agent_name',
   level: 'L1',
   title: 'Chat 不存在 Agent name 拒绝',
-  docs: 'POST /api/ai/chat agentName 必须引用现有 Agent',
+  docs: 'POST /api/ai/chat 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
   async run(ctx) {
     await expectHttpError(
       () =>
@@ -287,7 +297,7 @@ registerCase({
           agentName: `missing-${cid().slice(0, 8)}`,
           yoloEnabled: false,
         }),
-      { status: 404, messageIncludes: /agent|not found/i },
+      { status: 400, messageIncludes: /agent|unknown/i },
     )
   },
 })

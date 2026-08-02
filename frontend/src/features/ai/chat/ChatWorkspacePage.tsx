@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
@@ -35,7 +35,6 @@ export function ChatWorkspacePage() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
-  const migratedChatId = useRef<string | null>(null)
 
   useEffect(() => {
     setPaneState(loadChatPaneState(chatId))
@@ -63,27 +62,6 @@ export function ChatWorkspacePage() {
   })
   const agents = agentsQuery.data?.results ?? []
   const environments = environmentsQuery.data ?? []
-
-  useEffect(() => {
-    if (!chatQuery.data?.id || !chatId || migratedChatId.current === chatId) {
-      return
-    }
-    migratedChatId.current = chatId
-    const persistedState = loadChatPaneState(chatId)
-    const threadIds = [...new Set(persistedState.panes
-      .map((pane) => pane.threadId)
-      .filter((threadId): threadId is string => Boolean(threadId)))]
-    if (threadIds.length === 0) {
-      return
-    }
-    // Old local bindings are historical UI state. Associate each one idempotently, but never
-    // clear a pane when a stale or temporarily unavailable Thread cannot be associated.
-    void Promise.allSettled(
-      threadIds.map((threadId) => chatService.associateThread(chatId, threadId)),
-    ).then(() => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.list })
-    })
-  }, [chatId, chatQuery.data?.id, queryClient])
 
   const updateChatMutation = useMutation({
     mutationFn: ({
@@ -183,6 +161,7 @@ export function ChatWorkspacePage() {
             agents={agents}
             environments={environments}
             pane={pane}
+            settingsPending={updateChatMutation.isPending}
             focused={paneState.focusedPaneId === pane.id}
             sessionSort={paneState.sessionSort}
             threadSort={paneState.threadSort}

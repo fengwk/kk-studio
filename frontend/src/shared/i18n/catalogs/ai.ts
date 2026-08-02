@@ -690,8 +690,8 @@ export const aiCatalog = {
     'zh-CN': '新建 Chat',
   },
   'ai.chat.createDescription': {
-    'en-US': 'Create a persistent Chat workspace (a default Agent is required)',
-    'zh-CN': '创建持久 Chat 工作区（必须选择默认 Agent）',
+    'en-US': 'Create a persistent Chat workspace (an Agent is required)',
+    'zh-CN': '创建持久 Chat 工作区（必须选择 Agent）',
   },
   'ai.chat.untitled': {
     'en-US': 'Untitled Chat',
@@ -701,13 +701,13 @@ export const aiCatalog = {
     'en-US': 'Chat',
     'zh-CN': 'Chat',
   },
-  'ai.chat.defaultAgent': {
-    'en-US': 'Default Agent',
-    'zh-CN': 'Default Agent',
+  'ai.chat.agent': {
+    'en-US': 'Agent',
+    'zh-CN': 'Agent',
   },
-  'ai.chat.defaultEnvironment': {
-    'en-US': 'Default Environment',
-    'zh-CN': 'Default Environment',
+  'ai.chat.environment': {
+    'en-US': 'Environment',
+    'zh-CN': 'Environment',
   },
   'ai.chat.updated': {
     'en-US': 'Updated',
@@ -758,8 +758,8 @@ export const aiCatalog = {
     'zh-CN': '请填写名称',
   },
   'ai.chat.agentRequired': {
-    'en-US': 'Select a Default Agent',
-    'zh-CN': '请选择 Default Agent',
+    'en-US': 'Select an Agent',
+    'zh-CN': '请选择 Agent',
   },
   'ai.chat.loading': {
     'en-US': 'Loading Chat…',
@@ -786,8 +786,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread; /agent and /environment change Chat defaults, and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建新 Thread；/agent 和 /environment 修改 Chat 默认值，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread; /agent and /environment change the visible Chat settings, and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建新 Thread；/agent 和 /environment 修改当前可见 Chat 设置，/thread 复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',
@@ -844,26 +844,6 @@ export const aiCatalog = {
   'ai.chat.noThreads': {
     'en-US': 'No Threads',
     'zh-CN': '暂无 Thread',
-  },
-  'ai.chat.selectModel': {
-    'en-US': 'Select Model',
-    'zh-CN': '选择 Model',
-  },
-  'ai.chat.noModels': {
-    'en-US': 'No Models available',
-    'zh-CN': '暂无可用 Model',
-  },
-  'ai.chat.selectVariant': {
-    'en-US': 'Select Variant',
-    'zh-CN': '选择 Variant',
-  },
-  'ai.chat.noVariantsForModel': {
-    'en-US': 'This Model has no Variants',
-    'zh-CN': '当前 Model 暂无 Variant',
-  },
-  'ai.chat.setModelFirst': {
-    'en-US': 'Set a Model first',
-    'zh-CN': '请先设置 Model',
   },
   'ai.chat.history.title': {
     'en-US': 'History branches',
@@ -952,10 +932,6 @@ export const aiCatalog = {
   'ai.chat.sessionSubtitle': {
     'en-US': 'Session {{id}}',
     'zh-CN': 'Session {{id}}',
-  },
-  'ai.chat.unboundSession': {
-    'en-US': 'Unbound Session',
-    'zh-CN': '未绑定 Session',
   },
   'ai.runtime.composer.placeholder': {
     'en-US': 'Enter a task (/ for commands)',
@@ -1229,61 +1205,9 @@ export const aiCatalog = {
     'en-US': 'The conversation tree root was created.',
     'zh-CN': '已创建会话树根节点。',
   },
-  'ai.runtime.entry.unknownAgent': {
-    'en-US': 'Unknown Agent',
-    'zh-CN': '未知 Agent',
-  },
-  'ai.runtime.entry.unknownModel': {
-    'en-US': 'unknown-model',
-    'zh-CN': 'unknown-model',
-  },
-  'ai.runtime.entry.defaultVariant': {
-    'en-US': 'default',
-    'zh-CN': 'default',
-  },
-  'ai.runtime.entry.yoloOn': {
-    'en-US': 'enabled',
-    'zh-CN': '开启',
-  },
-  'ai.runtime.entry.yoloOff': {
-    'en-US': 'disabled',
-    'zh-CN': '关闭',
-  },
-  'ai.runtime.entry.yoloUnknown': {
-    'en-US': 'unknown',
-    'zh-CN': '未知',
-  },
-  'ai.runtime.entry.runtimeConfigTitle': {
-    'en-US': 'Runtime configuration recorded',
-    'zh-CN': '运行配置已记录',
-  },
   'ai.runtime.entry.unknownType': {
     'en-US': 'unknown type',
     'zh-CN': '未知类型',
-  },
-  'ai.runtime.entry.agentLine': {
-    'en-US': 'Agent: {{value}}',
-    'zh-CN': 'Agent：{{value}}',
-  },
-  'ai.runtime.entry.modelLine': {
-    'en-US': 'Model: {{value}}',
-    'zh-CN': '模型：{{value}}',
-  },
-  'ai.runtime.entry.yoloLine': {
-    'en-US': 'YOLO: {{value}}',
-    'zh-CN': 'YOLO：{{value}}',
-  },
-  'ai.runtime.entry.toolsLine': {
-    'en-US': 'Tools: {{value}}',
-    'zh-CN': '工具：{{value}}',
-  },
-  'ai.runtime.entry.skillsLine': {
-    'en-US': 'Skills: {{value}}',
-    'zh-CN': '技能：{{value}}',
-  },
-  'ai.runtime.entry.listSeparator': {
-    'en-US': ', ',
-    'zh-CN': '、',
   },
   'ai.runtime.entry.unknownRole': {
     'en-US': 'Unknown role',
@@ -1333,17 +1257,9 @@ export const aiCatalog = {
     'en-US': '{{action}}: Thread state changed ({{error}}); refreshed. Please try again',
     'zh-CN': '{{action}}：Thread 状态已变化（{{error}}），已刷新，请重试',
   },
-  'ai.runtime.action.unboundThread': {
-    'en-US': 'This Thread is not bound to a Session. Use /session or /tree to select a position first.',
-    'zh-CN': '当前 Thread 未绑定 Session，请先用 /session 或 /tree 选择位置',
-  },
   'ai.runtime.action.unknownCommand': {
     'en-US': 'Unknown command: {{command}}',
     'zh-CN': '未知命令：{{command}}',
-  },
-  'ai.runtime.action.unboundAction': {
-    'en-US': '{{action}}: this Thread is not bound to a Session',
-    'zh-CN': '{{action}}：当前 Thread 未绑定 Session',
   },
   'ai.runtime.action.blankAgent': {
     'en-US': '(no Agent)',
@@ -1362,12 +1278,16 @@ export const aiCatalog = {
     'zh-CN': '关联 Thread 失败',
   },
   'ai.runtime.action.updateAgentFailed': {
-    'en-US': 'Failed to update default Agent',
-    'zh-CN': '更新默认 Agent 失败',
+    'en-US': 'Failed to update Agent',
+    'zh-CN': '更新 Agent 失败',
   },
   'ai.runtime.action.updateEnvironmentFailed': {
-    'en-US': 'Failed to update default Environment',
-    'zh-CN': '更新默认 Environment 失败',
+    'en-US': 'Failed to update Environment',
+    'zh-CN': '更新 Environment 失败',
+  },
+  'ai.runtime.action.updateYoloFailed': {
+    'en-US': 'Failed to update YOLO',
+    'zh-CN': '更新 YOLO 失败',
   },
   'ai.runtime.action.firstSendMissingSession': {
     'en-US': 'Chat Thread creation did not return a Session',

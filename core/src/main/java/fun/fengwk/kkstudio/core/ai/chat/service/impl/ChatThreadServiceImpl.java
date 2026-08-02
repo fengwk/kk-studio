@@ -61,7 +61,7 @@ public class ChatThreadServiceImpl implements ChatThreadService {
     Chat chat = chatGuard.requireChat(chatId);
     long parsedThreadId = HarnessIds.parsePositive(threadId, "threadId");
     requireThread(threadId);
-    // ON CONFLICT DO NOTHING makes retries and localStorage migration idempotent.
+    // ON CONFLICT DO NOTHING makes repeated association idempotent.
     chatThreadRepository.associate(chat.getId(), parsedThreadId);
   }
 

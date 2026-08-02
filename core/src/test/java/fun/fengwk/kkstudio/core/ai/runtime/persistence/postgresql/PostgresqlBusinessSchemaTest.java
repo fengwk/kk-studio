@@ -26,6 +26,12 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   void agentResourcesKeepProviderAndModelOwnership() throws SQLException {
     String providerName = "provider-" + FIXTURE_IDS.incrementAndGet();
     String modelName = "model-" + FIXTURE_IDS.incrementAndGet();
+    for (String invalid : new String[] {" provider ", "\tprovider\t", "provider/name"}) {
+      try (Connection conn = newConnection()) {
+        assertTransactionConstraintViolation(
+            conn, "ck_agent_provider_name", () -> insertProvider(conn, invalid));
+      }
+    }
     try (Connection conn = newConnection()) {
       insertProvider(conn, providerName);
     }
@@ -36,6 +42,22 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
     try (Connection conn = newConnection()) {
       insertModel(conn, providerName, modelName);
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn, "ck_agent_model_name", () -> insertModel(conn, providerName, "\nmodel\n"));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_definition_name",
+          () -> insertDefinition(conn, "\tagent\t", providerName, modelName));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_definition_name",
+          () -> insertDefinition(conn, "agent/name", providerName, modelName));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
@@ -67,14 +89,16 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
               () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), "x".repeat(129)));
       assertEquals("22001", tooLong.getSQLState());
     }
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "insert into chat (id, title, agent_name, environment_name)"
-                    + " values (?, 'schema-test', ?, null)")) {
-      ps.setLong(1, FIXTURE_IDS.incrementAndGet());
-      ps.setString(2, " ");
-      assertTransactionConstraintViolation(conn, "ck_chat_agent_name", () -> ps.executeUpdate());
+    for (String invalid : new String[] {" ", " agent ", "\tagent\t", "agent/name"}) {
+      try (Connection conn = newConnection();
+          PreparedStatement ps =
+              conn.prepareStatement(
+                  "insert into chat (id, title, agent_name, environment_name)"
+                      + " values (?, 'schema-test', ?, null)")) {
+        ps.setLong(1, FIXTURE_IDS.incrementAndGet());
+        ps.setString(2, invalid);
+        assertTransactionConstraintViolation(conn, "ck_chat_agent_name", () -> ps.executeUpdate());
+      }
     }
   }
 

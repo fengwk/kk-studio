@@ -102,6 +102,9 @@ final class AgentProviderMutationFactory {
     if (normalized == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
     }
+    if (normalized.indexOf('/') >= 0) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
+    }
     editableSupport.validateMaxLength(RESOURCE, "name", normalized, NAME_MAX_LENGTH);
     return normalized;
   }

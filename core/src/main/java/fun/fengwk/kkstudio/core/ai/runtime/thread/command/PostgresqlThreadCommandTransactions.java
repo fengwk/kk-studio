@@ -42,7 +42,7 @@ import java.util.Optional;
  * final PostgreSQL {@link ThreadCommandTransactions} 实现。
  *
  * <p>所有 command mutation 锁定 owning Thread，再写 mailbox 或 fencing state。它绝不读取 live Definition，也不创建
- * Provider I/O resource；配置快照已经由 command service 在 enqueue 前冻结。
+ * Provider I/O resource；message payload 只保存本轮可见名称引用。
  */
 @Service
 public class PostgresqlThreadCommandTransactions implements ThreadCommandTransactions {

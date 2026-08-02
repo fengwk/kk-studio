@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -18,8 +16,8 @@ import java.util.Optional;
  *   <li>suspendAndRecheck 返回 {@link SuspendOutcome}；
  *   <li>quiesceAndRecheck 返回 {@link QuiesceOutcome}；
  *   <li>createModelInvocationAndRelease 返回 {@link ModelCreationOutcome}（{@link
- *       ModelCreationOutcome.Created} | {@link ModelCreationOutcome.LostOwnership} | {@link
- *       ModelCreationOutcome.Failed}）。
+ *       ModelCreationOutcome.Created} | {@link ModelCreationOutcome.PlanningFailureApplied} |
+ *       {@link ModelCreationOutcome.LostOwnership}）。
  * </ul>
  *
  * <p>意外 RuntimeException 必须由适配器向上抛出；Reconciler 捕获后 best-effort release 并重新抛出。
@@ -62,15 +60,6 @@ public interface ThreadReconcileTransactions {
       ThreadOwnership ownership, long assistantEntryId, Instant now);
 
   /**
-   * Append an AssistantError barrier for a typed planning failure and advance the head.
-   *
-   * <p>The adapter maps the pure failure to its durable error payload; no ModelInvocation or fake
-   * ProviderRequest is created.
-   */
-  ApplyOutcome applyPlanningFailure(
-      ThreadOwnership ownership, PlanningFailure failure, Instant now);
-
-  /**
    * 原子校验 {@code expectedBlocker} 仍是当前 durable blocker 并释放 Thread lease；若 sibling 已终态、blocker 已替换或新
    * work 到达则返回 {@link SuspendOutcome#WORK_AVAILABLE}，调用方仍持有 lease。返回 {@link
    * SuspendOutcome#SUSPENDED} 时，Reconciler 使用调用时的 {@code expectedBlocker} 构造结果，事务没有替换 blocker
@@ -86,11 +75,11 @@ public interface ThreadReconcileTransactions {
   ApplyOutcome harvestBatch(ThreadOwnership ownership, TurnInputBatch batch, Instant now);
 
   /**
-   * 原子创建 ModelInvocation 并在同事务内释放 Thread lease。plan 的 {@code sourceHeadEntryId} 必须等于 ownership 对应
-   * Thread 的当前 head。仅此处保留 typed failure 通道；意外错误以 RuntimeException 抛出。
+   * 锁定 ownership 对应 Thread 后，按当前 path 和最新 live definitions 规划。成功时原子创建 ModelInvocation 并释放 Thread
+   * lease；typed planning failure 直接追加 AssistantError barrier 且保留 lease，供 Reconciler 继续收敛。 意外错误以
+   * RuntimeException 抛出。
    */
-  ModelCreationOutcome createModelInvocationAndRelease(
-      ThreadOwnership ownership, ModelInvocationPlan plan, Instant now);
+  ModelCreationOutcome createModelInvocationAndRelease(ThreadOwnership ownership, Instant now);
 
   /**
    * 原子确认 Thread 无可推进 work 并释放 lease；若 recheck 发现新 work 则返回 {@link

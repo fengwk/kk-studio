@@ -1937,10 +1937,6 @@ div.is-error {
   white-space: pre-wrap;
 }
 
-.thread-block-entry.kind-runtime_config {
-  border-left-color: var(--green-primary);
-}
-
 /* 长会话离屏消息降耗：不裁切布局，浏览器可跳过绘制 */
 .thread-turn {
   content-visibility: auto;

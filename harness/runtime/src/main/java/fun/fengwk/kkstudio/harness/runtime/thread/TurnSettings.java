@@ -24,7 +24,7 @@ public record TurnSettings(String agentName, String environmentName, boolean yol
     if (value.isBlank()) {
       throw new IllegalArgumentException(field + " must not be blank");
     }
-    if (!value.equals(value.trim())) {
+    if (!value.equals(value.strip())) {
       throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
     }
     if (value.length() > 128) {

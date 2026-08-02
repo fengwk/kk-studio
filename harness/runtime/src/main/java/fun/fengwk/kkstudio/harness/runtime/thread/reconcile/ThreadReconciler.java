@@ -5,10 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
@@ -44,8 +41,7 @@ import java.util.concurrent.RejectedExecutionException;
  * <p>已有 response debt 必须先于 queued Input harvest 处理；一次 batch harvest 后，Reconciler 重新读取 snapshot，并从最终
  * head 最多创建一次 ModelInvocation。{@link StepResult.Suspended} 仅由 suspend 与 ModelInvocation creation
  * 两个成功路径返回，lease 已在事务内释放。{@link SuspendOutcome#WORK_AVAILABLE} 与 {@link
- * QuiesceOutcome#WORK_AVAILABLE} 在不释放 lease 的前提下继续循环。Typed failure 仅 ModelInvocation creation
- * 保留，其余事务的意外错误经 best-effort release 后重新抛出。
+ * QuiesceOutcome#WORK_AVAILABLE} 在不释放 lease 的前提下继续循环。其余事务的意外错误经 best-effort release 后重新抛出。
  */
 @Slf4j
 public final class ThreadReconciler {
@@ -282,13 +278,9 @@ public final class ThreadReconciler {
           // 3. 仍有外部工作未结束时暂停；不能越过它接收更晚的 mailbox 输入。
           yield suspendForBlocker(ownership, suspension.blocker());
         }
-        case ApplyPlanningFailure failure -> {
-          // 4. 解析失败是 durable AssistantError barrier，不创建伪造的模型调用。
-          yield applyPlanningFailure(ownership, failure.failure());
-        }
-        case CreateModelInvocation creation -> {
-          // 5. 当前回合已欠模型回复时先创建调用，避免后续 Input 污染冻结的 ProviderRequest。
-          yield createModelInvocation(ownership, creation.plan());
+        case CreateModelInvocation ignored -> {
+          // 4. 创建事务按当前 path 重新规划，避免 snapshot 与写入之间的 live definition 漂移。
+          yield createModelInvocation(ownership);
         }
       };
     }
@@ -351,27 +343,17 @@ public final class ThreadReconciler {
    * <p>创建 Invocation 与释放 Thread lease 在一个事务内完成，因此成功后本次 reconcile 必须结束并等待 ModelWorker。该步骤排在 Input
    * harvest 前，避免后续消息污染当前消息对应的 ProviderRequest。
    */
-  private IterationOutcome createModelInvocation(
-      ThreadOwnership ownership, ModelInvocationPlan plan) {
+  private IterationOutcome createModelInvocation(ThreadOwnership ownership) {
     ModelCreationOutcome outcome =
-        transactions.createModelInvocationAndRelease(ownership, plan, clock.instant());
+        transactions.createModelInvocationAndRelease(ownership, clock.instant());
     return switch (outcome) {
       case ModelCreationOutcome.Created created -> new FinishReconcile(
           new StepResult.Suspended(
               new ContinuationRef(ownership.threadTarget(), created.target())));
+      case ModelCreationOutcome.PlanningFailureApplied ignored -> RELOAD_SNAPSHOT;
       case ModelCreationOutcome.LostOwnership ignored -> new FinishReconcile(
           new StepResult.LostOwnership());
-      case ModelCreationOutcome.Failed failed -> {
-        bestEffortRelease(ownership);
-        yield new FinishReconcile(new StepResult.Failed(failed.failure()));
-      }
     };
-  }
-
-  private IterationOutcome applyPlanningFailure(
-      ThreadOwnership ownership, PlanningFailure failure) {
-    ApplyOutcome outcome = transactions.applyPlanningFailure(ownership, failure, clock.instant());
-    return reloadOrLostOwnership(outcome);
   }
 
   /**

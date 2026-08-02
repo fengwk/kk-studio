@@ -34,7 +34,7 @@ import {
 } from '@/features/ai/chat/SelectionListModal'
 import { translate, useI18n } from '@/shared/i18n'
 
-function resolveDefaultAgent(
+function resolveChatAgent(
   chat: ChatDTO | undefined,
   agents: AgentDefinitionDTO[],
 ): AgentDefinitionDTO | undefined {
@@ -44,7 +44,7 @@ function resolveDefaultAgent(
   return agents.find((agent) => agent.name === chat.agentName)
 }
 
-/** 空白 pane 尚无 Thread 时，用 Chat 默认 Agent 的 model/variant 填 footer（与已绑定 pane 一致） */
+/** 空白 pane 尚无 Thread 时，用当前可见 Chat Agent 的 model/variant 填 footer。 */
 function resolveBlankPaneFooterLabels(
   agent: AgentDefinitionDTO | undefined,
   models: AgentModelView[],
@@ -80,6 +80,7 @@ export function BlankComposerPane({
   agentName,
   environmentName,
   yoloEnabled,
+  settingsPending,
   onAgentChange,
   onEnvironmentChange = async () => undefined,
   onYoloChange = async () => undefined,
@@ -96,6 +97,7 @@ export function BlankComposerPane({
   agentName: string
   environmentName: string | null
   yoloEnabled: boolean
+  settingsPending: boolean
   onAgentChange: (agentName: string) => Promise<void>
   onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
@@ -110,7 +112,6 @@ export function BlankComposerPane({
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const [threadAssociationPending, setThreadAssociationPending] = useState(false)
-  const [environmentPending, setEnvironmentPending] = useState(false)
   const queryClient = useQueryClient()
   const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
   const modelsQuery = useQuery({
@@ -118,22 +119,22 @@ export function BlankComposerPane({
     queryFn: () => agentService.listModels(),
   })
   const models: AgentModelView[] = toAgentModelViews(modelsQuery.data?.results ?? [])
-  const defaultAgent = resolveDefaultAgent(chat, agents)
-  const footerLabels = resolveBlankPaneFooterLabels(defaultAgent, models)
+  const chatAgent = resolveChatAgent(chat, agents)
+  const footerLabels = resolveBlankPaneFooterLabels(chatAgent, models)
   const agentLabel =
-    defaultAgent?.name
+    chatAgent?.name
     || (chat?.agentName
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
 
-  async function runFirstSend(content: string) {
+  async function runFirstSend(content: string, effectiveAgentName = agentName) {
     setPending(true)
     setActionError(null)
     try {
       const result = await performBlankPaneFirstSend({
         chatId: chat?.id ?? '',
         content,
-        agentName,
+        agentName: effectiveAgentName,
         environmentName,
         yoloEnabled,
       })
@@ -160,11 +161,11 @@ export function BlankComposerPane({
 
   async function handleSubmit() {
     const content = draft.trim()
-    if (!content || content.startsWith('/') || pending) {
+    if (!content || content.startsWith('/') || pending || settingsPending) {
       return
     }
     onFocus()
-    if (!defaultAgent) {
+    if (!chatAgent) {
       setPendingContent(content)
       setAgentModalOpen(true)
       return
@@ -188,7 +189,7 @@ export function BlankComposerPane({
         setEnvironmentModalOpen(true)
         return
       case 'yolo':
-        void onYoloChange(!yoloEnabled)
+        void toggleYolo()
         return
       default:
         setActionError(
@@ -215,13 +216,16 @@ export function BlankComposerPane({
   }
 
   async function handleAgentSelected(selectedAgentName: string) {
-    setAgentModalOpen(false)
+    if (settingsPending) {
+      return
+    }
     const content = pendingContent?.trim()
     setActionError(null)
     try {
       await onAgentChange(selectedAgentName)
+      setAgentModalOpen(false)
       if (content) {
-        await runFirstSend(content)
+        await runFirstSend(content, selectedAgentName)
       }
     } catch (error) {
       setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
@@ -232,15 +236,27 @@ export function BlankComposerPane({
   }
 
   async function handleEnvironmentSelected(environmentName: string | null) {
-    setEnvironmentPending(true)
+    if (settingsPending) {
+      return
+    }
     setActionError(null)
     try {
       await onEnvironmentChange(environmentName)
       setEnvironmentModalOpen(false)
     } catch (error) {
       setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
-    } finally {
-      setEnvironmentPending(false)
+    }
+  }
+
+  async function toggleYolo() {
+    if (settingsPending) {
+      return
+    }
+    setActionError(null)
+    try {
+      await onYoloChange(!yoloEnabled)
+    } catch (error) {
+      setActionError(errorMessage(error, t('ai.runtime.action.updateYoloFailed')))
     }
   }
 
@@ -256,8 +272,8 @@ export function BlankComposerPane({
           </div>
           <ThreadComposer
             draft={draft}
-            pending={pending}
-            disabled={pending}
+            pending={pending || settingsPending}
+            disabled={pending || settingsPending}
             onDraftChange={setDraft}
             onSubmit={() => {
               void handleSubmit()
@@ -266,11 +282,11 @@ export function BlankComposerPane({
             commands={BLANK_PANE_COMMANDS}
           />
           <ThreadStatusFooter
-            agentName={defaultAgent ? footerLabels.agentName : agentLabel}
-            providerName={defaultAgent ? footerLabels.providerName : undefined}
-            modelName={defaultAgent ? footerLabels.modelName : undefined}
-            variantName={defaultAgent ? footerLabels.variantName : undefined}
-            contextWindow={defaultAgent ? footerLabels.contextWindow : undefined}
+            agentName={chatAgent ? footerLabels.agentName : agentLabel}
+            providerName={chatAgent ? footerLabels.providerName : undefined}
+            modelName={chatAgent ? footerLabels.modelName : undefined}
+            variantName={chatAgent ? footerLabels.variantName : undefined}
+            contextWindow={chatAgent ? footerLabels.contextWindow : undefined}
             environmentName={environmentName}
             yoloEnabled={yoloEnabled}
             onAgentClick={() => {
@@ -286,6 +302,7 @@ export function BlankComposerPane({
       </section>
       <AgentSelectionModal
         open={agentModalOpen}
+        selectionPending={settingsPending}
         agents={agents.map((agent) => ({
           name: agent.name,
           description: agent.description,
@@ -302,7 +319,7 @@ export function BlankComposerPane({
         open={environmentModalOpen}
         environments={environments}
         selectedEnvironmentName={environmentName}
-        selectionPending={environmentPending}
+        selectionPending={settingsPending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {
           void handleEnvironmentSelected(environmentName)

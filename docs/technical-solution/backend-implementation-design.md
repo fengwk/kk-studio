@@ -32,7 +32,8 @@ Runtime durable ID 在 HTTP 中编码为十进制字符串。Catalog 不使用 b
 
 - Provider 和 Agent 的 identity 是 immutable `name`。
 - Model 的 identity 是 `(providerName, name)`。
-- API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分。
+- 所有名称必须非空、无首尾空白；Provider/Agent 名称还必须是单路径段，禁止包含 `/`。
+- API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分，因此 Model 名称可以包含 `/`。
 - Catalog version 是独立的并发 token，以十进制字符串传输。
 
 Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `name` 两个字段。Provider、Model、Agent 的 PUT/DELETE 都用名称定位并携带 `expectedVersion`。
@@ -92,7 +93,7 @@ Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 
 
 ## 4. 请求与错误
 
-Chat 的唯一可见发送设置是 `agentName`、`environmentName`、`yoloEnabled`。每个 message/custom message 请求还包含 `content`、`clientMessageId` 与 `expectedExecutionEpoch`。Reconcile 时从 payload 中的 `TurnSettings` 解析本轮实际能力。
+Chat 的唯一可见发送设置是 `agentName`、`environmentName`、`yoloEnabled`。前端提交任一设置时会暂时阻止该 Chat 的全部 pane 发送，只有服务端确认并刷新 Chat 后才允许下一条消息。每个 message/custom message 请求还包含 `content`、`clientMessageId` 与 `expectedExecutionEpoch`。Reconcile 时从 payload 中的 `TurnSettings` 解析本轮实际能力。
 
 `PUT /head` 请求包含非空 `headEntryId` 与 `expectedExecutionEpoch`。head 重定位要求当前 Thread 无 processor lease、无 runnable work、无 queued Input、无当前 epoch 的非终态 Invocation/OPEN Interaction；成功后递增 epoch 并清理 lease。
 
@@ -100,8 +101,8 @@ Chat 的唯一可见发送设置是 `agentName`、`environmentName`、`yoloEnabl
 
 | 情况 | HTTP |
 | --- | --- |
-| DTO、名称、Model config 或 Model ref 非法 | `400` |
-| Thread、Session、Entry、Catalog 名称不存在 | `404` |
+| DTO、名称格式、Model config、Model ref 或请求体中的 Catalog 引用非法 | `400` |
+| 作为请求目标的 Thread、Session、Entry 或 Catalog 名称不存在 | `404` |
 | Chat version 或 execution epoch 过期，或 Thread 尚未静止 | `409` |
 | message/custom message 被接受进入 mailbox | `202` |
 | Chat-scoped Thread 创建成功 | `201` |
@@ -115,7 +116,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ChatThreadServiceImpl` | 在一个事务中调用 Thread command 创建 Session/ROOT/Thread，写入 Chat 关系并返回查询投影 |
 | `ThreadCommandCoordinator` | 创建 Thread、非空 head 重定位、消息 payload 构造、幂等短路与 stop |
 | `PostgresqlThreadCommandTransactions` | Session/ROOT/Thread 原子写入、head CAS、Input enqueue、stop |
-| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称读取最新 Agent、Model、Provider、Variant 与 READY Environment |
+| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称在同一 PostgreSQL repeatable-read snapshot 中读取 Agent、Model、Provider 与 Variant，并读取当前 READY Environment；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
 | `ThreadReconciler` | TURN_INPUT_BATCH、planning、Model/Tool terminal apply、Entry/head 推进 |
 | `ModelWorker` | 回放冻结 ProviderRequest，写 ModelInvocation terminal 与 realtime |
 | `ToolWorker` | 按冻结 ToolBinding 执行本地或 RemoteTool |

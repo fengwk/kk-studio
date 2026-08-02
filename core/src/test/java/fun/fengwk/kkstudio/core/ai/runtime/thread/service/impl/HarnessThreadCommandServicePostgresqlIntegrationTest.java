@@ -78,11 +78,11 @@ class HarnessThreadCommandServicePostgresqlIntegrationTest extends PostgresSprin
 
     HarnessThreadMessageCreateDTO replay = new HarnessThreadMessageCreateDTO();
     replay.setContent("different body");
-    replay.setAgentName("deleted-agent");
-    replay.setEnvironmentName("deleted-environment");
-    replay.setYoloEnabled(false);
+    replay.setAgentName(" invalid ");
+    replay.setEnvironmentName(" invalid ");
+    replay.setYoloEnabled(null);
     replay.setClientMessageId("user-1");
-    replay.setExpectedExecutionEpoch(thread.executionEpoch());
+    replay.setExpectedExecutionEpoch(null);
 
     HarnessThreadInputDTO replayed =
         commandService.submitUserMessage(Long.toString(thread.id()), replay);

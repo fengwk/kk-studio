@@ -1,9 +1,13 @@
 package fun.fengwk.kkstudio.core.ai.runtime.thread.reconcile;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.CannotSerializeTransactionException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
@@ -53,7 +57,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.SuspendOutcome;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadOwnership;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork;
-import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalModel;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.ApplyTerminalToolBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation;
@@ -73,6 +76,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -93,6 +97,7 @@ import java.util.Optional;
 @Service
 public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTransactions {
 
+  private static final int MODEL_CREATION_MAX_ATTEMPTS = 3;
   private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
       new ModelInvocationRequestJsonCodec();
   private static final ProviderResponseJsonCodec RESPONSE_CODEC = new ProviderResponseJsonCodec();
@@ -111,6 +116,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
   private final ModelInvocationPlanner planner;
   private final Duration leaseDuration;
   private final ExecutionTargetStore executionTargetStore;
+  private final TransactionTemplate modelCreationTransaction;
 
   @Autowired
   public PostgresqlThreadReconcileTransactions(
@@ -118,27 +124,18 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
       HarnessIdGenerator ids,
       HarnessRuntimeProperties properties,
       ExecutionTargetStore executionTargetStore,
-      TurnExecutionResolver executionResolver) {
-    this(
-        mapper,
-        ids,
-        new ModelInvocationPlanner(executionResolver),
-        properties.getThreadReconcileLeaseDuration(),
-        executionTargetStore);
-  }
-
-  PostgresqlThreadReconcileTransactions(
-      ThreadReconcileMapper mapper,
-      HarnessIdGenerator ids,
-      ModelInvocationPlanner planner,
-      Duration leaseDuration,
-      ExecutionTargetStore executionTargetStore) {
+      TurnExecutionResolver executionResolver,
+      PlatformTransactionManager transactionManager) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.ids = Objects.requireNonNull(ids, "ids");
-    this.planner = Objects.requireNonNull(planner, "planner");
-    this.leaseDuration = Objects.requireNonNull(leaseDuration, "leaseDuration");
+    this.planner =
+        new ModelInvocationPlanner(Objects.requireNonNull(executionResolver, "executionResolver"));
+    this.leaseDuration =
+        Objects.requireNonNull(properties, "properties").getThreadReconcileLeaseDuration();
     this.executionTargetStore =
         Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.modelCreationTransaction =
+        repeatableReadTransaction(Objects.requireNonNull(transactionManager, "transactionManager"));
     if (leaseDuration.isZero() || leaseDuration.isNegative()) {
       throw new IllegalArgumentException("thread reconcile lease duration must be positive");
     }
@@ -249,7 +246,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (blocker.isPresent()) {
       return Optional.of(new SuspendForBlocker(blocker.get()));
     }
-    return primaryWork(plan(thread));
+    return hasResponseDebt(thread) ? Optional.of(new CreateModelInvocation()) : Optional.empty();
   }
 
   @Override
@@ -358,26 +355,6 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
 
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
-  public ApplyOutcome applyPlanningFailure(
-      ThreadOwnership ownership, PlanningFailure failure, Instant now) {
-    Objects.requireNonNull(failure, "failure");
-    OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null) {
-      return ApplyOutcome.LOST_OWNERSHIP;
-    }
-    long entryId = ids.nextEntryId();
-    EntryPayload payload =
-        new AssistantErrorEntryPayload(
-            new ModelInvocationError(
-                ProviderErrorKind.INVALID_REQUEST,
-                failure.kind().name() + ": " + failure.message()));
-    insertEntry(thread, entryId, payload, now);
-    advance(thread, ownership, entryId, now);
-    return ApplyOutcome.PROGRESSED;
-  }
-
-  @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
   public SuspendOutcome suspendAndRecheck(
       ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
@@ -434,14 +411,46 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return ApplyOutcome.PROGRESSED;
   }
 
+  /**
+   * Uses one repeatable-read snapshot for the resolver's Agent, Provider, and Model queries so the
+   * frozen request cannot combine catalog versions that were never committed together. PostgreSQL
+   * serialization failures are retried outside the rolled-back transaction; every retry rechecks
+   * ownership, path, and live definitions.
+   */
   @Override
-  @Transactional(isolation = Isolation.READ_COMMITTED)
   public ModelCreationOutcome createModelInvocationAndRelease(
-      ThreadOwnership ownership, ModelInvocationPlan plan, Instant now) {
+      ThreadOwnership ownership, Instant now) {
+    RuntimeException lastSerializationFailure = null;
+    for (int attempt = 1; attempt <= MODEL_CREATION_MAX_ATTEMPTS; attempt++) {
+      try {
+        return Objects.requireNonNull(
+            modelCreationTransaction.execute(
+                ignored -> createModelInvocationAndReleaseInTransaction(ownership, now)));
+      } catch (RuntimeException error) {
+        if (!isSerializationFailure(error)) {
+          throw error;
+        }
+        lastSerializationFailure = error;
+      }
+    }
+    throw Objects.requireNonNull(lastSerializationFailure);
+  }
+
+  private ModelCreationOutcome createModelInvocationAndReleaseInTransaction(
+      ThreadOwnership ownership, Instant now) {
     OwnedThreadRow thread = owned(ownership, now);
-    if (thread == null || thread.getHeadEntryId() != plan.sourceHeadEntryId()) {
+    if (thread == null) {
       return new ModelCreationOutcome.LostOwnership();
     }
+    PlanningResult planningResult = plan(thread);
+    if (planningResult instanceof PlanningResult.NoDebt) {
+      throw new IllegalStateException("response debt disappeared while creating model invocation");
+    }
+    if (planningResult instanceof PlanningResult.Failed failed) {
+      appendPlanningFailure(thread, ownership, failed.failure(), now);
+      return new ModelCreationOutcome.PlanningFailureApplied();
+    }
+    ModelInvocationPlan plan = ((PlanningResult.Planned) planningResult).plan();
     long id = ids.nextModelInvocationId();
     if (mapper.insertModelInvocation(
             id,
@@ -461,6 +470,27 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, id));
   }
 
+  private static TransactionTemplate repeatableReadTransaction(
+      PlatformTransactionManager transactionManager) {
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+    transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    return transaction;
+  }
+
+  private static boolean isSerializationFailure(Throwable error) {
+    for (Throwable current = error; current != null; current = current.getCause()) {
+      if (current instanceof CannotSerializeTransactionException) {
+        return true;
+      }
+      if (current instanceof SQLException sqlException
+          && "40001".equals(sqlException.getSQLState())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @Override
   @Transactional(isolation = Isolation.READ_COMMITTED)
   public QuiesceOutcome quiesceAndRecheck(ThreadOwnership ownership, Instant now) {
@@ -468,7 +498,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if (thread == null) {
       return QuiesceOutcome.LOST_OWNERSHIP;
     }
-    if (hasAnyWork(thread) || !(plan(thread) instanceof PlanningResult.NoDebt)) {
+    if (hasAnyWork(thread) || hasResponseDebt(thread)) {
       return QuiesceOutcome.WORK_AVAILABLE;
     }
     return release(ownership, false, now)
@@ -498,12 +528,9 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         thread.getSessionId(), headEntryId, path(thread.getSessionId(), headEntryId));
   }
 
-  private static Optional<PrimaryWork> primaryWork(PlanningResult result) {
-    return switch (result) {
-      case PlanningResult.NoDebt ignored -> Optional.empty();
-      case PlanningResult.Planned planned -> Optional.of(new CreateModelInvocation(planned.plan()));
-      case PlanningResult.Failed failed -> Optional.of(new ApplyPlanningFailure(failed.failure()));
-    };
+  private boolean hasResponseDebt(OwnedThreadRow thread) {
+    return planner.hasResponseDebt(
+        thread.getHeadEntryId(), path(thread.getSessionId(), thread.getHeadEntryId()));
   }
 
   private List<SessionEntry> path(long sessionId, long headEntryId) {
@@ -747,6 +774,19 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
         != 1) {
       throw new IllegalStateException("cannot insert entry");
     }
+  }
+
+  private void appendPlanningFailure(
+      OwnedThreadRow thread, ThreadOwnership ownership, PlanningFailure failure, Instant now) {
+    Objects.requireNonNull(failure, "failure");
+    long entryId = ids.nextEntryId();
+    EntryPayload payload =
+        new AssistantErrorEntryPayload(
+            new ModelInvocationError(
+                ProviderErrorKind.INVALID_REQUEST,
+                failure.kind().name() + ": " + failure.message()));
+    insertEntry(thread, entryId, payload, now);
+    advance(thread, ownership, entryId, now);
   }
 
   private void insertUsage(

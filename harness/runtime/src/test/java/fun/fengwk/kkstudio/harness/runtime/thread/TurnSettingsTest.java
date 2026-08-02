@@ -23,5 +23,8 @@ class TurnSettingsTest {
     assertThrows(IllegalArgumentException.class, () -> new TurnSettings(" ", null, false));
     assertThrows(IllegalArgumentException.class, () -> new TurnSettings(" agent", null, false));
     assertThrows(IllegalArgumentException.class, () -> new TurnSettings("agent", " env", false));
+    assertThrows(IllegalArgumentException.class, () -> new TurnSettings("\tagent", null, false));
+    assertThrows(
+        IllegalArgumentException.class, () -> new TurnSettings("agent", "\u2003env", false));
   }
 }

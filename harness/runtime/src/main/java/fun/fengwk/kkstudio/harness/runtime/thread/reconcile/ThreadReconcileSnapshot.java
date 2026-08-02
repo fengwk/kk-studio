@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.thread.reconcile;
 
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 import fun.fengwk.kkstudio.harness.runtime.thread.HarnessThread;
 import fun.fengwk.kkstudio.harness.runtime.thread.InputStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
@@ -76,7 +74,7 @@ public record ThreadReconcileSnapshot(
     }
 
     if (this.primaryWork.isPresent()) {
-      validatePrimaryWork(this.primaryWork.get(), this.ownership, this.thread);
+      validatePrimaryWork(this.primaryWork.get(), this.ownership);
     }
     requireQueuedInputsMonotonic(this.queuedInputs, this.ownership);
   }
@@ -84,10 +82,9 @@ public record ThreadReconcileSnapshot(
   /**
    * 校验主要动作与 ownership/thread 的相对关系。
    *
-   * <p>各变体的基础值在自己的 compact 构造器中校验。这里仅校验跨对象约束：blocker 必须属于当前 Thread，plan 必须基于当前 head。
+   * <p>各变体的基础值在自己的 compact 构造器中校验。这里仅校验 blocker 必须属于当前 Thread。
    */
-  private static void validatePrimaryWork(
-      PrimaryWork work, ThreadOwnership ownership, HarnessThread thread) {
+  private static void validatePrimaryWork(PrimaryWork work, ThreadOwnership ownership) {
     switch (work) {
       case PrimaryWork.ApplyTerminalModel ignored -> {}
       case PrimaryWork.ApplyTerminalToolBatch ignored -> {}
@@ -103,14 +100,7 @@ public record ThreadReconcileSnapshot(
                   + blocker.blocker().kind());
         }
       }
-      case PrimaryWork.CreateModelInvocation creation -> {
-        ModelInvocationPlan plan = creation.plan();
-        if (plan.sourceHeadEntryId() != thread.headEntryId()) {
-          throw new IllegalArgumentException(
-              "modelInvocationPlan.sourceHeadEntryId must equal thread.headEntryId");
-        }
-      }
-      case PrimaryWork.ApplyPlanningFailure ignored -> {}
+      case PrimaryWork.CreateModelInvocation ignored -> {}
     }
   }
 
@@ -179,21 +169,9 @@ public record ThreadReconcileSnapshot(
     }
 
     /**
-     * 为既有 response debt 创建冻结的 ModelInvocation，并在同事务内释放 Thread lease。
-     *
-     * @param plan 冻结的模型调用计划；{@link ModelInvocationPlan#sourceHeadEntryId()} 必须等于当前 thread head
+     * 为既有 response debt 创建 ModelInvocation。创建事务必须基于锁定后的当前 path 重新解析 live definitions， 成功时冻结 request
+     * 并释放 lease，规划失败时追加 AssistantError barrier。
      */
-    record CreateModelInvocation(ModelInvocationPlan plan) implements PrimaryWork {
-      public CreateModelInvocation {
-        Objects.requireNonNull(plan, "plan");
-      }
-    }
-
-    /** 将无法解析当前 turn 的 typed planning failure 追加为 AssistantError barrier。 */
-    record ApplyPlanningFailure(PlanningFailure failure) implements PrimaryWork {
-      public ApplyPlanningFailure {
-        Objects.requireNonNull(failure, "failure");
-      }
-    }
+    record CreateModelInvocation() implements PrimaryWork {}
   }
 }

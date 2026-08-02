@@ -12,11 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 import fun.fengwk.kkstudio.harness.runtime.execution.StepResult;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadInputType;
 
@@ -216,12 +212,10 @@ class ThreadReconcilerTest {
   @Test
   void createModelInvocationRunsBeforeHarvest() {
     FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
-              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan));
+              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation());
           b.queuedInputs.add(
               ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.USER_MESSAGE));
         });
@@ -243,25 +237,21 @@ class ThreadReconcilerTest {
   }
 
   @Test
-  void planningFailureIsAppliedAsAssistantErrorBarrierWithoutModelCreation() {
+  void planningFailureAppliedByCreateTransactionReloadsAndQuiesces() {
     FakeTransactions txs = new FakeTransactions();
-    PlanningFailure failure =
-        new PlanningFailure(PlanningFailureKind.SKILL_NOT_FOUND, "skill is unavailable");
     txs.queueSnapshot(
         b ->
             b.primaryWork =
-                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.ApplyPlanningFailure(failure)));
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation()));
     txs.queueSnapshot(b -> {});
-    txs.applyPlanningFailureOutcome = ApplyOutcome.PROGRESSED;
+    txs.createOutcome = new ModelCreationOutcome.PlanningFailureApplied();
     txs.quiesceOutcome = QuiesceOutcome.QUIESCENT;
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
 
     assertInstanceOf(StepResult.Quiescent.class, result);
-    assertEquals(1, txs.applyPlanningFailureCount.get());
-    assertSame(failure, txs.lastPlanningFailure.get());
-    assertEquals(0, txs.createCount.get(), "a planning failure must not create a fake invocation");
-    assertEquals(List.of("apply-planning-failure", "quiesce"), txs.operationLog);
+    assertEquals(1, txs.createCount.get());
+    assertEquals(List.of("create-model", "quiesce"), txs.operationLog);
   }
 
   @Test
@@ -322,9 +312,7 @@ class ThreadReconcilerTest {
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
-              Optional.of(
-                  new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(
-                      new ModelInvocationPlan(4L, ReconcileTestSupport.modelInvocationRequest())));
+              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation());
           b.headEntryId = 4L;
         });
     txs.createOutcome =
@@ -346,7 +334,7 @@ class ThreadReconcilerTest {
   void responseDebtEndToEndCreatesInvocationBeforeNextInputIsHarvested() {
     // 端到端控制流：
     // snapshot 1 包含完整 turn-start batch；snapshot 之后又有一条 queued input 到达；
-    // harvest 成功后，snapshot 2 暴露最终 head 的 ModelInvocationPlan 并仍包含新 input；
+    // harvest 成功后，snapshot 2 暴露最终 head 的 response debt 并仍包含新 input；
     // create 成功后返回 Suspended；新 input 不会被当前 batch harvest。
     FakeTransactions txs = new FakeTransactions();
     ThreadInput cfg = ReconcileTestSupport.input(THREAD_ID, 1L, ThreadInputType.CUSTOM_MESSAGE);
@@ -359,12 +347,10 @@ class ThreadReconcilerTest {
     txs.queueSnapshot(b -> b.queuedInputs.addAll(List.of(cfg, msg, secondMsg, trailingConfig)));
     txs.harvestOutcome = ApplyOutcome.PROGRESSED;
 
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(4L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b -> {
           b.primaryWork =
-              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan));
+              Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation());
           b.headEntryId = 4L;
           b.queuedInputs.add(later);
         });
@@ -485,12 +471,10 @@ class ThreadReconcilerTest {
   @Test
   void lostOwnershipOnCreateReturnsLostOwnership() {
     FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
     txs.queueSnapshot(
         b ->
             b.primaryWork =
-                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan)));
+                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation()));
     txs.createOutcome = new ModelCreationOutcome.LostOwnership();
 
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
@@ -539,27 +523,6 @@ class ThreadReconcilerTest {
     StepResult result = new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN);
     assertInstanceOf(StepResult.LostOwnership.class, result);
     assertEquals(0, txs.bestEffortReleaseCount.get());
-  }
-
-  // --------------------- 仅 creation 保留 typed failure ---------------------
-
-  @Test
-  void createFailureReleasesLeaseAndReturnsFailed() {
-    FakeTransactions txs = new FakeTransactions();
-    ModelInvocationPlan plan =
-        new ModelInvocationPlan(1L, ReconcileTestSupport.modelInvocationRequest());
-    Failure failure = new Failure("CREATE_FAIL", "boom");
-    txs.queueSnapshot(
-        b ->
-            b.primaryWork =
-                Optional.of(new ThreadReconcileSnapshot.PrimaryWork.CreateModelInvocation(plan)));
-    txs.createOutcome = new ModelCreationOutcome.Failed(failure);
-
-    StepResult.Failed result =
-        assertInstanceOf(
-            StepResult.Failed.class, new ThreadReconciler(txs, CLOCK).reconcile(THREAD_ID, TOKEN));
-    assertSame(failure, result.failure());
-    assertEquals(1, txs.bestEffortReleaseCount.get());
   }
 
   // --------------------- 意外 RuntimeException ---------------------
@@ -707,7 +670,6 @@ class ThreadReconcilerTest {
 
     ApplyOutcome applyTerminalModelOutcome;
     ApplyOutcome applyTerminalToolOutcome;
-    ApplyOutcome applyPlanningFailureOutcome;
     SuspendOutcome suspendOutcome;
     ApplyOutcome harvestOutcome;
     ModelCreationOutcome createOutcome;
@@ -719,7 +681,6 @@ class ThreadReconcilerTest {
     final AtomicInteger renewCount = new AtomicInteger();
     final AtomicInteger applyTerminalModelCount = new AtomicInteger();
     final AtomicInteger applyTerminalToolCount = new AtomicInteger();
-    final AtomicInteger applyPlanningFailureCount = new AtomicInteger();
     final AtomicInteger suspendCount = new AtomicInteger();
     final AtomicInteger createCount = new AtomicInteger();
     final AtomicInteger harvestCount = new AtomicInteger();
@@ -727,7 +688,6 @@ class ThreadReconcilerTest {
     final AtomicInteger bestEffortReleaseCount = new AtomicInteger();
     final AtomicReference<TurnInputBatch> lastHarvestedBatch = new AtomicReference<>();
     final AtomicReference<ContinuationRef> lastExpectedBlocker = new AtomicReference<>();
-    final AtomicReference<PlanningFailure> lastPlanningFailure = new AtomicReference<>();
 
     void queueSnapshot(SnapshotMutator mutator) {
       queueSnapshotFor(THREAD_ID, TOKEN, mutator);
@@ -788,16 +748,6 @@ class ThreadReconcilerTest {
     }
 
     @Override
-    public ApplyOutcome applyPlanningFailure(
-        ThreadOwnership ownership, PlanningFailure failure, Instant now) {
-      applyPlanningFailureCount.incrementAndGet();
-      instantLog.add(now);
-      operationLog.add("apply-planning-failure");
-      lastPlanningFailure.set(failure);
-      return applyPlanningFailureOutcome;
-    }
-
-    @Override
     public SuspendOutcome suspendAndRecheck(
         ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now) {
       suspendCount.incrementAndGet();
@@ -818,7 +768,7 @@ class ThreadReconcilerTest {
 
     @Override
     public ModelCreationOutcome createModelInvocationAndRelease(
-        ThreadOwnership ownership, ModelInvocationPlan plan, Instant now) {
+        ThreadOwnership ownership, Instant now) {
       createCount.incrementAndGet();
       instantLog.add(now);
       operationLog.add("create-model");

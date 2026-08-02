@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.continuation.ContinuationRef;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.ModelInvocationPlan;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailure;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -171,12 +169,6 @@ class ThreadReconcilerActivationTest {
     }
 
     @Override
-    public ApplyOutcome applyPlanningFailure(
-        ThreadOwnership ownership, PlanningFailure failure, Instant now) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public SuspendOutcome suspendAndRecheck(
         ThreadOwnership ownership, ContinuationRef expectedBlocker, Instant now) {
       throw new UnsupportedOperationException();
@@ -189,7 +181,7 @@ class ThreadReconcilerActivationTest {
 
     @Override
     public ModelCreationOutcome createModelInvocationAndRelease(
-        ThreadOwnership ownership, ModelInvocationPlan plan, Instant now) {
+        ThreadOwnership ownership, Instant now) {
       throw new UnsupportedOperationException();
     }
 

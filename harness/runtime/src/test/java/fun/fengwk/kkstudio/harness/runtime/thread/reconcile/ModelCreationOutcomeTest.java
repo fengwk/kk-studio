@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
-import fun.fengwk.kkstudio.harness.runtime.execution.Failure;
 
 /** {@link ModelCreationOutcome} 三种变体的值相等性与构造约束测试。 */
 class ModelCreationOutcomeTest {
@@ -47,15 +46,9 @@ class ModelCreationOutcomeTest {
   }
 
   @Test
-  void failedEqualityAndIdentity() {
-    Failure failure = new Failure("CODE", "msg");
-    ModelCreationOutcome.Failed failed = new ModelCreationOutcome.Failed(failure);
-    assertSame(failure, failed.failure());
-    assertEquals(failed, new ModelCreationOutcome.Failed(new Failure("CODE", "msg")));
-  }
-
-  @Test
-  void failedRejectsNullFailure() {
-    assertThrows(NullPointerException.class, () -> new ModelCreationOutcome.Failed(null));
+  void planningFailureAppliedEquality() {
+    assertEquals(
+        new ModelCreationOutcome.PlanningFailureApplied(),
+        new ModelCreationOutcome.PlanningFailureApplied());
   }
 }

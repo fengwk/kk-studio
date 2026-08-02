@@ -92,7 +92,7 @@ public class ChatMutationFactory {
     if (raw == null) {
       throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
-    String trimmed = raw.trim();
+    String trimmed = raw.strip();
     if (trimmed.isEmpty()) {
       throw new AiValidationException(RESOURCE, "agentName must not be blank");
     }
@@ -104,7 +104,7 @@ public class ChatMutationFactory {
     if (raw == null) {
       return null;
     }
-    String trimmed = raw.trim();
+    String trimmed = raw.strip();
     if (trimmed.isEmpty()) {
       throw new AiValidationException(RESOURCE, "environmentName must not be blank");
     }

@@ -60,13 +60,13 @@ describe('ThreadTranscript', () => {
       <ThreadTranscript
         messages={[
           {
-            id: 'config',
+            id: 'root',
             role: 'entry',
-            kind: 'runtime_config',
-            title: '运行配置已记录',
-            text: 'Agent：reviewer\n模型：minimax/MiniMax-M2.7 · high',
-            rawPayloadJson: '{"agent":{"name":"reviewer"}}',
-            subjectEntryId: 'config',
+            kind: 'root',
+            title: '会话开始',
+            text: '已创建会话树根节点。',
+            rawPayloadJson: '{}',
+            subjectEntryId: 'root',
             createdAt: null,
             status: 'done',
           },
@@ -77,8 +77,8 @@ describe('ThreadTranscript', () => {
       />,
     )
 
-    expect(screen.getByText('运行配置已记录')).toBeInTheDocument()
-    expect(screen.getByText(/MiniMax-M2.7/)).toBeInTheDocument()
+    expect(screen.getByText('会话开始')).toBeInTheDocument()
+    expect(screen.getByText('已创建会话树根节点。')).toBeInTheDocument()
     expect(screen.getByText('查看原始 Entry')).toBeInTheDocument()
   })
 })

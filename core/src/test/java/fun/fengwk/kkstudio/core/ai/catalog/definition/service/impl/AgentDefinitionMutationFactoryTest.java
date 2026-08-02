@@ -91,6 +91,11 @@ public class AgentDefinitionMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newAgent(oversized.getName(), "provider", "model", oversized));
+    AgentDefinitionCreateDTO pathBreaking =
+        create("agent/name", "provider/model", config(List.of(), List.of()), null);
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newAgent(pathBreaking.getName(), "provider", "model", pathBreaking));
   }
 
   private static AgentDefinitionCreateDTO create(

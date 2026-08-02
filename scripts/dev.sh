@@ -45,7 +45,7 @@ Environment:
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
   TEST_MINIMAX_API_KEY / TEST_MINIMAX_BASE_URL
-  # e2e profile: the complete MiniMax pair is written to seed provider id=1 after backend readiness
+  # e2e profile: the complete MiniMax pair is written to seed provider name=minimax after backend readiness
   # the base URL is normalized to end with /v1
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false

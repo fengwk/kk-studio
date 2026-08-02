@@ -207,6 +207,19 @@ class ModelInvocationPlannerTest {
   }
 
   @Test
+  void debtDetectionDoesNotResolveLiveDefinitions() {
+    RecordingResolver resolver =
+        new RecordingResolver(
+            List.of(execution("never-used", "never-used", List.of(), List.of(), false)));
+    ModelInvocationPlanner planner = new ModelInvocationPlanner(resolver);
+
+    assertTrue(
+        planner.hasResponseDebt(2L, path(new RootEntryPayload(), user("question", USER_SETTINGS))));
+    assertTrue(!planner.hasResponseDebt(1L, path(new RootEntryPayload())));
+    assertEquals(List.of(), resolver.settings);
+  }
+
+  @Test
   void resolverFailureIsTypedPlanningFailure() {
     PlanningFailure failure =
         new PlanningFailure(PlanningFailureKind.MODEL_NOT_FOUND, "model was deleted");

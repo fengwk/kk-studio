@@ -35,7 +35,12 @@ create table agent_provider (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
-    constraint ck_agent_provider_name_len check (char_length(name) > 0),
+    constraint ck_agent_provider_name check (
+        name !~ '^[[:space:]]'
+        and name !~ '[[:space:]]$'
+        and char_length(name) > 0
+        and position('/' in name) = 0
+    ),
     constraint ck_agent_provider_version_nonneg check (version >= 0)
 );
 
@@ -48,6 +53,11 @@ create table agent_model (
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
     constraint pk_agent_model primary key (provider_name, name),
+    constraint ck_agent_model_name check (
+        name !~ '^[[:space:]]'
+        and name !~ '[[:space:]]$'
+        and char_length(name) > 0
+    ),
     constraint fk_agent_model_provider foreign key (provider_name)
         references agent_provider (name),
     constraint ck_agent_model_version_nonneg check (version >= 0)
@@ -64,6 +74,12 @@ create table agent_definition (
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
+    constraint ck_agent_definition_name check (
+        name !~ '^[[:space:]]'
+        and name !~ '[[:space:]]$'
+        and char_length(name) > 0
+        and position('/' in name) = 0
+    ),
     constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
         references agent_model (provider_name, name),
     constraint ck_agent_definition_version_nonneg check (version >= 0)
@@ -165,7 +181,10 @@ create table chat (
     version             bigint        not null default 0,
     constraint ck_chat_version_nonneg check (version >= 0),
     constraint ck_chat_agent_name check (
-        btrim(agent_name) <> '' and char_length(agent_name) <= 64
+        agent_name !~ '^[[:space:]]'
+        and agent_name !~ '[[:space:]]$'
+        and char_length(agent_name) > 0
+        and position('/' in agent_name) = 0
     ),
     constraint ck_chat_environment_name check (
         environment_name is null

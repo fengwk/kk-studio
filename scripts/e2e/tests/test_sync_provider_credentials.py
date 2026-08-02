@@ -15,7 +15,6 @@ from scripts.e2e.sync_provider_credentials import (
 def minimax_row(**overrides):
     """Return the deterministic MiniMax seed provider representation."""
     row = {
-        "id": "1",
         "name": "minimax",
         "description": "MiniMax (OpenAI Responses).",
         "providerType": "openai_response",
@@ -122,7 +121,7 @@ class TestSyncMiniMax(unittest.TestCase):
 
                 self.assertEqual([], calls)
 
-    def test_complete_pair_updates_only_provider_one(self):
+    def test_complete_pair_updates_minimax_by_name(self):
         calls = []
         secret = "test-minimax-secret"
 
@@ -138,9 +137,9 @@ class TestSyncMiniMax(unittest.TestCase):
         self.assertEqual(2, len(calls))
         self.assertTrue(calls[0][0].endswith("/api/ai/catalog/providers?pageNumber=1&pageSize=50"))
         put_url, payload, headers = calls[1]
-        self.assertEqual("http://backend/api/ai/catalog/providers/1", put_url)
+        self.assertEqual("http://backend/api/ai/catalog/providers/minimax", put_url)
         self.assertEqual("application/json", headers["Content-Type"])
-        self.assertEqual("minimax", payload["name"])
+        self.assertNotIn("name", payload)
         self.assertEqual("openai_response", payload["providerType"])
         self.assertEqual("https://api.minimax.example/v1", payload["baseUrl"])
         self.assertEqual(secret, payload["credential"])
@@ -151,22 +150,20 @@ class TestSyncMiniMax(unittest.TestCase):
         )
 
     def test_missing_seed_provider_fails_without_put(self):
-        for row in (minimax_row(id="2"), minimax_row(name="unexpected")):
-            with self.subTest(row=row):
-                calls = []
+        calls = []
 
-                with self.assertRaisesRegex(RuntimeError, "id=1 name=minimax"):
-                    sync_minimax(
-                        "http://backend",
-                        env={
-                            "TEST_MINIMAX_BASE_URL": "https://api.minimax.example",
-                            "TEST_MINIMAX_API_KEY": "test-secret",
-                        },
-                        urlopen=routed_http([row], calls),
-                    )
+        with self.assertRaisesRegex(RuntimeError, "name=minimax"):
+            sync_minimax(
+                "http://backend",
+                env={
+                    "TEST_MINIMAX_BASE_URL": "https://api.minimax.example",
+                    "TEST_MINIMAX_API_KEY": "test-secret",
+                },
+                urlopen=routed_http([minimax_row(name="unexpected")], calls),
+            )
 
-                self.assertEqual(1, len(calls))
-                self.assertIsNone(calls[0][1])
+        self.assertEqual(1, len(calls))
+        self.assertIsNone(calls[0][1])
 
     def test_missing_seed_version_fails_without_put(self):
         calls = []
