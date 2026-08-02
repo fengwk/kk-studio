@@ -7,7 +7,7 @@ import java.util.Optional;
  * Use-case atomic persistence port for durable Interactions.
  *
  * <p>Implementations atomically resolve an OPEN Tool permission fact, apply the supplied approval
- * decision, and make its owned target dispatchable or terminal in the same transaction.
+ * decision, and make its owned activation dispatchable or terminal in the same transaction.
  */
 public interface InteractionTransactions {
 

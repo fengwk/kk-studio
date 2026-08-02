@@ -8,7 +8,7 @@ import java.util.Objects;
  * Framework-free Interaction query/response orchestration.
  *
  * <p>Owns Tool permission projection and deterministic approval resolution. Callers remain
- * responsible only for decimal/DTO boundaries; the transaction makes the durable target
+ * responsible only for decimal/DTO boundaries; the transaction makes the durable activation
  * dispatchable.
  */
 public final class InteractionCoordinator {

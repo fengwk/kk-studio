@@ -194,22 +194,22 @@ public interface ThreadCommandMapper extends BaseMapper {
 
   @Delete(
       """
-      delete from harness_execution_target target
-      where (target.target_kind = 'THREAD' and target.target_id = #{threadId})
-         or (target.target_kind = 'MODEL_INVOCATION' and exists (
+      delete from harness_execution_activation activation
+      where (activation.target_kind = 'THREAD' and activation.target_id = #{threadId})
+         or (activation.target_kind = 'MODEL_INVOCATION' and exists (
                select 1
                from harness_model_invocation invocation
-               where invocation.id = target.target_id
+               where invocation.id = activation.target_id
                  and invocation.thread_id = #{threadId}
              ))
-         or (target.target_kind = 'TOOL_INVOCATION' and exists (
+         or (activation.target_kind = 'TOOL_INVOCATION' and exists (
                select 1
                from harness_tool_invocation invocation
-               where invocation.id = target.target_id
+               where invocation.id = activation.target_id
                  and invocation.thread_id = #{threadId}
              ))
       """)
-  int deleteExecutionTargetsForStoppedThread(@Param("threadId") long threadId);
+  int deleteActivationsForStoppedThread(@Param("threadId") long threadId);
 
   @Select(
       "select id, thread_id, sequence, input_type, payload::text as payload_json, idempotency_key, status, created_at, applied_at "

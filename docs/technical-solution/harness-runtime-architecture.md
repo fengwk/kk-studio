@@ -4,7 +4,7 @@
 
 ## 1. Runtime 目标与边界
 
-- PostgreSQL 保存唯一 durable truth，`harness_execution_target` 保存唯一 durable activation queue。
+- PostgreSQL 保存唯一 durable truth，`harness_execution_activation` 保存唯一 durable activation queue。
 - Thread 的 Entry/head 推进串行；Model、Tool、Interaction 通过各自 durable facts 继续执行。
 - Thread activation 只做短时状态收敛，不在 activation 内等待外部 I/O。
 - PostgreSQL listener、dispatcher wake、Environment READY 和 nearest-due timer 驱动 activation。
@@ -140,7 +140,7 @@ Model Invocation 状态为 `QUEUED`、`RUNNING`、`RETRY_WAIT`、`SUCCEEDED`、`
 
 ## 7. ToolInvocation
 
-Model terminal apply 时，Reconciler 按 Provider tool call 与冻结 ToolBinding materialize ToolInvocation。ToolInvocation 保存 descriptor、arguments、Environment target、permission state 与 request 的 `yoloEnabled`。
+Model terminal apply 时，Reconciler 按 Provider tool call 与冻结 ToolBinding materialize ToolInvocation。ToolInvocation 保存 descriptor、arguments、`environmentName`、permission state 与 request 的 `yoloEnabled`。
 
 ```text
 environmentName == null
@@ -169,7 +169,7 @@ QUEUED + PENDING
 | `ThreadReconciler` | Input apply、Entry/head、Model/Tool materialization、Usage apply | Provider/Tool 外部 I/O |
 | `ModelWorker` | Model Invocation lease、delta、terminal | Entry/head |
 | `ToolWorker` | Tool Invocation lease、partial、terminal | Entry/head |
-| Interaction transaction | Interaction 与 owner target/runnable | 越权 Entry |
+| Interaction transaction | Interaction 与 owner activation/runnable | 越权 Entry |
 
 Model terminal 与 Thread `runnable=true` 同事务；Reconciler 再在同一事务中写 Assistant Entry、Usage、ToolInvocation 与 head。
 
@@ -177,11 +177,12 @@ Model terminal 与 Thread `runnable=true` 同事务；Reconciler 再在同一事
 
 ```text
 durable mutation
-  -> execution target
+  -> execution activation
   -> PostgreSQL NOTIFY
   -> listener
   -> dispatcher wake
-  -> claim target
+  -> lock due activation
+  -> dispatch target identity
   -> Reconciler / ModelWorker / ToolWorker
 ```
 

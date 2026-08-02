@@ -18,9 +18,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * Thread activation 的生产 wiring。
  *
- * <p>协作路径为：durable execution-target dispatcher -> {@link ThreadReconciler#activate(long)} ->
- * bounded reconcile executor -> {@link ThreadReconciler} -> {@link ThreadReconcileTransactions}。
- * 跨节点所有权与唤醒事实均由 PostgreSQL durable target 决定。
+ * <p>协作路径为：durable ExecutionActivation dispatcher -> {@link ThreadReconciler#activate(long)} ->
+ * bounded reconcile executor -> {@link ThreadReconciler} -> {@link
+ * ThreadReconcileTransactions}。跨节点所有权与唤醒事实均由 PostgreSQL durable activation 决定。
  */
 @Configuration
 @EnableConfigurationProperties(HarnessRuntimeProperties.class)

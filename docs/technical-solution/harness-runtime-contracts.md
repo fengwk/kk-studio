@@ -154,9 +154,9 @@ Model retry 从持久化 request 重放同一份 ProviderRequest、ToolBinding�
 
 ## 7. ToolInvocation 与 Interaction
 
-ToolInvocation 的 durable 字段包括 Thread、Assistant Entry、Model Invocation、ordinal、toolCallId、descriptor、arguments、Environment target、epoch、状态、attempt、lease、deadline、result/error、`appliedAt`、permission state 与 YOLO。
+ToolInvocation 的 durable 字段包括 Thread、Assistant Entry、Model Invocation、ordinal、toolCallId、descriptor、arguments、`environmentName`、epoch、状态、attempt、lease、deadline、result/error、`appliedAt`、permission state 与 YOLO。
 
-Environment target 为空时执行本地 Tool；非空时经 RemoteTool 发送。外部 I/O 前必须先持久化最终 descriptor/arguments 与 permission decision：
+`environmentName` 为空时执行 Platform Tool；非空时经 RemoteTool 发送到对应 Environment。外部 I/O 前必须先持久化最终 descriptor/arguments 与 permission decision：
 
 ```text
 PENDING -> ALLOWED -> external Tool I/O
@@ -194,7 +194,7 @@ EnqueueResult submitCustomMessage(
 StopResult stop(long threadId, long expectedExecutionEpoch);
 ```
 
-`createThread` 的 PostgreSQL transaction 原子写入 Session、ROOT 和已绑定 Thread。`updateHead` 只接受正 `headEntryId`，要求 Thread 静止并以 epoch CAS fencing。message/custom message 先按幂等键短路，再写 Input、sequence、runnable 和 execution target。
+`createThread` 的 PostgreSQL transaction 原子写入 Session、ROOT 和已绑定 Thread。`updateHead` 只接受正 `headEntryId`，要求 Thread 静止并以 epoch CAS fencing。message/custom message 先按幂等键短路，再写 Input、sequence、runnable 和 execution activation。
 
 ## 9. Reconciler transactions
 
@@ -208,7 +208,7 @@ StopResult stop(long threadId, long expectedExecutionEpoch);
 - 应用 Model terminal、Tool sibling terminal、Usage 与 head；
 - 在锁内 recheck 后 quiesce。
 
-所有 mutation 都校验 Thread token、execution epoch 和当前 head。Model terminal、Thread runnable 与 execution target 在同一事务提交。
+所有 mutation 都校验 Thread token、execution epoch 和当前 head。Model terminal、Thread runnable 与 execution activation 在同一事务提交。
 
 ## 10. Stop 与 head fencing
 
@@ -220,13 +220,13 @@ lock Thread
   -> append stop barrier when required
   -> cancel queued/cancellable facts
   -> epoch++
-  -> clear lease and runnable/target
+  -> clear lease and runnable/activation
 ```
 
 旧 epoch 的 Model/Tool terminal callback 必须返回 ownership lost，不能写入新 head。
 
 ## 11. Realtime 与 ports
 
-`RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。`ExecutionTargetStore` 维护 Thread/Model/Tool target，并以 PostgreSQL NOTIFY 唤醒 dispatcher。Runtime 不执行 SQL，也不直接调用 Provider、Redis、HTTP 或 WebSocket。
+`RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。`ExecutionActivationStore` 维护 Thread/Model/Tool 的 ExecutionActivation，并以 PostgreSQL NOTIFY 唤醒 dispatcher。Runtime 不执行 SQL，也不直接调用 Provider、Redis、HTTP 或 WebSocket。
 
 客户端恢复顺序是 REST snapshot → durable revision SSE → Redis realtime overlay。revision 是唯一 durable cursor。

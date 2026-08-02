@@ -830,82 +830,90 @@ create table harness_artifact (
 );
 
 ------------------------------------------------------------------------------
--- 2.5 Harness durable execution target (sole activation queue)
+-- 2.5 Harness 持久化 ExecutionActivation
 --
--- A single target row persists for the entire work lifecycle and is the only
--- durable activation queue. dispatch_enabled is the explicit gate: disabled
--- rows remain visible to ownership/reconciliation inspection but are excluded
--- from due scans and nearest-due timing. NULL route_key targets are eligible
--- on every node; non-NULL route_key targets are eligible only on a node whose
--- route eligibility snapshot contains that key. ENVIRONMENT Tool targets are
--- initially parked and only the FIFO route head is enabled. FIFO order is the
--- owning Tool invocation's created_at, assistant_entry_id, ordinal, id.
--- An enabled insert, an enable transition, or a strictly-earlier move of an
--- enabled row triggers transactional NOTIFY; lease extensions and disabled-row
--- rewrites do not.
+-- 每个目标身份只有一条持久化激活记录。SCHEDULED 记录参与到期扫描，PARKED
+-- 记录保留在持久化事实中供所有权和检查使用，但不参与分发。NULL
+-- environment_name 在每个节点都可调度；非 NULL environment_name 仅在本地
+-- READY 快照包含该名称时可调度。Environment Tool FIFO 由专用队列适配器维护。
 ------------------------------------------------------------------------------
 
-create table harness_execution_target (
-    target_kind     varchar(32)  not null,
-    target_id       bigint       not null,
-    route_key       varchar(128),
-    dispatch_enabled boolean      not null default true,
-    available_at    timestamptz(3) not null,
-    constraint pk_harness_execution_target primary key (target_kind, target_id),
-    constraint ck_harness_execution_target_kind check (
+create table harness_execution_activation (
+    target_kind       varchar(32)  not null,
+    target_id         bigint       not null,
+    environment_name  varchar(128),
+    activation_state   varchar(16)  not null,
+    wake_at            timestamptz(3) not null,
+    constraint pk_harness_execution_activation primary key (target_kind, target_id),
+    constraint ck_harness_execution_activation_kind check (
         target_kind in ('THREAD', 'MODEL_INVOCATION', 'TOOL_INVOCATION')
     ),
-    constraint ck_harness_execution_target_id_pos check (target_id > 0),
-    constraint ck_harness_execution_target_route_key check (
-        route_key is null or char_length(btrim(route_key)) > 0
+    constraint ck_harness_execution_activation_id_pos check (target_id > 0),
+    constraint ck_harness_execution_activation_environment_name check (
+        environment_name is null
+        or (
+            environment_name !~ '^[[:space:]]'
+            and environment_name !~ '[[:space:]]$'
+            and char_length(environment_name) > 0
+            and char_length(environment_name) <= 128
+        )
+    ),
+    constraint ck_harness_execution_activation_environment_kind check (
+        environment_name is null or target_kind = 'TOOL_INVOCATION'
+    ),
+    constraint ck_harness_execution_activation_state check (
+        activation_state in ('SCHEDULED', 'PARKED')
+    ),
+    constraint ck_harness_execution_activation_parked_kind check (
+        activation_state <> 'PARKED' or target_kind = 'TOOL_INVOCATION'
     )
 );
 
-create index idx_harness_execution_target_due
-    on harness_execution_target (available_at, target_kind, target_id)
-    where dispatch_enabled;
+create index idx_harness_execution_activation_due
+    on harness_execution_activation (wake_at, target_kind, target_id)
+    where activation_state = 'SCHEDULED';
 
-create index idx_harness_execution_target_route
-    on harness_execution_target (route_key, available_at)
-    where dispatch_enabled and route_key is not null;
+create index idx_harness_execution_activation_environment
+    on harness_execution_activation (environment_name, wake_at)
+    where activation_state = 'SCHEDULED' and environment_name is not null;
 
--- The activation query must see parked rows as well as enabled rows. Keep this
--- route queue index non-partial; dispatcher scans use the partial indexes above.
-create index idx_harness_execution_target_route_queue
-    on harness_execution_target (route_key, target_kind, target_id);
+create index idx_harness_execution_activation_environment_queue
+    on harness_execution_activation (environment_name, target_kind, target_id);
 
--- Only an enabled insertion wakes a dispatcher. Parked rows are durable but
--- cannot be dispatched until the route head is activated.
-create or replace function harness_execution_target_notify_insert()
+-- 只有 SCHEDULED 插入才发送唤醒通知。
+create or replace function harness_execution_activation_notify_insert()
 returns trigger language plpgsql as $$
 begin
-    if new.dispatch_enabled then
-        perform pg_notify('harness_execution_target', '');
+    if new.activation_state = 'SCHEDULED' then
+        perform pg_notify('harness_execution_activation', '');
     end if;
     return new;
 end $$;
 
-create trigger trg_harness_execution_target_notify_insert
-    after insert on harness_execution_target
-    for each row execute function harness_execution_target_notify_insert();
+create trigger trg_harness_execution_activation_notify_insert
+    after insert on harness_execution_activation
+    for each row execute function harness_execution_activation_notify_insert();
 
--- Wake when a row becomes enabled or an enabled row moves strictly earlier.
--- Lease extension, equal-time rewrites, and all disabled-row rewrites stay
--- silent. Keep dispatch_enabled in the UPDATE OF list so an enable transition
--- invokes this function.
-create or replace function harness_execution_target_notify_update()
+-- 只通知 PARKED -> SCHEDULED，以及已 SCHEDULED 记录严格提前 wake_at。
+create or replace function harness_execution_activation_notify_update()
 returns trigger language plpgsql as $$
 begin
-    if new.dispatch_enabled
-       and (not old.dispatch_enabled or new.available_at < old.available_at) then
-        perform pg_notify('harness_execution_target', '');
+    if new.activation_state = 'SCHEDULED'
+       and (
+           old.activation_state = 'PARKED'
+           or (
+               old.activation_state = 'SCHEDULED'
+               and new.wake_at < old.wake_at
+           )
+       ) then
+        perform pg_notify('harness_execution_activation', '');
     end if;
     return new;
 end $$;
 
-create trigger trg_harness_execution_target_notify_update
-    after update of dispatch_enabled, available_at on harness_execution_target
-    for each row execute function harness_execution_target_notify_update();
+create trigger trg_harness_execution_activation_notify_update
+    after update of activation_state, wake_at on harness_execution_activation
+    for each row execute function harness_execution_activation_notify_update();
 
 ------------------------------------------------------------------------------
 -- 3. Harness model_usage ledger (depends on harness_* framework)

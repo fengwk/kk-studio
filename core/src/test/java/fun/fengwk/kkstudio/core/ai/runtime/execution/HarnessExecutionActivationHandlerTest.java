@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
 
 import java.time.Instant;
 
-/** Verifies PostgreSQL durable target rows reach exactly one Runtime entry point. */
-class HarnessExecutionTargetHandlerTest {
+/** 验证一条 PostgreSQL 持久化激活只路由到一个 Runtime 入口。 */
+class HarnessExecutionActivationHandlerTest {
 
   @Test
   void activatesThreadThroughReconciler() {
@@ -27,7 +27,7 @@ class HarnessExecutionTargetHandlerTest {
 
     boolean handled =
         handler(threadReconciler, modelWorker, toolWorker)
-            .handle(row(ExecutionTargetKind.THREAD, 11L));
+            .handle(activation(ExecutionTargetKind.THREAD, 11L));
 
     assertTrue(handled);
     verify(threadReconciler).activate(11L);
@@ -36,7 +36,7 @@ class HarnessExecutionTargetHandlerTest {
   }
 
   @Test
-  void claimsModelTargetSynchronously() {
+  void handlesModelActivationSynchronously() {
     ThreadReconciler threadReconciler = mock(ThreadReconciler.class);
     ModelWorker modelWorker = mock(ModelWorker.class);
     ToolWorker toolWorker = mock(ToolWorker.class);
@@ -44,7 +44,7 @@ class HarnessExecutionTargetHandlerTest {
 
     boolean handled =
         handler(threadReconciler, modelWorker, toolWorker)
-            .handle(row(ExecutionTargetKind.MODEL_INVOCATION, 12L));
+            .handle(activation(ExecutionTargetKind.MODEL_INVOCATION, 12L));
 
     assertTrue(handled);
     verify(modelWorker).activate(12L);
@@ -61,7 +61,7 @@ class HarnessExecutionTargetHandlerTest {
 
     boolean handled =
         handler(threadReconciler, modelWorker, toolWorker)
-            .handle(row(ExecutionTargetKind.TOOL_INVOCATION, 13L));
+            .handle(activation(ExecutionTargetKind.TOOL_INVOCATION, 13L));
 
     assertFalse(handled);
     verify(toolWorker).dispatch(13L);
@@ -69,13 +69,13 @@ class HarnessExecutionTargetHandlerTest {
     verify(modelWorker, never()).activate(13L);
   }
 
-  private static HarnessExecutionTargetHandler handler(
+  private static HarnessExecutionActivationHandler handler(
       ThreadReconciler threadReconciler, ModelWorker modelWorker, ToolWorker toolWorker) {
-    return new HarnessExecutionTargetHandler(threadReconciler, modelWorker, toolWorker);
+    return new HarnessExecutionActivationHandler(threadReconciler, modelWorker, toolWorker);
   }
 
-  private static ExecutionTargetRow row(ExecutionTargetKind kind, long targetId) {
-    return new ExecutionTargetRow(
-        kind, targetId, null, Instant.parse("2026-01-01T00:00:00Z"), true);
+  private static ExecutionActivation activation(ExecutionTargetKind kind, long targetId) {
+    return new ExecutionActivation(
+        kind, targetId, null, ActivationState.SCHEDULED, Instant.parse("2026-01-01T00:00:00Z"));
   }
 }

@@ -70,7 +70,7 @@ Gateway 可按需通过 `LOAD_SKILL` 请求完整 skill 正文。runtime-managed
 
 ## Invocation 分发
 
-`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 只通过 `TOOL_INVOCATION` durable target 分发指定 Invocation；`PostgresqlExecutionTargetDispatcher` 仅在该 Environment 位于当前 READY snapshot 时领取 due route head。READY event 只调用 dispatcher wake，使其重新读取 route eligibility 与 durable FIFO target。非空目标经 `RemoteTool` 与 Gateway transport 分发，空目标由本地 ToolRegistry 执行。发送前发现 Environment unavailable 时，worker 将 Invocation 终结为 `FAILED`；发送结果不确定时终结为 `UNKNOWN`，不得重放可能已经发生的副作用。
+`harness_tool_invocation.environment_name` 冻结实时环境名。统一 `ToolWorker` 只通过 `TOOL_INVOCATION` 的 ExecutionActivation 分发指定 Invocation；`PostgresqlExecutionActivationDispatcher` 仅在该 Environment 位于当前 READY snapshot 时领取 due 激活。READY event 只调用 dispatcher wake，使其重新读取 Environment eligibility 与 durable FIFO activation。非空目标经 `RemoteTool` 与 Gateway transport 分发，空目标由本地 ToolRegistry 执行。发送前发现 Environment unavailable 时，worker 将 Invocation 终结为 `FAILED`；发送结果不确定时终结为 `UNKNOWN`，不得重放可能已经发生的副作用。
 
 ```mermaid
 sequenceDiagram
@@ -79,7 +79,7 @@ sequenceDiagram
     participant G as Environment Gateway
     participant R as Live Registry
     participant L as READY listener bridge
-    participant ED as ExecutionTargetDispatcher
+    participant ED as ExecutionActivationDispatcher
     participant TW as ToolWorker
     participant DB as PostgreSQL
 
@@ -93,7 +93,7 @@ sequenceDiagram
     G->>R: mark READY, skills, lastSeen
     G-->>L: READY hint after protocol locks
     L-->>ED: wake()
-    ED->>TW: dispatch eligible route head
+    ED->>TW: dispatch eligible activation head
     TW->>DB: claim ToolInvocation lease
     TW->>G: RemoteTool send INVOKE
     G->>D: INVOKE
@@ -113,7 +113,7 @@ Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。`INVOK
 
 连接丢失或发送失败只丢弃瞬时 active handle，不伪造终态。持久 lease 与 fencing 仍由 PostgreSQL claim 约束。
 
-Gateway 构造时注入不可变 `EnvironmentReadyListener`，不持有 ToolWorker，也不暴露 mutable handler/executor setter。`HarnessToolWorkerConfiguration` 只按 `RemoteToolTransport` SPI 构造 ToolWorker；production listener 将 READY event 桥接为 `PostgresqlExecutionTargetDispatcher.wake()`。dispatcher 在自己的单线程 drain 中重读 READY snapshot 与 durable FIFO target；handler 失败只记录并隔离，不在 WebSocket caller thread 直调，也不轮询 READY 连接。
+Gateway 构造时注入不可变 `EnvironmentReadyListener`，不持有 ToolWorker，也不暴露 mutable handler/executor setter。`HarnessToolWorkerConfiguration` 只按 `RemoteToolTransport` SPI 构造 ToolWorker；production listener 将 READY event 桥接为 `PostgresqlExecutionActivationDispatcher.wake()`。dispatcher 在自己的单线程 drain 中重读 READY snapshot 与 durable FIFO activation；handler 失败只记录并隔离，不在 WebSocket caller thread 直调，也不轮询 READY 连接。
 
 ## 回调、结果与 Artifact
 

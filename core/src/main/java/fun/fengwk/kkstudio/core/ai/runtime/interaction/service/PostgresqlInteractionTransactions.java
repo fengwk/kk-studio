@@ -4,8 +4,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetRow;
-import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionTargetStore;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ActivationState;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.EnvironmentToolActivationQueue;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivation;
+import fun.fengwk.kkstudio.core.ai.runtime.execution.ExecutionActivationStore;
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.mapper.InteractionMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.mapper.InteractionThreadMapper;
 import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.mapper.InteractionToolOwnerMapper;
@@ -26,7 +28,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 
-/** PostgreSQL transaction adapter for the sole durable Tool permission Interaction product. */
+/** PostgreSQL Tool 权限 Interaction 持久化事务适配器。 */
 @Service
 public class PostgresqlInteractionTransactions implements InteractionTransactions {
   static final String TOOL_PERMISSION_DENIED_ERROR_JSON =
@@ -36,18 +38,22 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
   private final InteractionMapper interactionMapper;
   private final InteractionThreadMapper threadMapper;
   private final InteractionToolOwnerMapper toolMapper;
-  private final ExecutionTargetStore executionTargetStore;
+  private final ExecutionActivationStore executionActivationStore;
+  private final EnvironmentToolActivationQueue environmentToolActivationQueue;
 
   public PostgresqlInteractionTransactions(
       InteractionMapper interactionMapper,
       InteractionThreadMapper threadMapper,
       InteractionToolOwnerMapper toolMapper,
-      ExecutionTargetStore executionTargetStore) {
+      ExecutionActivationStore executionActivationStore,
+      EnvironmentToolActivationQueue environmentToolActivationQueue) {
     this.interactionMapper = Objects.requireNonNull(interactionMapper, "interactionMapper");
     this.threadMapper = Objects.requireNonNull(threadMapper, "threadMapper");
     this.toolMapper = Objects.requireNonNull(toolMapper, "toolMapper");
-    this.executionTargetStore =
-        Objects.requireNonNull(executionTargetStore, "executionTargetStore");
+    this.executionActivationStore =
+        Objects.requireNonNull(executionActivationStore, "executionActivationStore");
+    this.environmentToolActivationQueue =
+        Objects.requireNonNull(environmentToolActivationQueue, "environmentToolActivationQueue");
   }
 
   @Override
@@ -79,7 +85,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     Objects.requireNonNull(decision, "decision");
     Instant terminalAt = Objects.requireNonNull(resolvedAt, "resolvedAt");
 
-    // Read only the immutable owner id before acquiring the documented global lock order.
+    // 在获取约定的全局锁顺序前，只读取不可变的所有者标识。
     Interaction unlocked = peekInteraction(interactionId);
     PermissionOwnerLock ownerLock = lockPermissionOwner(unlocked.toolInvocationId());
     Interaction current = lockOpen(interactionId, expectedVersion);
@@ -112,8 +118,8 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
   }
 
   /**
-   * Locks Thread → ToolInvocation → ExecutionTarget using only durable database facts. Request JSON
-   * is audit data and never selects a mutation target.
+   * 按 Thread → ToolInvocation → ExecutionActivation 顺序加锁，只使用数据库中的持久化事实。 Request JSON
+   * 仅用于审计，不参与选择变更对象。
    */
   private PermissionOwnerLock lockPermissionOwner(long toolInvocationId) {
     InteractionToolOwnerDO peek = toolMapper.find(toolInvocationId);
@@ -136,15 +142,15 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
       throw new IllegalStateException(
           "tool permission owner is not WAITING_INTERACTION/ASKED: " + toolInvocationId);
     }
-    ExecutionTargetRow target =
-        executionTargetStore
+    ExecutionActivation activation =
+        executionActivationStore
             .lock(ExecutionTargetKind.TOOL_INVOCATION, toolInvocationId)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
-                        "tool permission owner is missing its target: " + toolInvocationId));
-    requireParkedPermissionTarget(tool, target);
-    return new PermissionOwnerLock(tool, target);
+                        "tool permission owner is missing its activation: " + toolInvocationId));
+    requireParkedPermissionActivation(tool, activation);
+    return new PermissionOwnerLock(tool, activation);
   }
 
   private void approveToolPermission(PermissionOwnerLock ownerLock, Instant transitionAt) {
@@ -152,20 +158,20 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     if (toolMapper.approveAsked(tool.getId()) != 1) {
       throw new IllegalStateException("tool permission approval lost race: " + tool.getId());
     }
-    Instant availableAt = persisted(transitionAt);
-    ExecutionTargetRow target = ownerLock.target();
-    requireTargetAffected(
-        executionTargetStore.rescheduleLocked(
-            ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), target.routeKey(), availableAt),
-        "reschedule approved tool permission target");
-    if (target.routeKey() == null) {
-      requireTargetAffected(
-          executionTargetStore.activateLocked(
-              ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), null, availableAt),
-          "activate approved platform tool target");
+    Instant wakeAt = persisted(transitionAt);
+    ExecutionActivation activation = ownerLock.activation();
+    requireActivationAffected(
+        executionActivationStore.rescheduleLocked(
+            ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), wakeAt),
+        "reschedule approved tool permission activation");
+    if (activation.environmentName() == null) {
+      requireActivationAffected(
+          executionActivationStore.activateLocked(
+              ExecutionTargetKind.TOOL_INVOCATION, tool.getId(), wakeAt),
+          "activate approved platform tool activation");
       return;
     }
-    executionTargetStore.activateOldestEnvironment(target.routeKey(), availableAt);
+    environmentToolActivationQueue.activateOldestTool(activation.environmentName(), wakeAt);
   }
 
   private void denyToolPermission(PermissionOwnerLock ownerLock, Instant transitionAt) {
@@ -183,13 +189,14 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
       throw new IllegalStateException("tool permission denial lost race: " + tool.getId());
     }
     setThreadRunnable(tool.getThreadId(), true, terminalAt);
-    requireTargetAffected(
-        executionTargetStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, tool.getId()),
-        "delete denied tool permission target");
-    executionTargetStore.schedule(ExecutionTargetKind.THREAD, tool.getThreadId(), null, terminalAt);
-    String routeKey = ownerLock.target().routeKey();
-    if (routeKey != null) {
-      executionTargetStore.activateOldestEnvironment(routeKey, terminalAt);
+    requireActivationAffected(
+        executionActivationStore.deleteLocked(ExecutionTargetKind.TOOL_INVOCATION, tool.getId()),
+        "delete denied tool permission activation");
+    executionActivationStore.schedule(
+        ExecutionTargetKind.THREAD, tool.getThreadId(), null, terminalAt);
+    String environmentName = ownerLock.activation().environmentName();
+    if (environmentName != null) {
+      environmentToolActivationQueue.activateOldestTool(environmentName, terminalAt);
     }
   }
 
@@ -209,20 +216,20 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     }
   }
 
-  private static void requireParkedPermissionTarget(
-      InteractionToolOwnerDO tool, ExecutionTargetRow target) {
-    if (target.dispatchEnabled()) {
+  private static void requireParkedPermissionActivation(
+      InteractionToolOwnerDO tool, ExecutionActivation activation) {
+    if (activation.activationState() != ActivationState.PARKED) {
       throw new IllegalStateException(
-          "tool permission target must be parked while interaction is open: " + tool.getId());
+          "tool permission activation must be parked while interaction is open: " + tool.getId());
     }
-    String expectedRoute = tool.getEnvironmentName();
-    if (!Objects.equals(expectedRoute, target.routeKey())) {
+    String expectedEnvironment = tool.getEnvironmentName();
+    if (!Objects.equals(expectedEnvironment, activation.environmentName())) {
       throw new IllegalStateException(
-          "tool permission target route does not match invocation: " + tool.getId());
+          "tool permission activation environment does not match invocation: " + tool.getId());
     }
   }
 
-  private static void requireTargetAffected(int affected, String operation) {
+  private static void requireActivationAffected(int affected, String operation) {
     if (affected != 1) {
       throw new IllegalStateException(operation + " affected " + affected + " rows");
     }
@@ -236,7 +243,7 @@ public class PostgresqlInteractionTransactions implements InteractionTransaction
     return first.isAfter(second) ? first : second;
   }
 
-  private record PermissionOwnerLock(InteractionToolOwnerDO tool, ExecutionTargetRow target) {}
+  private record PermissionOwnerLock(InteractionToolOwnerDO tool, ExecutionActivation activation) {}
 
   private Interaction lockOpen(long interactionId, long expectedVersion) {
     InteractionDO row = interactionMapper.findForUpdate(interactionId);

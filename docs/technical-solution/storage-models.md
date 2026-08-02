@@ -73,7 +73,7 @@ USER/CUSTOM Input 的 payload 与 harvest 后的对应 Entry 都保存：
 | `harness_model_invocation` | source head、epoch、完整 `ModelInvocationRequest`、状态、attempt、lease、deadline、result/error、`applied_at` 与安全流快照 |
 | `harness_tool_invocation` | Assistant Entry、Model Invocation、ordinal、tool call、descriptor/arguments、`environment_name`、权限、YOLO、状态、lease、结果 |
 | `harness_interaction` | Tool permission 的 request/response、`OPEN/RESOLVED` 与 version |
-| `harness_execution_target` | Thread、Model、Tool target 的唯一 durable activation queue；`dispatch_enabled` 控制可调度性 |
+| `harness_execution_activation` | Thread、Model、Tool 的唯一 durable activation queue；`activation_state` 使用 `SCHEDULED/PARKED` 表达可调度性 |
 
 `ModelInvocationRequest` 的 `providerRequest`、`toolBindings`、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。`providerRequest.model` 还冻结 `providerName` 与非负 `providerVersion`。Retry 只改变 invocation attempt 与调度时间，按该版本的 Provider revision 重放相同 request；ToolWorker 使用 request 中的原 binding。
 
@@ -120,5 +120,5 @@ created_at
 - Thread、Invocation、Interaction、Entry/Input 的锁序由 Runtime 契约统一定义。
 - Assistant Entry、Usage、ToolInvocation materialization 与 head 推进在 Reconciler 事务中保持原子。
 - Input sequence、幂等键与 `runnable=true` 在同一事务更新。
-- Model/Tool terminal 与后续 Thread activation target 在同一事务更新。
+- Model/Tool terminal 与后续 Thread activation 在同一事务更新。
 - PostgreSQL trigger 在事务提交后发送 NOTIFY；通知只负责唤醒，不承载事实。

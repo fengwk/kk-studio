@@ -115,7 +115,7 @@ Chat 当前可见设置
 
 Resolver 发现 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 缺失时返回 typed `PlanningFailure`；Reconciler 将其写成 `ASSISTANT_ERROR` barrier，模型调用不会静默降级。已创建的 ModelInvocation retry 使用同一份 request，ToolWorker 也只使用其中冻结的 ToolBinding。
 
-`ThreadReconciler` 是执行过程中 Entry/head 的唯一写者。ModelWorker 只写 ModelInvocation 和 realtime delta；ToolWorker 只写 ToolInvocation 和 realtime partial；terminal 事实通过 PostgreSQL execution target 唤醒后续 Reconcile。
+`ThreadReconciler` 是执行过程中 Entry/head 的唯一写者。ModelWorker 只写 ModelInvocation 和 realtime delta；ToolWorker 只写 ToolInvocation 和 realtime partial；terminal 事实通过 PostgreSQL ExecutionActivation 唤醒后续 Reconcile。
 
 ## 6. Canvas
 
@@ -123,6 +123,6 @@ Canvas 继续使用独立的 `CanvasDocument`、`CanvasNode`、`CanvasLink` 与 
 
 ## 7. Realtime 与恢复
 
-PostgreSQL 是唯一 durable truth，`harness_execution_target` 是唯一 durable activation queue。Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable `revision` 打开 SSE。Redis 丢失时重新加载 snapshot，不从 delta 重建状态。
+PostgreSQL 是唯一 durable truth，`harness_execution_activation` 是唯一 durable activation queue。Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable `revision` 打开 SSE。Redis 丢失时重新加载 snapshot，不从 delta 重建状态。
 
 详细契约见 [harness-runtime-architecture.md](harness-runtime-architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md) 与 [harness-storage-runtime.md](harness-storage-runtime.md)。

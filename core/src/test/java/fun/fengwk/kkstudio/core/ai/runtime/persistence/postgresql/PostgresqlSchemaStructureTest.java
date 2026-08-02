@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -55,7 +56,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_goal",
           "harness_model_usage",
           "harness_artifact",
-          "harness_execution_target");
+          "harness_execution_activation");
 
   private static final Set<String> SEQUENCE_BACKED_TABLES =
       Set.of(
@@ -196,32 +197,32 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void harnessExecutionTargetExposesOnlyItsDurableQueueContract() throws SQLException {
+  void harnessExecutionActivationExposesOnlyItsDurableQueueContract() throws SQLException {
     assertColumns(
-        "harness_execution_target",
+        "harness_execution_activation",
         "target_kind",
         "target_id",
-        "route_key",
-        "dispatch_enabled",
-        "available_at");
+        "environment_name",
+        "activation_state",
+        "wake_at");
   }
 
   @Test
-  void executionTargetRouteQueueIndexIncludesParkedRows() throws SQLException {
+  void executionActivationEnvironmentQueueIndexIncludesParkedRows() throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
                 "select indexdef from pg_indexes where schemaname = 'public'"
-                    + " and indexname = 'idx_harness_execution_target_route_queue'")) {
+                    + " and indexname = 'idx_harness_execution_activation_environment_queue'")) {
       try (ResultSet rs = ps.executeQuery()) {
-        assertTrue(rs.next(), "route queue index must exist");
+        assertTrue(rs.next(), "Environment queue index must exist");
         String indexDefinition = rs.getString(1).toLowerCase();
         assertTrue(
-            indexDefinition.contains("(route_key, target_kind, target_id)"),
-            () -> "route queue index columns mismatch: " + indexDefinition);
+            indexDefinition.contains("(environment_name, target_kind, target_id)"),
+            () -> "Environment queue index columns mismatch: " + indexDefinition);
         assertTrue(
             !indexDefinition.contains(" where "),
-            () -> "route queue index must be non-partial: " + indexDefinition);
+            () -> "environment queue index must be non-partial: " + indexDefinition);
       }
     }
   }
@@ -265,7 +266,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "harness_thread", "processor_until");
     assertColumnType("timestamp with time zone", "harness_thread_input", "applied_at");
     assertColumnType("timestamp with time zone", "harness_thread_input", "created_at");
-    assertColumnType("timestamp with time zone", "harness_execution_target", "available_at");
+    assertColumnType("timestamp with time zone", "harness_execution_activation", "wake_at");
     assertColumnType("timestamp with time zone", "agent_provider_revision", "created_at");
   }
 
@@ -277,8 +278,41 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void usesNativeBooleanForFlags() throws SQLException {
     assertColumnType("boolean", "harness_thread", "runnable");
-    assertColumnType("boolean", "harness_execution_target", "dispatch_enabled");
     assertColumnType("boolean", "harness_model_usage", "cache_eligible");
+  }
+
+  @Test
+  void executionActivationCheckConstraintsRejectInvalidRows() {
+    assertThrows(
+        SQLException.class, () -> insertActivation("THREAD", 910_001L, "env-a", "SCHEDULED"));
+    assertThrows(SQLException.class, () -> insertActivation("THREAD", 910_002L, null, "PARKED"));
+    assertThrows(
+        SQLException.class, () -> insertActivation("TOOL_INVOCATION", 910_003L, " ", "SCHEDULED"));
+    assertThrows(
+        SQLException.class, () -> insertActivation("TOOL_INVOCATION", 910_004L, null, "INVALID"));
+    assertThrows(
+        SQLException.class,
+        () -> insertActivation("TOOL_INVOCATION", 910_005L, " env-a", "SCHEDULED"));
+    assertThrows(
+        SQLException.class,
+        () -> insertActivation("TOOL_INVOCATION", 910_006L, "env-a ", "SCHEDULED"));
+  }
+
+  private static void insertActivation(
+      String targetKind, long targetId, String environmentName, String activationState)
+      throws SQLException {
+    try (Connection connection = newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement(
+                "insert into harness_execution_activation"
+                    + " (target_kind, target_id, environment_name, activation_state, wake_at)"
+                    + " values (?, ?, ?, ?, current_timestamp)")) {
+      statement.setString(1, targetKind);
+      statement.setLong(2, targetId);
+      statement.setString(3, environmentName);
+      statement.setString(4, activationState);
+      statement.executeUpdate();
+    }
   }
 
   @Test

@@ -39,27 +39,24 @@ import java.sql.Connection;
 import java.time.Instant;
 import java.util.List;
 
-/**
- * Verifies the production composition starts PostgreSQL activation and bridges an Environment READY
- * event into route-aware durable dispatch.
- */
+/** 验证生产配线能够启动 PostgreSQL 激活，并将 Environment READY 事件接入按路由筛选的持久化分发。 */
 @SpringBootTest(
     classes = CoreTestApplication.class,
     properties = {"kk-studio.harness.runtime.workers-enabled=true", "spring.flyway.enabled=false"})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class HarnessExecutionTargetProductionWiringIntegrationTest {
+class HarnessExecutionActivationProductionWiringIntegrationTest {
 
   static {
     resetSchema();
   }
 
-  @Autowired private PostgresqlExecutionTargetDispatcher dispatcher;
-  @Autowired private PostgresqlExecutionTargetListener listener;
+  @Autowired private PostgresqlExecutionActivationDispatcher dispatcher;
+  @Autowired private PostgresqlExecutionActivationListener listener;
   @Autowired private EnvironmentReadyListener environmentReadyListener;
-  @Autowired private PostgresqlExecutionTargetStore store;
+  @Autowired private PostgresqlExecutionActivationStore store;
 
   @Autowired
-  @Qualifier("harnessExecutionTargetLifecycle")
+  @Qualifier("harnessExecutionActivationLifecycle")
   private SmartLifecycle activationLifecycle;
 
   @MockitoBean private ThreadReconciler threadReconciler;
@@ -145,7 +142,7 @@ class HarnessExecutionTargetProductionWiringIntegrationTest {
 
     @Override
     public void close() {
-      // Test-only immutable connection.
+      // 仅供测试使用的不可变连接。
     }
   }
 }

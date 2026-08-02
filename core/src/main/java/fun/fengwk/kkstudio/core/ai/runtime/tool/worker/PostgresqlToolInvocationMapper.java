@@ -153,7 +153,7 @@ public interface PostgresqlToolInvocationMapper extends BaseMapper {
 
   /**
    * Recover a RUNNING/PENDING row whose lease expired back to initial QUEUED/PENDING while keeping
-   * the frozen original provider call and clearing all worker clocks. The target reschedule is
+   * the frozen original provider call and clearing all worker clocks. The activation reschedule is
    * owned by the calling transaction.
    */
   @Update(
