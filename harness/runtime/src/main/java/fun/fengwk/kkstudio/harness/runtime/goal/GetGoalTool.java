@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -25,6 +26,7 @@ public final class GetGoalTool implements Tool {
       new ToolDescriptor(
           NAME,
           VERSION,
+          ToolType.PLATFORM,
           GoalToolPrompts.load("goal-get-tool.md"),
           NAME,
           new ToolParamsSchema("Read the current Thread goal.", Map.of(), Set.of(), false),

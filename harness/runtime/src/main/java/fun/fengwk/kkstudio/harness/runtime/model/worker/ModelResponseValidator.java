@@ -10,9 +10,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ToolCallVisibility;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -33,8 +34,20 @@ final class ModelResponseValidator {
   static void validate(ProviderRequest request, ProviderResponse response) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(response, "response");
-    Set<String> declaredToolNames = declaredToolNames(request.tools());
+    List<String> availableToolNames = ToolCallVisibility.availableToolNames(request);
+    Set<String> declaredToolNames = declaredToolNames(availableToolNames);
     boolean hasToolCalls = !response.toolCalls().isEmpty();
+    Set<String> toolCallIds = new HashSet<>();
+    for (ProviderToolCall call : response.toolCalls()) {
+      if (!declaredToolNames.contains(call.name())) {
+        throw new IllegalArgumentException(
+            ToolCallVisibility.unavailableMessage(call.name(), availableToolNames));
+      }
+      if (!toolCallIds.add(call.id())) {
+        throw new IllegalArgumentException("tool call ids must be unique: " + call.id());
+      }
+      requireJsonObject(call.argumentsJson(), "tool call argumentsJson");
+    }
     if (response.stopReason() == ProviderStopReason.TOOL_CALLS && !hasToolCalls) {
       throw new IllegalArgumentException("tool-call response requires tool calls");
     }
@@ -42,24 +55,13 @@ final class ModelResponseValidator {
       throw new IllegalArgumentException(
           "only TOOL_CALLS stop reason may return executable tool calls");
     }
-    Set<String> toolCallIds = new HashSet<>();
-    for (ProviderToolCall call : response.toolCalls()) {
-      if (!declaredToolNames.contains(call.name())) {
-        throw new IllegalArgumentException("tool call references undeclared tool: " + call.name());
-      }
-      if (!toolCallIds.add(call.id())) {
-        throw new IllegalArgumentException("tool call ids must be unique: " + call.id());
-      }
-      requireJsonObject(call.argumentsJson(), "tool call argumentsJson");
-    }
   }
 
-  private static Set<String> declaredToolNames(Iterable<ProviderToolDefinition> definitions) {
+  private static Set<String> declaredToolNames(Iterable<String> definitions) {
     Set<String> result = new HashSet<>();
-    for (ProviderToolDefinition definition : definitions) {
-      if (!result.add(definition.name())) {
-        throw new IllegalArgumentException(
-            "provider request contains duplicate tool: " + definition.name());
+    for (String name : definitions) {
+      if (!result.add(name)) {
+        throw new IllegalArgumentException("provider request contains duplicate tool: " + name);
       }
     }
     return result;

@@ -5,7 +5,6 @@ export interface ChatDTO {
   id: string
   title: string | null
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   version: CatalogVersion
   createTime: InstantTimestamp
@@ -15,15 +14,13 @@ export interface ChatDTO {
 export interface ChatCreateDTO {
   title?: string
   agentName: string
-  environmentName?: string | null
   yoloEnabled?: boolean
 }
 
-/** Partial update: omitted fields preserve; explicit null clears environmentName. */
+/** Partial update: omitted fields preserve. */
 export interface ChatUpdateDTO {
   title?: string | null
   agentName?: string
-  environmentName?: string | null
   yoloEnabled?: boolean
   expectedVersion: CatalogVersion
 }

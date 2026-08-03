@@ -12,7 +12,6 @@ import { applyChatLayout, loadChatPaneState, saveChatPaneState } from '@/feature
 import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -130,7 +129,6 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -140,7 +138,6 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       version: '2',
       createTime: null,
@@ -193,7 +190,6 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       agentName: 'missing',
-      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -207,83 +203,15 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('button', { name: 'assistant' })).toBeInTheDocument()
   })
 
-  it('updates the visible Chat Environment with the exact nullable request shape', async () => {
+  it('keeps a blank-pane Environment draft out of Chat requests', async () => {
     const user = userEvent.setup()
     renderWorkspace()
 
     await screen.findByLabelText('给 AI 发送消息')
     await user.click(screen.getByRole('button', { name: '环境：（无）' }))
     await user.click(screen.getByRole('button', { name: 'local' }))
-    await waitFor(() =>
-      expect(chatService.updateChat).toHaveBeenCalledWith('chat-1', {
-        environmentName: 'local',
-        expectedVersion: '1',
-      }),
-    )
-
-    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
-    await user.click(
-      within(screen.getByLabelText('选择 Environment')).getByRole('button', {
-        name: /（无）/,
-      }),
-    )
-    await waitFor(() =>
-      expect(chatService.updateChat).toHaveBeenLastCalledWith('chat-1', {
-        environmentName: null,
-        expectedVersion: '2',
-      }),
-    )
-  })
-
-  it('keeps returned Chat version authoritative across stale refetches and the next mutation', async () => {
-    const user = userEvent.setup()
-    const initialChat: ChatDTO = {
-      id: 'chat-1',
-      title: 'Workspace',
-      agentName: 'assistant',
-      environmentName: null,
-      yoloEnabled: false,
-      version: '1',
-      createTime: null,
-      updateTime: null,
-    }
-    const updatedChat: ChatDTO = {
-      ...initialChat,
-      environmentName: 'local',
-      version: '2',
-    }
-    const secondUpdatedChat: ChatDTO = {
-      ...updatedChat,
-      environmentName: null,
-      version: '3',
-    }
-    let resolveStaleRefetch!: (chat: ChatDTO) => void
-    const staleRefetch = new Promise<ChatDTO>((resolve) => {
-      resolveStaleRefetch = resolve
-    })
-    vi.mocked(chatService.getChat)
-      .mockResolvedValueOnce(initialChat)
-      .mockImplementation(() => staleRefetch)
-    vi.mocked(chatService.updateChat)
-      .mockResolvedValueOnce(updatedChat)
-      .mockResolvedValueOnce(secondUpdatedChat)
-
-    const queryClient = renderWorkspace()
-    queryClient.setQueryData(queryKeys.chats.list, [initialChat])
-    await screen.findByLabelText('给 AI 发送消息')
-
-    await user.click(screen.getByRole('button', { name: '环境：（无）' }))
-    await user.click(screen.getByRole('button', { name: 'local' }))
-    await waitFor(() =>
-      expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
-        environmentName: 'local',
-        expectedVersion: '1',
-      }),
-    )
-    await waitFor(() =>
-      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('2'),
-    )
-    expect(queryClient.getQueryData<ChatDTO[]>(queryKeys.chats.list)?.[0]).toMatchObject(updatedChat)
+    expect(screen.getByRole('button', { name: '环境：local' })).toBeInTheDocument()
+    expect(chatService.updateChat).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: '环境：local' }))
     await user.click(
@@ -291,62 +219,40 @@ describe('ChatWorkspacePage', () => {
         name: /（无）/,
       }),
     )
-    await waitFor(() =>
-      expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
-        environmentName: null,
-        expectedVersion: '2',
-      }),
-    )
-    await waitFor(() =>
-      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('3'),
-    )
-
-    await act(async () => {
-      resolveStaleRefetch(initialChat)
-      await staleRefetch
-    })
-    await waitFor(() =>
-      expect(queryClient.getQueryData<ChatDTO>(queryKeys.chats.detail('chat-1'))?.version).toBe('3'),
-    )
-    expect(queryClient.getQueryData<ChatDTO[]>(queryKeys.chats.list)?.[0]?.version).toBe('3')
+    expect(screen.getByRole('button', { name: '环境：（无）' })).toBeInTheDocument()
+    expect(chatService.updateChat).not.toHaveBeenCalled()
   })
 
-  it('refreshes the Chat after a 409 and keeps the conflict visible before retry', async () => {
-    const user = userEvent.setup()
-    const initialChat: ChatDTO = {
-      id: 'chat-1',
-      title: 'Workspace',
-      agentName: 'assistant',
-      environmentName: null,
-      yoloEnabled: false,
-      version: '1',
-      createTime: null,
-      updateTime: null,
-    }
-    const refreshedChat: ChatDTO = { ...initialChat, version: '2' }
-    vi.mocked(chatService.getChat)
-      .mockResolvedValueOnce(initialChat)
-      .mockResolvedValue(refreshedChat)
-    vi.mocked(chatService.updateChat)
-      .mockRejectedValueOnce(new ApiError('Chat version conflict', 409))
-      .mockResolvedValueOnce({ ...refreshedChat, environmentName: 'local', version: '3' })
-
-    renderWorkspace()
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-    await user.click(composer)
-    await user.keyboard('/environment{Enter}')
-    await user.click(screen.getByRole('button', { name: 'local' }))
-
-    expect(await screen.findByText('Chat version conflict')).toBeInTheDocument()
-    await waitFor(() => expect(chatService.getChat).toHaveBeenCalledTimes(2))
-
-    await user.click(screen.getByRole('button', { name: 'local' }))
-    await waitFor(() =>
-      expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
-        environmentName: 'local',
-        expectedVersion: '2',
+  it('keeps bound pane Environments independent of Chat and each other', async () => {
+    const state = applyChatLayout(loadChatPaneState('chat-1'), 'split-2')
+    state.panes[0].threadId = 't-local'
+    state.panes[1].threadId = 't-remote'
+    saveChatPaneState('chat-1', state)
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
+      snapshot({
+        threadId,
+        sessionId: `session-${threadId}`,
+        sessionTitle: null,
+        headEntryId: `head-${threadId}`,
+        environmentName: threadId === 't-local' ? 'local' : 'remote',
+        executionEpoch: 1,
+        revision: '0',
+        status: 'IDLE',
+        inputSequence: 0,
+        processing: false,
+        createTime: null,
+        updateTime: null,
       }),
     )
+
+    renderWorkspace()
+    await waitFor(() => {
+      const environmentButtons = screen.getAllByRole('button', { name: /环境：/ })
+      expect(environmentButtons.map((button) => button.textContent)).toEqual(
+        expect.arrayContaining(['环境：local', '环境：remote']),
+      )
+    })
+    expect(chatService.updateChat).not.toHaveBeenCalled()
   })
 
   it('serializes same-tick split-pane selections and ignores an immediate send', async () => {
@@ -406,7 +312,6 @@ describe('ChatWorkspacePage', () => {
         id: 'chat-1',
         title: 'Workspace',
         agentName: 'coder',
-        environmentName: null,
         yoloEnabled: false,
         version: '2',
         createTime: null,
@@ -424,7 +329,6 @@ describe('ChatWorkspacePage', () => {
       id: 'chat-1',
       title: 'Workspace',
       agentName: 'missing',
-      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -436,7 +340,6 @@ describe('ChatWorkspacePage', () => {
         id: 'chat-1',
         title: 'Workspace',
         agentName: 'assistant',
-        environmentName: null,
         yoloEnabled: false,
         version: '2',
         createTime: null,
@@ -450,6 +353,7 @@ describe('ChatWorkspacePage', () => {
         sessionId: 's-stale-agent',
         sessionTitle: null,
         headEntryId: 'e-root',
+        environmentName: null,
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
@@ -638,6 +542,7 @@ describe('ChatWorkspacePage', () => {
         sessionId: 's-new',
         sessionTitle: null,
         headEntryId: 'e-root',
+        environmentName: null,
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
@@ -667,6 +572,7 @@ describe('ChatWorkspacePage', () => {
         sessionId: 's-new',
         sessionTitle: null,
         headEntryId: 'e-root',
+        environmentName: null,
         executionEpoch: 1,
         revision: '0',
         status: 'IDLE',
@@ -686,12 +592,13 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     // Atomic Chat-scoped creation precedes the first message.
     await waitFor(() => expect(order).toEqual(['createChatThread', 'message']))
-    expect(chatService.createChatThread).toHaveBeenCalledWith('chat-1')
+    expect(chatService.createChatThread).toHaveBeenCalledWith('chat-1', {
+      environmentName: null,
+    })
     // The message is fenced by the epoch returned by atomic Thread creation.
     expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t-new', {
       content: 'first message',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId: expect.any(String),
       expectedExecutionEpoch: 1,
@@ -708,6 +615,7 @@ describe('ChatWorkspacePage', () => {
       sessionId: 's-replay',
       sessionTitle: null,
       headEntryId: 'e-root',
+      environmentName: null,
       executionEpoch: 1,
       revision: '0',
       status: 'IDLE' as const,

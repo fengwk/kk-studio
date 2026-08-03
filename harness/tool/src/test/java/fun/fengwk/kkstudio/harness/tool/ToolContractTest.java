@@ -57,7 +57,14 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new ToolDescriptor(
-                "search", "", "Search", null, schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
+                "search",
+                "",
+                ToolType.PLATFORM,
+                "Search",
+                null,
+                schema(),
+                ToolSideEffect.READ_ONLY,
+                Duration.ZERO));
   }
 
   /** 执行请求必须复用 descriptor 校验，并在没有覆盖时使用 descriptor 超时。 */
@@ -119,6 +126,7 @@ class ToolContractTest {
     return new ToolDescriptor(
         "search",
         "1.0.0",
+        ToolType.PLATFORM,
         "Search the repository",
         rendererKey,
         schema(),

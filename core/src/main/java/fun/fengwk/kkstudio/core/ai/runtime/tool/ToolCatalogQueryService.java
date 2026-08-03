@@ -26,6 +26,7 @@ public class ToolCatalogQueryService {
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
+    dto.setType(descriptor.type().name());
     dto.setDescription(descriptor.description());
     return dto;
   }

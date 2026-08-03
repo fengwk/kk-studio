@@ -78,12 +78,10 @@ export function BlankComposerPane({
   onThreadChange,
   onThreadSortChange,
   agentName,
-  environmentName,
   yoloEnabled,
   settingsPending,
   isSettingsMutationLocked = () => false,
   onAgentChange,
-  onEnvironmentChange = async () => undefined,
   onYoloChange = async () => undefined,
   onFirstSendRecovery,
 }: {
@@ -96,17 +94,16 @@ export function BlankComposerPane({
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   settingsPending: boolean
   isSettingsMutationLocked?: () => boolean
   onAgentChange: (agentName: string) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
   onFirstSendRecovery: (replay: FirstSendReplay) => void
 }) {
   const { t } = useI18n()
   const [draft, setDraft] = useState('')
+  const [environmentDraft, setEnvironmentDraft] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
@@ -137,7 +134,7 @@ export function BlankComposerPane({
         chatId: chat?.id ?? '',
         content,
         agentName: effectiveAgentName,
-        environmentName,
+        environmentName: environmentDraft,
         yoloEnabled,
       })
       await Promise.all([
@@ -244,16 +241,11 @@ export function BlankComposerPane({
   }
 
   async function handleEnvironmentSelected(environmentName: string | null) {
-    if (settingsPending || isSettingsMutationLocked()) {
+    if (pending) {
       return
     }
-    setActionError(null)
-    try {
-      await onEnvironmentChange(environmentName)
-      setEnvironmentModalOpen(false)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
-    }
+    setEnvironmentDraft(environmentName)
+    setEnvironmentModalOpen(false)
   }
 
   async function toggleYolo() {
@@ -295,7 +287,7 @@ export function BlankComposerPane({
             modelName={chatAgent ? footerLabels.modelName : undefined}
             variantName={chatAgent ? footerLabels.variantName : undefined}
             contextWindow={chatAgent ? footerLabels.contextWindow : undefined}
-            environmentName={environmentName}
+            environmentName={environmentDraft}
             yoloEnabled={yoloEnabled}
             onAgentClick={() => {
               onFocus()
@@ -326,8 +318,8 @@ export function BlankComposerPane({
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentName={environmentName}
-        selectionPending={settingsPending}
+        selectedEnvironmentName={environmentDraft}
+        selectionPending={pending}
         onClose={() => setEnvironmentModalOpen(false)}
         onSelect={(environmentName) => {
           void handleEnvironmentSelected(environmentName)

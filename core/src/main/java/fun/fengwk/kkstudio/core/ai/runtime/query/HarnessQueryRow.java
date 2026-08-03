@@ -15,6 +15,7 @@ public class HarnessQueryRow {
   private String entryType;
   private String payloadJson;
   private Long headEntryId;
+  private String environmentName;
   private Long inputSequence;
   private Boolean runnable;
   private Long executionEpoch;

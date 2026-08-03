@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.api.CursorPageDTO;
 
@@ -80,8 +81,11 @@ public class StudioChatController {
   }
 
   @PostMapping("/{chatId}/threads")
-  public Result<HarnessThreadDTO> createChatThread(@PathVariable String chatId) {
-    return Results.created(chatThreadService.createThread(chatId));
+  public Result<HarnessThreadDTO> createChatThread(
+      @PathVariable String chatId,
+      @RequestBody(required = false) HarnessThreadCreateDTO createDTO) {
+    return Results.created(
+        withRequestValidation(() -> chatThreadService.createThread(chatId, createDTO)));
   }
 
   @PutMapping("/{chatId}/threads/{threadId}")

@@ -1,6 +1,7 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contracts/ai-chat'
 import type {
+  HarnessThreadCreateDTO,
   HarnessThreadDTO,
   HarnessThreadPage,
   ThreadListSort,
@@ -34,8 +35,8 @@ export function createChatService(client: HttpClient = apiClient) {
       }
       return client.get(`/ai/chat/${encodeURIComponent(chatId)}/threads`, { params })
     },
-    createChatThread: (chatId: string): Promise<HarnessThreadDTO> =>
-      client.post(`/ai/chat/${encodeURIComponent(chatId)}/threads`),
+    createChatThread: (chatId: string, data: HarnessThreadCreateDTO): Promise<HarnessThreadDTO> =>
+      client.post(`/ai/chat/${encodeURIComponent(chatId)}/threads`, data),
     associateThread: (chatId: string, threadId: string): Promise<void> =>
       client.put(
         `/ai/chat/${encodeURIComponent(chatId)}/threads/${encodeURIComponent(threadId)}`,

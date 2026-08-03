@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
@@ -609,7 +610,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         IllegalArgumentException.class,
         () ->
             transactions.persistPermissionAllowed(
-                claimed, ToolBinding.of(fixture.descriptor), "{\"changed\":true}", BASE));
+                claimed, ToolBinding.of(fixture.descriptor, "env-b"), "{\"changed\":true}", BASE));
 
     ToolInvocationDO row = rowFor(fixture.invocationId);
     assertEquals("RUNNING", row.getStatus());
@@ -705,7 +706,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     ClaimedToolInvocation claimed = claim(fixture, "env-worker", BASE, LONG_LEASE);
     PermissionPromptPreview prompt = new PermissionPromptPreview("environmentTool", "/work", "{}");
     // 最终 binding 修改了 environment，因此必须被拒绝。
-    ToolBinding badBinding = ToolBinding.of(fixture.descriptor);
+    ToolBinding badBinding = ToolBinding.of(fixture.descriptor, "env-b");
 
     assertThrows(
         IllegalArgumentException.class,
@@ -971,6 +972,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     return new ToolDescriptor(
         environmentName == null ? "platformTool" : "environmentTool",
         "1",
+        environmentName == null ? ToolType.PLATFORM : ToolType.ENVIRONMENT,
         "test tool",
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),

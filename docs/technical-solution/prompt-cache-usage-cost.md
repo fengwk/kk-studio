@@ -207,7 +207,12 @@ Model config 写入时严格校验：
 - `variants` 非空、variant id 唯一且命中 `defaultVariant`；
 - pricing 字段完整，单价非负，multiplier 为正。
 
-Agent config 的 tools/skills 也在写入时校验。每次 planning 由 `DatabaseTurnExecutionResolver` 重新读取最新 Agent、Provider、Model、Variant 与 READY Environment，并把结果冻结进 ModelInvocationRequest。缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 写入 `ASSISTANT_ERROR`，不创建 Provider 调用。
+Agent config 写入时校验可选择 Tool 名与 Skill 字段结构。每次 planning 由
+`DatabaseTurnExecutionResolver` 重新读取最新 Agent、Provider、Model、Variant、ToolCatalog 与 Thread
+当前 Environment，并把结果冻结进 ModelInvocationRequest。Platform Tool 总可候选，READY Environment
+才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；null、stale 或 offline
+Environment 只让对应能力为空。缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 写入
+`ASSISTANT_ERROR`，不创建 Provider 调用。
 
 ## 8. 实现与测试入口
 

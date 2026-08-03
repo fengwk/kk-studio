@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandCoordinator.StopR
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCustomMessageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadEnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadMessageCreateDTO;
@@ -33,8 +34,8 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
 
   @Override
   @Transactional
-  public HarnessThreadDTO createThread(String title) {
-    return converter.convert(coordinator.createThread(title));
+  public HarnessThreadDTO createThread(String title, String environmentName) {
+    return converter.convert(coordinator.createThread(title, environmentName));
   }
 
   @Override
@@ -46,6 +47,17 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     return converter.convert(
         coordinator.updateHead(
             id, requireExpectedEpoch(dto.getExpectedExecutionEpoch()), headEntryId));
+  }
+
+  @Override
+  @Transactional
+  public HarnessThreadDTO updateEnvironment(
+      String threadId, HarnessThreadEnvironmentUpdateDTO dto) {
+    Objects.requireNonNull(dto, "dto");
+    long id = HarnessIds.parsePositive(threadId, "threadId");
+    return converter.convert(
+        coordinator.updateEnvironment(
+            id, requireExpectedEpoch(dto.getExpectedExecutionEpoch()), dto.getEnvironmentName()));
   }
 
   private static long requireExpectedEpoch(Long value) {
@@ -69,10 +81,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
         coordinator
             .submitUserMessage(
                 id,
-                turnSettings(
-                    createDTO.getAgentName(),
-                    createDTO.getEnvironmentName(),
-                    createDTO.getYoloEnabled()),
+                turnSettings(createDTO.getAgentName(), createDTO.getYoloEnabled()),
                 createDTO.getContent(),
                 createDTO.getClientMessageId(),
                 requireExpectedEpoch(createDTO.getExpectedExecutionEpoch()))
@@ -93,10 +102,7 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
         coordinator
             .submitCustomMessage(
                 id,
-                turnSettings(
-                    createDTO.getAgentName(),
-                    createDTO.getEnvironmentName(),
-                    createDTO.getYoloEnabled()),
+                turnSettings(createDTO.getAgentName(), createDTO.getYoloEnabled()),
                 createDTO.getRole(),
                 createDTO.getContent(),
                 createDTO.getClientMessageId(),
@@ -117,11 +123,10 @@ public class HarnessThreadCommandServiceImpl implements HarnessThreadCommandServ
     return dto;
   }
 
-  private static TurnSettings turnSettings(
-      String agentName, String environmentName, Boolean yoloEnabled) {
+  private static TurnSettings turnSettings(String agentName, Boolean yoloEnabled) {
     if (yoloEnabled == null) {
       throw new IllegalArgumentException("yoloEnabled must not be null");
     }
-    return new TurnSettings(agentName, environmentName, yoloEnabled);
+    return new TurnSettings(agentName, yoloEnabled);
   }
 }

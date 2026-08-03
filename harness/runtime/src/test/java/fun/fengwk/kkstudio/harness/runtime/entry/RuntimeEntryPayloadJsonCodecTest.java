@@ -21,7 +21,7 @@ import java.util.List;
 /** Strict Entry codec coverage for turn references and role-specific payloads. */
 class RuntimeEntryPayloadJsonCodecTest {
 
-  private static final TurnSettings SETTINGS = new TurnSettings("agent", "env", true);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", true);
   private final RuntimeEntryPayloadJsonCodec codec = new RuntimeEntryPayloadJsonCodec();
 
   @Test

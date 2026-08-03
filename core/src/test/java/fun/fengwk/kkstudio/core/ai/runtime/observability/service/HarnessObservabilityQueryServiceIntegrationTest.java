@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.worker.Artifact;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
@@ -82,6 +83,7 @@ class HarnessObservabilityQueryServiceIntegrationTest {
             new ToolDescriptor(
                 "bash",
                 "1",
+                ToolType.PLATFORM,
                 "run",
                 "bash",
                 new ToolParamsSchema("", Map.of(), Set.of(), false),

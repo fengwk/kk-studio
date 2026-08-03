@@ -16,16 +16,16 @@ import java.util.Set;
 class ToolCatalogTest {
 
   @Test
-  void combinesLocalSelectableToolsWithFixedEnvironmentTools() {
-    ToolDescriptor local = descriptor("local_only");
+  void combinesSelectablePlatformToolsWithFixedEnvironmentTools() {
+    ToolDescriptor platform = descriptor("platform_only");
 
     ToolDescriptor loadSkill = descriptor("load_skill");
-    ToolCatalog catalog = new ToolCatalog(List.of(local, loadSkill), Set.of(loadSkill.name()));
+    ToolCatalog catalog = new ToolCatalog(List.of(platform, loadSkill), Set.of(loadSkill.name()));
 
-    assertEquals(local, catalog.require("local_only"));
+    assertEquals(platform, catalog.require("platform_only"));
     assertEquals(EnvironmentToolCatalog.descriptors().size() + 1, catalog.descriptors().size());
     assertTrue(catalog.find("load_skill").isEmpty());
-    assertEquals(loadSkill, catalog.findRuntimeManaged("load_skill").orElseThrow());
+    assertEquals(loadSkill, catalog.findInternal("load_skill").orElseThrow());
   }
 
   @Test
@@ -34,32 +34,31 @@ class ToolCatalogTest {
         IllegalArgumentException.class,
         () ->
             new ToolCatalog(
-                List.of(descriptor("local_only"), descriptor("local_only")), Set.of("load_skill")));
+                List.of(descriptor("platform_only"), descriptor("platform_only")), Set.of()));
   }
 
   @Test
-  void rejectsDuplicateRuntimeManagedNames() {
+  void rejectsUnknownInternalPlatformToolNames() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ToolCatalog(
-                List.of(descriptor("load_skill"), descriptor("load_skill")), Set.of("load_skill")));
+        () -> new ToolCatalog(List.of(descriptor("platform_only")), Set.of("load_skill")));
   }
 
   @Test
-  void rejectsLocalEnvironmentNameCollision() {
+  void rejectsPlatformEnvironmentNameCollision() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolCatalog(
                 List.of(descriptor(EnvironmentToolCatalog.descriptors().getFirst().name())),
-                Set.of("load_skill")));
+                Set.of()));
   }
 
   private static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
         "1",
+        ToolType.PLATFORM,
         name + " description",
         name,
         new ToolParamsSchema(null, Map.of(), Set.of(), false),

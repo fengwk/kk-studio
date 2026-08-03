@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
@@ -69,16 +70,30 @@ class ToolDomainContractsTest {
   void validatesFrozenToolBinding() {
     ToolBinding platform = ToolBinding.of(descriptor("tool"));
     assertEquals(null, platform.environmentName());
-    ToolBinding environment = ToolBinding.of(descriptor("environment"), "env-9");
+    ToolBinding environment =
+        ToolBinding.of(
+            descriptor("environment", "1", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, "env-9");
     assertEquals("env-9", environment.environmentName());
 
     assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), " "));
-    assertThrows(
-        IllegalArgumentException.class, () -> ToolBinding.of(descriptor("environment"), "\tenv"));
+        IllegalArgumentException.class,
+        () ->
+            ToolBinding.of(
+                descriptor("environment", "1", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, " "));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolBinding.of(descriptor("environment"), "e".repeat(129)));
+        () ->
+            ToolBinding.of(
+                descriptor("environment", "1", ToolType.ENVIRONMENT),
+                ToolType.ENVIRONMENT,
+                "\tenv"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolBinding.of(
+                descriptor("environment", "1", ToolType.ENVIRONMENT),
+                ToolType.ENVIRONMENT,
+                "e".repeat(129)));
     assertThrows(
         IllegalArgumentException.class, () -> ToolBinding.of(descriptor("tool", "v".repeat(129))));
   }
@@ -127,7 +142,10 @@ class ToolDomainContractsTest {
         assistantEntryId + 1,
         ordinal,
         toolCallId,
-        descriptor(toolName, toolVersion),
+        descriptor(
+            toolName,
+            toolVersion,
+            environmentName == null ? ToolType.PLATFORM : ToolType.ENVIRONMENT),
         "{}",
         environmentName,
         0L,
@@ -152,9 +170,14 @@ class ToolDomainContractsTest {
   }
 
   private static ToolDescriptor descriptor(String name, String version) {
+    return descriptor(name, version, ToolType.PLATFORM);
+  }
+
+  private static ToolDescriptor descriptor(String name, String version, ToolType type) {
     return new ToolDescriptor(
         name,
         version,
+        type,
         name,
         null,
         new ToolParamsSchema("", Map.of(), Set.of(), false),

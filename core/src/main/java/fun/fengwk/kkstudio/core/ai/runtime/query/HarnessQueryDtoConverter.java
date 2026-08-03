@@ -55,6 +55,7 @@ public class HarnessQueryDtoConverter {
     dto.setSessionId(formatNullable(row.getSessionId()));
     dto.setSessionTitle(row.getSessionTitle());
     dto.setHeadEntryId(formatNullable(row.getHeadEntryId()));
+    dto.setEnvironmentName(row.getEnvironmentName());
     dto.setExecutionEpoch(row.getExecutionEpoch());
     dto.setRevision(row.getRevision() == null ? null : Long.toString(row.getRevision()));
     dto.setStatus(DerivedThreadStatus.derive(row, now));

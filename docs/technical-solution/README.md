@@ -47,11 +47,11 @@ flowchart TD
 ## 贯穿约束
 
 - Provider 与 Agent 使用 immutable `name`。Model 的身份是 `(providerName, name)`，其公开引用是 `providerName/modelName`，解析时只在第一个 `/` 切分；Catalog DTO 不提供 bigint resource ID。
-- Chat 只持久化唯一可见发送设置 `agentName`、`environmentName`、`yoloEnabled`。每次 USER/CUSTOM 消息都携带同一份 compact `TurnSettings` 名称引用；Thread 持久化运行事实，不保存 active config。
-- Chat-scoped Thread 创建在一个事务中原子完成 Session、ROOT、已绑定 Thread 与 Chat 关系；Thread 的 head 始终非空，`PUT /head` 只接受非空 Entry 引用。
+- Chat 只持久化唯一可见发送设置 `agentName` 与 `yoloEnabled`。`HarnessThread` 持有 nullable `environmentName`：创建时可原子指定，静止 Thread 可通过 `PUT /api/ai/runtime/threads/{threadId}/environment` 设置或清除；请求携带 `expectedExecutionEpoch`，成功同时递增 `executionEpoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。每条 USER/CUSTOM 消息的 `TurnSettings` 只保存 `agentName` 与 `yoloEnabled`。
+- Chat-scoped Thread 创建在一个事务中原子完成 Session、ROOT、已绑定 Thread 与 Chat 关系，并可同时写入初始 Environment；Thread 的 head 始终非空，`PUT /head` 只接受非空 Entry 引用。
 - Entry 只包含 `ROOT`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`；Input 只包含 `USER_MESSAGE`、`CUSTOM_MESSAGE`。
-- 每次规划通过 `DatabaseTurnExecutionResolver` 读取最新 Agent、Model、Provider 与 READY Environment，并冻结一次 `ModelInvocationRequest`。缺失能力写入 `PlanningFailure` 对应的 `ASSISTANT_ERROR`，不创建伪 Provider 调用。
-- 每个 Invocation 的 exact `ProviderRequest`、`ToolBinding`、`SkillBinding` 与 `yolo` 一起持久化；retry 重放同一 request，Tool 按原 binding 执行。
+- 每次规划通过 `DatabaseTurnExecutionResolver` 读取最新 Agent、Provider、Model、ToolCatalog 与 Thread 当前 Environment。Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`；Platform Tool 总可候选，只有 READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集。null、stale 或 offline Environment 只贡献零 Environment Tool/Skill，不产生 Environment 或 Skill 缺失错误。
+- 每个 Invocation 的 exact `ProviderRequest`、`ToolBinding`（descriptor/type/environmentName）、`SkillBinding` 与 `yolo` 一起持久化；retry 重放同一 request，ToolCall 严格按原 binding 路由。Provider 返回本次 request 不可见的 Tool 时，写入包含请求名称和可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不物化 ToolInvocation。
 
 ## 维护规则
 

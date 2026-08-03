@@ -46,7 +46,6 @@ describe('useAgentThreadMessageMutation', () => {
       await result.current.mutateAsync({
         content: 'hello',
         agentName: 'assistant',
-        environmentName: null,
         yoloEnabled: false,
         clientMessageId: 'cid-1',
         expectedExecutionEpoch: 2,
@@ -57,7 +56,6 @@ describe('useAgentThreadMessageMutation', () => {
     expect(harnessService.submitThreadMessage).toHaveBeenCalledWith('t1', {
       content: 'hello',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 2,
@@ -78,7 +76,6 @@ describe('useAgentThreadMessageMutation', () => {
         result.current.mutateAsync({
           content: 'retry',
           agentName: 'assistant',
-          environmentName: null,
           yoloEnabled: false,
           clientMessageId,
           expectedExecutionEpoch: 5,
@@ -89,7 +86,6 @@ describe('useAgentThreadMessageMutation', () => {
       await result.current.mutateAsync({
         content: 'retry',
         agentName: 'assistant',
-        environmentName: null,
         yoloEnabled: false,
         clientMessageId,
         expectedExecutionEpoch: 5,
@@ -99,7 +95,6 @@ describe('useAgentThreadMessageMutation', () => {
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(1, 't1', {
       content: 'retry',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId,
       expectedExecutionEpoch: 5,
@@ -107,7 +102,6 @@ describe('useAgentThreadMessageMutation', () => {
     expect(harnessService.submitThreadMessage).toHaveBeenNthCalledWith(2, 't1', {
       content: 'retry',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId,
       expectedExecutionEpoch: 5,
@@ -124,7 +118,6 @@ describe('useAgentThreadMessageMutation', () => {
         role: 'system',
         content: 'system prompt',
         agentName: 'assistant',
-        environmentName: 'local',
         yoloEnabled: true,
         firstSendContext: null,
         clientMessageId: 'cid-custom',
@@ -136,7 +129,6 @@ describe('useAgentThreadMessageMutation', () => {
       role: 'system',
       content: 'system prompt',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 5,

@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.math.BigDecimal;
@@ -941,10 +942,12 @@ class ModelWorkerTest {
             "",
             "",
             List.of(new ProviderToolCall("call-1", "other", "{}")),
-            ProviderStopReason.TOOL_CALLS));
+            ProviderStopReason.COMPLETED));
 
     assertEquals(InvocationStatus.FAILED, fixture.transactions.current.status());
-    assertTrue(fixture.transactions.current.error().message().contains("undeclared tool"));
+    assertEquals(
+        "invalid provider response: tool is not available in this model invocation: other; available tools: [tool]",
+        fixture.transactions.current.error().message());
   }
 
   /** Frozen requests cannot hide ambiguous duplicate tool names from response validation. */
@@ -2025,6 +2028,7 @@ class ModelWorkerTest {
         new ToolDescriptor(
             providerTool.name(),
             "1",
+            ToolType.PLATFORM,
             providerTool.description(),
             providerTool.name(),
             new ToolParamsSchema(null, Map.of(), Set.of(), false),

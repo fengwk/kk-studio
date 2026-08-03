@@ -14,6 +14,7 @@ public record Session(long id, String title, Instant createdAt) {}
 public record HarnessThread(
     long id,
     long headEntryId,
+    String environmentName,
     long inputSequence,
     boolean runnable,
     long executionEpoch,
@@ -23,7 +24,7 @@ public record HarnessThread(
     Instant updatedAt) {}
 ```
 
-`headEntryId` 必须为正数。Session 不保存 Thread；Thread 的当前 Session 通过 head Entry 查询派生。已提交 Entry append-only。
+`headEntryId` 必须为正数；`environmentName` 可为 null，否则必须是 canonical 非空名称。Session 不保存 Thread；Thread 的当前 Session 通过 head Entry 查询派生。已提交 Entry append-only。创建 Thread 时可原子指定 Environment，静止 Thread 可通过 fenced Environment command 设置或清除它。
 
 Entry 类型固定为：
 
@@ -42,13 +43,12 @@ USER `MESSAGE` 与 `CUSTOM_MESSAGE` payload 必须携带：
 ```java
 public record TurnSettings(
     String agentName,
-    String environmentName,
     boolean yoloEnabled) {}
 ```
 
-`agentName` 必须是 canonical 非空名称；`environmentName` 可以为 null，否则必须是 canonical
-非空名称。null 允许 model-only 或只含本地 Tool 的 Agent 执行；Agent 配置了 Environment
-Tool 或 Skill 时，null 会明确产生 `ENVIRONMENT_REQUIRED`，不会静默移除能力。该值只保存名称引用和 YOLO 开关。
+`agentName` 必须是 canonical 非空名称。该值只保存 Agent 名称引用和 YOLO 开关；消息 DTO 不携带
+`environmentName`。Planning 额外读取 Thread 当前 Environment，Environment 不可用时只贡献零
+Environment Tool/Skill。
 
 ## 3. Invocation 状态
 
@@ -74,11 +74,11 @@ public enum InvocationStatus {
 ```java
 @FunctionalInterface
 public interface TurnExecutionResolver {
-  Resolution resolve(TurnSettings settings);
+  Resolution resolve(TurnSettings settings, String environmentName);
 }
 ```
 
-`Resolution` 只有 `Resolved(ResolvedTurnExecution)` 与 `Failed(PlanningFailure)`。`DatabaseTurnExecutionResolver` 每次调用都读取：
+`Resolution` 只有 `Resolved(ResolvedTurnExecution)` 与 `Failed(PlanningFailure)`。`DatabaseTurnExecutionResolver` 每次调用都读取最新：
 
 ```text
 TurnSettings.agentName
@@ -87,11 +87,19 @@ TurnSettings.agentName
   -> active AgentProvider
   -> AgentModel
   -> effective Variant
-  -> READY LiveEnvironment
+  -> ToolCatalog
+  -> Thread environmentName
+  -> READY LiveEnvironment contributions
   -> ToolBinding / SkillBinding
 ```
 
-Planning 成功时 ModelDescriptor 额外冻结当前 Provider 的非负 `providerVersion`。ModelWorker 随后只按 `(providerName, providerVersion)` 读取 append-only Provider revision；Provider 更新或软删除不会改变已持久化 invocation 的首次 dispatch/retry。缺失项对应 `PlanningFailureKind`：
+Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`。Platform Tool 总可候选，
+READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；
+null、stale 或 offline Environment 只产生零 Environment Tool/Skill，不产生 Environment/Skill 缺失错误。
+Planning 成功时 ModelDescriptor
+额外冻结当前 Provider 的非负 `providerVersion`。ModelWorker 随后只按 `(providerName, providerVersion)`
+读取 append-only Provider revision；Provider 更新或软删除不会改变已持久化 invocation 的首次
+dispatch/retry。缺失项对应 `PlanningFailureKind`：
 
 ```text
 MISSING_TURN_SETTINGS
@@ -99,10 +107,7 @@ AGENT_NOT_FOUND
 PROVIDER_NOT_FOUND
 MODEL_NOT_FOUND
 VARIANT_NOT_FOUND
-ENVIRONMENT_REQUIRED
-ENVIRONMENT_NOT_FOUND
 TOOL_NOT_FOUND
-SKILL_NOT_FOUND
 INVALID_TURN_SETTINGS
 ```
 
@@ -114,6 +119,7 @@ INVALID_TURN_SETTINGS
 PlanningResult plan(
     long sessionId,
     long sourceHeadEntryId,
+    String environmentName,
     List<SessionEntry> rootToHead);
 ```
 
@@ -133,6 +139,7 @@ PlanningResult plan(
 ```java
 public record ToolBinding(
     ToolDescriptor descriptor,
+    ToolType type,
     String environmentName) {}
 
 public record ModelInvocationRequest(
@@ -146,17 +153,26 @@ public record ModelInvocationRequest(
 
 - `providerRequest` 是完整、exact 的 Provider transport payload；
 - `providerRequest.tools` 与 `toolBindings` 数量、顺序、名称、description、input schema 必须完全一致；
+- 每个 `ToolBinding` 同时冻结 descriptor、product-level `type` 与 `environmentName`；`PLATFORM` binding 的目标为 null，`ENVIRONMENT` binding 指向具体 Environment；
 - `skillBindings` 是本次选中的 Skill binding；
 - `yoloEnabled` 与 request 同时冻结；
+- 有 Skill binding 时隐式加入内部 Platform Tool `load_skill`，它不属于 Agent 可选择目录；
 - JSON codec 只接受这四个顶层字段并严格校验嵌套结构。
 
 Model retry 从持久化 request 重放同一份 ProviderRequest、ToolBinding、SkillBinding 与 YOLO。ToolInvocation 执行同一 binding，不从最新 Agent 或 Environment 重新选择。
 
+Provider 返回的 ToolCall 必须命中本次冻结 `providerRequest.tools`。如果返回不可见或未知 Tool，
+Model invocation 终结为可恢复错误，错误消息包含请求的 Tool 名称和本次可用 Tool 名称；Reconciler
+追加 `ASSISTANT_ERROR` barrier，不物化 ToolInvocation，后续输入仍可继续处理。
+
 ## 7. ToolInvocation 与 Interaction
 
-ToolInvocation 的 durable 字段包括 Thread、Assistant Entry、Model Invocation、ordinal、toolCallId、descriptor、arguments、`environmentName`、epoch、状态、attempt、lease、deadline、result/error、`appliedAt`、permission state 与 YOLO。
+ToolInvocation 的 durable 字段包括 Thread、Assistant Entry、Model Invocation、ordinal、
+toolCallId、含 type 的 descriptor、arguments、`environmentName`、epoch、状态、attempt、lease、
+deadline、result/error、`appliedAt`、permission state 与 YOLO。
 
-`environmentName` 为空时执行 Platform Tool；非空时经 RemoteTool 发送到对应 Environment。外部 I/O 前必须先持久化最终 descriptor/arguments 与 permission decision：
+`PLATFORM` binding 由本地 Platform Tool 执行；`ENVIRONMENT` binding 经 RemoteTool 发送到冻结的
+Environment。外部 I/O 前必须先持久化最终 descriptor/arguments 与 permission decision：
 
 ```text
 PENDING -> ALLOWED -> external Tool I/O
@@ -169,12 +185,17 @@ PENDING -> DENIED -> FAILED
 ## 8. Command coordinator
 
 ```java
-HarnessThread createThread(String title);
+HarnessThread createThread(String title, String environmentName);
 
 HarnessThread updateHead(
     long threadId,
     long expectedExecutionEpoch,
     long headEntryId);
+
+HarnessThread updateEnvironment(
+    long threadId,
+    long expectedExecutionEpoch,
+    String environmentName);
 
 EnqueueResult submitUserMessage(
     long threadId,
@@ -194,7 +215,11 @@ EnqueueResult submitCustomMessage(
 StopResult stop(long threadId, long expectedExecutionEpoch);
 ```
 
-`createThread` 的 PostgreSQL transaction 原子写入 Session、ROOT 和已绑定 Thread。`updateHead` 只接受正 `headEntryId`，要求 Thread 静止并以 epoch CAS fencing。message/custom message 先按幂等键短路，再写 Input、sequence、runnable 和 execution activation。
+`createThread` 的 PostgreSQL transaction 原子写入 Session、ROOT 和已绑定 Thread，可同时写入 nullable
+Environment。`updateHead` 只接受正 `headEntryId`，要求 Thread 静止并以 epoch CAS fencing。
+`updateEnvironment` 同样要求 Thread 静止与 epoch 匹配，可设置或清除 Environment；成功递增
+`executionEpoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。message/custom message 先按幂等键
+短路，再写 Input、sequence、runnable 和 execution activation。
 
 ## 9. Reconciler transactions
 

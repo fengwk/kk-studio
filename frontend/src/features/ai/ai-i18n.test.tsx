@@ -123,14 +123,11 @@ describe('AI i18n live-switch contracts', () => {
       <CreateChatModal
         open
         agents={[agent]}
-        environments={[]}
-        selectedAgentId=""
-        selectedEnvironmentName=""
+        selectedAgentName=""
         title=""
         pending={false}
         onClose={() => undefined}
         onSelectAgent={() => undefined}
-        onSelectEnvironment={() => undefined}
         onTitleChange={() => undefined}
         onSubmit={(event) => event.preventDefault()}
       />,

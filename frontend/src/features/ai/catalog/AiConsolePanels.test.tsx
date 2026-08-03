@@ -54,7 +54,6 @@ describe('AiConsolePanels', () => {
               id: 'c1',
               title: 'One',
               agentName: 'missing',
-              environmentName: null,
               yoloEnabled: false,
               version: '1',
               createTime: null,

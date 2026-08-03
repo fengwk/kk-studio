@@ -34,11 +34,12 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("now") OffsetDateTime now);
 
   @Insert(
-      "insert into harness_thread (id, head_entry_id, input_sequence, runnable, execution_epoch, created_at, updated_at) "
-          + "values (#{id}, #{headEntryId}, 0, false, 0, #{now}, #{now})")
+      "insert into harness_thread (id, head_entry_id, environment_name, input_sequence, runnable, execution_epoch, created_at, updated_at) "
+          + "values (#{id}, #{headEntryId}, #{environmentName}, 0, false, 0, #{now}, #{now})")
   int insertThread(
       @Param("id") long id,
       @Param("headEntryId") long headEntryId,
+      @Param("environmentName") String environmentName,
       @Param("now") OffsetDateTime now);
 
   @Select(
@@ -57,7 +58,7 @@ public interface ThreadCommandMapper extends BaseMapper {
   ThreadCommandRow findEntry(@Param("entryId") long entryId);
 
   @Select(
-      "select t.id, t.head_entry_id, e.session_id, t.input_sequence, t.runnable, t.execution_epoch, t.revision,"
+      "select t.id, t.head_entry_id, t.environment_name, e.session_id, t.input_sequence, t.runnable, t.execution_epoch, t.revision,"
           + " t.processor_token, t.processor_until, t.created_at, t.updated_at"
           + " from harness_thread t join harness_entry e on e.id = t.head_entry_id"
           + " where t.id = #{threadId} for no key update of t")
@@ -67,6 +68,7 @@ public interface ThreadCommandMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "session_id", property = "sessionId"),
         @Result(column = "head_entry_id", property = "headEntryId"),
+        @Result(column = "environment_name", property = "environmentName"),
         @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "runnable", property = "runnable"),
         @Result(column = "execution_epoch", property = "executionEpoch"),
@@ -112,6 +114,19 @@ public interface ThreadCommandMapper extends BaseMapper {
       @Param("expectedEpoch") long expectedEpoch,
       @Param("epoch") long epoch,
       @Param("headEntryId") long headEntryId,
+      @Param("now") OffsetDateTime now);
+
+  /** 静止 Environment rebind：CAS 期望 epoch，递增代际并保留当前 head。 */
+  @Update(
+      "update harness_thread set environment_name = #{environmentName}, execution_epoch = #{epoch},"
+          + " processor_token = null, processor_until = null, runnable = false,"
+          + " updated_at = greatest(updated_at, #{now})"
+          + " where id = #{threadId} and execution_epoch = #{expectedEpoch}")
+  int rebindEnvironment(
+      @Param("threadId") long threadId,
+      @Param("expectedEpoch") long expectedEpoch,
+      @Param("epoch") long epoch,
+      @Param("environmentName") String environmentName,
       @Param("now") OffsetDateTime now);
 
   /** Stop discards unresolvable OPEN Tool permission prompts for the stopped Thread. */

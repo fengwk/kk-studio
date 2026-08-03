@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/ai/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
-import { environmentService } from '@/shared/api/environment-service'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -21,23 +20,15 @@ vi.mock('@/shared/api/chat-service', () => ({
     createChat: vi.fn(),
   },
 }))
-vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: {
-    listEnvironments: vi.fn(),
-  },
-}))
-
 describe('useChatPageController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(chatService.listChats).mockResolvedValue([])
     vi.mocked(chatService.createChat).mockResolvedValue({
       id: 'chat-1',
       title: '新的 Chat',
       agentName: 'default-assistant',
-      environmentName: null,
       yoloEnabled: false,
       version: '1',
       createTime: null,
@@ -53,7 +44,6 @@ describe('useChatPageController', () => {
     await waitFor(() => {
       expect(result.current.busy).toBe(false)
       expect(result.current.chatPanelProps.agents).toEqual([agent()])
-      expect(result.current.createChatModal.environments).toEqual([])
       expect(agentService.listAgents).toHaveBeenCalledTimes(1)
       expect(chatService.listChats).toHaveBeenCalledTimes(1)
     })
@@ -74,7 +64,6 @@ describe('useChatPageController', () => {
     act(() => {
       result.current.createChatModal.onTitleChange('新的 Chat')
       result.current.createChatModal.onSelectAgent('default-assistant')
-      result.current.createChatModal.onSelectEnvironment('local')
     })
     act(() => {
       result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
@@ -84,7 +73,6 @@ describe('useChatPageController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: '新的 Chat',
         agentName: 'default-assistant',
-        environmentName: 'local',
       }),
     )
   })

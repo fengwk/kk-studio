@@ -14,6 +14,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 's1',
     sessionTitle: null,
     headEntryId: 'root',
+    environmentName: null,
     executionEpoch: 0,
     revision: '0',
     status: 'IDLE',
@@ -28,8 +29,11 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 describe('performBlankPaneFirstSend', () => {
   it('creates an atomically bound Thread, then enqueues USER_MESSAGE directly', async () => {
     const calls: string[] = []
-    const createChatThread = vi.fn(async (chatId: string) => {
-      calls.push(`createChatThread:${chatId}`)
+    const createChatThread = vi.fn(async (
+      chatId: string,
+      data: { environmentName: string | null },
+    ) => {
+      calls.push(`createChatThread:${chatId}:${data.environmentName}`)
       return thread({
         threadId: 't1',
         sessionId: 's1',
@@ -70,11 +74,13 @@ describe('performBlankPaneFirstSend', () => {
     })
 
     // Atomic Chat-scoped creation already binds the Thread.
-    expect(calls).toEqual(['createChatThread:chat-1', 'user:t1:cid-user:hello:0'])
+    expect(calls).toEqual(['createChatThread:chat-1:local', 'user:t1:cid-user:hello:0'])
+    expect(createChatThread).toHaveBeenCalledWith('chat-1', {
+      environmentName: 'local',
+    })
     expect(submitThreadMessage).toHaveBeenCalledWith('t1', {
       content: 'hello',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-user',
       expectedExecutionEpoch: 0,
@@ -134,6 +140,7 @@ describe('performBlankPaneFirstSend', () => {
     }).catch((value: unknown) => value)
 
     expect(error).toBeInstanceOf(FirstSendMessageError)
+    expect(error.replay).not.toHaveProperty('environmentName')
     expect(error).toMatchObject({
       message: 'message temporarily unavailable',
       replay: {
@@ -143,7 +150,6 @@ describe('performBlankPaneFirstSend', () => {
         kind: 'USER_MESSAGE',
         role: 'user',
         agentName: 'assistant',
-        environmentName: null,
         yoloEnabled: false,
         firstSendContext: { chatId: 'chat-1' },
       },
@@ -156,7 +162,6 @@ describe('performBlankPaneFirstSend', () => {
     expect(submitThreadMessage).toHaveBeenCalledWith('t-replay', {
       content: 'retry me',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId: 'cid-replay',
       expectedExecutionEpoch: 2,

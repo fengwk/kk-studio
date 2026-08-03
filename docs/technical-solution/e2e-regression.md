@@ -51,7 +51,7 @@ npm --prefix frontend run e2e:docs
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD、名称身份、逐消息设置、Thread/Session、head、planning failure、policy、i18n 与 proxy |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD、名称身份、逐消息设置、Thread/Session、head、Environment capability projection、planning failure、policy、i18n 与 proxy |
 | L2 | `--real` | MiniMax | 文本轮次、queued batch、stop partial、Usage |
 | L3 | `--real --with-branch` | MiniMax | 历史 Entry 路径切换后的 Usage |
 | L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、ToolInvocation |
@@ -62,7 +62,7 @@ npm --prefix frontend run e2e:docs
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（50）
+### L1（51）
 
 ```text
 seed.structured_model_config
@@ -73,6 +73,7 @@ thread.rebind_same_session
 thread.rebind_cross_session
 thread.stop_then_rebind
 thread.turn_settings_wysiwyg_failure
+thread.environment_capability_projection
 thread.custom_message_turn_settings
 thread_snapshot.unknown_thread_404
 frontend.proxy_model_contract
@@ -120,11 +121,14 @@ matrix.agent.teardown_model
 L1 的关键语义断言：
 
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、删除；
-- Model config 与 Agent tools/skills 严格校验；
-- Chat 持久化 `agentName`、`environmentName`、`yoloEnabled`；
+- Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；
+- Chat CRUD 仅持久化 `agentName`、`yoloEnabled`，不包含 Environment；
+- Chat-scoped Thread create body 设置 `environmentName`，Thread DTO 返回当前 Environment；
 - Chat-scoped Thread 原子产生 Session、ROOT 与非空 head；
-- 每条 USER/CUSTOM message 携带精确 TurnSettings；
+- 静止 Thread 的 Environment PUT 携带 `expectedExecutionEpoch`，成功递增 epoch/revision；
+- 每条 USER/CUSTOM message 只携带精确的 `agentName`、`yoloEnabled` 与幂等/fencing 字段；
 - 缺失能力产生 `ASSISTANT_ERROR`，不产生 ModelInvocation；
+- null/stale/offline Environment 只贡献零 Environment Tool/Skill；Provider 返回本次不可见 Tool 时，`ASSISTANT_ERROR` 包含请求名与 `available tools`，且不产生 ToolInvocation；
 - `PUT /head` 只使用非空 Entry 和当前 epoch；
 - stale version/epoch、未知请求目标与 invalid DTO/请求体引用分别验证 `409`、`404`、`400`；
 - retry/realtime policy 通过 GET → PUT → GET 往返验证；
@@ -148,7 +152,7 @@ tool.read_turn
 | `real.stop_partial_continue` | `--real` | 安全 text/thinking partial、stop barrier 与后续轮次 |
 | `branch.path_usage` | `--real --with-branch` | head 切换到历史 Entry 后的路径 Usage |
 | `daemon.ready` | `--with-tools` | READY Environment 与 `GET /api/ai/environment` 的固定十个 Tool |
-| `tool.read_turn` | `--real --with-tools` | Agent 选择 `read`、YOLO、原 `environmentName` binding 与 Tool 成功 |
+| `tool.read_turn` | `--real --with-tools` | Agent 选择 `read`；Thread create 绑定 Environment；消息只发送 Agent/YOLO；ToolInvocation 冻结 Environment route 并成功 |
 
 ## 4. API 契约与验证方式
 
@@ -186,6 +190,7 @@ GET /api/ai/runtime/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
 GET /api/ai/runtime/threads/{threadId}
 GET /api/ai/runtime/threads/{threadId}/snapshot
 PUT /api/ai/runtime/threads/{threadId}/head
+PUT /api/ai/runtime/threads/{threadId}/environment
 POST /api/ai/runtime/threads/{threadId}/messages
 POST /api/ai/runtime/threads/{threadId}/messages/custom
 POST /api/ai/runtime/threads/{threadId}/stop
@@ -200,24 +205,58 @@ create Session + ROOT + bound Thread
   -> return HarnessThreadDTO
 ```
 
+Chat create body 只包含 Chat 自身的可见设置：
+
+```json
+{
+  "title": "...",
+  "agentName": "...",
+  "yoloEnabled": false
+}
+```
+
+Chat update body 仍只更新这些 Chat 字段，并额外携带当前版本：
+
+```json
+{
+  "agentName": "...",
+  "yoloEnabled": false,
+  "expectedVersion": "0"
+}
+```
+
+Chat-scoped Thread create body 负责选择当前 Thread 的 Environment：
+
+```json
+{
+  "environmentName": null
+}
+```
+
+静止 Thread 可以用当前 epoch fenced 地更换或清除 Environment；非静止或 stale epoch 为 `409`，成功会递增 execution epoch 与 durable revision：
+
+```json
+{
+  "environmentName": "tool-e2e",
+  "expectedExecutionEpoch": 0
+}
+```
+
 每个 message/custom message body 都包含：
 
 ```json
 {
   "content": "...",
   "agentName": "...",
-  "environmentName": null,
   "yoloEnabled": false,
   "clientMessageId": "...",
   "expectedExecutionEpoch": 0
 }
 ```
 
-服务端把三个设置保存为 compact TurnSettings。Resolver 每次 planning 读取最新 Agent、Provider、Model、Variant 与 READY Environment；缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 转为 `ASSISTANT_ERROR`。
+服务端把 message 中的 `agentName`、`yoloEnabled` 保存为 compact TurnSettings；Environment 只从 Thread durable binding 读取。Resolver 每次 planning 读取最新 Agent、Provider、Model、Variant，并把当前 READY Environment 的 Environment Tool/Skill 与 Platform Tool 一起冻结到本次 ModelInvocation。null、stale 或 offline Environment 不阻断 planning，只省略不可用的 Environment Tool/Skill；Agent 仍可正常使用 Platform Tool 或不携带 Tool。
 
-L1 同时覆盖无 Environment 的两种语义：model-only/本地 Tool Agent 可使用
-`environmentName=null`；Agent 配置 Environment Tool/Skill 时写入
-`ENVIRONMENT_REQUIRED`，不创建 ModelInvocation，也不在错误文案中输出伪名称 `null`。
+每次新 ModelInvocation 都持久化本次可见 Tool binding。Provider 如果返回本次请求不可见的 Tool，最终写入明确的 `ASSISTANT_ERROR`，文案包含请求 Tool 名和当前 `available tools` 列表，且不物化 ToolInvocation。Tool 产品分类只有 `PLATFORM` 与 `ENVIRONMENT`。
 
 `PUT /head` body 必须含非空 `headEntryId` 与 `expectedExecutionEpoch`。静止检查失败或 epoch 过期为 `409`；未知 Entry/Thread/Session 为 `404`。snapshot 的 `revision` 是十进制 durable cursor，SSE revision 帧携带同一 cursor，Redis realtime 没有 SSE id。
 
@@ -271,5 +310,5 @@ reports/e2e/latest/report.md
 
 1. API 字段、状态或验证变化时，同步 case 与本文件。
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
-3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`，首发只调用 Chat-scoped Thread POST，再发送 message。
+3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`，首发由 Chat-scoped Thread POST 设置 Environment，再发送只含 Agent/YOLO 的 message。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。

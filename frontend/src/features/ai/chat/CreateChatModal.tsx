@@ -3,37 +3,30 @@ import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLa
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { FormSelect } from '@/shared/ui/console/FormSelect'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function CreateChatModal({
   open,
   agents,
-  environments,
   selectedAgentName,
-  selectedEnvironmentName,
   title,
   pending,
   formError = '',
   nameError = '',
   onClose,
   onSelectAgent,
-  onSelectEnvironment,
   onTitleChange,
   onSubmit,
 }: {
   open: boolean
   agents: AgentDefinitionDTO[]
-  environments: LiveEnvironmentDTO[]
   selectedAgentName: string
-  selectedEnvironmentName: string
   title: string
   pending: boolean
   formError?: string
   nameError?: string
   onClose: () => void
   onSelectAgent: (agentName: string) => void
-  onSelectEnvironment: (environmentName: string) => void
   onTitleChange: (title: string) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
@@ -75,21 +68,6 @@ export function CreateChatModal({
               placeholder={t('ai.chat.selectAgent')}
               options={agents.map((agent) => ({ value: agent.name, label: agent.name }))}
               onChange={onSelectAgent}
-            />
-          </label>
-          <label className="form-group">
-            <FieldLabel>{t('ai.chat.environment')}</FieldLabel>
-            <FormSelect
-              aria-label={t('ai.chat.environment')}
-              value={selectedEnvironmentName}
-              placeholder={t('ai.chat.noneEnvironment')}
-              options={[
-                { value: '', label: t('ai.chat.noneEnvironment') },
-                ...environments
-                  .filter((environment) => String(environment.status).toUpperCase() === 'READY')
-                  .map((environment) => ({ value: environment.name, label: environment.name })),
-              ]}
-              onChange={onSelectEnvironment}
             />
           </label>
         </div>
