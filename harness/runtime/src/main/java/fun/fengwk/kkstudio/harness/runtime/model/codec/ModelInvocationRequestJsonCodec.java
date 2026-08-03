@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJ
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 import java.util.ArrayList;
@@ -32,7 +33,8 @@ public final class ModelInvocationRequestJsonCodec {
   private static final ToolDescriptorJsonCodec TOOL_CODEC = new ToolDescriptorJsonCodec();
   private static final Set<String> FIELDS =
       orderedSet("providerRequest", "toolBindings", "skillBindings", "yoloEnabled");
-  private static final Set<String> TOOL_FIELDS = orderedSet("descriptor", "environmentName");
+  private static final Set<String> TOOL_FIELDS =
+      orderedSet("descriptor", "type", "environmentName");
   private static final Set<String> SKILL_FIELDS =
       orderedSet("name", "description", "sourceEnvironment");
 
@@ -59,6 +61,7 @@ public final class ModelInvocationRequestJsonCodec {
     for (ToolBinding binding : request.toolBindings()) {
       ObjectNode node = tools.addObject();
       node.set("descriptor", TOOL_CODEC.encodeNode(binding.descriptor()));
+      node.put("type", binding.type().name());
       if (binding.environmentName() == null) {
         node.putNull("environmentName");
       } else {
@@ -106,9 +109,10 @@ public final class ModelInvocationRequestJsonCodec {
       fields(node, TOOL_FIELDS, "toolBinding");
       ToolDescriptor descriptor =
           TOOL_CODEC.decodeNode(required(node, "descriptor", "toolBinding"));
+      ToolType type = readType(node);
       JsonNode env = node.get("environmentName");
       String environmentName = env == null || env.isNull() ? null : text(env, "environmentName");
-      ToolBinding binding = ToolBinding.of(descriptor, environmentName);
+      ToolBinding binding = ToolBinding.of(descriptor, type, environmentName);
       if (!names.add(descriptor.name())) {
         throw new IllegalArgumentException("duplicate tool binding: " + descriptor.name());
       }
@@ -163,6 +167,15 @@ public final class ModelInvocationRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be non-blank text");
     }
     return value.textValue();
+  }
+
+  private static ToolType readType(ObjectNode node) {
+    String value = text(required(node, "type", "toolBinding"), "type");
+    try {
+      return ToolType.valueOf(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("toolBinding unknown type: " + value, error);
+    }
   }
 
   private static void fields(ObjectNode node, Set<String> expected, String context) {

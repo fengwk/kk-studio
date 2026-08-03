@@ -14,6 +14,7 @@ import java.util.Objects;
 public record HarnessThread(
     long id,
     long headEntryId,
+    String environmentName,
     long inputSequence,
     boolean runnable,
     long executionEpoch,
@@ -29,6 +30,7 @@ public record HarnessThread(
     if (headEntryId <= 0) {
       throw new IllegalArgumentException("headEntryId must be positive");
     }
+    environmentName = canonicalEnvironmentName(environmentName);
     if (inputSequence < 0) {
       throw new IllegalArgumentException("inputSequence must not be negative");
     }
@@ -48,5 +50,21 @@ public record HarnessThread(
   public boolean hasActiveProcessorAt(Instant observedAt) {
     Objects.requireNonNull(observedAt, "observedAt");
     return processorLease != null && processorLease.isActiveAt(observedAt);
+  }
+
+  public static String canonicalEnvironmentName(String value) {
+    if (value == null) {
+      return null;
+    }
+    if (value.isBlank()) {
+      throw new IllegalArgumentException("environmentName must not be blank");
+    }
+    if (!value.equals(value.strip())) {
+      throw new IllegalArgumentException("environmentName must not contain surrounding whitespace");
+    }
+    if (value.length() > 128) {
+      throw new IllegalArgumentException("environmentName must be <= 128 characters");
+    }
+    return value;
   }
 }

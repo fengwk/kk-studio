@@ -57,11 +57,11 @@ USER/CUSTOM message 的 Entry payload 还保存 compact `TurnSettings`：
 ```java
 public record TurnSettings(
     String agentName,
-    String environmentName,
     boolean yoloEnabled) {}
 ```
 
-该值只携带名称与开关，不包含 Agent、Model、Provider、Tool 或 Skill 的展开定义。
+该值只携带 Agent 名称与 YOLO 开关，不包含 Agent、Model、Provider、Tool、Skill 或 Environment
+定义。消息 DTO 不携带 `environmentName`。
 
 ### Thread
 
@@ -70,6 +70,7 @@ public record TurnSettings(
 ```text
 id
 headEntryId      # 始终非空
+environmentName  # nullable，Thread 当前选择的 Environment
 inputSequence
 runnable
 executionEpoch
@@ -78,7 +79,8 @@ processor lease
 createdAt / updatedAt
 ```
 
-Thread 行不保存 active Agent、Model、Variant、Environment、Tools 或 Skills。当前 Session 从 head Entry 派生，运行状态由查询投影：
+Thread 行只保存当前 nullable `environmentName` 与运行控制事实，不复制 active Agent、Model、Variant、
+Tools 或 Skills 配置。当前 Session 从 head Entry 派生，运行状态由查询投影：
 
 ```text
 有效 processor lease                         -> RUNNING
@@ -88,6 +90,11 @@ runnable=true                                -> RUNNABLE
 ```
 
 head 重定位是非空 Entry 的 CAS 更新，支持同 Session 或跨 Session 的历史路径切换。
+
+Chat-scoped Thread 创建时可在同一事务中原子指定 `environmentName`。静止 Thread 可通过
+`PUT /api/ai/runtime/threads/{threadId}/environment` 设置或清除它；请求携带
+`expectedExecutionEpoch`，成功同时递增 `executionEpoch` 与 `revision`，运行中或 epoch 陈旧返回
+`409`。Environment 名称在设置时只做 canonical 校验，不要求当时已经 READY。
 
 ### ThreadInput
 
@@ -111,16 +118,19 @@ TURN_INPUT_BATCH 的边界是 activation 开始时读取的全部 queued Input�
 
 `ModelInvocationPlanner` 从 root-to-head path 找到 response debt，并定位最近的 USER/CUSTOM TurnSettings。每次 plan 都调用 `DatabaseTurnExecutionResolver`：
 
-1. 按 `agentName` 读取 active Agent；
+1. 按 `agentName` 读取最新 Agent；
 2. 从 Agent 读取 `providerName`、`modelName` 与 variant；
-3. 按名称读取 active Provider 和 `(providerName, modelName)` Model，并读取 Provider 当前 version；
+3. 按名称读取最新 Provider 和 `(providerName, modelName)` Model，并读取 Provider 当前 version；
 4. 解析 Model config 与 effective Variant；
-5. 读取指定且 READY 的 Environment；
-6. 按 Agent tools/skills 解析本地或 Environment ToolBinding/SkillBinding；
+5. 读取最新 ToolCatalog 与 Thread 当前 `environmentName`；
+6. Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`；Platform Tool 总可候选，只有 READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；
 7. 读取 ProviderFactory 的 cache capability 与 pricing；
 8. 返回本轮的 system prompt、带冻结 `providerVersion` 的 ModelDescriptor、Variant、bindings 与 YOLO。
 
-缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 typed `PlanningFailure`。Reconciler 追加 `ASSISTANT_ERROR` barrier；不会创建虚假的 ProviderRequest 或 ModelInvocation。
+Thread Environment 为 null、stale 或 offline 时只贡献零 Environment Tool/Skill，不产生 Environment
+或 Skill 缺失错误。缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 typed
+`PlanningFailure`；Reconciler 追加 `ASSISTANT_ERROR` barrier，不会创建虚假的 ProviderRequest 或
+ModelInvocation。有 Skill binding 时隐式加入内部 Platform Tool `load_skill`。
 
 ## 6. ModelInvocation
 
@@ -134,21 +144,26 @@ public record ModelInvocationRequest(
     boolean yoloEnabled) {}
 ```
 
-`providerRequest` 是 exact Provider transport payload。ModelDescriptor 的 `providerName/providerVersion` 是 Provider revision identity。Provider tools 与 `toolBindings` 按顺序、名称、描述和 schema 一一对应；SkillBinding 和 YOLO 同时冻结。写入 `harness_model_invocation.request` 后，ModelWorker 只回放这份 request，retry 也只解析同一 Provider revision。
+`providerRequest` 是 exact Provider transport payload。ModelDescriptor 的 `providerName/providerVersion` 是 Provider revision identity。Provider tools 与 `toolBindings` 按顺序、名称、描述和 schema 一一对应；每个 ToolBinding 同时冻结 descriptor、type 与 `environmentName`；SkillBinding 和 YOLO 同时冻结。写入 `harness_model_invocation.request` 后，ModelWorker 只回放这份 request，retry 也只解析同一 Provider revision。
 
 Model Invocation 状态为 `QUEUED`、`RUNNING`、`RETRY_WAIT`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`UNKNOWN`。retry 仍属于同一个 Invocation，只增加 attempt 并重新调度相同 request。Provider 已开始但 ownership 不确定时写 `UNKNOWN`。
 
 ## 7. ToolInvocation
 
-Model terminal apply 时，Reconciler 按 Provider tool call 与冻结 ToolBinding materialize ToolInvocation。ToolInvocation 保存 descriptor、arguments、`environmentName`、permission state 与 request 的 `yoloEnabled`。
+Model terminal apply 时，Reconciler 按 Provider tool call 与冻结 ToolBinding materialize
+ToolInvocation。ToolInvocation 保存含 type 的 descriptor、arguments、`environmentName`、permission
+state 与 request 的 `yoloEnabled`。
 
 ```text
-environmentName == null
-  -> ToolWorker -> local Tool
+ToolBinding.type == PLATFORM
+  -> ToolWorker -> local Platform Tool
 
-environmentName != null
+ToolBinding.type == ENVIRONMENT
   -> ToolWorker -> RemoteTool -> transport -> Daemon -> Tool
 ```
+
+Provider 返回不可见或未知 Tool 时，Model invocation 产生可恢复 `ASSISTANT_ERROR`，错误消息包含请求
+名称和本次可用 Tool 名称；Reconciler 不物化 ToolInvocation，也不会因该错误卡住。
 
 Tool permission 在任何外部 I/O 前完成：
 
@@ -165,7 +180,7 @@ QUEUED + PENDING
 
 | 写者 | 可写事实 | 不写 |
 | --- | --- | --- |
-| `ThreadCommandCoordinator` / command transaction | Session、ROOT、Thread 创建；非空 head CAS；Input；Stop | 执行中的 Entry/head 语义推进 |
+| `ThreadCommandCoordinator` / command transaction | Session、ROOT、带 Environment 的 Thread 创建；Environment/head CAS；Input；Stop | 执行中的 Entry/head 语义推进 |
 | `ThreadReconciler` | Input apply、Entry/head、Model/Tool materialization、Usage apply | Provider/Tool 外部 I/O |
 | `ModelWorker` | Model Invocation lease、delta、terminal | Entry/head |
 | `ToolWorker` | Tool Invocation lease、partial、terminal | Entry/head |

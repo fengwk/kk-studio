@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 @FunctionalInterface
 public interface TurnExecutionResolver {
 
-  Resolution resolve(TurnSettings settings);
+  Resolution resolve(TurnSettings settings, String environmentName);
 
   sealed interface Resolution permits Resolution.Resolved, Resolution.Failed {
 

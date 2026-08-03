@@ -31,7 +31,6 @@ export function ChatWorkspacePane({
   onSessionSortChange,
   onThreadSortChange,
   onAgentChange,
-  onEnvironmentChange = async () => undefined,
   onYoloChange = async () => undefined,
 }: {
   chat: ChatDTO | undefined
@@ -48,7 +47,6 @@ export function ChatWorkspacePane({
   onSessionSortChange: (sort: PaneSortPreference) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
   onAgentChange: (agentName: string) => Promise<void>
-  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
 }) {
   const [firstSendReplay, setFirstSendReplay] = useState<FirstSendReplay | null>(null)
@@ -72,7 +70,6 @@ export function ChatWorkspacePane({
         agents={agents}
         environments={environments}
         agentName={chat?.agentName ?? ''}
-        environmentName={chat?.environmentName ?? null}
         yoloEnabled={chat?.yoloEnabled ?? false}
         settingsPending={settingsPending}
         isSettingsMutationLocked={isSettingsMutationLocked}
@@ -86,7 +83,6 @@ export function ChatWorkspacePane({
         onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
         onAgentChange={onAgentChange}
-        onEnvironmentChange={onEnvironmentChange}
         onYoloChange={onYoloChange}
         initialReplay={
           firstSendReplay?.threadId === pane.threadId
@@ -109,12 +105,10 @@ export function ChatWorkspacePane({
       onThreadChange={handleThreadChange}
       onThreadSortChange={onThreadSortChange}
       agentName={chat?.agentName ?? ''}
-      environmentName={chat?.environmentName ?? null}
       yoloEnabled={chat?.yoloEnabled ?? false}
       settingsPending={settingsPending}
       isSettingsMutationLocked={isSettingsMutationLocked}
       onAgentChange={onAgentChange}
-      onEnvironmentChange={onEnvironmentChange}
       onYoloChange={onYoloChange}
       onFirstSendRecovery={recoverFirstSend}
     />

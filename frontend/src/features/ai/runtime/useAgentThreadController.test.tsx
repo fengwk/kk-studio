@@ -138,7 +138,6 @@ describe('useAgentThreadController', () => {
     const { result } = renderHook(
       () => useAgentThreadController('1', '', undefined, {
         agentName: 'assistant',
-        environmentName: 'local',
         yoloEnabled: true,
       }),
       { wrapper },
@@ -161,7 +160,6 @@ describe('useAgentThreadController', () => {
       expect.objectContaining({
         content: 'hello world',
         agentName: 'assistant',
-        environmentName: 'local',
         yoloEnabled: true,
         expectedExecutionEpoch: 7,
       }),
@@ -202,12 +200,10 @@ describe('useAgentThreadController', () => {
           kind: 'USER_MESSAGE',
           role: 'user',
           agentName: 'assistant',
-          environmentName: null,
           yoloEnabled: false,
           firstSendContext: { chatId: 'chat-1' },
         }, {
           agentName: 'assistant',
-          environmentName: null,
           yoloEnabled: false,
         }),
       { wrapper },
@@ -266,12 +262,11 @@ describe('useAgentThreadController', () => {
             role: 'system',
             content: 'system instruction',
             agentName: 'assistant',
-            environmentName: null,
             yoloEnabled: false,
             firstSendContext: null,
             clientMessageId: 'cid-custom',
           },
-          { agentName: 'assistant', environmentName: null, yoloEnabled: false },
+          { agentName: 'assistant', yoloEnabled: false },
         ),
       { wrapper },
     )
@@ -288,7 +283,6 @@ describe('useAgentThreadController', () => {
       role: 'system',
       content: 'system instruction',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 7,
@@ -297,7 +291,6 @@ describe('useAgentThreadController', () => {
       role: 'system',
       content: 'system instruction',
       agentName: 'assistant',
-      environmentName: null,
       yoloEnabled: false,
       clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 7,
@@ -568,7 +561,7 @@ describe('useAgentThreadController', () => {
     expect(vi.mocked(harnessService.submitThreadMessage).mock.calls[2][1].clientMessageId).not.toBe(firstId)
   })
 
-  it('mints a new id and sends visible settings when a failed retry settings change', async () => {
+  it('mints a new id when a failed retry YOLO setting changes', async () => {
     vi.mocked(harnessService.submitThreadMessage)
       .mockRejectedValueOnce(new Error('response lost'))
       .mockResolvedValueOnce({
@@ -584,7 +577,7 @@ describe('useAgentThreadController', () => {
       })
 
     const { result, rerender } = renderHook(
-      ({ environmentName, yoloEnabled }) =>
+      ({ yoloEnabled }) =>
         useAgentThreadController(
           '1',
           'retry me',
@@ -594,14 +587,13 @@ describe('useAgentThreadController', () => {
             kind: 'USER_MESSAGE',
             role: 'user',
             agentName: 'assistant',
-            environmentName: null,
             yoloEnabled: false,
             firstSendContext: { chatId: 'chat-1' },
           },
-          { agentName: 'assistant', environmentName, yoloEnabled },
+          { agentName: 'assistant', yoloEnabled },
         ),
       {
-        initialProps: { environmentName: null as string | null, yoloEnabled: false },
+        initialProps: { yoloEnabled: false },
         wrapper,
       },
     )
@@ -614,7 +606,7 @@ describe('useAgentThreadController', () => {
     expect(originalId).toBe('cid-original')
     expect(result.current.draft).toBe('retry me')
 
-    rerender({ environmentName: 'local', yoloEnabled: true })
+    rerender({ yoloEnabled: true })
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -624,7 +616,6 @@ describe('useAgentThreadController', () => {
     expect(changedCall).toMatchObject({
       content: 'retry me',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
     })
   })
@@ -633,7 +624,6 @@ describe('useAgentThreadController', () => {
     const { result } = renderHook(
       () => useAgentThreadController('1', '', undefined, {
         agentName: 'assistant',
-        environmentName: 'local',
         yoloEnabled: false,
       }),
       { wrapper },
@@ -642,6 +632,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax-M2.7')
     expect(result.current.runtimeLabels.providerName).toBe('minimax')
     expect(result.current.runtimeLabels.contextWindow).toBe(128000)
+    expect(result.current.runtimeLabels.environmentName).toBe('local')
     expect(result.current.runtimeLabels.modelName).not.toBe('unknown-model')
   })
 
@@ -825,6 +816,7 @@ const thread = {
   sessionId: 's1',
   sessionTitle: 'title',
   headEntryId: 'h1',
+  environmentName: 'local',
   executionEpoch: 7,
   status: 'IDLE' as const,
   inputSequence: 0,

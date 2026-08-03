@@ -167,16 +167,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns("canvas_link", "id", "canvas_id", "source_node_id", "target_node_id");
     assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
     assertColumns(
-        "chat",
-        "id",
-        "title",
-        "agent_name",
-        "environment_name",
-        "yolo_enabled",
-        "created_at",
-        "updated_at",
-        "version");
+        "chat", "id", "title", "agent_name", "yolo_enabled", "created_at", "updated_at", "version");
     assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
+    assertColumns(
+        "harness_thread",
+        "id",
+        "head_entry_id",
+        "environment_name",
+        "input_sequence",
+        "runnable",
+        "execution_epoch",
+        "revision",
+        "processor_token",
+        "processor_until",
+        "created_at",
+        "updated_at");
   }
 
   @Test

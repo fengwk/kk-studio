@@ -1,6 +1,6 @@
 # Prompt 到 Artifact 数据流
 
-本文描述 Harness 从消息和当前可见发送设置构造 Provider request，到 Tool Result/Artifact 回到 Entry 并在浏览器呈现的事实链。
+本文描述 Harness 从消息、Chat 可见发送设置和 Thread 当前 Environment 构造 Provider request，到 Tool Result/Artifact 回到 Entry 并在浏览器呈现的事实链。
 
 ## 1. 数据流
 
@@ -52,7 +52,6 @@ POST /api/ai/runtime/threads/{threadId}/messages/custom
 ```text
 content
 agentName
-environmentName
 yoloEnabled
 clientMessageId
 expectedExecutionEpoch
@@ -66,42 +65,41 @@ Entry 只允许 `ROOT`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASS
 
 1. `ModelInvocationPlanner` 从完整 root-to-head path 检测 response debt。
 2. 从 debt 前缀中找到最近的 USER/CUSTOM `TurnSettings`。
-3. `DatabaseTurnExecutionResolver` 读取最新 Agent、Provider、Model、Variant 和 READY Environment。
-4. Resolver 依据 Agent 的 tools/skills 与 ToolCatalog 生成本次 `ToolBinding`、`SkillBinding` 和 system prompt。
-5. Planner 投影语义消息、生成 Provider tool definitions，并通过 `PromptCacheRequestFinalizer` 生成最终 cache control。
-6. Planner 冻结 `ModelInvocationRequest`：
+3. `DatabaseTurnExecutionResolver` 读取最新 Agent、Provider、Model、Variant、ToolCatalog 和 Thread 当前 Environment。
+4. Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`。Platform Tool 总可候选；只有 READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；null、stale 或 offline Environment 只贡献零 Environment Tool/Skill，不返回 Environment/Skill 缺失错误。
+5. Resolver 依据交集结果生成本次 `ToolBinding`、`SkillBinding` 和 system prompt；有 Skill binding 时隐式加入内部 Platform Tool `load_skill`。
+6. Planner 投影语义消息、生成 Provider tool definitions，并通过 `PromptCacheRequestFinalizer` 生成最终 cache control。
+7. Planner 冻结 `ModelInvocationRequest`：
 
 ```text
 providerRequest
-toolBindings
+toolBindings(descriptor, type, environmentName)
 skillBindings
 yoloEnabled
 ```
 
-缺失 Agent、Provider、Model、Variant、Environment、Tool 或 Skill 返回 `PlanningFailure`。
-无 Environment 且 Agent 需要 Environment Tool/Skill 时返回 `ENVIRONMENT_REQUIRED`；显式选择的
-Environment 不存在或未 READY 时返回 `ENVIRONMENT_NOT_FOUND`。Reconciler 追加
-`ASSISTANT_ERROR` barrier，不创建 ModelInvocation，也不静默使用其他资源。
+缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 `PlanningFailure`。Reconciler 追加
+`ASSISTANT_ERROR` barrier，不创建 ModelInvocation，也不静默使用其他资源；Environment 不可用时只让对应 Environment Tool/Skill 不进入本次 request。
 
 ## 4. Model 执行
 
 `harness_model_invocation.request` 保存 exact request。ModelWorker 只回放其中的 `providerRequest`；retry 仍使用同一 invocation request，只改变 attempt 和调度时间。
 
-Provider streaming delta 写入 Redis realtime。Provider terminal 先写 ModelInvocation terminal 并唤醒 Thread；Reconciler 再在 processor fencing 下原子写入 Assistant Entry、Usage、ToolInvocation materialization 与 head。
+Provider streaming delta 写入 Redis realtime。Provider terminal 先写 ModelInvocation terminal 并唤醒 Thread；Provider 返回冻结 request 中不可见或未知的 Tool 时，终结为可恢复错误，错误消息包含请求名称和本次可用 Tool 名称，Reconciler 追加 `ASSISTANT_ERROR`，不物化 ToolInvocation。正常 terminal 再由 Reconciler 在 processor fencing 下原子写入 Assistant Entry、Usage、ToolInvocation materialization 与 head。
 
 ## 5. Tool 执行与上下文回流
 
 Provider Tool Call 根据冻结 request 的 tool name 找到对应 ToolBinding，按 ordinal 写入 ToolInvocation：
 
 ```text
-environmentName == null
-  -> local Tool
+ToolBinding.type == PLATFORM
+  -> local Platform Tool
 
-environmentName != null
+ToolBinding.type == ENVIRONMENT
   -> RemoteTool -> Gateway -> Daemon -> Tool
 ```
 
-Tool worker 在外部 I/O 前完成 permission boundary。ALLOW 持久化 `ALLOWED` 与最终 descriptor/arguments；ASK 持久化 OPEN Interaction 并等待；DENY 写 `FAILED + DENIED`。用户批准只恢复同一 ToolInvocation 的执行，不重新读取 Agent 或 Environment。
+`ToolBinding` 的 descriptor、type 和 `environmentName` 是本次执行的冻结路由；Tool worker 在外部 I/O 前完成 permission boundary。ALLOW 持久化 `ALLOWED` 与最终 descriptor/arguments；ASK 持久化 OPEN Interaction 并等待；DENY 写 `FAILED + DENIED`。用户批准只恢复同一 ToolInvocation 的执行，不重新读取 Agent 或 Environment。
 
 Tool partial 写 Redis realtime；terminal 写 ToolInvocation。当前 Assistant 的全部 Tool sibling terminal 后，Reconciler 按 ordinal 追加 Tool Result `MESSAGE` Entry，推进 head，下一次 planning 只读取持久 Entry。
 

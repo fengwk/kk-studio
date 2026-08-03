@@ -7,5 +7,6 @@ import lombok.Data;
 public class ToolCatalogEntryDTO {
   private String name;
   private String version;
+  private String type;
   private String description;
 }

@@ -148,7 +148,7 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   void chatScopedCreatePersistsAssociationAndUnknownThreadIsRejected() {
     ChatDTO chat = createChat("scoped-create", "env-default");
 
-    HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
+    HarnessThreadDTO created = chatThreadService.createThread(chat.getId(), null);
 
     assertEquals("IDLE", created.getStatus());
     assertNotNull(created.getSessionId());
@@ -165,7 +165,7 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
   void chatScopedCreateSupportsNoDefaultEnvironment() {
     ChatDTO chat = createChat("no-environment");
 
-    HarnessThreadDTO created = chatThreadService.createThread(chat.getId());
+    HarnessThreadDTO created = chatThreadService.createThread(chat.getId(), null);
 
     assertEquals("IDLE", created.getStatus());
     assertNotNull(created.getSessionId());
@@ -190,7 +190,8 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
             + " for each row execute function fail_chat_thread_insert()");
 
     try {
-      assertThrows(DataAccessException.class, () -> chatThreadService.createThread(chat.getId()));
+      assertThrows(
+          DataAccessException.class, () -> chatThreadService.createThread(chat.getId(), null));
       assertEquals(before, jdbc.queryForObject("select count(*) from harness_thread", Long.class));
       assertEquals(
           0L,
@@ -223,7 +224,8 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
             + " for each row execute function fail_harness_session_insert()");
 
     try {
-      assertThrows(DataAccessException.class, () -> chatThreadService.createThread(chat.getId()));
+      assertThrows(
+          DataAccessException.class, () -> chatThreadService.createThread(chat.getId(), null));
       assertEquals(
           threadCount, jdbc.queryForObject("select count(*) from harness_thread", Long.class));
       assertEquals(
@@ -248,7 +250,6 @@ class ChatThreadIntegrationTest extends PostgresSpringTestSupport {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle(title);
     create.setAgentName("default-assistant");
-    create.setEnvironmentName(environmentName);
     return chatService.createChat(create);
   }
 

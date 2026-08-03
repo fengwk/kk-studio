@@ -37,7 +37,6 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
     ChatCreateDTO create = new ChatCreateDTO();
     create.setTitle("web-chat");
     create.setAgentName("default-assistant");
-    create.setEnvironmentName("web-environment");
     create.setYoloEnabled(true);
 
     MvcResult createResult =
@@ -50,7 +49,6 @@ public class StudioChatControllerTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.title").value("web-chat"))
             .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
-            .andExpect(jsonPath("$.data.environmentName").value("web-environment"))
             .andExpect(jsonPath("$.data.yoloEnabled").value(true))
             .andExpect(jsonPath("$.data.version").value("0"))
             .andReturn();

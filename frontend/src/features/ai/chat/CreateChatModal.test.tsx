@@ -24,14 +24,11 @@ describe('CreateChatModal', () => {
       <CreateChatModal
         open={false}
         agents={[]}
-        environments={[]}
         selectedAgentName=""
-        selectedEnvironmentName=""
         title=""
         pending={false}
         onClose={() => undefined}
         onSelectAgent={() => undefined}
-        onSelectEnvironment={() => undefined}
         onTitleChange={() => undefined}
         onSubmit={() => undefined}
       />,
@@ -48,18 +45,13 @@ describe('CreateChatModal', () => {
       <CreateChatModal
         open
         agents={[agent]}
-        environments={[
-          { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
-        ]}
         selectedAgentName=""
-        selectedEnvironmentName=""
         title=""
         pending={false}
         formError="请填写 Chat 名称"
         nameError="请填写名称"
         onClose={() => undefined}
         onSelectAgent={onSelectAgent}
-        onSelectEnvironment={() => undefined}
         onTitleChange={onTitleChange}
         onSubmit={onSubmit}
       />,
@@ -75,7 +67,7 @@ describe('CreateChatModal', () => {
     expect(onTitleChange).toHaveBeenCalled()
     await user.selectOptions(screen.getByLabelText('Agent'), 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    await user.selectOptions(screen.getByLabelText('Environment'), 'local')
+    expect(screen.queryByLabelText('Environment')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
   })

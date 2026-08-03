@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
@@ -287,7 +288,14 @@ class ToolInterceptorChainTest {
 
   private static ToolDescriptor descriptor(String name, ToolParamsSchema schema) {
     return new ToolDescriptor(
-        name, "1", name, null, schema, ToolSideEffect.IDEMPOTENT, Duration.ofSeconds(30));
+        name,
+        "1",
+        ToolType.PLATFORM,
+        name,
+        null,
+        schema,
+        ToolSideEffect.IDEMPOTENT,
+        Duration.ofSeconds(30));
   }
 
   private static ToolParamsSchema baseSchema() {

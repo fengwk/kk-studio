@@ -233,7 +233,8 @@ public final class EnvironmentToolCatalog {
 
   private static ToolDescriptor descriptor(
       String name, ToolParamsSchema inputSchema, ToolSideEffect sideEffect, Duration timeout) {
-    return new ToolDescriptor(name, "1", loadPrompt(name), name, inputSchema, sideEffect, timeout);
+    return new ToolDescriptor(
+        name, "1", ToolType.ENVIRONMENT, loadPrompt(name), name, inputSchema, sideEffect, timeout);
   }
 
   private static Map<String, ToolDescriptor> indexByName(List<ToolDescriptor> descriptors) {

@@ -22,7 +22,7 @@ import java.util.List;
 /** Message/custom payload role invariants and request-reference ownership. */
 class RuntimeEntryPayloadTest {
 
-  private static final TurnSettings SETTINGS = new TurnSettings("agent", null, false);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", false);
 
   @Test
   void userAndCustomMessagesCarryTurnSettings() {

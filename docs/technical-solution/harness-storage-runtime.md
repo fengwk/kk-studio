@@ -20,7 +20,7 @@ PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 ove
 
 ### `harness_session`
 
-字段为 `id`、`title`、`created_at`。Session 只组织一棵 append-only Entry Tree。Chat-scoped Thread 创建事务先写 Session，再写唯一 ROOT，最后写入 head 指向 ROOT 的 Thread。
+字段为 `id`、`title`、`created_at`。Session 只组织一棵 append-only Entry Tree。Chat-scoped Thread 创建事务先写 Session，再写唯一 ROOT，最后写入 head 指向 ROOT 且可带初始 Environment 的 Thread。
 
 ### `harness_entry`
 
@@ -43,9 +43,14 @@ ASSISTANT_ABORTED
 
 ### `harness_thread`
 
-字段为 `id`、非空 `head_entry_id`、`input_sequence`、`runnable`、`execution_epoch`、`revision`、processor lease 与时间戳。Thread 行不保存 Chat 设置、Agent、Model、Variant、Tool 或 Skill 投影；当前 Session 由 head Entry 派生。
+字段为 `id`、非空 `head_entry_id`、nullable `environment_name`、`input_sequence`、`runnable`、
+`execution_epoch`、`revision`、processor lease 与时间戳。Thread 行不复制 Chat 的 Agent/YOLO 设置，
+也不保存 Agent、Model、Variant、Tool 或 Skill 配置投影；当前 Session 由 head Entry 派生。
 
-`PUT /api/ai/runtime/threads/{threadId}/head` 只能写入非空 Entry 引用。命令先锁 Thread、校验静止条件和 `expectedExecutionEpoch`，再递增 epoch 并清理 processor lease 与 Thread ExecutionActivation。
+`PUT /api/ai/runtime/threads/{threadId}/head` 只能写入非空 Entry 引用。命令先锁 Thread、校验静止条件和
+`expectedExecutionEpoch`，再递增 epoch 并清理 processor lease 与 Thread ExecutionActivation。
+`PUT /api/ai/runtime/threads/{threadId}/environment` 使用同样的静止条件与 epoch CAS 设置或清除
+`environment_name`；成功同时递增 `execution_epoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。
 
 ## 3. Thread Input
 
@@ -62,11 +67,11 @@ enqueue 在同一事务内分配 sequence、写 Input、设置 `runnable=true` �
 
 ```text
 agentName
-environmentName
 yoloEnabled
 ```
 
-它是名称引用，不展开当前 Catalog 定义。USER/CUSTOM Input 被 harvest 后，对应 Entry 继续保留同一份 TurnSettings。
+它是名称引用，不展开当前 Catalog 定义；Thread 当前 `environment_name` 由 planning 单独读取。
+USER/CUSTOM Input 被 harvest 后，对应 Entry 继续保留同一份 TurnSettings。
 
 ## 4. Invocation 表
 
@@ -78,9 +83,12 @@ yoloEnabled
 
 ### `harness_tool_invocation`
 
-保存 Assistant Entry、所属 Model Invocation、ordinal、tool call id、descriptor/arguments、`environment_name`、权限状态、`yolo_enabled`、状态、lease、retry、result/error 与 `applied_at`。
+保存 Assistant Entry、所属 Model Invocation、ordinal、tool call id、descriptor、type、arguments、
+`environment_name`、权限状态、`yolo_enabled`、状态、lease、retry、result/error 与 `applied_at`。
 
-`environment_name` 是 ToolBinding 的冻结目标：为空时由本地 Tool 执行，非空时经 RemoteTool 发往指定 READY Environment。发送前目标不可用写 `FAILED`；发送结果不确定写 `UNKNOWN`，两者都由 durable facts 记录。
+`ToolBinding` 的 descriptor、type 与 `environment_name` 是执行历史的冻结路由：`PLATFORM` binding
+由本地 Platform Tool 执行，`ENVIRONMENT` binding 经 RemoteTool 发往指定 Environment。发送前目标
+不可用写 `FAILED`；发送结果不确定写 `UNKNOWN`，两者都由 durable facts 记录。
 
 ### `harness_interaction`
 
@@ -96,7 +104,8 @@ yoloEnabled
 
 - Thread、Model Invocation 与 Platform Tool 直接创建为 `SCHEDULED` Activation。
 - Environment Tool 先创建为 `PARKED` Activation；同一批 materialization 完成后，由
-  `EnvironmentToolActivationQueue` 依据 ToolInvocation `target_id` 顺序推进 FIFO 队头。
+  `EnvironmentToolActivationQueue` 依据 ToolInvocation `target_id` 顺序推进各 Environment 的 FIFO
+  队头。
 - `SCHEDULED` 记录参与 due scan 和 nearest-wake timer；`PARKED` 记录仍可被所有权检查读取。
 - Environment 在 Activation 创建后保持不变；retry、续租、权限等待和批准只修改 `wake_at`
   或 `activation_state`。

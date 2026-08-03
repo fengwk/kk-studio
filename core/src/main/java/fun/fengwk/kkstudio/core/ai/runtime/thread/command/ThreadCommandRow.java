@@ -13,6 +13,7 @@ public class ThreadCommandRow {
   private Long parentEntryId;
   private String title;
   private Long headEntryId;
+  private String environmentName;
   private Long inputSequence;
   private Boolean runnable;
   private Long executionEpoch;

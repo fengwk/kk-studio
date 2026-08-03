@@ -32,6 +32,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningResult;
 import fun.fengwk.kkstudio.harness.runtime.model.plan.TurnExecutionResolver;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ToolCallVisibility;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.port.HarnessIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -275,12 +277,26 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     if ("SUCCEEDED".equals(invocation.getStatus())) {
       ModelInvocationRequest request = REQUEST_CODEC.decode(invocation.getRequestJson());
       ProviderResponse response = RESPONSE_CODEC.decode(invocation.getResultJson());
-      payload = assistantPayload(response);
       entryId = ids.nextEntryId();
-      insertEntry(thread, entryId, payload, now);
-      insertUsage(thread, entryId, ModelUsageDraft.from(request.providerRequest(), response), now);
-      materializeTools(
-          thread, entryId, modelInvocationId, ownership.executionEpoch(), response, request, now);
+      Optional<ProviderToolCall> unavailableCall =
+          ToolCallVisibility.firstUnavailable(request.providerRequest(), response);
+      if (unavailableCall.isPresent()) {
+        payload =
+            new AssistantErrorEntryPayload(
+                new ModelInvocationError(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    ToolCallVisibility.unavailableMessage(
+                        unavailableCall.orElseThrow().name(),
+                        ToolCallVisibility.availableToolNames(request.providerRequest()))));
+        insertEntry(thread, entryId, payload, now);
+      } else {
+        payload = assistantPayload(response);
+        insertEntry(thread, entryId, payload, now);
+        insertUsage(
+            thread, entryId, ModelUsageDraft.from(request.providerRequest(), response), now);
+        materializeTools(
+            thread, entryId, modelInvocationId, ownership.executionEpoch(), response, request, now);
+      }
       advance(thread, ownership, entryId, now);
     } else {
       payload = new AssistantErrorEntryPayload(modelError(invocation));
@@ -530,7 +546,10 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
 
   private PlanningResult planAt(OwnedThreadRow thread, long headEntryId) {
     return planner.plan(
-        thread.getSessionId(), headEntryId, path(thread.getSessionId(), headEntryId));
+        thread.getSessionId(),
+        headEntryId,
+        thread.getEnvironmentName(),
+        path(thread.getSessionId(), headEntryId));
   }
 
   private boolean hasResponseDebt(OwnedThreadRow thread) {
@@ -609,7 +628,13 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
               .filter(candidate -> candidate.descriptor().name().equals(call.name()))
               .findFirst()
               .orElseThrow(
-                  () -> new IllegalStateException("model called an unbound tool: " + call.name()));
+                  () ->
+                      new IllegalStateException(
+                          ToolCallVisibility.unavailableMessage(
+                              call.name(),
+                              request.toolBindings().stream()
+                                  .map(candidateBinding -> candidateBinding.descriptor().name())
+                                  .toList())));
       long invocationId = ids.nextToolInvocationId();
       if (mapper.insertToolInvocation(
               invocationId,
@@ -628,20 +653,23 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
           != 1) {
         throw new IllegalStateException("cannot materialize tool invocation");
       }
-      if (binding.environmentName() != null) {
-        requireActivationAffected(
-            executionActivationStore.park(
-                ExecutionTargetKind.TOOL_INVOCATION,
-                invocationId,
-                binding.environmentName(),
-                persistedNow),
-            "park tool invocation");
-        environmentNames.add(binding.environmentName());
-      } else {
-        requireActivationAffected(
-            executionActivationStore.schedule(
-                ExecutionTargetKind.TOOL_INVOCATION, invocationId, null, persistedNow),
-            "schedule tool invocation");
+      switch (binding.type()) {
+        case ENVIRONMENT:
+          requireActivationAffected(
+              executionActivationStore.park(
+                  ExecutionTargetKind.TOOL_INVOCATION,
+                  invocationId,
+                  binding.environmentName(),
+                  persistedNow),
+              "park tool invocation");
+          environmentNames.add(binding.environmentName());
+          break;
+        case PLATFORM:
+          requireActivationAffected(
+              executionActivationStore.schedule(
+                  ExecutionTargetKind.TOOL_INVOCATION, invocationId, null, persistedNow),
+              "schedule tool invocation");
+          break;
       }
     }
     for (String environmentName : environmentNames) {
@@ -759,6 +787,7 @@ public class PostgresqlThreadReconcileTransactions implements ThreadReconcileTra
     return new HarnessThread(
         row.getId(),
         row.getHeadEntryId(),
+        row.getEnvironmentName(),
         row.getInputSequence(),
         row.isRunnable(),
         row.getExecutionEpoch(),

@@ -42,7 +42,6 @@ export type { ThreadMessageReplay } from '@/features/ai/runtime/thread-message-r
 
 export interface ThreadTurnSettings {
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
 }
 
@@ -52,7 +51,6 @@ export function useAgentThreadController(
   initialReplay?: ThreadMessageReplay,
   visibleSettings: ThreadTurnSettings = {
     agentName: '',
-    environmentName: null,
     yoloEnabled: false,
   },
 ) {
@@ -90,7 +88,12 @@ export function useAgentThreadController(
   const timeline = buildThreadTimeline(entries, inputs, modelStream)
   const working = isThreadWorking(thread, timeline)
   const currentAgent = agents.find((agent) => agent.name === visibleSettings.agentName)
-  const runtimeLabels = resolveRuntimeLabels(visibleSettings, currentAgent, models)
+  const runtimeLabels = resolveRuntimeLabels(
+    visibleSettings,
+    currentAgent,
+    models,
+    thread?.environmentName,
+  )
   const observability = useHarnessThreadObservability(threadId, usage, toolInvocations)
 
   useChatTranscriptAutoScroll(
@@ -158,7 +161,6 @@ export function useAgentThreadController(
       role: previousPayload?.role ?? 'user',
       content,
       agentName: visibleSettings.agentName,
-      environmentName: visibleSettings.environmentName,
       yoloEnabled: visibleSettings.yoloEnabled,
       firstSendContext: previousPayload?.firstSendContext ?? null,
     }
@@ -182,7 +184,6 @@ export function useAgentThreadController(
         firstSendContext: payload.firstSendContext,
         content,
         agentName: visibleSettings.agentName,
-        environmentName: visibleSettings.environmentName,
         yoloEnabled: visibleSettings.yoloEnabled,
         clientMessageId,
         expectedExecutionEpoch: thread.executionEpoch,
@@ -288,6 +289,7 @@ function resolveRuntimeLabels(
   visibleSettings: ThreadTurnSettings,
   agent: AgentDefinitionDTO | undefined,
   models: AgentModelView[],
+  environmentName: string | null | undefined,
 ) {
   const model = models.find((item) => modelRef(item) === agent?.model)
   const contextWindow = extractContextWindow(model)
@@ -300,7 +302,7 @@ function resolveRuntimeLabels(
     // Canonical display identity is provider/model.
     modelName: formatModelRef(providerName, bareModelName),
     variantName: firstNonEmpty(agent?.variant),
-    environmentName: firstNonEmpty(visibleSettings.environmentName),
+    environmentName: firstNonEmpty(environmentName),
     contextWindow,
   }
 }

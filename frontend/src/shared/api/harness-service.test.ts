@@ -17,7 +17,6 @@ describe('harnessService', () => {
     await service.submitThreadMessage('thread /1', {
       content: 'hello',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 3,
@@ -26,7 +25,6 @@ describe('harnessService', () => {
       role: 'system',
       content: 'policy',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 4,
@@ -47,7 +45,6 @@ describe('harnessService', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/messages', {
       content: 'hello',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-1',
       expectedExecutionEpoch: 3,
@@ -56,7 +53,6 @@ describe('harnessService', () => {
       role: 'system',
       content: 'policy',
       agentName: 'assistant',
-      environmentName: 'local',
       yoloEnabled: true,
       clientMessageId: 'cid-custom',
       expectedExecutionEpoch: 4,
@@ -101,6 +97,23 @@ describe('harnessService', () => {
       headEntryId: '9007199254740993',
       expectedExecutionEpoch: 1,
     })
+  })
+
+  it('maps the epoch-fenced Thread Environment update endpoint', async () => {
+    const client = createClient()
+    const service = createHarnessService(client)
+    await service.updateThreadEnvironment('thread /1', {
+      environmentName: null,
+      expectedExecutionEpoch: '9007199254740993',
+    })
+
+    expect(client.put).toHaveBeenCalledWith(
+      '/ai/runtime/threads/thread%20%2F1/environment',
+      {
+        environmentName: null,
+        expectedExecutionEpoch: '9007199254740993',
+      },
+    )
   })
 
   it('exposes the current snapshot-first Session and Thread command surface', async () => {

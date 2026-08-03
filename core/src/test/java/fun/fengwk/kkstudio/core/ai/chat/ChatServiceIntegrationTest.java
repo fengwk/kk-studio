@@ -78,12 +78,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
       ChatUpdateDTO update = new ChatUpdateDTO();
       update.setTitle("beta");
-      update.setEnvironmentName("local");
       update.setYoloEnabled(true);
       update.setExpectedVersion("0");
       ChatDTO updated = chatService.updateChat(chatId, update);
       assertEquals("beta", updated.getTitle());
-      assertEquals("local", updated.getEnvironmentName());
       assertTrue(updated.isYoloEnabled());
       assertEquals("1", updated.getVersion());
 
@@ -108,14 +106,13 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
       TurnExecutionResolver.Resolution resolution =
-          turnExecutionResolver.resolve(new TurnSettings("default-assistant", null, false));
+          turnExecutionResolver.resolve(new TurnSettings("default-assistant", false), null);
       TurnExecutionResolver.Resolution.Failed failure =
           assertInstanceOf(TurnExecutionResolver.Resolution.Failed.class, resolution);
       assertEquals(PlanningFailureKind.AGENT_NOT_FOUND, failure.failure().kind());
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");
-      staleAgentUpdate.setEnvironmentName(null);
       staleAgentUpdate.setYoloEnabled(false);
       staleAgentUpdate.setExpectedVersion("1");
       ChatDTO updatedWithStaleAgent = chatService.updateChat(chatId, staleAgentUpdate);

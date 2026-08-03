@@ -22,7 +22,6 @@ public class ChatMutationFactory {
 
   private static final String RESOURCE = "chat";
   private static final int TITLE_MAX_LENGTH = 256;
-  private static final int ENVIRONMENT_NAME_MAX_LENGTH = 128;
 
   private final AgentEditableSupport editableSupport;
   private final PostgresqlSequenceIdGenerator idGenerator;
@@ -50,7 +49,6 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
-    chat.setEnvironmentName(canonicalEnvironmentName(createDTO.getEnvironmentName()));
     chat.setYoloEnabled(
         createDTO.getYoloEnabled() == null
             ? toolSettingsProvider.get().defaultYolo()
@@ -75,9 +73,6 @@ public class ChatMutationFactory {
     }
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
-    }
-    if (updateDTO.isEnvironmentNameProvided()) {
-      chat.setEnvironmentName(canonicalEnvironmentName(updateDTO.getEnvironmentName()));
     }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
@@ -104,25 +99,6 @@ public class ChatMutationFactory {
       throw new AiValidationException(RESOURCE, "agentName must not contain '/'");
     }
     editableSupport.validateMaxLength(RESOURCE, "agentName", trimmed, 64);
-    return trimmed;
-  }
-
-  private String canonicalEnvironmentName(String raw) {
-    if (raw == null) {
-      return null;
-    }
-    String trimmed = raw.strip();
-    if (trimmed.isEmpty()) {
-      throw new AiValidationException(RESOURCE, "environmentName must not be blank");
-    }
-    if (!raw.equals(trimmed)) {
-      throw new AiValidationException(
-          RESOURCE, "environmentName must not contain surrounding whitespace");
-    }
-    if (trimmed.length() > ENVIRONMENT_NAME_MAX_LENGTH) {
-      throw new AiValidationException(
-          RESOURCE, "environmentName must be <= " + ENVIRONMENT_NAME_MAX_LENGTH + " characters");
-    }
     return trimmed;
   }
 }

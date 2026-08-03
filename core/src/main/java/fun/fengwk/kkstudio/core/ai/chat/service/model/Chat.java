@@ -11,7 +11,6 @@ public class Chat {
   private Long id;
   private String title;
   private String agentName;
-  private String environmentName;
   private boolean yoloEnabled;
   private Long version;
   private Instant createTime;

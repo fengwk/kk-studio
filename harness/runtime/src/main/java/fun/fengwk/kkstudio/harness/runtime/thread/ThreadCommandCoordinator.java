@@ -31,12 +31,22 @@ public final class ThreadCommandCoordinator {
   }
 
   /** Atomically creates the Session, ROOT entry, and already-bound Thread. */
-  public HarnessThread createThread(String title) {
-    return transactions.createThread(title, clock.instant());
+  public HarnessThread createThread(String title, String environmentName) {
+    return transactions.createThread(
+        title, HarnessThread.canonicalEnvironmentName(environmentName), clock.instant());
   }
 
   public HarnessThread updateHead(long threadId, long expectedExecutionEpoch, long headEntryId) {
     return transactions.updateHead(threadId, expectedExecutionEpoch, headEntryId, clock.instant());
+  }
+
+  public HarnessThread updateEnvironment(
+      long threadId, long expectedExecutionEpoch, String environmentName) {
+    return transactions.updateEnvironment(
+        threadId,
+        expectedExecutionEpoch,
+        HarnessThread.canonicalEnvironmentName(environmentName),
+        clock.instant());
   }
 
   /**

@@ -133,17 +133,14 @@ export function ChatWorkspacePage() {
   const updateChatMutation = useMutation({
     mutationFn: ({
       agentName,
-      environmentName,
       yoloEnabled,
       expectedVersion,
     }: {
       agentName?: string
-      environmentName?: string | null
       yoloEnabled?: boolean
       expectedVersion: string
     }) => chatService.updateChat(chatId, {
       ...(agentName === undefined ? {} : { agentName }),
-      ...(environmentName === undefined ? {} : { environmentName }),
       ...(yoloEnabled === undefined ? {} : { yoloEnabled }),
       expectedVersion,
     }),
@@ -165,7 +162,6 @@ export function ChatWorkspacePage() {
   async function updateChatSettings(
     patch: {
       agentName?: string
-      environmentName?: string | null
       yoloEnabled?: boolean
     },
   ) {
@@ -294,9 +290,6 @@ export function ChatWorkspacePage() {
             onThreadSortChange={setThreadSort}
             onAgentChange={async (agentName) => {
               await updateChatSettings({ agentName })
-            }}
-            onEnvironmentChange={async (environmentName) => {
-              await updateChatSettings({ environmentName })
             }}
             onYoloChange={async (yoloEnabled) => {
               await updateChatSettings({ yoloEnabled })

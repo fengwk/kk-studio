@@ -66,8 +66,8 @@ describe('AgentForm current contracts', () => {
             },
           ]}
           toolCatalog={[
-            { name: 'bash', version: '1', description: longDescription },
-            { name: 'lsp', version: '1', description: 'lsp' },
+            { name: 'bash', version: '1', description: longDescription, type: 'PLATFORM' },
+            { name: 'lsp', version: '1', description: 'lsp', type: 'ENVIRONMENT' },
           ]}
           onChange={setDraft}
         />

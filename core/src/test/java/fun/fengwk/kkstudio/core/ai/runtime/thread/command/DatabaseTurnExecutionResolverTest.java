@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -46,81 +47,92 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Covers the nullable Environment boundary without weakening exact Agent capability resolution. */
+/** Covers the latest per-invocation Platform/Environment capability view. */
 class DatabaseTurnExecutionResolverTest {
 
   @Test
-  void requiresEnvironmentForConfiguredEnvironmentTools() {
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-
-    Resolution.Failed failed = assertInstanceOf(Resolution.Failed.class, fixture.resolve(null));
-
-    // A missing selection must be distinguishable from a selected Environment going offline.
-    assertEquals(PlanningFailureKind.ENVIRONMENT_REQUIRED, failed.failure().kind());
-    assertEquals(
-        "selected Agent requires a READY Environment for tools [read]", failed.failure().message());
-  }
-
-  @Test
-  void requiresEnvironmentForConfiguredSkills() {
-    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
-
-    Resolution.Failed failed = assertInstanceOf(Resolution.Failed.class, fixture.resolve(null));
-
-    // Skills only exist behind a live Environment, so null cannot be silently treated as no skill.
-    assertEquals(PlanningFailureKind.ENVIRONMENT_REQUIRED, failed.failure().kind());
-    assertEquals(
-        "selected Agent requires a READY Environment for skills [dev]", failed.failure().message());
-  }
-
-  @Test
-  void reportsAllRequiredEnvironmentCapabilitiesTogether() {
-    Fixture fixture = new Fixture(List.of("read"), List.of("dev"), List.of());
-
-    PlanningFailure failure = failure(fixture.resolve(null));
-
-    // One failure explains the complete configuration instead of forcing one retry per capability.
-    assertEquals(PlanningFailureKind.ENVIRONMENT_REQUIRED, failure.kind());
-    assertEquals(
-        "selected Agent requires a READY Environment for tools [read] and skills [dev]",
-        failure.message());
-  }
-
-  @Test
-  void preservesSelectedUnavailableEnvironmentName() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-
-    Resolution.Failed failed =
-        assertInstanceOf(Resolution.Failed.class, fixture.resolve("offline"));
-
-    // An explicit stale selection remains a separate failure and must retain its concrete name.
-    assertEquals(PlanningFailureKind.ENVIRONMENT_NOT_FOUND, failed.failure().kind());
-    assertEquals("environment not found or not READY/open: offline", failed.failure().message());
-  }
-
-  @Test
-  void rejectsSelectedEnvironmentThatIsConnectedButNotReady() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.connectingEnvironment("starting");
-
-    PlanningFailure failure = failure(fixture.resolve("starting"));
-
-    // Registry presence alone is insufficient; planning requires READY and an open connection.
-    assertEquals(PlanningFailureKind.ENVIRONMENT_NOT_FOUND, failure.kind());
-    assertEquals("environment not found or not READY/open: starting", failure.message());
-  }
-
-  @Test
-  void resolvesLocalToolsWithoutEnvironment() {
-    ToolDescriptor localTool = descriptor("create_goal");
-    Fixture fixture = new Fixture(List.of(localTool.name()), List.of(), List.of(localTool));
+  void noEnvironmentKeepsPlatformToolsAndOmitsEnvironmentTools() {
+    ToolDescriptor platformTool = descriptor("create_goal");
+    Fixture fixture =
+        new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
 
     Resolution.Resolved resolved =
         assertInstanceOf(Resolution.Resolved.class, fixture.resolve(null));
 
-    // This proves nullable Environment still supports model-only and application-local tools.
+    assertEquals(
+        List.of(platformTool.name()),
+        resolved.execution().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
+    assertEquals(ToolType.PLATFORM, resolved.execution().toolBindings().getFirst().type());
+  }
+
+  @Test
+  void omitsSkillsWhenNoEnvironmentIsSelected() {
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
+
+    Resolution.Resolved resolved =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(null));
+
+    assertEquals(List.of(), resolved.execution().skillBindings());
+  }
+
+  @Test
+  void omitsAllUnavailableEnvironmentCapabilitiesTogether() {
+    Fixture fixture = new Fixture(List.of("read"), List.of("dev"), List.of());
+
+    Resolution.Resolved resolved =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(null));
+
+    assertEquals(List.of(), resolved.execution().toolBindings());
+    assertEquals(List.of(), resolved.execution().skillBindings());
+  }
+
+  @Test
+  void staleEnvironmentKeepsPlatformToolsAndOmitsEnvironmentTools() {
+    ToolDescriptor platformTool = descriptor("create_goal");
+    Fixture fixture =
+        new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
+
+    Resolution.Resolved resolved =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("offline"));
+
+    assertEquals(
+        List.of(platformTool.name()),
+        resolved.execution().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
+  }
+
+  @Test
+  void nonReadyEnvironmentKeepsPlatformToolsAndOmitsEnvironmentTools() {
+    ToolDescriptor platformTool = descriptor("create_goal");
+    Fixture fixture =
+        new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
+    fixture.connectingEnvironment("starting");
+
+    Resolution.Resolved resolved =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("starting"));
+
+    assertEquals(
+        List.of(platformTool.name()),
+        resolved.execution().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
+  }
+
+  @Test
+  void resolvesPlatformToolsWithoutEnvironment() {
+    ToolDescriptor platformTool = descriptor("create_goal");
+    Fixture fixture = new Fixture(List.of(platformTool.name()), List.of(), List.of(platformTool));
+
+    Resolution.Resolved resolved =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(null));
+
+    // This proves nullable Environment still supports model-only and Platform tools.
     assertEquals(1, resolved.execution().toolBindings().size());
-    assertEquals(localTool, resolved.execution().toolBindings().getFirst().descriptor());
+    assertEquals(platformTool, resolved.execution().toolBindings().getFirst().descriptor());
+    assertEquals(ToolType.PLATFORM, resolved.execution().toolBindings().getFirst().type());
     assertNull(resolved.execution().toolBindings().getFirst().environmentName());
   }
 
@@ -137,23 +149,30 @@ class DatabaseTurnExecutionResolverTest {
   }
 
   @Test
-  void resolvesEnvironmentToolsAgainstReadySelection() {
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+  void readyEnvironmentAddsSelectedEnvironmentToolsToPlatformTools() {
+    ToolDescriptor platformTool = descriptor("create_goal");
+    Fixture fixture =
+        new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
     fixture.readyEnvironment("local");
 
     Resolution.Resolved resolved =
         assertInstanceOf(Resolution.Resolved.class, fixture.resolve("local"));
 
-    // A READY selection freezes the Environment target into the resolved ToolBinding.
-    assertEquals(1, resolved.execution().toolBindings().size());
-    assertEquals("read", resolved.execution().toolBindings().getFirst().descriptor().name());
-    assertEquals("local", resolved.execution().toolBindings().getFirst().environmentName());
+    assertEquals(
+        List.of(platformTool.name(), "read"),
+        resolved.execution().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
+    assertEquals(ToolType.PLATFORM, resolved.execution().toolBindings().get(0).type());
+    assertNull(resolved.execution().toolBindings().get(0).environmentName());
+    assertEquals(ToolType.ENVIRONMENT, resolved.execution().toolBindings().get(1).type());
+    assertEquals("local", resolved.execution().toolBindings().get(1).environmentName());
   }
 
   @Test
   void reportsMissingTurnSettingsAndCatalogResources() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    PlanningFailure missingSettings = failure(fixture.resolver.resolve(null));
+    PlanningFailure missingSettings = failure(fixture.resolver.resolve(null, null));
     assertEquals(PlanningFailureKind.MISSING_TURN_SETTINGS, missingSettings.kind());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -244,18 +263,35 @@ class DatabaseTurnExecutionResolverTest {
 
   @Test
   void reportsUnknownToolAndMissingSkillByName() {
-    ToolDescriptor localTool = descriptor("create_goal");
+    ToolDescriptor platformTool = descriptor("create_goal");
     Fixture fixture =
-        new Fixture(List.of(localTool.name(), "missing"), List.of(), List.of(localTool));
+        new Fixture(List.of(platformTool.name(), "missing"), List.of(), List.of(platformTool));
     PlanningFailure missingTool = failure(fixture.resolve(null));
     assertEquals(PlanningFailureKind.TOOL_NOT_FOUND, missingTool.kind());
     assertEquals("tool not found: missing", missingTool.message());
 
-    fixture = new Fixture(List.of(), List.of("available", "missing"), List.of());
+    ToolDescriptor loadSkill = descriptor("load_skill");
+    fixture =
+        new Fixture(
+            List.of(),
+            List.of("available", "missing"),
+            List.of(loadSkill),
+            Set.of(loadSkill.name()),
+            AgentProviderType.openai,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true);
     fixture.readyEnvironment("local", List.of("available"));
-    PlanningFailure missingSkill = failure(fixture.resolve("local"));
-    assertEquals(PlanningFailureKind.SKILL_NOT_FOUND, missingSkill.kind());
-    assertEquals("skill not found in environment local: missing", missingSkill.message());
+    Resolution.Resolved missingSkill =
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("local"));
+    assertEquals(
+        List.of("available"),
+        missingSkill.execution().skillBindings().stream().map(skill -> skill.name()).toList());
+    assertEquals(
+        List.of("load_skill"),
+        missingSkill.execution().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
   }
 
   @Test
@@ -274,8 +310,8 @@ class DatabaseTurnExecutionResolverTest {
     assertEquals(PlanningFailureKind.PROVIDER_NOT_FOUND, missingFactory.kind());
     assertEquals("provider factory not found for provider (OPENAI)", missingFactory.message());
 
-    ToolDescriptor localTool = descriptor("create_goal");
-    fixture = new Fixture(List.of(localTool.name()), List.of(), List.of(localTool));
+    ToolDescriptor platformTool = descriptor("create_goal");
+    fixture = new Fixture(List.of(platformTool.name()), List.of(), List.of(platformTool));
     fixture.modelSupportsTools(false);
     PlanningFailure unsupportedTools = failure(fixture.resolve(null));
     assertEquals(PlanningFailureKind.INVALID_TURN_SETTINGS, unsupportedTools.kind());
@@ -283,12 +319,12 @@ class DatabaseTurnExecutionResolverTest {
   }
 
   @Test
-  void requiresAndInjectsRuntimeManagedLoadSkillTool() {
+  void requiresAndInjectsInternalPlatformLoadSkillTool() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment("local", List.of("dev"));
     PlanningFailure missingLoadSkill = failure(fixture.resolve("local"));
     assertEquals(PlanningFailureKind.TOOL_NOT_FOUND, missingLoadSkill.kind());
-    assertEquals("runtime-managed tool not found: load_skill", missingLoadSkill.message());
+    assertEquals("internal platform tool not found: load_skill", missingLoadSkill.message());
 
     ToolDescriptor loadSkill = descriptor("load_skill");
     fixture =
@@ -383,6 +419,7 @@ class DatabaseTurnExecutionResolverTest {
     return new ToolDescriptor(
         name,
         "1",
+        ToolType.PLATFORM,
         name + " description",
         name,
         new ToolParamsSchema(null, Map.of(), Set.of(), false),
@@ -420,11 +457,11 @@ class DatabaseTurnExecutionResolverTest {
     private final DatabaseTurnExecutionResolver resolver;
 
     private Fixture(
-        List<String> tools, List<String> skills, List<ToolDescriptor> localDescriptors) {
+        List<String> tools, List<String> skills, List<ToolDescriptor> platformDescriptors) {
       this(
           tools,
           skills,
-          localDescriptors,
+          platformDescriptors,
           Set.of(),
           AgentProviderType.openai,
           ProviderType.OPENAI,
@@ -435,8 +472,8 @@ class DatabaseTurnExecutionResolverTest {
     private Fixture(
         List<String> tools,
         List<String> skills,
-        List<ToolDescriptor> localDescriptors,
-        Set<String> runtimeManagedToolNames,
+        List<ToolDescriptor> platformDescriptors,
+        Set<String> internalPlatformToolNames,
         AgentProviderType persistedProviderType,
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
@@ -478,7 +515,7 @@ class DatabaseTurnExecutionResolverTest {
               agentConfigCodec,
               modelConfigParser,
               new ProviderFactories(providerFactories),
-              new ToolCatalog(localDescriptors, runtimeManagedToolNames),
+              new ToolCatalog(platformDescriptors, internalPlatformToolNames),
               environmentRegistry);
     }
 
@@ -519,7 +556,7 @@ class DatabaseTurnExecutionResolverTest {
     }
 
     private Resolution resolve(String environmentName) {
-      return resolver.resolve(new TurnSettings("assistant", environmentName, false));
+      return resolver.resolve(new TurnSettings("assistant", false), environmentName);
     }
 
     private void connectingEnvironment(String environmentName) {

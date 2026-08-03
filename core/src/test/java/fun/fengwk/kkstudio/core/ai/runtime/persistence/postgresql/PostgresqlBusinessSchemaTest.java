@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql;
 
 import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport.assertTransactionConstraintViolation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,36 +67,53 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void chatEnvironmentNameRequiresCanonicalValueAndAgentNameIsRequired() throws SQLException {
+  void chatAndThreadEnvironmentContractsAreCanonical() throws SQLException {
     try (Connection conn = newConnection()) {
-      insertChat(conn, FIXTURE_IDS.incrementAndGet(), null);
-      insertChat(conn, FIXTURE_IDS.incrementAndGet(), "prod");
+      insertChat(conn, FIXTURE_IDS.incrementAndGet());
+      insertChat(conn, FIXTURE_IDS.incrementAndGet());
     }
 
-    for (String invalid : new String[] {"", "   ", "\t", "\n", "\tprod\t"}) {
-      try (Connection conn = newConnection()) {
-        assertTransactionConstraintViolation(
-            conn,
-            "ck_chat_environment_name",
-            () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), invalid));
-      }
-    }
-    try (Connection conn = newConnection()) {
-      SQLException tooLong =
-          assertThrows(
-              SQLException.class,
-              () -> insertChat(conn, FIXTURE_IDS.incrementAndGet(), "x".repeat(129)));
-      assertEquals("22001", tooLong.getSQLState());
-    }
     for (String invalid : new String[] {" ", " agent ", "\tagent\t", "agent/name"}) {
       try (Connection conn = newConnection();
           PreparedStatement ps =
               conn.prepareStatement(
-                  "insert into chat (id, title, agent_name, environment_name)"
-                      + " values (?, 'schema-test', ?, null)")) {
+                  "insert into chat (id, title, agent_name) values (?, 'schema-test', ?)")) {
         ps.setLong(1, FIXTURE_IDS.incrementAndGet());
         ps.setString(2, invalid);
         assertTransactionConstraintViolation(conn, "ck_chat_agent_name", () -> ps.executeUpdate());
+      }
+    }
+
+    long threadId = FIXTURE_IDS.incrementAndGet();
+    long sessionId = FIXTURE_IDS.incrementAndGet();
+    long entryId = FIXTURE_IDS.incrementAndGet();
+    try (Connection conn = newConnection()) {
+      insertThread(conn, threadId, sessionId, entryId, "prod");
+      assertEquals(
+          0L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "update harness_thread set environment_name = 'prod-2' where id = ?")) {
+        ps.setLong(1, threadId);
+        assertEquals(1, ps.executeUpdate());
+      }
+      assertEquals(
+          1L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
+    }
+
+    for (String invalid : new String[] {"", "   ", "\t", "\n", "\tprod\t"}) {
+      long invalidThreadId = FIXTURE_IDS.incrementAndGet();
+      long invalidSessionId = FIXTURE_IDS.incrementAndGet();
+      long invalidEntryId = FIXTURE_IDS.incrementAndGet();
+      try (Connection conn = newConnection()) {
+        insertThread(conn, invalidThreadId, invalidSessionId, invalidEntryId, null);
+        try (PreparedStatement ps =
+            conn.prepareStatement("update harness_thread set environment_name = ? where id = ?")) {
+          ps.setString(1, invalid);
+          ps.setLong(2, invalidThreadId);
+          assertTransactionConstraintViolation(
+              conn, "ck_harness_thread_environment_name", () -> ps.executeUpdate());
+        }
       }
     }
   }
@@ -276,14 +292,48 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertChat(Connection conn, long id, String environmentName) throws SQLException {
+  private void insertChat(Connection conn, long id) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into chat (id, title, agent_name, environment_name)"
-                + " values (?, 'schema-test', 'schema-agent', ?)")) {
+            "insert into chat (id, title, agent_name)"
+                + " values (?, 'schema-test', 'schema-agent')")) {
       ps.setLong(1, id);
-      ps.setString(2, environmentName);
       assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertThread(
+      Connection conn, long threadId, long sessionId, long entryId, String environmentName)
+      throws SQLException {
+    try (PreparedStatement session =
+            conn.prepareStatement("insert into harness_session (id, title) values (?, 'schema')");
+        PreparedStatement entry =
+            conn.prepareStatement(
+                "insert into harness_entry (id, session_id, entry_type, payload)"
+                    + " values (?, ?, 'ROOT', '{}'::jsonb)");
+        PreparedStatement thread =
+            conn.prepareStatement(
+                "insert into harness_thread (id, head_entry_id, environment_name, input_sequence,"
+                    + " runnable, execution_epoch) values (?, ?, ?, 0, false, 0)")) {
+      session.setLong(1, sessionId);
+      assertEquals(1, session.executeUpdate());
+      entry.setLong(1, entryId);
+      entry.setLong(2, sessionId);
+      assertEquals(1, entry.executeUpdate());
+      thread.setLong(1, threadId);
+      thread.setLong(2, entryId);
+      thread.setString(3, environmentName);
+      assertEquals(1, thread.executeUpdate());
+    }
+  }
+
+  private long queryLong(Connection conn, String sql, long id) throws SQLException {
+    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setLong(1, id);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getLong(1);
+      }
     }
   }
 

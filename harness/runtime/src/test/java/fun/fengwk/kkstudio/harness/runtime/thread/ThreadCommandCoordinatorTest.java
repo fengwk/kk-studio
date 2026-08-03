@@ -26,7 +26,7 @@ class ThreadCommandCoordinatorTest {
 
   private static final Instant NOW = Instant.parse("2026-07-24T00:00:00Z");
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
-  private static final TurnSettings SETTINGS = new TurnSettings("agent", "environment", true);
+  private static final TurnSettings SETTINGS = new TurnSettings("agent", true);
 
   private FakeTransactions transactions;
   private ThreadCommandCoordinator coordinator;
@@ -52,7 +52,7 @@ class ThreadCommandCoordinatorTest {
 
   @Test
   void createsAndUpdatesThreadsThroughInjectedClock() {
-    assertSame(transactions.createdThread, coordinator.createThread("title"));
+    assertSame(transactions.createdThread, coordinator.createThread("title", null));
     assertEquals("title", transactions.lastTitle);
     assertEquals(NOW, transactions.lastCreateNow);
 
@@ -168,9 +168,9 @@ class ThreadCommandCoordinatorTest {
   private static final class FakeTransactions implements ThreadCommandTransactions {
     private final Map<String, EnqueueResult> existing = new HashMap<>();
     private final HarnessThread createdThread =
-        new HarnessThread(1L, 1L, 0L, false, 0L, 0L, null, NOW, NOW);
+        new HarnessThread(1L, 1L, null, 0L, false, 0L, 0L, null, NOW, NOW);
     private final HarnessThread updatedThread =
-        new HarnessThread(1L, 99L, 0L, false, 7L, 1L, null, NOW, NOW);
+        new HarnessThread(1L, 99L, null, 0L, false, 7L, 1L, null, NOW, NOW);
     private int findCalls;
     private int enqueueCalls;
     private Instant lastCreateNow;
@@ -188,7 +188,7 @@ class ThreadCommandCoordinatorTest {
     private int nextId = 100;
 
     @Override
-    public HarnessThread createThread(String title, Instant now) {
+    public HarnessThread createThread(String title, String environmentName, Instant now) {
       lastTitle = title;
       lastCreateNow = now;
       return createdThread;
@@ -201,6 +201,12 @@ class ThreadCommandCoordinatorTest {
       lastExpectedEpoch = expectedExecutionEpoch;
       lastHeadEntryId = headEntryId;
       lastUpdateNow = now;
+      return updatedThread;
+    }
+
+    @Override
+    public HarnessThread updateEnvironment(
+        long threadId, long expectedExecutionEpoch, String environmentName, Instant now) {
       return updatedThread;
     }
 

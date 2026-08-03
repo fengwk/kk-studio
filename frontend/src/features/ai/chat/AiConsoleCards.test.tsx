@@ -21,7 +21,7 @@ describe('ChatCard', () => {
   it('uses the Chat id when the title is absent and marks a missing Agent', () => {
     render(
       <MemoryRouter>
-        <ChatCard chat={{ ...chat(), title: null, agentName: 'missing', environmentName: null }} agents={[]} />
+        <ChatCard chat={{ ...chat(), title: null, agentName: 'missing' }} agents={[]} />
       </MemoryRouter>,
     )
     expect(screen.getByRole('button', { name: '进入 Chat chat-1' })).toBeInTheDocument()
@@ -71,7 +71,6 @@ function chat() {
     id: 'chat-1',
     title: 'Draft',
     agentName: 'missing',
-    environmentName: null,
     yoloEnabled: false,
     version: '1',
     createTime: null,

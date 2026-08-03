@@ -17,7 +17,6 @@ export interface ThreadMessagePayload {
   role: ThreadMessageRole
   content: string
   agentName: string
-  environmentName: string | null
   yoloEnabled: boolean
   firstSendContext: ThreadMessageFirstSendContext | null
 }
@@ -44,7 +43,6 @@ export function sameThreadMessagePayload(
     && left.role === right.role
     && left.content === right.content
     && left.agentName === right.agentName
-    && left.environmentName === right.environmentName
     && left.yoloEnabled === right.yoloEnabled
     && leftFirstSendChatId === rightFirstSendChatId
   )

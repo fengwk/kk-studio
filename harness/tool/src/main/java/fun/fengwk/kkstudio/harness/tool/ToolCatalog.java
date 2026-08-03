@@ -7,51 +7,54 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * A stable, name-keyed catalog composed by the application from local selectable tools and the
- * fixed Environment tools.
- */
+/** A stable, name-keyed catalog of selectable tools plus internal platform tools. */
 public final class ToolCatalog {
 
   private final List<ToolDescriptor> descriptors;
-  private final Map<String, ToolDescriptor> byName;
-  private final Map<String, ToolDescriptor> localByName;
-  private final Map<String, ToolDescriptor> runtimeManagedByName;
+  private final Map<String, ToolDescriptor> selectableByName;
+  private final Map<String, ToolDescriptor> internalByName;
 
-  public ToolCatalog(List<ToolDescriptor> localDescriptors, Set<String> runtimeManagedToolNames) {
-    Objects.requireNonNull(localDescriptors, "localDescriptors");
-    Objects.requireNonNull(runtimeManagedToolNames, "runtimeManagedToolNames");
-    Map<String, ToolDescriptor> local = new LinkedHashMap<>();
-    for (ToolDescriptor descriptor : localDescriptors) {
-      Objects.requireNonNull(descriptor, "localDescriptors[]");
-      if (local.putIfAbsent(descriptor.name(), descriptor) != null) {
-        throw new IllegalArgumentException("duplicate local tool name: " + descriptor.name());
+  public ToolCatalog(List<ToolDescriptor> platformDescriptors, Set<String> internalToolNames) {
+    Objects.requireNonNull(platformDescriptors, "platformDescriptors");
+    Objects.requireNonNull(internalToolNames, "internalToolNames");
+    Map<String, ToolDescriptor> platform = new LinkedHashMap<>();
+    for (ToolDescriptor descriptor : platformDescriptors) {
+      Objects.requireNonNull(descriptor, "platformDescriptors[]");
+      if (descriptor.type() != ToolType.PLATFORM) {
+        throw new IllegalArgumentException(
+            "non-platform descriptor supplied as platform tool: " + descriptor.name());
+      }
+      if (platform.putIfAbsent(descriptor.name(), descriptor) != null) {
+        throw new IllegalArgumentException("duplicate platform tool name: " + descriptor.name());
       }
     }
-    Map<String, ToolDescriptor> runtimeManaged = new LinkedHashMap<>();
-    for (String name : runtimeManagedToolNames) {
+    Map<String, ToolDescriptor> internal = new LinkedHashMap<>();
+    for (String name : internalToolNames) {
       if (name == null || name.isBlank()) {
-        throw new IllegalArgumentException("runtime-managed tool names must not be blank");
+        throw new IllegalArgumentException("internal tool names must not be blank");
       }
       if (EnvironmentToolCatalog.find(name).isPresent()) {
-        throw new IllegalArgumentException(
-            "runtime-managed and Environment tool names collide: " + name);
+        throw new IllegalArgumentException("internal and Environment tool names collide: " + name);
       }
-      ToolDescriptor descriptor = local.remove(name);
-      if (descriptor != null) {
-        runtimeManaged.put(name, descriptor);
+      ToolDescriptor descriptor = platform.remove(name);
+      if (descriptor == null) {
+        throw new IllegalArgumentException("internal tool is not registered: " + name);
       }
+      internal.put(name, descriptor);
     }
-    Map<String, ToolDescriptor> index = new LinkedHashMap<>(local);
+    Map<String, ToolDescriptor> index = new LinkedHashMap<>(platform);
     for (ToolDescriptor descriptor : EnvironmentToolCatalog.descriptors()) {
+      if (descriptor.type() != ToolType.ENVIRONMENT) {
+        throw new IllegalArgumentException(
+            "Environment catalog contains a non-environment tool: " + descriptor.name());
+      }
       if (index.putIfAbsent(descriptor.name(), descriptor) != null) {
         throw new IllegalArgumentException(
-            "local and Environment tool names collide: " + descriptor.name());
+            "platform and Environment tool names collide: " + descriptor.name());
       }
     }
-    this.byName = Map.copyOf(index);
-    this.localByName = Map.copyOf(local);
-    this.runtimeManagedByName = Map.copyOf(runtimeManaged);
+    this.selectableByName = Map.copyOf(index);
+    this.internalByName = Map.copyOf(internal);
     this.descriptors = List.copyOf(index.values());
   }
 
@@ -60,7 +63,7 @@ public final class ToolCatalog {
   }
 
   public Optional<ToolDescriptor> find(String name) {
-    return Optional.ofNullable(byName.get(name));
+    return findSelectable(name);
   }
 
   public ToolDescriptor require(String name) {
@@ -68,15 +71,15 @@ public final class ToolCatalog {
         .orElseThrow(() -> new IllegalArgumentException("unknown selectable tool: " + name));
   }
 
-  public Optional<ToolDescriptor> findLocal(String name) {
-    return Optional.ofNullable(localByName.get(name));
+  public Optional<ToolDescriptor> findSelectable(String name) {
+    return Optional.ofNullable(selectableByName.get(name));
   }
 
-  public Optional<ToolDescriptor> findEnvironment(String name) {
-    return EnvironmentToolCatalog.find(name);
+  public Optional<ToolDescriptor> findInternal(String name) {
+    return Optional.ofNullable(internalByName.get(name));
   }
 
-  public Optional<ToolDescriptor> findRuntimeManaged(String name) {
-    return Optional.ofNullable(runtimeManagedByName.get(name));
+  public Optional<ToolDescriptor> findAny(String name) {
+    return findSelectable(name).or(() -> findInternal(name));
   }
 }

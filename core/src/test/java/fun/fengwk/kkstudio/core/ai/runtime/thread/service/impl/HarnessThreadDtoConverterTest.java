@@ -24,10 +24,10 @@ class HarnessThreadDtoConverterTest {
 
     HarnessThreadDTO idle =
         converter.convert(
-            new HarnessThread(1L, 10L, 0L, false, 0L, 0L, null, CREATED_AT, UPDATED_AT));
+            new HarnessThread(1L, 10L, null, 0L, false, 0L, 0L, null, CREATED_AT, UPDATED_AT));
     HarnessThreadDTO runnable =
         converter.convert(
-            new HarnessThread(2L, 11L, 3L, true, 1L, 4L, null, CREATED_AT, UPDATED_AT));
+            new HarnessThread(2L, 11L, null, 3L, true, 1L, 4L, null, CREATED_AT, UPDATED_AT));
 
     assertEquals("IDLE", idle.getStatus());
     assertEquals("10", idle.getHeadEntryId());

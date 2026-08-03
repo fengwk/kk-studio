@@ -794,8 +794,8 @@ export const aiCatalog = {
     'zh-CN': '新对话',
   },
   'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread; /agent and /environment change the visible Chat settings, and /thread reuses an existing Thread.',
-    'zh-CN': '输入后创建新 Thread；/agent 和 /environment 修改当前可见 Chat 设置，/thread 复用已有 Thread。',
+    'en-US': 'Send a message to create a new Thread; /agent changes the visible Chat setting, /environment chooses this pane’s draft Environment, and /thread reuses an existing Thread.',
+    'zh-CN': '输入后创建新 Thread；/agent 修改当前 Chat 设置，/environment 选择当前 pane 的 Environment 草稿，/thread 复用已有 Thread。',
   },
   'ai.chat.scope': {
     'en-US': 'Scope',

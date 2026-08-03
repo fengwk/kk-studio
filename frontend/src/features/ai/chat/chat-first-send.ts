@@ -65,12 +65,13 @@ export async function performBlankPaneFirstSend(options: {
     role: 'user',
     content: options.content,
     agentName: options.agentName,
-    environmentName: options.environmentName,
     yoloEnabled: options.yoloEnabled,
     firstSendContext: { chatId: options.chatId },
   }
 
-  const created = await createChatThread(options.chatId)
+  const created = await createChatThread(options.chatId, {
+    environmentName: options.environmentName,
+  })
   if (!created.sessionId) {
     throw new Error(translate('ai.runtime.action.firstSendMissingSession'))
   }
@@ -79,7 +80,6 @@ export async function performBlankPaneFirstSend(options: {
     userMessageInput = await submitThreadMessage(created.threadId, {
       content: options.content,
       agentName: options.agentName,
-      environmentName: options.environmentName,
       yoloEnabled: options.yoloEnabled,
       clientMessageId: ids.userMessageId,
       expectedExecutionEpoch: created.executionEpoch,
