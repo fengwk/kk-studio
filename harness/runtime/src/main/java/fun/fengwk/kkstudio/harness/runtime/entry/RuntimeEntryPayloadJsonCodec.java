@@ -15,17 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
@@ -45,15 +36,16 @@ import java.util.Set;
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
- * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
- * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
- * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}；{@link AssistantAbortedEntryPayload} 必须仅含
- * text/thinking content 且不能全为空，否则进入取消 barrier 而非空 aborted turn。字段顺序固定；{@link BigDecimal} 字段以 {@code
- * toPlainString()} 字符串输出；list 顺序保留。branch settings 的 {@code environmentId} 是可空 canonical 小写 UUID
- * 文本，作为 Environment route identity；display name 不进入 durable 协议。
+ * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；raw {@code argumentsJson} / {@code
+ * detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code tool_result} 嵌套 {@code
+ * tool_call} 或 {@code tool_result}；{@link AssistantAbortedEntryPayload} 必须仅含 text/thinking content
+ * 且不能全为空，否则进入取消 barrier 而非空 aborted turn。字段顺序固定；{@link BigDecimal} 字段以 {@code toPlainString()}
+ * 字符串输出；list 顺序保留。branch settings 的 {@code environmentId} 是可空 canonical 小写 UUID 文本，作为 Environment
+ * route identity；display name 不进入 durable 协议。
  *
  * <p>{@code ASSISTANT_ERROR} 的 {@code error} 子树直接委派 {@link ModelInvocationErrorJsonCodec} 的 node
- * API。
+ * API。{@code message} 子树委派 {@link AgentMessageJsonCodec}，AgentMessage 与 content 的严格编码/解码规则 由该共享
+ * codec 负责，本 codec 不再持有重复实现。
  */
 public final class RuntimeEntryPayloadJsonCodec {
 
@@ -74,19 +66,6 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> ROOT_FIELDS = orderedSet();
 
-  private static final Set<String> TEXT_CONTENT_FIELDS = orderedSet("type", "text");
-  private static final Set<String> IMAGE_CONTENT_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> AUDIO_CONTENT_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> THINKING_CONTENT_FIELDS = orderedSet("type", "text");
-  private static final Set<String> JSON_CONTENT_FIELDS = orderedSet("type", "json");
-  private static final Set<String> TOOL_CALL_CONTENT_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "argumentsJson");
-  private static final Set<String> TOOL_RESULT_CONTENT_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
-  private static final Set<String> ARTIFACT_CONTENT_FIELDS =
-      orderedSet("type", "artifactId", "mediaType", "preview");
-
-  private static final Set<String> MESSAGE_INNER_FIELDS = orderedSet("role", "contents");
   private static final Set<String> TURN_SETTINGS_FIELDS = orderedSet("agentName", "yoloEnabled");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
   private static final Set<String> USAGE_FIELDS =
@@ -109,6 +88,7 @@ public final class RuntimeEntryPayloadJsonCodec {
           "reasoning",
           "total");
 
+  private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
   private static final ModelInvocationErrorJsonCodec ERROR_CODEC =
       new ModelInvocationErrorJsonCodec();
 
@@ -198,7 +178,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static ObjectNode encodeMessagePayload(MessageEntryPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.set("message", encodeMessage(value.message()));
+    node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
     if (value.turnSettings() == null) {
       node.putNull("turnSettings");
     } else {
@@ -214,7 +194,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static ObjectNode encodeCustomMessagePayload(CustomMessageEntryPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.set("message", encodeMessage(value.message()));
+    node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
     node.set("turnSettings", encodeTurnSettings(value.turnSettings()));
     return node;
   }
@@ -227,7 +207,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static ObjectNode encodeAssistantAborted(AssistantAbortedEntryPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.set("message", encodeMessage(value.message()));
+    node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
     return node;
   }
 
@@ -293,7 +273,7 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static MessageEntryPayload decodeMessagePayload(JsonNode value) {
     ObjectNode node = requireObject(value, "MESSAGE");
     requireExactFields(node, MESSAGE_FIELDS, "MESSAGE");
-    AgentMessage message = decodeMessage(node.get("message"));
+    AgentMessage message = MESSAGE_CODEC.decodeNode(node.get("message"));
     TurnSettings turnSettings = decodeNullableTurnSettings(node.get("turnSettings"));
     JsonNode metadataNode = node.get("assistantMetadata");
     if (metadataNode.isNull()) {
@@ -307,7 +287,8 @@ public final class RuntimeEntryPayloadJsonCodec {
     ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
     requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageEntryPayload(
-        decodeMessage(node.get("message")), decodeTurnSettings(node.get("turnSettings")));
+        MESSAGE_CODEC.decodeNode(node.get("message")),
+        decodeTurnSettings(node.get("turnSettings")));
   }
 
   private static AssistantErrorEntryPayload decodeAssistantError(JsonNode value) {
@@ -320,7 +301,7 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static AssistantAbortedEntryPayload decodeAssistantAborted(JsonNode value) {
     ObjectNode node = requireObject(value, "ASSISTANT_ABORTED");
     requireExactFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
-    AgentMessage message = decodeMessage(node.get("message"));
+    AgentMessage message = MESSAGE_CODEC.decodeNode(node.get("message"));
     return new AssistantAbortedEntryPayload(message);
   }
 
@@ -387,163 +368,6 @@ public final class RuntimeEntryPayloadJsonCodec {
     return value == null || value.isNull() ? null : decodeTurnSettings(value);
   }
 
-  // ---------- AgentMessage / content encoders & decoders ----------
-
-  private static ObjectNode encodeMessage(AgentMessage message) {
-    ObjectNode node = NODES.objectNode();
-    node.put("role", message.role().name());
-    ArrayNode contents = node.putArray("contents");
-    for (AgentMessageContent content : message.contents()) {
-      contents.add(encodeContent(content));
-    }
-    return node;
-  }
-
-  private static AgentMessage decodeMessage(JsonNode value) {
-    ObjectNode node = requireObject(value, "message");
-    requireExactFields(node, MESSAGE_INNER_FIELDS, "message");
-    AgentMessageRole role = readEnum(AgentMessageRole.class, text(node, "role"), "message.role");
-    ArrayNode contentsNode = requireArray(node.get("contents"), "message.contents");
-    List<AgentMessageContent> contents = new ArrayList<>(contentsNode.size());
-    for (JsonNode element : contentsNode) {
-      contents.add(decodeContent(element));
-    }
-    return new AgentMessage(role, contents);
-  }
-
-  private static ObjectNode encodeContent(AgentMessageContent content) {
-    ObjectNode node = NODES.objectNode();
-    if (content instanceof TextMessageContent value) {
-      node.put("type", "text");
-      node.put("text", value.text());
-    } else if (content instanceof ImageMessageContent value) {
-      node.put("type", "image");
-      node.put("mediaType", value.mediaType());
-      node.put("source", value.source());
-    } else if (content instanceof AudioMessageContent value) {
-      node.put("type", "audio");
-      node.put("mediaType", value.mediaType());
-      node.put("source", value.source());
-    } else if (content instanceof ThinkingMessageContent value) {
-      node.put("type", "thinking");
-      node.put("text", value.text());
-    } else if (content instanceof JsonMessageContent value) {
-      // Encode 端也必须严格校验 raw JSON value。
-      validateStrictJsonValue(value.json(), "content.json");
-      node.put("type", "json");
-      node.put("json", value.json());
-    } else if (content instanceof ToolCallMessageContent value) {
-      validateStrictJsonObject(value.argumentsJson(), "content.argumentsJson");
-      node.put("type", "tool_call");
-      node.put("toolCallId", value.toolCallId());
-      node.put("toolName", value.toolName());
-      node.put("argumentsJson", value.argumentsJson());
-    } else if (content instanceof ToolResultMessageContent value) {
-      validateStrictJsonObject(value.detailsJson(), "content.detailsJson");
-      node.put("type", "tool_result");
-      node.put("toolCallId", value.toolCallId());
-      node.put("toolName", value.toolName());
-      ArrayNode nested = node.putArray("contents");
-      for (AgentMessageContent child : value.contents()) {
-        if (child instanceof ToolCallMessageContent || child instanceof ToolResultMessageContent) {
-          throw new IllegalArgumentException(
-              "tool result contents cannot nest tool call or tool result");
-        }
-        nested.add(encodeContent(child));
-      }
-      node.put("error", value.error());
-      node.put("detailsJson", value.detailsJson());
-    } else if (content instanceof ArtifactMessageContent value) {
-      node.put("type", "artifact");
-      node.put("artifactId", value.artifactId());
-      node.put("mediaType", value.mediaType());
-      if (value.preview() == null) {
-        node.putNull("preview");
-      } else {
-        node.put("preview", value.preview());
-      }
-    } else {
-      throw new IllegalArgumentException(
-          "unsupported agent message content: " + content.getClass().getName());
-    }
-    return node;
-  }
-
-  private static AgentMessageContent decodeContent(JsonNode value) {
-    ObjectNode node = requireObject(value, "content");
-    JsonNode typeNode = node.get("type");
-    if (typeNode == null || !typeNode.isTextual()) {
-      throw new IllegalArgumentException("content.type must be text");
-    }
-    String type = typeNode.textValue();
-    return switch (type) {
-      case "text" -> {
-        requireExactFields(node, TEXT_CONTENT_FIELDS, "content");
-        // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
-        yield new TextMessageContent(requiredTextAllowEmpty(node, "text", "content"));
-      }
-      case "image" -> {
-        requireExactFields(node, IMAGE_CONTENT_FIELDS, "content");
-        yield new ImageMessageContent(
-            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
-      }
-      case "audio" -> {
-        requireExactFields(node, AUDIO_CONTENT_FIELDS, "content");
-        yield new AudioMessageContent(
-            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
-      }
-      case "thinking" -> {
-        requireExactFields(node, THINKING_CONTENT_FIELDS, "content");
-        yield new ThinkingMessageContent(requiredTextAllowEmpty(node, "text", "content"));
-      }
-      case "json" -> {
-        requireExactFields(node, JSON_CONTENT_FIELDS, "content");
-        String rawJson = requiredStrictJsonValueString(node, "json", "content");
-        yield new JsonMessageContent(rawJson);
-      }
-      case "tool_call" -> {
-        requireExactFields(node, TOOL_CALL_CONTENT_FIELDS, "content");
-        yield new ToolCallMessageContent(
-            requiredText(node, "toolCallId", "content"),
-            requiredText(node, "toolName", "content"),
-            requiredStrictJsonObjectString(node, "argumentsJson", "content"));
-      }
-      case "tool_result" -> {
-        requireExactFields(node, TOOL_RESULT_CONTENT_FIELDS, "content");
-        ArrayNode contentsArray = requireArray(node.get("contents"), "content.contents");
-        List<AgentMessageContent> nestedContents = new ArrayList<>(contentsArray.size());
-        for (JsonNode element : contentsArray) {
-          AgentMessageContent nested = decodeContent(element);
-          if (nested instanceof ToolCallMessageContent
-              || nested instanceof ToolResultMessageContent) {
-            throw new IllegalArgumentException(
-                "tool result contents cannot nest tool call or tool result");
-          }
-          nestedContents.add(nested);
-        }
-        yield new ToolResultMessageContent(
-            requiredText(node, "toolCallId", "content"),
-            requiredText(node, "toolName", "content"),
-            nestedContents,
-            requiredBoolean(node, "error", "content"),
-            requiredStrictJsonObjectString(node, "detailsJson", "content"));
-      }
-      case "artifact" -> {
-        requireExactFields(node, ARTIFACT_CONTENT_FIELDS, "content");
-        JsonNode previewNode = node.get("preview");
-        if (!previewNode.isTextual() && !previewNode.isNull()) {
-          throw new IllegalArgumentException("content.preview must be text or null");
-        }
-        String preview = previewNode.isNull() ? null : previewNode.textValue();
-        yield new ArtifactMessageContent(
-            requiredText(node, "artifactId", "content"),
-            requiredText(node, "mediaType", "content"),
-            preview);
-      }
-      default -> throw new IllegalArgumentException("unknown agent message content type: " + type);
-    };
-  }
-
   // ---------- Assistant metadata encoders & decoders ----------
 
   private static ObjectNode encodeAssistantMetadata(AssistantMessageMetadata metadata) {
@@ -601,43 +425,6 @@ public final class RuntimeEntryPayloadJsonCodec {
             requiredDecimal(costNode, "reasoning", "assistantMetadata.cost"),
             requiredDecimal(costNode, "total", "assistantMetadata.cost"));
     return new AssistantMessageMetadata(stopReason, usage, cost);
-  }
-
-  // ---------- Raw-JSON strict validation (shared by encode & decode) ----------
-
-  private static void validateStrictJsonObject(String raw, String name) {
-    JsonNode parsed = parseStrict(raw, name);
-    if (!parsed.isObject()) {
-      throw new IllegalArgumentException(name + " must be a JSON object");
-    }
-  }
-
-  private static void validateStrictJsonValue(String raw, String name) {
-    parseStrict(raw, name);
-  }
-
-  private static String requiredStrictJsonObjectString(
-      ObjectNode node, String field, String context) {
-    String raw = requiredText(node, field, context);
-    validateStrictJsonObject(raw, context + "." + field);
-    return raw;
-  }
-
-  private static String requiredStrictJsonValueString(
-      ObjectNode node, String field, String context) {
-    String raw = requiredText(node, field, context);
-    validateStrictJsonValue(raw, context + "." + field);
-    return raw;
-  }
-
-  private static JsonNode parseStrict(String raw, String name) {
-    JsonNode parsed;
-    try {
-      parsed = MAPPER.readTree(raw);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException(name + " must contain JSON", error);
-    }
-    return parsed;
   }
 
   // ---------- Generic helpers ----------
@@ -742,15 +529,6 @@ public final class RuntimeEntryPayloadJsonCodec {
           context + "." + field + " must be a canonical positive decimal string");
     }
     return value;
-  }
-
-  /** 与 {@link #requiredText} 类似，但允许空字符串（仅 non-null 约束，如 {@link TextMessageContent#text}）。 */
-  private static String requiredTextAllowEmpty(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(context + "." + field + " must be text");
-    }
-    return value.textValue();
   }
 
   private static long requiredNonNegativeLong(ObjectNode node, String field, String context) {
