@@ -14,9 +14,16 @@ class EntryTypeTest {
   @Test
   void containsOnlySupportedTypes() {
     assertEquals(
-        List.of("ROOT", "MESSAGE", "CUSTOM_MESSAGE", "ASSISTANT_ERROR", "ASSISTANT_ABORTED"),
+        List.of(
+            "ROOT",
+            "TURN_START",
+            "MESSAGE",
+            "CUSTOM_MESSAGE",
+            "ASSISTANT_ERROR",
+            "ASSISTANT_ABORTED",
+            "TURN_END"),
         List.of(EntryType.values()).stream().map(Enum::name).toList());
-    assertEquals(5, EntryType.values().length);
+    assertEquals(7, EntryType.values().length);
   }
 
   @Test

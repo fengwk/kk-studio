@@ -22,6 +22,13 @@ import java.util.List;
 class RuntimeEntryPayloadJsonCodecTest {
 
   private static final TurnSettings SETTINGS = new TurnSettings("agent", true);
+  private static final BranchSettings BRANCH_SETTINGS =
+      new BranchSettings(
+          "workspace-A",
+          "coding",
+          new ModelSelection("anthropic", "claude-sonnet", "default"),
+          "high",
+          List.of("read", "grep"));
   private final RuntimeEntryPayloadJsonCodec codec = new RuntimeEntryPayloadJsonCodec();
 
   @Test
@@ -66,6 +73,162 @@ class RuntimeEntryPayloadJsonCodecTest {
         () ->
             new CustomMessageEntryPayload(
                 message(AgentMessageRole.ASSISTANT, "assistant"), SETTINGS));
+  }
+
+  @Test
+  void roundTripsTurnBoundariesInDesignFieldOrder() {
+    TurnStartEntryPayload start = new TurnStartEntryPayload(TurnStartReason.INPUT, BRANCH_SETTINGS);
+    TurnEndEntryPayload end =
+        new TurnEndEntryPayload(123L, TurnEndOutcome.COMPLETED, true, null, null);
+    String expectedStart =
+        "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":\"workspace-A\",\"agentName\":\"coding\","
+            + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
+            + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]}}";
+    String expectedEnd =
+        "{\"turnStartEntryId\":\"123\",\"outcome\":\"COMPLETED\",\"continueModel\":true,"
+            + "\"reason\":null,\"closeRequestId\":null}";
+
+    assertEquals(expectedStart, codec.encode(start));
+    assertEquals(start, codec.decode(EntryType.TURN_START, expectedStart));
+    assertEquals(expectedEnd, codec.encode(end));
+    assertEquals(end, codec.decode(EntryType.TURN_END, expectedEnd));
+  }
+
+  @Test
+  void acceptsNullEnvironmentAndCanonicalizesDuplicateActiveTools() {
+    TurnStartEntryPayload start =
+        new TurnStartEntryPayload(
+            TurnStartReason.CONTINUATION,
+            new BranchSettings(
+                null,
+                "coding",
+                new ModelSelection("anthropic", "claude-sonnet", "default"),
+                "high",
+                List.of("read", "read", "grep")));
+
+    assertEquals(
+        "{\"reason\":\"CONTINUATION\",\"settings\":{\"environmentName\":null,\"agentName\":\"coding\","
+            + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
+            + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]}}",
+        codec.encode(start));
+  }
+
+  @Test
+  void rejectsStrictTurnBoundaryJsonViolations() {
+    TurnStartEntryPayload start = new TurnStartEntryPayload(TurnStartReason.INPUT, BRANCH_SETTINGS);
+    String startJson = codec.encode(start);
+    TurnEndEntryPayload end =
+        new TurnEndEntryPayload(123L, TurnEndOutcome.COMPLETED, true, null, null);
+    String endJson = codec.encode(end);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(EntryType.TURN_START, startJson + " {}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.substring(0, startJson.length() - 1) + ",\"extra\":true}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                "{\"reason\":\"INPUT\",\"reason\":\"CONTINUATION\","
+                    + "\"settings\":"
+                    + startJson.substring(startJson.indexOf("\"settings\"") + 11)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace("\"reason\":\"INPUT\"", "\"reason\":null")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace("\"reason\":\"INPUT\"", "\"reason\":\"UNKNOWN\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(EntryType.TURN_START, startJson.replace("\"reason\":\"INPUT\",", "")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace(
+                    "\"activeTools\":[\"read\",\"grep\"]", "\"activeTools\":\"read\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace(
+                    "\"environmentName\":\"workspace-A\"",
+                    "\"environmentName\":\" workspace-A\"")));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.TURN_START, endJson));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decode(EntryType.TURN_END, endJson + " {}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"turnStartEntryId\":\"123\"", "\"turnStartEntryId\":123")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"turnStartEntryId\":\"123\"", "\"turnStartEntryId\":\"0123\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"outcome\":\"COMPLETED\"", "\"outcome\":\"UNKNOWN\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"continueModel\":true", "\"continueModel\":\"true\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"outcome\":\"COMPLETED\"", "\"outcome\":\"FAILED\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END, endJson.replace("\"reason\":null", "\"reason\":\" \"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"closeRequestId\":null", "\"closeRequestId\":\" close\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                endJson.replace("\"closeRequestId\":null", "\"closeRequestId\":false")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_END,
+                "{\"turnStartEntryId\":\"123\",\"outcome\":\"COMPLETED\","
+                    + "\"continueModel\":true,\"reason\":null,\"reason\":null,\"closeRequestId\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(EntryType.TURN_END, endJson.replace("\"reason\":null,", "")));
   }
 
   private static AgentMessage message(AgentMessageRole role, String text) {

@@ -9,4 +9,6 @@ public sealed interface RuntimeEntryPayload extends EntryPayload
         MessageEntryPayload,
         CustomMessageEntryPayload,
         AssistantErrorEntryPayload,
-        AssistantAbortedEntryPayload {}
+        AssistantAbortedEntryPayload,
+        TurnStartEntryPayload,
+        TurnEndEntryPayload {}
