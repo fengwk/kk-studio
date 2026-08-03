@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -48,7 +49,8 @@ import java.util.Set;
  * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
  * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}；{@link AssistantAbortedEntryPayload} 必须仅含
  * text/thinking content 且不能全为空，否则进入取消 barrier 而非空 aborted turn。字段顺序固定；{@link BigDecimal} 字段以 {@code
- * toPlainString()} 字符串输出；list 顺序保留。
+ * toPlainString()} 字符串输出；list 顺序保留。branch settings 的 {@code environmentId} 是可空 canonical 小写 UUID
+ * 文本，作为 Environment route identity；display name 不进入 durable 协议。
  *
  * <p>{@code ASSISTANT_ERROR} 的 {@code error} 子树直接委派 {@link ModelInvocationErrorJsonCodec} 的 node
  * API。
@@ -62,7 +64,7 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environmentName", "agentName", "model", "thinkingLevel", "activeTools");
+      orderedSet("environmentId", "agentName", "model", "thinkingLevel", "activeTools");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> MESSAGE_FIELDS =
@@ -249,10 +251,10 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   private static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
-    if (settings.environmentName() == null) {
-      node.putNull("environmentName");
+    if (settings.environmentId() == null) {
+      node.putNull("environmentId");
     } else {
-      node.put("environmentName", settings.environmentName());
+      node.put("environmentId", settings.environmentId().value());
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
@@ -337,7 +339,7 @@ public final class RuntimeEntryPayloadJsonCodec {
     ObjectNode node = requireObject(value, "TURN_START.settings");
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, "TURN_START.settings");
     return new BranchSettings(
-        nullableCanonicalText(node, "environmentName", "TURN_START.settings"),
+        nullableEnvironmentId(node, "environmentId", "TURN_START.settings"),
         canonicalText(node, "agentName", "TURN_START.settings"),
         decodeModelSelection(node.get("model")),
         canonicalText(node, "thinkingLevel", "TURN_START.settings"),
@@ -699,6 +701,18 @@ public final class RuntimeEntryPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
     return canonicalName(value.textValue(), context + "." + field);
+  }
+
+  private static EnvironmentId nullableEnvironmentId(
+      ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return new EnvironmentId(value.textValue());
   }
 
   private static String canonicalName(String value, String context) {

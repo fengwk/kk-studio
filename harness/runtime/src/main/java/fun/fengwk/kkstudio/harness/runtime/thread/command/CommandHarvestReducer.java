@@ -59,7 +59,7 @@ public final class CommandHarvestReducer {
             settings.withActiveTools(value.activeTools());
         case SetYoloCommandPayload value -> yoloEnabled = value.yoloEnabled();
         case SetEnvironmentCommandPayload value -> settings =
-            settings.withEnvironmentName(value.environmentName());
+            settings.withEnvironmentId(value.environmentId());
       }
     }
     return new CommandHarvestResult(settings, yoloEnabled);
