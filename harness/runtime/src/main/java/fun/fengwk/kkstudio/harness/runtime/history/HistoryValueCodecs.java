@@ -1,0 +1,331 @@
+package fun.fengwk.kkstudio.harness.runtime.history;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * history 包内部的严格 value codec：BranchSettings / ModelSelection / AssistantMessageMetadata 以及它们 需要的通用
+ * JSON 原语。仅供 {@link HistoryEntryPayloadJsonCodec} 组合使用，不复制 AgentMessage codec。
+ */
+final class HistoryValueCodecs {
+
+  static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> BRANCH_SETTINGS_FIELDS =
+      orderedSet("environmentId", "agentName", "model", "thinkingLevel", "activeTools");
+  private static final Set<String> MODEL_SELECTION_FIELDS =
+      orderedSet("providerName", "modelName", "variant");
+  private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
+  private static final Set<String> USAGE_FIELDS =
+      orderedSet(
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens",
+          "cacheWriteLongTokens",
+          "reasoningTokens",
+          "providerTotalTokens");
+  private static final Set<String> COST_FIELDS =
+      orderedSet(
+          "currency",
+          "input",
+          "output",
+          "cacheRead",
+          "cacheWrite",
+          "cacheWriteLong",
+          "reasoning",
+          "total");
+
+  private HistoryValueCodecs() {}
+
+  // ---------- BranchSettings ----------
+
+  static ObjectNode encodeBranchSettings(BranchSettings settings) {
+    ObjectNode node = NODES.objectNode();
+    if (settings.environmentId() == null) {
+      node.putNull("environmentId");
+    } else {
+      node.put("environmentId", settings.environmentId().value());
+    }
+    node.put("agentName", settings.agentName());
+    node.set("model", encodeModelSelection(settings.model()));
+    node.put("thinkingLevel", settings.thinkingLevel());
+    ArrayNode activeTools = node.putArray("activeTools");
+    for (String activeTool : settings.activeTools()) {
+      activeTools.add(activeTool);
+    }
+    return node;
+  }
+
+  static BranchSettings decodeBranchSettings(JsonNode value, String context) {
+    ObjectNode node = requireObject(value, context);
+    requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
+    return new BranchSettings(
+        nullableEnvironmentId(node, "environmentId", context),
+        requiredText(node, "agentName", context),
+        decodeModelSelection(node.get("model"), context + ".model"),
+        requiredText(node, "thinkingLevel", context),
+        decodeActiveTools(node.get("activeTools"), context));
+  }
+
+  private static List<String> decodeActiveTools(JsonNode value, String context) {
+    ArrayNode node = requireArray(value, context + ".activeTools");
+    List<String> activeTools = new ArrayList<>(node.size());
+    for (JsonNode activeTool : node) {
+      if (!activeTool.isTextual()) {
+        throw new IllegalArgumentException(context + ".activeTools elements must be text");
+      }
+      activeTools.add(activeTool.textValue());
+    }
+    return activeTools;
+  }
+
+  // ---------- ModelSelection ----------
+
+  static ObjectNode encodeModelSelection(ModelSelection selection) {
+    ObjectNode node = NODES.objectNode();
+    node.put("providerName", selection.providerName());
+    node.put("modelName", selection.modelName());
+    node.put("variant", selection.variant());
+    return node;
+  }
+
+  static ModelSelection decodeModelSelection(JsonNode value, String context) {
+    ObjectNode node = requireObject(value, context);
+    requireExactFields(node, MODEL_SELECTION_FIELDS, context);
+    return new ModelSelection(
+        requiredText(node, "providerName", context),
+        requiredText(node, "modelName", context),
+        requiredText(node, "variant", context));
+  }
+
+  // ---------- AssistantMessageMetadata ----------
+
+  static ObjectNode encodeAssistantMetadata(AssistantMessageMetadata metadata) {
+    ObjectNode node = NODES.objectNode();
+    node.put("stopReason", metadata.stopReason().name());
+    ModelUsage usage = metadata.usage();
+    ObjectNode usageNode = node.putObject("usage");
+    usageNode.put("inputTokens", usage.inputTokens());
+    usageNode.put("outputTokens", usage.outputTokens());
+    usageNode.put("cacheReadTokens", usage.cacheReadTokens());
+    usageNode.put("cacheWriteTokens", usage.cacheWriteTokens());
+    usageNode.put("cacheWriteLongTokens", usage.cacheWriteLongTokens());
+    usageNode.put("reasoningTokens", usage.reasoningTokens());
+    usageNode.put("providerTotalTokens", usage.providerTotalTokens());
+    ModelCost cost = metadata.cost();
+    ObjectNode costNode = node.putObject("cost");
+    costNode.put("currency", cost.currency());
+    costNode.put("input", cost.input().toPlainString());
+    costNode.put("output", cost.output().toPlainString());
+    costNode.put("cacheRead", cost.cacheRead().toPlainString());
+    costNode.put("cacheWrite", cost.cacheWrite().toPlainString());
+    costNode.put("cacheWriteLong", cost.cacheWriteLong().toPlainString());
+    costNode.put("reasoning", cost.reasoning().toPlainString());
+    costNode.put("total", cost.total().toPlainString());
+    return node;
+  }
+
+  static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
+    ObjectNode node = requireObject(value, "assistantMetadata");
+    requireExactFields(node, METADATA_FIELDS, "assistantMetadata");
+    ProviderStopReason stopReason =
+        readEnum(
+            ProviderStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
+    ObjectNode usageNode = requireObject(node.get("usage"), "assistantMetadata.usage");
+    requireExactFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
+    ModelUsage usage =
+        new ModelUsage(
+            requiredNonNegativeLong(usageNode, "inputTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "outputTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "cacheReadTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "cacheWriteTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "cacheWriteLongTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
+            requiredNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
+    ObjectNode costNode = requireObject(node.get("cost"), "assistantMetadata.cost");
+    requireExactFields(costNode, COST_FIELDS, "assistantMetadata.cost");
+    ModelCost cost =
+        new ModelCost(
+            requiredText(costNode, "currency", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "input", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "output", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "cacheRead", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "cacheWrite", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "cacheWriteLong", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "reasoning", "assistantMetadata.cost"),
+            requiredDecimal(costNode, "total", "assistantMetadata.cost"));
+    return new AssistantMessageMetadata(stopReason, usage, cost);
+  }
+
+  // ---------- Generic JSON helpers ----------
+
+  static ObjectNode requireObject(JsonNode value, String context) {
+    if (!(value instanceof ObjectNode object)) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return object;
+  }
+
+  static ArrayNode requireArray(JsonNode value, String context) {
+    if (!(value instanceof ArrayNode array)) {
+      throw new IllegalArgumentException(context + " must be a JSON array");
+    }
+    return array;
+  }
+
+  static String text(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.textValue();
+  }
+
+  static String requiredText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    return requiredText(value, field, context);
+  }
+
+  static String requiredText(JsonNode value, String field, String context) {
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.textValue();
+    if (text.isBlank()) {
+      throw new IllegalArgumentException(context + "." + field + " must not be blank");
+    }
+    return text;
+  }
+
+  static boolean requiredBoolean(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(context + "." + field + " must be boolean");
+    }
+    return value.booleanValue();
+  }
+
+  static long requiredNonNegativeLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.longValue();
+  }
+
+  static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
+  static BigDecimal requiredDecimal(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    try {
+      return new BigDecimal(value.textValue());
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a decimal string", error);
+    }
+  }
+
+  static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
+    try {
+      return Enum.valueOf(kind, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context
+              + " must be one of "
+              + kind.getEnumConstants().length
+              + " "
+              + kind.getSimpleName()
+              + " values: "
+              + name,
+          error);
+    }
+  }
+
+  static <E extends Enum<E>> E nullableEnum(
+      Class<E> kind, ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    return readEnum(kind, text(node, field), context);
+  }
+
+  static String nullableText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    return value.isNull() ? null : text(node, field);
+  }
+
+  static long requiredPositiveId(ObjectNode node, String field, String context) {
+    String text = requiredText(node, field, context);
+    long value;
+    try {
+      value = Long.parseLong(text);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a decimal string", error);
+    }
+    if (value <= 0 || !Long.toString(value).equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical positive decimal string");
+    }
+    return value;
+  }
+
+  static EnvironmentId nullableEnvironmentId(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return new EnvironmentId(value.textValue());
+  }
+
+  static void requireExactFields(ObjectNode node, Set<String> expected, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    Iterator<String> names = node.fieldNames();
+    while (names.hasNext()) {
+      actual.add(names.next());
+    }
+    if (!actual.equals(expected)) {
+      throw new IllegalArgumentException(
+          context + " unexpected fields: " + actual + " (expected " + expected + ")");
+    }
+  }
+
+  static Set<String> orderedSet(String... values) {
+    Set<String> set = new LinkedHashSet<>();
+    for (String value : values) {
+      set.add(value);
+    }
+    return Set.copyOf(set);
+  }
+}

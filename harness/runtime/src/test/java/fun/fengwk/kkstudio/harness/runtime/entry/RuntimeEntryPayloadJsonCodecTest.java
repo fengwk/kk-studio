@@ -5,15 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
@@ -252,6 +260,30 @@ class RuntimeEntryPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(EntryType.TURN_END, endJson.replace("\"reason\":null,", "")));
+  }
+
+  @Test
+  void delegatesAgentMessageCodecByteForByte() throws Exception {
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new TextMessageContent("answer"),
+                new ImageMessageContent("image/png", "data:image/png;base64,AA=="),
+                new AudioMessageContent("audio/wav", "https://example.test/audio.wav"),
+                new ThinkingMessageContent("reasoning"),
+                new JsonMessageContent("[1,{\"ok\":true}]"),
+                new ToolCallMessageContent("call-1", "read", "{\"path\":\"README.md\"}"),
+                new ArtifactMessageContent("artifact-1", "text/plain", null)));
+    MessageEntryPayload payload =
+        new MessageEntryPayload(message, null, metadata(ProviderStopReason.TOOL_CALLS));
+
+    String encoded = codec.encode(payload);
+    assertEquals(payload, codec.decode(EntryType.MESSAGE, encoded));
+
+    ObjectMapper mapper = new ObjectMapper();
+    String messageSubtree = mapper.writeValueAsString(mapper.readTree(encoded).get("message"));
+    assertEquals(new AgentMessageJsonCodec().encode(message), messageSubtree);
   }
 
   private static AgentMessage message(AgentMessageRole role, String text) {
