@@ -31,6 +31,31 @@ public record BranchSettings(
     activeTools = List.copyOf(uniqueTools);
   }
 
+  /** Returns a snapshot with only the agent reference replaced. */
+  public BranchSettings withAgentName(String value) {
+    return new BranchSettings(environmentName, value, model, thinkingLevel, activeTools);
+  }
+
+  /** Returns a snapshot with the complete model selection replaced atomically. */
+  public BranchSettings withModel(ModelSelection value) {
+    return new BranchSettings(environmentName, agentName, value, thinkingLevel, activeTools);
+  }
+
+  /** Returns a snapshot with only the thinking level replaced. */
+  public BranchSettings withThinkingLevel(String value) {
+    return new BranchSettings(environmentName, agentName, model, value, activeTools);
+  }
+
+  /** Returns a snapshot with only the ordered active tool names replaced. */
+  public BranchSettings withActiveTools(List<String> values) {
+    return new BranchSettings(environmentName, agentName, model, thinkingLevel, values);
+  }
+
+  /** Returns a snapshot with only the environment binding replaced. */
+  public BranchSettings withEnvironmentName(String value) {
+    return new BranchSettings(value, agentName, model, thinkingLevel, activeTools);
+  }
+
   private static String nullableCanonicalName(String value, String field) {
     return value == null ? null : requireCanonicalName(value, field);
   }
