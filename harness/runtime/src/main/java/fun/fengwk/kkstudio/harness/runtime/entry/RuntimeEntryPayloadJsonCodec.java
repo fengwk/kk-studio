@@ -37,9 +37,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 5 类 Runtime Entry payload 的严格、确定性 JSON codec：{@link RootEntryPayload} / {@link
- * MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link AssistantErrorEntryPayload} /
- * {@link AssistantAbortedEntryPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
+ * 最终 7 类 Runtime Entry payload 的严格、确定性 JSON codec：{@link RootEntryPayload} / {@link
+ * TurnStartEntryPayload} / {@link MessageEntryPayload} / {@link CustomMessageEntryPayload} / {@link
+ * AssistantErrorEntryPayload} / {@link AssistantAbortedEntryPayload} / {@link TurnEndEntryPayload}。
+ * 直接对应 {@link EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -57,6 +58,13 @@ public final class RuntimeEntryPayloadJsonCodec {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
+  private static final Set<String> TURN_START_FIELDS = orderedSet("reason", "settings");
+  private static final Set<String> TURN_END_FIELDS =
+      orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
+  private static final Set<String> BRANCH_SETTINGS_FIELDS =
+      orderedSet("environmentName", "agentName", "model", "thinkingLevel", "activeTools");
+  private static final Set<String> MODEL_SELECTION_FIELDS =
+      orderedSet("providerName", "modelName", "variant");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "turnSettings", "assistantMetadata");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message", "turnSettings");
@@ -109,7 +117,7 @@ public final class RuntimeEntryPayloadJsonCodec {
 
   public RuntimeEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 5 类 Runtime Entry payload， 其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 7 类 Runtime Entry payload， 其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -120,6 +128,9 @@ public final class RuntimeEntryPayloadJsonCodec {
     Objects.requireNonNull(payload, "payload");
     if (payload instanceof RootEntryPayload) {
       return NODES.objectNode();
+    }
+    if (payload instanceof TurnStartEntryPayload value) {
+      return encodeTurnStart(value);
     }
     if (payload instanceof MessageEntryPayload value) {
       return encodeMessagePayload(value);
@@ -132,6 +143,9 @@ public final class RuntimeEntryPayloadJsonCodec {
     }
     if (payload instanceof AssistantAbortedEntryPayload value) {
       return encodeAssistantAborted(value);
+    }
+    if (payload instanceof TurnEndEntryPayload value) {
+      return encodeTurnEnd(value);
     }
     throw new IllegalArgumentException(
         "unsupported entry payload: " + payload.getClass().getName());
@@ -150,6 +164,9 @@ public final class RuntimeEntryPayloadJsonCodec {
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("malformed " + type.name() + " entry payload JSON", error);
     }
+    if (root == null) {
+      throw new IllegalArgumentException("malformed " + type.name() + " entry payload JSON");
+    }
     return decodeNode(type, root);
   }
 
@@ -159,14 +176,23 @@ public final class RuntimeEntryPayloadJsonCodec {
     Objects.requireNonNull(value, "value");
     return switch (type) {
       case ROOT -> decodeRoot(value);
+      case TURN_START -> decodeTurnStart(value);
       case MESSAGE -> decodeMessagePayload(value);
       case CUSTOM_MESSAGE -> decodeCustomMessagePayload(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
       case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
+      case TURN_END -> decodeTurnEnd(value);
     };
   }
 
   // ---------- Encoders ----------
+
+  private static ObjectNode encodeTurnStart(TurnStartEntryPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("reason", value.reason().name());
+    node.set("settings", encodeBranchSettings(value.settings()));
+    return node;
+  }
 
   private static ObjectNode encodeMessagePayload(MessageEntryPayload value) {
     ObjectNode node = NODES.objectNode();
@@ -203,12 +229,63 @@ public final class RuntimeEntryPayloadJsonCodec {
     return node;
   }
 
+  private static ObjectNode encodeTurnEnd(TurnEndEntryPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("turnStartEntryId", Long.toString(value.turnStartEntryId()));
+    node.put("outcome", value.outcome().name());
+    node.put("continueModel", value.continueModel());
+    if (value.reason() == null) {
+      node.putNull("reason");
+    } else {
+      node.put("reason", value.reason());
+    }
+    if (value.closeRequestId() == null) {
+      node.putNull("closeRequestId");
+    } else {
+      node.put("closeRequestId", value.closeRequestId());
+    }
+    return node;
+  }
+
+  private static ObjectNode encodeBranchSettings(BranchSettings settings) {
+    ObjectNode node = NODES.objectNode();
+    if (settings.environmentName() == null) {
+      node.putNull("environmentName");
+    } else {
+      node.put("environmentName", settings.environmentName());
+    }
+    node.put("agentName", settings.agentName());
+    node.set("model", encodeModelSelection(settings.model()));
+    node.put("thinkingLevel", settings.thinkingLevel());
+    ArrayNode activeTools = node.putArray("activeTools");
+    for (String activeTool : settings.activeTools()) {
+      activeTools.add(activeTool);
+    }
+    return node;
+  }
+
+  private static ObjectNode encodeModelSelection(ModelSelection selection) {
+    ObjectNode node = NODES.objectNode();
+    node.put("providerName", selection.providerName());
+    node.put("modelName", selection.modelName());
+    node.put("variant", selection.variant());
+    return node;
+  }
+
   // ---------- Decoders ----------
 
   private static RootEntryPayload decodeRoot(JsonNode value) {
     ObjectNode node = requireObject(value, "ROOT");
     requireExactFields(node, ROOT_FIELDS, "ROOT");
     return new RootEntryPayload();
+  }
+
+  private static TurnStartEntryPayload decodeTurnStart(JsonNode value) {
+    ObjectNode node = requireObject(value, "TURN_START");
+    requireExactFields(node, TURN_START_FIELDS, "TURN_START");
+    return new TurnStartEntryPayload(
+        readEnum(TurnStartReason.class, text(node, "reason"), "TURN_START.reason"),
+        decodeBranchSettings(node.get("settings")));
   }
 
   private static MessageEntryPayload decodeMessagePayload(JsonNode value) {
@@ -243,6 +320,50 @@ public final class RuntimeEntryPayloadJsonCodec {
     requireExactFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
     AgentMessage message = decodeMessage(node.get("message"));
     return new AssistantAbortedEntryPayload(message);
+  }
+
+  private static TurnEndEntryPayload decodeTurnEnd(JsonNode value) {
+    ObjectNode node = requireObject(value, "TURN_END");
+    requireExactFields(node, TURN_END_FIELDS, "TURN_END");
+    return new TurnEndEntryPayload(
+        requiredPositiveId(node, "turnStartEntryId", "TURN_END"),
+        readEnum(TurnEndOutcome.class, text(node, "outcome"), "TURN_END.outcome"),
+        requiredBoolean(node, "continueModel", "TURN_END"),
+        nullableCanonicalText(node, "reason", "TURN_END"),
+        nullableCanonicalText(node, "closeRequestId", "TURN_END"));
+  }
+
+  private static BranchSettings decodeBranchSettings(JsonNode value) {
+    ObjectNode node = requireObject(value, "TURN_START.settings");
+    requireExactFields(node, BRANCH_SETTINGS_FIELDS, "TURN_START.settings");
+    return new BranchSettings(
+        nullableCanonicalText(node, "environmentName", "TURN_START.settings"),
+        canonicalText(node, "agentName", "TURN_START.settings"),
+        decodeModelSelection(node.get("model")),
+        canonicalText(node, "thinkingLevel", "TURN_START.settings"),
+        decodeActiveTools(node.get("activeTools")));
+  }
+
+  private static ModelSelection decodeModelSelection(JsonNode value) {
+    ObjectNode node = requireObject(value, "TURN_START.settings.model");
+    requireExactFields(node, MODEL_SELECTION_FIELDS, "TURN_START.settings.model");
+    return new ModelSelection(
+        canonicalText(node, "providerName", "TURN_START.settings.model"),
+        canonicalText(node, "modelName", "TURN_START.settings.model"),
+        canonicalText(node, "variant", "TURN_START.settings.model"));
+  }
+
+  private static List<String> decodeActiveTools(JsonNode value) {
+    ArrayNode node = requireArray(value, "TURN_START.settings.activeTools");
+    List<String> activeTools = new ArrayList<>(node.size());
+    for (JsonNode activeTool : node) {
+      if (!activeTool.isTextual()) {
+        throw new IllegalArgumentException("TURN_START.settings.activeTools elements must be text");
+      }
+      activeTools.add(
+          canonicalName(activeTool.textValue(), "TURN_START.settings.activeTools element"));
+    }
+    return activeTools;
   }
 
   private static ObjectNode encodeTurnSettings(TurnSettings settings) {
@@ -563,6 +684,50 @@ public final class RuntimeEntryPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must not be blank");
     }
     return text;
+  }
+
+  private static String canonicalText(ObjectNode node, String field, String context) {
+    return canonicalName(requiredText(node, field, context), context + "." + field);
+  }
+
+  private static String nullableCanonicalText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return canonicalName(value.textValue(), context + "." + field);
+  }
+
+  private static String canonicalName(String value, String context) {
+    if (value.isBlank()) {
+      throw new IllegalArgumentException(context + " must not be blank");
+    }
+    if (!value.equals(value.strip())) {
+      throw new IllegalArgumentException(context + " must not contain surrounding whitespace");
+    }
+    if (value.length() > 128) {
+      throw new IllegalArgumentException(context + " must be <= 128 characters");
+    }
+    return value;
+  }
+
+  private static long requiredPositiveId(ObjectNode node, String field, String context) {
+    String text = requiredText(node, field, context);
+    long value;
+    try {
+      value = Long.parseLong(text);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a decimal string", error);
+    }
+    if (value <= 0 || !Long.toString(value).equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical positive decimal string");
+    }
+    return value;
   }
 
   /** 与 {@link #requiredText} 类似，但允许空字符串（仅 non-null 约束，如 {@link TextMessageContent#text}）。 */

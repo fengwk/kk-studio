@@ -9,6 +9,8 @@ import fun.fengwk.kkstudio.harness.runtime.entry.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.entry.MessageEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.entry.RootEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -187,6 +189,8 @@ public final class ModelInvocationPlanner {
           case CUSTOM_MESSAGE -> payload instanceof CustomMessageEntryPayload;
           case ASSISTANT_ERROR -> payload instanceof AssistantErrorEntryPayload;
           case ASSISTANT_ABORTED -> payload instanceof AssistantAbortedEntryPayload;
+          case TURN_START -> payload instanceof TurnStartEntryPayload;
+          case TURN_END -> payload instanceof TurnEndEntryPayload;
         };
     if (!supported) {
       throw new IllegalArgumentException(
