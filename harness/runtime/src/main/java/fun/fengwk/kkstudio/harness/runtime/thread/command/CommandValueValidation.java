@@ -7,10 +7,6 @@ final class CommandValueValidation {
 
   private CommandValueValidation() {}
 
-  static String nullableCanonicalName(String value, String field) {
-    return value == null ? null : requireCanonicalName(value, field);
-  }
-
   static String requireCanonicalName(String value, String field) {
     Objects.requireNonNull(value, field);
     if (value.isBlank()) {

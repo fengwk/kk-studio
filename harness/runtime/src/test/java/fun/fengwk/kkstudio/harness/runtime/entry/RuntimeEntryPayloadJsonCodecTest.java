@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -24,7 +26,7 @@ class RuntimeEntryPayloadJsonCodecTest {
   private static final TurnSettings SETTINGS = new TurnSettings("agent", true);
   private static final BranchSettings BRANCH_SETTINGS =
       new BranchSettings(
-          "workspace-A",
+          new EnvironmentId("123e4567-e89b-12d3-a456-426614174000"),
           "coding",
           new ModelSelection("anthropic", "claude-sonnet", "default"),
           "high",
@@ -81,7 +83,7 @@ class RuntimeEntryPayloadJsonCodecTest {
     TurnEndEntryPayload end =
         new TurnEndEntryPayload(123L, TurnEndOutcome.COMPLETED, true, null, null);
     String expectedStart =
-        "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":\"workspace-A\",\"agentName\":\"coding\","
+        "{\"reason\":\"INPUT\",\"settings\":{\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\",\"agentName\":\"coding\","
             + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
             + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]}}";
     String expectedEnd =
@@ -107,10 +109,15 @@ class RuntimeEntryPayloadJsonCodecTest {
                 List.of("read", "read", "grep")));
 
     assertEquals(
-        "{\"reason\":\"CONTINUATION\",\"settings\":{\"environmentName\":null,\"agentName\":\"coding\","
+        "{\"reason\":\"CONTINUATION\",\"settings\":{\"environmentId\":null,\"agentName\":\"coding\","
             + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
             + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]}}",
         codec.encode(start));
+
+    TurnStartEntryPayload decoded =
+        (TurnStartEntryPayload) codec.decode(EntryType.TURN_START, codec.encode(start));
+    assertNull(decoded.settings().environmentId());
+    assertEquals(List.of("read", "grep"), decoded.settings().activeTools());
   }
 
   @Test
@@ -166,8 +173,24 @@ class RuntimeEntryPayloadJsonCodecTest {
             codec.decode(
                 EntryType.TURN_START,
                 startJson.replace(
-                    "\"environmentName\":\"workspace-A\"",
-                    "\"environmentName\":\" workspace-A\"")));
+                    "\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\"",
+                    "\"environmentId\":\"123E4567-E89B-12D3-A456-426614174000\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace(
+                    "\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\"",
+                    "\"environmentName\":\"workspace-A\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                EntryType.TURN_START,
+                startJson.replace(
+                    "\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\"",
+                    "\"environmentId\":123")));
     assertThrows(IllegalArgumentException.class, () -> codec.decode(EntryType.TURN_START, endJson));
 
     assertThrows(

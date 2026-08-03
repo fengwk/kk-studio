@@ -1,12 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-/** Typed SET_ENVIRONMENT payload; null explicitly clears the Environment binding. */
-public record SetEnvironmentCommandPayload(String environmentName) implements ThreadCommandPayload {
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
-  public SetEnvironmentCommandPayload {
-    environmentName =
-        CommandValueValidation.nullableCanonicalName(environmentName, "environmentName");
-  }
+/** Typed SET_ENVIRONMENT payload; null explicitly clears the Environment route binding. */
+public record SetEnvironmentCommandPayload(EnvironmentId environmentId)
+    implements ThreadCommandPayload {
 
   @Override
   public ThreadCommandType type() {

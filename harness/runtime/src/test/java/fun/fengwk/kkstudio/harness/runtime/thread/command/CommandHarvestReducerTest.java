@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,9 +19,13 @@ import java.util.List;
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
+  private static final EnvironmentId ENV_A =
+      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentId ENV_B =
+      new EnvironmentId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   private static final BranchSettings BASE =
       new BranchSettings(
-          "workspace-A",
+          ENV_A,
           "coding",
           new ModelSelection("anthropic", "claude-sonnet", "default"),
           "medium",
@@ -49,7 +54,7 @@ class CommandHarvestReducerTest {
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
                 queued(6L, 6L, new SetThinkingLevelCommandPayload("high")),
                 queued(7L, 7L, new SetActiveToolsCommandPayload(List.of("grep", "read", "grep"))),
-                queued(8L, 8L, new SetEnvironmentCommandPayload("workspace-B")),
+                queued(8L, 8L, new SetEnvironmentCommandPayload(ENV_B)),
                 queued(9L, 9L, new SetEnvironmentCommandPayload(null)),
                 queued(10L, 10L, new SetYoloCommandPayload(true)),
                 queued(11L, 11L, new CustomMessageCommandPayload(system("instruction")))));
@@ -78,7 +83,7 @@ class CommandHarvestReducerTest {
                 queued(2L, 2L, new SetModelCommandPayload(replacement)),
                 queued(3L, 3L, new CustomMessageCommandPayload(system("system")))));
 
-    assertEquals("workspace-A", result.branchSettings().environmentName());
+    assertEquals(ENV_A, result.branchSettings().environmentId());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
     assertEquals("medium", result.branchSettings().thinkingLevel());
