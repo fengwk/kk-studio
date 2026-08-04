@@ -30,7 +30,8 @@ import java.util.function.Function;
  * 拒绝；实现必须拒绝重入（回调内再次调用同一 Store 的 {@link #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
  * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先锁 Thread，再锁其 Commands，再锁其 ModelInvocation，再按 ordinal 升序锁同 Assistant
- * Entry 的 ToolInvocation siblings，最后锁 Work；单实体 heartbeat 类事务只锁 Work。违反顺序属于实现错误。
+ * Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work
+ * 再 MODEL Work），单实体 heartbeat 类事务只锁 Work。违反顺序属于实现错误。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。

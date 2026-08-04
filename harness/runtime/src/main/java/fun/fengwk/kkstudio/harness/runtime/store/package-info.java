@@ -7,7 +7,8 @@
  * state。事务、锁定与唯一性约定见 {@link HarnessStore} 接口 javadoc。
  *
  * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：Thread -&gt; Commands -&gt; ModelInvocation -&gt; 同 Assistant Entry 的
- * ToolInvocation siblings（按 ordinal 升序）-&gt; Work；单实体 heartbeat 类事务只锁 Work。
+ * ToolInvocation siblings（按 ordinal 升序）-&gt; Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先
+ * THREAD Work 再 MODEL Work）；单实体 heartbeat 类事务只锁 Work。
  *
  * <p>Thread / ModelInvocation / ToolInvocation 的更新必须通过 aggregate 共享 transition validation （{@code
  * ThreadState.validateTransition} / {@code ModelInvocation.validateTransition} / {@code
