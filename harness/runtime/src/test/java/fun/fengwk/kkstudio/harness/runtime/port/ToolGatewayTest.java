@@ -92,7 +92,7 @@ class ToolGatewayTest {
   }
 
   @Test
-  void listenerSurfaceCoversPartialAndTheThreeTerminalOutcomes() {
+  void listenerSurfaceCoversPartialAndTheFourTerminalOutcomes() {
     ToolGateway.Listener listener =
         new ToolGateway.Listener() {
           @Override
@@ -105,11 +105,15 @@ class ToolGatewayTest {
           public void onFailed(ToolGateway.Failure failure) {}
 
           @Override
+          public void onCancelled(ToolInvocationError error) {}
+
+          @Override
           public void onUnknown(ToolInvocationError error) {}
         };
     listener.onPartial(new ToolResult("call-1", List.of(), false, "{}", false));
     listener.onSucceeded(null);
     listener.onFailed(null);
+    listener.onCancelled(null);
     listener.onUnknown(null);
   }
 
@@ -154,6 +158,9 @@ class ToolGatewayTest {
 
       @Override
       public void onFailed(ToolGateway.Failure failure) {}
+
+      @Override
+      public void onCancelled(ToolInvocationError error) {}
 
       @Override
       public void onUnknown(ToolInvocationError error) {}

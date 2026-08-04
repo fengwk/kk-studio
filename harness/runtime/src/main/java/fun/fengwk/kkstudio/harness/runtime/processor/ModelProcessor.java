@@ -58,7 +58,7 @@ public final class ModelProcessor implements AutoCloseable {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final ConcurrentHashMap<Long, ModelExecution> executions = new ConcurrentHashMap<>();
-  private final ConcurrentHashMap<Long, String> admissionTokens = new ConcurrentHashMap<>();
+  private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
 
   public ModelProcessor(
@@ -102,7 +102,7 @@ public final class ModelProcessor implements AutoCloseable {
     if (!claimOwned(claim)) {
       return ProcessResult.LOST_OWNERSHIP;
     }
-    if (!claimAdmission(invocationId, token)) {
+    if (!admissionGuard.tryAdmit(invocationId, token)) {
       return ProcessResult.LOST_OWNERSHIP;
     }
     try {
@@ -122,7 +122,7 @@ public final class ModelProcessor implements AutoCloseable {
         case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
       };
     } finally {
-      releaseAdmission(invocationId, token);
+      admissionGuard.release(invocationId, token);
     }
   }
 
@@ -167,33 +167,9 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /**
-   * per-invocation admission guard：覆盖 prepare 到 registry 插入窗口。同一 claim（同 token）并发投递被拒绝；不同 token（旧
-   * lease 已过期）并发投递抢占 guard。
+   * per-invocation admission guard：覆盖 prepare 到 registry 插入窗口（逻辑见 {@link ClaimAdmissionGuard}）。同一
+   * claim（同 token）并发投递被拒绝；不同 token（旧 lease 已过期）并发投递抢占 guard。
    */
-  private boolean claimAdmission(long invocationId, String token) {
-    String prior = admissionTokens.putIfAbsent(invocationId, token);
-    if (prior == null) {
-      return true;
-    }
-    if (prior.equals(token)) {
-      return false;
-    }
-    while (!admissionTokens.replace(invocationId, prior, token)) {
-      prior = admissionTokens.get(invocationId);
-      if (prior == null) {
-        return admissionTokens.putIfAbsent(invocationId, token) == null;
-      }
-      if (prior.equals(token)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  private void releaseAdmission(long invocationId, String token) {
-    admissionTokens.remove(invocationId, token);
-  }
-
   private void releaseExecution(ModelExecution execution) {
     executions.remove(execution.invocationId(), execution);
     execution.abandon();
@@ -334,7 +310,7 @@ public final class ModelProcessor implements AutoCloseable {
       return new Prepare.Lost();
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    ensureLeaseMargin(tx, claim, claimed.get(), now);
+    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
     tx.updateThread(thread.touchRevision(now));
     return new Prepare.Dispatched(thread.id(), model.attempt(), model.request());
@@ -357,19 +333,6 @@ public final class ModelProcessor implements AutoCloseable {
               return model.status() == ModelInvocationStatus.DISPATCHING
                   && model.attempt() == dispatched.attempt();
             }));
-  }
-
-  /**
-   * Gateway admission 前确保 lease 有完整 margin：只要当前 leaseUntil 早于 {@code now + leaseDuration} 就 renew 到
-   * {@code now + leaseDuration}（相等 / 更晚不 renew——renew 要求严格延展，等值会违反）。
-   */
-  private void ensureLeaseMargin(
-      HarnessStore.Transaction tx, ClaimedWork claim, Work work, Instant now) {
-    Instant target = now.plus(config.leaseConfig().leaseDuration());
-    if (!work.leaseUntil().isBefore(target)) {
-      return;
-    }
-    tx.renewWork(claim, now, target);
   }
 
   /** 旧 lease 过期恢复：DISPATCHING 消费 proposed attempt，RUNNING 保留 attempt；绝不重放 Provider。 */

@@ -10,10 +10,10 @@ import java.util.Objects;
 /**
  * Tool 执行 admission 端口：preflight 权限判定与 execution 提交。
  *
- * <p>{@link #preflight} 是同步、无副作用、事务外的判定（例外同 {@link #start} 的异常语义）；{@code yoloEnabled} 与 frozen
- * {@link ToolInvocationRequest} 一起决定 Allow / Ask / Deny。{@link #start} 返回前不得同步调用任何 listener 回调；回调
- * duplicate / stale 由 Runtime fence，Gateway 不保证 exactly-once。Tool 的 retry 决策（Busy / Overloaded
- * 后何时重试）由 Processor 决定，不放 Gateway。
+ * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。{@code
+ * yoloEnabled} 与 frozen {@link ToolInvocationRequest} 一起决定 Allow / Ask / Deny。{@link #start}
+ * 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway 不保证 exactly-once。Tool 的
+ * retry 决策（Busy / Overloaded 后何时重试）由 Processor 决定，不放 Gateway。
  */
 public interface ToolGateway {
 
@@ -126,6 +126,9 @@ public interface ToolGateway {
 
     /** 交付已确认失败的 terminal 事实（含明确 retryable 标记）。 */
     void onFailed(Failure failure);
+
+    /** 交付已确认被取消的 terminal 事实（string kind 不足以可靠推导，必须显式回调）。 */
+    void onCancelled(ToolInvocationError error);
 
     /** 交付无法确认是否执行成功的 terminal error。 */
     void onUnknown(ToolInvocationError error);
