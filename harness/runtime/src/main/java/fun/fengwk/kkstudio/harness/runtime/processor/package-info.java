@@ -19,5 +19,15 @@
  * + READY + attempt + approval null。两个 processor 都实现 {@link java.lang.AutoCloseable}：close 与
  * process 竞态下，registry 插入后启动 heartbeat 前会再次检查 closed，已关闭时立即 abandon 并把仍 owned 的 DISPATCHING 安全
  * bounce 回 READY + reschedule，绝不启动 Gateway，也不留下新 execution。
+ *
+ * <p>{@link ThreadProcessor} 输入必须是 THREAD target 的 claim，只依赖单一 {@link
+ * fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 与 {@link
+ * fun.fengwk.kkstudio.harness.runtime.port.TurnResolver}，以固定优先级（terminal Model apply -&gt; Tool
+ * sibling batch -&gt; blocker -&gt; continuation -&gt; input -&gt; quiescent）驱动完整 Agent Loop。Turn
+ * 启动采用 speculative plan + 事务外 resolve + 第二事务 CAS 提交，不存在可恢复的 durable TURN_START-without-Invocation
+ * 中间态；Resolved 请求在提交前由 {@link ResolvedRequestValidator} 按 candidate branch 事实（yolo / route / model
+ * / variant / tools）做机械一致性校验，任何不一致都是 Resolver 契约错误，抛错且零 durable mutation，绝不转 typed rejection。终端
+ * Model/Tool 应用只由 ThreadProcessor 写 Entry/head。Result / Config 类型见 {@link ThreadProcessResult} 与
+ * {@link ThreadProcessorConfig}。
  */
 package fun.fengwk.kkstudio.harness.runtime.processor;

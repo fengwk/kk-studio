@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,6 +74,50 @@ class ThreadCommandTest {
     assertThrows(
         NullPointerException.class,
         () -> new ThreadCommand(1L, 1L, 1L, payload(), "client", null, null, null));
+  }
+
+  @Test
+  void consumeTransitionsQueuedToAppliedWithConsumedTurnStart() {
+    ThreadCommand queued = command(1L, 1L, 1L, null, null);
+    ThreadCommand consumed = queued.consume(99L);
+    assertEquals(ThreadCommandState.APPLIED, consumed.state());
+    assertEquals(99L, consumed.consumedTurnStartEntryId());
+    assertNull(consumed.cancelledAt());
+    // identity 不变
+    assertEquals(queued.id(), consumed.id());
+    assertEquals(queued.threadId(), consumed.threadId());
+    assertEquals(queued.sequence(), consumed.sequence());
+    assertEquals(queued.payload(), consumed.payload());
+    assertEquals(queued.clientCommandId(), consumed.clientCommandId());
+    assertEquals(queued.createdAt(), consumed.createdAt());
+  }
+
+  @Test
+  void cancelTransitionsQueuedToCancelledWithCancelledAt() {
+    ThreadCommand queued = command(1L, 1L, 1L, null, null);
+    ThreadCommand cancelled = queued.cancel(CANCELLED);
+    assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
+    assertEquals(CANCELLED, cancelled.cancelledAt());
+    assertNull(cancelled.consumedTurnStartEntryId());
+  }
+
+  @Test
+  void terminalCommandsRejectFurtherTransitions() {
+    ThreadCommand applied = command(1L, 1L, 1L, 99L, null);
+    ThreadCommand cancelled = command(2L, 1L, 2L, null, CANCELLED);
+    assertThrows(IllegalStateException.class, () -> applied.consume(100L));
+    assertThrows(IllegalStateException.class, () -> applied.cancel(CANCELLED));
+    assertThrows(IllegalStateException.class, () -> cancelled.consume(100L));
+    assertThrows(IllegalStateException.class, () -> cancelled.cancel(CANCELLED.plusSeconds(1)));
+  }
+
+  @Test
+  void consumeRejectsNonPositiveTurnStartAndCancelRejectsPastTime() {
+    ThreadCommand queued = command(1L, 1L, 1L, null, null);
+    assertThrows(IllegalArgumentException.class, () -> queued.consume(0L));
+    assertThrows(IllegalArgumentException.class, () -> queued.consume(-1L));
+    assertThrows(IllegalArgumentException.class, () -> queued.cancel(CREATED.minusSeconds(1)));
+    assertThrows(NullPointerException.class, () -> queued.cancel(null));
   }
 
   private static ThreadCommand command(

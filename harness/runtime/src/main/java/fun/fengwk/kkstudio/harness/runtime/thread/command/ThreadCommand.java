@@ -60,4 +60,36 @@ public record ThreadCommand(
   public ThreadCommandType type() {
     return payload.type();
   }
+
+  /**
+   * Pure QUEUED -&gt; APPLIED transition: attaches the consuming TURN_START Entry id and clears the
+   * cancel marker. Only QUEUED commands may be consumed; {@code turnStartEntryId} must be positive.
+   */
+  public ThreadCommand consume(long turnStartEntryId) {
+    if (state() != ThreadCommandState.QUEUED) {
+      throw new IllegalStateException("only QUEUED commands can be consumed");
+    }
+    if (turnStartEntryId <= 0) {
+      throw new IllegalArgumentException("turnStartEntryId must be positive");
+    }
+    return new ThreadCommand(
+        id, threadId, sequence, payload, clientCommandId, turnStartEntryId, null, createdAt);
+  }
+
+  /**
+   * Pure QUEUED -&gt; CANCELLED transition: attaches the cancellation time and clears the consumed
+   * marker. Only QUEUED commands may be cancelled; {@code cancelledAt} must not precede the command
+   * creation time.
+   */
+  public ThreadCommand cancel(Instant cancelledAt) {
+    if (state() != ThreadCommandState.QUEUED) {
+      throw new IllegalStateException("only QUEUED commands can be cancelled");
+    }
+    Objects.requireNonNull(cancelledAt, "cancelledAt");
+    if (cancelledAt.isBefore(createdAt)) {
+      throw new IllegalArgumentException("cancelledAt must not precede createdAt");
+    }
+    return new ThreadCommand(
+        id, threadId, sequence, payload, clientCommandId, null, cancelledAt, createdAt);
+  }
 }
