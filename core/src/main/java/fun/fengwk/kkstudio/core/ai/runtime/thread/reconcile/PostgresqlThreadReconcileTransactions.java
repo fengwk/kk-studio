@@ -69,7 +69,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.TurnInputBatch;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.usage.ModelUsageDraft;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
@@ -78,6 +77,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.sql.SQLException;
 import java.time.Duration;

@@ -10,8 +10,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;

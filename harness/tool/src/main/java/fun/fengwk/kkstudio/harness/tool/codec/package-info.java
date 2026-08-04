@@ -1,5 +1,5 @@
 /**
- * 工具描述与 schema 的严格、确定性 JSON 编解码。
+ * 工具描述、schema 与 ToolResult 的严格、确定性 JSON 编解码。
  *
  * <p>{@link ToolDescriptorJsonCodec} 同时支持 PLATFORM 与 ENVIRONMENT 工具，可与 Provider tool input-schema
  * JSON 共享使用。它在边界拒绝：
@@ -15,6 +15,7 @@
  *
  * <p>object {@code properties} 按字典序排序，{@code required} 数组按字典序排序；enum 值保留输入顺序。
  *
- * <p>descriptor list 外部顺序不属于本 codec 职责——调用方需要时自行 canonical 排序。
+ * <p>descriptor list 外部顺序不属于本 codec 职责——调用方需要时自行 canonical 排序。{@link ToolResultJsonCodec} 保存
+ * ToolResult 的可持久化内容与 details，但不保存进程内 terminate hint。
  */
 package fun.fengwk.kkstudio.harness.tool.codec;
