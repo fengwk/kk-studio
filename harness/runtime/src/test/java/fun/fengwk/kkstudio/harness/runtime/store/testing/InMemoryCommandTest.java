@@ -48,17 +48,21 @@ class InMemoryCommandTest {
   void loadQueuedCommandsReturnsOnlyQueuedCommandsSortedBySequence() {
     inTransaction(
         store,
-        tx ->
-            tx.insertCommands(
-                List.of(
-                    command(1, baseline.threadId(), 2, "client-b"),
-                    command(2, baseline.threadId(), 1, "client-a"))));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  command(1, baseline.threadId(), 2, "client-b"),
+                  command(2, baseline.threadId(), 1, "client-a")));
+        });
     List<Long> queuedIds =
         store.transaction(
-            tx ->
-                tx.loadQueuedCommands(baseline.threadId()).stream()
-                    .map(ThreadCommand::id)
-                    .toList());
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              return tx.loadQueuedCommands(baseline.threadId()).stream()
+                  .map(ThreadCommand::id)
+                  .toList();
+            });
     assertEquals(List.of(2L, 1L), queuedIds);
   }
 
@@ -72,19 +76,30 @@ class InMemoryCommandTest {
               return id;
             });
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
-    assertTrue(store.<Boolean>transaction(tx -> tx.loadQueuedCommands(otherThreadId).isEmpty()));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockThread(otherThreadId);
+              return tx.loadQueuedCommands(otherThreadId).isEmpty();
+            }));
   }
 
   @Test
   void appliedOrCancelledCommandsDropOutOfQueuedLoad() {
     inTransaction(
         store,
-        tx ->
-            tx.insertCommands(
-                List.of(
-                    command(1, baseline.threadId(), 1, "client-a"),
-                    command(2, baseline.threadId(), 2, "client-b"))));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  command(1, baseline.threadId(), 1, "client-a"),
+                  command(2, baseline.threadId(), 2, "client-b")));
+        });
     long turnStartEntryId =
         store.transaction(
             tx -> {
@@ -95,6 +110,7 @@ class InMemoryCommandTest {
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(baseline.threadId());
           List<ThreadCommand> queued = tx.loadQueuedCommands(baseline.threadId());
           tx.updateCommands(
               List.of(
@@ -102,7 +118,11 @@ class InMemoryCommandTest {
                   withCancelledAt(queued.get(1), T2)));
         });
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadQueuedCommands(baseline.threadId()).isEmpty()));
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              return tx.loadQueuedCommands(baseline.threadId()).isEmpty();
+            }));
     assertEquals(
         ThreadCommandState.APPLIED,
         store
@@ -120,37 +140,58 @@ class InMemoryCommandTest {
   @Test
   void duplicateCommandIdIsRejected() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 2, "client-b")))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertCommands(List.of(command(1, baseline.threadId(), 2, "client-b")));
+                }));
   }
 
   @Test
   void duplicateThreadSequenceIsRejected() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx -> tx.insertCommands(List.of(command(2, baseline.threadId(), 1, "client-b")))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertCommands(List.of(command(2, baseline.threadId(), 1, "client-b")));
+                }));
   }
 
   @Test
   void duplicateClientCommandIdIsRejected() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx -> tx.insertCommands(List.of(command(2, baseline.threadId(), 2, "client-a")))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertCommands(List.of(command(2, baseline.threadId(), 2, "client-a")));
+                }));
   }
 
   @Test
@@ -164,11 +205,14 @@ class InMemoryCommandTest {
             });
     inTransaction(
         store,
-        tx ->
-            tx.insertCommands(
-                List.of(
-                    command(1, baseline.threadId(), 1, "client-a"),
-                    command(2, otherThreadId, 1, "client-a"))));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.lockThread(otherThreadId);
+          tx.insertCommands(
+              List.of(
+                  command(1, baseline.threadId(), 1, "client-a"),
+                  command(2, otherThreadId, 1, "client-a")));
+        });
     assertTrue(
         store.transaction(tx -> tx.findCommandByClientId(otherThreadId, "client-a")).isPresent());
   }
@@ -176,7 +220,11 @@ class InMemoryCommandTest {
   @Test
   void findCommandByClientIdScopesByThread() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     assertTrue(
         store
             .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "client-a"))
@@ -191,7 +239,11 @@ class InMemoryCommandTest {
   @Test
   void updateCommandsRequiresLockFromLoadQueuedCommands() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -207,7 +259,11 @@ class InMemoryCommandTest {
   @Test
   void updateCommandsRejectsIdentityChanges() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     ThreadCommand stored =
         store.transaction(
             tx -> tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow());
@@ -267,6 +323,7 @@ class InMemoryCommandTest {
               inTransaction(
                   store,
                   tx -> {
+                    tx.lockThread(baseline.threadId());
                     tx.loadQueuedCommands(baseline.threadId());
                     tx.updateCommands(List.of(forgedRow));
                   }),
@@ -278,6 +335,7 @@ class InMemoryCommandTest {
   void insertThenUpdateInTheSameTransactionIsAllowed() {
     store.transaction(
         tx -> {
+          tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
           ThreadCommand inserted =
               tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow();
@@ -309,9 +367,17 @@ class InMemoryCommandTest {
   @Test
   void loadQueuedCommandsReturnsAnImmutableList() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     List<ThreadCommand> queued =
-        store.transaction(tx -> tx.loadQueuedCommands(baseline.threadId()));
+        store.transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              return tx.loadQueuedCommands(baseline.threadId());
+            });
     assertThrows(
         UnsupportedOperationException.class,
         () -> queued.add(command(9, baseline.threadId(), 9, "client-zz")));
@@ -326,9 +392,41 @@ class InMemoryCommandTest {
   }
 
   @Test
+  void commandMailboxOperationsRequireTheThreadLockFirst() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
+    // load without the thread lock is rejected (lock order Thread -> commands)
+    assertThrows(
+        IllegalStateException.class,
+        () -> store.transaction(tx -> tx.loadQueuedCommands(baseline.threadId())));
+    // insert without the thread lock is rejected
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> tx.insertCommands(List.of(command(9, baseline.threadId(), 9, "client-z")))));
+    // the locked path works
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockThread(baseline.threadId());
+              return tx.loadQueuedCommands(baseline.threadId()).size() == 1;
+            }));
+  }
+
+  @Test
   void updateCommandsLifecycleIsRestrictedToQueuedTerminalTransitions() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     long turnStartEntryId =
         store.transaction(
             tx -> {
@@ -343,6 +441,7 @@ class InMemoryCommandTest {
             inTransaction(
                 store,
                 tx -> {
+                  tx.lockThread(baseline.threadId());
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(queued));
                 }));
@@ -357,6 +456,7 @@ class InMemoryCommandTest {
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(baseline.threadId());
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
           ThreadCommand applied = withConsumedTurnStart(queued, turnStartEntryId);
           tx.updateCommands(List.of(applied));
@@ -378,6 +478,7 @@ class InMemoryCommandTest {
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(2, baseline.threadId(), 2, "client-b")));
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
           ThreadCommand cancelled = withCancelledAt(queued, T2);
@@ -408,7 +509,11 @@ class InMemoryCommandTest {
   @Test
   void updateCommandsConsumedTurnStartMustReferenceSameSessionTurnStart() {
     inTransaction(
-        store, tx -> tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a"))));
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+        });
     // a USER MESSAGE (under a TURN_START) is not a TURN_START entry
     long userEntryId =
         store.transaction(
@@ -427,6 +532,7 @@ class InMemoryCommandTest {
             inTransaction(
                 store,
                 tx -> {
+                  tx.lockThread(baseline.threadId());
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, userEntryId)));
                 }));
@@ -445,6 +551,7 @@ class InMemoryCommandTest {
             inTransaction(
                 store,
                 tx -> {
+                  tx.lockThread(baseline.threadId());
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, otherTurnStart)));
                 }));
@@ -459,6 +566,7 @@ class InMemoryCommandTest {
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(baseline.threadId());
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
           tx.updateCommands(List.of(withConsumedTurnStart(queued, turnStartEntryId)));
         });

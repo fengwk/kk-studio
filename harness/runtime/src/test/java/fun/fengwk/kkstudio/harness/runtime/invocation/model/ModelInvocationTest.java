@@ -40,6 +40,18 @@ class ModelInvocationTest {
         invocation(ModelInvocationStatus.READY, 1, null, null, null, null);
     assertEquals(1, readyRetryWaiting.attempt());
 
+    ModelInvocation dispatchingFirstAttempt =
+        invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, null, null);
+    assertEquals(ModelInvocationStatus.DISPATCHING, dispatchingFirstAttempt.status());
+    assertNull(dispatchingFirstAttempt.streamCheckpoint());
+    assertNull(dispatchingFirstAttempt.result());
+    assertNull(dispatchingFirstAttempt.error());
+    assertNull(dispatchingFirstAttempt.resultEntryId());
+
+    ModelInvocation dispatchingRetry =
+        invocation(ModelInvocationStatus.DISPATCHING, 1, null, null, null, null);
+    assertEquals(1, dispatchingRetry.attempt());
+
     ModelInvocation running =
         invocation(ModelInvocationStatus.RUNNING, 1, checkpoint(1), null, null, null);
     assertEquals(1, running.attempt());
@@ -59,6 +71,10 @@ class ModelInvocationTest {
 
     ModelInvocation failed = invocation(ModelInvocationStatus.FAILED, 1, null, null, error(), 99L);
     assertEquals("model boom", failed.error().message());
+
+    ModelInvocation failedBeforeStart =
+        invocation(ModelInvocationStatus.FAILED, 0, null, null, error(), null);
+    assertEquals(0, failedBeforeStart.attempt());
 
     ModelInvocation cancelled =
         invocation(ModelInvocationStatus.CANCELLED, 1, null, null, error(), null);
@@ -80,10 +96,23 @@ class ModelInvocationTest {
         () -> invocation(ModelInvocationStatus.SUCCEEDED, 0, null, response(), null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.FAILED, 0, null, null, error(), null));
+        () -> invocation(ModelInvocationStatus.UNKNOWN, 0, null, null, error(), null));
+  }
+
+  @Test
+  void rejectsInvalidDispatchingCombinations() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.UNKNOWN, 0, null, null, error(), null));
+        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, checkpoint(1), null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, response(), null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, error(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, null, 5L));
   }
 
   @Test

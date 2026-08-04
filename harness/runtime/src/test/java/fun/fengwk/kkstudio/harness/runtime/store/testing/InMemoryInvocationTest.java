@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 
 import java.time.Instant;
 import java.util.Arrays;
@@ -66,31 +67,35 @@ class InMemoryInvocationTest {
   void modelInvocationRoundTripAndUniqueTurnKey() {
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    1,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T1)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            2,
-                            baseline.threadId(),
-                            baseline.turnStartEntryId(),
-                            baseline.turnStartEntryId(),
-                            ModelInvocationStatus.READY,
-                            null,
-                            T2))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          2,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.turnStartEntryId(),
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
     assertTrue(
         store
             .transaction(
@@ -124,32 +129,36 @@ class InMemoryInvocationTest {
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            2,
-                            baseline.threadId(),
-                            baseline.rootEntryId(),
-                            baseline.rootEntryId(),
-                            ModelInvocationStatus.READY,
-                            null,
-                            T1))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          2,
+                          baseline.threadId(),
+                          baseline.rootEntryId(),
+                          baseline.rootEntryId(),
+                          ModelInvocationStatus.READY,
+                          null,
+                          T1));
+                }));
     // basisHead not equal to the current thread head (basis CAS)
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            3,
-                            baseline.threadId(),
-                            baseline.turnStartEntryId(),
-                            999,
-                            ModelInvocationStatus.READY,
-                            null,
-                            T1))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          3,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          999,
+                          ModelInvocationStatus.READY,
+                          null,
+                          T1));
+                }));
   }
 
   @Test
@@ -161,29 +170,33 @@ class InMemoryInvocationTest {
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            1,
-                            other.threadId(),
-                            baseline.turnStartEntryId(),
-                            baseline.turnStartEntryId(),
-                            ModelInvocationStatus.READY,
-                            null,
-                            T2))));
+                tx -> {
+                  tx.lockThread(other.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          1,
+                          other.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.turnStartEntryId(),
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
     // basis on the thread's own head is valid
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    2,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T2)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  2,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T2));
+        });
   }
 
   @Test
@@ -197,29 +210,33 @@ class InMemoryInvocationTest {
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            1,
-                            baseline.threadId(),
-                            turnStartB,
-                            baseline.turnStartEntryId(),
-                            ModelInvocationStatus.READY,
-                            null,
-                            T2))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          1,
+                          baseline.threadId(),
+                          turnStartB,
+                          baseline.turnStartEntryId(),
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
     // basis on the thread's own branch is valid
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    3,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T2)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  3,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T2));
+        });
   }
 
   @Test
@@ -258,6 +275,7 @@ class InMemoryInvocationTest {
                   store,
                   tx -> {
                     long id = tx.nextId();
+                    tx.lockThread(baseline.threadId());
                     tx.insertModelInvocation(
                         modelInvocation(
                             id,
@@ -354,6 +372,7 @@ class InMemoryInvocationTest {
                 store,
                 tx -> {
                   long id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
                           id,
@@ -388,6 +407,7 @@ class InMemoryInvocationTest {
                 store,
                 tx -> {
                   long id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
                           id,
@@ -437,6 +457,7 @@ class InMemoryInvocationTest {
                 store,
                 tx -> {
                   long id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
                           id,
@@ -460,19 +481,97 @@ class InMemoryInvocationTest {
   }
 
   @Test
+  void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
+    // chain: root -> turnStartA -> userA -> assistantA
+    long userA =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    long assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
+    // a terminal invocation without a linked result entry
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+          ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+          tx.updateModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.CANCELLED,
+                  null,
+                  locked.createdAt()));
+        });
+    ModelInvocation committed = store.transaction(tx -> tx.findModelInvocation(1).orElseThrow());
+    // relocate the thread head onto an unrelated branch in another session
+    Baseline other = seedThreadBaseline(store);
+    long otherTurnStart =
+        insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
+    long otherUser =
+        insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
+    long otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateThread(
+              new ThreadState(baseline.threadId(), otherAssistant, false, 1, 1, T0, T2));
+        });
+    // terminal exact replay after relocation stays legal (no dependency on the current head)
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockModelInvocation(1);
+          tx.updateModelInvocation(committed);
+        });
+    // attaching an entry outside the basis/turn path is rejected even after relocation
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+                  tx.updateModelInvocation(locked.attachResultEntry(otherAssistant, T3));
+                }));
+    // attaching a result entry on the original turn after relocation stays legal
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+          tx.updateModelInvocation(locked.attachResultEntry(assistantA, T3));
+        });
+    Long committedResultEntryId =
+        store.transaction(tx -> tx.findModelInvocation(1).orElseThrow().resultEntryId());
+    assertEquals(assistantA, committedResultEntryId.longValue());
+  }
+
+  @Test
   void updateModelInvocationMovesToTerminalWithResultEntry() {
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    1,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T1)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
     long userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
@@ -501,16 +600,18 @@ class InMemoryInvocationTest {
   void updateModelInvocationRequiresLockAndStableIdentity() {
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    1,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T1)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
     ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(1).orElseThrow());
 
     // no lock
@@ -581,37 +682,41 @@ class InMemoryInvocationTest {
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        modelInvocation(
-                            1,
-                            baseline.threadId(),
-                            baseline.turnStartEntryId(),
-                            baseline.turnStartEntryId(),
-                            ModelInvocationStatus.CANCELLED,
-                            null,
-                            T1))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          1,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.turnStartEntryId(),
+                          ModelInvocationStatus.CANCELLED,
+                          null,
+                          T1));
+                }));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
-                tx ->
-                    tx.insertModelInvocation(
-                        new ModelInvocation(
-                            2,
-                            baseline.threadId(),
-                            baseline.turnStartEntryId(),
-                            baseline.turnStartEntryId(),
-                            modelRequest(),
-                            ModelInvocationStatus.READY,
-                            1,
-                            null,
-                            null,
-                            null,
-                            null,
-                            T1,
-                            T1))));
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      new ModelInvocation(
+                          2,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.turnStartEntryId(),
+                          modelRequest(),
+                          ModelInvocationStatus.READY,
+                          1,
+                          null,
+                          null,
+                          null,
+                          null,
+                          T1,
+                          T1));
+                }));
     // tool: non-READY status / positive attempt / non-null approval is rejected at insert
     long assistantEntryId = seedAssistantAndModel();
     assertThrows(
@@ -715,6 +820,7 @@ class InMemoryInvocationTest {
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(threadId);
           tx.insertModelInvocation(
               modelInvocation(
                   id,
@@ -1212,18 +1318,18 @@ class InMemoryInvocationTest {
                               ToolInvocationStatus.READY,
                               null,
                               T2)));
-                  tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
-                  tx.updateToolInvocations(
-                      List.of(
-                          toolInvocation(
-                              id,
-                              1,
-                              assistantEntryId,
-                              0,
-                              "call-1",
-                              ToolInvocationStatus.UNKNOWN,
-                              syntheticResultEntryId,
-                              T2)));
+                  ToolInvocation locked =
+                      tx.lockToolInvocationsByAssistantEntryId(assistantEntryId).get(0);
+                  // reach the terminal UNKNOWN state through legal transitions, then attach the
+                  // synthetic result entry: the store must reject the synthetic link itself
+                  ToolInvocation next =
+                      locked
+                          .markApprovalNotRequired(T2)
+                          .beginDispatch(T2)
+                          .markRunning(T2)
+                          .unknown(new ToolInvocationError("UNKNOWN", "ownership lost"), T2)
+                          .attachResultEntry(syntheticResultEntryId, T2);
+                  tx.updateToolInvocations(List.of(next));
                 }));
   }
 

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 /** Durable business status of one Model invocation. */
 public enum ModelInvocationStatus {
   READY,
+  DISPATCHING,
   RUNNING,
   SUCCEEDED,
   FAILED,
