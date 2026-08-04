@@ -23,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -40,19 +42,21 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，以固定优先级驱动 Thread 的完整 Agent Loop。
  *
- * <p>固定优先级（单次 claim 的有界步骤循环，每步一个短事务）：(a) 应用当前 branch 上 terminal 且未挂 result Entry 的
- * ModelInvocation（仅当 Thread head 恰为 basis 时 applicable）；(b) 当前 head 恰为本 Thread ModelInvocation 产出 的
- * Assistant Entry、且其 Tool siblings 全部 terminal 且全部未挂 result 时按 ordinal 原子应用；(c) 当前 applicable
- * Model/Tool invocation 非 terminal 时完成 claim 并返回 SUSPENDED；(d) 无 open Turn 且 head 为
- * continueModel=true 的 TURN_END 时启动 continuation；(e) queued USER/CUSTOM 存在时启动 INPUT Turn；(f) 否则完成
- * claim 返回 QUIESCENT。旧 / 历史 open Turn 只在启动新 INPUT Turn 时被 normalization，绝不恢复 / 复用。
+ * <p>每步短事务先用纯 {@link ThreadContextClassifier} 把当前 Thread 分类为唯一的 live/historical 适用性上下文 （{@link
+ * ThreadContext}，unlocked 读：Model 只按 (threadId, open TURN_START) 查找，Tool siblings 只在 Model 结果恰为当前
+ * Assistant head 时加载），再按上下文执行：(a) MODEL_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的 terminal
+ * ModelInvocation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread ModelInvocation 产出 的
+ * Assistant Entry、且其 Tool siblings 全部 terminal 且全部未挂结果时按 ordinal 原子 apply；(c) MODEL_ACTIVE /
+ * TOOL_ACTIVE —— 当前 applicable Model/Tool invocation 非 terminal 时完成 claim 并返回 SUSPENDED；(d)
+ * CONTINUATION_DUE —— 无 open Turn 且 head 为 continueModel=true 的 TURN_END 时启动 continuation；(e)
+ * queued USER/CUSTOM 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim 返回 QUIESCENT。旧 / 历史 open
+ * Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
@@ -90,6 +94,7 @@ public final class ThreadProcessor {
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
+  private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
 
   public ThreadProcessor(
       HarnessStore store,
@@ -188,177 +193,84 @@ public final class ThreadProcessor {
       return new LoopStep.Lost();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    Optional<Entry> openTurn = path.openTurnStart();
+    ModelInvocation model = null;
+    List<ToolInvocation> siblings = List.of();
+    var openTurn = path.openTurnStart();
     if (openTurn.isPresent()) {
-      Entry turn = openTurn.get();
-      // unlocked 读：决策阶段不产生任何 Model/Tool 锁。
-      ModelInvocation peek = tx.findModelInvocationByTurn(thread.id(), turn.id()).orElse(null);
-      // (a) terminal 未挂结果 Model：仅当当前 head 恰为 basis 才 applicable。
-      if (peek != null
-          && peek.resultEntryId() == null
-          && peek.status().isTerminal()
-          && thread.headEntryId() == peek.basisHeadEntryId()) {
-        ModelInvocation model = tx.lockModelInvocation(peek.id()).orElse(null);
-        if (model == null) {
-          return new LoopStep.Lost();
-        }
-        return applyModel(tx, claim, thread, path, turn, model, now);
+      // unlocked 读：决策阶段不产生任何 Model/Tool 锁。model 只按 (threadId, open TURN_START) 精确查找；Tool
+      // siblings 只在 model 结果恰为当前 head 且 head 为 ASSISTANT Message 时加载，否则保持空。
+      model = tx.findModelInvocationByTurn(thread.id(), openTurn.get().id()).orElse(null);
+      if (model != null
+          && model.resultEntryId() != null
+          && model.resultEntryId() == thread.headEntryId()
+          && path.head().payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT) {
+        siblings = tx.loadToolInvocationsByAssistantEntryId(path.head().id());
       }
-      // (b) 非 terminal Model blocker：head == basis；Work-only，不锁 Model/Tool。
-      if (peek != null
-          && !peek.status().isTerminal()
-          && thread.headEntryId() == peek.basisHeadEntryId()) {
+    }
+    // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
+    ThreadContext context = contextClassifier.classify(thread, path, model, siblings);
+    return switch (context) {
+      case ThreadContext.ModelTerminalPending pending -> {
+        ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
+        if (locked == null) {
+          yield new LoopStep.Lost();
+        }
+        yield applyModel(tx, claim, thread, path, locked, now);
+      }
+      case ThreadContext.ModelActive ignored -> {
         if (tx.lockClaimedWork(claim, now).isEmpty()) {
-          return new LoopStep.Lost();
+          yield new LoopStep.Lost();
         }
         tx.completeWork(claim, now);
-        return new LoopStep.Suspend();
+        yield new LoopStep.Suspend();
       }
-      // (c) Tool sibling：仅当 head 恰为本 Thread Model 产出的 Assistant Entry；unlocked 分类，真实 apply 才取锁。
-      LoopStep toolStep = toolSiblingStep(tx, claim, thread, path, turn, peek, now);
-      if (toolStep != null) {
-        return toolStep;
+      case ThreadContext.ToolTerminalPending pending -> {
+        ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
+        if (locked == null) {
+          yield new LoopStep.Lost();
+        }
+        List<ToolInvocation> lockedSiblings =
+            tx.lockToolInvocationsByAssistantEntryId(pending.assistant().id());
+        yield applyToolBatch(
+            tx,
+            claim,
+            thread,
+            path,
+            locked,
+            pending.assistant(),
+            pending.calls(),
+            lockedSiblings,
+            now);
       }
-      // 历史 / 非 applicable open Turn：全程未锁 Model/Tool，落到下方 queued 快照与 INPUT normalization。
-    } else if (path.head().payload() instanceof TurnEndPayload end && end.continueModel()) {
-      return planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
-    }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    boolean hasInput = false;
-    for (ThreadCommand command : queued) {
-      if (command.type().isMessage()) {
-        hasInput = true;
-        break;
+      case ThreadContext.ToolActive ignored -> {
+        if (tx.lockClaimedWork(claim, now).isEmpty()) {
+          yield new LoopStep.Lost();
+        }
+        tx.completeWork(claim, now);
+        yield new LoopStep.Suspend();
       }
-    }
-    if (hasInput) {
-      return planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
-    }
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
-      return new LoopStep.Lost();
-    }
-    tx.completeWork(claim, now);
-    return new LoopStep.Quiescent();
-  }
-
-  /**
-   * Tool sibling 分类与执行：head 必须恰为本 Thread Model 产出的 Assistant Entry。分类阶段只用 unlocked 读，且先做无锁一致性 校验：产出
-   * Model 必须 SUCCEEDED 且携带 result，response toolCalls 必须与 assistant Message ToolCall contents 按序
-   * 逐字段一致（id/name/argumentsJson），随后校验 assistant tool call 数量 / sibling 连续 ordinal / 全部归本 Model 所有
-   * —— 任一违反即抛错回滚（非 SUCCEEDED / 结果不一致绝不静默历史化或降级为 blocker）；随后按状态分类 —— 存在已挂 result 但 并非全部 terminal+已挂
-   * 是不变量违反抛错；全部 terminal+全部已挂 视为历史（结果在另一 descendant，返回 null 交 INPUT normalization，不锁
-   * Model/Tool）；全部未挂载且存在非 terminal 时 Work-only blocker；全部 terminal 且全部未挂载 时才按 Thread -&gt; Model
-   * -&gt; Tool -&gt; Work 取锁原子应用；SUCCEEDED 无 tool call 且无 sibling 的合法历史 assistant 返回 null。
-   */
-  private LoopStep toolSiblingStep(
-      HarnessStore.Transaction tx,
-      ClaimedWork claim,
-      ThreadState thread,
-      EntryPath path,
-      Entry turn,
-      ModelInvocation peek,
-      Instant now) {
-    if (peek == null
-        || peek.resultEntryId() == null
-        || thread.headEntryId() != peek.resultEntryId()) {
-      return null;
-    }
-    Entry assistant = path.head();
-    if (!(assistant.payload() instanceof MessagePayload message)
-        || message.message().role() != AgentMessageRole.ASSISTANT) {
-      return null;
-    }
-    if (peek.status() != ModelInvocationStatus.SUCCEEDED) {
-      throw new IllegalStateException(
-          "model "
-              + peek.id()
-              + " with status "
-              + peek.status()
-              + " must not attach an assistant message entry "
-              + assistant.id());
-    }
-    if (peek.result() == null) {
-      throw new IllegalStateException(
-          "succeeded model "
-              + peek.id()
-              + " must carry a result for assistant entry "
-              + assistant.id());
-    }
-    List<ToolCallMessageContent> calls = new ArrayList<>();
-    for (var content : message.message().contents()) {
-      if (content instanceof ToolCallMessageContent call) {
-        calls.add(call);
+      case ThreadContext.ContinuationDue ignored -> planStep(
+          tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
+      case ThreadContext.IdleOrHistorical ignored -> {
+        List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+        boolean hasInput = false;
+        for (ThreadCommand command : queued) {
+          if (command.type().isMessage()) {
+            hasInput = true;
+            break;
+          }
+        }
+        if (hasInput) {
+          yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
+        }
+        if (tx.lockClaimedWork(claim, now).isEmpty()) {
+          yield new LoopStep.Lost();
+        }
+        tx.completeWork(claim, now);
+        yield new LoopStep.Quiescent();
       }
-    }
-    if (!responseToolCallsMatch(peek.result(), calls)) {
-      throw new IllegalStateException(
-          "model "
-              + peek.id()
-              + " result tool calls must match the assistant message tool calls of entry "
-              + assistant.id());
-    }
-    List<ToolInvocation> siblings = tx.loadToolInvocationsByAssistantEntryId(assistant.id());
-    if (calls.isEmpty() && siblings.isEmpty()) {
-      // 合法历史：assistant 无 tool call（含 attached 无调用结果），交 normalization。
-      return null;
-    }
-    if (calls.size() != siblings.size()) {
-      throw new IllegalStateException(
-          "tool sibling count "
-              + siblings.size()
-              + " must match the assistant tool calls "
-              + calls.size()
-              + " of entry "
-              + assistant.id());
-    }
-    for (int i = 0; i < siblings.size(); i++) {
-      ToolInvocation sibling = siblings.get(i);
-      if (sibling.ordinal() != i) {
-        throw new IllegalStateException(
-            "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
-      }
-      if (sibling.modelInvocationId() != peek.id()) {
-        throw new IllegalStateException(
-            "tool siblings of entry " + assistant.id() + " must be owned by model " + peek.id());
-      }
-    }
-    boolean allTerminal = true;
-    boolean anyUnattached = false;
-    boolean anyAttached = false;
-    for (ToolInvocation sibling : siblings) {
-      if (!sibling.status().isTerminal()) {
-        allTerminal = false;
-      } else if (sibling.resultEntryId() == null) {
-        anyUnattached = true;
-      } else {
-        anyAttached = true;
-      }
-    }
-    if (anyAttached && (!allTerminal || anyUnattached)) {
-      throw new IllegalStateException(
-          "tool siblings of entry "
-              + assistant.id()
-              + " must be all terminal and attached or all unattached");
-    }
-    if (anyAttached) {
-      // 全部 terminal 且全部已挂结果：结果位于另一 descendant，历史，交 normalization（不锁 Model/Tool）。
-      return null;
-    }
-    if (!allTerminal) {
-      // 全部未挂载且存在非 terminal：blocker，Work-only。
-      if (tx.lockClaimedWork(claim, now).isEmpty()) {
-        return new LoopStep.Lost();
-      }
-      tx.completeWork(claim, now);
-      return new LoopStep.Suspend();
-    }
-    ModelInvocation model = tx.lockModelInvocation(peek.id()).orElse(null);
-    if (model == null) {
-      return new LoopStep.Lost();
-    }
-    List<ToolInvocation> lockedSiblings = tx.lockToolInvocationsByAssistantEntryId(assistant.id());
-    return applyToolBatch(
-        tx, claim, thread, path, turn, model, assistant, calls, lockedSiblings, now);
+    };
   }
 
   /**
@@ -370,7 +282,6 @@ public final class ThreadProcessor {
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
-      Entry turn,
       ModelInvocation model,
       Instant now) {
     if (!model.status().isTerminal()
@@ -403,7 +314,8 @@ public final class ThreadProcessor {
               turnEndId,
               sessionId,
               assistantEntryId,
-              new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
+              new TurnEndPayload(
+                  model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
               now));
       head = turnEndId;
     } else if (succeeded) {
@@ -447,7 +359,11 @@ public final class ThreadProcessor {
               sessionId,
               assistantEntryId,
               new TurnEndPayload(
-                  turn.id(), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  model.turnStartEntryId(),
+                  TurnEndOutcome.FAILED,
+                  false,
+                  TurnEndReason.TURN_FAILED,
+                  null),
               now));
       head = turnEndId;
     }
@@ -476,7 +392,6 @@ public final class ThreadProcessor {
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
-      Entry turn,
       ModelInvocation model,
       Entry assistant,
       List<ToolCallMessageContent> calls,
@@ -516,7 +431,8 @@ public final class ThreadProcessor {
             turnEndId,
             sessionId,
             parentId,
-            new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, true, null, null),
+            new TurnEndPayload(
+                model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
             now));
     tx.updateToolInvocations(updated);
     tx.updateThread(thread.advanceHead(turnEndId, thread.yoloEnabled(), now));
@@ -735,25 +651,6 @@ public final class ThreadProcessor {
       }
     }
     return null;
-  }
-
-  /** response toolCalls 与 assistant Message ToolCall contents 按序逐字段一致（id/name/argumentsJson）。 */
-  private static boolean responseToolCallsMatch(
-      ProviderResponse response, List<ToolCallMessageContent> calls) {
-    List<ProviderToolCall> responseCalls = response.toolCalls();
-    if (responseCalls.size() != calls.size()) {
-      return false;
-    }
-    for (int i = 0; i < calls.size(); i++) {
-      ProviderToolCall call = responseCalls.get(i);
-      ToolCallMessageContent content = calls.get(i);
-      if (!call.id().equals(content.toolCallId())
-          || !call.name().equals(content.toolName())
-          || !call.argumentsJson().equals(content.argumentsJson())) {
-        return false;
-      }
-    }
-    return true;
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
