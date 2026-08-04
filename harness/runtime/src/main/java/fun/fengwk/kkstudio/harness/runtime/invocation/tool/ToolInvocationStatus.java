@@ -4,6 +4,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 public enum ToolInvocationStatus {
   WAITING_APPROVAL,
   READY,
+  DISPATCHING,
   RUNNING,
   SUCCEEDED,
   FAILED,

@@ -48,6 +48,17 @@ class ToolInvocationTest {
         invocation(ToolInvocationStatus.READY, 1, allowed(), null, null, null);
     assertEquals(ToolApprovalDecision.ALLOWED, readyAllowed.approval().decision());
 
+    ToolInvocation dispatchingNotRequired =
+        invocation(ToolInvocationStatus.DISPATCHING, 0, notRequired(), null, null, null);
+    assertEquals(ToolInvocationStatus.DISPATCHING, dispatchingNotRequired.status());
+    assertNull(dispatchingNotRequired.result());
+    assertNull(dispatchingNotRequired.error());
+    assertNull(dispatchingNotRequired.resultEntryId());
+
+    ToolInvocation dispatchingAllowed =
+        invocation(ToolInvocationStatus.DISPATCHING, 2, allowed(), null, null, null);
+    assertEquals(2, dispatchingAllowed.attempt());
+
     ToolInvocation running =
         invocation(ToolInvocationStatus.RUNNING, 1, allowed(), null, null, null);
     assertEquals(1, running.attempt());
@@ -104,6 +115,16 @@ class ToolInvocationTest {
   void requiresCompletedPreflightApproval() {
     assertThrows(
         IllegalArgumentException.class,
+        () -> invocation(ToolInvocationStatus.DISPATCHING, 0, null, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            invocation(ToolInvocationStatus.DISPATCHING, 0, requiredUndecided(), null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ToolInvocationStatus.DISPATCHING, 0, denied(), null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
         () -> invocation(ToolInvocationStatus.RUNNING, 1, null, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
@@ -120,6 +141,9 @@ class ToolInvocationTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(ToolInvocationStatus.UNKNOWN, 1, denied(), null, error(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ToolInvocationStatus.FAILED, 0, requiredUndecided(), null, error(), null));
 
     ToolInvocation failedDenied =
         invocation(ToolInvocationStatus.FAILED, 1, denied(), null, error(), null);

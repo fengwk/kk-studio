@@ -205,13 +205,19 @@ class InMemoryEntryTreeTest {
           ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
           tx.updateThread(
               new ThreadState(
-                  locked.id(), locked.headEntryId(), true, 3, 2, locked.createdAt(), T2));
+                  locked.id(),
+                  locked.headEntryId(),
+                  true,
+                  3,
+                  locked.revision() + 1,
+                  locked.createdAt(),
+                  T2));
         });
     ThreadState committed =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertTrue(committed.yoloEnabled());
     assertEquals(3L, committed.nextCommandSequence());
-    assertEquals(2L, committed.revision());
+    assertEquals(1L, committed.revision());
     assertEquals(T2, committed.updatedAt());
   }
 
@@ -252,7 +258,7 @@ class InMemoryEntryTreeTest {
                       inserted.headEntryId(),
                       true,
                       inserted.nextCommandSequence(),
-                      inserted.revision(),
+                      inserted.revision() + 1,
                       inserted.createdAt(),
                       T2));
               return id;
@@ -332,7 +338,7 @@ class InMemoryEntryTreeTest {
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  tx.updateThread(new ThreadState(baseline.threadId(), 999, false, 1, 0, T0, T2));
+                  tx.updateThread(new ThreadState(baseline.threadId(), 999, false, 1, 1, T0, T2));
                 }));
     // relocating the head to an existing entry is allowed
     long turnStartEntryId =

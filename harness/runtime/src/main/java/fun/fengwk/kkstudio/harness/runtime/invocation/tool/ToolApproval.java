@@ -61,6 +61,50 @@ public record ToolApproval(
     return required && decision == null;
   }
 
+  /** Minimal factory for an approval that is not required (all other fields are null). */
+  public static ToolApproval notRequired() {
+    return new ToolApproval(false, null, null, null, null, null, null);
+  }
+
+  /** Minimal factory for a required undecided approval with the given request time and reason. */
+  public static ToolApproval request(Instant requestedAt, String reason) {
+    return new ToolApproval(true, null, null, null, reason, requestedAt, null);
+  }
+
+  /**
+   * Applies a decision to this approval (the request time is preserved).
+   *
+   * <p>An undecided approval becomes decided with the given {@code decidedAt}. An already decided
+   * approval accepts an idempotent replay with the same {@code decisionId}, {@code decision},
+   * {@code actor} and {@code reason} and returns the stored approval unchanged — a client retry
+   * carries no {@code decidedAt}, so the service derives a fresh one that must be ignored. The same
+   * {@code decisionId} with a different payload or any different {@code decisionId} is a conflict.
+   */
+  public ToolApproval decide(
+      ToolApprovalDecision decision,
+      String decisionId,
+      String actor,
+      String reason,
+      Instant decidedAt) {
+    Objects.requireNonNull(decision, "decision");
+    if (!required) {
+      throw new IllegalArgumentException("a non-required approval cannot be decided");
+    }
+    if (this.decision == null) {
+      return new ToolApproval(true, decision, decisionId, actor, reason, requestedAt, decidedAt);
+    }
+    if (this.decision == decision
+        && Objects.equals(this.decisionId, decisionId)
+        && Objects.equals(this.actor, actor)
+        && Objects.equals(this.reason, reason)) {
+      return this;
+    }
+    throw new IllegalArgumentException(
+        "approval decision conflict: decisionId "
+            + decisionId
+            + " does not replay the stored decision");
+  }
+
   private static String requireCanonical(String value, String field) {
     return requireCanonical(value, field, 128);
   }

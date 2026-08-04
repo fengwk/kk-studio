@@ -60,9 +60,12 @@ import java.util.function.Function;
  * assistantEntryId（同 branch）；Work target 必须存在且保持 {@code (targetType, targetId)} 主键。
  *
  * <p>per-transaction lock tracking：updateThread / updateCommands / updateModelInvocation /
- * updateToolInvocations 要求对应行已在本事务锁定；lock* 方法、loadQueuedCommands 与
- * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新；Work 的 renew / complete /
- * reschedule 方法内部先锁定目标行。返回对象与 list 均为 immutable records / copies。
+ * updateToolInvocations 要求对应行已在本事务锁定，且 Thread / Model / Tool 更新必须通过 aggregate 共享 transition
+ * validation （非法状态机跳跃与 terminal 回退/改写被拒绝）；lock* 方法、loadQueuedCommands 与
+ * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新，insertModelInvocation 额外要求 Thread
+ * 已在本事务锁定（basis CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
+ * 已在本事务锁定（锁序 Thread -&gt; commands）；Work 的 renew / complete / reschedule 方法内部先锁定目标行，
+ * lockClaimedWork 在 ownership 校验通过后锁行，deleteWork 强制删除行。返回对象与 list 均为 immutable records / copies。
  */
 public final class InMemoryHarnessStore implements HarnessStore {
 
@@ -317,9 +320,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (stored == null) {
         throw new IllegalArgumentException("thread " + thread.id() + " does not exist");
       }
-      if (!stored.createdAt().equals(thread.createdAt())) {
-        throw new IllegalArgumentException("thread createdAt must not change");
-      }
+      ThreadState.validateTransition(stored, thread);
       requireExistingEntry(thread.headEntryId());
       state.threads.put(thread.id(), thread);
     }
@@ -339,6 +340,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public List<ThreadCommand> loadQueuedCommands(long threadId) {
       checkOpen();
+      // 锁序 Thread -> commands：先锁 Thread 才能读它的 mailbox。
+      requireLocked(LockKey.thread(threadId));
       List<ThreadCommand> queued =
           state.commands.values().stream()
               .filter(
@@ -364,6 +367,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
         if (!state.threads.containsKey(command.threadId())) {
           throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
         }
+        // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread。
+        requireLocked(LockKey.thread(command.threadId()));
         requireUniqueCommandKey(command);
         state.commands.put(command.id(), command);
         lock(LockKey.command(command.id()));
@@ -401,6 +406,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
           throw new IllegalArgumentException("command " + command.id() + " does not exist");
         }
         requireSameCommandIdentity(stored, command);
+        // 锁序 Thread -> commands：harvest / stop 更新 mailbox 前必须先锁定相关 Thread；身份检查先行，
+        // 伪造身份的 update 仍以 IllegalArgumentException 拒绝。
+        requireLocked(LockKey.thread(command.threadId()));
         requireValidCommandLifecycle(stored, command);
         requireValidConsumedTurnStart(command);
         state.commands.put(command.id(), command);
@@ -501,6 +509,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (!state.threads.containsKey(invocation.threadId())) {
         throw new IllegalArgumentException("thread " + invocation.threadId() + " does not exist");
       }
+      // basis CAS 只有在 Thread 已在本事务锁定时才原子成立。
+      requireLocked(LockKey.thread(invocation.threadId()));
       Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
       if (turnStart.payload().type() != EntryType.TURN_START) {
         throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
@@ -522,8 +532,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * turnStartEntryId 必须位于 basisHeadEntryId 的 EntryPath 上；该 path 的 session 必须与 Thread 当前 head 的
-     * session 一致；resultEntryId（若有）的 path 必须同时包含 basisHeadEntryId 与 turnStartEntryId。
+     * turnStartEntryId 必须位于 basisHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread 当前 head 的
+     * session 一致。仅 insert 使用：创建时的 basis CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
      */
     private void requireValidModelBranch(ModelInvocation invocation) {
       EntryPath basisPath = loadEntryPath(invocation.basisHeadEntryId());
@@ -539,20 +549,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
       long threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
       if (threadSessionId != basisSessionId) {
         throw new IllegalArgumentException("thread head session must match the basis path session");
-      }
-      Long resultEntryId = invocation.resultEntryId();
-      if (resultEntryId != null) {
-        EntryPath resultPath = loadEntryPath(resultEntryId);
-        boolean onBasisPath =
-            resultPath.entries().stream()
-                .anyMatch(entry -> entry.id() == invocation.basisHeadEntryId());
-        boolean sameTurnStart =
-            resultPath.entries().stream()
-                .anyMatch(entry -> entry.id() == invocation.turnStartEntryId());
-        if (!onBasisPath || !sameTurnStart) {
-          throw new IllegalArgumentException(
-              "model result entry must be on the basis path and in the same turn");
-        }
       }
     }
 
@@ -579,6 +575,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "model resultEntryId must reference an assistant, assistant-error or"
                 + " assistant-aborted entry");
+      }
+      // result path 必须同时包含 basis 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
+      EntryPath resultPath = loadEntryPath(resultEntryId);
+      boolean onBasisPath =
+          resultPath.entries().stream()
+              .anyMatch(entry -> entry.id() == invocation.basisHeadEntryId());
+      boolean sameTurnStart =
+          resultPath.entries().stream()
+              .anyMatch(entry -> entry.id() == invocation.turnStartEntryId());
+      if (!onBasisPath || !sameTurnStart) {
+        throw new IllegalArgumentException(
+            "model result entry must be on the basis path and in the same turn");
       }
       for (ModelInvocation other : state.modelInvocations.values()) {
         if (other.id() != invocation.id() && Objects.equals(other.resultEntryId(), resultEntryId)) {
@@ -607,16 +615,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "model invocation " + invocation.id() + " does not exist");
       }
-      if (stored.threadId() != invocation.threadId()
-          || stored.turnStartEntryId() != invocation.turnStartEntryId()
-          || stored.basisHeadEntryId() != invocation.basisHeadEntryId()
-          || !stored.request().equals(invocation.request())
-          || !stored.createdAt().equals(invocation.createdAt())) {
-        throw new IllegalArgumentException(
-            "model invocation identity"
-                + " (thread/turnStartEntry/basisHeadEntry/request/createdAt) must not change");
-      }
-      requireValidModelBranch(invocation);
+      ModelInvocation.validateTransition(stored, invocation);
+      // update 不重复依赖 Thread 当前 head / session（relocation 后 terminal exact replay 仍合法）；
+      // 仅当 resultEntry 出现时校验类型、path 与唯一性。
       requireValidModelResultEntry(invocation);
       state.modelInvocations.put(invocation.id(), invocation);
     }
@@ -809,21 +810,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
           throw new IllegalArgumentException(
               "tool invocation " + invocation.id() + " does not exist");
         }
-        requireSameToolIdentity(stored, invocation);
+        ToolInvocation.validateTransition(stored, invocation);
         requireValidToolResultEntry(invocation);
         state.toolInvocations.put(invocation.id(), invocation);
-      }
-    }
-
-    private static void requireSameToolIdentity(ToolInvocation stored, ToolInvocation invocation) {
-      if (stored.modelInvocationId() != invocation.modelInvocationId()
-          || stored.assistantEntryId() != invocation.assistantEntryId()
-          || stored.ordinal() != invocation.ordinal()
-          || !stored.request().equals(invocation.request())
-          || !stored.createdAt().equals(invocation.createdAt())) {
-        throw new IllegalArgumentException(
-            "tool invocation identity"
-                + " (modelInvocation/assistantEntry/ordinal/request/createdAt) must not change");
       }
     }
 
@@ -843,6 +832,34 @@ public final class InMemoryHarnessStore implements HarnessStore {
         lock(LockKey.work(target));
       }
       return Optional.ofNullable(work);
+    }
+
+    @Override
+    public Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now) {
+      checkOpen();
+      Objects.requireNonNull(claim, "claim");
+      Objects.requireNonNull(now, "now");
+      Work work = state.works.get(claim.target());
+      if (work == null
+          || !claim.leaseToken().equals(work.leaseToken())
+          || work.leaseUntil() == null
+          || !work.leaseUntil().isAfter(now)) {
+        // 行缺失 / token 不匹配 / lease 已过期都是正常竞态：lost / stale ownership，不以异常表达。
+        return Optional.empty();
+      }
+      lock(LockKey.work(claim.target()));
+      return Optional.of(work);
+    }
+
+    @Override
+    public boolean deleteWork(WorkTarget target) {
+      checkOpen();
+      Objects.requireNonNull(target, "target");
+      boolean existed = state.works.remove(target) != null;
+      if (existed) {
+        lock(LockKey.work(target));
+      }
+      return existed;
     }
 
     @Override

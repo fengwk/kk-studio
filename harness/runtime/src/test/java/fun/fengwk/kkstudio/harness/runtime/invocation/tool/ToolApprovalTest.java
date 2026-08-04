@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -186,5 +187,95 @@ class ToolApprovalTest {
         () ->
             new ToolApproval(
                 true, ToolApprovalDecision.ALLOWED, "d-1", "actor", " ", REQUESTED, DECIDED));
+  }
+
+  @Test
+  void staticFactoriesBuildTheCanonicalShapes() {
+    ToolApproval notRequired = ToolApproval.notRequired();
+    assertFalse(notRequired.required());
+    assertFalse(notRequired.isUndecided());
+    assertNull(notRequired.requestedAt());
+    assertNull(notRequired.decidedAt());
+
+    ToolApproval requested = ToolApproval.request(REQUESTED, "why");
+    assertTrue(requested.required());
+    assertTrue(requested.isUndecided());
+    assertEquals(REQUESTED, requested.requestedAt());
+    assertEquals("why", requested.reason());
+    assertNull(requested.decisionId());
+  }
+
+  @Test
+  void decideAppliesTheDecisionToAnUndecidedApproval() {
+    ToolApproval requested = ToolApproval.request(REQUESTED, "why");
+    ToolApproval decided =
+        requested.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+    assertFalse(decided.isUndecided());
+    assertEquals(ToolApprovalDecision.ALLOWED, decided.decision());
+    assertEquals("d-1", decided.decisionId());
+    assertEquals("actor", decided.actor());
+    assertEquals(REQUESTED, decided.requestedAt());
+    assertEquals(DECIDED, decided.decidedAt());
+  }
+
+  @Test
+  void decideIsExactIdempotentAndConflictsOnRewrites() {
+    ToolApproval decided =
+        ToolApproval.request(REQUESTED, null)
+            .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+    // the exact same decision payload replays idempotently
+    assertEquals(
+        decided, decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED));
+    // same decisionId with a different payload conflicts
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "other", null, DECIDED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", "new reason", DECIDED));
+    // an existing different decision conflicts even with a new decisionId
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decided.decide(ToolApprovalDecision.DENIED, "d-9", "actor", null, DECIDED));
+    // a non-required approval can never be decided
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolApproval.notRequired()
+                .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED));
+  }
+
+  @Test
+  void decideIgnoresAFreshDecidedAtOnAnIdempotentNetworkRetry() {
+    ToolApproval decided =
+        ToolApproval.request(REQUESTED, null)
+            .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+    // the client does not send decidedAt, so the retried request carries a fresh service now:
+    // same decisionId + decision + actor + reason must return the stored approval unchanged
+    ToolApproval replayed =
+        decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED.plusSeconds(30));
+    assertEquals(decided, replayed);
+    assertEquals(DECIDED, replayed.decidedAt());
+    // a retry that changes any of the identifying facts is a conflict, not a replay
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            decided.decide(
+                ToolApprovalDecision.ALLOWED, "d-1", "other-actor", null, DECIDED.plusSeconds(30)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decided.decide(ToolApprovalDecision.DENIED, "d-1", "actor", null, DECIDED));
+  }
+
+  @Test
+  void decideRejectsInvalidDecisionFacts() {
+    ToolApproval requested = ToolApproval.request(REQUESTED, null);
+    assertThrows(
+        NullPointerException.class, () -> requested.decide(null, "d-1", "actor", null, DECIDED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            requested.decide(
+                ToolApprovalDecision.ALLOWED, "d-1", "actor", null, REQUESTED.minusSeconds(1)));
   }
 }

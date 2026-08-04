@@ -12,6 +12,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -93,16 +94,18 @@ class InMemoryWorkTest {
     TurnBaseline baseline = seedTurnBaseline(store);
     inTransaction(
         store,
-        tx ->
-            tx.insertModelInvocation(
-                modelInvocation(
-                    1,
-                    baseline.threadId(),
-                    baseline.turnStartEntryId(),
-                    baseline.turnStartEntryId(),
-                    ModelInvocationStatus.READY,
-                    null,
-                    T1)));
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  1,
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, 1);
     inTransaction(
@@ -381,5 +384,107 @@ class InMemoryWorkTest {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, 1);
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.lockWork(target).isEmpty()));
+  }
+
+  @Test
+  void lockClaimedWorkReturnsTheCurrentWorkWhileOwnershipIsValid() {
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(store, tx -> tx.requestWork(target, T0));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
+    Work work = store.transaction(tx -> tx.lockClaimedWork(claim, T2)).orElseThrow();
+    assertEquals(target, work.target());
+    assertEquals(1L, work.wakeVersion());
+    assertEquals(claim.leaseToken(), work.leaseToken());
+    assertEquals(claim.leaseUntil(), work.leaseUntil());
+  }
+
+  @Test
+  void lockClaimedWorkReturnsEmptyOnMissingRowStaleTokenAndExpiredLease() {
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(store, tx -> tx.requestWork(target, T0));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
+    // a claim for a target that never had work is lost ownership
+    WorkTarget never = new WorkTarget(WorkTargetType.THREAD, 42);
+    assertTrue(
+        store
+            .transaction(
+                tx ->
+                    tx.lockClaimedWork(
+                        new ClaimedWork(never, 1L, "lease-token", T2.plusSeconds(60)), T2))
+            .isEmpty());
+    // wrong token is stale ownership
+    assertTrue(
+        store
+            .transaction(
+                tx ->
+                    tx.lockClaimedWork(
+                        new ClaimedWork(
+                            target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil()),
+                        T2))
+            .isEmpty());
+    // lease already expired at now is stale ownership
+    assertTrue(
+        store
+            .transaction(tx -> tx.lockClaimedWork(claim, claim.leaseUntil().plusSeconds(1)))
+            .isEmpty());
+    // the row is untouched by failed ownership checks
+    Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    assertEquals(claim.leaseToken(), work.leaseToken());
+    assertEquals(claim.leaseUntil(), work.leaseUntil());
+  }
+
+  @Test
+  void lockClaimedWorkSurvivesWakeVersionGrowth() {
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(store, tx -> tx.requestWork(target, T0));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
+    // a newer wake arrives while the lease is held
+    inTransaction(store, tx -> tx.requestWork(target, T4));
+    Work work = store.transaction(tx -> tx.lockClaimedWork(claim, T2)).orElseThrow();
+    // ownership is not lost: the returned row carries the newer wakeVersion while availableAt
+    // stays the earliest requested time (requestWork pulls forward to the minimum)
+    assertEquals(2L, work.wakeVersion());
+    assertEquals(claim.leaseToken(), work.leaseToken());
+    assertEquals(T0, work.availableAt());
+  }
+
+  @Test
+  void deleteWorkRemovesTheRowWithoutNeedingAClaimToken() {
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(store, tx -> tx.requestWork(target, T0));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
+    assertTrue(store.<Boolean>transaction(tx -> tx.deleteWork(target)));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
+    // the deleted row fences the old callback: every claim-based mutation is lost ownership
+    assertThrows(
+        IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim, T2)));
+    assertThrows(
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.renewWork(claim, T2, T3)));
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.rescheduleWork(claim, T2, T3)));
+  }
+
+  @Test
+  void deleteWorkReturnsFalseForMissingTargetsAndRollsBackWithTheTransaction() {
+    WorkTarget missing = new WorkTarget(WorkTargetType.THREAD, 42);
+    assertFalse(store.<Boolean>transaction(tx -> tx.deleteWork(missing)));
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(store, tx -> tx.requestWork(target, T0));
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.deleteWork(target);
+                  throw new IllegalStateException("boom");
+                }));
+    // the deletion from the failed transaction is not visible
+    assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isPresent()));
   }
 }

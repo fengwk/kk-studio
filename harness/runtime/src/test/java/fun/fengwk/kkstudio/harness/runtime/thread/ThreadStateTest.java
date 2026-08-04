@@ -48,6 +48,123 @@ class ThreadStateTest {
         () -> state(7L, 42L, false, 1L, 0L, CREATED.minusSeconds(1)));
   }
 
+  @Test
+  void reserveCommandSequencesAdvancesBatchAndRevisionByOne() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
+    ThreadState next = stored.reserveCommandSequences(3, CREATED.plusSeconds(1));
+    assertEquals(6L, next.nextCommandSequence());
+    assertEquals(6L, next.revision());
+    assertEquals(CREATED.plusSeconds(1), next.updatedAt());
+    assertEquals(stored.headEntryId(), next.headEntryId());
+    assertEquals(stored.yoloEnabled(), next.yoloEnabled());
+    // a single sequence is just count=1
+    ThreadState single = stored.reserveCommandSequences(1, CREATED.plusSeconds(1));
+    assertEquals(4L, single.nextCommandSequence());
+    assertEquals(6L, single.revision());
+  }
+
+  @Test
+  void reserveCommandSequencesRejectsNonPositiveCountAndOverflow() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
+    assertThrows(IllegalArgumentException.class, () -> stored.reserveCommandSequences(0, CREATED));
+    assertThrows(IllegalArgumentException.class, () -> stored.reserveCommandSequences(-1, CREATED));
+    assertThrows(
+        ArithmeticException.class,
+        () ->
+            state(7L, 42L, false, Long.MAX_VALUE, 5L, CREATED).reserveCommandSequences(2, CREATED));
+  }
+
+  @Test
+  void advanceHeadAndTouchRevisionBumpRevisionByOne() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
+    // head + yolo policy are set in one atomic step with a single revision bump
+    ThreadState head = stored.advanceHead(99L, true, CREATED.plusSeconds(2));
+    assertEquals(99L, head.headEntryId());
+    assertTrue(head.yoloEnabled());
+    assertEquals(6L, head.revision());
+    assertEquals(3L, head.nextCommandSequence());
+    // re-sending the current policy on terminal apply keeps the same semantics
+    ThreadState replayPolicy = head.advanceHead(99L, true, CREATED.plusSeconds(3));
+    assertEquals(7L, replayPolicy.revision());
+    ThreadState touched = replayPolicy.touchRevision(CREATED.plusSeconds(3));
+    assertEquals(8L, touched.revision());
+    assertEquals(99L, touched.headEntryId());
+    assertTrue(touched.yoloEnabled());
+    assertEquals(3L, touched.nextCommandSequence());
+  }
+
+  @Test
+  void validateTransitionAcceptsExactReplayAndRejectsIdentityRegression() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
+    ThreadState.validateTransition(stored, stored);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ThreadState.validateTransition(stored, state(8L, 42L, false, 3L, 5L, CREATED)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    7L, 42L, false, 3L, 5L, CREATED.plusSeconds(1), CREATED.plusSeconds(1))));
+  }
+
+  @Test
+  void validateTransitionRejectsSequenceRevisionAndUpdatedAtRegression() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED.plusSeconds(2));
+    // nextCommandSequence regression
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 2L, 6L, CREATED.plusSeconds(3))));
+    // revision regression
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 3L, 4L, CREATED.plusSeconds(3))));
+    // updatedAt regression
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 3L, 6L, CREATED.plusSeconds(1))));
+  }
+
+  @Test
+  void validateTransitionRequiresExactRevisionIncrementOnAnyChange() {
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
+    // any externally visible change must bump revision by exactly one
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, true, 3L, 5L, CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 4L, 5L, CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 43L, false, 3L, 5L, CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 3L, 7L, CREATED.plusSeconds(1))));
+    // an updatedAt-only change still requires the revision bump
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(7L, 42L, false, 3L, 5L, CREATED.plusSeconds(1))));
+    ThreadState.validateTransition(stored, state(7L, 42L, false, 3L, 6L, CREATED.plusSeconds(1)));
+  }
+
   private static ThreadState state(
       long id,
       long headEntryId,
