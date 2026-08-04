@@ -16,6 +16,7 @@
     <modules>
         <module>tool</module>
         <module>runtime</module>
+        <module>runtime-spring</module>
         <module>daemon</module>
     </modules>
 </project>

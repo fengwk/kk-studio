@@ -74,6 +74,8 @@ class RuntimeModuleArchitectureTest {
 
     Path harnessRoot = moduleRoot.getParent();
     assertHarnessModules(harnessRoot.resolve("pom.xml"));
+    assertManagedInternalDependency(
+        harnessRoot.getParent().resolve("pom.xml"), "kk-studio-harness-runtime-spring");
     assertDirectProductionDependencies(
         harnessRoot.resolve("tool/pom.xml"), Set.of("com.fasterxml.jackson.core:jackson-databind"));
     assertDirectProductionDependencies(
@@ -82,6 +84,9 @@ class RuntimeModuleArchitectureTest {
             "com.fasterxml.jackson.core:jackson-databind",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.slf4j:slf4j-api"));
+    assertDirectProductionDependencies(
+        harnessRoot.resolve("runtime-spring/pom.xml"),
+        Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("daemon/pom.xml"),
         Set.of(
@@ -137,8 +142,8 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(List.of("tool", "runtime", "daemon")),
-        () -> "harness modules must be exactly tool/runtime/daemon, got " + modules);
+        modules.equals(List.of("tool", "runtime", "runtime-spring", "daemon")),
+        () -> "harness modules must be exactly tool/runtime/runtime-spring/daemon, got " + modules);
   }
 
   private static void assertDirectProductionDependencies(Path pom, Set<String> allowed)
@@ -161,6 +166,24 @@ class RuntimeModuleArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () -> "disallowed direct production dependencies in " + pom + ": " + violations);
+  }
+
+  private static void assertManagedInternalDependency(Path pom, String artifactId)
+      throws IOException {
+    String text = Files.readString(pom, StandardCharsets.UTF_8);
+    Matcher matcher = DEPENDENCY_PATTERN.matcher(text);
+    boolean found = false;
+    while (matcher.find()) {
+      String dependency = matcher.group(1);
+      if ("fun.fengwk.kk-studio".equals(optionalTag(dependency, "groupId"))
+          && artifactId.equals(optionalTag(dependency, "artifactId"))) {
+        assertTrue(
+            "${kk-studio.version}".equals(optionalTag(dependency, "version")),
+            () -> artifactId + " must use ${kk-studio.version} in dependencyManagement");
+        found = true;
+      }
+    }
+    assertTrue(found, () -> artifactId + " must be declared in root dependencyManagement");
   }
 
   private static String requiredTag(String block, String tag) {
