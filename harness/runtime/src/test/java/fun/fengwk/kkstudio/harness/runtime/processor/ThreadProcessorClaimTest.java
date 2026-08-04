@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.STEP_LIMIT;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
@@ -12,7 +14,10 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedToolChain;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -105,5 +112,151 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
+  }
+
+  @Test
+  void nonterminalModelBlockerWithLostClaimIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    var baseline = seedOpenInputTurn(real);
+    seedModelInvocation(
+        real,
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.userEntryId(),
+        ModelInvocationStatus.READY,
+        plainRequest(),
+        null,
+        null);
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+
+    // fence 调用序列：claimOwned（1）-> ModelActive blocker 的 Work fence（2）丢失 -> LoopStep.Lost -> LOST
+    // no-op。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(3, path(real, baseline.threadId()).entries().size());
+    assertEquals(0L, thread(real, baseline.threadId()).revision());
+    assertNotNull(work(real, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  @Test
+  void nonterminalToolSiblingsWithLostClaimIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    var chain =
+        seedToolChain(
+            real,
+            List.of("call-1", "call-2"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.READY));
+    requestThreadWork(real, chain.turn().threadId());
+    ClaimedWork claim = claimThreadWork(real, chain.turn().threadId());
+
+    // fence 调用序列：claimOwned（1）-> ToolActive blocker 的 Work fence（2）丢失 -> LOST no-op（不挂结果）。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(4, path(real, chain.turn().threadId()).entries().size());
+    assertEquals(chain.assistantEntryId(), thread(real, chain.turn().threadId()).headEntryId());
+    assertNotNull(work(real, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
+  }
+
+  @Test
+  void quiescentClaimLostAtFinalFenceIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    var baseline = seedBaseline(real);
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+
+    // fence 调用序列：claimOwned（1）-> quiescent 完成 fence（2）丢失 -> LOST，零 mutation。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(1, path(real, baseline.threadId()).entries().size());
+    assertEquals(0L, thread(real, baseline.threadId()).revision());
+  }
+
+  @Test
+  void planClaimLostAtPlanFenceIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
+    var baseline = seedBaseline(real);
+    seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+
+    // fence 调用序列：claimOwned（1）-> planStep 的 claim fence（2）丢失 -> LoopStep.Lost，resolver 不被调用。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(1, path(real, baseline.threadId()).entries().size());
+    assertEquals(0, fixture.resolver.calls);
+  }
+
+  @Test
+  void stepLimitRescheduleWithLostClaimIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(1, claimLosingStore(real, 3));
+    var baseline = seedOpenInputTurn(real);
+    long modelId =
+        seedModelInvocation(
+            real,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            plainRequest(),
+            successResponse(List.of(), "bash"),
+            null);
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+
+    // fence 调用序列：claimOwned（1）-> applyModel 的 final fence（2）通过（apply 已提交）-> step limit 后
+    // reschedule 的 claim fence（3）丢失 -> 本调用返回 LOST，但已提交的 apply 是幂等事实，不会重复 apply。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(5, path(real, baseline.threadId()).entries().size());
+    assertNotNull(model(real, modelId).resultEntryId());
+    assertEquals(
+        path(real, baseline.threadId()).entries().get(4).id(),
+        thread(real, baseline.threadId()).headEntryId());
+    // 到期后由普通 processor（共享同一 real store）重新 claim：已挂结果的模型不再 applicable，直接 quiescent 完成 Work。
+    Fixture healing = fixture(STEP_LIMIT, real);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork nextClaim = claimThreadWork(real, baseline.threadId(), fixture.clock.instant());
+    assertEquals(ThreadProcessResult.QUIESCENT, healing.processor.process(nextClaim));
+  }
+
+  @Test
+  void heartbeatSchedulingFailureWithLostRescheduleIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
+    var baseline = seedBaseline(real);
+    long userCommand =
+        seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+    // scheduler 已关闭：resolve 前 heartbeat 无法启动 -> reschedule，但 reschedule 的 claim fence（3）丢失 -> LOST。
+    fixture.scheduler.shutdownNow();
+
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(1, path(real, baseline.threadId()).entries().size());
+    assertEquals(
+        ThreadCommandState.QUEUED, command(real, baseline.threadId(), userCommand).state());
+    // reschedule 未发生：Work 行仍持有原 lease（到期后才能被再次 claim）。
+    assertNotNull(
+        work(real, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())).leaseToken());
+  }
+
+  @Test
+  void resolverNullWithLostRescheduleIsLostNoOp() {
+    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
+    var baseline = seedBaseline(real);
+    long userCommand =
+        seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    requestThreadWork(real, baseline.threadId());
+    ClaimedWork claim = claimThreadWork(real, baseline.threadId());
+
+    // resolver 返回 null -> reschedule，但 reschedule 的 claim fence（3）丢失 -> LOST，零 durable mutation。
+    assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
+    assertEquals(1, path(real, baseline.threadId()).entries().size());
+    assertEquals(
+        ThreadCommandState.QUEUED, command(real, baseline.threadId(), userCommand).state());
+    assertEquals(1L, thread(real, baseline.threadId()).revision());
   }
 }
