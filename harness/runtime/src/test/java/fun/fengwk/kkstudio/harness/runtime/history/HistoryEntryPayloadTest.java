@@ -312,7 +312,13 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new TurnEndPayload(
-                7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(129)));
+                7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(257)));
+    // 恰好 256 字符是 durable 上限：合法。
+    assertEquals(
+        new TurnEndPayload(
+            7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(256)),
+        new TurnEndPayload(
+            7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(256)));
     assertThrows(
         IllegalArgumentException.class,
         () ->

@@ -9,8 +9,8 @@ import java.util.Objects;
  *
  * <p>精确规则：COMPLETED 的 continueModel 可 true/false，reason 与 closeRequestId 必须 null；FAILED 必须
  * continueModel=false、reason=TURN_FAILED、closeRequestId null；STOPPED 必须 reason=USER_STOP、
- * continueModel=false、closeRequestId canonical 非空且 ≤128；CANCELLED 必须 reason=HISTORY_CUT 或
- * CANCELLED、continueModel=false，closeRequestId 可为 null（若有则 canonical 且 ≤128）。
+ * continueModel=false、closeRequestId canonical 非空且 ≤256；CANCELLED 必须 reason=HISTORY_CUT 或
+ * CANCELLED、continueModel=false，closeRequestId 可为 null（若有则 canonical 且 ≤256）。
  */
 public record TurnEndPayload(
     long turnStartEntryId,
@@ -20,7 +20,7 @@ public record TurnEndPayload(
     String closeRequestId)
     implements EntryPayload {
 
-  private static final int CLOSE_REQUEST_ID_MAX_LENGTH = 128;
+  private static final int CLOSE_REQUEST_ID_MAX_LENGTH = 256;
 
   public TurnEndPayload {
     if (turnStartEntryId <= 0) {

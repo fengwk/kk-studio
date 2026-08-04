@@ -25,7 +25,7 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
 
   /** Closed set of conflict categories of the Harness control plane. */
   public enum Reason {
-    /** MOVE_HEAD expectedRevision does not match the current Thread revision. */
+    /** A revision-guarded control request does not match the current Thread revision. */
     STALE_REVISION,
     /** New command batch expected head/next-command-sequence cursor is stale. */
     STALE_COMMAND_CURSOR,
@@ -51,6 +51,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
      * MOVE_HEAD target is a continueModel=true TURN_END that would reactivate an old obligation.
      */
     MOVE_TARGET_HAS_CONTINUATION_OBLIGATION,
+    /** Stop idempotency key was already used by a non-Stop close operation. */
+    STOP_REQUEST_ID_REUSED,
     /** Approval target is missing, not owned by the request thread or not currently applicable. */
     APPROVAL_NOT_APPLICABLE,
     /** Approval is already decided and the request does not replay the stored decision. */

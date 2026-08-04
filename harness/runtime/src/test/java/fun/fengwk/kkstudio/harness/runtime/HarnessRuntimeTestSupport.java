@@ -48,8 +48,10 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
@@ -130,6 +132,15 @@ final class HarnessRuntimeTestSupport {
       long modelId,
       long toolId) {}
 
+  record MultiToolBaseline(
+      long sessionId,
+      long rootEntryId,
+      long turnStartEntryId,
+      long threadId,
+      long assistantEntryId,
+      long modelId,
+      List<Long> toolIds) {}
+
   record ContinuationBaseline(
       long sessionId, long rootEntryId, long turnEndEntryId, long threadId) {}
 
@@ -163,7 +174,9 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** MODEL_ACTIVE baseline: open turn with a RUNNING model at its basis head. */
+  /**
+   * MODEL_ACTIVE compatibility baseline: open turn with a RUNNING model at its TURN_START basis.
+   */
   static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -175,6 +188,70 @@ final class HarnessRuntimeTestSupport {
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
           tx.insertThread(thread(threadId, turnStartEntryId));
+          long modelId = tx.nextId();
+          ModelInvocation model =
+              modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
+          tx.insertModelInvocation(model);
+          tx.updateModelInvocation(model.beginDispatch(T2));
+          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
+        });
+  }
+
+  /**
+   * MODEL_ACTIVE baseline at the given live status (READY / DISPATCHING / RUNNING): ROOT -&gt;
+   * TURN_START(INPUT) -&gt; USER, thread head at the USER entry, model basis = the USER entry.
+   */
+  static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
+    return store.transaction(
+        tx -> {
+          long sessionId = tx.nextId();
+          long rootEntryId = tx.nextId();
+          long turnStartEntryId = tx.nextId();
+          long threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
+          long userEntryId = tx.nextId();
+          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          ThreadState thread = thread(threadId, userEntryId);
+          tx.insertThread(thread);
+          long modelId = tx.nextId();
+          ModelInvocation model =
+              modelInvocation(modelId, threadId, turnStartEntryId, userEntryId, T1);
+          tx.insertModelInvocation(model);
+          if (status == ModelInvocationStatus.DISPATCHING) {
+            tx.updateModelInvocation(model.beginDispatch(T2));
+          } else if (status == ModelInvocationStatus.RUNNING) {
+            tx.updateModelInvocation(model.beginDispatch(T2));
+            tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          }
+          return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
+        });
+  }
+
+  /**
+   * MODEL_ACTIVE on a CONTINUATION turn: bare TURN_START(CONTINUATION) head (the real plan shape
+   * has no input entries) with a RUNNING model at that TURN_START basis.
+   */
+  static ModelBaseline seedRunningContinuationModel(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          long sessionId = tx.nextId();
+          long rootEntryId = tx.nextId();
+          long turnStartEntryId = tx.nextId();
+          long threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(
+              new Entry(
+                  turnStartEntryId,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.CONTINUATION, settings()),
+                  T1));
+          ThreadState thread = thread(threadId, turnStartEntryId);
+          tx.insertThread(thread);
           long modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
@@ -211,6 +288,29 @@ final class HarnessRuntimeTestSupport {
    * model attached to the assistant, one READY tool invocation, thread head at the assistant entry.
    */
   static ToolBaseline seedToolBaseline(InMemoryHarnessStore store) {
+    MultiToolBaseline multi = seedToolBaseline(store, 1);
+    return new ToolBaseline(
+        multi.sessionId(),
+        multi.rootEntryId(),
+        multi.turnStartEntryId(),
+        multi.threadId(),
+        multi.assistantEntryId(),
+        multi.modelId(),
+        multi.toolIds().get(0));
+  }
+
+  /**
+   * Multi-sibling TOOL baseline: the assistant carries {@code toolCount} calls ("call-0" ...) and
+   * one READY invocation per call, so Stop can converge a full sibling status matrix in one path.
+   */
+  static MultiToolBaseline seedToolBaseline(InMemoryHarnessStore store, int toolCount) {
+    if (toolCount <= 0) {
+      throw new IllegalArgumentException("toolCount must be positive");
+    }
+    String[] callIds = new String[toolCount];
+    for (int i = 0; i < toolCount; i++) {
+      callIds[i] = toolCount == 1 ? "call-1" : "call-" + i;
+    }
     return store.transaction(
         tx -> {
           long sessionId = tx.nextId();
@@ -225,29 +325,35 @@ final class HarnessRuntimeTestSupport {
           long userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           long assistantEntryId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1, "call-1"));
+          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1, callIds));
           long modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
           ModelInvocation succeeded =
-              model.beginDispatch(T2).markRunning(T2).succeed(responseWithToolCalls(), T2);
+              model.beginDispatch(T2).markRunning(T2).succeed(responseWithToolCalls(callIds), T2);
           tx.updateModelInvocation(model.beginDispatch(T2));
           tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
-          long toolId = tx.nextId();
-          tx.insertToolInvocations(
-              List.of(toolInvocation(toolId, modelId, assistantEntryId, 0, "call-1", T1)));
+          List<ToolInvocation> invocations = new ArrayList<>(toolCount);
+          List<Long> toolIds = new ArrayList<>(toolCount);
+          for (int ordinal = 0; ordinal < toolCount; ordinal++) {
+            long toolId = tx.nextId();
+            toolIds.add(toolId);
+            invocations.add(
+                toolInvocation(toolId, modelId, assistantEntryId, ordinal, callIds[ordinal], T1));
+          }
+          tx.insertToolInvocations(invocations);
           tx.updateThread(thread.advanceHead(assistantEntryId, thread.yoloEnabled(), T2));
-          return new ToolBaseline(
+          return new MultiToolBaseline(
               sessionId,
               rootEntryId,
               turnStartEntryId,
               threadId,
               assistantEntryId,
               modelId,
-              toolId);
+              List.copyOf(toolIds));
         });
   }
 
@@ -264,12 +370,71 @@ final class HarnessRuntimeTestSupport {
 
   /** Marks the tool invocation terminal without an applied result (TOOL_TERMINAL_PENDING). */
   static ToolInvocation cancelTool(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return cancelTool(store, baseline.toolId());
+  }
+
+  /** Marks the tool invocation of the given id terminal CANCELLED without an applied result. */
+  static ToolInvocation cancelTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
           ToolInvocation cancelled = tool.cancel(toolError(), T3);
           tx.updateToolInvocations(List.of(cancelled));
           return cancelled;
+        });
+  }
+
+  /** READY -&gt; DISPATCHING of the given tool (approval preflight completed, attempt stays 0). */
+  static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, long toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
+          tx.updateToolInvocations(List.of(preflighted));
+          ToolInvocation updated = preflighted.beginDispatch(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** DISPATCHING -&gt; RUNNING of the given tool (attempt advances to 1). */
+  static ToolInvocation markRunningTool(InMemoryHarnessStore store, long toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated = tool.markRunning(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** RUNNING -&gt; READY after a retryable attempt; the confirmed attempt remains positive. */
+  static ToolInvocation retryReadyTool(InMemoryHarnessStore store, long toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated = tool.retryReady(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** RUNNING -&gt; SUCCEEDED of the given tool with a real result, result not yet attached. */
+  static ToolInvocation succeedTool(InMemoryHarnessStore store, long toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated =
+              tool.succeed(
+                  new ToolResult(
+                      tool.request().call().id(),
+                      List.of(new TextToolContent("real result")),
+                      false,
+                      "{}",
+                      false),
+                  T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
         });
   }
 
@@ -391,6 +556,42 @@ final class HarnessRuntimeTestSupport {
             });
   }
 
+  /**
+   * Test-only delegating store whose transactions advance the mutable {@code clock} the moment any
+   * Work row is locked, so tests prove Stop reads its timestamp only after the whole Work pre-lock
+   * (a pre-lock instant would regress the updatedAt written by the Stop transaction).
+   */
+  static HarnessStore storeAdvancingClockOnWorkLock(
+      InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if (method.getName().equals("transaction")) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, Object> callback =
+                    (Function<HarnessStore.Transaction, Object>) args[0];
+                return delegate.transaction(
+                    tx -> {
+                      HarnessStore.Transaction wrapped =
+                          (HarnessStore.Transaction)
+                              Proxy.newProxyInstance(
+                                  HarnessStore.Transaction.class.getClassLoader(),
+                                  new Class<?>[] {HarnessStore.Transaction.class},
+                                  (transactionProxy, transactionMethod, transactionArgs) -> {
+                                    if (transactionMethod.getName().equals("lockWork")) {
+                                      clock.advance(advanceTo);
+                                    }
+                                    return transactionMethod.invoke(tx, transactionArgs);
+                                  });
+                      return callback.apply(wrapped);
+                    });
+              }
+              return method.invoke(delegate, args);
+            });
+  }
+
   /** Inserts one QUEUED command on the thread (must be a fresh thread without commands). */
   static void seedQueuedCommand(
       InMemoryHarnessStore store,
@@ -414,7 +615,31 @@ final class HarnessRuntimeTestSupport {
   static void seedThreadWork(InMemoryHarnessStore store, long threadId) {
     store.transaction(
         tx -> {
+          tx.lockThread(threadId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T0);
+          return null;
+        });
+  }
+
+  /** Requests an unleased MODEL Work row (fenced while a Model is live). */
+  static void seedModelWork(InMemoryHarnessStore store, long modelId) {
+    store.transaction(
+        tx -> {
+          ModelInvocation model = tx.findModelInvocation(modelId).orElseThrow();
+          tx.lockThread(model.threadId()).orElseThrow();
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId), T0);
+          return null;
+        });
+  }
+
+  /** Requests an unleased TOOL Work row for the given invocation. */
+  static void seedToolWork(InMemoryHarnessStore store, long toolId) {
+    store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
+          ModelInvocation model = tx.findModelInvocation(tool.modelInvocationId()).orElseThrow();
+          tx.lockThread(model.threadId()).orElseThrow();
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), T0);
           return null;
         });
   }
@@ -423,6 +648,7 @@ final class HarnessRuntimeTestSupport {
   static void seedClaimedThreadWork(InMemoryHarnessStore store, long threadId) {
     store.transaction(
         tx -> {
+          tx.lockThread(threadId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T0);
           tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", T3);
           return null;
@@ -577,17 +803,13 @@ final class HarnessRuntimeTestSupport {
     return new ToolInvocationRequest(new ToolCall(toolCallId, "bash", "{}"), platformBinding());
   }
 
-  static ProviderResponse responseWithToolCalls() {
+  static ProviderResponse responseWithToolCalls(String... toolCallIds) {
+    List<ProviderToolCall> calls = new ArrayList<>(toolCallIds.length);
+    for (String toolCallId : toolCallIds) {
+      calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
+    }
     return new ProviderResponse(
-        "",
-        "",
-        List.of(new ProviderToolCall("call-1", "bash", "{}")),
-        ProviderStopReason.TOOL_CALLS,
-        usage(),
-        cost(),
-        null,
-        null,
-        null);
+        "", "", calls, ProviderStopReason.TOOL_CALLS, usage(), cost(), null, null, null);
   }
 
   static ModelInvocationError modelError() {

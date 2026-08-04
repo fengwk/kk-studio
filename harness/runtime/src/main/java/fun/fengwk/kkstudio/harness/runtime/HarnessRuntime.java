@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -9,6 +11,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -26,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.LongConsumer;
 
 /**
  * Root Harness command/control/query plane: the synchronous public entry point of the durable Agent
@@ -38,20 +43,59 @@ import java.util.Optional;
  * HarnessRuntimeNotFoundException}; broken persistence invariants (wrong ownership, mixed sibling
  * attachment, non-contiguous ordinals) stay {@link IllegalStateException}. Mutations of an existing
  * Thread read their timestamp after the relevant durable locks, so a lock wait never lets a stale
- * pre-lock instant regress {@code updatedAt}.
+ * pre-lock instant regress {@code updatedAt}; Stop additionally clamps its timestamp to the newest
+ * locked durable fact to tolerate local clock rollback and cross-node skew.
  *
  * <p>This slice implements {@link #createThread}, {@link #enqueueCommands}, {@link #moveHead},
- * {@link #decideToolApproval} and {@link #getThreadSnapshot}. Stop is a later slice and must go
- * through the same Thread lock so approval/Stop races serialize.
+ * {@link #stop}, {@link #decideToolApproval} and {@link #getThreadSnapshot}.
  */
+@Slf4j
 public final class HarnessRuntime {
+
+  private static final LongConsumer NO_OP_CANCELLER = ignored -> {};
 
   private final HarnessStore store;
   private final Clock clock;
+  private final StopControl stopControl;
+  private final LongConsumer modelExecutionCanceller;
+  private final LongConsumer toolExecutionCanceller;
 
+  /**
+   * Creates the complete Runtime facade, including process-local execution cancellation after a
+   * durable Stop commit.
+   */
+  public HarnessRuntime(
+      HarnessStore store, Clock clock, ModelProcessor modelProcessor, ToolProcessor toolProcessor) {
+    this(
+        store,
+        clock,
+        modelExecutionCanceller(modelProcessor),
+        toolExecutionCanceller(toolProcessor));
+  }
+
+  /**
+   * Creates a control-only Runtime that does not host local Model/Tool executions.
+   *
+   * <p>Stop remains correct through durable terminal state and Work fencing; only the optional
+   * same-process best-effort cancellation is absent.
+   */
   public HarnessRuntime(HarnessStore store, Clock clock) {
+    this(store, clock, NO_OP_CANCELLER, NO_OP_CANCELLER);
+  }
+
+  /** Internal constructor shared by concrete Processor wiring and local execution adapters. */
+  HarnessRuntime(
+      HarnessStore store,
+      Clock clock,
+      LongConsumer modelExecutionCanceller,
+      LongConsumer toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.stopControl = new StopControl(store, clock);
+    this.modelExecutionCanceller =
+        Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
+    this.toolExecutionCanceller =
+        Objects.requireNonNull(toolExecutionCanceller, "toolExecutionCanceller");
   }
 
   /**
@@ -280,6 +324,25 @@ public final class HarnessRuntime {
           }
           return decideUndecidedApproval(tx, thread, probe, command);
         });
+  }
+
+  /**
+   * Atomically stops the current live Turn, cancels queued Commands, or replays an earlier
+   * thread-owned Stop.
+   *
+   * <p>The durable transaction is owned by {@link StopControl}. Only after it commits does this
+   * method best-effort cancel matching process-local Model/Tool executions; a local cancellation
+   * failure is logged and cannot change the committed result.
+   */
+  public StopResult stop(StopCommand command) {
+    StopControl.Commit commit = stopControl.stop(command);
+    if (commit.modelExecutionId() != null) {
+      cancelLocalExecution(modelExecutionCanceller, "Model", commit.modelExecutionId());
+    }
+    for (long toolExecutionId : commit.toolExecutionIds()) {
+      cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
+    }
+    return commit.result();
   }
 
   /**
@@ -529,6 +592,29 @@ public final class HarnessRuntime {
             : new WorkTarget(WorkTargetType.THREAD, thread.id());
     tx.requestWork(wake, now);
     return updated;
+  }
+
+  private static LongConsumer modelExecutionCanceller(ModelProcessor processor) {
+    Objects.requireNonNull(processor, "modelProcessor");
+    return processor::cancel;
+  }
+
+  private static LongConsumer toolExecutionCanceller(ToolProcessor processor) {
+    Objects.requireNonNull(processor, "toolProcessor");
+    return processor::cancel;
+  }
+
+  private static void cancelLocalExecution(
+      LongConsumer canceller, String executionType, long invocationId) {
+    try {
+      canceller.accept(invocationId);
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot cancel process-local {} execution {} after durable Stop commit",
+          executionType,
+          invocationId,
+          failure);
+    }
   }
 
   private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
