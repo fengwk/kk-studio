@@ -1,0 +1,180 @@
+package fun.fengwk.kkstudio.harness.runtime;
+
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+
+import java.time.Clock;
+import java.time.ZoneOffset;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+/**
+ * Stop control races: Thread locking and revision CAS permit only one linearization across Approval
+ * and MOVE_HEAD, while deterministic winner-order tests preserve Approval replay semantics.
+ */
+class HarnessRuntimeStopConcurrencyTest {
+
+  @Test
+  void approvalThenStopPreservesTheDecisionAndExactApprovalReplayReturnsCancelled() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime = runtime(store);
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    setWaitingApproval(store, baseline);
+    ToolApprovalCommand approval = allow(baseline);
+    runtime.decideToolApproval(approval);
+
+    StopResult stopped = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 2));
+    ToolInvocation replay = runtime.decideToolApproval(approval);
+
+    assertEquals(StopResult.Status.STOPPED, stopped.status());
+    assertEquals(ToolInvocationStatus.CANCELLED, replay.status());
+    assertEquals(ToolApprovalDecision.ALLOWED, replay.approval().decision());
+    assertEquals("decision-1", replay.approval().decisionId());
+  }
+
+  @Test
+  void stopThenApprovalCannotReopenAnUndecidedTool() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime = runtime(store);
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    setWaitingApproval(store, baseline);
+
+    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    HarnessRuntimeConflictException error =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.decideToolApproval(allow(baseline)));
+
+    assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
+    ToolInvocation tool =
+        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
+    assertTrue(tool.approval().isUndecided());
+  }
+
+  @Test
+  void concurrentStopAndApprovalHaveExactlyOneBusinessWinner() throws Exception {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime = runtime(store);
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    setWaitingApproval(store, baseline);
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<Attempt> stop =
+          pool.submit(
+              attempt(
+                  barrier, () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1))));
+      Future<Attempt> approval =
+          pool.submit(attempt(barrier, () -> runtime.decideToolApproval(allow(baseline))));
+      Attempt stopAttempt = stop.get();
+      Attempt approvalAttempt = approval.get();
+      assertEquals(1, successCount(stopAttempt, approvalAttempt));
+
+      ToolInvocation tool =
+          store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+      if (stopAttempt.error() == null) {
+        assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
+        assertTrue(tool.approval().isUndecided());
+        assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
+      } else {
+        assertConflict(stopAttempt, Reason.STALE_REVISION);
+        assertEquals(ToolInvocationStatus.READY, tool.status());
+        assertEquals(ToolApprovalDecision.ALLOWED, tool.approval().decision());
+      }
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void concurrentStopAndMoveHeadHaveExactlyOneRevisionCasWinner() throws Exception {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime = runtime(store);
+    HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<Attempt> stop =
+          pool.submit(
+              attempt(barrier, () -> runtime.stop(new StopCommand(chain.threadId(), "stop-1", 1))));
+      Future<Attempt> move =
+          pool.submit(
+              attempt(
+                  barrier,
+                  () ->
+                      runtime.moveHead(
+                          new MoveHeadCommand(chain.threadId(), chain.rootEntryId(), 1))));
+      Attempt stopAttempt = stop.get();
+      Attempt moveAttempt = move.get();
+      assertEquals(1, successCount(stopAttempt, moveAttempt));
+      ThreadState thread = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
+      assertEquals(2L, thread.revision());
+      if (stopAttempt.error() == null) {
+        assertConflict(moveAttempt, Reason.STALE_REVISION);
+        StopResult result = (StopResult) stopAttempt.value();
+        assertEquals(result.stoppedTurnEndEntryId(), thread.headEntryId());
+      } else {
+        assertConflict(stopAttempt, Reason.STALE_REVISION);
+        assertNull(moveAttempt.error());
+        assertEquals(chain.rootEntryId(), thread.headEntryId());
+      }
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  private static HarnessRuntime runtime(InMemoryHarnessStore store) {
+    return new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC));
+  }
+
+  private static ToolApprovalCommand allow(HarnessRuntimeTestSupport.ToolBaseline baseline) {
+    return new ToolApprovalCommand(
+        baseline.threadId(),
+        baseline.toolId(),
+        ToolApprovalDecision.ALLOWED,
+        "decision-1",
+        "alice",
+        null);
+  }
+
+  private static Callable<Attempt> attempt(CyclicBarrier barrier, Callable<?> action) {
+    return () -> {
+      barrier.await();
+      try {
+        return new Attempt(action.call(), null);
+      } catch (Throwable error) {
+        return new Attempt(null, error);
+      }
+    };
+  }
+
+  private static int successCount(Attempt first, Attempt second) {
+    return (first.error() == null ? 1 : 0) + (second.error() == null ? 1 : 0);
+  }
+
+  private static void assertConflict(Attempt attempt, Reason reason) {
+    assertTrue(attempt.error() instanceof HarnessRuntimeConflictException);
+    assertEquals(reason, ((HarnessRuntimeConflictException) attempt.error()).reason());
+  }
+
+  private record Attempt(Object value, Throwable error) {}
+}

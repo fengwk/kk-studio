@@ -126,7 +126,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 取消一个进程内本地 execution（best effort，供未来 Stop commit 后调用）；结果不反写任何 durable 状态。
+   * 取消一个进程内本地 execution（供 Stop durable commit 后 best-effort 调用）；结果不反写任何 durable 状态。
    *
    * @return 是否存在并已取消对应本地 execution
    */

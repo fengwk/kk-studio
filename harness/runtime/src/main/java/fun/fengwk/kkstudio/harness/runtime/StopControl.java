@@ -1,0 +1,400 @@
+package fun.fengwk.kkstudio.harness.runtime;
+
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * Feature-local synchronous Stop transaction.
+ *
+ * <p>This is deliberately not a Store use-case method or generic workflow. It owns the one atomic
+ * branch closure required by Stop: exact thread-scoped replay, Command cancellation, Model/Tool
+ * convergence, Entry append, one Thread revision bump and final Work fencing.
+ */
+final class StopControl {
+
+  private static final String DURABLE_KEY_PREFIX = "STOP/";
+  private static final String CANCELLED_MESSAGE = "Cancelled by user";
+  private static final ToolInvocationError TOOL_CANCELLED_ERROR =
+      new ToolInvocationError(
+          "USER_STOP", "Stopped by user; no further execution or deliverable result is available");
+  private static final ToolInvocationError TOOL_UNKNOWN_ERROR =
+      new ToolInvocationError(
+          "USER_STOP_UNCERTAIN", "Stopped by user while the tool execution outcome was uncertain");
+  private static final Comparator<WorkTarget> WORK_TARGET_ORDER =
+      Comparator.comparingInt((WorkTarget target) -> workTypeRank(target.type()))
+          .thenComparingLong(WorkTarget::id);
+
+  private final HarnessStore store;
+  private final Clock clock;
+  private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
+
+  StopControl(HarnessStore store, Clock clock) {
+    this.store = Objects.requireNonNull(store, "store");
+    this.clock = Objects.requireNonNull(clock, "clock");
+  }
+
+  Commit stop(StopCommand command) {
+    Objects.requireNonNull(command, "command");
+    return store.transaction(tx -> stop(tx, command));
+  }
+
+  private Commit stop(HarnessStore.Transaction tx, StopCommand command) {
+    ThreadState thread =
+        tx.lockThread(command.threadId())
+            .orElseThrow(
+                () ->
+                    new HarnessRuntimeNotFoundException(
+                        "thread " + command.threadId() + " does not exist"));
+    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    String durableKey = durableKey(thread.id(), command.stopRequestId());
+    StopResult replay = findReplay(path, durableKey, thread);
+    if (replay != null) {
+      return new Commit(replay, null, List.of());
+    }
+    if (thread.revision() != command.expectedRevision()) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.STALE_REVISION,
+          "thread "
+              + thread.id()
+              + " revision "
+              + thread.revision()
+              + " does not match expected "
+              + command.expectedRevision());
+    }
+
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    LockedThreadContext locked = ThreadContextLock.load(tx, thread, path);
+    ThreadContext context = locked.context();
+    if (context instanceof ThreadContext.ModelTerminalPending
+        || context instanceof ThreadContext.ToolTerminalPending) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.TERMINAL_APPLY_PENDING,
+          "thread " + thread.id() + " has a terminal invocation waiting to be applied");
+    }
+
+    List<WorkTarget> workTargets = workTargets(thread, context);
+    for (WorkTarget target : workTargets) {
+      tx.lockWork(target);
+    }
+    Instant now = effectiveNow(clock.instant(), thread, path, queued, context);
+
+    List<ThreadCommand> cancelledCommands =
+        queued.stream().map(commandToCancel -> commandToCancel.cancel(now)).toList();
+    if (!cancelledCommands.isEmpty()) {
+      tx.updateCommands(cancelledCommands);
+    }
+    Long modelExecutionId =
+        context instanceof ThreadContext.ModelActive active ? active.model().id() : null;
+    List<Long> toolExecutionIds =
+        context instanceof ThreadContext.ToolActive active
+            ? active.siblings().stream()
+                .filter(sibling -> !sibling.status().isTerminal())
+                .map(ToolInvocation::id)
+                .toList()
+            : List.of();
+
+    StopResult result =
+        switch (context) {
+          case ThreadContext.IdleOrHistorical ignored -> stopIdle(
+              tx, thread, cancelledCommands.size(), now);
+          case ThreadContext.ContinuationDue ignored -> stopContinuation(
+              tx, thread, path, durableKey, cancelledCommands.size(), now);
+          case ThreadContext.ModelActive active -> stopModel(
+              tx, thread, path, active.model(), durableKey, cancelledCommands.size(), now);
+          case ThreadContext.ToolActive active -> stopTools(
+              tx, thread, path, active, durableKey, cancelledCommands.size(), now);
+          case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
+              "terminal Model context escaped the Stop guard");
+          case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
+              "terminal Tool context escaped the Stop guard");
+        };
+    for (WorkTarget target : workTargets) {
+      tx.deleteWork(target);
+    }
+    return new Commit(result, modelExecutionId, toolExecutionIds);
+  }
+
+  private StopResult findReplay(EntryPath path, String durableKey, ThreadState thread) {
+    Entry match = null;
+    TurnEndPayload matchedEnd = null;
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof TurnEndPayload end
+          && durableKey.equals(end.closeRequestId())) {
+        if (match != null) {
+          throw new IllegalStateException(
+              "stop durable key " + durableKey + " appears more than once on the current path");
+        }
+        match = entry;
+        matchedEnd = end;
+      }
+    }
+    if (match == null) {
+      return null;
+    }
+    if (matchedEnd.outcome() != TurnEndOutcome.STOPPED
+        || matchedEnd.reason() != TurnEndReason.USER_STOP) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
+          "stop durable key " + durableKey + " was used by another close operation");
+    }
+    return new StopResult(StopResult.Status.REPLAYED, thread, match.id(), 0);
+  }
+
+  private static List<WorkTarget> workTargets(ThreadState thread, ThreadContext context) {
+    List<WorkTarget> targets = new ArrayList<>();
+    targets.add(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (context instanceof ThreadContext.ModelActive active) {
+      targets.add(new WorkTarget(WorkTargetType.MODEL, active.model().id()));
+    } else if (context instanceof ThreadContext.ToolActive active) {
+      targets.add(new WorkTarget(WorkTargetType.MODEL, active.model().id()));
+      for (ToolInvocation sibling : active.siblings()) {
+        targets.add(new WorkTarget(WorkTargetType.TOOL, sibling.id()));
+      }
+    }
+    targets.sort(WORK_TARGET_ORDER);
+    return List.copyOf(targets);
+  }
+
+  /**
+   * One non-regressing timestamp for every Stop mutation.
+   *
+   * <p>Reading the local Clock after all locks prevents lock-wait staleness, while taking the max
+   * of the locked durable facts also tolerates cross-node clock skew and wall-clock rollback.
+   */
+  private static Instant effectiveNow(
+      Instant clockNow,
+      ThreadState thread,
+      EntryPath path,
+      List<ThreadCommand> queued,
+      ThreadContext context) {
+    Instant now = Objects.requireNonNull(clockNow, "clockNow");
+    now = max(now, thread.updatedAt());
+    now = max(now, path.head().createdAt());
+    for (ThreadCommand command : queued) {
+      now = max(now, command.createdAt());
+    }
+    if (context instanceof ThreadContext.ModelActive active) {
+      now = max(now, active.model().updatedAt());
+    } else if (context instanceof ThreadContext.ToolActive active) {
+      now = max(now, active.model().updatedAt());
+      for (ToolInvocation sibling : active.siblings()) {
+        now = max(now, sibling.updatedAt());
+      }
+    }
+    return now;
+  }
+
+  private static Instant max(Instant left, Instant right) {
+    return right.isAfter(left) ? right : left;
+  }
+
+  private static int workTypeRank(WorkTargetType type) {
+    return switch (type) {
+      case THREAD -> 0;
+      case MODEL -> 1;
+      case TOOL -> 2;
+    };
+  }
+
+  private static StopResult stopIdle(
+      HarnessStore.Transaction tx, ThreadState thread, int cancelledCommandCount, Instant now) {
+    ThreadState current = thread;
+    if (cancelledCommandCount > 0) {
+      current = thread.touchRevision(now);
+      tx.updateThread(current);
+    }
+    return new StopResult(StopResult.Status.IDLE, current, null, cancelledCommandCount);
+  }
+
+  private static StopResult stopContinuation(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      String durableKey,
+      int cancelledCommandCount,
+      Instant now) {
+    long sessionId = path.root().sessionId();
+    long turnStartId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnStartId,
+            sessionId,
+            path.head().id(),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings()),
+            now));
+    long barrierId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            barrierId,
+            sessionId,
+            turnStartId,
+            new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE)),
+            now));
+    long turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, durableKey), now));
+    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    tx.updateThread(stopped);
+    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+  }
+
+  private StopResult stopModel(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      ModelInvocation model,
+      String durableKey,
+      int cancelledCommandCount,
+      Instant now) {
+    StreamCheckpoint checkpoint = model.streamCheckpoint();
+    EntryPayload barrier = modelStopBarrier(checkpoint);
+    ModelInvocationError error =
+        new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
+    long barrierId = tx.nextId();
+    tx.insertEntry(new Entry(barrierId, path.root().sessionId(), path.head().id(), barrier, now));
+    ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
+    tx.updateModelInvocation(cancelled);
+    long turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            path.root().sessionId(),
+            barrierId,
+            stoppedTurnEnd(model.turnStartEntryId(), durableKey),
+            now));
+    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    tx.updateThread(stopped);
+    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+  }
+
+  private StopResult stopTools(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      ThreadContext.ToolActive active,
+      String durableKey,
+      int cancelledCommandCount,
+      Instant now) {
+    List<ToolInvocation> updated = new ArrayList<>(active.siblings().size());
+    long parentId = active.assistant().id();
+    for (ToolInvocation sibling : active.siblings()) {
+      ToolInvocation terminal =
+          switch (sibling.status()) {
+            case WAITING_APPROVAL, READY -> sibling.cancel(TOOL_CANCELLED_ERROR, now);
+            case DISPATCHING, RUNNING -> sibling.unknown(TOOL_UNKNOWN_ERROR, now);
+            case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
+          };
+      long resultEntryId = tx.nextId();
+      tx.insertEntry(
+          new Entry(
+              resultEntryId,
+              path.root().sessionId(),
+              parentId,
+              payloadMapper.toolResultPayload(terminal),
+              now));
+      updated.add(terminal.attachResultEntry(resultEntryId, now));
+      parentId = resultEntryId;
+    }
+    tx.updateToolInvocations(updated);
+    long turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            path.root().sessionId(),
+            parentId,
+            stoppedTurnEnd(active.model().turnStartEntryId(), durableKey),
+            now));
+    ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
+    tx.updateThread(stopped);
+    return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
+  }
+
+  private static EntryPayload modelStopBarrier(StreamCheckpoint checkpoint) {
+    if (checkpoint == null) {
+      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE));
+    }
+    List<AgentMessageContent> contents = new ArrayList<>(2);
+    if (checkpoint.thinking() != null && !checkpoint.thinking().isBlank()) {
+      contents.add(new ThinkingMessageContent(checkpoint.thinking()));
+    }
+    if (checkpoint.text() != null && !checkpoint.text().isBlank()) {
+      contents.add(new TextMessageContent(checkpoint.text()));
+    }
+    if (contents.isEmpty()) {
+      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE));
+    }
+    return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
+  }
+
+  private static TurnEndPayload stoppedTurnEnd(long turnStartEntryId, String durableKey) {
+    return new TurnEndPayload(
+        turnStartEntryId, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, durableKey);
+  }
+
+  static String durableKey(long threadId, String externalStopRequestId) {
+    if (threadId <= 0) {
+      throw new IllegalArgumentException("threadId must be positive");
+    }
+    Objects.requireNonNull(externalStopRequestId, "externalStopRequestId");
+    return DURABLE_KEY_PREFIX + threadId + "/" + externalStopRequestId;
+  }
+
+  private static HarnessRuntimeConflictException conflict(
+      HarnessRuntimeConflictException.Reason reason, String message) {
+    return new HarnessRuntimeConflictException(reason, message);
+  }
+
+  /** Durable Stop result plus process-local executions to cancel after the transaction commits. */
+  record Commit(StopResult result, Long modelExecutionId, List<Long> toolExecutionIds) {
+
+    Commit {
+      result = Objects.requireNonNull(result, "result");
+      if (modelExecutionId != null && modelExecutionId <= 0) {
+        throw new IllegalArgumentException("modelExecutionId must be positive");
+      }
+      toolExecutionIds = List.copyOf(Objects.requireNonNull(toolExecutionIds, "toolExecutionIds"));
+      for (long toolExecutionId : toolExecutionIds) {
+        if (toolExecutionId <= 0) {
+          throw new IllegalArgumentException("toolExecutionIds must be positive");
+        }
+      }
+      if (modelExecutionId != null && !toolExecutionIds.isEmpty()) {
+        throw new IllegalArgumentException("a Stop commit cannot cancel Model and Tool executions");
+      }
+    }
+  }
+}
