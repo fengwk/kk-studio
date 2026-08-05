@@ -14,7 +14,7 @@ public record CodingToolsConfig(
     String bashExecutable,
     String rgExecutable,
     String fdExecutable,
-    ArtifactSink artifactSink,
+    ResourceStore resourceStore,
     String lspBridgeCommand,
     String javapExecutable) {
 
@@ -39,7 +39,7 @@ public record CodingToolsConfig(
     bashExecutable = requireNonBlank(bashExecutable, "bashExecutable");
     rgExecutable = requireNonBlank(rgExecutable, "rgExecutable");
     fdExecutable = requireNonBlank(fdExecutable, "fdExecutable");
-    artifactSink = Objects.requireNonNull(artifactSink, "artifactSink");
+    resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
     lspBridgeCommand = blankToNull(lspBridgeCommand);
     javapExecutable =
         requireNonBlank(
@@ -58,7 +58,7 @@ public record CodingToolsConfig(
       String bashExecutable,
       String rgExecutable,
       String fdExecutable,
-      ArtifactSink artifactSink) {
+      ResourceStore resourceStore) {
     this(
         environmentRoot,
         defaultWorkdir,
@@ -67,7 +67,7 @@ public record CodingToolsConfig(
         bashExecutable,
         rgExecutable,
         fdExecutable,
-        artifactSink,
+        resourceStore,
         null,
         DEFAULT_JAVAP_EXECUTABLE);
   }
@@ -79,11 +79,11 @@ public record CodingToolsConfig(
             System.getProperty("kkstudio.daemon.environment-root", System.getProperty("user.dir")));
     Path defaultWorkdir =
         Path.of(System.getProperty("kkstudio.daemon.default-workdir", root.toString()));
-    Path artifactDirectory =
+    Path resourceDirectory =
         Path.of(
             System.getProperty(
-                "kkstudio.daemon.artifact-directory",
-                root.resolve(".kkstudio-artifacts").toString()));
+                "kkstudio.daemon.resource-directory",
+                root.resolve(".kkstudio").resolve("resources").toString()));
     return new CodingToolsConfig(
         root,
         defaultWorkdir,
@@ -92,9 +92,29 @@ public record CodingToolsConfig(
         System.getProperty("kkstudio.daemon.bash", "bash"),
         System.getProperty("kkstudio.daemon.rg", "rg"),
         System.getProperty("kkstudio.daemon.fd", "fd"),
-        new LocalFileArtifactSink(artifactDirectory),
+        new LocalFileResourceStore(
+            resourceDirectory,
+            parsePositiveLong(
+                System.getProperty("kkstudio.daemon.max-resource-bytes"),
+                LocalFileResourceStore.DEFAULT_MAX_RESOURCE_BYTES,
+                "kkstudio.daemon.max-resource-bytes")),
         System.getProperty("kkstudio.daemon.lsp-bridge"),
         System.getProperty("kkstudio.daemon.javap", DEFAULT_JAVAP_EXECUTABLE));
+  }
+
+  private static long parsePositiveLong(String value, long defaultValue, String property) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      long parsed = Long.parseLong(value.trim());
+      if (parsed <= 0) {
+        throw new IllegalArgumentException(property + " must be positive");
+      }
+      return parsed;
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(property + " must be a positive long", error);
+    }
   }
 
   private static Path canonicalDirectory(Path value, String name) {

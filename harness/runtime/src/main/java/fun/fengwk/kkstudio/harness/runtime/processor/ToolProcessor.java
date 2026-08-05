@@ -536,7 +536,10 @@ public final class ToolProcessor implements AutoCloseable {
       result =
           gateway.start(
               new ToolGateway.Execution(
-                  invocationId, Math.addExact(dispatched.attempt(), 1), dispatched.request()),
+                  invocationId,
+                  dispatched.threadId(),
+                  Math.addExact(dispatched.attempt(), 1),
+                  dispatched.request()),
               execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。

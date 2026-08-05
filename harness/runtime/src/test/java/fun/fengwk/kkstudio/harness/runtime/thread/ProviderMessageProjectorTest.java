@@ -17,14 +17,15 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
 
@@ -54,8 +55,14 @@ class ProviderMessageProjectorTest {
                         new AudioMessageContent("audio/mpeg", "audio-data"),
                         new ThinkingMessageContent("reasoning"),
                         new JsonMessageContent("{\"answer\":true}"),
-                        new ArtifactMessageContent("artifact-empty", "text/plain", null),
-                        new ArtifactMessageContent("artifact-preview", "text/plain", "preview"),
+                        new ResourceMessageContent(
+                            new ResourceRef(
+                                "https://example.test/report.txt",
+                                "text/plain",
+                                "report",
+                                3L,
+                                null),
+                            "resource preview"),
                         new ToolCallMessageContent("call-1", "lookup", "{\"key\":\"value\"}"))),
                 new AgentMessage(
                     AgentMessageRole.TOOL,
@@ -85,8 +92,7 @@ class ProviderMessageProjectorTest {
             new ProviderAudioBlock("audio/mpeg", "audio-data"),
             new ProviderThinkingBlock("reasoning"),
             new ProviderJsonBlock("{\"answer\":true}"),
-            new ProviderTextBlock("[Artifact artifact-empty (text/plain)]\n"),
-            new ProviderTextBlock("[Artifact artifact-preview (text/plain)]\npreview"),
+            new ProviderTextBlock("[Resource report]\nresource preview"),
             new ProviderToolCallBlock(
                 new ProviderToolCall("call-1", "lookup", "{\"key\":\"value\"}"))),
         projected.get(2).contents());
@@ -127,6 +133,73 @@ class ProviderMessageProjectorTest {
         projected.stream().map(ProviderMessage::role).toList());
     assertSyntheticOrphanResult(projected.get(1));
     assertSyntheticOrphanResult(projected.get(4));
+  }
+
+  /** Resource 投影为有界小文本标记：display name 优先；data URI 用 inline mediaType；长 URI ASCII 截断到 512 字符。 */
+  @Test
+  void projectsBoundedResourceMarkersWithoutInjectingLargeUris() {
+    ProviderMessageProjector projector = new ProviderMessageProjector();
+    String longUri = "https://example.test/" + "segment/".repeat(100) + "tail.txt";
+    assertTrue(longUri.length() > ProviderMessageProjector.MAX_URI_LABEL_CHARS);
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ResourceMessageContent(
+                            new ResourceRef(
+                                "https://example.test/a.txt", "text/plain", "a.txt", null, null),
+                            null),
+                        new ResourceMessageContent(
+                            new ResourceRef(
+                                "https://example.test/b.txt", "text/plain", null, null, null),
+                            "preview"),
+                        new ResourceMessageContent(
+                            new ResourceRef(
+                                "data:text/plain,hello",
+                                "text/plain",
+                                null,
+                                5L,
+                                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                            "data preview"),
+                        new ResourceMessageContent(
+                            new ResourceRef(longUri, "text/plain", null, null, null), null)))));
+
+    String truncated =
+        longUri.substring(0, ProviderMessageProjector.MAX_URI_LABEL_CHARS - 3) + "...";
+    assertEquals(
+        List.of(
+            new ProviderTextBlock("[Resource a.txt]\n"),
+            new ProviderTextBlock("[Resource https://example.test/b.txt]\npreview"),
+            new ProviderTextBlock("[Resource inline text/plain]\ndata preview"),
+            new ProviderTextBlock("[Resource " + truncated + "]\n")),
+        projected.get(0).contents());
+  }
+
+  /** display name 优先于 data URI：data 资源带 name 时绝不投影 inline/inline 载荷。 */
+  @Test
+  void resourceNameWinsOverDataUri() {
+    ProviderMessageProjector projector = new ProviderMessageProjector();
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ResourceMessageContent(
+                            new ResourceRef(
+                                "data:text/plain,hello",
+                                "text/plain",
+                                "hello.txt",
+                                5L,
+                                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                            null)))));
+
+    assertEquals(
+        List.of(new ProviderTextBlock("[Resource hello.txt]\n")), projected.get(0).contents());
   }
 
   private static AgentMessage assistantToolCall(String toolCallId) {

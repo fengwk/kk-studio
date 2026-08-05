@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteTool;
@@ -254,11 +255,19 @@ final class PermissionResolver {
   /**
    * Resolves the Tool that executes the persisted final plan. A non-null Environment target always
    * routes remotely, even when a local registry contains a same-named descriptor.
+   *
+   * <p>路由身份始终来自冻结的 {@link EnvironmentId}（claimed invocation 的 canonical 环境身份），绝不从 display name
+   * 或字符串字段派生；{@code binding} 仅用于 descriptor 校验与 interceptor 契约。
    */
-  Optional<Tool> resolveTool(ToolBinding binding) {
+  Optional<Tool> resolveTool(ToolBinding binding, EnvironmentId environmentId) {
     return switch (binding.type()) {
-      case ENVIRONMENT -> Optional.of(
-          new RemoteTool(binding.descriptor(), binding.environmentName(), remoteTransport));
+      case ENVIRONMENT -> {
+        if (environmentId == null) {
+          throw new IllegalStateException(
+              "environment binding requires the frozen canonical environment id");
+        }
+        yield Optional.of(new RemoteTool(binding.descriptor(), environmentId, remoteTransport));
+      }
       case PLATFORM -> {
         Optional<Tool> local =
             registry.find(binding.descriptor().name(), binding.descriptor().version());
@@ -298,8 +307,13 @@ final class PermissionResolver {
   }
 
   private static ToolBinding bindingFor(ToolInvocation invocation) {
+    // 共享 ToolBinding（Model 定义契约）以 String 承载环境目标；这里把冻结的 canonical EnvironmentId 桥接为
+    // UUID 文本，仅用于 interceptor 契约与持久化比较，路由身份始终来自 invocation.environmentId()。
+    EnvironmentId environmentId = invocation.environmentId();
     return ToolBinding.of(
-        invocation.descriptor(), invocation.descriptor().type(), invocation.environmentName());
+        invocation.descriptor(),
+        invocation.descriptor().type(),
+        environmentId == null ? null : environmentId.value());
   }
 
   private static boolean descriptorMatches(ToolBinding binding, Tool tool) {

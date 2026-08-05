@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,7 +12,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
@@ -78,7 +80,7 @@ class CodingToolsEdgeTest {
     JsonNode values =
         AbstractCodingTool.OBJECT_MAPPER.readTree("{\"text\":\"x\",\"number\":2,\"truth\":true}");
     assertEquals("x", AbstractCodingTool.string(values, "text"));
-    assertEquals(null, AbstractCodingTool.optionalString(values, "missing"));
+    assertNull(AbstractCodingTool.optionalString(values, "missing"));
     assertEquals(7, AbstractCodingTool.optionalPositiveInt(values, "missing", 7, 9));
     assertEquals(2, AbstractCodingTool.optionalPositiveInt(values, "number", 7, 9));
     assertTrue(AbstractCodingTool.optionalBoolean(values, "truth"));
@@ -126,30 +128,38 @@ class CodingToolsEdgeTest {
   }
 
   @Test
-  void outputLimiterHonorsExactThresholdsUtf8AndArtifactFailures() throws Exception {
-    InMemoryArtifactSink sink = new InMemoryArtifactSink();
-    CodingToolsConfig exact = config(2, 4, sink);
+  void outputLimiterHonorsExactThresholdsUtf8AndResourceFailures() throws Exception {
+    InMemoryResourceStore store = new InMemoryResourceStore();
+    CodingToolsConfig exact = config(2, 4, store);
     List<ToolContent> untruncated =
         OutputLimiter.limit("ab\nc".getBytes(StandardCharsets.UTF_8), "text/plain", exact);
     List<ToolContent> truncated =
         OutputLimiter.limit(
-            "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, sink));
+            "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, store));
     List<ToolContent> binary =
         OutputLimiter.limit(new byte[] {1, 0, 2}, "application/octet-stream", exact);
 
     assertEquals("ab\nc", text(untruncated));
     assertTrue(text(truncated).contains("Output truncated"));
     assertFalse(text(truncated).contains("�"));
-    ArtifactToolContent artifact = (ArtifactToolContent) truncated.get(1);
+    ResourceToolContent resource = (ResourceToolContent) truncated.get(1);
     assertArrayEquals(
-        "😀x".getBytes(StandardCharsets.UTF_8), sink.get(artifact.artifact().artifactId()));
-    assertTrue(binary.get(1) instanceof ArtifactToolContent);
+        "😀x".getBytes(StandardCharsets.UTF_8), store.get(resource.resource().sha256()));
+    assertTrue(binary.get(1) instanceof ResourceToolContent);
     CodingToolsConfig failing =
         config(
             1,
             1,
-            (bytes, mediaType) -> {
-              throw new IOException("sink down");
+            new ResourceStore() {
+              @Override
+              public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
+                throw new IOException("store down");
+              }
+
+              @Override
+              public byte[] read(ResourceRef ref) throws IOException {
+                throw new IOException("store down");
+              }
             });
     assertThrows(
         IOException.class,
@@ -157,7 +167,7 @@ class CodingToolsEdgeTest {
   }
 
   @Test
-  void codecAndArtifactSinksPreserveAllSupportedBomFormats() throws Exception {
+  void codecAndResourceStoresPreserveAllSupportedBomFormats() throws Exception {
     byte[] utf16le = new byte[] {(byte) 0xff, (byte) 0xfe, 'a', 0, '\n', 0};
     byte[] utf16be = new byte[] {(byte) 0xfe, (byte) 0xff, 0, 'a', 0, '\n'};
     TextFileCodec.Decoded little = TextFileCodec.decode(utf16le);
@@ -168,15 +178,15 @@ class CodingToolsEdgeTest {
     assertArrayEquals(utf16be, TextFileCodec.encode(big.text(), big.charset(), big.bomLength()));
     assertThrows(IllegalArgumentException.class, () -> TextFileCodec.decode(new byte[] {0, 1}));
 
-    LocalFileArtifactSink local = new LocalFileArtifactSink(environmentRoot.resolve("artifacts"));
+    LocalFileResourceStore local = new LocalFileResourceStore(environmentRoot.resolve("export"));
     var reference = local.store(new byte[] {7, 8}, "application/octet-stream");
     assertArrayEquals(
-        new byte[] {7, 8}, Files.readAllBytes(local.directory().resolve(reference.artifactId())));
-    InMemoryArtifactSink memory = new InMemoryArtifactSink();
+        new byte[] {7, 8}, Files.readAllBytes(local.directory().resolve(reference.sha256())));
+    InMemoryResourceStore memory = new InMemoryResourceStore();
     var memoryReference = memory.store(new byte[] {9}, "text/plain");
-    byte[] copy = memory.get(memoryReference.artifactId());
+    byte[] copy = memory.get(memoryReference.sha256());
     copy[0] = 0;
-    assertArrayEquals(new byte[] {9}, memory.get(memoryReference.artifactId()));
+    assertArrayEquals(new byte[] {9}, memory.get(memoryReference.sha256()));
   }
 
   @Test
@@ -190,7 +200,7 @@ class CodingToolsEdgeTest {
     assertFalse(result.error());
     assertTrue(text(result).contains("1|alpha"));
     assertTrue(text(result).contains("2|beta"));
-    assertFalse(result.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
+    assertFalse(result.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
   }
 
   @Test
@@ -198,7 +208,8 @@ class CodingToolsEdgeTest {
     String[] names = {
       "kkstudio.daemon.environment-root",
       "kkstudio.daemon.default-workdir",
-      "kkstudio.daemon.artifact-directory",
+      "kkstudio.daemon.resource-directory",
+      "kkstudio.daemon.max-resource-bytes",
       "kkstudio.daemon.bash",
       "kkstudio.daemon.rg",
       "kkstudio.daemon.fd"
@@ -210,14 +221,23 @@ class CodingToolsEdgeTest {
     try {
       System.setProperty(names[0], environmentRoot.toString());
       System.setProperty(names[1], environmentRoot.toString());
-      System.setProperty(names[2], environmentRoot.resolve("local-artifacts").toString());
-      System.setProperty(names[3], "custom-bash");
-      System.setProperty(names[4], "custom-rg");
-      System.setProperty(names[5], "custom-fd");
+      System.setProperty(names[2], environmentRoot.resolve("local-resources").toString());
+      System.setProperty(names[3], "4");
+      System.setProperty(names[4], "custom-bash");
+      System.setProperty(names[5], "custom-rg");
+      System.setProperty(names[6], "custom-fd");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties();
       assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
       assertEquals("custom-bash", properties.bashExecutable());
-      assertTrue(properties.artifactSink() instanceof LocalFileArtifactSink);
+      assertTrue(properties.resourceStore() instanceof LocalFileResourceStore);
+      // 配置的 max-resource-bytes 必须落到 store：超限字节在写入前拒绝。
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> properties.resourceStore().store(new byte[] {1, 2, 3, 4, 5}, "text/plain"));
+      System.setProperty(names[3], "0");
+      assertThrows(IllegalArgumentException.class, CodingToolsConfig::fromSystemProperties);
+      System.setProperty(names[3], "not-a-number");
+      assertThrows(IllegalArgumentException.class, CodingToolsConfig::fromSystemProperties);
     } finally {
       for (int index = 0; index < names.length; index++) {
         if (old[index] == null) {
@@ -238,7 +258,7 @@ class CodingToolsEdgeTest {
                 "bash",
                 "rg",
                 "fd",
-                new InMemoryArtifactSink()));
+                new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -250,7 +270,7 @@ class CodingToolsEdgeTest {
                 "bash",
                 "rg",
                 "fd",
-                new InMemoryArtifactSink()));
+                new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -262,7 +282,7 @@ class CodingToolsEdgeTest {
                 "",
                 "rg",
                 "fd",
-                new InMemoryArtifactSink()));
+                new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -274,7 +294,7 @@ class CodingToolsEdgeTest {
                 "bash",
                 "rg",
                 "fd",
-                new InMemoryArtifactSink()));
+                new InMemoryResourceStore()));
   }
 
   @Test
@@ -314,9 +334,9 @@ class CodingToolsEdgeTest {
     Path rg =
         script("rg", "printf '%s\\n' '" + visible + ":1: " + longLine + "' 'file.txt:2: alpha'\n");
     Path fd = script("fd", "printf '%s\\n' './dir/a.txt' './dir/b.txt'\n");
-    InMemoryArtifactSink sink = new InMemoryArtifactSink();
-    GrepTool grep = new GrepTool(config(2000, 50 * 1024, sink, rg, fd));
-    FindTool find = new FindTool(config(2000, 50 * 1024, sink, rg, fd));
+    InMemoryResourceStore store = new InMemoryResourceStore();
+    GrepTool grep = new GrepTool(config(2000, 50 * 1024, store, rg, fd));
+    FindTool find = new FindTool(config(2000, 50 * 1024, store, rg, fd));
 
     ToolResult literal =
         invoke(
@@ -325,27 +345,27 @@ class CodingToolsEdgeTest {
     assertTrue(text(literal).contains("visible.txt:1:"));
     assertFalse(text(literal).contains(environmentRoot.toString()));
     assertTrue(text(literal).contains("line truncated to 500 chars"));
-    ArtifactToolContent grepArtifact =
-        (ArtifactToolContent)
+    ResourceToolContent grepResource =
+        (ResourceToolContent)
             literal.contents().stream()
-                .filter(ArtifactToolContent.class::isInstance)
+                .filter(ResourceToolContent.class::isInstance)
                 .findFirst()
                 .orElseThrow();
     assertTrue(
-        new String(sink.get(grepArtifact.artifact().artifactId()), StandardCharsets.UTF_8)
+        new String(store.get(grepResource.resource().sha256()), StandardCharsets.UTF_8)
             .contains(longLine));
 
     ToolResult found = invoke(find, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
     assertTrue(text(found).contains("dir/a.txt"));
     assertTrue(text(found).contains("results limit reached"));
-    assertTrue(found.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
+    assertTrue(found.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
 
     Path argumentFile = environmentRoot.resolve("fd-arguments.txt");
     Path exactFd =
         script(
             "fd-exact",
             "printf '%s\\n' \"$@\" > '" + argumentFile + "'\nprintf '%s\\n' './dir/only.txt'\n");
-    FindTool exactFind = new FindTool(config(2000, 50 * 1024, sink, rg, exactFd));
+    FindTool exactFind = new FindTool(config(2000, 50 * 1024, store, rg, exactFd));
     ToolResult exact = invoke(exactFind, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
     assertFalse(text(exact).contains("results limit reached"));
     assertTrue(Files.readString(argumentFile).contains("--full-path"));
@@ -355,26 +375,26 @@ class CodingToolsEdgeTest {
             config(
                 2000,
                 50 * 1024,
-                new InMemoryArtifactSink(),
+                new InMemoryResourceStore(),
                 environmentRoot.resolve("missing-rg"),
                 fd));
     assertTrue(text(invoke(missing, "{\"pattern\":\"x\",\"path\":\".\"}")).contains("unavailable"));
     Path failing = script("failing", "echo bad >&2\nexit 2\n");
     GrepTool nonZero =
-        new GrepTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), failing, fd));
+        new GrepTool(config(2000, 50 * 1024, new InMemoryResourceStore(), failing, fd));
     assertTrue(text(invoke(nonZero, "{\"pattern\":\"x\",\"path\":\".\"}")).contains("bad"));
     FindTool missingFind =
         new FindTool(
             config(
                 2000,
                 50 * 1024,
-                new InMemoryArtifactSink(),
+                new InMemoryResourceStore(),
                 rg,
                 environmentRoot.resolve("missing-fd")));
     assertTrue(
         text(invoke(missingFind, "{\"pattern\":\"*\",\"path\":\".\"}")).contains("unavailable"));
     FindTool failingFind =
-        new FindTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), rg, failing));
+        new FindTool(config(2000, 50 * 1024, new InMemoryResourceStore(), rg, failing));
     assertTrue(text(invoke(failingFind, "{\"pattern\":\"*\",\"path\":\".\"}")).contains("bad"));
     assertTrue(
         text(invoke(find, "{\"pattern\":\"*\",\"path\":\"visible.txt\"}"))
@@ -393,7 +413,7 @@ class CodingToolsEdgeTest {
                 "missing-bash",
                 "rg",
                 "fd",
-                new InMemoryArtifactSink()));
+                new InMemoryResourceStore()));
     assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
     BashTool bash = new BashTool(config());
     ToolResult nonZero = invoke(bash, "{\"command\":\"echo failure; exit 7\"}");
@@ -435,11 +455,11 @@ class CodingToolsEdgeTest {
     assumePosix();
     Path sleeper = script("sleep", "sleep 5\n");
     GrepTool grep =
-        new GrepTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), sleeper, sleeper));
+        new GrepTool(config(2000, 50 * 1024, new InMemoryResourceStore(), sleeper, sleeper));
     ToolResult timedOut = invoke(grep, "{\"pattern\":\"x\",\"path\":\".\",\"timeout_seconds\":1}");
     assertTrue(text(timedOut).contains("timed out"));
     FindTool find =
-        new FindTool(config(2000, 50 * 1024, new InMemoryArtifactSink(), sleeper, sleeper));
+        new FindTool(config(2000, 50 * 1024, new InMemoryResourceStore(), sleeper, sleeper));
     ToolResult findTimedOut =
         invoke(find, "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":1}");
     assertTrue(text(findTimedOut).contains("timed out"));
@@ -454,16 +474,23 @@ class CodingToolsEdgeTest {
   }
 
   private CodingToolsConfig config() {
-    return config(2000, 50 * 1024, new InMemoryArtifactSink());
+    return config(2000, 50 * 1024, new InMemoryResourceStore());
   }
 
-  private CodingToolsConfig config(int lines, int bytes, ArtifactSink sink) {
-    return config(lines, bytes, sink, Path.of("rg"), Path.of("fd"));
+  private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
+    return config(lines, bytes, store, Path.of("rg"), Path.of("fd"));
   }
 
-  private CodingToolsConfig config(int lines, int bytes, ArtifactSink sink, Path rg, Path fd) {
+  private CodingToolsConfig config(int lines, int bytes, ResourceStore store, Path rg, Path fd) {
     return new CodingToolsConfig(
-        environmentRoot, environmentRoot, lines, bytes, "bash", rg.toString(), fd.toString(), sink);
+        environmentRoot,
+        environmentRoot,
+        lines,
+        bytes,
+        "bash",
+        rg.toString(),
+        fd.toString(),
+        store);
   }
 
   private Path script(String name, String body) throws IOException {

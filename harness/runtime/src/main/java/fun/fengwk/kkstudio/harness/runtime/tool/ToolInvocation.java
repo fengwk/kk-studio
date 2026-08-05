@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.tool;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.execution.Lease;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -35,7 +36,7 @@ public record ToolInvocation(
     String toolCallId,
     ToolDescriptor descriptor,
     String argumentsJson,
-    String environmentName,
+    EnvironmentId environmentId,
     long executionEpoch,
     InvocationStatus status,
     int attempt,
@@ -65,7 +66,8 @@ public record ToolInvocation(
     }
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
-    validateEnvironmentName(environmentName);
+    // environmentId 为 PLATFORM 绑定时可空；非空值由 EnvironmentId 构造器保证 canonical UUID。
+    validateEnvironmentId(environmentId);
     if (executionEpoch < 0) {
       throw new IllegalArgumentException("executionEpoch must be non-negative");
     }
@@ -113,9 +115,11 @@ public record ToolInvocation(
     return descriptor.version();
   }
 
-  private static void validateEnvironmentName(String environmentName) {
-    if (environmentName != null && (environmentName.isBlank() || environmentName.length() > 128)) {
-      throw new IllegalArgumentException("environmentName must be non-blank and <= 128 chars");
+  private static void validateEnvironmentId(EnvironmentId environmentId) {
+    // EnvironmentId 构造器已执行 canonical lowercase UUID 校验；这里只拒绝非法包装。
+    if (environmentId != null
+        && (environmentId.value().isBlank() || environmentId.value().length() > 128)) {
+      throw new IllegalArgumentException("environmentId must fit persistent column bounds");
     }
   }
 

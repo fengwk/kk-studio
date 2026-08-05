@@ -18,19 +18,20 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.daemon.coding.ArtifactSource;
-import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryArtifactSink;
+import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
+import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -81,6 +82,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
+  private static final EnvironmentId ENVIRONMENT_ID =
+      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
@@ -107,7 +110,7 @@ class DaemonRuntimeTest {
     JsonNode hello = codec.readPayload(handshake.get(0));
     assertEquals("test-gateway-token", hello.path("gatewayToken").asText());
     assertEquals("daemon", hello.path("daemonId").asText());
-    assertEquals(DaemonProtocol.VERSION_1, hello.path("protocolVersion").asInt());
+    assertEquals(DaemonProtocol.VERSION_2, hello.path("protocolVersion").asInt());
     assertEquals(EnvironmentToolCatalog.version(), hello.path("toolCatalogVersion").asText());
     assertTrue(codec.readPayload(handshake.get(1)).path("skills").isArray());
 
@@ -137,7 +140,7 @@ class DaemonRuntimeTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> new DaemonRuntime(config, registry, DaemonSkillRegistry.empty()));
+        () -> new DaemonRuntime(config, ENVIRONMENT_ID, registry, DaemonSkillRegistry.empty()));
   }
 
   /**
@@ -243,7 +246,7 @@ class DaemonRuntimeTest {
     assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
   }
 
-  /** 引用错误的 Environment 或非法 INVOKE payload 必须得到明确 ERROR/FAILED 响应。 */
+  /** 引用错误的 Environment（id 或 display name）或非法 INVOKE payload 必须得到明确 ERROR 响应。 */
   @Test
   void rejectsWrongScopeAndMalformedInvocationPayload() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -255,8 +258,9 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
+            ENVIRONMENT_ID,
             "other-environment",
             "wrong-scope",
             1,
@@ -265,13 +269,46 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
+            new EnvironmentId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
+            "environment",
+            "wrong-id",
+            1,
+            "{\"toolName\":\"test\",\"arguments\":{}}"));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_2,
+            DaemonMessageType.INVOKE,
+            ENVIRONMENT_ID,
             "environment",
             "bad-payload",
             2,
             "{\"toolName\":\"test\",\"arguments\":[]}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+  }
+
+  /** v1 协议消息必须在 codec 边界拒绝，不会触达 scope 或 invocation 生命周期。 */
+  @Test
+  void rejectsLegacyVersionOneEnvelopes() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receiveRaw(
+        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
+            + "\"environmentName\":\"environment\",\"sequence\":1,"
+            + "\"payload\":{\"toolName\":\"test\",\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+    assertEquals(0, tool.executions.get());
+    transport.receive(invoke("valid-after-v1", 1));
+    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
   }
 
   /** 缺失 invocationId 在 codec 边界失败，不得触达 journal 或 Tool SPI。 */
@@ -286,13 +323,17 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\",\"environmentId\":\""
+            + ENVIRONMENT_ID
+            + "\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
             + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":1,\"messageType\":\"CANCEL\","
+        "{\"protocolVersion\":2,\"messageType\":\"CANCEL\",\"environmentId\":\""
+            + ENVIRONMENT_ID
+            + "\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -412,8 +453,9 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
+            ENVIRONMENT_ID,
             "environment",
             "file-path-alias",
             1,
@@ -581,14 +623,14 @@ class DaemonRuntimeTest {
     assertEquals(0, tool.handle.cancelCalls.get());
   }
 
-  /** 流式结果必须保留 JSON 与 Artifact 等非文本内容的结构，并随 payload 自包含 artifact 字节。 */
+  /** 流式 PARTIAL 只承载 text/json；resource 内容在 PARTIAL 路径被拒绝并收敛为 FAILED。 */
   @Test
-  void serializesJsonAndArtifactToolContents() throws InterruptedException {
+  void partialSerializesTextAndJsonButRejectsResourceContents() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
-    InMemoryArtifactSink sink = new InMemoryArtifactSink();
-    ArtifactRef stored = sink.store(new byte[] {1, 2}, "application/json");
-    runtime = runtime(transport, tool, sink);
+    InMemoryResourceStore store = new InMemoryResourceStore();
+    ResourceRef stored = store.store(new byte[] {1, 2}, "application/json");
+    runtime = runtime(transport, tool, store);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -599,7 +641,7 @@ class DaemonRuntimeTest {
     tool.partial(
         new ToolResult(
             "structured-content",
-            List.of(new JsonToolContent("[1,2]"), new ArtifactToolContent(stored)),
+            List.of(new JsonToolContent("[1,2]"), new TextToolContent("hi")),
             false,
             "{}",
             false));
@@ -609,42 +651,50 @@ class DaemonRuntimeTest {
     String payload = messages.get(0).payloadJson();
     assertTrue(payload.contains("\"type\":\"json\""));
     assertTrue(payload.contains("\"json\":[1,2]"));
-    assertTrue(payload.contains("\"type\":\"artifact\""));
-    assertTrue(payload.contains("\"artifactId\":\"" + stored.artifactId() + "\""));
-    assertTrue(payload.contains("\"mediaType\":\"application/json\""));
-    assertTrue(payload.contains("\"sizeBytes\":2"));
-    assertTrue(payload.contains("\"contentBase64\":\"AQI=\""));
+    assertTrue(payload.contains("\"type\":\"text\""));
+    assertTrue(payload.contains("\"text\":\"hi\""));
+
+    // PARTIAL 携带 resource → 编码在任何 store 访问前拒绝，收敛为 FAILED。
+    transport.receive(invoke("structured-content-2", 2));
+    transport.takeMessages(2);
+    tool.partial(
+        new ToolResult(
+            "structured-content-2", List.of(new ResourceToolContent(stored)), false, "{}", false));
+    List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
+    assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
+    assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
   }
 
-  /** wire artifact 必须包含 Base64 字节，使接收端可独立持久化并替换为 global ref；终端 payload 自包含，不依赖连接内映射。 */
+  /** wire resource 必须包含 Base64 字节，使接收端可独立持久化；终端 payload 自包含，不依赖连接内映射。 */
   @Test
-  void artifactPayloadIsSelfContainedAndRefIsRewrittenOnReceiver() throws InterruptedException {
+  void resourcePayloadIsSelfContainedAndDecodesOnReceiver() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
-    InMemoryArtifactSink sink = new InMemoryArtifactSink();
+    InMemoryResourceStore store = new InMemoryResourceStore();
     byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
-    ArtifactRef stored = sink.store(data, "application/octet-stream");
-    runtime = runtime(transport, tool, sink);
+    ResourceRef stored = store.store(data, "application/octet-stream");
+    runtime = runtime(transport, tool, store);
 
     runtime.start();
     transport.awaitConnections(1);
     completeHandshake(0);
     transport.takeMessages(2);
-    transport.receive(invoke("artifact-rewrite", 1));
+    transport.receive(invoke("resource-rewrite", 1));
     transport.takeMessages(2);
     tool.complete(
         new ToolResult(
-            "artifact-rewrite", List.of(new ArtifactToolContent(stored)), false, "{}", false));
+            "resource-rewrite", List.of(new ResourceToolContent(stored)), false, "{}", false));
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, COMPLETED);
     String payload = terminal.get(0).payloadJson();
     JsonNode resultNode = codec.readPayload(terminal.get(0)).get("result");
     JsonNode content = resultNode.get("contents").get(0);
-    assertEquals("artifact", content.get("type").asText());
-    assertEquals(stored.artifactId(), content.get("artifactId").asText());
+    assertEquals("resource", content.get("type").asText());
+    assertEquals(stored.uri(), content.get("uri").asText());
     assertEquals(stored.mediaType(), content.get("mediaType").asText());
-    assertEquals(stored.sizeBytes(), content.get("sizeBytes").asLong());
+    assertEquals(stored.size(), content.get("size").asLong());
+    assertEquals(stored.sha256(), content.get("sha256").asText());
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
@@ -654,37 +704,80 @@ class DaemonRuntimeTest {
     assertEquals(1, decoded.contents().size());
     BinaryToolContent binary = (BinaryToolContent) decoded.contents().get(0);
     assertArrayEquals(data, binary.content());
-    assertTrue(
-        payload.contains("\"contentBase64\":\"yv66vg==\"")
-            || payload.contains("\"contentBase64\":\"" + base64 + "\""));
   }
 
-  /** artifact reader / 编码失败必须让 PARTIAL/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
+  /** BinaryToolContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
   @Test
-  void convergesArtifactFailuresToFailedTerminal() throws InterruptedException {
+  void storesBinaryToolContentBeforeEncoding() throws Exception {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
-    ArtifactSource failingSource =
-        ref -> {
-          throw new IOException("missing artifact: " + ref.artifactId());
-        };
-    runtime = runtime(transport, tool, failingSource);
+    InMemoryResourceStore store = new InMemoryResourceStore();
+    runtime = runtime(transport, tool, store);
+    byte[] data = new byte[] {1, 2, 3};
 
     runtime.start();
     transport.awaitConnections(1);
     completeHandshake(0);
     transport.takeMessages(2);
-    transport.receive(invoke("artifact-fail", 1));
+    transport.receive(invoke("binary-content", 1));
+    transport.takeMessages(2);
+    tool.complete(
+        new ToolResult(
+            "binary-content",
+            List.of(new BinaryToolContent("application/octet-stream", data)),
+            false,
+            "{}",
+            false));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, COMPLETED);
+    JsonNode content = codec.readPayload(terminal.get(0)).get("result").get("contents").get(0);
+    assertEquals("resource", content.get("type").asText());
+    assertEquals("application/octet-stream", content.get("mediaType").asText());
+    assertEquals(3, content.get("size").asLong());
+    assertEquals(Base64.getEncoder().encodeToString(data), content.get("contentBase64").asText());
+    ResourceRef wireRef =
+        new ResourceRef(
+            content.get("uri").asText(),
+            content.get("mediaType").asText(),
+            null,
+            content.get("size").asLong(),
+            content.get("sha256").asText());
+    assertArrayEquals(data, store.read(wireRef));
+  }
+
+  /** resource reader / 编码失败必须让 PARTIAL/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
+  @Test
+  void convergesResourceFailuresToFailedTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestTool tool = new TestTool();
+    ResourceStore failingStore =
+        new ResourceStore() {
+          @Override
+          public ResourceRef store(byte[] bytes, String mediaType) throws IOException {
+            throw new IOException("store down");
+          }
+
+          @Override
+          public byte[] read(ResourceRef ref) throws IOException {
+            throw new IOException("missing resource: " + ref.uri());
+          }
+        };
+    runtime = runtime(transport, tool, failingStore);
+    ResourceRef local =
+        new ResourceRef("file:///export/local-1", "application/json", null, 3L, "0".repeat(64));
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receive(invoke("resource-fail", 1));
     transport.takeMessages(2);
 
     // PARTIAL failure must converge to FAILED and not emit any PARTIAL or COMPLETED.
     tool.partial(
         new ToolResult(
-            "artifact-fail",
-            List.of(new ArtifactToolContent(new ArtifactRef("local-1", "application/json", 3))),
-            false,
-            "{}",
-            false));
+            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
@@ -692,20 +785,19 @@ class DaemonRuntimeTest {
     // A late COMPLETED after FAILED must be ignored (journal guards).
     tool.complete(
         new ToolResult(
-            "artifact-fail",
-            List.of(new ArtifactToolContent(new ArtifactRef("local-1", "application/json", 3))),
-            false,
-            "{}",
-            false));
+            "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
     assertFalse(transport.hasMessages());
 
     // Now a separate invocation with COMPLETED failure must also converge to FAILED.
-    transport.receive(invoke("artifact-fail-2", 2));
+    transport.receive(invoke("resource-fail-2", 2));
     transport.takeMessages(2);
     tool.complete(
         new ToolResult(
-            "artifact-fail-2",
-            List.of(new ArtifactToolContent(new ArtifactRef("local-2", "text/plain", 1))),
+            "resource-fail-2",
+            List.of(
+                new ResourceToolContent(
+                    new ResourceRef(
+                        "file:///export/local-2", "text/plain", null, 1L, "0".repeat(64)))),
             false,
             "{}",
             false));
@@ -714,12 +806,12 @@ class DaemonRuntimeTest {
     assertTrue(completeFailure.get(0).payloadJson().contains("cannot complete"));
   }
 
-  /** 无 artifact source 的 generic runtime 遇 artifact 必须确定性 FAILED，不能发送 local-only ref。 */
+  /** 无 resource store 的 generic runtime 遇 resource 必须确定性 FAILED，不能发送不可解析的内容。 */
   @Test
-  void failsClosedWhenArtifactSourceIsAbsent() throws InterruptedException {
+  void failsClosedWhenResourceStoreIsAbsent() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestTool tool = new TestTool();
-    runtime = runtime(transport, tool); // no artifact source
+    runtime = runtime(transport, tool); // no resource store
 
     runtime.start();
     transport.awaitConnections(1);
@@ -731,7 +823,14 @@ class DaemonRuntimeTest {
     tool.complete(
         new ToolResult(
             "no-source",
-            List.of(new ArtifactToolContent(new ArtifactRef("local-only", "application/json", 0))),
+            List.of(
+                new ResourceToolContent(
+                    new ResourceRef(
+                        "file:///export/local-only",
+                        "application/json",
+                        null,
+                        0L,
+                        "0".repeat(64)))),
             false,
             "{}",
             false));
@@ -740,7 +839,7 @@ class DaemonRuntimeTest {
     assertMessageTypes(terminal, DaemonMessageType.FAILED);
     String payload = terminal.get(0).payloadJson();
     assertTrue(payload.contains("cannot complete"));
-    assertFalse(payload.contains("\"artifactId\":\"local-only\""));
+    assertFalse(payload.contains("\"type\":\"resource\""));
     assertFalse(payload.contains("\"contentBase64\""));
   }
 
@@ -847,8 +946,9 @@ class DaemonRuntimeTest {
       DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
       transport.receive(
           new DaemonEnvelope(
-              DaemonProtocol.VERSION_1,
+              DaemonProtocol.VERSION_2,
               DaemonMessageType.LOAD_SKILL,
+              ENVIRONMENT_ID,
               "environment",
               "skill-1",
               1,
@@ -879,8 +979,9 @@ class DaemonRuntimeTest {
     DaemonSkillLoadCodec skillCodec = new DaemonSkillLoadCodec();
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
+            ENVIRONMENT_ID,
             "environment",
             "skill-missing",
             1,
@@ -994,22 +1095,26 @@ class DaemonRuntimeTest {
     transport.receiveFromConnection(
         0,
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
+            ENVIRONMENT_ID,
             "environment",
             "stale-skill",
             1,
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
     transport.receiveRawFromConnection(
         0,
-        "{\"protocolVersion\":1,\"messageType\":\"INVOKE\","
+        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\",\"environmentId\":\""
+            + ENVIRONMENT_ID
+            + "\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
+            ENVIRONMENT_ID,
             "environment",
             "current-skill",
             1,
@@ -1063,7 +1168,13 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1, DaemonMessageType.HELLO, "environment", null, 1, "{}"));
+            DaemonProtocol.VERSION_2,
+            DaemonMessageType.HELLO,
+            ENVIRONMENT_ID,
+            "environment",
+            null,
+            1,
+            "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1071,8 +1182,9 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_1,
+            DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
+            ENVIRONMENT_ID,
             "environment",
             "invalid-skill-payload",
             2,
@@ -1164,8 +1276,8 @@ class DaemonRuntimeTest {
     return runtime(transport, tool, heartbeatInterval, Duration.ofSeconds(10));
   }
 
-  private DaemonRuntime runtime(FakeTransport transport, Tool tool, ArtifactSource artifactSource) {
-    return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), artifactSource);
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool, ResourceStore resourceStore) {
+    return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), resourceStore);
   }
 
   private DaemonRuntime runtime(
@@ -1184,6 +1296,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             List.of()),
+        ENVIRONMENT_ID,
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1207,6 +1320,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             List.of()),
+        ENVIRONMENT_ID,
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1224,14 +1338,14 @@ class DaemonRuntimeTest {
       Tool tool,
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
-      ArtifactSource artifactSource) {
+      ResourceStore resourceStore) {
     return runtime(
         transport,
         tool,
         DaemonSkillRegistry.empty(),
         heartbeatInterval,
         defaultToolTimeout,
-        artifactSource);
+        resourceStore);
   }
 
   private DaemonRuntime runtime(
@@ -1246,7 +1360,7 @@ class DaemonRuntimeTest {
       DaemonSkillRegistry skillRegistry,
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
-      ArtifactSource artifactSource) {
+      ResourceStore resourceStore) {
     handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
@@ -1261,12 +1375,13 @@ class DaemonRuntimeTest {
             defaultToolTimeout,
             "test-gateway-token",
             List.of()),
+        ENVIRONMENT_ID,
         transport,
         registry,
         skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        artifactSource);
+        resourceStore);
   }
 
   private void deleteRecursively(Path root) throws Exception {
@@ -1305,8 +1420,9 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invoke(
       String invocationId, long sequence, String toolName, String toolVersion, long timeoutMillis) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1,
+        DaemonProtocol.VERSION_2,
         DaemonMessageType.INVOKE,
+        ENVIRONMENT_ID,
         "environment",
         invocationId,
         sequence,
@@ -1322,8 +1438,9 @@ class DaemonRuntimeTest {
   private DaemonEnvelope invokeWithoutTimeout(
       String invocationId, long sequence, String toolName, String toolVersion) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1,
+        DaemonProtocol.VERSION_2,
         DaemonMessageType.INVOKE,
+        ENVIRONMENT_ID,
         "environment",
         invocationId,
         sequence,
@@ -1336,13 +1453,14 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1, messageType, "environment", null, sequence, "{}");
+        DaemonProtocol.VERSION_2, messageType, ENVIRONMENT_ID, "environment", null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1,
+        DaemonProtocol.VERSION_2,
         DaemonMessageType.CANCEL,
+        ENVIRONMENT_ID,
         "environment",
         invocationId,
         sequence,

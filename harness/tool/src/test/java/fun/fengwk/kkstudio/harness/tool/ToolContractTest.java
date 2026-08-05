@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolArraySchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolEnumSchema;
@@ -102,20 +103,53 @@ class ToolContractTest {
   /** invocation 生命周期消息必须带 invocation ID，连接级消息则无需该字段。 */
   @Test
   void enforcesDaemonEnvelopeCorrelationAndJsonPayload() {
+    EnvironmentId environmentId = new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonEnvelope(1, DaemonMessageType.INVOKE, "environment", null, 1, "{}"));
+        () ->
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION_2,
+                DaemonMessageType.INVOKE,
+                environmentId,
+                "environment",
+                null,
+                1,
+                "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonEnvelope(1, DaemonMessageType.LOAD_SKILL, "environment", null, 1, "{}"));
+        () ->
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION_2,
+                DaemonMessageType.LOAD_SKILL,
+                environmentId,
+                "environment",
+                null,
+                1,
+                "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "not-json"));
+        () ->
+            new DaemonEnvelope(
+                DaemonProtocol.VERSION_2,
+                DaemonMessageType.HELLO,
+                environmentId,
+                "environment",
+                null,
+                0,
+                "not-json"));
 
     DaemonEnvelope hello =
-        new DaemonEnvelope(1, DaemonMessageType.HELLO, "environment", null, 0, "{}");
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION_2,
+            DaemonMessageType.HELLO,
+            environmentId,
+            "environment",
+            null,
+            0,
+            "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
     assertEquals("environment", hello.environmentName());
+    assertEquals(environmentId, hello.environmentId());
   }
 
   private ToolDescriptor descriptor() {

@@ -40,17 +40,22 @@ class ToolGatewayTest {
 
   @Test
   void executionFreezesTheKeyAndTheRequest() {
-    ToolGateway.Execution execution = new ToolGateway.Execution(9L, 2, PortTestData.toolRequest());
+    ToolGateway.Execution execution =
+        new ToolGateway.Execution(9L, 7L, 2, PortTestData.toolRequest());
     assertEquals(9L, execution.invocationId());
+    assertEquals(7L, execution.threadId());
     assertEquals(2, execution.proposedAttempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(0L, 1, PortTestData.toolRequest()));
+        () -> new ToolGateway.Execution(0L, 1L, 1, PortTestData.toolRequest()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 0, PortTestData.toolRequest()));
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Execution(1L, 1, null));
+        () -> new ToolGateway.Execution(1L, 0L, 1, PortTestData.toolRequest()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolGateway.Execution(1L, 1L, 0, PortTestData.toolRequest()));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Execution(1L, 1L, 1, null));
   }
 
   @Test
@@ -149,7 +154,8 @@ class ToolGatewayTest {
         };
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest(), true));
     ToolGateway.StartResult result =
-        gateway.start(new ToolGateway.Execution(5L, 1, PortTestData.toolRequest()), noopListener());
+        gateway.start(
+            new ToolGateway.Execution(5L, 3L, 1, PortTestData.toolRequest()), noopListener());
     assertTrue(result instanceof ToolGateway.Started);
   }
 

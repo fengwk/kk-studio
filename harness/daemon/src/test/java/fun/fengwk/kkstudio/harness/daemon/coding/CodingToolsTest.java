@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
@@ -100,7 +100,7 @@ class CodingToolsTest {
   }
 
   @Test
-  void readReturnsDirectoryWindowAndBinaryArtifact() throws Exception {
+  void readReturnsDirectoryWindowAndBinaryResource() throws Exception {
     Files.writeString(environmentRoot.resolve("many.txt"), "one\ntwo\nthree\n");
     Files.write(environmentRoot.resolve("binary.bin"), new byte[] {1, 0, 2});
     Files.createDirectory(environmentRoot.resolve("directory"));
@@ -114,7 +114,7 @@ class CodingToolsTest {
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
-    assertTrue(binary.contents().stream().anyMatch(ArtifactToolContent.class::isInstance));
+    assertTrue(binary.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
   }
 
   @Test
@@ -269,7 +269,7 @@ class CodingToolsTest {
         "bash",
         "rg",
         "fd",
-        new InMemoryArtifactSink());
+        new InMemoryResourceStore());
   }
 
   private ToolExecutionRequest request(Tool tool, String arguments) {

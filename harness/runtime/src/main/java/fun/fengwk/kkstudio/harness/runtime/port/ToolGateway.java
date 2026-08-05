@@ -28,12 +28,19 @@ public interface ToolGateway {
    */
   StartResult start(Execution execution, Listener listener);
 
-  /** 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，request 已冻结。 */
-  record Execution(long invocationId, int proposedAttempt, ToolInvocationRequest request) {
+  /**
+   * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, proposedAttempt)}，request 已冻结。
+   * {@code threadId} 提供平台 ToolExecutionContext 需要的持久线程所有权，Gateway 无需查询 HarnessStore。
+   */
+  record Execution(
+      long invocationId, long threadId, int proposedAttempt, ToolInvocationRequest request) {
 
     public Execution {
       if (invocationId <= 0) {
         throw new IllegalArgumentException("invocationId must be positive");
+      }
+      if (threadId <= 0) {
+        throw new IllegalArgumentException("threadId must be positive");
       }
       if (proposedAttempt <= 0) {
         throw new IllegalArgumentException("proposedAttempt must be positive");
@@ -113,7 +120,7 @@ public interface ToolGateway {
   /** partial 与 terminal 回调；duplicate / stale 由 Runtime fence。 */
   interface Listener {
 
-    /** 交付一个非 terminal partial ToolResult（不得包含 artifact / binary content）。 */
+    /** 交付一个非 terminal partial ToolResult（不得包含 binary / resource content）。 */
     void onPartial(ToolResult partial);
 
     /** 交付完整 ToolResult。 */

@@ -29,7 +29,7 @@ class ToolApprovalTest {
     assertTrue(withoutReason.required());
     assertTrue(withoutReason.isUndecided());
     assertEquals(REQUESTED, withoutReason.requestedAt());
-    assertEquals(null, withoutReason.reason());
+    assertNull(withoutReason.reason());
 
     ToolApproval withReason =
         new ToolApproval(true, null, null, null, "user asked", REQUESTED, null);

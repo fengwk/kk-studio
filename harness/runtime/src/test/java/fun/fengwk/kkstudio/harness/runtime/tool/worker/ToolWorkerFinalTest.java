@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
@@ -28,9 +29,10 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -79,6 +81,15 @@ class ToolWorkerFinalTest {
   private static final Path WORKDIR = Path.of("/work").toAbsolutePath();
   private static final Path ENV_ROOT = Path.of("/").toAbsolutePath();
 
+  /** 测试用 Environment 的 canonical 路由身份；RemoteTool/Transport 只接受 canonical EnvironmentId。 */
+  private static final EnvironmentId ENV_A =
+      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+
+  private static final EnvironmentId ENV_B =
+      new EnvironmentId("223e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentId ENV_C =
+      new EnvironmentId("323e4567-e89b-12d3-a456-426614174000");
+
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
   @AfterEach
@@ -95,7 +106,7 @@ class ToolWorkerFinalTest {
   @Test
   void environmentUnavailableBeforeSendConvergesToTerminalFailed() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.rebuildWorkerWithTransport(
         (environmentName, request, listener) -> {
@@ -107,14 +118,14 @@ class ToolWorkerFinalTest {
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
     assertEquals("ENVIRONMENT_UNAVAILABLE", fixture.transactions.error.kind());
     assertEquals(0, fixture.transactions.retryCalls);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertEquals(0, fixture.tool.executions);
   }
 
   @Test
   void dueEnvironmentRetryWaitUnavailabilityConvergesToTerminalFailed() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.rebuildWorkerWithTransport(
         (environmentName, request, listener) -> {
@@ -127,14 +138,14 @@ class ToolWorkerFinalTest {
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
     assertEquals("ENVIRONMENT_UNAVAILABLE", fixture.transactions.error.kind());
     assertEquals(0, fixture.transactions.retryCalls);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertEquals(0, fixture.tool.executions);
   }
 
   @Test
   void environmentUncertainSendCompletesUnknownImmediately() {
     Fixture fixture = fixture(ToolSideEffect.NON_IDEMPOTENT);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.rebuildWorkerWithTransport(
         (environmentName, request, listener) -> {
@@ -145,13 +156,13 @@ class ToolWorkerFinalTest {
     assertEquals(1, fixture.transactions.claimCalls);
     assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
     assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
   }
 
   @Test
   void asyncUncertainDisconnectCompletesUnknownWithoutRetryEvenWhenIdempotent() {
     Fixture fixture = fixture(ToolSideEffect.IDEMPOTENT);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.retryPolicy =
         new InvocationRetryPolicy(
@@ -180,13 +191,13 @@ class ToolWorkerFinalTest {
     assertEquals(0, fixture.transactions.retryCalls);
     assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
     assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
   }
 
   @Test
   void environmentSlotReleasedWhenClaimedExecutionThrowsUnexpectedly() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.rebuildWorkerWithTransport(
         (environmentName, request, listener) -> {
@@ -195,13 +206,13 @@ class ToolWorkerFinalTest {
 
     assertTrue(fixture.worker.dispatch(1));
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
   }
 
   @Test
-  void environmentRemoteCompleteExternalizesInlineBinaryArtifactLazily() {
+  void environmentRemoteCompleteExternalizesInlineBinaryAsResourceLazily() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
     fixture.rebuildWorkerWithTransport(
@@ -230,8 +241,52 @@ class ToolWorkerFinalTest {
                 false));
 
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
-    assertTrue(fixture.transactions.result.contents().get(0) instanceof ArtifactToolContent);
-    assertArrayEquals(new byte[] {9, 9}, fixture.artifacts.content);
+    assertEquals(
+        "[binary output stored as resource]",
+        ((TextToolContent) fixture.transactions.result.contents().get(0)).text());
+    assertTrue(fixture.transactions.result.contents().get(1) instanceof ResourceToolContent);
+    assertArrayEquals(new byte[] {9, 9}, fixture.resources.content);
+  }
+
+  @Test
+  void partialWithResourceContentFailsTerminalWithoutRealtimeOrResources() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+
+    assertTrue(fixture.worker.dispatch(1));
+    fixture.tool.listener.onPartial(
+        new ToolResult(
+            "call-1",
+            List.of(
+                new ResourceToolContent(
+                    new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
+            false,
+            "{}",
+            false));
+
+    assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
+    assertEquals("EXECUTION_FAILED", fixture.transactions.error.kind());
+    assertTrue(fixture.realtimeEvents.isEmpty());
+    assertNull(fixture.resources.content);
+    assertFalse(fixture.worker.hasActiveExecution());
+  }
+
+  @Test
+  void terminalResourceContentPassesThroughUnchangedWithoutExternalization() {
+    Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
+    ResourceRef resource =
+        new ResourceRef("https://example.com/a", "text/plain", "a.txt", null, null);
+
+    assertTrue(fixture.worker.dispatch(1));
+    fixture.tool.listener.onComplete(
+        new ToolResult("call-1", List.of(new ResourceToolContent(resource)), false, "{}", false));
+
+    assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
+    assertEquals(1, fixture.transactions.result.contents().size());
+    ResourceToolContent persisted =
+        (ResourceToolContent) fixture.transactions.result.contents().get(0);
+    assertEquals(resource, persisted.resource());
+    // 已有规范 Resource 引用直接透传，ResourceStore 不被触碰。
+    assertNull(fixture.resources.content);
   }
 
   @Test
@@ -245,7 +300,7 @@ class ToolWorkerFinalTest {
             (name, version) -> fixture.registryTool.map(value -> (Tool) value),
             noopTransport(),
             fixture.interceptorChain,
-            fixture.artifacts,
+            fixture.resources,
             () -> fixture.retryPolicy,
             fixture.realtimeEvents::add,
             ToolWorkerConfig.DEFAULT,
@@ -311,7 +366,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void lostPartialFenceSuppressesRealtimeAndNeverPersistsPartialArtifacts() {
+  void lostPartialFenceSuppressesRealtimeAndNeverPersistsPartialResources() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     fixture.transactions.activityOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     fixture.rebuildWorker(
@@ -328,7 +383,7 @@ class ToolWorkerFinalTest {
     fixture.tool.listener.onPartial(result("partial-large-output"));
 
     assertTrue(fixture.realtimeEvents.isEmpty());
-    assertNull(fixture.artifacts.content);
+    assertNull(fixture.resources.content);
     assertTrue(fixture.tool.handle.cancelled);
     assertFalse(fixture.worker.hasActiveExecution());
   }
@@ -432,7 +487,7 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void lostTerminalOwnershipDoesNotRunAfterInterceptorOrPersistArtifacts() {
+  void lostTerminalOwnershipDoesNotRunAfterInterceptorOrPersistResources() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
     int[] afterCalls = {0};
     fixture.interceptorChain =
@@ -458,7 +513,7 @@ class ToolWorkerFinalTest {
     fixture.tool.listener.onComplete(result("large-output"));
 
     assertEquals(0, afterCalls[0]);
-    assertNull(fixture.artifacts.content);
+    assertNull(fixture.resources.content);
     assertTrue(fixture.tool.handle.cancelled);
   }
 
@@ -482,9 +537,9 @@ class ToolWorkerFinalTest {
   }
 
   @Test
-  void artifactPersistenceFailureBecomesDeterministicFailure() {
+  void resourcePersistenceFailureBecomesDeterministicFailure() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.artifacts.failure = new IllegalStateException("artifact database unavailable");
+    fixture.resources.failure = new IllegalStateException("resource store unavailable");
     fixture.rebuildWorker(
         new ToolWorkerConfig(
             Duration.ofSeconds(30),
@@ -500,7 +555,7 @@ class ToolWorkerFinalTest {
 
     assertEquals(InvocationStatus.FAILED, fixture.transactions.terminalStatus);
     assertEquals("RESULT_PERSISTENCE_FAILED", fixture.transactions.error.kind());
-    assertEquals("artifact database unavailable", fixture.transactions.error.message());
+    assertEquals("resource store unavailable", fixture.transactions.error.message());
   }
 
   @Test
@@ -519,9 +574,9 @@ class ToolWorkerFinalTest {
     assertTrue(fixture.worker.dispatch(1));
     fixture.tool.listener.onComplete(result("😀😀"));
 
-    assertEquals("😀\n[full output stored as artifact]", text(fixture.transactions.result));
-    assertTrue(fixture.transactions.result.contents().get(1) instanceof ArtifactToolContent);
-    assertEquals("😀😀", new String(fixture.artifacts.content, StandardCharsets.UTF_8));
+    assertEquals("😀\n[full output stored as resource]", text(fixture.transactions.result));
+    assertTrue(fixture.transactions.result.contents().get(1) instanceof ResourceToolContent);
+    assertEquals("😀😀", new String(fixture.resources.content, StandardCharsets.UTF_8));
   }
 
   @Test
@@ -617,7 +672,7 @@ class ToolWorkerFinalTest {
           throw new RejectedExecutionException("test executor is shut down");
         };
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = retryWaiting(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.rebuildWorkerWithExecutor(rejecting);
 
@@ -806,7 +861,7 @@ class ToolWorkerFinalTest {
   @Test
   void remoteCancellationReleasesEnvironmentSlotAndPersistsCancelled() {
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
     fixture.rebuildWorkerWithTransport(
@@ -824,13 +879,13 @@ class ToolWorkerFinalTest {
         });
 
     assertTrue(fixture.worker.dispatch(1));
-    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_A));
     assertTrue(fixture.worker.hasActiveExecution());
 
     remoteListener.get().onError(new RemoteToolCancelledException("daemon asked to cancel"));
 
     assertEquals(InvocationStatus.CANCELLED, fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertFalse(fixture.worker.hasActiveExecution());
     // Cancellation must not be retried even when the descriptor is idempotent.
     assertEquals(0, fixture.transactions.retryCalls);
@@ -852,18 +907,14 @@ class ToolWorkerFinalTest {
     fixture.rebuildWorkerWithTransport(
         (environmentName, request, listener) -> {
           pending.incrementAndGet();
-          switch (environmentName) {
-            case "env-a":
-              listenerA.set(listener);
-              break;
-            case "env-b":
-              listenerB.set(listener);
-              break;
-            case "env-c":
-              listenerC.set(listener);
-              break;
-            default:
-              throw new IllegalStateException("unexpected environment " + environmentName);
+          if (ENV_A.equals(environmentName)) {
+            listenerA.set(listener);
+          } else if (ENV_B.equals(environmentName)) {
+            listenerB.set(listener);
+          } else if (ENV_C.equals(environmentName)) {
+            listenerC.set(listener);
+          } else {
+            throw new IllegalStateException("unexpected environment " + environmentName);
           }
           return new ToolExecutionHandle() {
             @Override
@@ -877,37 +928,37 @@ class ToolWorkerFinalTest {
         });
 
     // 1) Dispatch env-a; the slot is held while the daemon run is in-flight.
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     assertTrue(fixture.worker.dispatch(101));
-    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_A));
     assertTrue(fixture.worker.hasActiveExecution());
 
     // 2) Completion releases the env-a slot and clears the global hasActiveExecution gate.
     listenerA.get().onComplete(result("done-a"));
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertFalse(fixture.worker.hasActiveExecution());
 
     // 3) After terminal convergence the slot is reusable: env-b is admitted independently.
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-b");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_B);
     fixture.transactions.descriptor = environmentDescriptor();
     assertTrue(fixture.worker.dispatch(102));
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
-    assertTrue(fixture.worker.hasActiveExecution("env-b"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_B));
 
     // 4) Failure releases the env-b slot exactly like completion.
     listenerB.get().onError(new RuntimeException("env-b blew up"));
-    assertFalse(fixture.worker.hasActiveExecution("env-b"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_B));
     assertFalse(fixture.worker.hasActiveExecution());
 
     // 5) Disconnect (uncertain send) releases the env-c slot exactly like completion.
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-c");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_C);
     fixture.transactions.descriptor = environmentDescriptor();
     assertTrue(fixture.worker.dispatch(103));
-    assertTrue(fixture.worker.hasActiveExecution("env-c"));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_C));
     listenerC.get().onError(new RemoteToolSendUncertainException("env-c dropped"));
-    assertFalse(fixture.worker.hasActiveExecution("env-c"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_C));
     assertFalse(fixture.worker.hasActiveExecution());
 
     // The transport has been invoked exactly three times (one per dispatched invocation) and each
@@ -1011,7 +1062,7 @@ class ToolWorkerFinalTest {
     assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
     assertEquals("LEASE_EXPIRED", fixture.transactions.error.kind());
     assertFalse(fixture.worker.hasActiveExecution());
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
   }
 
   @Test
@@ -1023,7 +1074,7 @@ class ToolWorkerFinalTest {
     fixture.retryPolicy =
         new InvocationRetryPolicy(
             5, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     AtomicReference<ToolExecutionListener> remoteListener = new AtomicReference<>();
     fixture.rebuildWorkerWithTransport(
@@ -1041,12 +1092,12 @@ class ToolWorkerFinalTest {
         });
 
     assertTrue(fixture.worker.dispatch(1));
-    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_A));
     remoteListener.get().onError(new RemoteToolSendUncertainException("socket closed mid-invoke"));
 
     assertEquals(InvocationStatus.UNKNOWN, fixture.transactions.terminalStatus);
     assertEquals("REMOTE_UNCERTAIN", fixture.transactions.error.kind());
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertFalse(fixture.worker.hasActiveExecution());
     assertEquals(0, fixture.transactions.retryCalls);
   }
@@ -1058,7 +1109,7 @@ class ToolWorkerFinalTest {
     // the previous terminal convergence must not leak the process-local slot or short-circuit
     // the next attempt.
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     AtomicReference<ToolExecutionListener> firstListener = new AtomicReference<>();
     AtomicReference<ToolExecutionListener> secondListener = new AtomicReference<>();
@@ -1084,13 +1135,13 @@ class ToolWorkerFinalTest {
     assertTrue(fixture.worker.dispatch(1));
     firstListener.get().onComplete(result("first"));
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
 
     assertTrue(fixture.worker.dispatch(1));
-    assertTrue(fixture.worker.hasActiveExecution("env-a"));
+    assertTrue(fixture.worker.hasActiveExecution(ENV_A));
     secondListener.get().onComplete(result("second"));
     assertEquals(InvocationStatus.SUCCEEDED, fixture.transactions.terminalStatus);
-    assertFalse(fixture.worker.hasActiveExecution("env-a"));
+    assertFalse(fixture.worker.hasActiveExecution(ENV_A));
     assertEquals(2, dispatched.get());
     assertEquals(2, fixture.transactions.claimCalls);
   }
@@ -1318,7 +1369,7 @@ class ToolWorkerFinalTest {
     // synchronously from invoke so the catch (RuntimeException) branch is exercised; the active
     // map must be empty and the heartbeat must not have been driven to fire.
     Fixture fixture = fixture(ToolSideEffect.READ_ONLY);
-    fixture.transactions.candidate = queued(environmentDescriptor(), "env-a");
+    fixture.transactions.candidate = queued(environmentDescriptor(), ENV_A);
     fixture.transactions.descriptor = environmentDescriptor();
     fixture.transactions.terminalOutcome = ToolInvocationUpdateOutcome.LOST_OWNERSHIP;
     fixture.rebuildWorkerWithTransport(
@@ -1385,7 +1436,7 @@ class ToolWorkerFinalTest {
             new TerminalCompleter(
                 transactions,
                 new ToolInterceptorChain(List.of(), List.of()),
-                new MemoryArtifacts(),
+                new MemoryResources(),
                 config,
                 Clock.fixed(NOW, ZoneOffset.UTC)),
             ignored -> {},
@@ -1508,7 +1559,7 @@ class ToolWorkerFinalTest {
     return new ToolInterceptorChain(List.of(boundary), List.of());
   }
 
-  private static ToolInvocation pending(ToolDescriptor descriptor, String environmentName) {
+  private static ToolInvocation pending(ToolDescriptor descriptor, EnvironmentId environmentId) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1518,7 +1569,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -1537,7 +1588,7 @@ class ToolWorkerFinalTest {
   }
 
   private static ToolInvocation allowed(
-      ToolDescriptor descriptor, String environmentName, String token) {
+      ToolDescriptor descriptor, EnvironmentId environmentId, String token) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1547,7 +1598,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -1565,7 +1616,7 @@ class ToolWorkerFinalTest {
         false);
   }
 
-  private static ToolInvocation waiting(ToolDescriptor descriptor, String environmentName) {
+  private static ToolInvocation waiting(ToolDescriptor descriptor, EnvironmentId environmentId) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1575,7 +1626,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.WAITING_INTERACTION,
         1,
@@ -1673,7 +1724,7 @@ class ToolWorkerFinalTest {
         Duration.ofSeconds(30));
   }
 
-  private static ToolInvocation queued(ToolDescriptor descriptor, String environmentName) {
+  private static ToolInvocation queued(ToolDescriptor descriptor, EnvironmentId environmentId) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1683,7 +1734,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.QUEUED,
         1,
@@ -1701,7 +1752,8 @@ class ToolWorkerFinalTest {
         false);
   }
 
-  private static ToolInvocation retryWaiting(ToolDescriptor descriptor, String environmentName) {
+  private static ToolInvocation retryWaiting(
+      ToolDescriptor descriptor, EnvironmentId environmentId) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1711,7 +1763,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.RETRY_WAIT,
         2,
@@ -1730,11 +1782,11 @@ class ToolWorkerFinalTest {
   }
 
   private static ToolInvocation running(ToolDescriptor descriptor, String token) {
-    return running(descriptor, token, descriptor.name().startsWith("environment") ? "env-a" : null);
+    return running(descriptor, token, descriptor.name().startsWith("environment") ? ENV_A : null);
   }
 
   private static ToolInvocation running(
-      ToolDescriptor descriptor, String token, String environmentName) {
+      ToolDescriptor descriptor, String token, EnvironmentId environmentId) {
     return new ToolInvocation(
         1L,
         2L,
@@ -1744,7 +1796,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -1764,11 +1816,11 @@ class ToolWorkerFinalTest {
 
   private static ToolInvocation runningWithPastDeadline(ToolDescriptor descriptor, String token) {
     return runningWithPastDeadline(
-        descriptor, token, descriptor.name().startsWith("environment") ? "env-a" : null);
+        descriptor, token, descriptor.name().startsWith("environment") ? ENV_A : null);
   }
 
   private static ToolInvocation runningWithPastDeadline(
-      ToolDescriptor descriptor, String token, String environmentName) {
+      ToolDescriptor descriptor, String token, EnvironmentId environmentId) {
     Instant createdAt = NOW.minusSeconds(10);
     Instant startedAt = NOW.minusSeconds(5);
     Instant pastDeadline = NOW.minusSeconds(3);
@@ -1783,7 +1835,7 @@ class ToolWorkerFinalTest {
         "call-1",
         descriptor,
         "{}",
-        environmentName,
+        environmentId,
         7L,
         InvocationStatus.RUNNING,
         1,
@@ -1804,7 +1856,7 @@ class ToolWorkerFinalTest {
   private final class Fixture {
     private final RecordingTransactions transactions;
     private final RecordingTool tool;
-    private final MemoryArtifacts artifacts = new MemoryArtifacts();
+    private final MemoryResources resources = new MemoryResources();
     private final List<RealtimeEvent> realtimeEvents = new ArrayList<>();
 
     private ToolInterceptorChain interceptorChain = new ToolInterceptorChain(List.of(), List.of());
@@ -1847,7 +1899,7 @@ class ToolWorkerFinalTest {
               (name, version) -> registryTool.map(value -> (Tool) value),
               transport,
               interceptorChain,
-              artifacts,
+              resources,
               () -> retryPolicy,
               event -> {
                 if (realtimeFailure) {
@@ -1922,16 +1974,16 @@ class ToolWorkerFinalTest {
         recovered = false;
       }
       ToolInvocation claimed;
-      String environmentName = candidate.environmentName();
+      EnvironmentId environmentId = candidate.environmentId();
       if (claimAsked) {
-        claimed = waiting(descriptor, environmentName);
+        claimed = waiting(descriptor, environmentId);
       } else if (claimPending) {
-        claimed = pending(descriptor, environmentName);
+        claimed = pending(descriptor, environmentId);
       } else {
         claimed =
             pastDeadline
-                ? runningWithPastDeadline(descriptor, workerToken, environmentName)
-                : running(descriptor, workerToken, environmentName);
+                ? runningWithPastDeadline(descriptor, workerToken, environmentId)
+                : running(descriptor, workerToken, environmentId);
       }
       return Optional.of(new ClaimedToolInvocation(claimed, candidate.status(), recovered));
     }
@@ -2106,22 +2158,26 @@ class ToolWorkerFinalTest {
     }
   }
 
-  private static final class MemoryArtifacts implements ArtifactStore {
+  private static final class MemoryResources implements ResourceStore {
     private byte[] content;
     private RuntimeException failure;
 
     @Override
-    public ArtifactRef save(String mediaType, String encoding, byte[] content) {
+    public ResourceRef put(String mediaType, String name, byte[] content) {
       if (failure != null) {
         throw failure;
       }
       this.content = content.clone();
-      return new ArtifactRef("artifact-1", mediaType, content.length);
+      return new ResourceRef(
+          "https://example.test/resource", mediaType, name, (long) content.length, null);
     }
 
     @Override
-    public Optional<Artifact> find(String artifactId) {
-      return Optional.empty();
+    public byte[] read(ResourceRef resource) {
+      if (content == null) {
+        throw new IllegalStateException("no stored resource");
+      }
+      return content.clone();
     }
   }
 

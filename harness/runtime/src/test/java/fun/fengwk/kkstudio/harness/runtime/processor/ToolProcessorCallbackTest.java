@@ -14,15 +14,20 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -126,23 +131,25 @@ class ToolProcessorCallbackTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).error().kind());
   }
 
-  /** partial 携带 ArtifactToolContent：同样拒绝（partial 阶段不允许持久资源引用）。 */
+  /** partial 携带 ResourceToolContent：确定性 FAILED(INVALID_PARTIAL)。 */
   @Test
-  void partialWithArtifactContentFails() {
+  void partialWithResourceContentFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onPartial(
         new ToolResult(
             "call-1",
-            List.of(new ArtifactToolContent(new ArtifactRef("a-1", "text/plain", 3))),
+            List.of(
+                new ResourceToolContent(
+                    new ResourceRef("https://example.com/a", "text/plain", null, null, null))),
             false,
             "{}",
             false));
 
-    assertEquals(
-        ToolInvocationStatus.FAILED,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_PARTIAL", tool.error().kind());
   }
 
   /** sink 失败只影响实时投影：partial 后 execution 继续，terminal 照常落地。 */
@@ -209,7 +216,7 @@ class ToolProcessorCallbackTest {
             .wakeVersion());
   }
 
-  /** success 携带 BinaryToolContent：Gateway 必须先外部化为稳定 ArtifactToolContent ref，否则 FAILED。 */
+  /** success 携带 BinaryToolContent：Gateway 必须先外部化为稳定 ResourceToolContent ref，否则 FAILED。 */
   @Test
   void successWithBinaryContentFails() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
@@ -224,19 +231,138 @@ class ToolProcessorCallbackTest {
     assertEquals("INVALID_RESULT", tool.error().kind());
   }
 
-  /** success 携带 ArtifactToolContent（稳定 ref）：合法，直接 SUCCEEDED。 */
+  /** success 携带 ResourceToolContent（规范引用）：合法，直接 SUCCEEDED。 */
   @Test
-  void successWithArtifactContentSucceeds() {
+  void successWithResourceContentSucceeds() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult(
-            "call-1", new ArtifactToolContent(new ArtifactRef("a-1", "text/plain", 3))));
+            "call-1",
+            new ResourceToolContent(
+                new ResourceRef("https://example.com/a", "text/plain", null, null, null))));
 
-    assertEquals(
-        ToolInvocationStatus.SUCCEEDED,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
+    assertTrue(tool.result().contents().get(0) instanceof ResourceToolContent);
+  }
+
+  /** partial canonical JSON 超过 256 KiB（N×内联大文本）：确定性 INVALID_PARTIAL，绝不发布实时事件。 */
+  @Test
+  void partialExceedingEncodedSizeCapFailsWithoutRealtime() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+
+    listener.onPartial(
+        new ToolResult(
+            "call-1", List.of(new TextToolContent("a".repeat(300_000))), false, "{}", false));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_PARTIAL", tool.error().kind());
+    assertTrue(fixture.sink.events.isEmpty());
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** terminal 聚合大量 data URI refs 超过 1 MiB canonical JSON：确定性 INVALID_RESULT，不得写入 PostgreSQL。 */
+  @Test
+  void successWithAggregatedDataResourceRefsOverCapFails() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+    List<ResourceToolContent> refs = new ArrayList<>();
+    for (int index = 0; index < 20; index++) {
+      refs.add(dataResource("data:text/plain,", 60_000));
+    }
+
+    listener.onSucceeded(new ToolResult("call-1", new ArrayList<>(refs), false, "{}", false));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_RESULT", tool.error().kind());
+    assertNull(tool.result(), "oversized result must never be persisted");
+  }
+
+  /** terminal 超大内联文本超过 1 MiB canonical JSON：确定性 INVALID_RESULT。 */
+  @Test
+  void successWithHugeInlineTextOverCapFails() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+
+    listener.onSucceeded(
+        ToolProcessorTestSupport.successResult(
+            "call-1", new TextToolContent("a".repeat(1_100_000))));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_RESULT", tool.error().kind());
+    assertNull(tool.result(), "oversized result must never be persisted");
+  }
+
+  /** terminal 的合法 detailsJson 与内联文本聚合后超过 1 MiB canonical JSON：确定性 INVALID_RESULT。 */
+  @Test
+  void successWithHugeDetailsJsonOverCapFails() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+
+    listener.onSucceeded(
+        new ToolResult(
+            "call-1",
+            List.of(new TextToolContent("b".repeat(200_000))),
+            false,
+            "{\"x\":\"" + "a".repeat(900_000) + "\"}",
+            false));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_RESULT", tool.error().kind());
+    assertNull(tool.result(), "oversized result must never be persisted");
+  }
+
+  /**
+   * terminal 24 MiB 内联文本：尺寸判定必须走 bounded 编码器（超限即中止，不物化完整 canonical JSON String / byte[]）， 绝不能先
+   * encode 完整 JSON 再量长度；bounded 辅助器与处理器结论一致，确定性 INVALID_RESULT。
+   */
+  @Test
+  void successWithVeryLargeInlineTextRejectsWithoutFullEncode() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+    String huge = "a".repeat(24 * 1024 * 1024);
+
+    assertTrue(
+        ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+            ToolProcessorTestSupport.successResult("call-1", new TextToolContent(huge)),
+            ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES),
+        "bounded helper must reject 24 MiB text without materializing the full JSON");
+
+    listener.onSucceeded(
+        ToolProcessorTestSupport.successResult("call-1", new TextToolContent(huge)));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.FAILED, tool.status());
+    assertEquals("INVALID_RESULT", tool.error().kind());
+    assertNull(tool.result(), "oversized result must never be persisted");
+  }
+
+  /** 构造 canonical data URI ResourceToolContent；payload 全为 unreserved ASCII，无需百分号转义。 */
+  private static ResourceToolContent dataResource(String prefix, int payloadSize) {
+    byte[] payload = "a".repeat(payloadSize).getBytes(StandardCharsets.UTF_8);
+    String sha = HexFormat.of().formatHex(sha256(payload));
+    return new ResourceToolContent(
+        new ResourceRef(
+            prefix + new String(payload, StandardCharsets.UTF_8),
+            "text/plain",
+            null,
+            (long) payloadSize,
+            sha));
+  }
+
+  private static byte[] sha256(byte[] content) {
+    try {
+      return MessageDigest.getInstance("SHA-256").digest(content);
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   /**

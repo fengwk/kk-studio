@@ -8,7 +8,7 @@
       {"type": "thinking", "text": "reasoning"},
       {"type": "json", "json": "[1,{\"ok\":true}]"},
       {"type": "tool_call", "toolCallId": "call-1", "toolName": "read", "argumentsJson": "{\"path\":\"README.md\"}"},
-      {"type": "artifact", "artifactId": "artifact-1", "mediaType": "text/plain", "preview": null}
+      {"type": "resource", "uri": "https://example.test/report.txt", "mediaType": "text/plain", "name": "report.txt", "size": 5, "sha256": null, "preview": null}
     ]
   },
   "assistantMetadata": {
