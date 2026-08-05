@@ -15,11 +15,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Strict, deterministic JSON codec for {@link ModelInvocationError}. Mirrors the {@link
- * fun.fengwk.kkstudio.harness.runtime.session.SessionEntryJsonCodec} style: it builds and reads
- * {@link JsonNode} trees explicitly, requires an exact field set, and rejects unknown, missing, or
- * wrong-typed values with {@link IllegalArgumentException}. No Jackson default typing, polymorphic
- * annotations, reflective POJO binding or compatibility aliases are used.
+ * Strict, deterministic JSON codec for {@link ModelInvocationError}. Mirrors the runtime's other
+ * strict codecs: it builds and reads {@link JsonNode} trees explicitly, requires an exact field
+ * set, and rejects unknown, missing, or wrong-typed values with {@link IllegalArgumentException}.
+ * No Jackson default typing, polymorphic annotations, reflective POJO binding or compatibility
+ * aliases are used.
  */
 public final class ModelInvocationErrorJsonCodec {
 

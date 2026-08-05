@@ -26,7 +26,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
 
   @Test
   void exposesTheAiEnvironmentDaemonPath() {
-    assertEquals("/api/ai/environment/daemon/v1", EnvironmentDaemonWebSocketHandler.PATH);
+    assertEquals("/api/ai/environment/daemon/v2", EnvironmentDaemonWebSocketHandler.PATH);
   }
 
   /**

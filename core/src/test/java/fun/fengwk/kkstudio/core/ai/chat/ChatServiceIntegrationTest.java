@@ -15,16 +15,20 @@ import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.core.ai.runtime.thread.command.DatabaseTurnExecutionResolver;
+import fun.fengwk.kkstudio.core.ai.runtime.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.PlanningFailureKind;
-import fun.fengwk.kkstudio.harness.runtime.model.plan.TurnExecutionResolver;
-import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 import java.sql.Connection;
+import java.time.Instant;
 import java.util.List;
 
 /** PostgreSQL-backed Chat coverage for visible name configuration, yolo, stale Agents and CAS. */
@@ -32,7 +36,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;
   @Autowired private AgentDefinitionService agentDefinitionService;
-  @Autowired private DatabaseTurnExecutionResolver turnExecutionResolver;
+  @Autowired private DatabaseTurnResolver turnResolver;
 
   @Override
   protected void migrateDatabase(Connection conn) {
@@ -105,11 +109,25 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
-      TurnExecutionResolver.Resolution resolution =
-          turnExecutionResolver.resolve(new TurnSettings("default-assistant", false), null);
-      TurnExecutionResolver.Resolution.Failed failure =
-          assertInstanceOf(TurnExecutionResolver.Resolution.Failed.class, resolution);
-      assertEquals(PlanningFailureKind.AGENT_NOT_FOUND, failure.failure().kind());
+      EntryPath path =
+          new EntryPath(
+              List.of(
+                  new Entry(
+                      1L,
+                      100L,
+                      null,
+                      new RootPayload(
+                          new BranchSettings(
+                              null,
+                              "default-assistant",
+                              new ModelSelection("provider", "model", "v1"),
+                              "low",
+                              List.of())),
+                      Instant.parse("2026-08-02T00:00:00Z"))));
+      TurnResolver.Result resolution = turnResolver.resolve(1L, path, false);
+      TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
+      assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+      assertEquals("agent not found: default-assistant", rejected.error().message());
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");

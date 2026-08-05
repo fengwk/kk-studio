@@ -1,44 +1,44 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
-/** HarnessThread 查询投影；id 均为 decimal string。 */
+/**
+ * HarnessThread 查询投影；id 均为 strict positive decimal string，{@code revision} 为 durable snapshot
+ * cursor。
+ *
+ * <p>{@code status} 与 {@code processing} 由 Thread 快照确定性派生（processing 仅 IDLE 为 false）， 不属于 durable
+ * 列；{@code branchSettings} 是 head Entry 分支的完整设置快照。
+ */
 @Data
 public class HarnessThreadDTO {
-  /** Thread 主键。 */
   private String threadId;
 
   /** 当前 Session 主键（由 head Entry 派生）。 */
   private String sessionId;
 
-  /** 当前 Session 标题（由 head Entry 派生）。 */
-  private String sessionTitle;
-
   /** 当前 head Entry。 */
   private String headEntryId;
 
-  /** 当前 Thread 选择的 Environment；为空表示仅使用平台工具。 */
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  /** 当前 frozen YOLO runtime policy。 */
+  private Boolean yoloEnabled;
 
-  /** 当前 execution epoch。 */
-  private Long executionEpoch;
+  /** 已分配的 command sequence 高水位 +1。 */
+  private String nextCommandSequence;
 
-  /** PostgreSQL authoritative durable projection cursor (decimal bigint string). */
+  /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string)。 */
   private String revision;
 
-  /** 展示状态（query 派生，非 durable 列）：{@code RUNNING > WAITING > RUNNABLE > IDLE}。 */
+  /** 展示状态（派生）：{@code IDLE / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING}。 */
   private String status;
 
-  /** 已分配 input sequence 高水位。 */
-  private Long inputSequence;
-
-  /** 是否正在被 Reconciler 持有（processor lease 未过期）。 */
+  /** 是否正在被 runtime 处理（派生）。 */
   private Boolean processing;
 
-  private LocalDateTime createTime;
-  private LocalDateTime updateTime;
+  /** head Entry 分支的完整设置快照。 */
+  private HarnessBranchSettingsDTO branchSettings;
+
+  private Instant createTime;
+  private Instant updateTime;
 }

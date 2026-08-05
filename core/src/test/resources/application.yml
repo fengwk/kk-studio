@@ -33,6 +33,7 @@ kk-studio:
   harness:
     runtime:
       workers-enabled: false
+      environment-root: target/harness-environment
 
 kk-circle:
   ai:

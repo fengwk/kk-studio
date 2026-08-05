@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -9,85 +11,95 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
 /** Guards the Core composition/application boundary around framework-free Harness runtime APIs. */
 class CoreHarnessArchitectureTest {
 
-  private static final String HARNESS_RUNTIME = "fun.fengwk.kkstudio.harness.runtime.";
-  private static final String CORE = "fun.fengwk.kkstudio.core.ai.";
+  private static final String HARNESS_RUNTIME_SPRING =
+      "fun.fengwk.kkstudio.harness.runtime.spring.";
 
-  private static final List<String> COMMAND_BOUNDARY_FORBIDDEN_IMPORTS =
-      List.of(HARNESS_RUNTIME + "thread." + "ThreadCommandTransactions");
-
-  private static final List<String> INTERACTION_BOUNDARY_FORBIDDEN_IMPORTS =
-      List.of(HARNESS_RUNTIME + "interaction." + "InteractionTransactions");
-
+  /**
+   * Core is not the composition root: main sources and the pom must not depend on runtime-spring.
+   */
   @Test
-  void applicationBoundariesConsumeRuntimeApiWithoutOutboundSpiOrConcreteGatewayCoupling()
-      throws IOException {
+  void coreNeverDependsOnRuntimeSpring() throws IOException {
     Path main = locateCoreMainJava();
     List<String> violations = new ArrayList<>();
-
-    scanTree(
-        main.resolve("fun/fengwk/kkstudio/core/ai/runtime/thread/service"),
-        COMMAND_BOUNDARY_FORBIDDEN_IMPORTS,
-        violations);
-    scanTree(
-        main.resolve("fun/fengwk/kkstudio/core/ai/runtime/session/service"),
-        COMMAND_BOUNDARY_FORBIDDEN_IMPORTS,
-        violations);
-    scanFile(
-        main.resolve(
-            "fun/fengwk/kkstudio/core/ai/runtime/interaction/service/InteractionService.java"),
-        INTERACTION_BOUNDARY_FORBIDDEN_IMPORTS,
-        violations);
-    scanTree(
-        main.resolve("fun/fengwk/kkstudio/core/ai/runtime/interaction/service/impl"),
-        INTERACTION_BOUNDARY_FORBIDDEN_IMPORTS,
-        violations);
-    scanFile(
-        main.resolve(
-            "fun/fengwk/kkstudio/core/ai/runtime/tool/worker/HarnessToolWorkerConfiguration.java"),
-        List.of(CORE + "environment.gateway." + "EnvironmentDaemonGateway"),
-        violations);
-    scanFile(
-        main.resolve(
-            "fun/fengwk/kkstudio/core/ai/environment/gateway/EnvironmentDaemonGateway.java"),
-        List.of(HARNESS_RUNTIME + "tool.worker." + "ToolWorker"),
-        violations);
-
-    assertTrue(
-        violations.isEmpty(),
-        () -> "Core Harness boundary violations:\n" + String.join("\n", violations));
-  }
-
-  private static void scanTree(Path root, List<String> forbidden, List<String> violations)
-      throws IOException {
-    assertTrue(Files.isDirectory(root), "source directory must exist: " + root);
-    try (Stream<Path> paths = Files.walk(root)) {
+    try (Stream<Path> paths = Files.walk(main)) {
       for (Path path : paths.filter(candidate -> candidate.toString().endsWith(".java")).toList()) {
-        scanFile(path, forbidden, violations);
-      }
-    }
-  }
-
-  private static void scanFile(Path path, List<String> forbidden, List<String> violations)
-      throws IOException {
-    assertTrue(Files.isRegularFile(path), "source file must exist: " + path);
-    for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-      String trimmed = line.trim();
-      if (!trimmed.startsWith("import ")) {
-        continue;
-      }
-      String imported = normalizeImport(trimmed);
-      for (String forbiddenImport : forbidden) {
-        if (imported.equals(forbiddenImport) || imported.startsWith(forbiddenImport + ".")) {
-          violations.add(path.getFileName() + ": " + trimmed);
+        for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+          String trimmed = line.trim();
+          if (trimmed.startsWith("import ")
+              && normalizeImport(trimmed).startsWith(HARNESS_RUNTIME_SPRING)) {
+            violations.add(relative(main, path) + ": " + trimmed);
+          }
         }
       }
     }
+
+    Path pom = locateCorePom(main);
+    String pomText = Files.readString(pom, StandardCharsets.UTF_8);
+    assertFalse(
+        pomText.contains("<artifactId>kk-studio-harness-runtime-spring</artifactId>"),
+        "core/pom.xml must not declare kk-studio-harness-runtime-spring");
+
+    assertTrue(
+        violations.isEmpty(),
+        () -> "Core runtime-spring dependency violations:\n" + String.join("\n", violations));
+  }
+
+  /**
+   * Core V1 migration embeds the runtime-spring schema source file byte-identically: the contiguous
+   * block from {@code create sequence harness_runtime_id_seq} through the {@code harness_work}
+   * {@code lease_until} index must equal the runtime-spring file exactly, so the two schema sources
+   * can never drift.
+   */
+  @Test
+  void coreV1SchemaEmbedsRuntimeSpringSchemaByteIdentically() throws IOException {
+    Path v1 = locateCoreV1Schema();
+    Path runtimeSpring = locateRuntimeSpringSchema();
+    byte[] v1Bytes = Files.readAllBytes(v1);
+    byte[] runtimeSpringBytes = Files.readAllBytes(runtimeSpring);
+
+    int blockStart =
+        indexOf(v1Bytes, "create sequence harness_runtime_id_seq".getBytes(StandardCharsets.UTF_8));
+    assertTrue(blockStart >= 0, "V1 must contain the runtime-spring protocol block start");
+    int marker =
+        indexOf(
+            v1Bytes, "where lease_until is not null;".getBytes(StandardCharsets.UTF_8), blockStart);
+    assertTrue(marker > blockStart, "V1 must contain the runtime-spring protocol block end");
+    int blockEndExclusive = marker + "where lease_until is not null;".length() + 1;
+    byte[] embedded = Arrays.copyOfRange(v1Bytes, blockStart, blockEndExclusive);
+
+    assertArrayEquals(
+        runtimeSpringBytes,
+        embedded,
+        () ->
+            "core V1 harness protocol block must stay byte-identical to "
+                + runtimeSpring
+                + " ("
+                + v1
+                + ")");
+  }
+
+  private static int indexOf(byte[] haystack, byte[] needle) {
+    return indexOf(haystack, needle, 0);
+  }
+
+  private static int indexOf(byte[] haystack, byte[] needle, int fromIndex) {
+    outer:
+    for (int i = fromIndex; i <= haystack.length - needle.length; i++) {
+      for (int j = 0; j < needle.length; j++) {
+        if (haystack[i + j] != needle[j]) {
+          continue outer;
+        }
+      }
+      return i;
+    }
+    return -1;
   }
 
   private static String normalizeImport(String importLine) {
@@ -96,6 +108,10 @@ class CoreHarnessArchitectureTest {
       imported = imported.substring("static ".length()).trim();
     }
     return imported;
+  }
+
+  private static String relative(Path main, Path path) {
+    return main.relativize(path).toString();
   }
 
   private static Path locateCoreMainJava() {
@@ -108,5 +124,51 @@ class CoreHarnessArchitectureTest {
       }
     }
     throw new IllegalStateException("cannot locate core main sources from " + cwd);
+  }
+
+  private static Path locateCorePom(Path mainJava) {
+    Path moduleRoot = mainJava.getParent().getParent().getParent();
+    Path pom = moduleRoot.resolve("pom.xml");
+    if (Files.isRegularFile(pom)) {
+      return pom;
+    }
+    Path cwd = Path.of("").toAbsolutePath().normalize();
+    Path reactorPom = cwd.resolve("core/pom.xml");
+    if (Files.isRegularFile(reactorPom)) {
+      return reactorPom;
+    }
+    throw new IllegalStateException("cannot locate core/pom.xml from " + mainJava + " or " + cwd);
+  }
+
+  private static Path locateCoreV1Schema() {
+    Path cwd = Path.of("").toAbsolutePath().normalize();
+    for (Path candidate :
+        List.of(
+            cwd.resolve("src/main/resources/db/migration/V1__schema.sql"),
+            cwd.resolve("core/src/main/resources/db/migration/V1__schema.sql"))) {
+      Path normalized = candidate.normalize();
+      if (Files.isRegularFile(normalized) && !normalized.toString().contains("/target/")) {
+        return normalized;
+      }
+    }
+    throw new IllegalStateException("cannot locate core V1 schema from " + cwd);
+  }
+
+  private static Path locateRuntimeSpringSchema() {
+    Path cwd = Path.of("").toAbsolutePath().normalize();
+    for (Path candidate :
+        List.of(
+            cwd.resolve(
+                "../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/"
+                    + "spring/postgresql/harness-runtime-schema.sql"),
+            cwd.resolve(
+                "harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/"
+                    + "spring/postgresql/harness-runtime-schema.sql"))) {
+      Path normalized = candidate.normalize();
+      if (Files.isRegularFile(normalized) && !normalized.toString().contains("/target/")) {
+        return normalized;
+      }
+    }
+    throw new IllegalStateException("cannot locate runtime-spring schema from " + cwd);
   }
 }

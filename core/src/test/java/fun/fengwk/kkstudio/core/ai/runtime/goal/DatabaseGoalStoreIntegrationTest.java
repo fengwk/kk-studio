@@ -28,10 +28,10 @@ class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
 
   @BeforeEach
   void clean() {
-    // The Session/Thread setup uses a deferrable FK and must commit in one transaction.
+    // Session, ROOT Entry and Thread insert in dependency order inside one transaction.
     transactionTemplate.executeWithoutResult(
         status -> {
-          jdbc.update("delete from harness_thread_goal");
+          jdbc.update("delete from agent_thread_goal");
           jdbc.update("delete from harness_thread");
           jdbc.update("delete from harness_entry");
           jdbc.update("delete from harness_session");
@@ -44,9 +44,9 @@ class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
               THREAD_ID + 2,
               THREAD_ID + 1);
           jdbc.update(
-              "insert into harness_thread (id, head_entry_id, input_sequence, runnable,"
-                  + " execution_epoch, created_at, updated_at) values (?, ?, 0, false, 0,"
-                  + " now(), now())",
+              "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                  + " next_command_sequence, revision, created_at, updated_at) values"
+                  + " (?, ?, false, 1, 0, now(), now())",
               THREAD_ID,
               THREAD_ID + 2);
         });

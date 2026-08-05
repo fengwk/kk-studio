@@ -69,15 +69,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           nextSequenceValue() > sequenceBeforeReapply,
           "re-applying a seed must preserve sequence progress");
     }
-    // Only the harness singleton rows use explicit ids; catalog identities are names.
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs = st.executeQuery("select nextval('kk_studio_id_seq')")) {
-      assertTrue(rs.next());
-      long nextId = rs.getLong(1);
-      assertTrue(
-          nextId > 1L, () -> "sequence must exceed the highest explicit seed id, got " + nextId);
-    }
+    // Catalog identities are names; no seed row consumes the business sequence.
     // Subsequent inserts must not collide with deterministic seed ids.
     assertDoesNotThrow(
         () -> {
@@ -111,20 +103,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 st,
                 "select name || ':' || provider_type from agent_provider where name = 'minimax'"),
             "the MiniMax credential synchronizer targets the minimax provider name");
-      }
-      long retryPolicyCount;
-      try (Statement st = conn.createStatement();
-          ResultSet rs = st.executeQuery("select count(*) from harness_retry_policy")) {
-        assertTrue(rs.next());
-        retryPolicyCount = rs.getLong(1);
-      }
-      assertEquals(1L, retryPolicyCount, "exactly one retry_policy row from seed");
-      try (Statement st = conn.createStatement();
-          ResultSet rs =
-              st.executeQuery(
-                  "select max_length from harness_realtime_stream_policy where id = 1")) {
-        assertTrue(rs.next());
-        assertEquals(5_000L, rs.getLong(1), "seed must initialize realtime Stream capacity");
       }
     }
   }
@@ -163,8 +141,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertEquals(1L, rs.getLong(1));
     }
     assertSingleCount(conn, "agent_provider_revision", 1L);
-    assertSingleLong(
-        conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
   }
 
   private static void assertE2eSeedContent(Connection conn) throws Exception {
@@ -181,9 +157,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     assertSingleCount(conn, "agent_provider_revision", 7L);
     assertSingleCount(conn, "agent_model", 19L);
     assertSingleCount(conn, "agent_definition", 1L);
-    assertSingleCount(conn, "harness_realtime_stream_policy", 1L);
-    assertSingleLong(
-        conn, "select max_length from harness_realtime_stream_policy where id = 1", 5_000L);
     try (Statement st = conn.createStatement()) {
       assertEquals(
           "minimax/MiniMax-M2.7:high",
@@ -266,12 +239,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
                   + " from agent_definition"));
-      sb.append('|');
-      sb.append(
-          singleString(
-              st,
-              "select string_agg(id || '|' || max_length, ';' order by id) from"
-                  + " harness_realtime_stream_policy"));
     }
     return sb.toString();
   }
@@ -324,18 +291,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               st,
               "select string_agg(name || '|' || coalesce(system_prompt, ''), ';' order by name)"
                   + " from agent_definition"));
-      sb.append('|');
-      sb.append(
-          singleString(
-              st,
-              "select string_agg(id || '|' || max_retries || '|' || backoff_strategy, ';' order"
-                  + " by id) from harness_retry_policy"));
-      sb.append('|');
-      sb.append(
-          singleString(
-              st,
-              "select string_agg(id || '|' || max_length, ';' order by id) from"
-                  + " harness_realtime_stream_policy"));
     }
     return sb.toString();
   }

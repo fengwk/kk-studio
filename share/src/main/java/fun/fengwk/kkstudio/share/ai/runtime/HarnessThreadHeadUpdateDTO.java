@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import lombok.Data;
 
-/** Thread head rebind 请求。 */
+/** Thread head 重定位请求；{@code expectedRevision} 是 exact revision CAS cursor。 */
 @Data
 public class HarnessThreadHeadUpdateDTO {
-  private String headEntryId;
-  private Long expectedExecutionEpoch;
+  private String targetEntryId;
+  private String expectedRevision;
 }

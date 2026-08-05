@@ -1,18 +1,22 @@
 package fun.fengwk.kkstudio.core.ai.chat.service;
 
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCreateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
-import fun.fengwk.kkstudio.share.api.CursorPageDTO;
+import java.util.List;
 
-/** Chat-scoped Thread association and creation use cases. */
+/**
+ * Chat-scoped Thread association use cases.
+ *
+ * <p>This boundary only validates the Chat and manages Chat↔Thread associations/list ids; it has no
+ * HarnessRuntime DTO/converter dependency. Thread existence and snapshot validation is orchestrated
+ * by the web layer through HarnessRuntime.
+ */
 public interface ChatThreadService {
 
-  CursorPageDTO<HarnessThreadDTO> listThreads(
-      String chatId, String sort, String cursor, Integer limit);
+  /** Validates that the Chat exists before a non-idempotent Thread create is attempted. */
+  void requireChat(String chatId);
 
-  /** Atomically creates and associates a Thread for the Chat. */
-  HarnessThreadDTO createThread(String chatId, HarnessThreadCreateDTO dto);
+  /** Validates the Chat and returns its associated Thread ids ordered newest association first. */
+  List<Long> listThreadIds(String chatId);
 
-  /** Idempotently associates an existing global Thread with a Chat. */
-  void associateThread(String chatId, String threadId);
+  /** Validates the Chat and idempotently associates an existing Thread with it. */
+  void associateThread(String chatId, long threadId);
 }

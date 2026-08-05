@@ -17,8 +17,8 @@ class EnvironmentGatewayPropertiesTest {
     assertThrows(IllegalArgumentException.class, properties::requireDaemonToken);
     properties.setDaemonToken("daemon-token");
     assertEquals("daemon-token", properties.requireDaemonToken());
-    properties.setMaxArtifactBytes(0);
-    assertThrows(IllegalArgumentException.class, properties::requireMaxArtifactBytes);
+    properties.setMaxResourceBytes(0);
+    assertThrows(IllegalArgumentException.class, properties::requireMaxResourceBytes);
     assertEquals(16 * 1024 * 1024, properties.requireMaxMessageBytes());
 
     properties.setMaxMessageBytes(0);

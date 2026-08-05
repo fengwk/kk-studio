@@ -8,16 +8,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "kk-studio.harness.environment-gateway")
 public class EnvironmentGatewayProperties {
 
-  private long maxArtifactBytes = 8L * 1024 * 1024;
+  private long maxResourceBytes = 8L * 1024 * 1024;
   private long maxMessageBytes = 16L * 1024 * 1024;
   private String daemonToken;
 
-  public long requireMaxArtifactBytes() {
-    if (maxArtifactBytes <= 0) {
+  public long requireMaxResourceBytes() {
+    if (maxResourceBytes <= 0) {
       throw new IllegalArgumentException(
-          "kk-studio.harness.environment-gateway.max-artifact-bytes must be positive");
+          "kk-studio.harness.environment-gateway.max-resource-bytes must be positive");
     }
-    return maxArtifactBytes;
+    return maxResourceBytes;
   }
 
   /** Returns the bounded text-frame buffer size required by the WebSocket transport. */

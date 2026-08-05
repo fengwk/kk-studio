@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.tool.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -13,11 +12,8 @@ import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsCodec;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
-import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallInterceptor;
-import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallInterceptor;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 
-/** Tool settings、permission evaluator 与执行 interceptor 的生产装配。 */
+/** Tool settings 与 permission evaluator 的生产装配。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(ToolSettingsProperties.class)
 public class HarnessToolConfiguration {
@@ -45,14 +41,5 @@ public class HarnessToolConfiguration {
   public PermissionEvaluator permissionEvaluator(
       ObjectMapper objectMapper, BashSurfaceAnalyzer bashSurfaceAnalyzer) {
     return new PermissionEvaluator(objectMapper, bashSurfaceAnalyzer);
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
-  public ToolInterceptorChain toolInterceptorChain(
-      ObjectProvider<BeforeToolCallInterceptor> beforeInterceptors,
-      ObjectProvider<AfterToolCallInterceptor> afterInterceptors) {
-    return new ToolInterceptorChain(
-        beforeInterceptors.orderedStream().toList(), afterInterceptors.orderedStream().toList());
   }
 }

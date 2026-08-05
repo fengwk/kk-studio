@@ -20,6 +20,14 @@ public interface ResourceStore {
   ResourceRef put(String mediaType, String name, byte[] content);
 
   /**
+   * 无副作用地构造与 {@link #put} 对匹配内容返回的完全相同的规范引用（不写入、不读取任何内容）。
+   *
+   * <p>{@code size}/{@code sha256} 必须与将要写入的字节精确一致；实现走与 put 相同的输入校验路径，但绝不触碰存储。调用方用它
+   * 先计划引用（含全部确定性校验）再逐个 put；put 对匹配字节返回的引用必须与此方法返回的引用相等，不等即存储契约违反。
+   */
+  ResourceRef reference(String mediaType, String name, long size, String sha256);
+
+  /**
    * 读取 {@code resource} 引用的内容。
    *
    * <p>实现只读取自己发布且拥有/支持的规范引用（例如本地文件实现仅支持其根目录下的 file 引用），不承诺读取其他实现发布的引用，也 不承诺支持未来新增的 scheme；各实现以自己的

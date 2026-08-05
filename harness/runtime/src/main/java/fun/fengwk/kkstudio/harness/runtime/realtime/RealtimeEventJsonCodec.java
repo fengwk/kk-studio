@@ -8,7 +8,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
@@ -64,8 +63,8 @@ public final class RealtimeEventJsonCodec {
   private static final Set<String> TOOL_CALL_PAYLOAD_FIELDS =
       orderedSet("kind", "index", "id", "name", "argumentsJson");
 
-  private static final String MODEL_INVOCATION = ExecutionTargetKind.MODEL_INVOCATION.name();
-  private static final String TOOL_INVOCATION = ExecutionTargetKind.TOOL_INVOCATION.name();
+  private static final String MODEL_INVOCATION = RealtimeEvent.SubjectKind.MODEL_INVOCATION.name();
+  private static final String TOOL_INVOCATION = RealtimeEvent.SubjectKind.TOOL_INVOCATION.name();
   private static final String MODEL_DELTA = RealtimeEventType.MODEL_DELTA.name();
   private static final String TOOL_PARTIAL = RealtimeEventType.TOOL_PARTIAL.name();
 
@@ -123,8 +122,8 @@ public final class RealtimeEventJsonCodec {
 
     long threadId = requiredPositiveLong(node, "threadId", "realtimeEvent");
     String subjectKindName = requiredText(node, "subjectKind", "realtimeEvent");
-    ExecutionTargetKind subjectKind =
-        readEnum(ExecutionTargetKind.class, subjectKindName, "realtimeEvent.subjectKind");
+    RealtimeEvent.SubjectKind subjectKind =
+        readEnum(RealtimeEvent.SubjectKind.class, subjectKindName, "realtimeEvent.subjectKind");
     long subjectId = requiredPositiveLongString(node, "subjectId", "realtimeEvent");
     int attempt = requiredPositiveInt(node, "attempt", "realtimeEvent");
     JsonNode payloadNode = node.get("payload");
@@ -141,7 +140,7 @@ public final class RealtimeEventJsonCodec {
     }
 
     if (type == RealtimeEventType.MODEL_DELTA) {
-      if (subjectKind != ExecutionTargetKind.MODEL_INVOCATION) {
+      if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
         throw new IllegalArgumentException(
             "MODEL_DELTA subjectKind must be MODEL_INVOCATION: " + subjectKindName);
       }
@@ -150,7 +149,7 @@ public final class RealtimeEventJsonCodec {
       return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, sequence, delta, createdAt);
     }
     if (type == RealtimeEventType.TOOL_PARTIAL) {
-      if (subjectKind != ExecutionTargetKind.TOOL_INVOCATION) {
+      if (subjectKind != RealtimeEvent.SubjectKind.TOOL_INVOCATION) {
         throw new IllegalArgumentException(
             "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
       }

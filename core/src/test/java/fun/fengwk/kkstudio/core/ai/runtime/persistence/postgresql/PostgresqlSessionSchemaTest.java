@@ -16,7 +16,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Verifies the bound Session/Entry/Thread schema, mailbox integrity and recursive path loading. */
+/**
+ * Verifies the bound Session/Entry/Thread schema, command mailbox integrity and recursive paths.
+ */
 class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach
@@ -92,12 +94,23 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     assertEquals(List.of("head_entry_id"), foreignKeyColumns("fk_harness_thread_head"));
   }
 
-  /** Model/Tool/Usage 只用单列 thread_id FK 引用 Thread，不再假设 Thread 终身属于一个 Session。 */
+  /** 所有 Harness 执行表只通过单列 FK 引用其直接 owner。 */
   @Test
-  void invocationAndUsageThreadForeignKeysAreSingleColumn() throws SQLException {
+  void harnessExecutionForeignKeysTargetTheirOwners() throws SQLException {
+    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_thread_command_thread"));
+    assertEquals(
+        List.of("consumed_turn_start_entry_id"),
+        foreignKeyColumns("fk_harness_thread_command_consumed"));
     assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_model_invocation_thread"));
-    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_tool_invocation_thread"));
-    assertEquals(List.of("thread_id"), foreignKeyColumns("fk_harness_model_usage_thread"));
+    assertEquals(
+        List.of("turn_start_entry_id"),
+        foreignKeyColumns("fk_harness_model_invocation_turn_start"));
+    assertEquals(
+        List.of("basis_head_entry_id"), foreignKeyColumns("fk_harness_model_invocation_basis"));
+    assertEquals(
+        List.of("model_invocation_id"), foreignKeyColumns("fk_harness_tool_invocation_model"));
+    assertEquals(
+        List.of("assistant_entry_id"), foreignKeyColumns("fk_harness_tool_invocation_assistant"));
   }
 
   @Test
@@ -113,7 +126,8 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
             try (PreparedStatement ps =
                 conn.prepareStatement(
                     "insert into harness_entry (id, session_id, parent_entry_id, entry_type,"
-                        + " payload) values (?, ?, ?, 'MESSAGE', '{}'::jsonb)")) {
+                        + " payload, created_at) values (?, ?, ?, 'MESSAGE', '{}'::jsonb,"
+                        + " current_timestamp)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, second.sessionId);
               ps.setLong(3, first.rootEntryId);
@@ -136,7 +150,8 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
             try (PreparedStatement ps =
                 conn.prepareStatement(
                     "insert into harness_entry (id, session_id, parent_entry_id, entry_type,"
-                        + " payload) values (?, ?, ?, 'MESSAGE', '{}'::jsonb)")) {
+                        + " payload, created_at) values (?, ?, ?, 'MESSAGE', '{}'::jsonb,"
+                        + " current_timestamp)")) {
               ps.setLong(1, entryId);
               ps.setLong(2, thread.sessionId);
               ps.setLong(3, entryId);
@@ -158,7 +173,8 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
             try (PreparedStatement ps =
                 conn.prepareStatement(
                     "insert into harness_entry (id, session_id, parent_entry_id, entry_type,"
-                        + " payload) values (?, ?, null, 'ROOT', '{}'::jsonb)")) {
+                        + " payload, created_at) values (?, ?, null, 'ROOT', '{}'::jsonb,"
+                        + " current_timestamp)")) {
               ps.setLong(1, FIXTURE_IDS.incrementAndGet());
               ps.setLong(2, thread.sessionId);
               ps.executeUpdate();
@@ -173,18 +189,20 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     assertEquals(2L, countEntries(thread.sessionId));
   }
 
+  /** revision/next_command_sequence 是 runtime 所有物；DB 只保证非负/正数和时间顺序。 */
   @Test
-  void processorLeaseTokenAndDeadlineMoveTogether() throws SQLException {
+  void threadRuntimeStateColumnsAreConstrainedButNeverMutated() throws SQLException {
     ThreadFixture thread = createThread();
 
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_lease_pair",
+          "ck_harness_thread_time_order",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "update harness_thread set processor_token = 'owner' where id = ?")) {
+                    "update harness_thread set updated_at = created_at - interval '1 hour'"
+                        + " where id = ?")) {
               ps.setLong(1, thread.threadId);
               ps.executeUpdate();
             }
@@ -193,101 +211,39 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_lease_token",
+          "harness_thread_next_command_sequence_check",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "update harness_thread set processor_token = '   ', processor_until ="
-                        + " current_timestamp + interval '1 minute' where id = ?")) {
+                    "update harness_thread set next_command_sequence = 0 where id = ?")) {
               ps.setLong(1, thread.threadId);
               ps.executeUpdate();
             }
           });
     }
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "update harness_thread set processor_token = 'owner', processor_until ="
-                    + " current_timestamp + interval '1 minute' where id = ?")) {
-      ps.setLong(1, thread.threadId);
-      assertEquals(1, ps.executeUpdate());
-    }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_lease_pair",
+          "harness_thread_revision_check",
           () -> {
             try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "update harness_thread set processor_token = null where id = ?")) {
+                conn.prepareStatement("update harness_thread set revision = -1 where id = ?")) {
               ps.setLong(1, thread.threadId);
               ps.executeUpdate();
             }
           });
     }
-  }
-
-  @Test
-  void inputAppliedTimeMatchesStatusAndCreationTime() throws SQLException {
-    ThreadFixture thread = createThread();
-
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_input_applied",
-          () ->
-              insertInputWithoutAppliedAt(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread.threadId,
-                  1L,
-                  "USER_MESSAGE",
-                  "missing-applied-at",
-                  "APPLIED"));
-    }
-
-    long inputId = FIXTURE_IDS.incrementAndGet();
-    try (Connection conn = newConnection()) {
-      insertInputWithoutAppliedAt(
-          conn, inputId, thread.threadId, 1L, "USER_MESSAGE", "queued-input", "QUEUED");
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_thread_input_applied",
+          "harness_thread_id_check",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "update harness_thread_input set status = 'CANCELLED', applied_at ="
-                        + " current_timestamp where id = ?")) {
-              ps.setLong(1, inputId);
-              ps.executeUpdate();
-            }
-          });
-    }
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "update harness_thread_input set status = 'APPLIED', applied_at ="
-                    + " current_timestamp where id = ?")) {
-      ps.setLong(1, inputId);
-      assertEquals(1, ps.executeUpdate());
-    }
-
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_thread_input_time_order",
-          () -> {
-            try (PreparedStatement ps =
-                conn.prepareStatement(
-                    "insert into harness_thread_input (id, thread_id, sequence, input_type,"
-                        + " payload, idempotency_key, status, created_at, applied_at) values"
-                        + " (?, ?, 2, 'USER_MESSAGE', '{}'::jsonb, 'backdated', 'APPLIED',"
-                        + " timestamptz '2024-01-02 00:00:00Z',"
-                        + " timestamptz '2024-01-01 00:00:00Z')")) {
-              ps.setLong(1, FIXTURE_IDS.incrementAndGet());
-              ps.setLong(2, thread.threadId);
+                    "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                        + " next_command_sequence, revision, created_at, updated_at)"
+                        + " values (0, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
+              ps.setLong(1, thread.rootEntryId);
               ps.executeUpdate();
             }
           });
@@ -295,110 +251,184 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void inputTypesUseOnlyUserAndCustomMessages() throws SQLException {
-    ThreadFixture thread = createThread();
-    try (Connection conn = newConnection()) {
-      insertInputWithoutAppliedAt(
-          conn,
-          FIXTURE_IDS.incrementAndGet(),
-          thread.threadId,
-          1L,
-          "CUSTOM_MESSAGE",
-          "custom-message",
-          "QUEUED");
-    }
-
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_thread_input_type",
-          () ->
-              insertInputWithoutAppliedAt(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread.threadId,
-                  2L,
-                  "SET_EXECUTION_POLICY",
-                  "removed-alias",
-                  "QUEUED"));
-    }
-  }
-
-  @Test
-  void inputSequenceAndIdempotencyKeyAreUniquePerThread() throws SQLException {
-    ThreadFixture thread = createThread();
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_harness_thread_input_idempotency",
-          () ->
-              insertInputWithoutAppliedAt(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread.threadId,
-                  1L,
-                  "USER_MESSAGE",
-                  "   ",
-                  "QUEUED"));
-    }
-    try (Connection conn = newConnection()) {
-      insertInputWithoutAppliedAt(
-          conn,
-          FIXTURE_IDS.incrementAndGet(),
-          thread.threadId,
-          1L,
-          "USER_MESSAGE",
-          "client-a",
-          "QUEUED");
-    }
-
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "uk_harness_thread_input_sequence",
-          () ->
-              insertInputWithoutAppliedAt(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread.threadId,
-                  1L,
-                  "USER_MESSAGE",
-                  "client-b",
-                  "QUEUED"));
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "uk_harness_thread_input_idempotency",
-          () ->
-              insertInputWithoutAppliedAt(
-                  conn,
-                  FIXTURE_IDS.incrementAndGet(),
-                  thread.threadId,
-                  2L,
-                  "USER_MESSAGE",
-                  "client-a",
-                  "QUEUED"));
-    }
-  }
-
-  @Test
-  void inputSequenceMustBePositive() throws SQLException {
+  void commandSequenceMustBePositive() throws SQLException {
     ThreadFixture thread = createThread();
 
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_input_sequence_pos",
+          "harness_thread_command_sequence_check",
           () ->
-              insertInputWithoutAppliedAt(
+              insertCommand(
                   conn,
                   FIXTURE_IDS.incrementAndGet(),
                   thread.threadId,
                   0L,
                   "USER_MESSAGE",
                   "zero-sequence",
-                  "QUEUED"));
+                  "{}",
+                  null,
+                  null,
+                  null));
+    }
+  }
+
+  @Test
+  void commandPayloadMustBeAJsonObject() throws SQLException {
+    ThreadFixture thread = createThread();
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "harness_thread_command_payload_check",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  1L,
+                  "USER_MESSAGE",
+                  "array-payload",
+                  "[1,2]",
+                  null,
+                  null,
+                  null));
+    }
+  }
+
+  @Test
+  void commandTypeAllowsOnlyDeclaredCommands() throws SQLException {
+    ThreadFixture thread = createThread();
+    try (Connection conn = newConnection()) {
+      insertCommand(
+          conn,
+          FIXTURE_IDS.incrementAndGet(),
+          thread.threadId,
+          1L,
+          "CUSTOM_MESSAGE",
+          "custom-message",
+          "{}",
+          null,
+          null,
+          null);
+    }
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_thread_command_type",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  2L,
+                  "EXECUTE_POLICY",
+                  "removed-alias",
+                  "{}",
+                  null,
+                  null,
+                  null));
+    }
+  }
+
+  @Test
+  void commandSequenceAndClientIdAreUniquePerThread() throws SQLException {
+    ThreadFixture thread = createThread();
+    try (Connection conn = newConnection()) {
+      insertCommand(
+          conn,
+          FIXTURE_IDS.incrementAndGet(),
+          thread.threadId,
+          1L,
+          "USER_MESSAGE",
+          "client-a",
+          "{}",
+          null,
+          null,
+          null);
+    }
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_harness_thread_command_sequence",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  1L,
+                  "USER_MESSAGE",
+                  "client-b",
+                  "{}",
+                  null,
+                  null,
+                  null));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "uk_harness_thread_command_client",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  2L,
+                  "USER_MESSAGE",
+                  "client-a",
+                  "{}",
+                  null,
+                  null,
+                  null));
+    }
+  }
+
+  @Test
+  void commandConsumedAndCancelledAreMutuallyExclusive() throws SQLException {
+    ThreadFixture thread = createThread();
+    long turnStartId = thread.appendChild("TURN_START");
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_thread_command_terminal",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  1L,
+                  "USER_MESSAGE",
+                  "consumed-and-cancelled",
+                  "{}",
+                  turnStartId,
+                  "current_timestamp",
+                  null));
+    }
+  }
+
+  @Test
+  void commandCancellationIsNotBackdated() throws SQLException {
+    ThreadFixture thread = createThread();
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_thread_command_cancel_time",
+          () ->
+              insertCommand(
+                  conn,
+                  FIXTURE_IDS.incrementAndGet(),
+                  thread.threadId,
+                  1L,
+                  "USER_MESSAGE",
+                  "backdated-cancel",
+                  "{}",
+                  null,
+                  "timestamptz '2024-01-01 00:00:00Z'",
+                  "timestamptz '2024-01-02 00:00:00Z'"));
     }
   }
 
@@ -491,25 +521,42 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertInputWithoutAppliedAt(
+  private void insertCommand(
       Connection conn,
-      long inputId,
+      long commandId,
       long threadId,
       long sequence,
-      String inputType,
-      String idempotencyKey,
-      String status)
+      String commandType,
+      String clientCommandId,
+      String payloadJson,
+      Long consumedTurnStartEntryId,
+      String cancelledAt,
+      String createdAt)
       throws SQLException {
+    String consumed = consumedTurnStartEntryId == null ? "null" : "?";
+    String cancel = cancelledAt == null ? "null" : cancelledAt;
+    String created = createdAt == null ? "current_timestamp" : createdAt;
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into harness_thread_input (id, thread_id, sequence, input_type, payload,"
-                + " idempotency_key, status) values (?, ?, ?, ?, '{}'::jsonb, ?, ?)")) {
-      ps.setLong(1, inputId);
+            "insert into harness_thread_command (id, thread_id, sequence, command_type, payload,"
+                + " client_command_id, consumed_turn_start_entry_id, cancelled_at, created_at)"
+                + " values (?, ?, ?, ?, cast(? as jsonb), ?, "
+                + consumed
+                + ", "
+                + cancel
+                + ", "
+                + created
+                + ")")) {
+      ps.setLong(1, commandId);
       ps.setLong(2, threadId);
       ps.setLong(3, sequence);
-      ps.setString(4, inputType);
-      ps.setString(5, idempotencyKey);
-      ps.setString(6, status);
+      ps.setString(4, commandType);
+      ps.setString(5, payloadJson);
+      ps.setString(6, clientCommandId);
+      int index = 7;
+      if (consumedTurnStartEntryId != null) {
+        ps.setLong(index++, consumedTurnStartEntryId);
+      }
       assertEquals(1, ps.executeUpdate());
     }
   }

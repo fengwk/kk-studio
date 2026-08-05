@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.spring.resource;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -101,6 +102,28 @@ class LocalFileResourceStoreTest {
     assertEquals(expectedUri, resource.uri());
     assertTrue(resource.uri().startsWith("file:///"));
     assertArrayEquals(content, store.read(resource));
+  }
+
+  @Test
+  void referenceProducesExactPutReferenceWithoutSideEffects() throws IOException {
+    Path root = newRoot();
+    LocalFileResourceStore store = newStore(root, DEFAULT_MAX_BYTES);
+    byte[] content = bytes("hello resource");
+
+    ResourceRef viaPut = store.put(MEDIA_TYPE, NAME, content);
+    // reference 与 put 对匹配字节返回完全相同的引用（put 复用 reference 构造），且绝不产生存储副作用。
+    ResourceRef viaReference =
+        store.reference(MEDIA_TYPE, NAME, content.length, sha256Hex(content));
+    assertEquals(viaPut, viaReference);
+    assertEquals(1L, objectCount(root), "reference must not create any object");
+
+    // 未写入的引用（规划阶段）也能精确构造：null name 合法，且零存储副作用。
+    ResourceRef planned = store.reference("text/plain", null, content.length, sha256Hex(content));
+    assertEquals(1L, objectCount(root), "planning a reference must be side-effect free");
+    assertEquals("text/plain", planned.mediaType());
+    assertNull(planned.name());
+    assertEquals(sha256Hex(content), planned.sha256());
+    assertTrue(planned.uri().startsWith("file:///"));
   }
 
   @Test

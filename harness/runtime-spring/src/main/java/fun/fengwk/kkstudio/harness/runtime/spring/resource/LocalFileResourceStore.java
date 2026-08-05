@@ -76,9 +76,8 @@ public final class LocalFileResourceStore implements ResourceStore {
     byte[] payload = content.clone();
     String sha = sha256Hex(payload);
     Path target = root.resolve(sha);
-    // 引用在写盘前构造：mediaType/name/uri/size/sha 全部输入校验先行，失败不产生任何存储副作用。
-    ResourceRef ref =
-        new ResourceRef(canonicalObjectUri(target), mediaType, name, (long) payload.length, sha);
+    // 引用在写盘前构造：mediaType/name/uri/size/sha 全部输入校验先行，失败不产生任何存储副作用；与 reference 完全一致。
+    ResourceRef ref = reference(mediaType, name, payload.length, sha);
     if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
       // 已存在路径：不与写入竞争，但返回前仍需同一最终校验（对象损坏/被篡改不得复用）。
       verifyFinalTarget(target, payload.length, sha);
@@ -110,6 +109,20 @@ public final class LocalFileResourceStore implements ResourceStore {
     // 自有发布与并发冲突的公共收尾：返回引用前必须对最终目标做精确 size + sha 校验（同一 NOFOLLOW 通道）。
     verifyFinalTarget(target, payload.length, sha);
     return ref;
+  }
+
+  @Override
+  public ResourceRef reference(String mediaType, String name, long size, String sha256) {
+    requireInput(mediaType, "mediaType");
+    requireInput(sha256, "sha256");
+    if (size < 0) {
+      throw new IllegalArgumentException("size must not be negative");
+    }
+    if (size > maxBytes) {
+      throw new IllegalArgumentException("size must not exceed " + maxBytes + " bytes: " + sha256);
+    }
+    // 与 put 完全相同的规范引用构造路径（uri 由 sha 推导、ResourceRef 校验 mediaType/name/size/sha），但绝不触碰存储。
+    return new ResourceRef(canonicalObjectUri(root.resolve(sha256)), mediaType, name, size, sha256);
   }
 
   @Override

@@ -123,29 +123,6 @@ insert into agent_definition (
 )
 on conflict (name) do nothing;
 
-insert into harness_realtime_stream_policy (
-    id, max_length
-) values (
-    1, 5000
-)
-on conflict (id) do nothing;
-
-insert into harness_retry_policy (
-    id, max_retries, backoff_strategy, base_delay_millis, max_delay_millis
-) values (
-    1, 3, 'EXPONENTIAL', 2000, 60000
-)
-on conflict (id) do nothing;
-
--- Keep the shared sequence ahead of the remaining deterministic singleton ids;
--- re-application after normal writes never calls setval.
-with seed_max(value) as (
-    select greatest(
-        coalesce((select max(id) from harness_realtime_stream_policy), 0),
-        coalesce((select max(id) from harness_retry_policy), 0)
-    )
-)
-select setval('kk_studio_id_seq', seed_max.value, true)
-from seed_max, kk_studio_id_seq current_sequence
-where current_sequence.last_value < seed_max.value
-   or (not current_sequence.is_called and current_sequence.last_value <= seed_max.value);
+-- Harness runtime policy rows are gone: retry and realtime stream policy are
+-- no longer database tables. The runtime owns execution state via
+-- harness_runtime_id_seq, so the business sequence needs no seed alignment.

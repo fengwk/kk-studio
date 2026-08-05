@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import fun.fengwk.kkstudio.core.ai.runtime.realtime.HarnessRealtimeEventTail;
+import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -21,9 +21,10 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Thread realtime SSE tail backed by Core {@link HarnessRealtimeEventTail}. Snapshot-first clients
- * load PostgreSQL state first. Revision events carry the durable revision as SSE id while lossy
- * Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by Redis.
+ * Thread realtime SSE tail backed by the runtime-spring {@link RealtimeEventTail}. Snapshot-first
+ * clients load PostgreSQL state first. Revision events carry the durable revision as SSE id while
+ * lossy Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by
+ * Redis.
  */
 @Slf4j
 final class StudioHarnessThreadSseEmitter {
@@ -36,7 +37,7 @@ final class StudioHarnessThreadSseEmitter {
       long threadId,
       long afterRevision,
       String afterStreamId,
-      HarnessRealtimeEventTail tail,
+      RealtimeEventTail tail,
       ThreadRevisionEventSource revisionHub,
       Executor executor) {
     Objects.requireNonNull(tail, "tail");
@@ -44,7 +45,7 @@ final class StudioHarnessThreadSseEmitter {
     SseEmitter emitter = new SseEmitter(0L);
     AtomicBoolean closed = new AtomicBoolean(false);
     AtomicReference<String> cursor =
-        new AtomicReference<>(HarnessRealtimeEventTail.normalizeAfterId(afterStreamId));
+        new AtomicReference<>(RealtimeEventTail.normalizeAfterId(afterStreamId));
     AtomicReference<Future<?>> futureRef = new AtomicReference<>();
     AtomicBoolean resyncPending = new AtomicBoolean(false);
     AtomicBoolean revisionPending = new AtomicBoolean(false);
@@ -96,12 +97,12 @@ final class StudioHarnessThreadSseEmitter {
                   sentRevision = revision;
                 }
               }
-              List<HarnessRealtimeEventTail.Record> batch =
+              List<RealtimeEventTail.Record> batch =
                   tail.readAfter(threadId, cursor.get(), BATCH, BLOCK);
               if (closed.get()) {
                 return;
               }
-              for (HarnessRealtimeEventTail.Record record : batch) {
+              for (RealtimeEventTail.Record record : batch) {
                 emitter.send(SseEmitter.event().name("realtime").data(record.payloadJson()));
                 cursor.set(record.id());
               }

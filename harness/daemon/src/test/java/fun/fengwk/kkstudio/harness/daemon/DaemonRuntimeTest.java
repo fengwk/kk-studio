@@ -698,7 +698,7 @@ class DaemonRuntimeTest {
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
-    // Receivers decode to inline binary content; durable externalization is ToolWorker ownership.
+    // Receivers decode to inline binary content; durable externalization is ToolGateway ownership.
     DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
     ToolResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());

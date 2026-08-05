@@ -2,11 +2,16 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import lombok.Data;
 
-import java.util.List;
-
-/** Stop 结果：新 executionEpoch 与本次取消的 Input。 */
+/**
+ * Stop 结果。
+ *
+ * <p>{@code status} 为 STOPPED / IDLE / REPLAYED；IDLE 表示未停止任何 Turn 但可能仍取消了 queued Commands，{@code
+ * stoppedTurnEndEntryId} 仅在 STOPPED / REPLAYED 时非 null。
+ */
 @Data
 public class HarnessThreadStopResultDTO {
-  private Long executionEpoch;
-  private List<HarnessThreadInputDTO> cancelledInputs;
+  private String status;
+  private HarnessThreadDTO thread;
+  private String stoppedTurnEndEntryId;
+  private Integer cancelledCommandCount;
 }

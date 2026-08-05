@@ -16,6 +16,10 @@ import java.util.Objects;
  * 必须为正数；execution 携带 完整 frozen {@link ModelInvocationRequest}。{@link #start} 返回前不得同步调用任何 listener
  * 回调；回调可能因进程崩溃 / lease 恢复而重复或迟到，去重与 stale fence 由 Runtime（Processor）负责，Gateway 不保证 exactly-once。
  *
+ * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（即便 Provider 同步回调也只能缓冲）， {@link
+ * Handle#activate} 由 Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用， 此时
+ * Gateway 才允许打开回调 gate / 启动外部执行；activate 抛异常表示激活失败，Processor 恰好收敛一次 UNKNOWN。
+ *
  * <p>admission certainty：{@link Busy} 表示肯定未开始（稍后重试）；{@link Rejected} 表示肯定未开始且不可重试（terminate
  * invocation）；{@link Indeterminate} 表示可能已开始（terminate 为 UNKNOWN）。{@link Handle#cancel} 是 best
  * effort 且必须 幂等。
@@ -78,9 +82,16 @@ public interface ModelGateway {
     }
   }
 
-  /** 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。 */
+  /**
+   * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。{@link #activate} 的默认实现是 no-op（lambda 兼容）；需要两阶段激活的
+   * Gateway 覆盖它，在 Processor attach handle + durable markRunning 之后打开回调 gate。
+   */
   interface Handle {
+
     void cancel();
+
+    /** 打开 Gateway 回调 gate；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
+    default void activate() {}
   }
 
   /** 流与 terminal 回调；duplicate / stale 由 Runtime fence。 */

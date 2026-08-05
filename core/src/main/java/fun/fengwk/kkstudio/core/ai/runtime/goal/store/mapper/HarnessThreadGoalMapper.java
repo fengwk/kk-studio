@@ -22,12 +22,12 @@ public interface HarnessThreadGoalMapper extends BaseMapper {
           + " created_at as create_time, updated_at as update_time";
 
   @Insert(
-      "insert into harness_thread_goal (thread_id, objective, token_budget, status, reason,"
+      "insert into agent_thread_goal (thread_id, objective, token_budget, status, reason,"
           + " created_at, updated_at) values (#{threadId}, #{objective}, #{tokenBudget},"
           + " #{status}, #{reason}, #{createTime}, #{updateTime})")
   int insert(HarnessThreadGoalDO goal);
 
-  @Select("select " + COLUMNS + " from harness_thread_goal where thread_id = #{threadId}")
+  @Select("select " + COLUMNS + " from agent_thread_goal where thread_id = #{threadId}")
   @Results(
       id = "harnessThreadGoalResultMap",
       value = {
@@ -41,19 +41,18 @@ public interface HarnessThreadGoalMapper extends BaseMapper {
       })
   HarnessThreadGoalDO find(@Param("threadId") long threadId);
 
-  @Select(
-      "select " + COLUMNS + " from harness_thread_goal where thread_id = #{threadId} for update")
+  @Select("select " + COLUMNS + " from agent_thread_goal where thread_id = #{threadId} for update")
   @ResultMap("harnessThreadGoalResultMap")
   HarnessThreadGoalDO findForUpdate(@Param("threadId") long threadId);
 
   @Update(
-      "update harness_thread_goal set objective = #{objective}, token_budget = #{tokenBudget},"
+      "update agent_thread_goal set objective = #{objective}, token_budget = #{tokenBudget},"
           + " status = #{status}, reason = #{reason}, updated_at = #{updateTime}"
           + " where thread_id = #{threadId}")
   int update(HarnessThreadGoalDO goal);
 
   @Update(
-      "update harness_thread_goal set status = #{status}, reason = #{reason},"
+      "update agent_thread_goal set status = #{status}, reason = #{reason},"
           + " updated_at = #{now} where thread_id = #{threadId} and status = 'active'")
   int updateTerminal(
       @Param("threadId") long threadId,
@@ -61,6 +60,6 @@ public interface HarnessThreadGoalMapper extends BaseMapper {
       @Param("reason") String reason,
       @Param("now") OffsetDateTime now);
 
-  @Delete("delete from harness_thread_goal where thread_id = #{threadId}")
+  @Delete("delete from agent_thread_goal where thread_id = #{threadId}")
   int delete(@Param("threadId") long threadId);
 }

@@ -1,0 +1,209 @@
+package fun.fengwk.kkstudio.web.runtime;
+
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** 测试专用最小合法 Harness Runtime domain facts（web 层映射测试基座）。 */
+public final class HarnessRuntimeTestFixtures {
+
+  public static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+
+  private HarnessRuntimeTestFixtures() {}
+
+  public static BranchSettings settings() {
+    return new BranchSettings(
+        new EnvironmentId("123e4567-e89b-12d3-a456-426614174000"),
+        "default-assistant",
+        new ModelSelection("openai", "gpt-5", "default"),
+        "low",
+        List.of("web_search"));
+  }
+
+  public static Entry rootEntry() {
+    return new Entry(1, 1, null, new RootPayload(settings()), NOW);
+  }
+
+  public static Entry turnStartEntry() {
+    return new Entry(2, 1, 1L, new TurnStartPayload(TurnStartReason.INPUT, settings()), NOW);
+  }
+
+  public static Entry userMessageEntry() {
+    MessagePayload payload =
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+            null,
+            null);
+    return new Entry(3, 1, 2L, payload, NOW);
+  }
+
+  /** 无 tool call 的 ASSISTANT 结果（用于 COMPLETED TURN_END 前置）。 */
+  public static Entry plainAssistantEntry() {
+    MessagePayload payload =
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("ok"))),
+            new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage(), cost()),
+            null);
+    return new Entry(4, 1, 3L, payload, NOW);
+  }
+
+  public static ThreadState thread(long headEntryId) {
+    return new ThreadState(1, headEntryId, true, 4, 3, NOW, NOW);
+  }
+
+  public static ThreadState thread(long id, long headEntryId) {
+    return new ThreadState(id, headEntryId, true, 4, 3, NOW, NOW);
+  }
+
+  public static Session session() {
+    return new Session(1, "new chat", NOW);
+  }
+
+  /** IDLE 快照：仅 ROOT，无 open Turn、无 Invocation。 */
+  public static ThreadSnapshot idleSnapshot() {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(thread(1), path, List.of(), null, List.of());
+  }
+
+  /** IDLE 快照（指定 thread id）。 */
+  public static ThreadSnapshot idleSnapshot(long threadId) {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(thread(threadId, 1), path, List.of(), null, List.of());
+  }
+
+  /** CONTINUATION_DUE 快照：ROOT -> TURN_START -> USER -> ASSISTANT -> continueModel TURN_END。 */
+  public static ThreadSnapshot continuationDueSnapshot() {
+    return continuationDueSnapshot(1);
+  }
+
+  /** CONTINUATION_DUE 快照（指定 thread id）。 */
+  public static ThreadSnapshot continuationDueSnapshot(long threadId) {
+    Entry turnEnd =
+        new Entry(5, 1, 4L, new TurnEndPayload(2, TurnEndOutcome.COMPLETED, true, null, null), NOW);
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                rootEntry(), turnStartEntry(), userMessageEntry(), plainAssistantEntry(), turnEnd));
+    return new ThreadSnapshot(thread(threadId, 5), path, List.of(), null, List.of());
+  }
+
+  public static ModelUsage usage() {
+    return new ModelUsage(11, 7, 5, 3, 2, 13, 47);
+  }
+
+  public static ModelCost cost() {
+    BigDecimal zero = BigDecimal.ZERO;
+    return new ModelCost("USD", zero, zero, zero, zero, zero, zero, zero);
+  }
+
+  public static ProviderResponse toolCallResponse() {
+    return new ProviderResponse(
+        "",
+        "",
+        List.of(new ProviderToolCall("call-1", "web_search", "{}")),
+        ProviderStopReason.TOOL_CALLS,
+        usage(),
+        cost(),
+        null,
+        null,
+        null);
+  }
+
+  /** 带 ToolCall 的 ASSISTANT 结果（TOOL_ACTIVE 快照 head）。 */
+  public static Entry assistantEntry() {
+    AgentMessage message =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent("call-1", "web_search", "{}")));
+    MessagePayload payload =
+        new MessagePayload(
+            message,
+            new AssistantMessageMetadata(ProviderStopReason.TOOL_CALLS, usage(), cost()),
+            null);
+    return new Entry(4, 1, 3L, payload, NOW);
+  }
+
+  public static ToolInvocation waitingApprovalTool() {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "web_search",
+            "1.0",
+            ToolType.PLATFORM,
+            "search the web",
+            "web_search",
+            new ToolParamsSchema("search the web", Map.of(), Set.of(), true),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30));
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", "web_search", "{}"),
+            new ToolBinding(descriptor, ToolType.PLATFORM, null));
+    return new ToolInvocation(
+        100,
+        10,
+        4,
+        0,
+        request,
+        ToolInvocationStatus.WAITING_APPROVAL,
+        0,
+        ToolApproval.request(NOW, null),
+        null,
+        null,
+        null,
+        NOW,
+        NOW);
+  }
+
+  public static ThreadCommand queuedUserMessageCommand() {
+    return new ThreadCommand(
+        50,
+        1,
+        4,
+        new UserMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))),
+        "client-1",
+        null,
+        null,
+        NOW);
+  }
+}

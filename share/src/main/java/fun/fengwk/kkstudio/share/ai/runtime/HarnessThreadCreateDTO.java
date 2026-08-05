@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import lombok.Data;
 
-/** Initial Thread Environment selection for Chat-scoped Thread creation. */
+/** 以完整 branch settings 原子创建 Thread 的请求。 */
 @Data
 public class HarnessThreadCreateDTO {
-  private String environmentName;
+  private String title;
+  private HarnessBranchSettingsDTO branchSettings;
+  private Boolean yoloEnabled;
 }

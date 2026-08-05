@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.OffsetDateTime;
 
-/** {@code harness_thread_goal} 行映射：Thread 当前 durable goal。 */
+/** {@code agent_thread_goal} 行映射：Thread 当前 durable goal。 */
 @Data
 public class HarnessThreadGoalDO {
   /** 主键：Thread id。 */

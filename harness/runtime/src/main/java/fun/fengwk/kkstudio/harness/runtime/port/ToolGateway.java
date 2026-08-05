@@ -15,6 +15,10 @@ import java.util.Objects;
  * yoloEnabled} 与 frozen {@link ToolInvocationRequest} 一起决定 Allow / Ask / Deny。{@link #start}
  * 返回前不得同步调用任何 listener 回调；回调 duplicate / stale 由 Runtime fence，Gateway 不保证 exactly-once。Tool 的
  * retry 决策（Busy / Overloaded 后何时重试）由 Processor 决定，不放 Gateway。
+ *
+ * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调 gate（同步回调只能缓冲），{@link Handle#activate} 由
+ * Processor 在 attach handle + durable markRunning 之后、打开自身 listener 门之前调用，此时 Gateway 才允许打开回调 gate /
+ * 启动外部执行；activate 抛异常表示激活失败，Processor 恰好收敛一次 UNKNOWN。
  */
 public interface ToolGateway {
 
@@ -112,9 +116,15 @@ public interface ToolGateway {
     }
   }
 
-  /** 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。 */
+  /**
+   * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。{@link #activate} 的默认实现是 no-op（lambda 兼容）；需要两阶段激活的
+   * Gateway 覆盖它，在 Processor attach handle + durable markRunning 之后打开回调 gate。
+   */
   interface Handle {
     void cancel();
+
+    /** 打开 Gateway 回调 gate；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
+    default void activate() {}
   }
 
   /** partial 与 terminal 回调；duplicate / stale 由 Runtime fence。 */

@@ -183,7 +183,7 @@ start_daemon() {
     -Dkkstudio.daemon.default-workdir="$DAEMON_ENV_ROOT" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --environment-name "$DAEMON_ENV_NAME" \
-    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v1" \
+     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
     --gateway-token "$DAEMON_TOKEN" \
     --daemon-id "$DAEMON_ID" \
     --skill-dir "$SKILL_DIR" \

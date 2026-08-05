@@ -5,19 +5,17 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * Coherent PostgreSQL Thread projection used by the chat runtime.
+ * Coherent Thread 快照投影。
  *
- * <p>All fields are read from one repeatable-read database snapshot. {@code revision} is the
- * durable invalidation cursor; realtime transport events are not part of this object.
+ * <p>所有字段来自同一数据库快照；{@code revision} 是 durable invalidation cursor。{@code modelInvocation} 为当前 Turn
+ * 的活跃模型调用（无则 null），{@code toolInvocations} 为其工具兄弟； 列表默认为不可变空列表。
  */
 @Data
 public class HarnessThreadSnapshotDTO {
   private String revision;
   private HarnessThreadDTO thread;
-  private List<HarnessSessionEntryDTO> entries;
-  private List<HarnessThreadInputDTO> inputs;
-  private List<ModelInvocationDTO> modelInvocations;
-  private List<ToolInvocationDTO> toolInvocations;
-  private List<InteractionDTO> openInteractions;
-  private ModelUsageSummaryDTO usage;
+  private List<HarnessSessionEntryDTO> entries = List.of();
+  private List<HarnessThreadCommandDTO> queuedCommands = List.of();
+  private ModelInvocationDTO modelInvocation;
+  private List<ToolInvocationDTO> toolInvocations = List.of();
 }

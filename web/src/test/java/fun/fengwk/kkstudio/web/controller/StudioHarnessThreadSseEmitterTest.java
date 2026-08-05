@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import fun.fengwk.kkstudio.core.ai.runtime.realtime.HarnessRealtimeEventTail;
+import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 
 import java.time.Duration;
 import java.util.List;
@@ -35,7 +36,7 @@ class StudioHarnessThreadSseEmitterTest {
 
   @Test
   void completeStopsFurtherTailReads() throws Exception {
-    HarnessRealtimeEventTail tail = mock(HarnessRealtimeEventTail.class);
+    RealtimeEventTail tail = mock(RealtimeEventTail.class);
     AtomicInteger calls = new AtomicInteger();
     when(tail.readAfter(anyLong(), anyString(), anyInt(), any(Duration.class)))
         .thenAnswer(
@@ -43,7 +44,7 @@ class StudioHarnessThreadSseEmitterTest {
               calls.incrementAndGet();
               Thread.sleep(50);
               return List.of(
-                  new HarnessRealtimeEventTail.Record(
+                  new RealtimeEventTail.Record(
                       "1-0",
                       "{\"threadId\":\"1\",\"subjectKind\":\"MODEL_INVOCATION\",\"subjectId\":\"2\",\"attempt\":1,\"type\":\"MODEL_DELTA\",\"payload\":{\"kind\":\"TEXT_DELTA\",\"text\":\"x\"},\"createdAt\":\"2026-01-01T00:00:00Z\"}"));
             });
@@ -56,7 +57,7 @@ class StudioHarnessThreadSseEmitterTest {
             });
     try {
       SseEmitter emitter =
-          StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), executor);
+          StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), executor);
       assertNotNull(emitter);
       Thread.sleep(250);
       emitter.complete();
@@ -75,14 +76,14 @@ class StudioHarnessThreadSseEmitterTest {
    */
   @Test
   void rejectedExecutorFailsWithoutInvokingTail() throws Exception {
-    HarnessRealtimeEventTail tail = mock(HarnessRealtimeEventTail.class);
+    RealtimeEventTail tail = mock(RealtimeEventTail.class);
     Executor rejecting =
         command -> {
           throw new RejectedExecutionException("saturated");
         };
 
     SseEmitter emitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), rejecting);
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), rejecting);
 
     assertNotNull(emitter);
     verifyNoInteractions(tail);
@@ -97,21 +98,21 @@ class StudioHarnessThreadSseEmitterTest {
   /** Production AsyncTaskExecutor and plain Executor adapters both retain a cancellable Future. */
   @Test
   void supportsManagedAsyncAndPlainExecutorsWithoutInlinePolling() {
-    HarnessRealtimeEventTail tail = mock(HarnessRealtimeEventTail.class);
+    RealtimeEventTail tail = mock(RealtimeEventTail.class);
     AsyncTaskExecutor async = mock(AsyncTaskExecutor.class);
     @SuppressWarnings("unchecked")
     Future<Object> asyncFuture = mock(Future.class);
     doReturn(asyncFuture).when(async).submit(any(Runnable.class));
 
     SseEmitter asyncEmitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), async);
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), async);
 
     verify(async).submit(any(Runnable.class));
     asyncEmitter.complete();
 
     AtomicReference<Runnable> submitted = new AtomicReference<>();
     SseEmitter plainEmitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "$", tail, source(), submitted::set);
+        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), submitted::set);
 
     assertNotNull(submitted.get());
     plainEmitter.complete();
@@ -120,5 +121,17 @@ class StudioHarnessThreadSseEmitterTest {
 
   private static ThreadRevisionEventSource source() {
     return (threadId, afterRevision, consumer) -> () -> {};
+  }
+
+  /**
+   * Runtime-spring tail only accepts concrete {@code ms-seq} cursors; transient "$" is rejected.
+   */
+  @Test
+  void concreteCursorNormalizationRejectsTransientDollar() {
+    assertEquals("0-0", RealtimeEventTail.normalizeAfterId(null));
+    assertEquals("0-0", RealtimeEventTail.normalizeAfterId(""));
+    assertEquals("0-0", RealtimeEventTail.normalizeAfterId("0"));
+    assertEquals("123-456", RealtimeEventTail.normalizeAfterId("123-456"));
+    assertThrows(IllegalArgumentException.class, () -> RealtimeEventTail.normalizeAfterId("$"));
   }
 }

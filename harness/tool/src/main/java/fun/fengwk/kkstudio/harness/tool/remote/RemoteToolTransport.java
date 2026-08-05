@@ -10,8 +10,9 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
  *
  * <p>实现只负责连接/协议发送与回调转发，不拥有 durable ToolInvocation 状态机。协议回调必须映射到同一 {@link ToolExecutionListener}
  * 契约：PARTIAL → {@link ToolExecutionListener#onPartial}，COMPLETED → {@link
- * ToolExecutionListener#onComplete}，FAILED → {@link ToolExecutionListener#onError}，CANCELLED →
- * {@link ToolExecutionListener#onError} with {@link RemoteToolCancelledException}。
+ * ToolExecutionListener#onComplete}，FAILED → {@link ToolExecutionListener#onError} with {@link
+ * RemoteToolFailedException}，CANCELLED → {@link ToolExecutionListener#onError} with {@link
+ * RemoteToolCancelledException}。
  */
 public interface RemoteToolTransport {
 

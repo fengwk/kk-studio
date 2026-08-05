@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
@@ -176,6 +177,8 @@ public class EnvironmentDaemonGateway
       if (invocationId <= 0) {
         throw new IllegalArgumentException("invocationId must be positive");
       }
+      // 完整编码在注册 active 之前完成；确定性 payload 失败不得留下永远占用 Environment 的幽灵 invocation。
+      invokePayload = createInvokePayload(request);
       active =
           new ActiveRemote(
               environmentId,
@@ -184,7 +187,6 @@ public class EnvironmentDaemonGateway
               request.call(),
               listener);
       activeByEnvironment.put(environmentId, active);
-      invokePayload = createInvokePayload(request);
     }
     // Send outside the gateway monitor to avoid this->state lock inversion with receive paths.
     SendOutcome outcome =
@@ -399,7 +401,7 @@ public class EnvironmentDaemonGateway
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
             wireInvocationId(active),
-            properties.requireMaxArtifactBytes(),
+            properties.requireMaxResourceBytes(),
             false);
     ToolResult mapped =
         new ToolResult(
@@ -411,12 +413,12 @@ public class EnvironmentDaemonGateway
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveRemote active = takeActive(state, envelope);
     // COMPLETED decodes resource segments to transient in-memory BinaryToolContent; durable
-    // externalization belongs to the ToolWorker, never to the gateway.
+    // externalization belongs to the ToolGateway, never to the transport gateway.
     ToolResult result =
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
             wireInvocationId(active),
-            properties.requireMaxArtifactBytes(),
+            properties.requireMaxResourceBytes(),
             true);
     ToolResult mapped =
         new ToolResult(
@@ -429,7 +431,8 @@ public class EnvironmentDaemonGateway
     ActiveRemote active = takeActive(state, envelope);
     String message =
         requiredSingleText(envelopeCodec.readPayload(envelope), "message", "FAILED payload");
-    deferred.add(() -> active.listener.onError(new IllegalStateException(message)));
+    // daemon FAILED 是已确认的已知失败：typed 异常让 ToolGateway 映射为非可重试 durable FAILED（其余未分类错误是 UNKNOWN）。
+    deferred.add(() -> active.listener.onError(new RemoteToolFailedException(message)));
   }
 
   private void handleCancelled(

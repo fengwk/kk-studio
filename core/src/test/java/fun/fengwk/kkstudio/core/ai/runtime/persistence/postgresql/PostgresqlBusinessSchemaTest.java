@@ -67,7 +67,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void chatAndThreadEnvironmentContractsAreCanonical() throws SQLException {
+  void chatAgentNameContractIsCanonicalAndThreadRevisionStaysAppOwned() throws SQLException {
     try (Connection conn = newConnection()) {
       insertChat(conn, FIXTURE_IDS.incrementAndGet());
       insertChat(conn, FIXTURE_IDS.incrementAndGet());
@@ -88,33 +88,18 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     long sessionId = FIXTURE_IDS.incrementAndGet();
     long entryId = FIXTURE_IDS.incrementAndGet();
     try (Connection conn = newConnection()) {
-      insertThread(conn, threadId, sessionId, entryId, "prod");
+      insertThread(conn, threadId, sessionId, entryId);
       assertEquals(
           0L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
       try (PreparedStatement ps =
-          conn.prepareStatement(
-              "update harness_thread set environment_name = 'prod-2' where id = ?")) {
+          conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
         ps.setLong(1, threadId);
         assertEquals(1, ps.executeUpdate());
       }
       assertEquals(
-          1L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
-    }
-
-    for (String invalid : new String[] {"", "   ", "\t", "\n", "\tprod\t"}) {
-      long invalidThreadId = FIXTURE_IDS.incrementAndGet();
-      long invalidSessionId = FIXTURE_IDS.incrementAndGet();
-      long invalidEntryId = FIXTURE_IDS.incrementAndGet();
-      try (Connection conn = newConnection()) {
-        insertThread(conn, invalidThreadId, invalidSessionId, invalidEntryId, null);
-        try (PreparedStatement ps =
-            conn.prepareStatement("update harness_thread set environment_name = ? where id = ?")) {
-          ps.setString(1, invalid);
-          ps.setLong(2, invalidThreadId);
-          assertTransactionConstraintViolation(
-              conn, "ck_harness_thread_environment_name", () -> ps.executeUpdate());
-        }
-      }
+          0L,
+          queryLong(conn, "select revision from harness_thread where id = ?", threadId),
+          "revision is owned by HarnessRuntime; an application UPDATE must never bump it");
     }
   }
 
@@ -302,19 +287,21 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertThread(
-      Connection conn, long threadId, long sessionId, long entryId, String environmentName)
+  private void insertThread(Connection conn, long threadId, long sessionId, long entryId)
       throws SQLException {
     try (PreparedStatement session =
-            conn.prepareStatement("insert into harness_session (id, title) values (?, 'schema')");
+            conn.prepareStatement(
+                "insert into harness_session (id, title, created_at) values (?, 'schema',"
+                    + " current_timestamp)");
         PreparedStatement entry =
             conn.prepareStatement(
-                "insert into harness_entry (id, session_id, entry_type, payload)"
-                    + " values (?, ?, 'ROOT', '{}'::jsonb)");
+                "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+                    + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
         PreparedStatement thread =
             conn.prepareStatement(
-                "insert into harness_thread (id, head_entry_id, environment_name, input_sequence,"
-                    + " runnable, execution_epoch) values (?, ?, ?, 0, false, 0)")) {
+                "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                    + " next_command_sequence, revision, created_at, updated_at) values"
+                    + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
       session.setLong(1, sessionId);
       assertEquals(1, session.executeUpdate());
       entry.setLong(1, entryId);
@@ -322,7 +309,6 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       assertEquals(1, entry.executeUpdate());
       thread.setLong(1, threadId);
       thread.setLong(2, entryId);
-      thread.setString(3, environmentName);
       assertEquals(1, thread.executeUpdate());
     }
   }

@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -25,7 +23,8 @@ class RealtimeEventTest {
             1L, 2L, 3, 4L, new ProviderStreamEvent.TextDelta("delta"), createdAt);
 
     assertEquals(1L, event.threadId());
-    assertEquals(new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, 2L), event.subject());
+    assertEquals(
+        new RealtimeEvent.Subject(RealtimeEvent.SubjectKind.MODEL_INVOCATION, 2L), event.subject());
     assertEquals(3, event.attempt());
     assertEquals(4L, event.sequence());
     assertEquals(RealtimeEventType.MODEL_DELTA, event.type());
@@ -65,7 +64,8 @@ class RealtimeEventTest {
         new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false);
     RealtimeEvent.ToolPartial event = new RealtimeEvent.ToolPartial(1L, 2L, 3, partial, now);
 
-    assertEquals(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 2L), event.subject());
+    assertEquals(
+        new RealtimeEvent.Subject(RealtimeEvent.SubjectKind.TOOL_INVOCATION, 2L), event.subject());
     assertEquals(RealtimeEventType.TOOL_PARTIAL, event.type());
     assertEquals(now, event.createdAt());
     assertThrows(
