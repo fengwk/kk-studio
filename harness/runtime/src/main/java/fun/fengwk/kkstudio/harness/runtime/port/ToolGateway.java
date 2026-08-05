@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -79,20 +80,14 @@ public interface ToolGateway {
   /** 肯定未开始；调用方应稍后按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
   record Busy(Duration retryAfter) implements StartResult {
     public Busy {
-      Objects.requireNonNull(retryAfter, "retryAfter");
-      if (retryAfter.isZero() || retryAfter.isNegative()) {
-        throw new IllegalArgumentException("retryAfter must be strictly positive");
-      }
+      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 
   /** 肯定未开始；Gateway 过载，调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
   record Overloaded(Duration retryAfter) implements StartResult {
     public Overloaded {
-      Objects.requireNonNull(retryAfter, "retryAfter");
-      if (retryAfter.isZero() || retryAfter.isNegative()) {
-        throw new IllegalArgumentException("retryAfter must be strictly positive");
-      }
+      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 

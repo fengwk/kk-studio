@@ -65,6 +65,8 @@ class ModelGatewayTest {
     assertThrows(IllegalArgumentException.class, () -> new ModelGateway.Busy(Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class, () -> new ModelGateway.Busy(Duration.ofSeconds(-1)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ModelGateway.Busy(Duration.ofNanos(1_500_000)));
     assertEquals(Duration.ofSeconds(5), new ModelGateway.Busy(Duration.ofSeconds(5)).retryAfter());
     assertThrows(NullPointerException.class, () -> new ModelGateway.Rejected(null));
     assertEquals(error, new ModelGateway.Rejected(error).error());

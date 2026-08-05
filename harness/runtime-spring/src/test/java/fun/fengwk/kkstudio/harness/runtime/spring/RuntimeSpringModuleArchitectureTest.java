@@ -22,6 +22,8 @@ class RuntimeSpringModuleArchitectureTest {
           "javax.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
+          "org.postgresql.",
+          "org.slf4j.",
           "org.springframework.");
 
   /** Every production source stays under the adapter package and imports no Core/Web technology. */

@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+
 import java.time.Duration;
-import java.util.Objects;
 
 /**
  * 通用 processor lease 参数：claim 的有效期与本地 heartbeat 节奏。
@@ -20,10 +21,6 @@ public record ProcessorLeaseConfig(Duration leaseDuration, Duration heartbeatInt
   }
 
   private static Duration requireMillisPositive(Duration value, String name) {
-    value = Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative() || value.toMillis() <= 0) {
-      throw new IllegalArgumentException(name + " must be at least one millisecond");
-    }
-    return value;
+    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 }

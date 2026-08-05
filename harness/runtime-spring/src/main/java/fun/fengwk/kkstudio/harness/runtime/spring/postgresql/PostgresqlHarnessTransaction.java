@@ -825,6 +825,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 PostgresqlHarnessRows.timestamp(requestedAt))
             .orElseThrow(() -> new IllegalStateException("work upsert returned no row"));
     recordWorkLock(work.target());
+    notifyWorkAvailable();
   }
 
   @Override
@@ -885,6 +886,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       requireSingleUpdate(deleted, "work", claim.target().id());
     } else {
       updateWork(next.get());
+      notifyWorkAvailable();
     }
     return next;
   }
@@ -901,6 +903,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         lockedWork(claim.target())
             .reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, requestedAt);
     updateWork(next);
+    notifyWorkAvailable();
   }
 
   private Optional<ThreadCommand> findCommand(long id) {
@@ -1346,6 +1349,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return invocation.error() == null
         ? null
         : PostgresqlHarnessRows.TOOL_ERRORS.encode(invocation.error());
+  }
+
+  private void notifyWorkAvailable() {
+    boolean sent =
+        queryOne(
+                "select pg_notify(?, ?) as ignored, true as sent",
+                (resultSet, rowNumber) -> resultSet.getBoolean("sent"),
+                PostgresqlWorkChannel.NAME,
+                "")
+            .orElseThrow(() -> new IllegalStateException("pg_notify returned no row"));
+    if (!sent) {
+      throw new IllegalStateException("pg_notify did not confirm execution");
+    }
   }
 
   private <T> Optional<T> queryOne(String sql, RowMapper<T> mapper, Object... arguments) {

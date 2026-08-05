@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+
 import java.time.Duration;
-import java.util.Objects;
 
 /** Bounded persistence cadence for the route-neutral ToolWorker. */
 public record ToolWorkerConfig(
@@ -33,10 +34,6 @@ public record ToolWorkerConfig(
   }
 
   private static Duration positive(Duration value, String name) {
-    value = Objects.requireNonNull(value, name);
-    if (value.isZero() || value.isNegative()) {
-      throw new IllegalArgumentException(name + " must be positive");
-    }
-    return value;
+    return HarnessStoreTime.requireWholeMillisecondDuration(value, name);
   }
 }
