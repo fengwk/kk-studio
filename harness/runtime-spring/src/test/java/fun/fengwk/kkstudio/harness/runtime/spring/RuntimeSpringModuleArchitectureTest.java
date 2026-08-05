@@ -24,7 +24,10 @@ class RuntimeSpringModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.tool.",
           "org.postgresql.",
           "org.slf4j.",
-          "org.springframework.");
+          "org.springframework.dao.",
+          "org.springframework.data.",
+          "org.springframework.jdbc.",
+          "org.springframework.transaction.");
 
   /** Every production source stays under the adapter package and imports no Core/Web technology. */
   @Test

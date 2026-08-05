@@ -8,8 +8,11 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
+import java.util.List;
 
 /** Lossy realtime events retain enough durable identity for snapshot-first filtering. */
 class RealtimeEventTest {
@@ -50,5 +53,36 @@ class RealtimeEventTest {
         NullPointerException.class, () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, null, now));
     assertThrows(
         NullPointerException.class, () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, delta, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, delta, now.plusNanos(1)));
+  }
+
+  @Test
+  void toolPartialExposesIdentityAndRejectsInvalidValues() {
+    Instant now = Instant.parse("2026-07-23T00:00:00Z");
+    ToolResult partial =
+        new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false);
+    RealtimeEvent.ToolPartial event = new RealtimeEvent.ToolPartial(1L, 2L, 3, partial, now);
+
+    assertEquals(new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, 2L), event.subject());
+    assertEquals(RealtimeEventType.TOOL_PARTIAL, event.type());
+    assertEquals(now, event.createdAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ToolPartial(0L, 2L, 1, partial, now));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ToolPartial(1L, 0L, 1, partial, now));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ToolPartial(1L, 2L, 0, partial, now));
+    assertThrows(
+        NullPointerException.class, () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, null, now));
+    assertThrows(
+        NullPointerException.class, () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, partial, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, partial, now.plusNanos(1)));
   }
 }
