@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -105,7 +106,7 @@ public final class ThreadProcessor {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = Objects.requireNonNull(clock, "clock");
+    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
   }
 

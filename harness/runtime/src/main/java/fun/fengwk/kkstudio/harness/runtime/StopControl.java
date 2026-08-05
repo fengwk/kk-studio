@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -64,7 +65,7 @@ final class StopControl {
 
   StopControl(HarnessStore store, Clock clock) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = Objects.requireNonNull(clock, "clock");
+    this.clock = HarnessStoreTime.millisecondClock(clock);
   }
 
   Commit stop(StopCommand command) {

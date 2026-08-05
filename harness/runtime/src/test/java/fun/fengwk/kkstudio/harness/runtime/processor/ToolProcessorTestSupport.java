@@ -381,6 +381,36 @@ final class ToolProcessorTestSupport {
     return work(store, new WorkTarget(WorkTargetType.TOOL, toolInvocationId));
   }
 
+  static void deleteToolWork(Fixture fixture) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
+          return null;
+        });
+  }
+
+  static void replaceToolWork(Fixture fixture, Instant requestedAt) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          WorkTarget target = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
+          tx.deleteWork(target);
+          tx.requestWork(target, requestedAt);
+          return null;
+        });
+  }
+
+  static void requestToolWork(Fixture fixture, Instant requestedAt) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.requestWork(
+              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId), requestedAt);
+          return null;
+        });
+  }
+
   static Work threadWork(InMemoryHarnessStore store, long threadId) {
     return work(store, new WorkTarget(WorkTargetType.THREAD, threadId));
   }

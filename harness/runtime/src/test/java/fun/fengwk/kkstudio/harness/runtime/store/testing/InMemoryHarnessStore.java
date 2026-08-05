@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -65,9 +66,23 @@ import java.util.function.Function;
  * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新，insertModelInvocation 额外要求 Thread
  * 已在本事务锁定（basis CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
  * 已在本事务锁定（锁序 Thread -&gt; commands）；Work 的 renew / complete / reschedule 方法内部先锁定目标行，
- * lockClaimedWork 在 ownership 校验通过后锁行，deleteWork 强制删除行。返回对象与 list 均为 immutable records / copies。
+ * lockClaimedWork 在 ownership 校验通过后锁行；Thread 同层按 id 升序，Tool siblings 按 ordinal 升序，Work 同层按 (type,
+ * id) 升序；requestWork 与存在行的 deleteWork 要求 owning Thread 已锁定。返回对象与 list 均为 immutable records /
+ * copies。
  */
 public final class InMemoryHarnessStore implements HarnessStore {
+
+  private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
+      Comparator.comparingLong(ThreadCommand::threadId)
+          .thenComparingLong(ThreadCommand::sequence)
+          .thenComparingLong(ThreadCommand::id);
+  private static final Comparator<ToolInvocation> TOOL_LOCK_ORDER =
+      Comparator.comparingLong(ToolInvocation::assistantEntryId)
+          .thenComparingInt(ToolInvocation::ordinal)
+          .thenComparingLong(ToolInvocation::id);
+  private static final Comparator<WorkTarget> WORK_LOCK_ORDER =
+      Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
+          .thenComparingLong(WorkTarget::id);
 
   private final Object monitor = new Object();
   private State committed;
@@ -87,6 +102,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
     this.committed = new State();
     this.committed.nextId = initialNextId;
+  }
+
+  private static void requireMillisecondPrecision(Instant instant) {
+    HarnessStoreTime.requireMillisecondPrecision(instant);
   }
 
   @Override
@@ -140,32 +159,51 @@ public final class InMemoryHarnessStore implements HarnessStore {
   }
 
   /** Row lock key used for per-transaction update tracking. */
-  private record LockKey(String kind, long id) {
+  private enum LockRank {
+    THREAD,
+    COMMAND,
+    MODEL,
+    TOOL,
+    WORK
+  }
+
+  private record LockKey(LockRank rank, String kind, long id) {
     static LockKey thread(long id) {
-      return new LockKey("thread", id);
+      return new LockKey(LockRank.THREAD, "thread", id);
     }
 
     static LockKey command(long id) {
-      return new LockKey("command", id);
+      return new LockKey(LockRank.COMMAND, "command", id);
     }
 
     static LockKey model(long id) {
-      return new LockKey("model", id);
+      return new LockKey(LockRank.MODEL, "model", id);
     }
 
     static LockKey tool(long id) {
-      return new LockKey("tool", id);
+      return new LockKey(LockRank.TOOL, "tool", id);
     }
 
     static LockKey work(WorkTarget target) {
-      return new LockKey("work:" + target.type(), target.id());
+      return new LockKey(LockRank.WORK, "work:" + target.type(), target.id());
     }
   }
+
+  private record CommandSequenceKey(long threadId, long sequence) {}
+
+  private record CommandClientKey(long threadId, String clientCommandId) {}
+
+  private record ToolOrdinalKey(long assistantEntryId, int ordinal) {}
 
   private final class InMemoryTransaction implements Transaction {
 
     private final State state;
     private final Set<LockKey> locked = new HashSet<>();
+    private final Map<Long, Integer> highestToolOrdinalByAssistant = new HashMap<>();
+    private final Thread owner = Thread.currentThread();
+    private LockRank highestLockRank;
+    private Long highestThreadId;
+    private WorkTarget highestWorkTarget;
     private boolean closed;
 
     InMemoryTransaction(State state) {
@@ -177,13 +215,115 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     private void checkOpen() {
+      if (Thread.currentThread() != owner) {
+        throw new IllegalStateException("transaction handle may only be used by its owner thread");
+      }
       if (closed) {
         throw new IllegalStateException("transaction is closed");
       }
     }
 
+    private void requireCanLockRank(LockRank rank) {
+      if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
+        throw new IllegalStateException(
+            "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
+      }
+    }
+
+    private void requireCanLockThread(long threadId) {
+      LockKey key = LockKey.thread(threadId);
+      if (locked.contains(key)) {
+        return;
+      }
+      requireCanLock(key);
+      if (highestThreadId != null && threadId <= highestThreadId) {
+        throw new IllegalStateException(
+            "thread locks must be acquired by ascending id: "
+                + highestThreadId
+                + " before "
+                + threadId);
+      }
+    }
+
+    private void recordThreadLock(long threadId) {
+      requireCanLockThread(threadId);
+      LockKey key = LockKey.thread(threadId);
+      if (!locked.contains(key)) {
+        lock(key);
+        highestThreadId = threadId;
+      }
+    }
+
+    private void requireCanLock(LockKey key) {
+      if (!locked.contains(key)) {
+        requireCanLockRank(key.rank());
+      }
+    }
+
     private void lock(LockKey key) {
-      locked.add(key);
+      requireCanLock(key);
+      if (locked.add(key)) {
+        highestLockRank = key.rank();
+      }
+    }
+
+    private void requireCanLockTools(List<ToolInvocation> invocations) {
+      Map<Long, Integer> ordinals = new HashMap<>(highestToolOrdinalByAssistant);
+      for (ToolInvocation invocation : invocations) {
+        LockKey key = LockKey.tool(invocation.id());
+        if (locked.contains(key)) {
+          continue;
+        }
+        requireCanLock(key);
+        Integer previous = ordinals.put(invocation.assistantEntryId(), invocation.ordinal());
+        if (previous != null && invocation.ordinal() <= previous) {
+          throw new IllegalStateException(
+              "tool invocation locks for assistant entry "
+                  + invocation.assistantEntryId()
+                  + " must be acquired by ascending ordinal");
+        }
+      }
+    }
+
+    private void lockTool(ToolInvocation invocation) {
+      requireCanLockTools(List.of(invocation));
+      LockKey key = LockKey.tool(invocation.id());
+      if (!locked.contains(key)) {
+        lock(key);
+        highestToolOrdinalByAssistant.put(invocation.assistantEntryId(), invocation.ordinal());
+      }
+    }
+
+    private void requireCanLockWork(WorkTarget target) {
+      LockKey key = LockKey.work(target);
+      if (locked.contains(key)) {
+        return;
+      }
+      requireCanLock(key);
+      if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
+        throw new IllegalStateException(
+            "work locks must be acquired by ascending (type, id): "
+                + highestWorkTarget
+                + " before "
+                + target);
+      }
+    }
+
+    private void requireCanClaimWork() {
+      requireCanLockRank(LockRank.WORK);
+      if (highestWorkTarget != null) {
+        throw new IllegalStateException(
+            "claimNextWork must be the first Work lock acquisition in a transaction");
+      }
+    }
+
+    private void recordWorkLock(WorkTarget target) {
+      requireCanLockWork(target);
+      LockKey key = LockKey.work(target);
+      if (!locked.contains(key)) {
+        lock(key);
+        highestWorkTarget = target;
+      }
     }
 
     private void requireLocked(LockKey key) {
@@ -217,6 +357,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void insertSession(Session session) {
       checkOpen();
       Objects.requireNonNull(session, "session");
+      requireMillisecondPrecision(session.createdAt());
       requireAbsent(state.sessions, session.id(), "session");
       state.sessions.put(session.id(), session);
     }
@@ -231,6 +372,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void insertEntry(Entry entry) {
       checkOpen();
       Objects.requireNonNull(entry, "entry");
+      requireMillisecondPrecision(entry.createdAt());
       requireAbsent(state.entries, entry.id(), "entry");
       if (!state.sessions.containsKey(entry.sessionId())) {
         throw new IllegalArgumentException("session " + entry.sessionId() + " does not exist");
@@ -289,10 +431,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void insertThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
+      requireMillisecondPrecision(thread.createdAt());
+      requireMillisecondPrecision(thread.updatedAt());
       requireAbsent(state.threads, thread.id(), "thread");
       requireExistingEntry(thread.headEntryId());
+      requireCanLockThread(thread.id());
       state.threads.put(thread.id(), thread);
-      lock(LockKey.thread(thread.id()));
+      recordThreadLock(thread.id());
     }
 
     @Override
@@ -304,9 +449,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public Optional<ThreadState> lockThread(long id) {
       checkOpen();
+      requireCanLockThread(id);
       ThreadState thread = state.threads.get(id);
       if (thread != null) {
-        lock(LockKey.thread(id));
+        recordThreadLock(id);
       }
       return Optional.ofNullable(thread);
     }
@@ -315,6 +461,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void updateThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
+      requireMillisecondPrecision(thread.createdAt());
+      requireMillisecondPrecision(thread.updatedAt());
       requireLocked(LockKey.thread(thread.id()));
       ThreadState stored = state.threads.get(thread.id());
       if (stored == null) {
@@ -342,6 +490,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       // 锁序 Thread -> commands：先锁 Thread 才能读它的 mailbox。
       requireLocked(LockKey.thread(threadId));
+      requireCanLockRank(LockRank.COMMAND);
       List<ThreadCommand> queued =
           state.commands.values().stream()
               .filter(
@@ -359,7 +508,31 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public void insertCommands(List<ThreadCommand> commands) {
       checkOpen();
-      for (ThreadCommand command : List.copyOf(commands)) {
+      List<ThreadCommand> copied =
+          List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
+      Set<Long> ids = new HashSet<>();
+      Set<CommandSequenceKey> sequences = new HashSet<>();
+      Set<CommandClientKey> clientIds = new HashSet<>();
+      for (ThreadCommand command : copied) {
+        requireMillisecondPrecision(command.cancelledAt());
+        requireMillisecondPrecision(command.createdAt());
+        if (!ids.add(command.id())) {
+          throw new IllegalArgumentException("duplicate command id " + command.id());
+        }
+        if (!sequences.add(new CommandSequenceKey(command.threadId(), command.sequence()))) {
+          throw new IllegalArgumentException(
+              "duplicate command sequence "
+                  + command.sequence()
+                  + " on thread "
+                  + command.threadId());
+        }
+        if (!clientIds.add(new CommandClientKey(command.threadId(), command.clientCommandId()))) {
+          throw new IllegalArgumentException(
+              "duplicate clientCommandId "
+                  + command.clientCommandId()
+                  + " on thread "
+                  + command.threadId());
+        }
         requireAbsent(state.commands, command.id(), "command");
         if (command.state() != ThreadCommandState.QUEUED) {
           throw new IllegalArgumentException("inserted commands must be QUEUED");
@@ -370,6 +543,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread。
         requireLocked(LockKey.thread(command.threadId()));
         requireUniqueCommandKey(command);
+      }
+      if (!copied.isEmpty()) {
+        requireCanLockRank(LockRank.COMMAND);
+      }
+      for (ThreadCommand command : copied) {
         state.commands.put(command.id(), command);
         lock(LockKey.command(command.id()));
       }
@@ -399,7 +577,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public void updateCommands(List<ThreadCommand> commands) {
       checkOpen();
-      for (ThreadCommand command : List.copyOf(commands)) {
+      List<ThreadCommand> copied =
+          List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
+      Set<Long> ids = new HashSet<>();
+      for (ThreadCommand command : copied) {
+        requireMillisecondPrecision(command.cancelledAt());
+        requireMillisecondPrecision(command.createdAt());
+        if (!ids.add(command.id())) {
+          throw new IllegalArgumentException("duplicate command id " + command.id());
+        }
         requireLocked(LockKey.command(command.id()));
         ThreadCommand stored = state.commands.get(command.id());
         if (stored == null) {
@@ -411,6 +597,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
         requireLocked(LockKey.thread(command.threadId()));
         requireValidCommandLifecycle(stored, command);
         requireValidConsumedTurnStart(command);
+      }
+      for (ThreadCommand command : copied) {
         state.commands.put(command.id(), command);
       }
     }
@@ -480,9 +668,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public Optional<ModelInvocation> lockModelInvocation(long id) {
       checkOpen();
+      LockKey lockKey = LockKey.model(id);
+      requireCanLock(lockKey);
       ModelInvocation invocation = state.modelInvocations.get(id);
       if (invocation != null) {
-        lock(LockKey.model(id));
+        lock(lockKey);
       }
       return Optional.ofNullable(invocation);
     }
@@ -504,6 +694,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void insertModelInvocation(ModelInvocation invocation) {
       checkOpen();
       Objects.requireNonNull(invocation, "invocation");
+      requireMillisecondPrecision(invocation.createdAt());
+      requireMillisecondPrecision(invocation.updatedAt());
       requireAbsent(state.modelInvocations, invocation.id(), "model invocation");
       requireUniqueModelTurn(invocation);
       if (!state.threads.containsKey(invocation.threadId())) {
@@ -527,8 +719,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       requireValidModelBranch(invocation);
       requireValidModelResultEntry(invocation);
+      LockKey lockKey = LockKey.model(invocation.id());
+      requireCanLock(lockKey);
       state.modelInvocations.put(invocation.id(), invocation);
-      lock(LockKey.model(invocation.id()));
+      lock(lockKey);
     }
 
     /**
@@ -609,6 +803,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public void updateModelInvocation(ModelInvocation invocation) {
       checkOpen();
       Objects.requireNonNull(invocation, "invocation");
+      requireMillisecondPrecision(invocation.createdAt());
+      requireMillisecondPrecision(invocation.updatedAt());
       requireLocked(LockKey.model(invocation.id()));
       ModelInvocation stored = state.modelInvocations.get(invocation.id());
       if (stored == null) {
@@ -633,7 +829,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       ToolInvocation invocation = state.toolInvocations.get(id);
       if (invocation != null) {
-        lock(LockKey.tool(id));
+        lockTool(invocation);
       }
       return Optional.ofNullable(invocation);
     }
@@ -650,9 +846,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(long assistantEntryId) {
       checkOpen();
+      requireCanLockRank(LockRank.TOOL);
       List<ToolInvocation> invocations = loadToolInvocationsByAssistantEntryId(assistantEntryId);
+      requireCanLockTools(invocations);
       for (ToolInvocation invocation : invocations) {
-        lock(LockKey.tool(invocation.id()));
+        lockTool(invocation);
       }
       return invocations;
     }
@@ -660,7 +858,24 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public void insertToolInvocations(List<ToolInvocation> invocations) {
       checkOpen();
-      for (ToolInvocation invocation : List.copyOf(invocations)) {
+      List<ToolInvocation> copied =
+          List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
+      Set<Long> ids = new HashSet<>();
+      Set<ToolOrdinalKey> ordinals = new HashSet<>();
+      for (ToolInvocation invocation : copied) {
+        requireMillisecondPrecision(invocation.createdAt());
+        requireMillisecondPrecision(invocation.updatedAt());
+        if (!ids.add(invocation.id())) {
+          throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
+        }
+        if (!ordinals.add(
+            new ToolOrdinalKey(invocation.assistantEntryId(), invocation.ordinal()))) {
+          throw new IllegalArgumentException(
+              "duplicate tool invocation ordinal "
+                  + invocation.ordinal()
+                  + " on assistant entry "
+                  + invocation.assistantEntryId());
+        }
         requireAbsent(state.toolInvocations, invocation.id(), "tool invocation");
         // 新 durable invocation 初始状态不变量：READY / attempt=0 / approval=null / 无 terminal facts（record
         // 配合）。
@@ -672,8 +887,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         requireUniqueToolOrdinal(invocation);
         requireValidToolReferences(invocation);
+      }
+      requireCanLockTools(copied);
+      for (ToolInvocation invocation : copied) {
         state.toolInvocations.put(invocation.id(), invocation);
-        lock(LockKey.tool(invocation.id()));
+        lockTool(invocation);
       }
     }
 
@@ -803,7 +1021,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public void updateToolInvocations(List<ToolInvocation> invocations) {
       checkOpen();
-      for (ToolInvocation invocation : List.copyOf(invocations)) {
+      List<ToolInvocation> copied =
+          List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
+      Set<Long> ids = new HashSet<>();
+      Set<Long> resultEntryIds = new HashSet<>();
+      for (ToolInvocation invocation : copied) {
+        requireMillisecondPrecision(invocation.createdAt());
+        requireMillisecondPrecision(invocation.updatedAt());
+        if (!ids.add(invocation.id())) {
+          throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
+        }
+        if (invocation.resultEntryId() != null && !resultEntryIds.add(invocation.resultEntryId())) {
+          throw new IllegalArgumentException(
+              "duplicate tool resultEntryId " + invocation.resultEntryId());
+        }
         requireLocked(LockKey.tool(invocation.id()));
         ToolInvocation stored = state.toolInvocations.get(invocation.id());
         if (stored == null) {
@@ -812,6 +1043,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         ToolInvocation.validateTransition(stored, invocation);
         requireValidToolResultEntry(invocation);
+      }
+      for (ToolInvocation invocation : copied) {
         state.toolInvocations.put(invocation.id(), invocation);
       }
     }
@@ -827,9 +1060,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public Optional<Work> lockWork(WorkTarget target) {
       checkOpen();
       Objects.requireNonNull(target, "target");
+      requireCanLockWork(target);
       Work work = state.works.get(target);
       if (work != null) {
-        lock(LockKey.work(target));
+        recordWorkLock(target);
       }
       return Optional.ofNullable(work);
     }
@@ -839,6 +1073,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
+      requireMillisecondPrecision(now);
+      requireCanLockWork(claim.target());
       Work work = state.works.get(claim.target());
       if (work == null
           || !claim.leaseToken().equals(work.leaseToken())
@@ -847,7 +1083,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         // 行缺失 / token 不匹配 / lease 已过期都是正常竞态：lost / stale ownership，不以异常表达。
         return Optional.empty();
       }
-      lock(LockKey.work(claim.target()));
+      recordWorkLock(claim.target());
       return Optional.of(work);
     }
 
@@ -855,11 +1091,14 @@ public final class InMemoryHarnessStore implements HarnessStore {
     public boolean deleteWork(WorkTarget target) {
       checkOpen();
       Objects.requireNonNull(target, "target");
-      boolean existed = state.works.remove(target) != null;
-      if (existed) {
-        lock(LockKey.work(target));
+      if (!state.works.containsKey(target)) {
+        return false;
       }
-      return existed;
+      requireWorkOwnerLocked(target);
+      requireCanLockWork(target);
+      state.works.remove(target);
+      recordWorkLock(target);
+      return true;
     }
 
     @Override
@@ -867,12 +1106,49 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(target, "target");
       Objects.requireNonNull(requestedAt, "requestedAt");
-      requireTargetExists(target);
+      requireMillisecondPrecision(requestedAt);
+      requireWorkOwnerLocked(target);
+      requireCanLockWork(target);
       Work existing = state.works.get(target);
       Work next =
           existing == null ? Work.initial(target, requestedAt) : existing.request(requestedAt);
       state.works.put(target, next);
-      lock(LockKey.work(target));
+      recordWorkLock(target);
+    }
+
+    private void requireWorkOwnerLocked(WorkTarget target) {
+      long threadId =
+          switch (target.type()) {
+            case THREAD -> {
+              if (!state.threads.containsKey(target.id())) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              yield target.id();
+            }
+            case MODEL -> {
+              ModelInvocation model = state.modelInvocations.get(target.id());
+              if (model == null) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              yield model.threadId();
+            }
+            case TOOL -> {
+              ToolInvocation tool = state.toolInvocations.get(target.id());
+              if (tool == null) {
+                throw new IllegalArgumentException("work target does not exist: " + target);
+              }
+              ModelInvocation model = state.modelInvocations.get(tool.modelInvocationId());
+              if (model == null) {
+                throw new IllegalArgumentException(
+                    "model invocation "
+                        + tool.modelInvocationId()
+                        + " does not exist for work target "
+                        + target);
+              }
+              yield model.threadId();
+            }
+          };
+      requireLocked(LockKey.thread(threadId));
     }
 
     private void requireTargetExists(WorkTarget target) {
@@ -895,6 +1171,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(now, "now");
       Objects.requireNonNull(leaseToken, "leaseToken");
       Objects.requireNonNull(leaseUntil, "leaseUntil");
+      requireMillisecondPrecision(now);
+      requireMillisecondPrecision(leaseUntil);
+      requireCanClaimWork();
       List<Work> due =
           state.works.values().stream()
               .filter(work -> work.target().type() == targetType)
@@ -910,8 +1189,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Work candidate = due.get(0);
       requireTargetExists(candidate.target());
       Work claimed = candidate.claim(now, leaseToken, leaseUntil);
+      requireCanLockWork(claimed.target());
       state.works.put(claimed.target(), claimed);
-      lock(LockKey.work(claimed.target()));
+      recordWorkLock(claimed.target());
       return Optional.of(
           new ClaimedWork(
               claimed.target(), claimed.wakeVersion(), claimed.leaseToken(), claimed.leaseUntil()));
@@ -923,6 +1203,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
       Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
+      requireMillisecondPrecision(now);
+      requireMillisecondPrecision(newLeaseUntil);
       Work work = lockedWork(claim.target());
       Work renewed = work.renew(claim.leaseToken(), now, newLeaseUntil);
       state.works.put(renewed.target(), renewed);
@@ -933,13 +1215,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
+      requireMillisecondPrecision(now);
       Work work = state.works.get(claim.target());
       if (work == null) {
         // 行不存在意味着没有可验证的 lease：completed 的 ownership 已丢失，不能幂等吞掉终态。
         throw new IllegalStateException(
             "work does not exist for target " + claim.target() + " (lost ownership)");
       }
-      lock(LockKey.work(claim.target()));
+      requireCanLockWork(claim.target());
+      recordWorkLock(claim.target());
       Optional<Work> next = work.complete(claim.leaseToken(), claim.claimedWakeVersion(), now);
       if (next.isEmpty()) {
         state.works.remove(claim.target());
@@ -955,13 +1239,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
       Objects.requireNonNull(requestedAt, "requestedAt");
+      requireMillisecondPrecision(now);
+      requireMillisecondPrecision(requestedAt);
       Work work = lockedWork(claim.target());
       Work next = work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, requestedAt);
       state.works.put(next.target(), next);
     }
 
     private Work lockedWork(WorkTarget target) {
-      lock(LockKey.work(target));
+      requireCanLockWork(target);
+      recordWorkLock(target);
       Work work = state.works.get(target);
       if (work == null) {
         throw new IllegalStateException("work does not exist for target " + target);

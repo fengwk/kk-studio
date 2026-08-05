@@ -646,10 +646,9 @@ final class HarnessRuntimeTestSupport {
 
   /** Claims the THREAD Work row so it exists with an active lease. */
   static void seedClaimedThreadWork(InMemoryHarnessStore store, long threadId) {
+    seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T0);
           tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", T3);
           return null;
         });

@@ -12,6 +12,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * In-memory transaction semantics: commit visibility, RuntimeException / Error rollback, nextId
  * restore on rollback, and rejection of escaped / nested transaction handles.
@@ -123,6 +127,26 @@ class InMemoryHarnessStoreTransactionTest {
                 }));
     assertThrows(IllegalStateException.class, escaped[0]::nextId);
     assertThrows(IllegalStateException.class, () -> escaped[0].findSession(1));
+  }
+
+  @Test
+  void transactionHandleRejectsCrossThreadUseWhileCallbackIsActive() {
+    try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+      store.transaction(
+          tx -> {
+            IllegalStateException thrown =
+                CompletableFuture.supplyAsync(
+                        () ->
+                            assertThrows(
+                                IllegalStateException.class, () -> tx.insertSession(session(1))),
+                        executor)
+                    .join();
+            assertEquals(
+                "transaction handle may only be used by its owner thread", thrown.getMessage());
+            return null;
+          });
+    }
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
   }
 
   @Test

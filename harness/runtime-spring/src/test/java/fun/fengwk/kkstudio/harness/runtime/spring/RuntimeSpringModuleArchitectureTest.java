@@ -12,9 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
-/**
- * Guards the adapter-only source root before concrete Spring/PostgreSQL/Redis dependencies arrive.
- */
+/** Guards the adapter-only source root as concrete infrastructure capabilities are introduced. */
 class RuntimeSpringModuleArchitectureTest {
 
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.harness.runtime.spring";
@@ -23,7 +21,8 @@ class RuntimeSpringModuleArchitectureTest {
           "java.",
           "javax.",
           "fun.fengwk.kkstudio.harness.runtime.",
-          "fun.fengwk.kkstudio.harness.tool.");
+          "fun.fengwk.kkstudio.harness.tool.",
+          "org.springframework.");
 
   /** Every production source stays under the adapter package and imports no Core/Web technology. */
   @Test

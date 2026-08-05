@@ -183,6 +183,7 @@ class WorkHeartbeatTest {
 
     fixture.store.transaction(
         tx -> {
+          tx.lockThread(fixture.claimed.target().id()).orElseThrow();
           tx.deleteWork(fixture.claimed.target());
           return null;
         });

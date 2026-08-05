@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -232,11 +231,7 @@ class ToolProcessorRecoveryTest {
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -266,11 +261,7 @@ class ToolProcessorRecoveryTest {
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -302,14 +293,7 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.NOW,
                 "token-old")));
     fixture.clock.advance(Duration.ofSeconds(61));
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId),
-              ToolProcessorTestSupport.NOW);
-          return null;
-        });
+    ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
     ClaimedWork recovered =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, fixture.clock.instant(), "token-new");
@@ -467,14 +451,7 @@ class ToolProcessorRecoveryTest {
     threadA.start();
     assertTrue(inStart.await(5, TimeUnit.SECONDS));
 
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId),
-              ToolProcessorTestSupport.NOW);
-          return null;
-        });
+    ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
     ClaimedWork claimedB =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW, "token-B");
@@ -527,11 +504,7 @@ class ToolProcessorRecoveryTest {
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -733,12 +706,7 @@ class ToolProcessorRecoveryTest {
                 new Class<?>[] {ScheduledExecutorService.class},
                 (proxy, method, args) -> {
                   if (method.getName().equals("scheduleAtFixedRate")) {
-                    fixture.store.transaction(
-                        tx -> {
-                          tx.deleteWork(
-                              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                          return null;
-                        });
+                    ToolProcessorTestSupport.deleteToolWork(fixture);
                     throw new RejectedExecutionException("shutdown");
                   }
                   return method.invoke(base, args);
@@ -961,11 +929,7 @@ class ToolProcessorRecoveryTest {
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -1148,16 +1112,7 @@ class ToolProcessorRecoveryTest {
                 (proxy, method, args) -> {
                   if (method.getName().equals("scheduleAtFixedRate")) {
                     processorRef.get().cancel(cancelId.get());
-                    fixtureRef
-                        .get()
-                        .store
-                        .transaction(
-                            tx -> {
-                              tx.deleteWork(
-                                  new WorkTarget(
-                                      WorkTargetType.TOOL, fixtureRef.get().toolInvocationId));
-                              return null;
-                            });
+                    ToolProcessorTestSupport.deleteToolWork(fixtureRef.get());
                     return null;
                   }
                   return method.invoke(base, args);

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 
 import java.time.Clock;
@@ -47,7 +48,7 @@ final class WorkHeartbeat {
     this.store = Objects.requireNonNull(store, "store");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = Objects.requireNonNull(clock, "clock");
+    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.onLostOwnership = Objects.requireNonNull(onLostOwnership, "onLostOwnership");
   }
 

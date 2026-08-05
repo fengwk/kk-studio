@@ -15,8 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.lang.reflect.Proxy;
@@ -384,11 +382,7 @@ class ToolProcessorPreflightTest {
                             ToolProcessorTestSupport.NOW))));
     thread.start();
     assertTrue(inPreflight.await(5, TimeUnit.SECONDS));
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
     release.countDown();
     thread.join(5000);
 
@@ -521,11 +515,7 @@ class ToolProcessorPreflightTest {
     Thread thread = new Thread(() -> result.set(fixture.processor.process(claimed)));
     thread.start();
     assertTrue(inPreflight.await(5, TimeUnit.SECONDS));
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
     release.countDown();
     thread.join(5000);
 
@@ -839,10 +829,6 @@ class ToolProcessorPreflightTest {
   }
 
   private void deleteToolWork(ToolProcessorTestSupport.Fixture fixture) {
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
   }
 }
