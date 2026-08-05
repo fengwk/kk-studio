@@ -81,8 +81,13 @@ class ToolGatewayTest {
     assertThrows(IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofSeconds(-1)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofNanos(1_500_000)));
     assertThrows(NullPointerException.class, () -> new ToolGateway.Overloaded(null));
     assertThrows(IllegalArgumentException.class, () -> new ToolGateway.Overloaded(Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolGateway.Overloaded(Duration.ofNanos(1_500_000)));
     assertEquals(
         Duration.ofSeconds(3), new ToolGateway.Overloaded(Duration.ofSeconds(3)).retryAfter());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Rejected(null));

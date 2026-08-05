@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationReque
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -59,10 +60,7 @@ public interface ModelGateway {
   /** 肯定未开始；调用方应稍后按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
   record Busy(Duration retryAfter) implements StartResult {
     public Busy {
-      Objects.requireNonNull(retryAfter, "retryAfter");
-      if (retryAfter.isZero() || retryAfter.isNegative()) {
-        throw new IllegalArgumentException("retryAfter must be strictly positive");
-      }
+      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 

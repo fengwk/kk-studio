@@ -26,4 +26,16 @@ public final class HarnessStoreTime {
     }
     return value;
   }
+
+  /** Returns a positive whole-millisecond duration suitable for durable time arithmetic. */
+  public static Duration requireWholeMillisecondDuration(Duration value, String name) {
+    Objects.requireNonNull(value, name);
+    if (value.isZero() || value.isNegative() || value.toMillis() <= 0) {
+      throw new IllegalArgumentException(name + " must be at least one millisecond");
+    }
+    if (value.getNano() % 1_000_000 != 0) {
+      throw new IllegalArgumentException(name + " must use whole milliseconds");
+    }
+    return value;
+  }
 }
