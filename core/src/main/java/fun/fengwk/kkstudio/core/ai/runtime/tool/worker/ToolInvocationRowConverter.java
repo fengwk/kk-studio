@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
@@ -57,7 +58,7 @@ final class ToolInvocationRowConverter {
         row.getToolCallId(),
         descriptor,
         row.getArgumentsJson(),
-        row.getEnvironmentName(),
+        row.getEnvironmentName() == null ? null : new EnvironmentId(row.getEnvironmentName()),
         row.getExecutionEpoch(),
         InvocationStatus.valueOf(row.getStatus()),
         row.getAttempt(),

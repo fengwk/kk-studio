@@ -10,7 +10,7 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 
 /**
- * WebSocket transport registration for the Daemon v1 Environment gateway.
+ * WebSocket transport registration for the Daemon v2 Environment gateway.
  *
  * <p>Daemon {@code READY} frames may exceed Tomcat's default 8 KiB text buffer when skills are
  * advertised. A tolerant {@link ServletServerContainerFactoryBean} raises the JSR-356 {@link

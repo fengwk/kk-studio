@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.ai.environment.registry;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.time.Instant;
@@ -14,49 +15,61 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Thread-safe server-memory Environment registry keyed by non-blank {@code environmentName}.
+ * Thread-safe server-memory Environment registry keyed by canonical {@link EnvironmentId}.
  *
- * <p>First connected name wins: a later HELLO for an occupied name is rejected without displacing
- * the original entry. Entries are removed on disconnect. Nothing is persisted.
+ * <p>First connected id wins: a later HELLO for an occupied id is rejected without displacing the
+ * original entry. Entries are removed on disconnect. Display names are metadata only: the same name
+ * may be bound to different ids, and routing never falls back to a name. Nothing is persisted.
  */
 @Component
 public class LiveEnvironmentRegistry {
 
-  private final Map<String, LiveEnvironment> byName = new LinkedHashMap<>();
+  private final Map<EnvironmentId, LiveEnvironment> byId = new LinkedHashMap<>();
 
   public LiveEnvironmentRegistry() {}
 
   /**
-   * Attempts to bind {@code environmentName} to {@code connection} after HELLO authentication.
+   * Attempts to bind {@code environmentId} (with display {@code environmentName}) to {@code
+   * connection} after HELLO authentication.
    *
-   * @return true when this connection becomes the first occupant of the name
+   * @return true when this connection becomes the first occupant of the id
    */
   public synchronized boolean tryBind(
-      String environmentName, EnvironmentDaemonConnection connection, Instant now) {
-    String name = requireNonBlank(environmentName, "environmentName");
+      EnvironmentId environmentId,
+      String environmentName,
+      EnvironmentDaemonConnection connection,
+      Instant now) {
+    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(connection, "connection");
     Objects.requireNonNull(now, "now");
-    LiveEnvironment existing = byName.get(name);
+    LiveEnvironment existing = byId.get(environmentId);
     if (existing != null) {
       return existing.connection().connectionId().equals(connection.connectionId());
     }
-    byName.put(
-        name,
-        new LiveEnvironment(name, LiveEnvironmentStatus.CONNECTING, connection, List.of(), now));
+    byId.put(
+        environmentId,
+        new LiveEnvironment(
+            environmentId,
+            requireNonBlank(environmentName, "environmentName"),
+            LiveEnvironmentStatus.CONNECTING,
+            connection,
+            List.of(),
+            now));
     return true;
   }
 
-  /** Replaces the daemon's advertised skills for a bound name owned by {@code connection}. */
+  /** Replaces the daemon's advertised skills for a bound id owned by {@code connection}. */
   public synchronized void updateSkills(
-      String environmentName,
+      EnvironmentId environmentId,
       EnvironmentDaemonConnection connection,
       List<DaemonSkillDescriptor> skills,
       Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    byName.put(
-        current.environmentName(),
+    LiveEnvironment current = requireOwned(environmentId, connection);
+    byId.put(
+        current.id(),
         new LiveEnvironment(
-            current.environmentName(),
+            current.id(),
+            current.name(),
             current.status(),
             current.connection(),
             List.copyOf(Objects.requireNonNull(skills, "skills")),
@@ -64,30 +77,32 @@ public class LiveEnvironmentRegistry {
   }
 
   /**
-   * Marks the bound name READY so gateway workers may dispatch against it. Callers own the
+   * Marks the bound id READY so gateway workers may dispatch against it. Callers own the
    * skills-before-READY transition; an empty skills list remains valid.
    */
   public synchronized void markReady(
-      String environmentName, EnvironmentDaemonConnection connection, Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    byName.put(
-        current.environmentName(),
+      EnvironmentId environmentId, EnvironmentDaemonConnection connection, Instant now) {
+    LiveEnvironment current = requireOwned(environmentId, connection);
+    byId.put(
+        current.id(),
         new LiveEnvironment(
-            current.environmentName(),
+            current.id(),
+            current.name(),
             LiveEnvironmentStatus.READY,
             current.connection(),
             current.skills(),
             Objects.requireNonNull(now, "now")));
   }
 
-  /** Refreshes last-seen for a bound name owned by {@code connection}. */
+  /** Refreshes last-seen for a bound id owned by {@code connection}. */
   public synchronized void heartbeat(
-      String environmentName, EnvironmentDaemonConnection connection, Instant now) {
-    LiveEnvironment current = requireOwned(environmentName, connection);
-    byName.put(
-        current.environmentName(),
+      EnvironmentId environmentId, EnvironmentDaemonConnection connection, Instant now) {
+    LiveEnvironment current = requireOwned(environmentId, connection);
+    byId.put(
+        current.id(),
         new LiveEnvironment(
-            current.environmentName(),
+            current.id(),
+            current.name(),
             current.status(),
             current.connection(),
             current.skills(),
@@ -95,47 +110,48 @@ public class LiveEnvironmentRegistry {
   }
 
   /**
-   * Removes the entry only when {@code connection} still owns {@code environmentName}. Safe to call
+   * Removes the entry only when {@code connection} still owns {@code environmentId}. Safe to call
    * on every disconnect path.
    */
   public synchronized void unregister(
-      String environmentName, EnvironmentDaemonConnection connection) {
-    if (environmentName == null || environmentName.isBlank() || connection == null) {
+      EnvironmentId environmentId, EnvironmentDaemonConnection connection) {
+    if (environmentId == null || connection == null) {
       return;
     }
-    LiveEnvironment current = byName.get(environmentName);
+    LiveEnvironment current = byId.get(environmentId);
     if (current != null && current.connection().connectionId().equals(connection.connectionId())) {
-      byName.remove(environmentName);
+      byId.remove(environmentId);
     }
   }
 
-  public synchronized Optional<LiveEnvironment> find(String environmentName) {
-    if (environmentName == null || environmentName.isBlank()) {
+  public synchronized Optional<LiveEnvironment> find(EnvironmentId environmentId) {
+    if (environmentId == null) {
       return Optional.empty();
     }
-    return Optional.ofNullable(byName.get(environmentName));
+    return Optional.ofNullable(byId.get(environmentId));
   }
 
-  public synchronized boolean isReady(String environmentName) {
-    return find(environmentName).map(LiveEnvironment::isReady).orElse(false);
+  public synchronized boolean isReady(EnvironmentId environmentId) {
+    return find(environmentId).map(LiveEnvironment::isReady).orElse(false);
   }
 
   /** Compact snapshot list for read-only API, insertion order preserved. */
   public synchronized List<LiveEnvironment> list() {
-    return List.copyOf(new ArrayList<>(byName.values()));
+    return List.copyOf(new ArrayList<>(byId.values()));
   }
 
   public synchronized List<LiveEnvironment> listReady() {
-    return byName.values().stream().filter(LiveEnvironment::isReady).toList();
+    return byId.values().stream().filter(LiveEnvironment::isReady).toList();
   }
 
   private LiveEnvironment requireOwned(
-      String environmentName, EnvironmentDaemonConnection connection) {
-    String name = requireNonBlank(environmentName, "environmentName");
+      EnvironmentId environmentId, EnvironmentDaemonConnection connection) {
+    Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(connection, "connection");
-    LiveEnvironment current = byName.get(name);
+    LiveEnvironment current = byId.get(environmentId);
     if (current == null || !current.connection().connectionId().equals(connection.connectionId())) {
-      throw new IllegalStateException("environment is not bound to this connection: " + name);
+      throw new IllegalStateException(
+          "environment is not bound to this connection: " + environmentId);
     }
     return current;
   }

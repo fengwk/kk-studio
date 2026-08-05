@@ -16,6 +16,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.execution.ActivationState;
+import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.mapper.InteractionMapper;
+import fun.fengwk.kkstudio.core.ai.runtime.interaction.store.model.InteractionDO;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
@@ -24,10 +26,9 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ClaimedToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationUpdateOutcome;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -36,7 +37,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -58,7 +58,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * PostgreSQL 17 激活驱动 ToolInvocation worker 事务的合约测试：锁顺序 （Thread → ToolInvocation →
@@ -72,8 +71,15 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
   private static final Duration LONG_LEASE = Duration.ofMinutes(5);
   private static final Duration SHORT_LEASE = Duration.ofMillis(50);
 
+  /** Environment 列持久化 canonical id；测试只使用规范 UUID 文本，绝不使用显示名。 */
+  private static final EnvironmentId ENVIRONMENT_ID =
+      new EnvironmentId("5f8fad5b-d9cb-469f-a165-70867728950e");
+
+  private static final EnvironmentId OTHER_ENVIRONMENT_ID =
+      new EnvironmentId("6f8fad5b-d9cb-469f-a165-70867728950e");
+
   @Autowired private PostgresqlToolInvocationTransactions transactions;
-  @Autowired private ArtifactStore artifactStore;
+  @Autowired private InteractionMapper interactionMapper;
   // 禁用 Gateway 的 READY 配线：持久化激活分发切片负责唤醒。
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
@@ -111,20 +117,20 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void claimRoutesEnvironmentActivationByEnvironmentName() throws Exception {
-    Fixture fixture = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
 
     ClaimedToolInvocation claimed = claim(fixture, "env-owner", BASE, LONG_LEASE);
 
     assertFalse(claimed.recoveredLease());
     ActivationRow activation = activationFor(fixture.invocationId);
-    assertEquals("env-a", activation.environmentName());
+    assertEquals(ENVIRONMENT_ID.value(), activation.environmentName());
     assertEquals(claimed.invocation().workerLease().until(), activation.wakeAt());
   }
 
   @Test
   void claimRejectsActivationEnvironmentMismatchWithoutMutatingInvocation() throws Exception {
-    Fixture fixture = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
-    setActivationEnvironment(fixture.invocationId, "env-b");
+    Fixture fixture = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
+    setActivationEnvironment(fixture.invocationId, OTHER_ENVIRONMENT_ID.value());
 
     assertThrows(
         IllegalStateException.class,
@@ -281,9 +287,9 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void ownedMutationRejectsActivationEnvironmentMismatch() throws Exception {
-    Fixture fixture = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
-    setActivationEnvironment(fixture.invocationId, "env-b");
+    setActivationEnvironment(fixture.invocationId, OTHER_ENVIRONMENT_ID.value());
 
     assertThrows(
         IllegalStateException.class,
@@ -359,8 +365,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void terminalEnvironmentToolActivatesNextRouteHead() throws Exception {
-    Fixture first = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
-    Fixture second = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture first = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
+    Fixture second = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
     setInvocationCreatedAt(first.invocationId, BASE);
     setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
     setActivationState(second.invocationId, ActivationState.PARKED);
@@ -540,7 +546,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     Fixture fixture = newQueued(null, ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "worker-a", BASE, LONG_LEASE);
     suppressRunnableUpdates();
-    AtomicReference<ArtifactRef> artifact = new AtomicReference<>();
+    AtomicLong probeId = new AtomicLong();
 
     IllegalStateException error =
         assertThrows(
@@ -549,9 +555,14 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
                 transactions.completeSuccess(
                     claimed,
                     () -> {
-                      artifact.set(
-                          artifactStore.save(
-                              "text/plain", "utf-8", "artifact".getBytes(StandardCharsets.UTF_8)));
+                      probeId.set(ids.incrementAndGet());
+                      InteractionDO probe = new InteractionDO();
+                      probe.setId(probeId.get());
+                      probe.setToolInvocationId(fixture.invocationId);
+                      probe.setRequestJson("{}");
+                      probe.setStatus("OPEN");
+                      probe.setCreatedAt(OffsetDateTime.ofInstant(BASE, ZoneOffset.UTC));
+                      interactionMapper.insertOpen(probe);
                       return result(fixture.toolCallId, "done");
                     },
                     BASE,
@@ -563,8 +574,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
     assertEquals("worker-a", row.getWorkerToken());
     assertNull(row.getResultJson());
     assertFalse(threadRunnable(fixture.threadId));
-    assertNotNull(artifact.get());
-    assertTrue(artifactStore.find(artifact.get().artifactId()).isEmpty());
+    assertNull(interactionMapper.find(probeId.get()));
   }
 
   @Test
@@ -603,19 +613,22 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void persistPermissionAllowedRejectsRouteChangesWithoutMutatingTheInvocation() throws Exception {
-    Fixture fixture = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "env-owner", BASE, LONG_LEASE);
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             transactions.persistPermissionAllowed(
-                claimed, ToolBinding.of(fixture.descriptor, "env-b"), "{\"changed\":true}", BASE));
+                claimed,
+                ToolBinding.of(fixture.descriptor, OTHER_ENVIRONMENT_ID.value()),
+                "{\"changed\":true}",
+                BASE));
 
     ToolInvocationDO row = rowFor(fixture.invocationId);
     assertEquals("RUNNING", row.getStatus());
     assertEquals("PENDING", row.getPermissionState());
-    assertEquals("env-a", row.getEnvironmentName());
+    assertEquals(ENVIRONMENT_ID.value(), row.getEnvironmentName());
     assertEquals("{}", row.getArgumentsJson());
     assertEquals(
         claimed.invocation().workerLease().until(), activationFor(fixture.invocationId).wakeAt());
@@ -702,11 +715,11 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void awaitPermissionRejectsRouteChange() throws Exception {
-    Fixture fixture = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture fixture = newPendingQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
     ClaimedToolInvocation claimed = claim(fixture, "env-worker", BASE, LONG_LEASE);
     PermissionPromptPreview prompt = new PermissionPromptPreview("environmentTool", "/work", "{}");
     // 最终 binding 修改了 environment，因此必须被拒绝。
-    ToolBinding badBinding = ToolBinding.of(fixture.descriptor, "env-b");
+    ToolBinding badBinding = ToolBinding.of(fixture.descriptor, OTHER_ENVIRONMENT_ID.value());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -715,8 +728,8 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
 
   @Test
   void denyPermissionTerminatesWakesThreadAndActivatesNextEnvironmentHead() throws Exception {
-    Fixture first = newPendingQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
-    Fixture second = newQueued("env-a", ToolSideEffect.READ_ONLY, 1L);
+    Fixture first = newPendingQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
+    Fixture second = newQueued(ENVIRONMENT_ID.value(), ToolSideEffect.READ_ONLY, 1L);
     setInvocationCreatedAt(first.invocationId, BASE);
     setInvocationCreatedAt(second.invocationId, BASE.plusSeconds(1));
     setActivationState(second.invocationId, ActivationState.PARKED);
@@ -745,7 +758,7 @@ class PostgresqlToolInvocationTransactionsIntegrationTest extends PostgresSpring
         ActivationState.SCHEDULED,
         nextActivation.activationState(),
         "deny must activate the next environment head");
-    assertEquals("env-a", nextActivation.environmentName());
+    assertEquals(ENVIRONMENT_ID.value(), nextActivation.environmentName());
   }
 
   @Test

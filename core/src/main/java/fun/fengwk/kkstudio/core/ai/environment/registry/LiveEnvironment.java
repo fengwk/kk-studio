@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.environment.registry;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -10,20 +11,23 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Snapshot of one server-memory Environment entry keyed by non-blank {@code environmentName}.
+ * Snapshot of one server-memory Environment entry keyed by canonical {@link EnvironmentId}.
  *
- * <p>Environment tools are fixed by {@link EnvironmentToolCatalog}; READY only publishes the
- * daemon's available skills.
+ * <p>{@code name} is display-only metadata bound at HELLO; it may be reused across different ids
+ * and never participates in routing. Environment tools are fixed by {@link EnvironmentToolCatalog};
+ * READY only publishes the daemon's available skills.
  */
 public record LiveEnvironment(
-    String environmentName,
+    EnvironmentId id,
+    String name,
     LiveEnvironmentStatus status,
     EnvironmentDaemonConnection connection,
     List<DaemonSkillDescriptor> skills,
     Instant lastSeenAt) {
 
   public LiveEnvironment {
-    environmentName = requireNonBlank(environmentName, "environmentName");
+    id = Objects.requireNonNull(id, "id");
+    name = requireNonBlank(name, "name");
     status = Objects.requireNonNull(status, "status");
     connection = Objects.requireNonNull(connection, "connection");
     skills = List.copyOf(Objects.requireNonNull(skills, "skills"));

@@ -35,7 +35,8 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
 
   private static LiveEnvironmentDTO toDto(LiveEnvironment environment) {
     LiveEnvironmentDTO dto = new LiveEnvironmentDTO();
-    dto.setName(environment.environmentName());
+    dto.setId(environment.id().value());
+    dto.setName(environment.name());
     dto.setStatus(environment.status().name());
     dto.setLastSeen(environment.lastSeenAt());
     List<LiveEnvironmentToolDTO> tools = new ArrayList<>();

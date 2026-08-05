@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -205,7 +206,9 @@ public final class DatabaseTurnExecutionResolver implements TurnExecutionResolve
     if (environmentName == null) {
       return Optional.empty();
     }
-    return environmentRegistry.find(environmentName).filter(LiveEnvironment::isReady);
+    return environmentRegistry
+        .find(new EnvironmentId(environmentName))
+        .filter(LiveEnvironment::isReady);
   }
 
   private List<ToolBinding> resolveTools(

@@ -5,7 +5,7 @@ import jakarta.websocket.server.ServerContainer;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 /**
- * Tolerant variant of {@link ServletServerContainerFactoryBean} for the Daemon v1 Environment
+ * Tolerant variant of {@link ServletServerContainerFactoryBean} for the Daemon v2 Environment
  * gateway. Detects whether the JSR-356 {@link ServerContainer} attribute is actually present in the
  * {@link ServletContext} and only delegates to the Spring standard configuration path when it is;
  * otherwise the bean becomes a no-op so non-container Spring contexts (MockMvc, {@code
