@@ -10,17 +10,29 @@ import java.time.Duration;
 
 class HarnessRuntimePropertiesTest {
 
-  /** Deployment defaults keep durable worker leases, timers, and Thread concurrency bounded. */
+  /** 部署默认值保持 worker 开关、资源边界、Redis overlay 与 processor/dispatcher 参数有界。 */
   @Test
-  void providesModelWorkerDeploymentDefaults() {
+  void providesRuntimeDeploymentDefaults() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
 
-    assertEquals(Duration.ofSeconds(30), properties.getThreadReconcileLeaseDuration());
-    assertEquals(8, properties.getThreadWorkerConcurrency());
-    assertEquals(16, properties.getThreadReconcilerMaxSteps());
-    assertEquals(Duration.ofSeconds(30), properties.getModelWorkerLeaseDuration());
-    assertEquals(Duration.ofSeconds(10), properties.getModelWorkerHeartbeatInterval());
-    assertEquals(Duration.ofMillis(100), properties.getModelWorkerActivityFlushInterval());
+    assertEquals(true, properties.isWorkersEnabled());
+    assertEquals(16 * 1024 * 1024, properties.getResourceMaxBytes());
+    assertEquals("kk-studio:harness:realtime:", properties.getRedisPrefix());
+    assertEquals(5_000L, properties.getRedisMaxLength());
+    assertEquals(Duration.ofSeconds(30), properties.getProcessorLeaseDuration());
+    assertEquals(Duration.ofSeconds(10), properties.getProcessorHeartbeatInterval());
+    assertEquals(16, properties.getThreadStepLimit());
+    assertEquals(Duration.ofSeconds(1), properties.getThreadResolveFailureDelay());
+    assertEquals(Duration.ofMillis(100), properties.getModelCheckpointFlushInterval());
+    assertEquals(Duration.ofSeconds(1), properties.getModelDispatchBusyFallbackDelay());
+    assertEquals(Duration.ofSeconds(1), properties.getToolPreflightFailureDelay());
+    assertEquals(Duration.ofSeconds(1), properties.getToolDispatchBusyFallbackDelay());
+    assertEquals(Duration.ofSeconds(30), properties.getDispatcherLeaseDuration());
+    assertEquals(Duration.ofSeconds(1), properties.getDispatcherPollInterval());
+    assertEquals(Duration.ofSeconds(1), properties.getDispatcherRejectionDelay());
+    assertEquals(64, properties.getDispatcherMaxDispatchTasks());
+    assertEquals(16, properties.getDispatcherWorkerConcurrency());
+    assertEquals(64, properties.getDispatcherWorkerQueueCapacity());
   }
 
   /** Relative workdirs resolve under environmentRoot while traversal and absolute escapes fail. */

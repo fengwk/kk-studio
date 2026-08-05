@@ -4,6 +4,9 @@ import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.util.List;
 
 /** MyBatis mapper for idempotent Chat↔Thread associations. */
 @Mapper
@@ -16,4 +19,13 @@ public interface ChatThreadMapper extends BaseMapper {
       on conflict (chat_id, thread_id) do nothing
       """)
   int insert(@Param("chatId") long chatId, @Param("threadId") long threadId);
+
+  @Select(
+      """
+      select thread_id
+      from chat_thread
+      where chat_id = #{chatId}
+      order by created_at desc, thread_id desc
+      """)
+  List<Long> listThreadIds(@Param("chatId") long chatId);
 }

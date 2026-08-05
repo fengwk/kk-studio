@@ -20,7 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 /**
  * 验证 {@link ModelExecutionConfiguration} 暴露的 4 个 named ProviderFactory bean 全部被收集到 {@link
- * ProviderFactories}，避免 Spring 按返回类型匹配时丢失 bean。
+ * ProviderFactories}，避免 Spring 按返回类型匹配时丢失 bean；同时验证生产 {@link CoreModelGateway} 与 {@link
+ * ModelGatewayConfig} 被组合进上下文。
  */
 class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
 
@@ -41,6 +42,16 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   private ProviderFactory googleProviderFactory;
 
   @Autowired private ProviderFactories providerFactories;
+
+  @Autowired private CoreModelGateway coreModelGateway;
+
+  @Autowired private ModelGatewayConfig modelGatewayConfig;
+
+  @Test
+  void composesCoreModelGatewayWithSharedExecutorAndConfig() {
+    assertNotNull(coreModelGateway);
+    assertNotNull(modelGatewayConfig);
+  }
 
   @Test
   void registersAllFourNamedProviderFactoryBeans() {

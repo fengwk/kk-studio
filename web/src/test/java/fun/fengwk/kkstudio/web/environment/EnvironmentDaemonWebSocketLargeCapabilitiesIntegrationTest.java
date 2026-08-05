@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayPropert
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
@@ -63,9 +62,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @Autowired private LiveEnvironmentRegistry registry;
   @Autowired private EnvironmentGatewayProperties properties;
 
-  @MockitoBean private ToolInvocationTransactions transactions;
   @MockitoBean private ResourceStore resourceStore;
-  // The Gateway's READY wake is wired by the ExecutionActivation dispatcher slice; suppress here.
+  // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
   /**

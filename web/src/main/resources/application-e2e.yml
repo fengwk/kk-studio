@@ -24,7 +24,7 @@ kk-studio:
   harness:
     environment-gateway:
       daemon-token: e2e-daemon-token
-      max-artifact-bytes: 8388608
+       max-resource-bytes: 8388608
       max-message-bytes: 16777216
 
 logging:

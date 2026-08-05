@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.realtime;
 
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTarget;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -20,11 +18,27 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
 
   long threadId();
 
-  ExecutionTarget subject();
+  Subject subject();
 
   RealtimeEventType type();
 
   Instant createdAt();
+
+  /** durable subject 的不可变 identity：Invocation kind + durable id。 */
+  record Subject(SubjectKind kind, long id) {
+    public Subject {
+      kind = Objects.requireNonNull(kind, "kind");
+      if (id <= 0) {
+        throw new IllegalArgumentException("subject id must be positive");
+      }
+    }
+  }
+
+  /** Realtime projection 支持的 durable subject kind；wire 名称是稳定协议事实。 */
+  enum SubjectKind {
+    MODEL_INVOCATION,
+    TOOL_INVOCATION
+  }
 
   /**
    * 一条 Model Provider delta；sequence 在 attempt 内从 1 严格递增。最终完整 response 仍只进入 durable
@@ -59,8 +73,8 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
     }
 
     @Override
-    public ExecutionTarget subject() {
-      return new ExecutionTarget(ExecutionTargetKind.MODEL_INVOCATION, modelInvocationId);
+    public Subject subject() {
+      return new Subject(SubjectKind.MODEL_INVOCATION, modelInvocationId);
     }
 
     @Override
@@ -88,8 +102,8 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
     }
 
     @Override
-    public ExecutionTarget subject() {
-      return new ExecutionTarget(ExecutionTargetKind.TOOL_INVOCATION, toolInvocationId);
+    public Subject subject() {
+      return new Subject(SubjectKind.TOOL_INVOCATION, toolInvocationId);
     }
 
     @Override

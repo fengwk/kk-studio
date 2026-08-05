@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.ai.environment.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,8 +50,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Gateway is connection/protocol transport only. Durable claim/lease/terminal lives in ToolWorker.
- * Routing uses the canonical EnvironmentId bound at HELLO; the display name never routes.
+ * Gateway is connection/protocol transport only. Durable claim/lease/terminal lives in Harness
+ * Runtime. Routing uses the canonical EnvironmentId bound at HELLO; the display name never routes.
  */
 class EnvironmentDaemonGatewayFinalTest {
   private static final EnvironmentId ENVIRONMENT_ID =
@@ -172,6 +173,28 @@ class EnvironmentDaemonGatewayFinalTest {
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT_ID, request(fixture.descriptor), new RecordingListener()));
+  }
+
+  @Test
+  void invalidInvokePayloadDoesNotReserveEnvironmentSlot() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-invalid-payload");
+
+    assertThrows(
+        ArithmeticException.class,
+        () ->
+            fixture.gateway.invoke(
+                ENVIRONMENT_ID,
+                request(fixture.descriptor, Duration.ofSeconds(Long.MAX_VALUE)),
+                new RecordingListener()));
+
+    ToolExecutionHandle handle =
+        fixture.gateway.invoke(
+            ENVIRONMENT_ID, request(fixture.descriptor), new RecordingListener());
+    assertNotNull(handle);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
+        messageTypes(connection.envelopes()));
   }
 
   @Test
@@ -426,10 +449,14 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private ToolExecutionRequest request(ToolDescriptor descriptor) {
+    return request(descriptor, Duration.ofSeconds(30));
+  }
+
+  private ToolExecutionRequest request(ToolDescriptor descriptor, Duration timeout) {
     return new ToolExecutionRequest(
         descriptor,
         new ToolCall("provider-call", descriptor.name(), "{\"path\":\"README.md\"}"),
-        Duration.ofSeconds(30),
+        timeout,
         new ToolExecutionContext(INVOCATION_ID, 7001L));
   }
 

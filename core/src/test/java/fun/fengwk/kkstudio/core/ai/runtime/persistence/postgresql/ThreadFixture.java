@@ -9,9 +9,8 @@ import java.util.Objects;
  * Deterministic ids for a Session + ROOT Entry + Thread bundle bound to that ROOT.
  *
  * <p>Session and Thread are independent aggregates: the Session/Entry rows are inserted first, and
- * the Thread only references the ROOT through the deferrable single-column {@code head_entry_id}
- * FK. Entry helpers keep fixture construction deterministic without random ids or clock-derived
- * values.
+ * the Thread references the ROOT through the single-column {@code head_entry_id} FK. Entry helpers
+ * keep fixture construction deterministic without random ids or clock-derived values.
  */
 final class ThreadFixture {
 
@@ -66,9 +65,9 @@ final class ThreadFixture {
       }
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "insert into harness_thread (id, head_entry_id, input_sequence,"
-                  + " runnable, execution_epoch, created_at, updated_at)"
-                  + " values (?, ?, 0, false, 1, current_timestamp, current_timestamp)")) {
+              "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                  + " next_command_sequence, revision, created_at, updated_at)"
+                  + " values (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
         ps.setLong(1, threadId);
         ps.setLong(2, rootEntryId);
         ps.executeUpdate();

@@ -23,6 +23,11 @@ public record BinaryToolContent(String mediaType, byte[] content) implements Too
     return content.clone();
   }
 
+  /** 原始字节长度；不复制、不物化，供尺寸校验直接使用。 */
+  public int size() {
+    return content.length;
+  }
+
   @Override
   public boolean equals(Object other) {
     if (this == other) {

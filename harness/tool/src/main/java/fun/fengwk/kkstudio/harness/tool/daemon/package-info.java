@@ -40,7 +40,7 @@
  * </ul>
  *
  * <p>resource 字节随终态 payload 自包含并解码为内联 {@code BinaryToolContent}；PARTIAL 禁止 resource。入站 daemon URI
- * 不是 durable 目的地；持久化外部化由 ToolWorker 在 fenced terminal supplier 内完成。连接断开后通过 invocation journal
+ * 不是 durable 目的地；持久化外部化由 ToolGateway 在 fenced terminal callback 前完成。连接断开后通过 invocation journal
  * 重发不需要连接内内存映射。
  */
 package fun.fengwk.kkstudio.harness.tool.daemon;

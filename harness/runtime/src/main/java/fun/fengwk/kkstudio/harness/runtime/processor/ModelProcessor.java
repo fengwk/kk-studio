@@ -237,7 +237,9 @@ public final class ModelProcessor implements AutoCloseable {
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
       log.warn(
-          "model gateway start failed for invocation {}: {}", invocationId, failure.toString());
+          "model gateway start failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       execution.abandon();
       return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
           ? ProcessResult.RESCHEDULED

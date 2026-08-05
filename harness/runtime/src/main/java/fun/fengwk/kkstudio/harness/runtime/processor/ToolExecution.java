@@ -37,7 +37,8 @@ import java.util.function.Consumer;
 /**
  * 一次 claim 的进程内 Tool execution：Gateway listener 门控缓冲、durable fence 与 lease heartbeat。
  *
- * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；激活（{@link #activate}）成功后按到达顺序重放。partial 先做 toolCallId /
+ * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；两阶段激活（{@link #activate}）：attach handle -&gt; 持久化
+ * markRunning -&gt; {@code handle.activate()}（Gateway 打开回调 gate）成功后按到达顺序重放。partial 先做 toolCallId /
  * content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB 编码尺寸上限（bounded
  * 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与 claim ownership 的短事务中确认（无 durable
  * mutation），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次
@@ -45,6 +46,7 @@ import java.util.function.Consumer;
  * ref），随后对「即将持久化的规范化对象」做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable
  * 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate /
  * late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写 任何 durable 状态。
+ * {@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -128,8 +130,9 @@ final class ToolExecution implements ToolGateway.Listener {
   /**
    * Gateway admission 返回 Started 后调用：先安全 attach handle（若 execution 已被 abandon / heartbeat 已 lost，
    * 立即 best-effort cancel 且不 markRunning），再短事务重新验证 lease + DISPATCHING + proposed attempt 并
-   * markRunning + Thread revision+1；成功后打开 listener 门并重放缓冲回调。失败（lost / stale / Stop 获胜）关闭 listener 并
-   * cancel handle，不写任何 durable 状态。
+   * markRunning + Thread revision+1，随后调用 {@code handle.activate()} 让 Gateway 打开回调 gate，最后打开
+   * listener 门并重放缓冲回调。activate 抛异常即激活失败：恰好一次 UNKNOWN terminal。失败（lost / stale / Stop 获胜）关闭 listener
+   * 并 cancel handle，不写任何 durable 状态。
    */
   ProcessResult activate(ToolGateway.Handle startedHandle) {
     if (!attachHandle(startedHandle)) {
@@ -146,6 +149,22 @@ final class ToolExecution implements ToolGateway.Listener {
       // handle 已 attach：abandon 会 cancel 它。
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
+    }
+    // 两阶段激活：durable markRunning 落地之后、打开自身 listener 门之前，才允许 Gateway 打开回调 gate / 启动外部执行。
+    try {
+      startedHandle.activate();
+    } catch (RuntimeException failure) {
+      // 先收敛 durable UNKNOWN，再记录：异常渲染（toString）绝不能 bypass 状态转换。
+      ProcessResult result =
+          activationFailure(
+              new ToolInvocationError(
+                  "ACTIVATION_FAILED",
+                  "tool gateway activation failed; tool outcome cannot be confirmed"));
+      log.warn(
+          "tool gateway activation failed for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      return result;
     }
     List<Publish> publishes = new ArrayList<>();
     Applied applied;
@@ -164,6 +183,32 @@ final class ToolExecution implements ToolGateway.Listener {
       return applied == Applied.RETRY ? ProcessResult.RESCHEDULED : ProcessResult.TERMINATED;
     }
     return ProcessResult.STARTED;
+  }
+
+  /**
+   * Gateway 激活失败（{@code handle.activate} 抛异常）：执行结果无法确认，强制恰好一次 UNKNOWN terminal。恶意 / 异常 handle 可能在
+   * activate() 内同步投递 terminal 回调（gate 未开，只进缓冲且 terminal 已被 claim）——一律丢弃缓冲信号并强制落地 UNKNOWN，绝不把执行留在
+   * RUNNING 等 lease 恢复；随后 abandon。
+   */
+  private ProcessResult activationFailure(ToolInvocationError error) {
+    List<Publish> publishes = new ArrayList<>();
+    Applied applied;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
+      // 缓冲的 terminal（若存在）从未落地：丢弃并强制 UNKNOWN；terminal 标志无条件收敛，DB 层保证至多一次 terminal。
+      pending.clear();
+      terminal.set(true);
+      applied = finishUnknownLocked(error, publishes);
+    }
+    publishAll(publishes);
+    if (applied == Applied.LOST) {
+      abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    abandon();
+    return ProcessResult.TERMINATED;
   }
 
   /**
@@ -254,7 +299,10 @@ final class ToolExecution implements ToolGateway.Listener {
     if (failure != null) {
       // 非法 partial/result 已在 processLocked 内确定性映射为 FAILED；逃逸到这里的是 Store /
       // 本地管线异常，不能伪装成 Gateway 协议错误。关闭本地执行，保留 durable 状态供 lease 恢复为 UNKNOWN。
-      log.warn("cannot process tool callback for {}: {}", invocationId, failure.toString());
+      log.warn(
+          "cannot process tool callback for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       abandon();
       return;
     }
@@ -554,7 +602,10 @@ final class ToolExecution implements ToolGateway.Listener {
     try {
       return action.getAsBoolean();
     } catch (RuntimeException failure) {
-      log.warn("cannot persist tool terminal for {}: {}", invocationId, failure.toString());
+      log.warn(
+          "cannot persist tool terminal for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       return false;
     }
   }

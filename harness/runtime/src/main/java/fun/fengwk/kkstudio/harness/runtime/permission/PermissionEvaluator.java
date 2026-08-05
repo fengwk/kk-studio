@@ -4,10 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallContext;
-import fun.fengwk.kkstudio.harness.runtime.tool.BeforeToolCallResult;
-import fun.fengwk.kkstudio.harness.runtime.tool.PermissionBoundaryInterceptor;
-
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -15,7 +11,7 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /** PiBase 等价的 ordered Tool permission evaluator。路径仅构造候选，不承担 T09 path/symlink 安全。 */
-public final class PermissionEvaluator implements PermissionBoundaryInterceptor {
+public final class PermissionEvaluator {
   private static final int ARGUMENT_PREVIEW_LENGTH = 120;
 
   private final ObjectMapper objectMapper;
@@ -26,21 +22,7 @@ public final class PermissionEvaluator implements PermissionBoundaryInterceptor 
     this.bashAnalyzer = Objects.requireNonNull(bashAnalyzer, "bashAnalyzer");
   }
 
-  @Override
-  public BeforeToolCallResult intercept(BeforeToolCallContext context) {
-    Evaluation evaluation =
-        evaluate(
-            new PermissionEvaluationContext(
-                context.binding().descriptor().name(),
-                context.call().argumentsJson(),
-                context.workdir(),
-                context.environmentRoot(),
-                context.settings()));
-    PermissionAction action = context.yoloEnabled() ? PermissionAction.ALLOW : evaluation.action();
-    return new BeforeToolCallResult(
-        context.binding(), context.call().argumentsJson(), action, evaluation.promptPreview());
-  }
-
+  /** 按调用方冻结的权限上下文评估 Tool 调用，返回 action 与 prompt preview。 */
   public Evaluation evaluate(PermissionEvaluationContext context) {
     JsonNode input = readArguments(context.argumentsJson());
     PermissionAction action;

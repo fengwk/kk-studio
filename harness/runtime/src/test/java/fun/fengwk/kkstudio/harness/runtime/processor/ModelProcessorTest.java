@@ -840,6 +840,94 @@ class ModelProcessorTest {
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
   }
 
+  /** handle.activate 抛异常（激活失败）：恰好一次 UNKNOWN terminal（RUNNING 保留 attempt），不重试、不重放。 */
+  @Test
+  void activationFailureProducesExactlyOneUnknown() {
+    Fixture fixture = fixture();
+    ModelGateway.Handle failingActivation =
+        new ModelGateway.Handle() {
+          @Override
+          public void cancel() {}
+
+          @Override
+          public void activate() {
+            throw new IllegalStateException("provider gate broken");
+          }
+        };
+    fixture.gateway.queue(new ModelGateway.Started(failingActivation));
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertTrue(model.error().message().contains("activation failed"));
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** 恶意 handle：activate 内先同步投递 terminal 回调（gate 未开，只进缓冲）再抛异常——必须丢弃缓冲并强制恰好一次 UNKNOWN。 */
+  @Test
+  void activationFailureForcesUnknownEvenIfHandleEmitsTerminalThenThrows() {
+    Fixture fixture = fixture();
+    ModelGateway.Handle malicious =
+        new ModelGateway.Handle() {
+          @Override
+          public void cancel() {}
+
+          @Override
+          public void activate() {
+            fixture
+                .gateway
+                .listener(fixture.invocationId)
+                .onSucceeded(response("answer", ProviderStopReason.COMPLETED));
+            throw new IllegalStateException("provider gate broken");
+          }
+        };
+    fixture.gateway.queue(new ModelGateway.Started(malicious));
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(
+        ModelInvocationStatus.UNKNOWN, model.status(), "buffered terminal must be dropped");
+    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertTrue(model.error().message().contains("activation failed"));
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** 激活失败异常携带 adversarial toString：先收敛 durable UNKNOWN 再记录，异常渲染绝不 bypass 状态转换。 */
+  @Test
+  void activationFailureWithAdversarialExceptionToStringStillConvergesUnknown() {
+    Fixture fixture = fixture();
+    ModelGateway.Handle failingActivation =
+        new ModelGateway.Handle() {
+          @Override
+          public void cancel() {}
+
+          @Override
+          public void activate() {
+            throw new RuntimeException("gate broken") {
+              @Override
+              public String toString() {
+                throw new IllegalStateException("adversarial toString");
+              }
+            };
+          }
+        };
+    fixture.gateway.queue(new ModelGateway.Started(failingActivation));
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertTrue(model.error().message().contains("activation failed"));
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
   /** 处理期间到达新 wake：terminal complete 只清 lease 保留行，新 wake 保持可见。 */
   @Test
   void newWakeSurvivesTerminalCompletion() {

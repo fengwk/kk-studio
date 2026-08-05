@@ -1,221 +1,149 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
-import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
-import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
+import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
+
+import java.util.List;
 
 /**
- * {@link StudioChatController} end-to-end tests.
- *
- * <p>验证 Chat CRUD、未知 id 失败以及 Agent name 校验。Chat 不再持有 Session 成员关系。
+ * {@link StudioChatController} Chat-scoped Thread 编排契约：列表按关联顺序映射快照、创建先 createThread
+ * 再关联并返回创建快照、关联前校验快照存在。
  */
-@AutoConfigureMockMvc
-public class StudioChatControllerTest extends WebPostgresTestSupport {
+class StudioChatControllerTest {
 
-  @Autowired private MockMvc mockMvc;
-  @Autowired private ObjectMapper objectMapper;
+  private ChatService chatService;
+  private ChatThreadService chatThreadService;
+  private HarnessRuntime runtime;
+  private MockMvc mockMvc;
 
-  @Test
-  public void shouldCreateListUpdateAndDeleteChat() throws Exception {
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle("web-chat");
-    create.setAgentName("default-assistant");
-    create.setYoloEnabled(true);
-
-    MvcResult createResult =
-        mockMvc
-            .perform(
-                post("/api/ai/chat")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(create)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.id").isString())
-            .andExpect(jsonPath("$.data.title").value("web-chat"))
-            .andExpect(jsonPath("$.data.agentName").value("default-assistant"))
-            .andExpect(jsonPath("$.data.yoloEnabled").value(true))
-            .andExpect(jsonPath("$.data.version").value("0"))
-            .andReturn();
-
-    String chatId =
-        objectMapper
-            .readTree(createResult.getResponse().getContentAsString())
-            .get("data")
-            .get("id")
-            .asText();
-    assertTrue(chatId.matches("\\d+"));
-    String version =
-        objectMapper
-            .readTree(createResult.getResponse().getContentAsString())
-            .get("data")
-            .get("version")
-            .asText();
-
-    try {
-      mockMvc
-          .perform(get("/api/ai/chat"))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data[?(@.id=='" + chatId + "')]").exists());
-
-      mockMvc
-          .perform(get("/api/ai/chat/" + chatId))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data.id").value(chatId))
-          .andExpect(jsonPath("$.data.title").value("web-chat"));
-
-      ChatUpdateDTO update = new ChatUpdateDTO();
-      update.setTitle("web-chat-renamed");
-      update.setExpectedVersion(version);
-      mockMvc
-          .perform(
-              put("/api/ai/chat/" + chatId)
-                  .contentType(MediaType.APPLICATION_JSON)
-                  .content(objectMapper.writeValueAsString(update)))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data.title").value("web-chat-renamed"))
-          .andExpect(jsonPath("$.data.agentName").value("default-assistant"));
-
-      // Chat↔Session membership routes no longer exist.
-      mockMvc.perform(get("/api/ai/chat/" + chatId + "/sessions")).andExpect(status().isNotFound());
-    } finally {
-      mockMvc
-          .perform(delete("/api/ai/chat/" + chatId).param("expectedVersion", "1"))
-          .andExpect(status().isNoContent());
-    }
+  @BeforeEach
+  void setUp() {
+    chatService = mock(ChatService.class);
+    chatThreadService = mock(ChatThreadService.class);
+    runtime = mock(HarnessRuntime.class);
+    StudioChatController controller =
+        new StudioChatController(chatService, chatThreadService, runtime);
+    mockMvc =
+        MockMvcBuilders.standaloneSetup(controller)
+            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .build();
   }
 
   @Test
-  public void shouldRejectUnknownIdsAndInvalidAgentName() throws Exception {
-    mockMvc.perform(get("/api/ai/chat/999999999999")).andExpect(status().isNotFound());
-    mockMvc.perform(get("/api/ai/chat/not-a-number")).andExpect(status().isBadRequest());
+  void listChatThreadsReturnsMappedThreadsInAssociationOrder() throws Exception {
+    when(chatThreadService.listThreadIds("7")).thenReturn(List.of(2L, 1L));
+    when(runtime.getThreadSnapshot(2L))
+        .thenReturn(HarnessRuntimeTestFixtures.continuationDueSnapshot(2L));
+    when(runtime.getThreadSnapshot(1L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(1L));
 
-    ChatCreateDTO unknownAgent = new ChatCreateDTO();
-    unknownAgent.setAgentName("missing-agent");
+    mockMvc
+        .perform(get("/api/ai/chat/7/threads"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].threadId").value("2"))
+        .andExpect(jsonPath("$.data[0].status").value("CONTINUATION_DUE"))
+        .andExpect(jsonPath("$.data[1].threadId").value("1"))
+        .andExpect(jsonPath("$.data[1].status").value("IDLE"));
+  }
+
+  @Test
+  void createChatThreadCreatesAssociatesAndReturnsCreatedSnapshot() throws Exception {
+    when(runtime.createThread(any(CreateThreadCommand.class)))
+        .thenReturn(
+            new CreatedThread(
+                HarnessRuntimeTestFixtures.session(),
+                HarnessRuntimeTestFixtures.rootEntry(),
+                HarnessRuntimeTestFixtures.thread(1)));
+    when(runtime.getThreadSnapshot(1L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+
+    String body =
+        """
+        {
+          "title": "new chat",
+          "branchSettings": {
+            "environmentId": "123e4567-e89b-12d3-a456-426614174000",
+            "agentName": "default-assistant",
+            "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
+            "thinkingLevel": "low",
+            "activeTools": ["web_search"]
+          },
+          "yoloEnabled": true
+        }
+        """;
+
     mockMvc
         .perform(
-            post("/api/ai/chat")
+            post("/api/ai/chat/7/threads").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.thread.threadId").value("1"))
+        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
+        .andExpect(jsonPath("$.data.thread.branchSettings.agentName").value("default-assistant"));
+
+    ArgumentCaptor<CreateThreadCommand> captor = ArgumentCaptor.forClass(CreateThreadCommand.class);
+    verify(runtime).createThread(captor.capture());
+    assertEquals("new chat", captor.getValue().title());
+    assertEquals("default-assistant", captor.getValue().branchSettings().agentName());
+    assertEquals("gpt-5", captor.getValue().branchSettings().model().modelName());
+    assertEquals(List.of("web_search"), captor.getValue().branchSettings().activeTools());
+    assertEquals(true, captor.getValue().yoloEnabled());
+    verify(chatThreadService).associateThread("7", 1L);
+  }
+
+  @Test
+  void associateValidatesRuntimeSnapshotThenAssociates() throws Exception {
+    when(runtime.getThreadSnapshot(5L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+
+    mockMvc.perform(put("/api/ai/chat/7/threads/5")).andExpect(status().isNoContent());
+
+    verify(runtime).getThreadSnapshot(5L);
+    verify(chatThreadService).associateThread("7", 5L);
+  }
+
+  @Test
+  void associateMissingThreadIsNotFoundAndDoesNotAssociate() throws Exception {
+    when(runtime.getThreadSnapshot(anyLong()))
+        .thenThrow(new HarnessRuntimeNotFoundException("thread 9 does not exist"));
+
+    mockMvc.perform(put("/api/ai/chat/7/threads/9")).andExpect(status().isNotFound());
+
+    verify(chatThreadService, never()).associateThread(eq("7"), anyLong());
+  }
+
+  @Test
+  void createChatThreadRejectsIncompleteBranchSettingsAsBadRequest() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/ai/chat/7/threads")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(unknownAgent)))
+                .content("{\"title\":\"broken\",\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
-
-    ChatUpdateDTO unknownChatUpdate = new ChatUpdateDTO();
-    unknownChatUpdate.setExpectedVersion("0");
-    mockMvc
-        .perform(
-            put("/api/ai/chat/999999999999")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(unknownChatUpdate)))
-        .andExpect(status().isNotFound());
-    mockMvc
-        .perform(delete("/api/ai/chat/999999999999").param("expectedVersion", "0"))
-        .andExpect(status().isNotFound());
-  }
-
-  @Test
-  public void shouldCreateAndPageChatThreadsByChatNameReferences() throws Exception {
-    ChatCreateDTO create = new ChatCreateDTO();
-    create.setTitle("thread-picker-chat");
-    create.setAgentName("default-assistant");
-    MvcResult createdChat =
-        mockMvc
-            .perform(
-                post("/api/ai/chat")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(create)))
-            .andExpect(status().isCreated())
-            .andReturn();
-    JsonNode chat = data(createdChat);
-    String chatId = chat.path("id").asText();
-    String chatVersion = chat.path("version").asText();
-
-    try {
-      MvcResult scopedCreate =
-          mockMvc
-              .perform(post("/api/ai/chat/{chatId}/threads", chatId))
-              .andExpect(status().isCreated())
-              .andExpect(jsonPath("$.data.threadId").isString())
-              .andExpect(jsonPath("$.data.status").value("IDLE"))
-              .andExpect(jsonPath("$.data.executionEpoch").value("0"))
-              .andReturn();
-      String scopedThreadId = data(scopedCreate).path("threadId").asText();
-
-      MvcResult secondCreate =
-          mockMvc
-              .perform(post("/api/ai/chat/{chatId}/threads", chatId))
-              .andExpect(status().isCreated())
-              .andExpect(jsonPath("$.data.threadId").isString())
-              .andReturn();
-      String secondThreadId = data(secondCreate).path("threadId").asText();
-
-      mockMvc
-          .perform(
-              get("/api/ai/chat/{chatId}/threads", chatId)
-                  .param("sort", "created")
-                  .param("limit", "100"))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data.items").isArray())
-          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + scopedThreadId + "')]").exists())
-          .andExpect(jsonPath("$.data.items[?(@.threadId=='" + secondThreadId + "')]").exists())
-          .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
-
-      MvcResult firstPage =
-          mockMvc
-              .perform(
-                  get("/api/ai/chat/{chatId}/threads", chatId)
-                      .param("sort", "recent")
-                      .param("limit", "1"))
-              .andExpect(status().isOk())
-              .andExpect(jsonPath("$.data.items").isArray())
-              .andExpect(jsonPath("$.data.items.length()").value(1))
-              .andExpect(jsonPath("$.data.nextCursor").isString())
-              .andReturn();
-      String nextCursor = data(firstPage).path("nextCursor").asText();
-      mockMvc
-          .perform(
-              get("/api/ai/chat/{chatId}/threads", chatId)
-                  .param("sort", "recent")
-                  .param("cursor", nextCursor)
-                  .param("limit", "1"))
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.data.items.length()").value(1))
-          .andExpect(jsonPath("$.data.nextCursor").doesNotExist());
-
-      mockMvc
-          .perform(
-              get("/api/ai/chat/{chatId}/threads", chatId)
-                  .param("sort", "unsupported")
-                  .param("limit", "20"))
-          .andExpect(status().isBadRequest());
-      mockMvc
-          .perform(
-              get("/api/ai/chat/{chatId}/threads", chatId)
-                  .param("sort", "recent")
-                  .param("limit", "101"))
-          .andExpect(status().isBadRequest());
-    } finally {
-      mockMvc
-          .perform(delete("/api/ai/chat/{chatId}", chatId).param("expectedVersion", chatVersion))
-          .andExpect(status().isNoContent());
-    }
-  }
-
-  private JsonNode data(MvcResult result) throws Exception {
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    verify(runtime, never()).createThread(any(CreateThreadCommand.class));
   }
 }

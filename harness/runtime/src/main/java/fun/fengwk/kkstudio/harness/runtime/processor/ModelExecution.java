@@ -35,10 +35,12 @@ import java.util.function.Consumer;
 /**
  * 一次 claim 的进程内 Model execution：Gateway listener 门控缓冲、durable fence 与 lease heartbeat。
  *
- * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；激活（{@link #activate}）成功后按到达顺序重放。所有回调都先在校验 RUNNING +
+ * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；两阶段激活（{@link #activate}）：attach handle -&gt; 持久化
+ * markRunning -&gt; {@code handle.activate()}（Gateway 打开回调 gate）成功后按到达顺序重放。所有回调都先在校验 RUNNING +
  * attempt 与 claim ownership 的短事务中落地（text/thinking 单调 checkpoint，tool-call fragment 只推 sequence 不入
  * checkpoint），commit 后才 best-effort 发布 {@link RealtimeEvent.ModelDelta}。terminal 回调一次生效， duplicate
  * / late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写任何 durable 状态。
+ * {@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -117,8 +119,9 @@ final class ModelExecution implements ModelGateway.Listener {
   /**
    * Gateway admission 返回 Started 后调用：先安全 attach handle（若 execution 已被 abandon / heartbeat 已 lost，
    * 立即 best-effort cancel 且不 markRunning），再短事务重新验证 lease + DISPATCHING + proposed attempt 并
-   * markRunning + Thread revision+1；成功后打开 listener 门并重放缓冲回调。失败（lost / stale / Stop 获胜）关闭 listener 并
-   * cancel handle，不写任何 durable 状态。handle 在 attach 之后的所有 abandon 路径都会被恰好 best-effort cancel。
+   * markRunning + Thread revision+1，随后调用 {@code handle.activate()} 让 Gateway 打开回调 gate，最后打开
+   * listener 门并重放缓冲回调。activate 抛异常即激活失败：恰好一次 UNKNOWN terminal。失败（lost / stale / Stop 获胜）关闭 listener
+   * 并 cancel handle，不写任何 durable 状态。handle 在 attach 之后的所有 abandon 路径都会被恰好 best-effort cancel。
    */
   ProcessResult activate(ModelGateway.Handle startedHandle) {
     if (!attachHandle(startedHandle)) {
@@ -135,6 +138,22 @@ final class ModelExecution implements ModelGateway.Listener {
       // handle 已 attach：abandon 会 cancel 它。
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
+    }
+    // 两阶段激活：durable markRunning 落地之后、打开自身 listener 门之前，才允许 Gateway 打开回调 gate / 启动外部执行。
+    try {
+      startedHandle.activate();
+    } catch (RuntimeException failure) {
+      // 先收敛 durable UNKNOWN，再记录：异常渲染（toString）绝不能 bypass 状态转换。
+      ProcessResult result =
+          activationFailure(
+              new ModelInvocationError(
+                  ProviderErrorKind.TRANSIENT,
+                  "model gateway activation failed; provider outcome cannot be confirmed"));
+      log.warn(
+          "model gateway activation failed for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      return result;
     }
     List<Publish> publishes = new ArrayList<>();
     Applied applied;
@@ -153,6 +172,32 @@ final class ModelExecution implements ModelGateway.Listener {
       return applied == Applied.RETRY ? ProcessResult.RESCHEDULED : ProcessResult.TERMINATED;
     }
     return ProcessResult.STARTED;
+  }
+
+  /**
+   * Gateway 激活失败（{@code handle.activate} 抛异常）：执行结果无法确认，强制恰好一次 UNKNOWN terminal。恶意 / 异常 handle 可能在
+   * activate() 内同步投递 terminal 回调（gate 未开，只进缓冲且 terminal 已被 claim）——一律丢弃缓冲信号并强制落地 UNKNOWN，绝不把执行留在
+   * RUNNING 等 lease 恢复；随后 abandon。
+   */
+  private ProcessResult activationFailure(ModelInvocationError error) {
+    List<Publish> publishes = new ArrayList<>();
+    Applied applied;
+    synchronized (monitor) {
+      if (abandoned.get()) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
+      // 缓冲的 terminal（若存在）从未落地：丢弃并强制 UNKNOWN；terminal 标志无条件收敛，DB 层保证至多一次 terminal。
+      pending.clear();
+      terminal.set(true);
+      applied = finishUnknownLocked(error, publishes);
+    }
+    publishAll(publishes);
+    if (applied == Applied.LOST) {
+      abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    abandon();
+    return ProcessResult.TERMINATED;
   }
 
   /**
@@ -237,7 +282,10 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     if (failure != null) {
       if (terminalSignal) {
-        log.warn("cannot persist model terminal for {}: {}", invocationId, failure.toString());
+        log.warn(
+            "cannot persist model terminal for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(failure));
         abandon();
       } else {
         deliverFailure(
@@ -339,7 +387,10 @@ final class ModelExecution implements ModelGateway.Listener {
       completion = accumulator.complete(response);
       ModelResponseValidator.validate(request.providerRequest(), completion.response());
     } catch (RuntimeException failure) {
-      log.warn("invalid provider response for invocation {}: {}", invocationId, failure.toString());
+      log.warn(
+          "invalid provider response for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       return finishFailureLocked(
           new ModelInvocationError(
               ProviderErrorKind.INVALID_REQUEST, message(failure, "invalid provider response")),
@@ -535,7 +586,10 @@ final class ModelExecution implements ModelGateway.Listener {
     try {
       return action.getAsBoolean();
     } catch (RuntimeException failure) {
-      log.warn("cannot persist model terminal for {}: {}", invocationId, failure.toString());
+      log.warn(
+          "cannot persist model terminal for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       return false;
     }
   }

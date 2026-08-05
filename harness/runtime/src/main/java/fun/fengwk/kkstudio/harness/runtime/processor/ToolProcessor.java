@@ -318,7 +318,10 @@ public final class ToolProcessor implements AutoCloseable {
       result = gateway.preflight(preflight.request(), preflight.yoloEnabled());
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 preflight 确定无副作用（listener / Gateway start 尚未发生）。
-      log.warn("tool preflight failed for invocation {}: {}", invocationId, failure.toString());
+      log.warn(
+          "tool preflight failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       execution.abandon();
       return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
@@ -543,7 +546,10 @@ public final class ToolProcessor implements AutoCloseable {
               execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
-      log.warn("tool gateway start failed for invocation {}: {}", invocationId, failure.toString());
+      log.warn(
+          "tool gateway start failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
       execution.abandon();
       return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
           ? ProcessResult.RESCHEDULED

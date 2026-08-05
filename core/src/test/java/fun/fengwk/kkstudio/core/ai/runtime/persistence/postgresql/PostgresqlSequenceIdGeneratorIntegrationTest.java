@@ -40,13 +40,6 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
    */
   private static final String EXPECTED_SELECTION_SQL = "select nextval('kk_studio_id_seq')";
 
-  /**
-   * Largest deterministic id assigned by the e2e Flyway seed. The seed's trailing {@code
-   * setval('kk_studio_id_seq', ..., true)} clause advances the sequence past this value so every
-   * subsequent allocation must be strictly greater.
-   */
-  private static final long E2E_SEED_MAX_ID = 1L;
-
   private PostgresqlSequenceIdGenerator generator;
   private SequenceMapper jdbcMapper;
 
@@ -126,49 +119,38 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   }
 
   /**
-   * After applying the e2e seed (retry and realtime Stream policy ids 1), the seed script advances
-   * the sequence via {@code setval(..., true)} so no allocation can ever return a value within the
-   * seeded range.
+   * The harness runtime sequence is a separate physical sequence: it allocates positive monotonic
+   * ids independently of the business sequence, and it is never aligned by any seed (the runtime
+   * policy tables that used to own deterministic singleton ids are gone).
    */
   @Test
-  void allocationsNeverReuseSeededDeterministicIds() throws Exception {
-    long maxSeeded;
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery(
-                "select greatest("
-                    + "coalesce((select max(id) from harness_realtime_stream_policy), 0),"
-                    + "coalesce((select max(id) from harness_retry_policy), 0)"
-                    + ")")) {
-      assertTrue(rs.next());
-      maxSeeded = rs.getLong(1);
-    }
-    assertEquals(
-        E2E_SEED_MAX_ID,
-        maxSeeded,
-        "the e2e Flyway seed must keep its expected deterministic id range");
-
-    long maxSeen = 0L;
-    for (int i = 0; i < 8; i++) {
-      long id = generator.next();
+  void harnessRuntimeSequenceAllocatesPositiveMonotonicIds() throws Exception {
+    long previous = 0L;
+    for (int i = 0; i < 16; i++) {
+      long id;
+      try (Connection conn = newConnection();
+          Statement st = conn.createStatement();
+          ResultSet rs = st.executeQuery("select nextval('harness_runtime_id_seq')")) {
+        assertTrue(rs.next(), "harness_runtime_id_seq nextval must return exactly one row");
+        id = rs.getLong(1);
+      }
+      assertTrue(id > 0, "harness_runtime_id_seq must produce positive ids, got " + id);
       assertTrue(
-          id > maxSeeded,
-          "kk_studio_id_seq must skip seeded ids (max=" + maxSeeded + ") but produced " + id);
-      assertTrue(id > maxSeen, "monotonic, got " + id + " after " + maxSeen);
-      maxSeen = id;
+          id > previous,
+          "harness_runtime_id_seq must be monotonic: prev=" + previous + " next=" + id);
+      previous = id;
     }
 
-    // PostgreSQL is_called is true after the seed's setval(..., true) call.
+    // The two sequences are independent physical objects.
     try (Connection conn = newConnection();
         PreparedStatement ps =
-            conn.prepareStatement("select last_value, is_called from kk_studio_id_seq");
+            conn.prepareStatement(
+                "select count(*) from information_schema.sequences"
+                    + " where sequence_schema = 'public'"
+                    + " and sequence_name in ('kk_studio_id_seq', 'harness_runtime_id_seq')");
         ResultSet rs = ps.executeQuery()) {
       assertTrue(rs.next());
-      long lastValue = rs.getLong(1);
-      assertTrue(
-          rs.getBoolean(2), "sequence must be marked is_called after seed setval(..., true)");
-      assertTrue(lastValue >= maxSeeded, "sequence last_value must be at least the seeded max");
+      assertEquals(2L, rs.getLong(1), "both declared sequences must exist");
     }
   }
 }

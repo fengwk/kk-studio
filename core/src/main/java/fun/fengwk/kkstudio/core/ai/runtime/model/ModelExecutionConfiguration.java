@@ -48,6 +48,12 @@ public class ModelExecutionConfiguration {
     return Clock.systemUTC();
   }
 
+  @Bean
+  @ConditionalOnMissingBean
+  public ModelGatewayConfig modelGatewayConfig() {
+    return ModelGatewayConfig.DEFAULT;
+  }
+
   @Bean(name = "openaiProviderFactory")
   @ConditionalOnMissingBean(name = "openaiProviderFactory")
   public ProviderFactory openaiProviderFactory() {

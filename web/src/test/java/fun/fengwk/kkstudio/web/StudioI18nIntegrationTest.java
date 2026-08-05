@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -87,8 +88,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
       throws Exception {
     mockMvc
         .perform(
-            get("/api/ai/chat/{chatId}/threads", chatId)
-                .param("limit", "0")
+            put("/api/ai/chat/{chatId}/threads/{threadId}", chatId, "not-a-number")
                 .header(HttpHeaders.ACCEPT_LANGUAGE, language))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.status").value(400))
@@ -96,6 +96,8 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.message").value(expectedMessage))
         .andExpect(jsonPath("$.errors.type").value("about:blank"))
         .andExpect(jsonPath("$.errors.title").value(expectedTitle))
-        .andExpect(jsonPath("$.errors.detail").value("limit must be between 1 and 100"));
+        .andExpect(
+            jsonPath("$.errors.detail")
+                .value("threadId must be an unsigned positive decimal: not-a-number"));
   }
 }

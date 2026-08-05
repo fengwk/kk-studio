@@ -1,7 +1,10 @@
 /**
- * Durable ToolInvocation 状态、冻结 binding、preparation 与可信 interceptor contract。
+ * Runtime Tool 边界：framework-free Tool factories 与 typed invocation error。
  *
- * <p>统一执行状态机位于 {@link fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker}；Platform 与
- * Environment 路由共享同一 worker 和 {@link fun.fengwk.kkstudio.harness.tool.execution.Tool} API。
+ * <p>{@link fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories} 按冻结 name/version 精确查找本地
+ * Platform Tool；{@link fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError} 携带稳定 kind 与 非空
+ * message，由 {@link fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec} 做 strict
+ * JSON 编解码。Tool invocation 的 durable aggregate 位于 {@code harness.runtime.invocation}，执行由 {@code
+ * harness.runtime.processor} 与 {@code harness.runtime.port.ToolGateway} 完成；本包不定义执行状态机。
  */
 package fun.fengwk.kkstudio.harness.runtime.tool;
