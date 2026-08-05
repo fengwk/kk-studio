@@ -82,7 +82,7 @@ final class StoreTestSupport {
   private StoreTestSupport() {}
 
   /** Runs a void transaction body, so tests can use statement lambdas. */
-  static void inTransaction(InMemoryHarnessStore store, Consumer<HarnessStore.Transaction> body) {
+  static void inTransaction(HarnessStore store, Consumer<HarnessStore.Transaction> body) {
     store.transaction(
         tx -> {
           body.accept(tx);
@@ -96,7 +96,7 @@ final class StoreTestSupport {
   /** Baseline with one open TURN_START chain; the thread head points at the TURN_START. */
   record TurnBaseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
 
-  static Baseline seedThreadBaseline(InMemoryHarnessStore store) {
+  static Baseline seedThreadBaseline(HarnessStore store) {
     return store.transaction(
         tx -> {
           long sessionId = tx.nextId();
@@ -109,7 +109,7 @@ final class StoreTestSupport {
         });
   }
 
-  static TurnBaseline seedTurnBaseline(InMemoryHarnessStore store) {
+  static TurnBaseline seedTurnBaseline(HarnessStore store) {
     return store.transaction(
         tx -> {
           long sessionId = tx.nextId();
@@ -126,7 +126,7 @@ final class StoreTestSupport {
 
   /** Inserts a child Entry under {@code parentEntryId} with a fresh id and returns that id. */
   static long insertChildEntry(
-      InMemoryHarnessStore store, long sessionId, long parentEntryId, EntryPayload payload) {
+      HarnessStore store, long sessionId, long parentEntryId, EntryPayload payload) {
     return store.transaction(
         tx -> {
           long id = tx.nextId();
@@ -188,6 +188,17 @@ final class StoreTestSupport {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         assistantMetadata(stopReason),
+        null);
+  }
+
+  static EntryPayload assistantPayloadWithArguments(String toolCallId, String argumentsJson) {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new ToolCallMessageContent(toolCallId, "bash", argumentsJson),
+                new TextMessageContent("assistant reply"))),
+        assistantMetadata(ProviderStopReason.TOOL_CALLS),
         null);
   }
 
@@ -361,7 +372,12 @@ final class StoreTestSupport {
   }
 
   static ToolInvocationRequest toolRequest(String toolCallId) {
-    return new ToolInvocationRequest(new ToolCall(toolCallId, "bash", "{}"), platformBinding());
+    return toolRequest(toolCallId, "{}");
+  }
+
+  static ToolInvocationRequest toolRequest(String toolCallId, String argumentsJson) {
+    return new ToolInvocationRequest(
+        new ToolCall(toolCallId, "bash", argumentsJson), platformBinding());
   }
 
   private static AssistantMessageMetadata assistantMetadata(ProviderStopReason stopReason) {

@@ -68,6 +68,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -663,11 +664,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onSucceeded(response("answer", ProviderStopReason.COMPLETED));
     listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
@@ -697,11 +694,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
 
@@ -722,11 +715,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onUnknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
 
@@ -746,11 +735,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
@@ -772,11 +757,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onEvent(null);
 
@@ -797,11 +778,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     listener.onFailed(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
 
@@ -872,11 +849,7 @@ class ModelProcessorTest {
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId), NOW);
-          return null;
-        });
+    requestModelWork(fixture);
 
     listener.onSucceeded(response("answer", ProviderStopReason.COMPLETED));
 
@@ -1023,13 +996,7 @@ class ModelProcessorTest {
   void stopWinningAdmissionReturnsLostAndCancelsHandle() {
     Fixture fixture = fixture();
     FakeHandle handle = new FakeHandle();
-    fixture.gateway.beforeReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                  return null;
-                });
+    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
     fixture.gateway.queue(new ModelGateway.Started(handle));
 
     assertEquals(
@@ -1304,13 +1271,7 @@ class ModelProcessorTest {
   @Test
   void busyWithLostWorkReturnsLostOwnership() {
     Fixture fixture = fixture();
-    fixture.gateway.beforeReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                  return null;
-                });
+    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
     fixture.gateway.queue(new ModelGateway.Busy(Duration.ofSeconds(5)));
 
     assertEquals(
@@ -1328,13 +1289,7 @@ class ModelProcessorTest {
   @Test
   void startExceptionWithLostWorkReturnsLostOwnership() {
     Fixture fixture = fixture();
-    fixture.gateway.beforeReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                  return null;
-                });
+    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
     fixture.gateway.queue(new IllegalStateException("gateway down"));
 
     assertEquals(
@@ -1350,13 +1305,7 @@ class ModelProcessorTest {
   @Test
   void rejectedWithLostWorkReturnsLostOwnership() {
     Fixture fixture = fixture();
-    fixture.gateway.beforeReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                  return null;
-                });
+    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
     fixture.gateway.queue(
         new ModelGateway.Rejected(
             new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "rejected")));
@@ -1374,13 +1323,7 @@ class ModelProcessorTest {
   @Test
   void indeterminateWithLostWorkReturnsLostOwnership() {
     Fixture fixture = fixture();
-    fixture.gateway.beforeReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                  return null;
-                });
+    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
     fixture.gateway.queue(
         new ModelGateway.Indeterminate(
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unknown")));
@@ -1400,11 +1343,7 @@ class ModelProcessorTest {
     Fixture fixture = fixture();
     transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId, NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -1426,11 +1365,7 @@ class ModelProcessorTest {
         fixture.invocationId,
         model -> model.succeed(response("ok", ProviderStopReason.COMPLETED), NOW));
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId, NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -1887,12 +1822,7 @@ class ModelProcessorTest {
     assertTrue(inStart.await(5, TimeUnit.SECONDS)); // A 已通过 guard / putIfAbsent，阻塞在 gateway.start
 
     // 旧 lease 被 dispatcher 重新 claim：删旧行、重建 wake 并以新 token 重新领取。
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId), NOW);
-          return null;
-        });
+    replaceModelWork(fixture);
     ClaimedWork claimedB = claim(fixture.store, fixture.invocationId, NOW, "token-B");
 
     AtomicReference<ProcessResult> resultB = new AtomicReference<>();
@@ -1953,12 +1883,7 @@ class ModelProcessorTest {
 
     // lease 过期，dispatcher 以 token-2 重新 claim；另一实例 recover UNKNOWN（跨实例，A 的 abandoned 检查不可见）。
     fixtureA.clock.advance(Duration.ofSeconds(61));
-    fixtureA.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixtureA.invocationId));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, fixtureA.invocationId), NOW);
-          return null;
-        });
+    replaceModelWork(fixtureA);
     ClaimedWork claimedB =
         claim(fixtureA.store, fixtureA.invocationId, fixtureA.clock.instant(), "token-2");
     ModelProcessor processorB =
@@ -2006,11 +1931,7 @@ class ModelProcessorTest {
                 (proxy, method, args) -> {
                   if (method.getName().equals("scheduleAtFixedRate")) {
                     // prepare 之后、bounce 之前删除 work 行：bounce 无法恢复，必须 LOST。
-                    fixture.store.transaction(
-                        tx -> {
-                          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-                          return null;
-                        });
+                    deleteModelWork(fixture);
                     throw new RejectedExecutionException("shutdown");
                   }
                   return method.invoke(base, args);
@@ -2198,7 +2119,7 @@ class ModelProcessorTest {
   @Test
   void heartbeatRenewsLeaseAndStopsWhenOwnershipIsLost() throws Exception {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
-    Instant now = Instant.now();
+    Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     Baseline baseline = seedBaseline(store, now);
     long invocationId = seedInvocation(store, baseline, request(), now);
     FakeGateway gateway = new FakeGateway();
@@ -2235,6 +2156,7 @@ class ModelProcessorTest {
         Duration.ofSeconds(2));
     store.transaction(
         tx -> {
+          tx.lockThread(baseline.threadId()).orElseThrow();
           tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
@@ -2300,11 +2222,7 @@ class ModelProcessorTest {
   void deletedWorkClaimIsLostOwnershipWithoutMutation() {
     Fixture fixture = fixture();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId, NOW);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-          return null;
-        });
+    deleteModelWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
@@ -2316,6 +2234,43 @@ class ModelProcessorTest {
   // ---------------------------------------------------------------------------------------------
   // fixture / helpers
   // ---------------------------------------------------------------------------------------------
+
+  private void deleteModelWork(Fixture fixture) {
+    deleteModelWork(fixture, fixture.invocationId);
+  }
+
+  private void deleteModelWork(Fixture fixture, long invocationId) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          return null;
+        });
+  }
+
+  private void replaceModelWork(Fixture fixture) {
+    replaceModelWork(fixture, fixture.invocationId);
+  }
+
+  private void replaceModelWork(Fixture fixture, long invocationId) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          WorkTarget target = new WorkTarget(WorkTargetType.MODEL, invocationId);
+          tx.deleteWork(target);
+          tx.requestWork(target, NOW);
+          return null;
+        });
+  }
+
+  private void requestModelWork(Fixture fixture) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId), NOW);
+          return null;
+        });
+  }
 
   private Fixture fixture() {
     return fixture(NO_RETRY, request());

@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -90,8 +91,8 @@ public final class HarnessRuntime {
       LongConsumer modelExecutionCanceller,
       LongConsumer toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = Objects.requireNonNull(clock, "clock");
-    this.stopControl = new StopControl(store, clock);
+    this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.stopControl = new StopControl(store, this.clock);
     this.modelExecutionCanceller =
         Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
     this.toolExecutionCanceller =

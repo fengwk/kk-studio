@@ -14,8 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
 import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -433,11 +431,7 @@ class ToolProcessorCallbackTest {
   void lateCallbackAfterWorkDeletionIsNoOp() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
@@ -456,11 +450,7 @@ class ToolProcessorCallbackTest {
     ToolProcessorTestSupport.Fixture fixture =
         startedFixture(ToolProcessorTestSupport.RETRY_TWICE, ToolSideEffect.READ_ONLY);
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onFailed(new ToolGateway.Failure(new ToolInvocationError("TRANSIENT", "boom"), true));
 
@@ -475,11 +465,7 @@ class ToolProcessorCallbackTest {
   void unknownAfterWorkDeletionIsLost() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onUnknown(new ToolInvocationError("UNCERTAIN", "outcome unknown"));
 
@@ -494,11 +480,7 @@ class ToolProcessorCallbackTest {
   void cancelledAfterWorkDeletionIsLost() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onCancelled(new ToolInvocationError("CANCELLED", "stopped"));
 
@@ -513,13 +495,7 @@ class ToolProcessorCallbackTest {
   void newWakeSurvivesTerminalCompletion() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId),
-              ToolProcessorTestSupport.NOW);
-          return null;
-        });
+    ToolProcessorTestSupport.requestToolWork(fixture, ToolProcessorTestSupport.NOW);
 
     listener.onSucceeded(
         ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
@@ -735,11 +711,7 @@ class ToolProcessorCallbackTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
-    fixture.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-          return null;
-        });
+    ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
 

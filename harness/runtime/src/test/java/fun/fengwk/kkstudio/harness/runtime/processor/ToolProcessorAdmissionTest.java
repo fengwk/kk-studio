@@ -15,8 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
@@ -263,12 +261,7 @@ class ToolProcessorAdmissionTest {
   void busyWithLostWorkReturnsLostOwnership() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     fixture.gateway.beforeStartReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                  return null;
-                });
+        listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
     fixture.gateway.queueStart(new ToolGateway.Busy(Duration.ofSeconds(5)));
 
     assertEquals(
@@ -290,12 +283,7 @@ class ToolProcessorAdmissionTest {
   void startExceptionWithLostWorkReturnsLostOwnership() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     fixture.gateway.beforeStartReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                  return null;
-                });
+        listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
     fixture.gateway.queueStart(new IllegalStateException("gateway down"));
 
     assertEquals(
@@ -316,12 +304,7 @@ class ToolProcessorAdmissionTest {
   void rejectedWithLostWorkReturnsLostOwnership() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     fixture.gateway.beforeStartReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                  return null;
-                });
+        listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
     fixture.gateway.queueStart(
         new ToolGateway.Rejected(new ToolInvocationError("REJECTED", "rejected")));
 
@@ -343,12 +326,7 @@ class ToolProcessorAdmissionTest {
   void indeterminateWithLostWorkReturnsLostOwnership() {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     fixture.gateway.beforeStartReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                  return null;
-                });
+        listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
     fixture.gateway.queueStart(
         new ToolGateway.Indeterminate(new ToolInvocationError("UNCERTAIN", "unknown")));
 
@@ -371,12 +349,7 @@ class ToolProcessorAdmissionTest {
     ToolProcessorTestSupport.Fixture fixture = approvedFixture();
     ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
     fixture.gateway.beforeStartReturn =
-        listener ->
-            fixture.store.transaction(
-                tx -> {
-                  tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
-                  return null;
-                });
+        listener -> ToolProcessorTestSupport.deleteToolWork(fixture);
     fixture.gateway.queueStart(new ToolGateway.Started(handle));
 
     assertEquals(
@@ -435,14 +408,7 @@ class ToolProcessorAdmissionTest {
     assertTrue(inHeartbeat.await(5, TimeUnit.SECONDS));
 
     fixtureA.clock.advance(Duration.ofSeconds(61));
-    fixtureA.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixtureA.toolInvocationId));
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixtureA.toolInvocationId),
-              ToolProcessorTestSupport.NOW);
-          return null;
-        });
+    ToolProcessorTestSupport.replaceToolWork(fixtureA, ToolProcessorTestSupport.NOW);
     ClaimedWork claimedB =
         ToolProcessorTestSupport.claim(
             fixtureA.store, fixtureA.toolInvocationId, fixtureA.clock.instant(), "token-2");
@@ -650,14 +616,7 @@ class ToolProcessorAdmissionTest {
     assertTrue(inStart.await(5, TimeUnit.SECONDS), "A must be inside gateway.start");
 
     fixtureA.clock.advance(Duration.ofSeconds(61));
-    fixtureA.store.transaction(
-        tx -> {
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixtureA.toolInvocationId));
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixtureA.toolInvocationId),
-              ToolProcessorTestSupport.NOW);
-          return null;
-        });
+    ToolProcessorTestSupport.replaceToolWork(fixtureA, ToolProcessorTestSupport.NOW);
     ClaimedWork claimedB =
         ToolProcessorTestSupport.claim(
             fixtureA.store, fixtureA.toolInvocationId, fixtureA.clock.instant(), "token-2");

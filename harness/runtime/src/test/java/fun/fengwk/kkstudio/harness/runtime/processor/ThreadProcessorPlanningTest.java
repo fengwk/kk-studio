@@ -392,6 +392,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             inTx(
                 fixture,
                 tx -> {
+                  tx.lockThread(baseline.threadId()).orElseThrow();
                   tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
                   return null;
                 });

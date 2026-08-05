@@ -86,7 +86,10 @@ class RuntimeModuleArchitectureTest {
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("runtime-spring/pom.xml"),
-        Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime"));
+        Set.of(
+            "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+            "org.postgresql:postgresql",
+            "org.springframework:spring-jdbc"));
     assertDirectProductionDependencies(
         harnessRoot.resolve("daemon/pom.xml"),
         Set.of(

@@ -26,16 +26,20 @@ import java.util.function.Function;
  * append-only 不可变记录。
  *
  * <p>事务语义（所有实现必须遵守）：回调正常返回即提交，抛出 {@link RuntimeException} 或 {@link Error} 时 完整回滚并原样重抛；回调返回 null
- * 合法（void 场景）。事务句柄只能在回调内使用，回调结束后任何句柄方法调用 都必须被实现以 {@link IllegalStateException}
- * 拒绝；实现必须拒绝重入（回调内再次调用同一 Store 的 {@link #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
+ * 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用；跨线程使用或回调结束后的任何句柄调用都必须被实现以 {@link IllegalStateException}
+ * 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先锁 Thread，再锁其 Commands，再锁其 ModelInvocation，再按 ordinal 升序锁同 Assistant
- * Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work
- * 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher claim、heartbeat/lease 等单 Work
- * 调度事务是唯一例外，它们不得创建新的业务 wake。违反顺序属于实现错误。
+ * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先按 id 升序锁 Thread，再锁其 Commands，再锁其 ModelInvocation，再按 ordinal 升序锁同
+ * Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先
+ * THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher
+ * claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
+ * IllegalStateException} 拒绝逆序；重复访问本事务已持有的锁合法。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
+ *
+ * <p>时间精度：映射到 SQL timestamp 列的 durable 时间，以及 Work primitive 的 {@link Instant} 参数，统一使用毫秒精度；任何非 null
+ * 值若包含亚毫秒部分，实现必须以 {@link IllegalArgumentException} 拒绝，禁止静默截断或四舍五入。
  */
 public interface HarnessStore {
 
@@ -108,8 +112,9 @@ public interface HarnessStore {
 
     /**
      * 批量插入新 Command；每条 command 的 thread 必须存在且已在本事务锁定（锁序 Thread -&gt; commands），初始状态必须为 QUEUED（无任何
-     * terminal marker），并逐条校验 id、 {@code (thread, sequence)}、{@code (thread, clientCommandId)}
-     * 唯一性后写入。违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
+     * terminal marker），并逐条校验 id、 {@code (thread, sequence)}、{@code (thread, clientCommandId)} 唯一性后按
+     * {@code (threadId, sequence, id)} 稳定顺序写入。违反抛 {@link IllegalArgumentException}；入参 list
+     * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertCommands(List<ThreadCommand> commands);
 
@@ -173,8 +178,9 @@ public interface HarnessStore {
      * assistantEntryId；assistantEntryId 指向 Assistant MESSAGE Entry 且 request.call 与其中按 ordinal 提取的
      * ToolCall（id / toolName / argumentsJson）精确一致；resultEntryId 全局唯一、是指向匹配 toolCallId /
      * assistantEntryId / ordinal 的 ToolResult MESSAGE Entry（非 synthetic，metadata.status 必须精确映射
-     * invocation terminal status）且其 path 包含 assistantEntryId（同 branch descendant）。违反抛 {@link
-     * IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
+     * invocation terminal status）且其 path 包含 assistantEntryId（同 branch descendant）。完整预校验后按 {@code
+     * (assistantEntryId, ordinal, id)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
+     * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertToolInvocations(List<ToolInvocation> invocations);
 
@@ -203,20 +209,22 @@ public interface HarnessStore {
 
     /**
      * 控制面强制锁定并删除 Work 行：行存在时删除并返回 true，不存在返回 false；无需 claim token（Stop / MOVE_HEAD 用它 fence 旧
-     * callback）。删除后旧 claim 的 renew / complete / reschedule 视为 lost ownership。
+     * callback）。Work 行存在时要求 owning Thread 已在本事务锁定；删除后旧 claim 的 renew / complete / reschedule 视为
+     * lost ownership。
      */
     boolean deleteWork(WorkTarget target);
 
     /**
      * 请求一次 wake（upsert 调度原语）：target 必须存在；新 target 写入 wakeVersion=1，已有行递增 wakeVersion 并把 availableAt
-     * 提前为 min(现有, requestedAt)，保留当前 lease。target 不存在抛 {@link IllegalArgumentException}。
+     * 提前为 min(现有, requestedAt)，保留当前 lease。要求 owning Thread 已在本事务锁定；target 不存在抛 {@link
+     * IllegalArgumentException}。
      */
     void requestWork(WorkTarget target, Instant requestedAt);
 
     /**
      * 领取 targetType 中下一个 due 的 Work：候选为 availableAt {@code <= now} 且 lease 为空或已过期 （leaseUntil
-     * {@code <= now}）的行，按 (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。无候选返回
-     * {@link Optional#empty()}。
+     * {@code <= now}）的行，按 (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。该
+     * dispatcher primitive 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
      */
     Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil);

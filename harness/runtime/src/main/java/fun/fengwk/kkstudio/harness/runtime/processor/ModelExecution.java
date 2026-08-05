@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -83,13 +84,13 @@ final class ModelExecution implements ModelGateway.Listener {
     this.attempt = attempt;
     this.request = Objects.requireNonNull(request, "request");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = Objects.requireNonNull(clock, "clock");
+    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.heartbeat =
         new WorkHeartbeat(
             Objects.requireNonNull(store, "store"),
             Objects.requireNonNull(scheduler, "scheduler"),
             config.leaseConfig(),
-            clock,
+            this.clock,
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
   }
