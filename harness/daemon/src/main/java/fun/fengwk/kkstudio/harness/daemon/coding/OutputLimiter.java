@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 
@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Applies the shared bounded-preview and complete-artifact policy to tool output. */
+/** Applies the shared bounded-preview and complete-resource policy to tool output. */
 final class OutputLimiter {
 
   private OutputLimiter() {}
@@ -19,13 +19,13 @@ final class OutputLimiter {
     boolean binary = isBinary(bytes);
     String text =
         binary
-            ? "[Binary output; complete bytes are attached as an artifact.]"
+            ? "[Binary output; complete bytes are attached as a resource.]"
             : new String(bytes, StandardCharsets.UTF_8);
     if (binary || exceeds(text, bytes.length, config)) {
       List<ToolContent> contents = new ArrayList<>();
       contents.add(
           new TextToolContent(binary ? text : preview(text, config) + truncationHint(bytes, text)));
-      contents.add(new ArtifactToolContent(config.artifactSink().store(bytes, mediaType)));
+      contents.add(new ResourceToolContent(config.resourceStore().store(bytes, mediaType)));
       return contents;
     }
     return List.of(new TextToolContent(text));
@@ -95,7 +95,7 @@ final class OutputLimiter {
         + bytes.length
         + " bytes, "
         + lineCount(text)
-        + ") is attached as an artifact.]";
+        + ") is attached as a resource.]";
   }
 
   private static int lineCount(String text) {

@@ -14,15 +14,17 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,6 +37,9 @@ import java.util.List;
  */
 public final class ProviderMessageProjector {
   private static final String ORPHAN_RESULT_TEXT = "No result provided";
+
+  /** 非 data URI 的 prompt 标签最大字符数（含截断省略号），防止无限长 URI 注入 provider prompt。 */
+  static final int MAX_URI_LABEL_CHARS = 512;
 
   public List<ProviderMessage> project(List<AgentMessage> messages) {
     List<ProviderMessage> result = new ArrayList<>();
@@ -136,11 +141,36 @@ public final class ProviderMessageProjector {
           value.error(),
           value.detailsJson());
     }
-    if (content instanceof ArtifactMessageContent value) {
+    if (content instanceof ResourceMessageContent value) {
+      ResourceRef resource = value.resource();
+      String label = resourceLabel(resource);
       String preview = value.preview() == null ? "" : value.preview();
-      return new ProviderTextBlock(
-          "[Artifact " + value.artifactId() + " (" + value.mediaType() + ")]\n" + preview);
+      return new ProviderTextBlock("[Resource " + label + "]\n" + preview);
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
+  }
+
+  /**
+   * Resource 的 prompt 标记：display name 优先；否则 data URI 用 {@code inline <mediaType>}（绝不把大 data URI 注入
+   * prompt）；其余 URI 标签 ASCII 截断到至多 512 字符并追加 {@code ...}。preview 由 {@link ResourceMessageContent} 的
+   * 16 KiB 上限约束。
+   */
+  private static String resourceLabel(ResourceRef resource) {
+    if (resource.name() != null) {
+      return resource.name();
+    }
+    String scheme = URI.create(resource.uri()).getScheme();
+    if ("data".equals(scheme)) {
+      return "inline " + resource.mediaType();
+    }
+    return truncateAscii(resource.uri());
+  }
+
+  /** ASCII URI 截断：超过 {@link #MAX_URI_LABEL_CHARS} 字符时保留前缀并追加 {@code ...}，总长不超过上限。 */
+  private static String truncateAscii(String uri) {
+    if (uri.length() <= MAX_URI_LABEL_CHARS) {
+      return uri;
+    }
+    return uri.substring(0, MAX_URI_LABEL_CHARS - 3) + "...";
   }
 }

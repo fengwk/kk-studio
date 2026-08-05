@@ -14,16 +14,17 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -274,7 +275,14 @@ class RuntimeEntryPayloadJsonCodecTest {
                 new ThinkingMessageContent("reasoning"),
                 new JsonMessageContent("[1,{\"ok\":true}]"),
                 new ToolCallMessageContent("call-1", "read", "{\"path\":\"README.md\"}"),
-                new ArtifactMessageContent("artifact-1", "text/plain", null)));
+                new ResourceMessageContent(
+                    new ResourceRef(
+                        "data:text/plain,hello",
+                        "text/plain",
+                        "hello.txt",
+                        5L,
+                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                    null)));
     MessageEntryPayload payload =
         new MessageEntryPayload(message, null, metadata(ProviderStopReason.TOOL_CALLS));
 

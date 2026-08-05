@@ -1,12 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.InvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolPermissionState;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -19,14 +21,16 @@ import java.util.Set;
 
 class ToolDomainContractsTest {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+  private static final EnvironmentId ENV_ID =
+      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
 
   @Test
   void validatesToolInvocationSnapshotAndBoundTarget() {
     ToolInvocation platform = invocation(1L, 2L, 3L, 0, "call", "tool", "1", null);
-    ToolInvocation environment = invocation(1L, 2L, 3L, 0, "call", "tool", "1", "env-9");
+    ToolInvocation environment = invocation(1L, 2L, 3L, 0, "call", "tool", "1", ENV_ID);
     assertEquals(InvocationStatus.QUEUED, platform.status());
-    assertEquals(null, platform.environmentName());
-    assertEquals("env-9", environment.environmentName());
+    assertNull(platform.environmentId());
+    assertEquals(ENV_ID, environment.environmentId());
 
     assertThrows(
         IllegalArgumentException.class, () -> invocation(0L, 2L, 3L, 0, "call", "tool", "1", null));
@@ -39,11 +43,13 @@ class ToolDomainContractsTest {
         () -> invocation(1L, 2L, 3L, -1, "call", "tool", "1", null));
     assertThrows(
         IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, " ", "tool", "1", null));
-    assertThrows(
-        IllegalArgumentException.class, () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", " "));
+    // 非 canonical 环境身份（非 UUID 文本）必须被 EnvironmentId 构造器拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", "e".repeat(129)));
+        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", new EnvironmentId("env-9")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(1L, 2L, 3L, 0, "call", "tool", "1", new EnvironmentId("e".repeat(129))));
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(1L, 2L, 3L, 0, "x".repeat(257), "tool", "1", null));
@@ -69,7 +75,7 @@ class ToolDomainContractsTest {
   @Test
   void validatesFrozenToolBinding() {
     ToolBinding platform = ToolBinding.of(descriptor("tool"));
-    assertEquals(null, platform.environmentName());
+    assertNull(platform.environmentName());
     ToolBinding environment =
         ToolBinding.of(
             descriptor("environment", "1", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, "env-9");
@@ -134,7 +140,7 @@ class ToolDomainContractsTest {
       String toolCallId,
       String toolName,
       String toolVersion,
-      String environmentName) {
+      EnvironmentId environmentId) {
     return new ToolInvocation(
         id,
         threadId,
@@ -145,9 +151,9 @@ class ToolDomainContractsTest {
         descriptor(
             toolName,
             toolVersion,
-            environmentName == null ? ToolType.PLATFORM : ToolType.ENVIRONMENT),
+            environmentId == null ? ToolType.PLATFORM : ToolType.ENVIRONMENT),
         "{}",
-        environmentName,
+        environmentId,
         0L,
         InvocationStatus.QUEUED,
         1,

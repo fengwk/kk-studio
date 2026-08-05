@@ -4,11 +4,13 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
@@ -41,7 +43,7 @@ import java.util.function.Supplier;
  *   <li>{@link PermissionResolver} owns the durable permission transition and produces the final
  *       {@link ExecutablePlan} that must match the row.
  *   <li>{@link TerminalCompleter} owns {@code SUCCEEDED} result preparation (after interceptor +
- *       {@link ArtifactStore} externalization) plus the four terminal transitions ({@code SUCCEEDED
+ *       {@link ResourceStore} externalization) plus the four terminal transitions ({@code SUCCEEDED
  *       / FAILED / CANCELLED / UNKNOWN}).
  *   <li>{@link ExecutionCallback} owns in-flight {@link
  *       fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener} callbacks, the heartbeat
@@ -60,7 +62,7 @@ import java.util.function.Supplier;
  *       dispatchClaimed} ensures {@link #stop()} and superseding claims prevent any
  *       no-longer-current Runnable from performing external Tool I/O.
  *   <li>The process-local active-execution map: {@link #hasActiveExecution()} / {@link
- *       #hasActiveExecution(String)} expose the in-flight gate so the environment slot is
+ *       #hasActiveExecution(EnvironmentId)} expose the in-flight gate so the environment slot is
  *       observable until every callback has terminated.
  * </ol>
  *
@@ -95,7 +97,7 @@ public final class ToolWorker {
       ToolRegistry registry,
       RemoteToolTransport remoteTransport,
       ToolInterceptorChain interceptorChain,
-      ArtifactStore artifactStore,
+      ResourceStore resourceStore,
       InvocationRetryPolicyResolver retryPolicyResolver,
       RealtimeEventSink realtimeEventSink,
       ToolWorkerConfig config,
@@ -128,7 +130,7 @@ public final class ToolWorker {
             workdir,
             environmentRoot);
     this.terminalCompleter =
-        new TerminalCompleter(transactions, interceptorChain, artifactStore, config, clock);
+        new TerminalCompleter(transactions, interceptorChain, resourceStore, config, clock);
   }
 
   /**
@@ -215,18 +217,18 @@ public final class ToolWorker {
   }
 
   /**
-   * Process-local gate: an in-flight ENVIRONMENT handle for the given name. PLATFORM handles never
-   * match an Environment route.
+   * Process-local gate: an in-flight ENVIRONMENT handle for the given canonical route identity.
+   * PLATFORM handles never match an Environment route.
    */
-  public boolean hasActiveExecution(String environmentName) {
-    if (environmentName == null || environmentName.isBlank()) {
+  public boolean hasActiveExecution(EnvironmentId environmentId) {
+    if (environmentId == null) {
       return false;
     }
     return executions.values().stream()
         .anyMatch(
             execution ->
                 execution.binding().type() == ToolType.ENVIRONMENT
-                    && environmentName.equals(execution.binding().environmentName()));
+                    && environmentId.value().equals(execution.binding().environmentName()));
   }
 
   /**
@@ -268,7 +270,9 @@ public final class ToolWorker {
       // resolver; the process-local slot stays empty so the durable FIFO gate can advance.
       return;
     }
-    Optional<Tool> tool = permissionResolver.resolveTool(resolved.plan().binding());
+    Optional<Tool> tool =
+        permissionResolver.resolveTool(
+            resolved.plan().binding(), claimed.invocation().environmentId());
     if (tool.isEmpty()) {
       terminalCompleter.completeFailure(
           claimed,

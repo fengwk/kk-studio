@@ -1,35 +1,48 @@
 package fun.fengwk.kkstudio.harness.tool.daemon;
 
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.util.Iterator;
 import java.util.Set;
 
 /**
- * Daemon v1 envelope 的 JSON codec。
+ * Daemon v2 envelope 的 JSON codec。
  *
- * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段和非对象 payload，避免将不完整 wire 消息传给运行时。
+ * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
+ * 消息传给运行时；{@code environmentId} 必须是 canonical 小写 UUID 文本。
  */
 public final class DaemonEnvelopeCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
   private static final Set<String> ENVELOPE_FIELDS =
       Set.of(
           "protocolVersion",
           "messageType",
+          "environmentId",
           "environmentName",
           "invocationId",
           "sequence",
           "payload");
 
-  /** 将 envelope 编码为协议规定的 JSON 字段。 */
+  /** 将 envelope 编码为协议规定的 JSON 字段；environmentId 编码为小写 UUID 文本。 */
   public String encode(DaemonEnvelope envelope) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     root.put("protocolVersion", envelope.protocolVersion());
     root.put("messageType", envelope.messageType().name());
+    root.put("environmentId", envelope.environmentId().value());
     root.put("environmentName", envelope.environmentName());
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
@@ -43,12 +56,12 @@ public final class DaemonEnvelopeCodec {
     }
   }
 
-  /** 解码且校验单个 v1 envelope。 */
+  /** 解码且校验单个 v2 envelope。 */
   public DaemonEnvelope decode(String json) {
     JsonNode root = readObject(json, "envelope");
     rejectUnknownFields(root);
     int protocolVersion = requiredInt(root, "protocolVersion");
-    if (protocolVersion != DaemonProtocol.VERSION_1) {
+    if (protocolVersion != DaemonProtocol.VERSION_2) {
       throw new DaemonProtocolException("unsupported protocolVersion: " + protocolVersion);
     }
     String messageTypeValue = requiredText(root, "messageType");
@@ -67,13 +80,24 @@ public final class DaemonEnvelopeCodec {
       throw new DaemonProtocolException("payload must be a JSON object");
     }
     String invocationId = optionalText(root, "invocationId");
-    return new DaemonEnvelope(
-        protocolVersion,
-        messageType,
-        requiredText(root, "environmentName"),
-        invocationId,
-        sequence,
-        writeJson(payload));
+    EnvironmentId environmentId;
+    try {
+      environmentId = new EnvironmentId(requiredText(root, "environmentId"));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("environmentId must be a canonical lowercase UUID", error);
+    }
+    try {
+      return new DaemonEnvelope(
+          protocolVersion,
+          messageType,
+          environmentId,
+          requiredText(root, "environmentName"),
+          invocationId,
+          sequence,
+          writeJson(payload));
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("envelope fields are invalid", error);
+    }
   }
 
   /** 创建一个空的 JSON object payload。 */

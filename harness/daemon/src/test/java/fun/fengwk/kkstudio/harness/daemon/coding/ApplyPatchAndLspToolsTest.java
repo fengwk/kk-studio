@@ -439,7 +439,7 @@ class ApplyPatchAndLspToolsTest {
             "bash",
             "rg",
             "fd",
-            new InMemoryArtifactSink(),
+            new InMemoryResourceStore(),
             script.toString(),
             System.getProperty("java.home") + "/bin/javap");
     LspGotoDefinitionTool gotoDef = new LspGotoDefinitionTool(bridged);
@@ -470,7 +470,7 @@ class ApplyPatchAndLspToolsTest {
             "bash",
             "rg",
             "fd",
-            new InMemoryArtifactSink(),
+            new InMemoryResourceStore(),
             null,
             javap);
     LspJavaDecompileTool tool = new LspJavaDecompileTool(config);
@@ -794,7 +794,7 @@ class ApplyPatchAndLspToolsTest {
         "bash",
         "rg",
         "fd",
-        new InMemoryArtifactSink());
+        new InMemoryResourceStore());
   }
 
   private static String patchArgs(String patchText) throws Exception {

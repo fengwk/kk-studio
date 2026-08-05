@@ -8,16 +8,16 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -32,7 +32,7 @@ import java.util.Objects;
  * <p>只做类型化映射，不做任何持久化决策：{@link ProviderResponse} 投影为 ASSISTANT {@link MessagePayload}（内容顺序为
  * thinking、text、tool calls，全部为空时回退为空 text，metadata 直接快照 usage/cost）；terminal Model 错误投影为 {@link
  * AssistantErrorPayload}（code 使用 {@code error.kind().name()}）；terminal {@link ToolInvocation} 投影为
- * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Artifact {@link ToolContent} 映射为对应 {@link
+ * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link ToolContent} 映射为对应 {@link
  * AgentMessageContent} 并回退空 text，error 标志原样保留，Binary / 未知 content 显式 {@link
  * IllegalArgumentException} 失败而不是静默丢失；非成功使用 error message + {@link ToolInvocationErrorJsonCodec}
  * 详情且 error=true，metadata.status 精确映射 invocation terminal status）；history normalization 的 synthetic
@@ -76,7 +76,7 @@ public final class HistoryPayloadMapper {
   }
 
   /**
-   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射 Text/JSON/Artifact content 并回退空
+   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射 Text/JSON/Resource content 并回退空
    * text；FAILED / CANCELLED / UNKNOWN 使用 error message + codec 详情且 error=true。metadata 精确映射
    * invocation terminal status。
    */
@@ -140,10 +140,8 @@ public final class HistoryPayloadMapper {
         contents.add(new TextMessageContent(text.text()));
       } else if (toolContent instanceof JsonToolContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (toolContent instanceof ArtifactToolContent artifact) {
-        contents.add(
-            new ArtifactMessageContent(
-                artifact.artifact().artifactId(), artifact.artifact().mediaType(), null));
+      } else if (toolContent instanceof ResourceToolContent resource) {
+        contents.add(new ResourceMessageContent(resource.resource(), null));
       } else {
         // BinaryToolContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(

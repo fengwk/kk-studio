@@ -20,19 +20,19 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.session.ArtifactMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -129,15 +129,12 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
-  void toolResultPayloadSucceededMapsTextJsonAndArtifactContents() {
+  void toolResultPayloadSucceededMapsTextAndJsonContents() {
     ToolInvocation invocation =
         succeededInvocation(
             new ToolResult(
                 "call-1",
-                List.of(
-                    new TextToolContent("plain"),
-                    new JsonToolContent("{\"a\":1}"),
-                    new ArtifactToolContent(new ArtifactRef("art-1", "application/pdf", 10))),
+                List.of(new TextToolContent("plain"), new JsonToolContent("{\"a\":1}")),
                 false,
                 "{}",
                 false));
@@ -146,12 +143,9 @@ class HistoryPayloadMapperTest {
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertFalse(result.error());
     assertEquals("{}", result.detailsJson());
-    assertEquals(3, result.contents().size());
+    assertEquals(2, result.contents().size());
     assertEquals("plain", ((TextMessageContent) result.contents().get(0)).text());
     assertEquals("{\"a\":1}", ((JsonMessageContent) result.contents().get(1)).json());
-    ArtifactMessageContent artifact = (ArtifactMessageContent) result.contents().get(2);
-    assertEquals("art-1", artifact.artifactId());
-    assertEquals("application/pdf", artifact.mediaType());
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(ToolResultStatus.SUCCEEDED, metadata.status());
     assertEquals(7L, metadata.assistantEntryId());
@@ -159,6 +153,27 @@ class HistoryPayloadMapperTest {
     assertEquals("call-1", metadata.toolCallId());
     assertFalse(metadata.synthetic());
     assertNull(metadata.reason());
+  }
+
+  @Test
+  void toolResultPayloadSucceededMapsResourceContentPreservingRefAndNullPreview() {
+    ResourceRef resource =
+        new ResourceRef(
+            "file:///report.txt",
+            "text/plain",
+            "report.txt",
+            3L,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    ToolInvocation invocation =
+        succeededInvocation(
+            new ToolResult(
+                "call-1", List.of(new ResourceToolContent(resource)), false, "{}", false));
+    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) payload.message().contents().get(0);
+    ResourceMessageContent mapped = (ResourceMessageContent) result.contents().get(0);
+    assertEquals(resource, mapped.resource());
+    assertNull(mapped.preview());
   }
 
   @Test

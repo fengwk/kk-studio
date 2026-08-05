@@ -1,22 +1,30 @@
 package fun.fengwk.kkstudio.harness.tool.daemon;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -24,7 +32,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Daemon v1 {@code PARTIAL}/{@code COMPLETED} payload 的 tool-result codec。
+ * Daemon v2 {@code PARTIAL}/{@code COMPLETED} payload 的 tool-result codec。
  *
  * <p>wire shape:
  *
@@ -32,82 +40,194 @@ import java.util.Set;
  *   <li>{@code {"result":{"toolCallId":string,"error":bool,"details":object,"contents":[...]}}}；
  *   <li>text: {@code {"type":"text","text":string}}；
  *   <li>json: {@code {"type":"json","json":value}}（value 原样编码）；
- *   <li>artifact: {@code
- *       {"type":"artifact","artifactId":string,"mediaType":string,"sizeBytes":long,
- *       "contentBase64":string}}；{@code contentBase64} 是 artifact 原始 bytes 的 RFC 4648 basic
- *       Base64（无换行）。
+ *   <li>resource: {@code {"type":"resource","uri":string,"mediaType":string,"name":string|null,
+ *       "size":long,"sha256":string,"contentBase64":string}}；{@code size}/{@code sha256} 必填且先于任何
+ *       Base64 分配完成校验；{@code contentBase64} 是 resource 原始 bytes 的 RFC 4648 basic Base64（无换行），
+ *       且解码后长度必须等于声明 {@code size}、摘要必须等于声明 {@code sha256}。
  * </ul>
  *
- * <p>解码将 artifact 还原为内联 {@link BinaryToolContent}，不在 codec 边界持久化 ArtifactStore。PARTIAL 应在调用侧拒绝
- * artifact（见 {@link #decodeResult(String, long, boolean)}）。编码时 {@link ArtifactToolContent} 通过
- * {@link DaemonArtifactContentWriter} 读取本地 bytes；{@link BinaryToolContent} 直接写出。
+ * <p>编码分相：{@link #encodePartial} 只允许 text/json，任何 resource/binary 内容在任何 store 操作之前拒绝； {@link
+ * #encodeCompleted} 先对全部内容做计数/单条/聚合资源字节预算预检（默认 {@link #DEFAULT_MAX_RESOURCE_BYTES} 8
+ * MiB），预检全部通过后才允许任何 store 读写，杜绝后置条目超限造成半途副作用。最终 payload 的 UTF-8 字节数必须 ≤ {@link
+ * #MAX_PAYLOAD_UTF8_BYTES}（16 MiB），由 bounded 输出辅助在物化前中止。
+ *
+ * <p>解码侧：{@link ResourceToolContent} 通过 {@link DaemonResourceStore#read} 读取字节并复核 size/sha； {@link
+ * BinaryToolContent} 先经 {@link DaemonResourceStore#store} 落盘再编码返回的 resource。解码将 resource 还原为内联
+ * {@link BinaryToolContent}，不在 codec 边界持久化（入站 daemon URI 永远不是 durable 目的地）。解码先施加原始 payload 的 UTF-8
+ * 上限（{@link #MAX_PAYLOAD_UTF8_BYTES}），再在 Base64 分配前按“当前 size 是否超过剩余聚合预算”拒绝超限条目， 并配置 Jackson {@link
+ * StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
  */
 public final class DaemonToolResultCodec {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  /** 默认单资源/聚合资源字节预算：8 MiB（Base64 后约 10.7 MiB 字符，适配 gateway 默认 16 MiB 入站文本上限）。 */
+  public static final long DEFAULT_MAX_RESOURCE_BYTES = 8L * 1024 * 1024;
+
+  /** 结果 payload 的原始 UTF-8 上限（解码前）与最终编码输出上限：16 MiB。 */
+  public static final int MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024;
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      new ObjectMapper(
+          JsonFactory.builder()
+              // 解析放大防护：字符串、嵌套深度、数字长度与文档长度全部有界（与 payload 上限同量级）。
+              .streamReadConstraints(
+                  StreamReadConstraints.builder()
+                      .maxStringLength(MAX_PAYLOAD_UTF8_BYTES)
+                      .maxNestingDepth(100)
+                      .maxNumberLength(1000)
+                      .maxDocumentLength(MAX_PAYLOAD_UTF8_BYTES)
+                      .build())
+              .build());
+
+  static {
+    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+  }
+
+  private static final Set<String> RESOURCE_FIELDS =
+      Set.of("type", "uri", "mediaType", "name", "size", "sha256", "contentBase64");
 
   /**
-   * 将 {@link ToolResult} 编码为 v1 wire JSON 文本。
-   *
-   * @param result 待编码的 ToolResult；不得为 null。
-   * @param artifactWriter artifact 字节读取 SPI；当 {@code result.contents()} 包含 {@link
-   *     ArtifactToolContent} 时必须提供。
-   * @return 完整 wire JSON 文本（始终包含顶层 {@code result} 对象）。
-   * @throws DaemonProtocolException 当 writer 抛 {@link IOException} 或结果包含不支持的内容类型时。
+   * 编码 PARTIAL 结果：只允许 text/json 内容；任何 {@link ResourceToolContent}/{@link BinaryToolContent} 都在 任何
+   * store 操作之前被拒绝。
    */
-  public String encodeResult(ToolResult result, DaemonArtifactContentWriter artifactWriter) {
-    Objects.requireNonNull(result, "result");
-    Objects.requireNonNull(artifactWriter, "artifactWriter");
-    ObjectNode root = OBJECT_MAPPER.createObjectNode();
-    ObjectNode wireResult = root.putObject("result");
-    wireResult.put("toolCallId", result.toolCallId());
-    wireResult.put("error", result.error());
-    JsonNode details = readDetails(result.detailsJson());
-    wireResult.set("details", details);
-    ArrayNode contents = wireResult.putArray("contents");
-    for (ToolContent content : result.contents()) {
-      writeContent(contents, content, artifactWriter);
+  public String encodePartial(ToolResult partial, DaemonResourceStore resourceStore) {
+    Objects.requireNonNull(partial, "partial");
+    Objects.requireNonNull(resourceStore, "resourceStore");
+    for (ToolContent content : partial.contents()) {
+      if (!(content instanceof TextToolContent) && !(content instanceof JsonToolContent)) {
+        throw new DaemonProtocolException(
+            "PARTIAL result must not contain " + content.getClass().getSimpleName() + " content");
+      }
     }
-    return writeJson(root);
+    return writeBoundedPayload(buildResultTree(partial, resourceStore));
   }
 
-  /** 将 v1 wire JSON 文本解码为 {@link ToolResult}；artifact 还原为内联 {@link BinaryToolContent}。 */
-  public ToolResult decodeResult(String payloadJson) {
-    return decodeResult(payloadJson, Long.MAX_VALUE, true);
+  /** 编码 COMPLETED 结果，使用默认资源字节预算 {@link #DEFAULT_MAX_RESOURCE_BYTES}。 */
+  public String encodeCompleted(ToolResult result, DaemonResourceStore resourceStore) {
+    return encodeCompleted(result, DEFAULT_MAX_RESOURCE_BYTES, resourceStore);
   }
 
   /**
-   * 将 v1 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 artifact 的声明字节数。
+   * 编码 COMPLETED 结果。
    *
-   * @param allowArtifacts false 时拒绝 artifact 内容（PARTIAL 使用）。
+   * <p>在第一个 {@code store.store}/{@code store.read}、Base64 与输出树构建之前完成全部预检：内容数 ≤ {@link
+   * ToolResult#MAX_CONTENT_ITEMS}（由 ToolResult 构造期强制，codec 不再重复）；resource ref 必须携带非空 size/sha；
+   * binary 大小取自内容；单条与聚合资源字节都必须 ≤ {@code maximumResourceBytes}。任何后置条目超限都不会产生任何 store 副作用。 最终 payload
+   * 必须 ≤ {@link #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节。
+   */
+  public String encodeCompleted(
+      ToolResult result, long maximumResourceBytes, DaemonResourceStore resourceStore) {
+    Objects.requireNonNull(result, "result");
+    Objects.requireNonNull(resourceStore, "resourceStore");
+    if (maximumResourceBytes <= 0) {
+      throw new IllegalArgumentException("maximumResourceBytes must be positive");
+    }
+    long aggregate = 0;
+    for (ToolContent content : result.contents()) {
+      long size;
+      if (content instanceof ResourceToolContent resource) {
+        ResourceRef ref = resource.resource();
+        if (ref.size() == null || ref.sha256() == null) {
+          throw new DaemonProtocolException(
+              "resource ref must declare size and sha256 for the daemon wire: " + ref.uri());
+        }
+        size = ref.size();
+      } else if (content instanceof BinaryToolContent binary) {
+        size = binary.content().length;
+      } else {
+        size = 0;
+      }
+      if (size > maximumResourceBytes - aggregate) {
+        throw new DaemonProtocolException(
+            "aggregate resource bytes exceed maximumResourceBytes: maximum="
+                + maximumResourceBytes);
+      }
+      aggregate += size;
+    }
+    return writeBoundedPayload(buildResultTree(result, resourceStore));
+  }
+
+  /** 将 v2 wire JSON 文本解码为 {@link ToolResult}；resource 还原为内联 {@link BinaryToolContent}。 */
+  public ToolResult decodeResult(String payloadJson) {
+    return decodeResult(payloadJson, DEFAULT_MAX_RESOURCE_BYTES, true);
+  }
+
+  /**
+   * 将 v2 wire JSON 文本解码为 {@link ToolResult}，并在 Base64 分配前限制单个 resource 的声明字节数与聚合解码字节数。
+   *
+   * @param allowResources false 时拒绝 resource 内容（PARTIAL 使用）。
    */
   public ToolResult decodeResult(
-      String payloadJson, long maximumArtifactBytes, boolean allowArtifacts) {
-    return decodeResult(payloadJson, null, maximumArtifactBytes, allowArtifacts);
+      String payloadJson, long maximumResourceBytes, boolean allowResources) {
+    return decodeResult(payloadJson, null, maximumResourceBytes, allowResources);
   }
 
   /**
-   * Decodes a result for one expected daemon invocation. Artifacts stay inline as {@link
+   * 解码 PARTIAL 结果（专用入口：拒绝 resource，替代 boolean 参数用法）。
+   *
+   * @param expectedToolCallId 期望的调用 ID；空白或 null 时拒绝。
+   * @param maximumResourceBytes 单条/聚合资源字节预算。
+   */
+  public ToolResult decodePartialForInvocation(
+      String payloadJson, String expectedToolCallId, long maximumResourceBytes) {
+    return decodeResult(
+        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, false);
+  }
+
+  /**
+   * 解码 COMPLETED 结果（专用入口：允许 resource 并还原为内联 {@link BinaryToolContent}，替代 boolean 参数用法）。
+   *
+   * @param expectedToolCallId 期望的调用 ID；空白或 null 时拒绝。
+   * @param maximumResourceBytes 单条/聚合资源字节预算。
+   */
+  public ToolResult decodeCompletedForInvocation(
+      String payloadJson, String expectedToolCallId, long maximumResourceBytes) {
+    return decodeResult(
+        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, true);
+  }
+
+  /**
+   * Decodes a result for one expected daemon invocation. Resources stay inline as {@link
    * BinaryToolContent}; no durable store is touched.
+   *
+   * <p>保留给尚未迁移的 Core 调用方；新代码请使用 {@link #decodePartialForInvocation} / {@link
+   * #decodeCompletedForInvocation}。
    */
   public ToolResult decodeResultForInvocation(
       String payloadJson,
       String expectedToolCallId,
-      long maximumArtifactBytes,
-      boolean allowArtifacts) {
+      long maximumResourceBytes,
+      boolean allowResources) {
+    return decodeResult(
+        payloadJson, requireInvocationId(expectedToolCallId), maximumResourceBytes, allowResources);
+  }
+
+  private static String requireInvocationId(String expectedToolCallId) {
     if (expectedToolCallId == null || expectedToolCallId.isBlank()) {
       throw new IllegalArgumentException("expectedToolCallId must not be blank");
     }
-    return decodeResult(payloadJson, expectedToolCallId, maximumArtifactBytes, allowArtifacts);
+    return expectedToolCallId;
   }
 
   private ToolResult decodeResult(
       String payloadJson,
       String expectedToolCallId,
-      long maximumArtifactBytes,
-      boolean allowArtifacts) {
-    if (maximumArtifactBytes < 0) {
-      throw new IllegalArgumentException("maximumArtifactBytes must not be negative");
+      long maximumResourceBytes,
+      boolean allowResources) {
+    if (maximumResourceBytes < 0) {
+      throw new IllegalArgumentException("maximumResourceBytes must not be negative");
+    }
+    // 解析前先施加原始 payload 的 UTF-8 上限：不分配完整编码缓冲，超限即拒绝，避免解析放大。
+    try {
+      if (ResourceRef.utf8LengthUpTo(payloadJson, "payloadJson", MAX_PAYLOAD_UTF8_BYTES)
+          > MAX_PAYLOAD_UTF8_BYTES) {
+        throw new DaemonProtocolException(
+            "payload exceeds " + MAX_PAYLOAD_UTF8_BYTES + " UTF-8 bytes");
+      }
+    } catch (DaemonProtocolException error) {
+      throw error;
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException("payload is not valid Unicode", error);
     }
     ObjectNode root = readRootObject(payloadJson, "result");
     Set<String> allowedTop = Set.of("result");
@@ -139,19 +259,58 @@ public final class DaemonToolResultCodec {
     if (!contentsNode.isArray()) {
       throw new DaemonProtocolException("result 'contents' must be an array");
     }
+    if (contentsNode.size() > ToolResult.MAX_CONTENT_ITEMS) {
+      throw new DaemonProtocolException(
+          "result 'contents' must not exceed " + ToolResult.MAX_CONTENT_ITEMS + " items");
+    }
     List<ToolContent> contents = new ArrayList<>();
+    long decodedResourceBytes = 0;
     int index = 0;
     for (JsonNode element : contentsNode) {
-      contents.add(
+      // 剩余聚合预算在 readContent 内先于任何 Base64 分配完成预检；预检保证累加不溢出。
+      DecodedContent decoded =
           readContent(
-              element, "result.contents[" + index + "]", maximumArtifactBytes, allowArtifacts));
+              element,
+              "result.contents[" + index + "]",
+              maximumResourceBytes - decodedResourceBytes,
+              allowResources);
+      decodedResourceBytes += decoded.resourceBytes;
+      contents.add(decoded.content);
       index++;
     }
-    return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson, false);
+    try {
+      return new ToolResult(toolCallId, List.copyOf(contents), error, detailsJson, false);
+    } catch (IllegalArgumentException invalid) {
+      // ToolResult 构造期的有界输入校验（如 detailsJson 超限/非法 Unicode）按协议错误拒绝。
+      throw new DaemonProtocolException("result fields are invalid", invalid);
+    }
   }
 
-  private void writeContent(
-      ArrayNode contents, ToolContent content, DaemonArtifactContentWriter artifactWriter) {
+  private ObjectNode buildResultTree(ToolResult result, DaemonResourceStore resourceStore) {
+    ObjectNode root = OBJECT_MAPPER.createObjectNode();
+    ObjectNode wireResult = root.putObject("result");
+    wireResult.put("toolCallId", result.toolCallId());
+    wireResult.put("error", result.error());
+    JsonNode details = readDetails(result.detailsJson());
+    wireResult.set("details", details);
+    ArrayNode contents = wireResult.putArray("contents");
+    for (ToolContent content : result.contents()) {
+      writeContent(contents, content, resourceStore);
+    }
+    return root;
+  }
+
+  /** 最终 payload 必须 ≤ {@link #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节：经 bounded 输出在物化前中止。 */
+  private String writeBoundedPayload(ObjectNode root) {
+    String payload = ToolResultJsonCodec.encodeBoundedUtf8(root, MAX_PAYLOAD_UTF8_BYTES);
+    if (payload == null) {
+      throw new DaemonProtocolException(
+          "daemon payload exceeds " + MAX_PAYLOAD_UTF8_BYTES + " UTF-8 bytes");
+    }
+    return payload;
+  }
+
+  private void writeContent(ArrayNode contents, ToolContent content, DaemonResourceStore store) {
     ObjectNode wireContent = contents.addObject();
     if (content instanceof TextToolContent text) {
       wireContent.put("type", "text");
@@ -159,54 +318,33 @@ public final class DaemonToolResultCodec {
     } else if (content instanceof JsonToolContent json) {
       wireContent.put("type", "json");
       wireContent.set("json", readJson(json.json()));
+    } else if (content instanceof ResourceToolContent resource) {
+      ResourceRef ref = resource.resource();
+      byte[] bytes = readAndVerify(store, ref);
+      writeResource(wireContent, ref, bytes);
     } else if (content instanceof BinaryToolContent binary) {
-      byte[] bytes = binary.content();
-      wireContent.put("type", "artifact");
-      wireContent.put("artifactId", "inline");
-      wireContent.put("mediaType", binary.mediaType());
-      wireContent.put("sizeBytes", bytes.length);
-      wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
-    } else if (content instanceof ArtifactToolContent artifact) {
-      ArtifactRef ref = artifact.artifact();
-      byte[] bytes;
+      ResourceRef ref;
       try {
-        bytes = artifactWriter.readBytes(ref);
+        ref = store.store(binary.content(), binary.mediaType());
       } catch (IOException error) {
-        throw new DaemonProtocolException(
-            "cannot read artifact bytes for " + ref.artifactId(), error);
+        throw new DaemonProtocolException("cannot store binary tool content", error);
       }
-      if (bytes == null) {
-        throw new DaemonProtocolException(
-            "artifact writer returned null bytes for " + ref.artifactId());
-      }
-      if (bytes.length != ref.sizeBytes()) {
-        throw new DaemonProtocolException(
-            "artifact writer size mismatch for "
-                + ref.artifactId()
-                + ": declared="
-                + ref.sizeBytes()
-                + " actual="
-                + bytes.length);
-      }
-      wireContent.put("type", "artifact");
-      wireContent.put("artifactId", ref.artifactId());
-      wireContent.put("mediaType", ref.mediaType());
-      wireContent.put("sizeBytes", ref.sizeBytes());
-      wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+      writeResource(wireContent, ref, binary.content());
     } else {
       throw new DaemonProtocolException("unsupported tool content: " + content.getClass());
     }
   }
 
-  private ToolContent readContent(
-      JsonNode node, String context, long maximumArtifactBytes, boolean allowArtifacts) {
+  private DecodedContent readContent(
+      JsonNode node, String context, long remainingResourceBytes, boolean allowResources) {
     ObjectNode obj = requiredObject(node, context);
     String type = requiredText(obj, "type", context);
     switch (type) {
       case "text" -> {
         rejectUnknownFields(obj, Set.of("type", "text"), context);
-        String text = requiredText(obj, "text", context);
-        return new TextToolContent(text);
+        // 空字符串是合法文本内容；只要求类型是 string。
+        String text = requiredString(obj, "text", context);
+        return new DecodedContent(new TextToolContent(text), 0);
       }
       case "json" -> {
         rejectUnknownFields(obj, Set.of("type", "json"), context);
@@ -214,35 +352,44 @@ public final class DaemonToolResultCodec {
         if (value == null) {
           throw new DaemonProtocolException(context + " must declare 'json'");
         }
-        return new JsonToolContent(writeJson(value));
+        try {
+          // JsonToolContent 构造期的 1 MiB 上限校验：超限/非法 Unicode 按协议错误拒绝。
+          return new DecodedContent(new JsonToolContent(writeJson(value)), 0);
+        } catch (IllegalArgumentException error) {
+          throw new DaemonProtocolException(context + " 'json' is invalid or too large", error);
+        }
       }
-      case "artifact" -> {
-        if (!allowArtifacts) {
-          throw new DaemonProtocolException("PARTIAL result must not contain artifact content");
+      case "resource" -> {
+        if (!allowResources) {
+          throw new DaemonProtocolException("PARTIAL result must not contain resource content");
         }
-        Set<String> allowedArtifact =
-            Set.of("type", "artifactId", "mediaType", "sizeBytes", "contentBase64");
-        rejectUnknownFields(obj, allowedArtifact, context);
-        requiredText(obj, "artifactId", context);
+        rejectUnknownFields(obj, RESOURCE_FIELDS, context);
+        String uri = requiredText(obj, "uri", context);
         String mediaType = requiredText(obj, "mediaType", context);
-        long sizeBytes = requiredLong(obj, "sizeBytes", context);
-        if (sizeBytes < 0) {
-          throw new DaemonProtocolException(context + " 'sizeBytes' must not be negative");
-        }
-        if (sizeBytes > maximumArtifactBytes) {
-          throw new DaemonProtocolException(
-              context
-                  + " 'sizeBytes' exceeds maximumArtifactBytes: declared="
-                  + sizeBytes
-                  + " maximum="
-                  + maximumArtifactBytes);
-        }
+        String name = optionalTextOrNull(obj, "name", context);
+        // size/sha256 对每个 wire resource 都是必填：缺失或 null 直接拒绝，杜绝声明为 null 绕过大小预检。
+        long size = requiredLong(obj, "size", context);
+        String sha256 = requiredText(obj, "sha256", context);
         String contentBase64 = requiredString(obj, "contentBase64", context);
-        if ((long) contentBase64.length() != canonicalBase64Length(sizeBytes)) {
+        // 先完成全量字段/URI 校验，再进行任何 Base64 分配。
+        try {
+          new ResourceRef(uri, mediaType, name, size, sha256);
+        } catch (IllegalArgumentException error) {
+          throw new DaemonProtocolException(context + " resource fields are invalid", error);
+        }
+        // 聚合预检先于 Base64 校验/分配：即使 contentBase64 非法，预算耗尽也必须报聚合错误。
+        if (size > remainingResourceBytes) {
+          throw new DaemonProtocolException(
+              "aggregate decoded resource bytes exceed maximumResourceBytes: declared="
+                  + size
+                  + " remaining="
+                  + remainingResourceBytes);
+        }
+        if (contentBase64.length() != canonicalBase64Length(size)) {
           throw new DaemonProtocolException(
               context
                   + " 'contentBase64' must use canonical Base64 with encoded length matching "
-                  + "'sizeBytes'");
+                  + "'size'");
         }
         byte[] bytes;
         try {
@@ -251,27 +398,85 @@ public final class DaemonToolResultCodec {
           throw new DaemonProtocolException(
               context + " 'contentBase64' is not valid Base64", error);
         }
-        if (bytes.length != sizeBytes) {
-          throw new DaemonProtocolException(
-              context
-                  + " 'contentBase64' decoded length does not match 'sizeBytes': declared="
-                  + sizeBytes
-                  + " actual="
-                  + bytes.length);
-        }
         if (!Base64.getEncoder().encodeToString(bytes).equals(contentBase64)) {
           throw new DaemonProtocolException(context + " 'contentBase64' must use canonical Base64");
         }
-        return new BinaryToolContent(mediaType, bytes);
+        if (bytes.length != size) {
+          throw new DaemonProtocolException(
+              context
+                  + " 'contentBase64' decoded length does not match 'size': declared="
+                  + size
+                  + " actual="
+                  + bytes.length);
+        }
+        if (!sha256.equals(sha256Hex(bytes))) {
+          throw new DaemonProtocolException(
+              context + " 'sha256' does not match decoded 'contentBase64' bytes");
+        }
+        return new DecodedContent(new BinaryToolContent(mediaType, bytes), bytes.length);
       }
       default -> throw new DaemonProtocolException(context + " unknown content type: " + type);
     }
   }
 
-  private JsonNode readDetails(String detailsJson) {
+  private static byte[] readAndVerify(DaemonResourceStore store, ResourceRef ref) {
+    byte[] bytes;
     try {
-      JsonNode value =
-          OBJECT_MAPPER.readTree(detailsJson == null || detailsJson.isBlank() ? "{}" : detailsJson);
+      bytes = store.read(ref);
+    } catch (IOException error) {
+      throw new DaemonProtocolException("cannot read resource bytes for " + ref.uri(), error);
+    }
+    if (bytes == null) {
+      throw new DaemonProtocolException("resource store returned null bytes for " + ref.uri());
+    }
+    if (ref.size() != null && bytes.length != ref.size()) {
+      throw new DaemonProtocolException(
+          "resource store size mismatch for "
+              + ref.uri()
+              + ": declared="
+              + ref.size()
+              + " actual="
+              + bytes.length);
+    }
+    if (ref.sha256() != null && !ref.sha256().equals(sha256Hex(bytes))) {
+      throw new DaemonProtocolException("resource store sha256 mismatch for " + ref.uri());
+    }
+    return bytes;
+  }
+
+  private void writeResource(ObjectNode wireContent, ResourceRef ref, byte[] bytes) {
+    if (ref.size() == null || ref.sha256() == null) {
+      throw new DaemonProtocolException(
+          "resource ref must declare size and sha256 for the daemon wire: " + ref.uri());
+    }
+    if (bytes.length != ref.size()) {
+      throw new DaemonProtocolException(
+          "resource size mismatch for "
+              + ref.uri()
+              + ": declared="
+              + ref.size()
+              + " actual="
+              + bytes.length);
+    }
+    if (!ref.sha256().equals(sha256Hex(bytes))) {
+      throw new DaemonProtocolException("resource sha256 mismatch for " + ref.uri());
+    }
+    wireContent.put("type", "resource");
+    wireContent.put("uri", ref.uri());
+    wireContent.put("mediaType", ref.mediaType());
+    putNullableText(wireContent, "name", ref.name());
+    putNullableLong(wireContent, "size", ref.size());
+    putNullableText(wireContent, "sha256", ref.sha256());
+    wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+  }
+
+  private JsonNode readDetails(String detailsJson) {
+    // ToolResult 构造期已保证 detailsJson 是合法 JSON object；codec 不做规范化，若触达非法值直接严格失败。
+    if (detailsJson == null || detailsJson.isBlank()) {
+      throw new DaemonProtocolException("result 'details' must be a JSON object");
+    }
+    try {
+      JsonNode value = OBJECT_MAPPER.readTree(detailsJson);
       if (value == null || !value.isObject()) {
         throw new DaemonProtocolException("result 'details' must be a JSON object");
       }
@@ -345,6 +550,47 @@ public final class DaemonToolResultCodec {
     return value.textValue();
   }
 
+  private String optionalTextOrNull(ObjectNode obj, String field, String context) {
+    JsonNode value = obj.get(field);
+    if (value == null) {
+      throw new DaemonProtocolException(context + " must declare '" + field + "'");
+    }
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new DaemonProtocolException(context + " '" + field + "' must be a string or null");
+    }
+    return value.textValue();
+  }
+
+  private Long optionalLongOrNull(ObjectNode obj, String field, String context) {
+    JsonNode value = obj.get(field);
+    if (value == null) {
+      throw new DaemonProtocolException(context + " must declare '" + field + "'");
+    }
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new DaemonProtocolException(
+          context + " '" + field + "' must be a long integer or null");
+    }
+    long result = value.longValue();
+    if (result < 0) {
+      throw new DaemonProtocolException(context + " '" + field + "' must not be negative");
+    }
+    return result;
+  }
+
+  private long requiredLong(ObjectNode obj, String field, String context) {
+    Long value = optionalLongOrNull(obj, field, context);
+    if (value == null) {
+      throw new DaemonProtocolException(context + " must declare '" + field + "'");
+    }
+    return value;
+  }
+
   private boolean requiredBoolean(ObjectNode obj, String field, String context) {
     JsonNode value = obj.get(field);
     if (value == null || value.isNull()) {
@@ -356,23 +602,36 @@ public final class DaemonToolResultCodec {
     return value.booleanValue();
   }
 
-  private long requiredLong(ObjectNode obj, String field, String context) {
-    JsonNode value = obj.get(field);
-    if (value == null || value.isNull()) {
-      throw new DaemonProtocolException(context + " must declare '" + field + "'");
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new DaemonProtocolException(context + " '" + field + "' must be a long integer");
-    }
-    return value.longValue();
-  }
-
   private long canonicalBase64Length(long sizeBytes) {
     long groups = sizeBytes / 3;
     if (sizeBytes % 3 != 0) {
       groups++;
     }
     return groups > Long.MAX_VALUE / 4 ? Long.MAX_VALUE : groups * 4;
+  }
+
+  private static String sha256Hex(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 unavailable", error);
+    }
+  }
+
+  private static void putNullableText(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value.longValue());
+    }
   }
 
   private void rejectUnknownFields(ObjectNode obj, Set<String> allowed, String context) {
@@ -387,4 +646,6 @@ public final class DaemonToolResultCodec {
       }
     }
   }
+
+  private record DecodedContent(ToolContent content, long resourceBytes) {}
 }

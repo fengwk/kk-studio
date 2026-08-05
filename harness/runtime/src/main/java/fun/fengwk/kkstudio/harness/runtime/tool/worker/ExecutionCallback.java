@@ -7,8 +7,8 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyResolver;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -184,8 +184,10 @@ final class ExecutionCallback implements ToolExecutionListener {
   @Override
   public void onPartial(ToolResult partial) {
     for (ToolContent content : partial.contents()) {
-      if (content instanceof BinaryToolContent || content instanceof ArtifactToolContent) {
-        error(new IllegalArgumentException("PARTIAL result must not contain artifact content"));
+      if (content instanceof BinaryToolContent || content instanceof ResourceToolContent) {
+        error(
+            new IllegalArgumentException(
+                "PARTIAL result must not contain binary or resource content"));
         return;
       }
     }

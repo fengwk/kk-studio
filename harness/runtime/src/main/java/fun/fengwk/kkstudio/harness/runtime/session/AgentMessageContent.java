@@ -9,4 +9,4 @@ public sealed interface AgentMessageContent
         JsonMessageContent,
         ToolCallMessageContent,
         ToolResultMessageContent,
-        ArtifactMessageContent {}
+        ResourceMessageContent {}

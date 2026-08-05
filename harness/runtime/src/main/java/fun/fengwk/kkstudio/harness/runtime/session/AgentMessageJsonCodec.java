@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -43,8 +45,8 @@ public final class AgentMessageJsonCodec {
       orderedSet("type", "toolCallId", "toolName", "argumentsJson");
   private static final Set<String> TOOL_RESULT_FIELDS =
       orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
-  private static final Set<String> ARTIFACT_FIELDS =
-      orderedSet("type", "artifactId", "mediaType", "preview");
+  private static final Set<String> RESOURCE_FIELDS =
+      orderedSet("type", "uri", "mediaType", "name", "size", "sha256", "preview");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -153,15 +155,15 @@ public final class AgentMessageJsonCodec {
         node.put("error", value.error());
         node.put("detailsJson", value.detailsJson());
       }
-      case ArtifactMessageContent value -> {
-        node.put("type", "artifact");
-        node.put("artifactId", value.artifactId());
-        node.put("mediaType", value.mediaType());
-        if (value.preview() == null) {
-          node.putNull("preview");
-        } else {
-          node.put("preview", value.preview());
-        }
+      case ResourceMessageContent value -> {
+        ResourceRef resource = value.resource();
+        node.put("type", "resource");
+        node.put("uri", resource.uri());
+        node.put("mediaType", resource.mediaType());
+        putNullableText(node, "name", resource.name());
+        putNullableLong(node, "size", resource.size());
+        putNullableText(node, "sha256", resource.sha256());
+        putNullableText(node, "preview", value.preview());
       }
     }
     return node;
@@ -226,17 +228,16 @@ public final class AgentMessageJsonCodec {
             requiredBoolean(node, "error", "content"),
             requiredStrictJsonObjectString(node, "detailsJson", "content"));
       }
-      case "artifact" -> {
-        requireExactFields(node, ARTIFACT_FIELDS, "content");
-        JsonNode previewNode = node.get("preview");
-        if (!previewNode.isTextual() && !previewNode.isNull()) {
-          throw new IllegalArgumentException("content.preview must be text or null");
-        }
-        String preview = previewNode.isNull() ? null : previewNode.textValue();
-        yield new ArtifactMessageContent(
-            requiredText(node, "artifactId", "content"),
-            requiredText(node, "mediaType", "content"),
-            preview);
+      case "resource" -> {
+        requireExactFields(node, RESOURCE_FIELDS, "content");
+        yield new ResourceMessageContent(
+            new ResourceRef(
+                requiredText(node, "uri", "content"),
+                requiredText(node, "mediaType", "content"),
+                nullableText(node, "name", "content"),
+                nullableLong(node, "size", "content"),
+                nullableText(node, "sha256", "content")),
+            nullableText(node, "preview", "content"));
       }
       default -> throw new IllegalArgumentException("unknown agent message content type: " + type);
     };
@@ -342,6 +343,46 @@ public final class AgentMessageJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return value.textValue();
+  }
+
+  /** 可空文本字段：JSON null 或 text。 */
+  private static String nullableText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return value.textValue();
+  }
+
+  /** 可空整数字段：JSON null 或 integer（范围约束由 ResourceRef 构造校验）。 */
+  private static Long nullableLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new IllegalArgumentException(context + "." + field + " must be an integer or null");
+    }
+    return value.longValue();
+  }
+
+  private static void putNullableText(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value.longValue());
+    }
   }
 
   private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {

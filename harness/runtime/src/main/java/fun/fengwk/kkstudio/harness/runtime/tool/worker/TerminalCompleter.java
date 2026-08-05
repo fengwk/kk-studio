@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.tool.worker;
 
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.AfterToolCallContext;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInterceptorChain;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.ArtifactRef;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceRef;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
@@ -30,7 +31,7 @@ import java.util.Objects;
  * ToolInvocationTransactions} port owns the durable mutation.
  *
  * <p>Preparation order for {@link #prepareTerminalResult}: after-tool-call interceptors first, then
- * {@link ArtifactStore} externalization of oversized or binary content. Either step failing is
+ * {@link ResourceStore} externalization of oversized or binary content. Either step failing is
  * captured as a {@link TerminalResultPreparationException} so the caller can converge to a
  * deterministic {@code FAILED} row with the matching error kind and never run the persisted-success
  * path.
@@ -39,19 +40,19 @@ final class TerminalCompleter {
 
   private final ToolInvocationTransactions transactions;
   private final ToolInterceptorChain interceptorChain;
-  private final ArtifactStore artifactStore;
+  private final ResourceStore resourceStore;
   private final ToolWorkerConfig config;
   private final Clock clock;
 
   TerminalCompleter(
       ToolInvocationTransactions transactions,
       ToolInterceptorChain interceptorChain,
-      ArtifactStore artifactStore,
+      ResourceStore resourceStore,
       ToolWorkerConfig config,
       Clock clock) {
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.interceptorChain = Objects.requireNonNull(interceptorChain, "interceptorChain");
-    this.artifactStore = Objects.requireNonNull(artifactStore, "artifactStore");
+    this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -113,7 +114,7 @@ final class TerminalCompleter {
 
   /**
    * Prepare the persisted {@link ToolResult}: after-tool-call interceptors first, then {@link
-   * ArtifactStore} externalization of any oversized or binary content. Either failure is reported
+   * ResourceStore} externalization of any oversized or binary content. Either failure is reported
    * as a {@link TerminalResultPreparationException} so the caller can fail closed without writing a
    * partial terminal row.
    */
@@ -143,11 +144,13 @@ final class TerminalCompleter {
     for (ToolContent content : result.contents()) {
       if (content instanceof BinaryToolContent binary) {
         byte[] bytes = binary.content();
-        ArtifactRef artifact = artifactStore.save(binary.mediaType(), "identity", bytes);
-        contents.add(new ArtifactToolContent(artifact));
+        ResourceRef resource = resourceStore.put(binary.mediaType(), null, bytes);
+        contents.add(new TextToolContent(BINARY_RESOURCE_PREVIEW));
+        contents.add(new ResourceToolContent(resource));
         continue;
       }
-      if (content instanceof ArtifactToolContent) {
+      if (content instanceof ResourceToolContent) {
+        // 已有规范 Resource 引用直接透传，不做二次外部化。
         contents.add(content);
         continue;
       }
@@ -158,9 +161,9 @@ final class TerminalCompleter {
       }
       String mediaType = content instanceof JsonToolContent ? "application/json" : "text/plain";
       // The terminal transaction invokes this method only after validating and locking ownership.
-      ArtifactRef artifact = artifactStore.save(mediaType, "utf-8", bytes);
+      ResourceRef resource = resourceStore.put(mediaType, null, bytes);
       contents.add(new TextToolContent(preview(bytes)));
-      contents.add(new ArtifactToolContent(artifact));
+      contents.add(new ResourceToolContent(resource));
     }
     if (contents.isEmpty()) {
       contents.add(new TextToolContent(""));
@@ -178,6 +181,9 @@ final class TerminalCompleter {
     }
     return new byte[0];
   }
+
+  /** Binary 输出外部化时的稳定文本标记；二进制字节不产生文本 preview。 */
+  private static final String BINARY_RESOURCE_PREVIEW = "[binary output stored as resource]";
 
   private String preview(byte[] bytes) {
     if (bytes.length <= config.previewBytes()) {
@@ -197,7 +203,7 @@ final class TerminalCompleter {
       previewBytes += codePointBytes;
       offset += Character.charCount(codePoint);
     }
-    return prefix + "\n[full output stored as artifact]";
+    return prefix + "\n[full output stored as resource]";
   }
 
   private static String failureMessage(Throwable error, String fallback) {

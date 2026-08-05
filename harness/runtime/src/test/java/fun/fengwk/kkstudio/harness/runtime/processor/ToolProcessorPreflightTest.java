@@ -69,6 +69,7 @@ class ToolProcessorPreflightTest {
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
     assertEquals(1, fixture.gateway.startCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
     assertEquals(1, fixture.gateway.executions.get(0).proposedAttempt());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
     assertFalse(handle.isCancelled());

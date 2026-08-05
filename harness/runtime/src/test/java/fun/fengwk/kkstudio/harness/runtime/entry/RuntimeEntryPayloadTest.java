@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -41,8 +42,8 @@ class RuntimeEntryPayloadTest {
             assistantMessage("answer"), null, completedMetadata(ProviderStopReason.COMPLETED));
     MessageEntryPayload tool = new MessageEntryPayload(toolMessage(), null, null);
 
-    assertEquals(null, assistant.turnSettings());
-    assertEquals(null, tool.turnSettings());
+    assertNull(assistant.turnSettings());
+    assertNull(tool.turnSettings());
   }
 
   @Test

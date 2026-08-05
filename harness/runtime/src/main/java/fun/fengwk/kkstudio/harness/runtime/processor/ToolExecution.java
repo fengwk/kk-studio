@@ -15,11 +15,12 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -37,12 +38,13 @@ import java.util.function.Consumer;
  * 一次 claim 的进程内 Tool execution：Gateway listener 门控缓冲、durable fence 与 lease heartbeat。
  *
  * <p>listener 回调在 durable RUNNING 落地前只进缓冲区；激活（{@link #activate}）成功后按到达顺序重放。partial 先做 toolCallId /
- * content 校验（拒绝 Binary / Artifact content，partial 不可持久资源），再在校验 RUNNING + attempt 与 claim ownership
- * 的短事务中确认（无 durable mutation），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink
- * 失败不影响执行。terminal 回调一次生效，success 强制把 terminate 归一 false（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定
- * ArtifactToolContent ref）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy
- * 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late / stale 一律 no-op；lost ownership 立即关 gate、cancel
- * handle 并停止 heartbeat，且不反写任何 durable 状态。
+ * content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB 编码尺寸上限（bounded
+ * 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与 claim ownership 的短事务中确认（无 durable
+ * mutation），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次
+ * 生效，success 强制把 terminate 归一 false（拒绝 BinaryToolContent——Gateway 必须先外部化为稳定 ResourceToolContent
+ * ref），随后对「即将持久化的规范化对象」做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable
+ * 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate /
+ * late / stale 一律 no-op；lost ownership 立即关 gate、cancel handle 并停止 heartbeat，且不反写 任何 durable 状态。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -291,9 +293,10 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   /**
-   * 处理一个 partial：先验证 toolCallId 匹配 request 且不含 Binary / Artifact content（partial 不可持久资源，违反即
-   * 协议破坏，确定性 FAILED）；再短事务锁 Tool -&gt; claimed Work 校验 RUNNING + attempt（无 durable mutation）， commit
-   * 后 best-effort 发布 {@link RealtimeEvent.ToolPartial}；duplicate / late / stale no-op。
+   * 处理一个 partial：先验证 toolCallId 匹配 request、不含 Binary / Resource content（partial 不可持久资源，违反即 协议破坏，确定性
+   * FAILED）且 canonical JSON 不超过 256 KiB（bounded 编码器测量，N×内联大文本不得撑爆实时通道）；再短事务锁 Tool -&gt; claimed
+   * Work 校验 RUNNING + attempt（无 durable mutation）， commit 后 best-effort 发布 {@link
+   * RealtimeEvent.ToolPartial}；duplicate / late / stale no-op。
    */
   private Applied processPartialLocked(ToolResult partial, List<Publish> publishes) {
     String validation = validatePartial(partial);
@@ -321,8 +324,9 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   /**
-   * Terminal success：toolCallId 必须匹配 request；拒绝 BinaryToolContent（Gateway 必须先外部化为稳定
-   * ArtifactToolContent ref）；terminate 强制归一 false 后写 SUCCEEDED。
+   * Terminal success：先做基础校验（非空 / toolCallId 匹配 / 拒绝 BinaryToolContent——Gateway 必须先外部化为稳定
+   * ResourceToolContent ref）；terminate 归一 false 后，对「即将持久化的规范化对象」用 bounded 编码器测量 canonical JSON
+   * UTF-8 字节（不物化完整 JSON），超过 1 MiB 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
    */
   private Applied finishSuccessLocked(ToolResult result, List<Publish> publishes) {
     String validation = validateTerminalResult(result);
@@ -334,6 +338,18 @@ final class ToolExecution implements ToolGateway.Listener {
     ToolResult normalized =
         new ToolResult(
             result.toolCallId(), result.contents(), result.error(), result.detailsJson(), false);
+    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+        normalized, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
+      return finishFailureLocked(
+          new ToolGateway.Failure(
+              new ToolInvocationError(
+                  "INVALID_RESULT",
+                  "result must not exceed "
+                      + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
+                      + " bytes of canonical tool result JSON"),
+              false),
+          publishes);
+    }
     boolean committed = safeTerminal(() -> commitSuccess(normalized));
     if (!committed) {
       return Applied.LOST;
@@ -383,7 +399,9 @@ final class ToolExecution implements ToolGateway.Listener {
         : Applied.LOST;
   }
 
-  /** partial 校验：非空、toolCallId 匹配 request、不得携带 Binary / Artifact content。 */
+  /**
+   * partial 校验：非空、toolCallId 匹配 request、不得携带 Binary / Resource content、canonical JSON 不超 256 KiB。
+   */
   private String validatePartial(ToolResult partial) {
     if (partial == null) {
       return "partial must not be null";
@@ -392,14 +410,22 @@ final class ToolExecution implements ToolGateway.Listener {
       return "partial toolCallId does not match the request call";
     }
     for (ToolContent content : partial.contents()) {
-      if (content instanceof BinaryToolContent || content instanceof ArtifactToolContent) {
-        return "partial must not carry binary or artifact content";
+      if (content instanceof BinaryToolContent || content instanceof ResourceToolContent) {
+        return "partial must not carry binary or resource content";
       }
+    }
+    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+        partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
+      return "partial must not exceed "
+          + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
+          + " bytes of canonical tool result JSON";
     }
     return null;
   }
 
-  /** Terminal result 校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。 */
+  /**
+   * Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryToolContent。编码尺寸校验在 terminate 归一后进行。
+   */
   private String validateTerminalResult(ToolResult result) {
     if (result == null) {
       return "result must not be null";
@@ -409,7 +435,7 @@ final class ToolExecution implements ToolGateway.Listener {
     }
     for (ToolContent content : result.contents()) {
       if (content instanceof BinaryToolContent) {
-        return "result must not carry inline binary content; externalize it to an artifact first";
+        return "result must not carry inline binary content; externalize it to a resource first";
       }
     }
     return null;

@@ -4,9 +4,10 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * 内联二进制 artifact 内容单元，用于远程终态结果的临时承载。
+ * 内联二进制内容单元，用于远程终态结果的临时承载。
  *
- * <p>字节仅在内存中暂存；持久化 ArtifactStore 写入由统一 ToolWorker 在 fenced terminal supplier 内完成。PARTIAL 路径不得使用本类型。
+ * <p>字节仅在内存中暂存；daemon COMPLETED 编码时先经 DaemonResourceStore 落盘，再以 resource 引用上 wire。 PARTIAL
+ * 路径不得使用本类型。
  */
 public record BinaryToolContent(String mediaType, byte[] content) implements ToolContent {
 

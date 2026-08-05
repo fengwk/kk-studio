@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.tool.ArtifactToolContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -141,7 +141,7 @@ public final class GrepTool extends AbstractCodingTool {
     contents.add(new TextToolContent(preview));
     if (truncated) {
       contents.add(
-          new ArtifactToolContent(config.artifactSink().store(completeBytes, "text/plain")));
+          new ResourceToolContent(config.resourceStore().store(completeBytes, "text/plain")));
     }
     return new ToolResult(request.call().id(), contents, false, "{}", false);
   }

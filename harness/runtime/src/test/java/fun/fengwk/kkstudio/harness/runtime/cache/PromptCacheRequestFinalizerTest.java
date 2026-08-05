@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.cache;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,7 +65,7 @@ class PromptCacheRequestFinalizerTest {
         new PromptCacheRequestFinalizer(SESSION_ID).apply(forged).cacheControl();
     assertEquals(PromptCacheRetention.NONE, resolved.retention());
     assertTrue(resolved.breakpoints().isEmpty());
-    assertEquals(null, resolved.affinityKey());
+    assertNull(resolved.affinityKey());
   }
 
   @Test
