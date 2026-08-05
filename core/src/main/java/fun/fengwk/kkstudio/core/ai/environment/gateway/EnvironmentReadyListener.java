@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.environment.gateway;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+
 /**
  * Immutable READY bridge for Environment daemon connections.
  *
@@ -9,6 +11,9 @@ package fun.fengwk.kkstudio.core.ai.environment.gateway;
 @FunctionalInterface
 public interface EnvironmentReadyListener {
 
-  /** Notifies that {@code environmentName} is READY for ENVIRONMENT tool dispatch. */
-  void onEnvironmentReady(String environmentName);
+  /**
+   * Notifies that the environment bound to {@code environmentId} is READY for ENVIRONMENT tool
+   * dispatch.
+   */
+  void onEnvironmentReady(EnvironmentId environmentId);
 }

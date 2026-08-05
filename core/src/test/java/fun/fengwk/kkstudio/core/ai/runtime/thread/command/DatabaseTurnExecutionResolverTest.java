@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.thread.TurnSettings;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -49,6 +50,15 @@ import java.util.Set;
 
 /** Covers the latest per-invocation Platform/Environment capability view. */
 class DatabaseTurnExecutionResolverTest {
+
+  /** The resolver interprets its Environment String as the canonical id; names are display-only. */
+  private static final EnvironmentId LOCAL_ENVIRONMENT_ID =
+      new EnvironmentId("7f8fad5b-d9cb-469f-a165-70867728950e");
+
+  private static final EnvironmentId STARTING_ENVIRONMENT_ID =
+      new EnvironmentId("8f8fad5b-d9cb-469f-a165-70867728950e");
+  private static final EnvironmentId OFFLINE_ENVIRONMENT_ID =
+      new EnvironmentId("9f8fad5b-d9cb-469f-a165-70867728950e");
 
   @Test
   void noEnvironmentKeepsPlatformToolsAndOmitsEnvironmentTools() {
@@ -95,7 +105,8 @@ class DatabaseTurnExecutionResolverTest {
         new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
 
     Resolution.Resolved resolved =
-        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("offline"));
+        assertInstanceOf(
+            Resolution.Resolved.class, fixture.resolve(OFFLINE_ENVIRONMENT_ID.value()));
 
     assertEquals(
         List.of(platformTool.name()),
@@ -109,10 +120,11 @@ class DatabaseTurnExecutionResolverTest {
     ToolDescriptor platformTool = descriptor("create_goal");
     Fixture fixture =
         new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
-    fixture.connectingEnvironment("starting");
+    fixture.connectingEnvironment(STARTING_ENVIRONMENT_ID, "starting");
 
     Resolution.Resolved resolved =
-        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("starting"));
+        assertInstanceOf(
+            Resolution.Resolved.class, fixture.resolve(STARTING_ENVIRONMENT_ID.value()));
 
     assertEquals(
         List.of(platformTool.name()),
@@ -153,10 +165,10 @@ class DatabaseTurnExecutionResolverTest {
     ToolDescriptor platformTool = descriptor("create_goal");
     Fixture fixture =
         new Fixture(List.of(platformTool.name(), "read"), List.of(), List.of(platformTool));
-    fixture.readyEnvironment("local");
+    fixture.readyEnvironment(LOCAL_ENVIRONMENT_ID, "local");
 
     Resolution.Resolved resolved =
-        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("local"));
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(LOCAL_ENVIRONMENT_ID.value()));
 
     assertEquals(
         List.of(platformTool.name(), "read"),
@@ -166,7 +178,8 @@ class DatabaseTurnExecutionResolverTest {
     assertEquals(ToolType.PLATFORM, resolved.execution().toolBindings().get(0).type());
     assertNull(resolved.execution().toolBindings().get(0).environmentName());
     assertEquals(ToolType.ENVIRONMENT, resolved.execution().toolBindings().get(1).type());
-    assertEquals("local", resolved.execution().toolBindings().get(1).environmentName());
+    assertEquals(
+        LOCAL_ENVIRONMENT_ID.value(), resolved.execution().toolBindings().get(1).environmentName());
   }
 
   @Test
@@ -281,9 +294,9 @@ class DatabaseTurnExecutionResolverTest {
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
-    fixture.readyEnvironment("local", List.of("available"));
+    fixture.readyEnvironment(LOCAL_ENVIRONMENT_ID, "local", List.of("available"));
     Resolution.Resolved missingSkill =
-        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("local"));
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(LOCAL_ENVIRONMENT_ID.value()));
     assertEquals(
         List.of("available"),
         missingSkill.execution().skillBindings().stream().map(skill -> skill.name()).toList());
@@ -321,8 +334,8 @@ class DatabaseTurnExecutionResolverTest {
   @Test
   void requiresAndInjectsInternalPlatformLoadSkillTool() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
-    fixture.readyEnvironment("local", List.of("dev"));
-    PlanningFailure missingLoadSkill = failure(fixture.resolve("local"));
+    fixture.readyEnvironment(LOCAL_ENVIRONMENT_ID, "local", List.of("dev"));
+    PlanningFailure missingLoadSkill = failure(fixture.resolve(LOCAL_ENVIRONMENT_ID.value()));
     assertEquals(PlanningFailureKind.TOOL_NOT_FOUND, missingLoadSkill.kind());
     assertEquals("internal platform tool not found: load_skill", missingLoadSkill.message());
 
@@ -337,13 +350,15 @@ class DatabaseTurnExecutionResolverTest {
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
             true);
-    fixture.readyEnvironment("local", List.of("dev"));
+    fixture.readyEnvironment(LOCAL_ENVIRONMENT_ID, "local", List.of("dev"));
     Resolution.Resolved resolved =
-        assertInstanceOf(Resolution.Resolved.class, fixture.resolve("local"));
+        assertInstanceOf(Resolution.Resolved.class, fixture.resolve(LOCAL_ENVIRONMENT_ID.value()));
     assertEquals(
         List.of(loadSkill),
         resolved.execution().toolBindings().stream().map(binding -> binding.descriptor()).toList());
-    assertEquals("local", resolved.execution().skillBindings().getFirst().sourceEnvironment());
+    assertEquals(
+        LOCAL_ENVIRONMENT_ID.value(),
+        resolved.execution().skillBindings().getFirst().sourceEnvironment());
   }
 
   @Test
@@ -555,36 +570,37 @@ class DatabaseTurnExecutionResolverTest {
                   pricing()));
     }
 
-    private Resolution resolve(String environmentName) {
-      return resolver.resolve(new TurnSettings("assistant", false), environmentName);
+    private Resolution resolve(String environmentId) {
+      return resolver.resolve(new TurnSettings("assistant", false), environmentId);
     }
 
-    private void connectingEnvironment(String environmentName) {
+    private void connectingEnvironment(EnvironmentId environmentId, String environmentName) {
       EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
       Instant now = Instant.parse("2026-08-02T00:00:00Z");
-      environmentRegistry.tryBind(environmentName, connection, now);
+      environmentRegistry.tryBind(environmentId, environmentName, connection, now);
     }
 
-    private void readyEnvironment(String environmentName) {
-      readyEnvironment(environmentName, List.of());
+    private void readyEnvironment(EnvironmentId environmentId, String environmentName) {
+      readyEnvironment(environmentId, environmentName, List.of());
     }
 
-    private void readyEnvironment(String environmentName, List<String> skills) {
+    private void readyEnvironment(
+        EnvironmentId environmentId, String environmentName, List<String> skills) {
       EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
       Instant now = Instant.parse("2026-08-02T00:00:00Z");
-      environmentRegistry.tryBind(environmentName, connection, now);
+      environmentRegistry.tryBind(environmentId, environmentName, connection, now);
       environmentRegistry.updateSkills(
-          environmentName,
+          environmentId,
           connection,
           skills.stream()
               .map(name -> new DaemonSkillDescriptor(name, name + " description"))
               .toList(),
           now);
-      environmentRegistry.markReady(environmentName, connection, now);
+      environmentRegistry.markReady(environmentId, connection, now);
     }
   }
 }

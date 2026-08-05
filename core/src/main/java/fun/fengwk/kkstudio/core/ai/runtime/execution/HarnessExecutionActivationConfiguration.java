@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
-import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
@@ -37,7 +36,7 @@ public class HarnessExecutionActivationConfiguration {
       LiveEnvironmentRegistry environmentRegistry) {
     return () ->
         environmentRegistry.listReady().stream()
-            .map(LiveEnvironment::environmentName)
+            .map(environment -> environment.id().value())
             .collect(Collectors.toUnmodifiableSet());
   }
 

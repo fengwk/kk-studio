@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionTargetKind;
 import fun.fengwk.kkstudio.harness.runtime.model.worker.ModelWorker;
 import fun.fengwk.kkstudio.harness.runtime.thread.reconcile.ThreadReconciler;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolWorker;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.sql.Connection;
@@ -45,6 +46,12 @@ import java.util.List;
     properties = {"kk-studio.harness.runtime.workers-enabled=true", "spring.flyway.enabled=false"})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class HarnessExecutionActivationProductionWiringIntegrationTest {
+
+  /** Canonical route identity; the old activation bridge matches on {@code id.value()}. */
+  private static final EnvironmentId ENVIRONMENT_ID =
+      new EnvironmentId("4f8fad5b-d9cb-469f-a165-70867728950e");
+
+  private static final String ENVIRONMENT_NAME = "env-ready";
 
   static {
     resetSchema();
@@ -95,19 +102,22 @@ class HarnessExecutionActivationProductionWiringIntegrationTest {
     store.schedule(
         ExecutionTargetKind.TOOL_INVOCATION,
         environmentToolId,
-        "env-ready",
+        ENVIRONMENT_ID.value(),
         Instant.now().minusSeconds(1));
     verify(toolWorker, after(300).never()).dispatch(environmentToolId);
 
-    when(environmentRegistry.listReady()).thenReturn(List.of(readyEnvironment("env-ready")));
-    environmentReadyListener.onEnvironmentReady("env-ready");
+    when(environmentRegistry.listReady())
+        .thenReturn(List.of(readyEnvironment(ENVIRONMENT_ID, ENVIRONMENT_NAME)));
+    environmentReadyListener.onEnvironmentReady(ENVIRONMENT_ID);
 
     verify(toolWorker, timeout(5_000)).dispatch(environmentToolId);
   }
 
-  private static LiveEnvironment readyEnvironment(String name) {
+  private static LiveEnvironment readyEnvironment(
+      EnvironmentId environmentId, String environmentName) {
     return new LiveEnvironment(
-        name,
+        environmentId,
+        environmentName,
         LiveEnvironmentStatus.READY,
         new ReadyConnection(),
         List.<DaemonSkillDescriptor>of(),

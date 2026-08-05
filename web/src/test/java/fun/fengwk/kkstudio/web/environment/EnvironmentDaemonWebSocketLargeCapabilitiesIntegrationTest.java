@@ -14,8 +14,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
-import fun.fengwk.kkstudio.harness.runtime.tool.worker.ArtifactStore;
+import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.worker.ToolInvocationTransactions;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
@@ -42,12 +43,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Without the configured buffer raise, the embedded Tomcat closes the connection with close code
  * 1009 the instant it receives the oversized frame, so the live registry never reaches READY. This
  * test sends a {@code READY} frame carrying a fat skills payload well above the default threshold
- * and asserts that {@link LiveEnvironmentRegistry#isReady(String)} becomes {@code true} within a
- * deadline. Any future change that drops or weakens the buffer initializer will surface here as a
- * registry that never reaches READY together with an observed close code 1009.
+ * and asserts that {@link LiveEnvironmentRegistry#isReady(EnvironmentId)} becomes {@code true}
+ * within a deadline. Any future change that drops or weakens the buffer initializer will surface
+ * here as a registry that never reaches READY together with an observed close code 1009.
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
+  private static final EnvironmentId ENVIRONMENT_ID =
+      new EnvironmentId("2f8fad5b-d9cb-469f-a165-70867728950e");
   private static final String ENVIRONMENT_NAME = "env-large-caps";
   private static final String DAEMON_TOKEN = "test-daemon-token";
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
@@ -61,7 +64,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @Autowired private EnvironmentGatewayProperties properties;
 
   @MockitoBean private ToolInvocationTransactions transactions;
-  @MockitoBean private ArtifactStore artifactStore;
+  @MockitoBean private ResourceStore resourceStore;
   // The Gateway's READY wake is wired by the ExecutionActivation dispatcher slice; suppress here.
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
@@ -130,12 +133,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private boolean awaitReady() throws InterruptedException {
     long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (System.nanoTime() < deadlineNanos) {
-      if (registry.isReady(ENVIRONMENT_NAME)) {
+      if (registry.isReady(ENVIRONMENT_ID)) {
         return true;
       }
       Thread.sleep(50);
     }
-    return registry.isReady(ENVIRONMENT_NAME);
+    return registry.isReady(ENVIRONMENT_ID);
   }
 
   private static String readMessageType(String envelopeJson) throws Exception {
@@ -161,14 +164,15 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope helloEnvelope(long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1,
+        DaemonProtocol.VERSION_2,
         DaemonMessageType.HELLO,
+        ENVIRONMENT_ID,
         ENVIRONMENT_NAME,
         null,
         sequence,
         "{"
             + "\"daemonId\":\"daemon-large-caps\","
-            + "\"protocolVersion\":1,"
+            + "\"protocolVersion\":2,"
             + "\"toolCatalogVersion\":\""
             + EnvironmentToolCatalog.version()
             + "\","
@@ -179,7 +183,13 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_1, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
+        DaemonProtocol.VERSION_2,
+        DaemonMessageType.READY,
+        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
+        null,
+        1,
+        payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {
