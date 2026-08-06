@@ -464,8 +464,11 @@ public final class ModelProcessor implements AutoCloseable {
     executions.remove(execution.invocationId(), execution);
   }
 
+  /** 内部回滚信号：最终 Work ownership fence 失败时使当前事务完整回滚。 */
   private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {}
+    private ClaimLostSignal() {
+      super("claimed work lost at final fence", null, false, false);
+    }
   }
 
   private sealed interface Prepare permits Prepare.Lost, Prepare.Dispatched, Prepare.Terminated {

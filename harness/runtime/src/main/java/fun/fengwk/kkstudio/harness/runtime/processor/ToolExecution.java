@@ -668,8 +668,11 @@ final class ToolExecution implements ToolGateway.Listener {
 
   private record Publish(ToolResult partial, Instant createdAt) {}
 
+  /** 内部回滚信号：callback 事务失去 Work ownership 时使当前事务完整回滚。 */
   private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {}
+    private ClaimLostSignal() {
+      super("claimed work lost at final fence", null, false, false);
+    }
   }
 
   private enum Applied {
