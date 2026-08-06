@@ -81,7 +81,7 @@ Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTu
 | CanvasLink | 同一 Canvas 内的可见性边 |
 | CanvasCommand | 带 `commandId` 与 `baseRevision` 的幂等命令 |
 
-当前可持久化的 Function 节点是 `system.generate-text` v1。表现型节点类型映射见 `frontend/src/features/canvas/domain-map.ts`。
+当前可持久化的 Function 节点是 `system.generate-text` v1；前端 demo 节点在构造时直接携带对应的 `domainKind`。
 
 ## 6. API 边界
 
@@ -91,7 +91,7 @@ Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTu
 | `GET/POST /api/ai/catalog/models` | Model 分页查询与创建 |
 | `GET/POST /api/ai/catalog/agents` | Agent 分页查询与创建 |
 | `GET/POST /api/ai/chat` | Chat 列表与创建 |
-| `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 分页 |
+| `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 全量列表（按关联时间从新到旧） |
 | `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
 | `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
 | `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（八类），202 |

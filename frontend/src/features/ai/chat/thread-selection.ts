@@ -10,14 +10,6 @@ export function isThreadActive(thread: HarnessThreadDTO | undefined): boolean {
   )
 }
 
-/** Only logically quiescent Threads accept an external head rebind. */
-export function canRebindThread(thread: HarnessThreadDTO | undefined): boolean {
-  if (!thread) {
-    return false
-  }
-  return !isThreadActive(thread) && thread.status === 'IDLE'
-}
-
 /** Chat-scoped Thread picker row; the Thread id is the selection value and route identity. */
 export function toThreadSelectionItem(
   thread: HarnessThreadDTO,
