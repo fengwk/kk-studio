@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.tool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -43,10 +44,15 @@ class EnvironmentIdTest {
 
   @Test
   void rejectsInvalidUuidText() {
-    assertThrows(IllegalArgumentException.class, () -> new EnvironmentId("not-a-uuid"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new EnvironmentId("zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"));
+    IllegalArgumentException shortText =
+        assertThrows(IllegalArgumentException.class, () -> new EnvironmentId("not-a-uuid"));
+    IllegalArgumentException invalidHex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new EnvironmentId("zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz"));
+
+    assertTrue(shortText.getMessage().contains("environmentId"));
+    assertTrue(invalidHex.getMessage().contains("environmentId"));
   }
 
   @Test

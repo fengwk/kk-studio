@@ -11,8 +11,6 @@ export interface SelectionListItem {
   badge?: string
 }
 
-export type SelectionScope = 'current' | 'global'
-
 export function SelectionListModal({
   open,
   title,
@@ -23,12 +21,7 @@ export function SelectionListModal({
   onSelect,
   onClose,
   emptyText,
-  scope,
-  onScopeChange,
   loading = false,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
   selectionPending = false,
 }: {
   open: boolean
@@ -40,12 +33,7 @@ export function SelectionListModal({
   onSelect: (id: string) => void | Promise<void>
   onClose: () => void
   emptyText?: string
-  scope?: SelectionScope
-  onScopeChange?: (scope: SelectionScope) => void
   loading?: boolean
-  hasMore?: boolean
-  loadingMore?: boolean
-  onLoadMore?: () => void
   selectionPending?: boolean
 }) {
   const { t } = useI18n()
@@ -58,31 +46,8 @@ export function SelectionListModal({
       <div className="modal-card selection-modal" aria-label={title} onMouseDown={(event) => event.stopPropagation()}>
         <ModalHeader title={title} onClose={onClose} />
         <div className="modal-body">
-          {onScopeChange || showSort ? (
+          {showSort ? (
             <div className="selection-controls-row">
-              {onScopeChange ? (
-                <div className="selection-sort-row">
-                  <span>{t('ai.chat.scope')}</span>
-                  <div className="selection-sort-actions">
-                    <button
-                      type="button"
-                      className={scope === 'current' ? 'active' : undefined}
-                      onClick={() => onScopeChange('current')}
-                      disabled={selectionPending}
-                    >
-                      {t('ai.chat.currentChat')}
-                    </button>
-                    <button
-                      type="button"
-                      className={scope === 'global' ? 'active' : undefined}
-                      onClick={() => onScopeChange('global')}
-                      disabled={selectionPending}
-                    >
-                      {t('ai.chat.globalThread')}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               {showSort ? (
                 <div className="selection-sort-row">
                   <span>{t('ai.chat.sort')}</span>
@@ -128,16 +93,6 @@ export function SelectionListModal({
               </li>
             ))}
           </ul>
-          {hasMore && onLoadMore ? (
-            <button
-              type="button"
-              className="selection-load-more"
-              onClick={onLoadMore}
-              disabled={loadingMore || selectionPending}
-            >
-              {loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}
-            </button>
-          ) : null}
         </div>
       </div>
     </ModalBackdrop>
@@ -197,20 +152,20 @@ export function AgentSelectionModal({
 export function EnvironmentSelectionModal({
   open,
   environments,
-  selectedEnvironmentName,
+  selectedEnvironmentId,
   selectionPending = false,
   onSelect,
   onClose,
 }: {
   open: boolean
   environments: LiveEnvironmentDTO[]
-  selectedEnvironmentName?: string | null
+  selectedEnvironmentId?: string | null
   selectionPending?: boolean
-  onSelect: (environmentName: string | null) => void | Promise<void>
+  onSelect: (environmentId: string | null) => void | Promise<void>
   onClose: () => void
 }) {
   const { t } = useI18n()
-  const selected = selectedEnvironmentName?.trim() || ''
+  const selected = selectedEnvironmentId?.trim() || ''
   const items: SelectionListItem[] = [
     {
       id: '',
@@ -218,9 +173,10 @@ export function EnvironmentSelectionModal({
       badge: selected ? undefined : t('ai.chat.selected'),
     },
     ...filterReadyEnvironments(environments).map((environment) => ({
-      id: environment.name,
+      id: environment.id,
       title: environment.name,
-      badge: environment.name === selected ? t('ai.chat.selected') : undefined,
+      subtitle: environment.status,
+      badge: environment.id === selected ? t('ai.chat.selected') : undefined,
     })),
   ]
   return (
@@ -234,7 +190,7 @@ export function EnvironmentSelectionModal({
       selectionPending={selectionPending}
       emptyText={t('ai.chat.noEnvironments')}
       onClose={onClose}
-      onSelect={(environmentName) => onSelect(environmentName || null)}
+      onSelect={(environmentId) => onSelect(environmentId || null)}
     />
   )
 }

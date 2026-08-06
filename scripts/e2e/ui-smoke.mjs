@@ -279,8 +279,8 @@ async function main(argv) {
   }
 
   await run('ui.i18n.language_switch', '右上角切换 English/中文并持久化', async (caseArt) => {
-    await goto('/settings')
-    await expectVisibleText(page, '设置')
+    await goto('/chats')
+    await expectVisibleText(page, '新建 Chat')
     const localeTrigger = page.locator('.topbar-right .locale-selector-trigger')
     await localeTrigger.click()
     await page.getByRole('listbox', { name: '语言' }).waitFor({ state: 'visible' })
@@ -288,17 +288,17 @@ async function main(argv) {
     await page.getByRole('option', { name: '中文', exact: true }).waitFor({ state: 'visible' })
     await shot(caseArt, 'language-selector-open')
     await page.getByRole('option', { name: 'English', exact: true }).click()
-    await expectVisibleText(page, 'Setting')
+    await expectVisibleText(page, 'Create Chat')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'en-US'),
       'English locale was not persisted',
     )
 
     await page.reload({ waitUntil: 'networkidle', timeout: 30_000 })
-    await expectVisibleText(page, 'Setting')
+    await expectVisibleText(page, 'Create Chat')
     await page.locator('.topbar-right .locale-selector-trigger').click()
     await page.getByRole('option', { name: '中文', exact: true }).click()
-    await expectVisibleText(page, '设置')
+    await expectVisibleText(page, '新建 Chat')
     assert(
       await page.evaluate(() => localStorage.getItem('kk-studio.locale') === 'zh-CN'),
       'Chinese locale was not persisted',
@@ -401,17 +401,6 @@ async function main(argv) {
     expectNoFatal(pageErrors, consoleErrors)
     const body = await page.locator('body').innerText()
     assert(body.trim().length > 20, 'environments page body empty')
-  })
-
-  await run('ui.harness_settings.page_loads', 'Harness 设置页渲染两张全局策略卡片', async (caseArt) => {
-    await goto('/settings')
-    expectNoFatal(pageErrors, consoleErrors)
-    await expectVisibleText(page, '自动重试')
-    await expectVisibleText(page, '实时流缓存')
-    const maxLength = page.getByLabel('最大保留事件数')
-    await maxLength.waitFor({ state: 'visible', timeout: 30_000 })
-    assert((await maxLength.inputValue()) === '5000', 'expected seed realtime Stream maxLength=5000')
-    await shot(caseArt, 'harness-settings')
   })
 
   await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {

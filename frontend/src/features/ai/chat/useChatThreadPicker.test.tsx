@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
+import { sortThreads, useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import { chatService } from '@/shared/api/chat-service'
-import { harnessService } from '@/shared/api/harness-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/chat-service', () => ({
@@ -13,25 +13,26 @@ vi.mock('@/shared/api/chat-service', () => ({
   },
 }))
 
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
-    listThreads: vi.fn(),
-  },
-}))
-
-function thread(threadId: string): HarnessThreadDTO {
+function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
-    threadId,
+    threadId: 't',
+    sessionId: 's',
+    headEntryId: 'root',
+    yoloEnabled: false,
+    nextCommandSequence: '1',
     revision: '0',
-    sessionId: `session-${threadId}`,
-    sessionTitle: null,
-    headEntryId: `head-${threadId}`,
-    executionEpoch: 0,
     status: 'IDLE',
-    inputSequence: 0,
     processing: false,
+    branchSettings: {
+      environmentId: null,
+      agentName: 'assistant',
+      model: { providerName: 'p', modelName: 'm', variant: 'v' },
+      thinkingLevel: 'default',
+      activeTools: [],
+    },
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-01T00:00:00Z',
+    ...overrides,
   }
 }
 
@@ -47,15 +48,8 @@ describe('useChatThreadPicker', () => {
     vi.clearAllMocks()
   })
 
-  it('keeps scope while changing sort and starts every scope/sort query at its first cursor', async () => {
-    vi.mocked(chatService.listChatThreads).mockResolvedValue({
-      items: [thread('current-recent')],
-      nextCursor: null,
-    })
-    vi.mocked(harnessService.listThreads).mockResolvedValue({
-      items: [thread('global-recent')],
-      nextCursor: null,
-    })
+  it('runs a single useQuery on queryKeys.chats.threads(chatId) via chatService.listChatThreads', async () => {
+    vi.mocked(chatService.listChatThreads).mockResolvedValue([thread({ threadId: 't1' })])
 
     const result = renderHook(
       ({ chatId, open, sort }) => useChatThreadPicker(chatId, open, sort),
@@ -64,54 +58,68 @@ describe('useChatThreadPicker', () => {
         wrapper,
       },
     )
-    await waitFor(() => expect(result.result.current.items[0]?.threadId).toBe('current-recent'))
 
-    result.result.current.setScope('global')
-    await waitFor(() => expect(result.result.current.items[0]?.threadId).toBe('global-recent'))
-    expect(harnessService.listThreads).toHaveBeenLastCalledWith({
-      sort: 'recent',
-      cursor: undefined,
-      limit: 20,
-    })
-
-    result.rerender({ chatId: 'chat-1', open: true, sort: 'created' })
-    await waitFor(() => expect(result.result.current.items[0]?.threadId).toBe('global-recent'))
-    expect(harnessService.listThreads).toHaveBeenLastCalledWith({
-      sort: 'created',
-      cursor: undefined,
-      limit: 20,
-    })
+    await waitFor(() => expect(result.result.current.items[0]?.threadId).toBe('t1'))
+    expect(chatService.listChatThreads).toHaveBeenCalledWith('chat-1')
+    expect(chatService.listChatThreads).toHaveBeenCalledTimes(1)
+    expect(queryKeys.chats.threads('chat-1')).toEqual(['chats', 'threads', 'chat-1'])
   })
 
-  it('loads more pages and resets scope when opening a different Chat', async () => {
-    vi.mocked(chatService.listChatThreads)
-      .mockResolvedValueOnce({ items: [thread('first')], nextCursor: 'cursor-1' })
-      .mockResolvedValueOnce({ items: [thread('second')], nextCursor: null })
-      .mockResolvedValue({ items: [thread('new-chat')], nextCursor: null })
+  it('does not fetch when the picker is closed', async () => {
+    vi.mocked(chatService.listChatThreads).mockResolvedValue([])
 
-    const result = renderHook(
-      ({ chatId, open }) => useChatThreadPicker(chatId, open, 'recent'),
-      {
-        initialProps: { chatId: 'chat-1', open: true },
-        wrapper,
-      },
-    )
-    await waitFor(() => expect(result.result.current.items[0]?.threadId).toBe('first'))
-    await result.result.current.loadMore()
-    await waitFor(() => expect(result.result.current.items.map((item) => item.threadId)).toEqual(['first', 'second']))
-    expect(chatService.listChatThreads).toHaveBeenNthCalledWith(2, 'chat-1', {
-      sort: 'recent',
-      cursor: 'cursor-1',
-      limit: 20,
-    })
+    renderHook(() => useChatThreadPicker('chat-1', false, 'recent'), { wrapper })
 
-    result.result.current.setScope('global')
-    result.rerender({ chatId: 'chat-2', open: true })
-    await waitFor(() => expect(result.result.current.scope).toBe('current'))
-    expect(chatService.listChatThreads).toHaveBeenLastCalledWith('chat-2', {
-      sort: 'recent',
-      cursor: undefined,
-      limit: 20,
-    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(chatService.listChatThreads).not.toHaveBeenCalled()
+  })
+})
+
+describe('sortThreads', () => {
+  it('sorts by updateTime descending when sort="recent"', () => {
+    const sorted = sortThreads(
+      [
+        thread({ threadId: 'old', updateTime: '2026-01-01T00:00:00Z' }),
+        thread({ threadId: 'new', updateTime: '2026-01-03T00:00:00Z' }),
+        thread({ threadId: 'mid', updateTime: '2026-01-02T00:00:00Z' }),
+      ],
+      'recent',
+    ).map((item) => item.threadId)
+    expect(sorted).toEqual(['new', 'mid', 'old'])
+  })
+
+  it('sorts by createTime newest-first when sort="created"', () => {
+    const sorted = sortThreads(
+      [
+        thread({ threadId: 'b', createTime: '2026-01-02T00:00:00Z' }),
+        thread({ threadId: 'a', createTime: '2026-01-01T00:00:00Z' }),
+        thread({ threadId: 'c', createTime: '2026-01-03T00:00:00Z' }),
+      ],
+      'created',
+    ).map((item) => item.threadId)
+    expect(sorted).toEqual(['c', 'b', 'a'])
+  })
+
+  it('handles BackendDateTime in number[] array form', () => {
+    const sorted = sortThreads(
+      [
+        thread({ threadId: 'iso', updateTime: '2026-01-02T00:00:00Z' }),
+        thread({ threadId: 'arr', updateTime: [2026, 1, 3, 0, 0, 0] }),
+        thread({ threadId: 'epoch', updateTime: Date.parse('2026-01-01T00:00:00Z') }),
+      ],
+      'recent',
+    ).map((item) => item.threadId)
+    expect(sorted).toEqual(['arr', 'iso', 'epoch'])
+  })
+
+  it('treats null timestamps as the oldest possible value', () => {
+    const sorted = sortThreads(
+      [
+        thread({ threadId: 'has', updateTime: '2026-01-01T00:00:00Z' }),
+        thread({ threadId: 'none', updateTime: null }),
+      ],
+      'recent',
+    ).map((item) => item.threadId)
+    expect(sorted).toEqual(['has', 'none'])
   })
 })

@@ -1,4 +1,5 @@
 import { assert, expectHttpError, httpJson } from '../lib/http.mjs'
+import { createChat } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 function errorEnvelope(error) {
@@ -22,6 +23,21 @@ async function localizedGet(ctx, requestPath, language) {
   )
 }
 
+async function localizedPut(ctx, requestPath, language) {
+  return expectHttpError(
+    () =>
+      httpJson(
+        ctx.baseUrl,
+        'PUT',
+        requestPath,
+        undefined,
+        60_000,
+        { 'Accept-Language': language },
+      ),
+    { status: 400 },
+  )
+}
+
 registerCase({
   id: 'i18n.error_response_accept_language',
   level: 'L1',
@@ -41,10 +57,40 @@ registerCase({
       JSON.stringify(chineseDomain),
     )
 
-    const invalidSortPath = '/api/ai/runtime/threads?sort=invalid&limit=1'
-    const englishHttp = errorEnvelope(await localizedGet(ctx, invalidSortPath, 'en-US'))
-    const chineseHttp = errorEnvelope(await localizedGet(ctx, invalidSortPath, 'zh-CN'))
-    const fallbackHttp = errorEnvelope(await localizedGet(ctx, invalidSortPath, 'fr-FR'))
+    // Catalog controller 的类型不匹配由 Domain advice 归一为 validation。
+    const mismatchPath = '/api/ai/catalog/models?pageNumber=abc&pageSize=1'
+    const englishValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'en-US'))
+    const chineseValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'zh-CN'))
+    const fallbackValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'fr-FR'))
+    assert(englishValidation.code === 'validation', JSON.stringify(englishValidation))
+    assert(
+      englishValidation.message === 'The pageNumber parameter has an invalid value.',
+      JSON.stringify(englishValidation),
+    )
+    assert(chineseValidation.code === 'validation', JSON.stringify(chineseValidation))
+    assert(
+      chineseValidation.message === 'pageNumber 参数的值无效。',
+      JSON.stringify(chineseValidation),
+    )
+    assert(
+      chineseValidation.errors?.detail === 'pageNumber has invalid value: abc',
+      JSON.stringify(chineseValidation),
+    )
+    assert(
+      fallbackValidation.message === englishValidation.message,
+      JSON.stringify(fallbackValidation),
+    )
+
+    // Controller-originated ResponseStatusException 保持 HTTP code/context，仅本地化 message/title。
+    const chat = await createChat(ctx, {
+      title: `e2e-i18n-${Math.random().toString(36).slice(2, 10)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const responseStatusPath = `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/not-a-number`
+    const englishHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'en-US'))
+    const chineseHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'zh-CN'))
+    const fallbackHttp = errorEnvelope(await localizedPut(ctx, responseStatusPath, 'fr-FR'))
     assert(englishHttp.code === 'BAD_REQUEST', JSON.stringify(englishHttp))
     assert(englishHttp.message === 'The request is invalid.', JSON.stringify(englishHttp))
     assert(englishHttp.errors?.title === 'Bad Request', JSON.stringify(englishHttp))
@@ -52,9 +98,10 @@ registerCase({
     assert(chineseHttp.message === '请求无效。', JSON.stringify(chineseHttp))
     assert(chineseHttp.errors?.title === '请求错误', JSON.stringify(chineseHttp))
     assert(
-      chineseHttp.errors?.detail === 'sort must be recent or created',
+      chineseHttp.errors?.detail === 'threadId must be an unsigned positive decimal: not-a-number',
       JSON.stringify(chineseHttp),
     )
+    assert(fallbackHttp.code === englishHttp.code, JSON.stringify(fallbackHttp))
     assert(fallbackHttp.message === englishHttp.message, JSON.stringify(fallbackHttp))
     assert(fallbackHttp.errors?.title === englishHttp.errors?.title, JSON.stringify(fallbackHttp))
   },

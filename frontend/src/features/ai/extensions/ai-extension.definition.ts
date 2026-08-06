@@ -4,7 +4,6 @@ import {
   ChatsPage,
   CreateChatDialog,
   EnvironmentsRoute,
-  HarnessSettingsRoute,
   ModelsRoute,
   ProvidersRoute,
   ResourceDeleteDialog,
@@ -22,7 +21,6 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.models', path: 'models', component: ModelsRoute, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersRoute, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
-    { id: 'ai.settings', path: 'settings', component: HarnessSettingsRoute, priority: 100 },
   ],
   navigation: [
     { id: 'ai.nav.chats', label: 'Chat', labelKey: 'ai.nav.chats', path: 'chats', priority: 100 },
@@ -35,13 +33,6 @@ export const aiExtension: TrustedReactExtension = {
       labelKey: 'ai.nav.environments',
       path: 'environments',
       priority: 90,
-    },
-    {
-      id: 'ai.nav.settings',
-      label: 'Setting',
-      labelKey: 'ai.nav.setting',
-      path: 'settings',
-      priority: 80,
     },
   ],
   dialogs: [

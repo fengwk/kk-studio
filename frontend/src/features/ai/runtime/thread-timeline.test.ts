@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import type {
   EntryType,
   HarnessSessionEntryDTO,
-  HarnessThreadInputDTO,
-  ThreadInputType,
+  HarnessThreadCommandDTO,
+  ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
+import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 
 describe('thread timeline', () => {
@@ -20,6 +20,7 @@ describe('thread timeline', () => {
         ])),
       ],
       [],
+      [],
     )
 
     expect(timeline.messages).toMatchObject([
@@ -31,32 +32,30 @@ describe('thread timeline', () => {
     expect(timeline.hasPendingInputs).toBe(false)
   })
 
-  it('adds a transient assistant overlay until the matching durable response is available', () => {
+  it('appends a transient assistant modelStream overlay after durable entries', () => {
     const stream: RealtimeModelStream = {
       threadId: 'thread-1',
       invocationId: 'model-1',
       attempt: 1,
+      sequence: 1,
       text: '正在输出',
       thinking: '正在思考',
       createdAt: '2026-07-28T10:00:00Z',
+      status: 'streaming',
     }
-    const live = buildThreadTimeline([], [], stream)
-    // Invocation/appliedAt state clears the overlay before the durable Entry reaches this pure
-    // projection; the timeline does not infer causality from timestamps.
+    const live = buildThreadTimeline([], [], [], stream)
     const durable = buildThreadTimeline(
       [
-        {
-          ...entry(
-            '2',
-            'MESSAGE',
-            messagePayload('ASSISTANT', [
-              { type: 'thinking', text: '已完成思考' },
-              { type: 'text', text: '正在输出' },
-            ]),
-          ),
-          createTime: '2026-07-28T10:00:01',
-        },
+        entry(
+          '2',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            { type: 'thinking', text: '已完成思考' },
+            { type: 'text', text: '正在输出' },
+          ]),
+        ),
       ],
+      [],
       [],
       null,
     )
@@ -76,7 +75,7 @@ describe('thread timeline', () => {
       entryType: 'message',
     } as unknown as HarnessSessionEntryDTO
 
-    expect(buildThreadTimeline([malformed], []).messages).toMatchObject([
+    expect(buildThreadTimeline([malformed], [], []).messages).toMatchObject([
       {
         role: 'entry',
         kind: 'unknown_entry',
@@ -92,7 +91,7 @@ describe('thread timeline', () => {
       payloadJson: '',
     }
 
-    const timeline = buildThreadTimeline([root], [])
+    const timeline = buildThreadTimeline([root], [], [])
 
     expect(timeline.messages).toMatchObject([
       { role: 'entry', kind: 'root', rawPayloadJson: '{}', subjectEntryId: 'root' },
@@ -105,7 +104,7 @@ describe('thread timeline', () => {
       entryType: '' as unknown as EntryType,
     }
 
-    const timeline = buildThreadTimeline([malformed], [])
+    const timeline = buildThreadTimeline([malformed], [], [])
 
     expect(timeline.messages).toMatchObject([
       {
@@ -120,22 +119,21 @@ describe('thread timeline', () => {
   it('keeps QUEUED USER_MESSAGE inputs out of the transcript', () => {
     const timeline = buildThreadTimeline(
       [entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '第一句' }]))],
-      [input('in-2', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '排队中' }]), false)],
+      [command('in-2', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '排队中' }]), 'QUEUED')],
+      [],
     )
     expect(timeline.messages).toMatchObject([{ role: 'user', text: '第一句' }])
     expect(timeline.queuedMessages).toMatchObject([
-      { inputId: 'in-2', role: 'user', text: '排队中' },
+      { commandId: 'in-2', role: 'user', text: '排队中', sequence: '1' },
     ])
     expect(timeline.hasPendingInputs).toBe(true)
   })
 
   it('preserves backend mailbox order instead of sorting inputs in the frontend', () => {
-    const first = input('in-2', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '后端第一条' }]), false)
-    const second = input('in-1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '后端第二条' }]), false)
-    first.sequence = 2
-    second.sequence = 1
+    const first = command('in-2', '2', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '后端第一条' }]), 'QUEUED')
+    const second = command('in-1', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '后端第二条' }]), 'QUEUED')
 
-    const timeline = buildThreadTimeline([], [first, second])
+    const timeline = buildThreadTimeline([], [first, second], [])
 
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages.map((message) => message.text)).toEqual(['后端第一条', '后端第二条'])
@@ -144,7 +142,8 @@ describe('thread timeline', () => {
   it('never bridges APPLIED inputs into the transcript; Entries are authoritative', () => {
     const timeline = buildThreadTimeline(
       [],
-      [input('in-1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '仍可见' }]), true)],
+      [command('in-1', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '仍可见' }]), 'APPLIED')],
+      [],
     )
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages).toEqual([])
@@ -154,7 +153,8 @@ describe('thread timeline', () => {
   it('dedupes applied USER_MESSAGE inputs once Entry appears', () => {
     const timeline = buildThreadTimeline(
       [entry('11', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '已落库' }]))],
-      [input('in-1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '已落库' }]), true)],
+      [command('in-1', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '已落库' }]), 'APPLIED')],
+      [],
     )
     expect(timeline.messages.filter((message) => message.role === 'user')).toHaveLength(1)
     expect(timeline.messages).toMatchObject([{ role: 'user', text: '已落库', id: '11' }])
@@ -165,10 +165,11 @@ describe('thread timeline', () => {
     const timeline = buildThreadTimeline(
       [
         entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题' }])),
-        entry('2', 'ASSISTANT_ERROR', assistantErrorPayload('第一次失败')),
-        entry('3', 'ASSISTANT_ERROR', assistantErrorPayload('第二次失败')),
+        entry('2', 'ASSISTANT_ERROR', { error: { kind: 'TRANSIENT', message: '第一次失败' } }),
+        entry('3', 'ASSISTANT_ERROR', { error: { kind: 'TRANSIENT', message: '第二次失败' } }),
         entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '最终成功' }])),
       ],
+      [],
       [],
     )
 
@@ -178,6 +179,31 @@ describe('thread timeline', () => {
       { id: '3', role: 'assistant', text: '第二次失败', status: 'error' },
       { id: '4', role: 'assistant', text: '最终成功', status: 'done' },
     ])
+  })
+
+  it('produces no messages for TURN_START and TURN_END control boundaries', () => {
+    const timeline = buildThreadTimeline(
+      [
+        entry('0', 'ROOT', {}),
+        entry('1', 'TURN_START', { reason: 'USER_MESSAGE', settings: {} }),
+        entry('2', 'TURN_END', {
+          turnStartEntryId: '1',
+          outcome: 'COMPLETED',
+          continueModel: false,
+          reason: 'no-continuation',
+          closeRequestId: null,
+        }),
+        entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'next turn' }])),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages.map((m) => m.id)).toEqual([
+      'entry:0',
+      '3',
+    ])
+    expect(timeline.messages.find((m) => m.role === 'entry' && m.kind === 'unknown_entry')).toBeUndefined()
   })
 
   it('projects durable TOOL results with correlated tool_call arguments', () => {
@@ -211,6 +237,7 @@ describe('thread timeline', () => {
         ),
       ],
       [],
+      [],
     )
     expect(timeline.messages).toMatchObject([
       { role: 'assistant', text: 'run', status: 'done' },
@@ -233,17 +260,202 @@ describe('thread timeline', () => {
     ])
   })
 
+  it('overlays tool invocation status/approval/partial onto the durable tool call', () => {
+    const invocations: ToolInvocationDTO[] = [
+      {
+        id: 'inv-1',
+        modelInvocationId: 'm-1',
+        assistantEntryId: '40',
+        ordinal: 0,
+        status: 'WAITING_APPROVAL',
+        attempt: 1,
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        toolVersion: '1',
+        toolType: 'shell',
+        environmentId: null,
+        argumentsJson: '{"command":"ls"}',
+        approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        resultJson: null,
+        errorJson: null,
+        resultEntryId: null,
+        createTime: '2026-07-28T10:00:00Z',
+        updateTime: '2026-07-28T10:00:00Z',
+      },
+    ]
+    const toolStreams = new Map<string, RealtimeToolStream>([
+      ['inv-1', {
+        threadId: 'thread-1',
+        invocationId: 'inv-1',
+        attempt: 1,
+        toolCallId: 'call-1',
+        text: 'streaming partial output',
+        error: false,
+        createdAt: '2026-07-28T10:00:01Z',
+      }],
+    ])
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{"command":"ls"}' },
+          ]),
+        ),
+      ],
+      [],
+      invocations,
+      null,
+      toolStreams,
+    )
+
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).toMatchObject({
+      role: 'tool',
+      phase: 'call',
+      status: 'streaming',
+      invocationId: 'inv-1',
+      partial: 'streaming partial output',
+      approval: { required: true, decision: null, decisionId: null },
+    })
+  })
+
+  it('projects overlays by durable identity, never by reused toolCallId on an older Entry', () => {
+    const invocation: ToolInvocationDTO = {
+      id: 'inv-2',
+      modelInvocationId: 'm-2',
+      assistantEntryId: '41',
+      ordinal: 0,
+      status: 'WAITING_APPROVAL',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      toolVersion: '1',
+      toolType: 'shell',
+      environmentId: null,
+      argumentsJson: '{"command":"ls"}',
+      approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      resultJson: null,
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+    }
+    const toolStreams = new Map<string, RealtimeToolStream>([
+      ['inv-2', {
+        threadId: 'thread-1',
+        invocationId: 'inv-2',
+        attempt: 1,
+        toolCallId: 'call-1',
+        text: 'second-turn partial output',
+        error: false,
+        createdAt: '2026-07-28T10:00:01Z',
+      }],
+    ])
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '40',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{"command":"ls"}' },
+          ]),
+        ),
+        entry(
+          '41',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{"command":"ls"}' },
+          ]),
+        ),
+      ],
+      [],
+      [invocation],
+      null,
+      toolStreams,
+    )
+
+    const calls = timeline.messages.filter((m) => m.role === 'tool' && m.phase === 'call')
+    expect(calls).toHaveLength(2)
+    // Both durable calls share toolCallId 'call-1' at ordinal 0, but only the Entry the
+    // invocation actually belongs to may receive streaming/approval/invocationId/partial.
+    expect(calls[0]).toMatchObject({
+      subjectEntryId: '40',
+      toolCallId: 'call-1',
+      status: 'done',
+    })
+    expect(calls[0]).not.toHaveProperty('invocationId')
+    expect(calls[0]).not.toHaveProperty('partial')
+    expect(calls[0]).not.toHaveProperty('approval')
+    expect(calls[1]).toMatchObject({
+      subjectEntryId: '41',
+      toolCallId: 'call-1',
+      status: 'streaming',
+      invocationId: 'inv-2',
+      partial: 'second-turn partial output',
+      approval: { required: true, decision: null, decisionId: null },
+    })
+  })
+
+  it('does not project an invocation whose toolCallId disagrees with the durable call', () => {
+    const invocation: ToolInvocationDTO = {
+      id: 'inv-3',
+      modelInvocationId: 'm-3',
+      assistantEntryId: '42',
+      ordinal: 0,
+      status: 'WAITING_APPROVAL',
+      attempt: 1,
+      toolCallId: 'call-other',
+      toolName: 'bash',
+      toolVersion: '1',
+      toolType: 'shell',
+      environmentId: null,
+      argumentsJson: '{"command":"ls"}',
+      approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+      resultJson: null,
+      errorJson: null,
+      resultEntryId: null,
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          '42',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            { type: 'tool_call', toolCallId: 'call-1', toolName: 'bash', argumentsJson: '{"command":"ls"}' },
+          ]),
+        ),
+      ],
+      [],
+      [invocation],
+    )
+    expect(timeline.messages).toMatchObject([
+      {
+        role: 'tool',
+        phase: 'call',
+        subjectEntryId: '42',
+        toolCallId: 'call-1',
+        status: 'done',
+      },
+    ])
+    const call = timeline.messages.find((m) => m.role === 'tool' && m.phase === 'call')
+    expect(call).not.toHaveProperty('invocationId')
+    expect(call).not.toHaveProperty('partial')
+    expect(call).not.toHaveProperty('approval')
+  })
+
   it('separates durable transcript from a later queued mailbox input', () => {
     const timeline = buildThreadTimeline(
       [
         entry('10', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '先回答' }])),
       ],
       [
-        {
-          ...input('in-2', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '第二句' }]), false),
-          createTime: '2026-01-01T00:00:01',
-        },
+        command('in-2', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '第二句' }]), 'QUEUED'),
       ],
+      [],
     )
     expect(timeline.messages).toMatchObject([{ role: 'assistant', text: '先回答' }])
     expect(timeline.queuedMessages).toMatchObject([{ role: 'user', text: '第二句' }])
@@ -252,19 +464,11 @@ describe('thread timeline', () => {
   it('preserves backend Entry path order when wall-clock timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        {
-          ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])),
-          createTime: [2026, 1, 1, 0, 0, 3],
-        },
-        {
-          ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])),
-          createTime: [2026, 1, 1, 0, 0, 1],
-        },
-        {
-          ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])),
-          createTime: [2026, 1, 1, 0, 0, 2],
-        },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])), createTime: [2026, 1, 1, 0, 0, 3] },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])), createTime: [2026, 1, 1, 0, 0, 1] },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])), createTime: [2026, 1, 1, 0, 0, 2] },
       ],
+      [],
       [],
     )
     expect(timeline.messages.map((message) => message.text)).toEqual(['A', 'B', 'C'])
@@ -273,23 +477,12 @@ describe('thread timeline', () => {
   it('keeps multi-turn USER then ASSISTANT causality when child timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        {
-          ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])),
-          createTime: '2026-01-01T00:00:03',
-        },
-        {
-          ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])),
-          createTime: '2026-01-01T00:00:01',
-        },
-        {
-          ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])),
-          createTime: '2026-01-01T00:00:06',
-        },
-        {
-          ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])),
-          createTime: '2026-01-01T00:00:04',
-        },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])), createTime: '2026-01-01T00:00:03' },
+        { ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])), createTime: '2026-01-01T00:00:01' },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])), createTime: '2026-01-01T00:00:06' },
+        { ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])), createTime: '2026-01-01T00:00:04' },
       ],
+      [],
       [],
     )
 
@@ -304,19 +497,11 @@ describe('thread timeline', () => {
   it('does not inspect createTime when projecting the backend Entry path', () => {
     const timeline = buildThreadTimeline(
       [
-        {
-          ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])),
-          createTime: '2026-01-01T00:00:03',
-        },
-        {
-          ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])),
-          createTime: 'not-a-date',
-        },
-        {
-          ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])),
-          createTime: '2026-01-01T00:00:01',
-        },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])), createTime: '2026-01-01T00:00:03' },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])), createTime: 'not-a-date' },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])), createTime: '2026-01-01T00:00:01' },
       ],
+      [],
       [],
     )
     expect(timeline.messages.map((message) => message.text)).toEqual(['late-valid', 'invalid', 'early-valid'])
@@ -343,19 +528,7 @@ describe('thread timeline', () => {
     ).toBe(false)
     expect(
       isThreadWorking(
-        { status: 'RUNNABLE', processing: false } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: false },
-      ),
-    ).toBe(true)
-    expect(
-      isThreadWorking(
-        { status: 'WAITING', processing: false } as never,
-        { messages: [], queuedMessages: [], hasPendingInputs: false },
-      ),
-    ).toBe(true)
-    expect(
-      isThreadWorking(
-        { status: 'RUNNING', processing: false } as never,
+        { status: 'MODEL_STREAMING', processing: false } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: false },
       ),
     ).toBe(true)
@@ -365,6 +538,7 @@ describe('thread timeline', () => {
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
     entryId,
+    sessionId: 's1',
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
@@ -372,21 +546,23 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
   }
 }
 
-function input(
-  inputId: string,
-  inputType: ThreadInputType,
+function command(
+  commandId: string,
+  sequence: string,
+  type: 'USER_MESSAGE' | 'CUSTOM_MESSAGE',
   payload: Record<string, unknown>,
-  applied: boolean,
-): HarnessThreadInputDTO {
+  state: 'QUEUED' | 'APPLIED',
+): HarnessThreadCommandDTO {
   return {
-    inputId,
-    threadId: '1',
-    sequence: Number(inputId.replace(/\D/g, '') || 1),
-    inputType,
+    commandId,
+    threadId: 't1',
+    sequence,
+    type,
+    state,
+    clientCommandId: `cid-${commandId}`,
     payloadJson: JSON.stringify(payload),
-    clientMessageId: `cid-${inputId}`,
-    status: applied ? 'APPLIED' : 'QUEUED',
-    resolvedAt: applied ? '2026-01-01T00:00:01' : null,
+    consumedTurnStartEntryId: null,
+    cancelledAt: null,
     createTime: '2026-01-01T00:00:00',
   }
 }
@@ -394,42 +570,5 @@ function input(
 function messagePayload(role: string, contents: Array<Record<string, unknown>>) {
   return {
     message: { role, contents },
-    assistantMetadata: role === 'ASSISTANT'
-      ? zeroAssistantMetadata(contents.some((content) => content.type === 'tool_call') ? 'TOOL_CALLS' : 'COMPLETED')
-      : null,
-  }
-}
-
-function zeroAssistantMetadata(stopReason: 'COMPLETED' | 'TOOL_CALLS') {
-  return {
-    stopReason,
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      cacheWriteLongTokens: 0,
-      reasoningTokens: 0,
-      providerTotalTokens: 0,
-    },
-    cost: {
-      currency: 'USD',
-      input: '0',
-      output: '0',
-      cacheRead: '0',
-      cacheWrite: '0',
-      cacheWriteLong: '0',
-      reasoning: '0',
-      total: '0',
-    },
-  }
-}
-
-function assistantErrorPayload(message: string) {
-  return {
-    error: {
-      kind: 'TRANSIENT',
-      message,
-    },
   }
 }

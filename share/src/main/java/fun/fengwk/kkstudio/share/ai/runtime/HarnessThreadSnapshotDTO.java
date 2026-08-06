@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.util.List;
@@ -16,6 +17,9 @@ public class HarnessThreadSnapshotDTO {
   private HarnessThreadDTO thread;
   private List<HarnessSessionEntryDTO> entries = List.of();
   private List<HarnessThreadCommandDTO> queuedCommands = List.of();
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private ModelInvocationDTO modelInvocation;
+
   private List<ToolInvocationDTO> toolInvocations = List.of();
 }

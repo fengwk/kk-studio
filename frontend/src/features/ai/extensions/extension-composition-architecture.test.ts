@@ -14,7 +14,6 @@ describe('AI extension composition architecture', () => {
       ['ai.models', 'models'],
       ['ai.providers', 'providers'],
       ['ai.environments', 'environments'],
-      ['ai.settings', 'settings'],
     ])
     expect(aiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
       'ai.create-chat',
@@ -37,7 +36,6 @@ describe('AI extension composition architecture', () => {
       'ai.models',
       'ai.providers',
       'ai.environments',
-      'ai.settings',
       'ai.comfyui',
       'canvas.home',
     ])

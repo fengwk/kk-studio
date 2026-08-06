@@ -55,8 +55,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Environment Daemon 的连接、协议和本地 Tool SPI 执行基座。
  *
- * <p>Invocation journal 是去重事实源；WebSocket 仅传递消息。因此连接断开后，Daemon 可以连接到 任意 gateway 并通过 READY/PULL
- * 重新获取未完成调用。
+ * <p>Invocation journal 是进程内去重事实源；WebSocket 仅传递消息。连接断开后 Daemon 会重新握手；若 gateway 再次发送相同
+ * invocationId，RUNNING/terminal journal 条目分别重放 STARTED/terminal。
  */
 public final class DaemonRuntime implements AutoCloseable {
 

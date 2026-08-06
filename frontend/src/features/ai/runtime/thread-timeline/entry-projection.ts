@@ -1,7 +1,10 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type { DialogueMessage, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
-import { contentText, toArtifactAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
+import {
+  contentText,
+  toResourceAttachment,
+} from '@/features/ai/runtime/thread-timeline/content-utils'
 import {
   projectEmptyMessageEntry,
   projectRootEntry,
@@ -20,6 +23,10 @@ export function projectDurableEntry(
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
     messages.push(projectRootEntry(entry))
+    return
+  }
+  if (entryType === 'TURN_START' || entryType === 'TURN_END') {
+    // 控制边界：不显示成 unknown entry，也不进入对话时间线。
     return
   }
   if (entryType === 'ASSISTANT_ERROR') {
@@ -177,7 +184,7 @@ function projectToolResult(
     toolName: getString(content.toolName),
     arguments: argumentsJson,
     text: contents.map(contentText).filter(Boolean).join('\n'),
-    attachments: contents.flatMap(toArtifactAttachment),
+    attachments: contents.flatMap(toResourceAttachment),
     errorMessage: error ? translate('ai.runtime.entry.toolFailed') : undefined,
     createdAt: entry.createTime,
     status: error ? 'error' : 'done',

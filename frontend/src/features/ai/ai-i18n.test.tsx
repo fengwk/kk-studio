@@ -13,7 +13,6 @@ import { ResourceEditorModal } from '@/features/ai/catalog/AiConsoleResourceEdit
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { emptyProviderDraft } from '@/features/ai/catalog/ai-provider-draft-codec'
-import { HarnessSettingsPage } from '@/features/ai/settings/HarnessSettingsPage'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { setLocale } from '@/shared/i18n'
@@ -78,10 +77,10 @@ function createHost() {
     id: 'test.ai',
     navigation: [
       {
-        id: 'ai.nav.setting',
-        label: 'Setting',
-        labelKey: 'ai.nav.setting',
-        path: 'settings',
+        id: 'ai.nav.environments',
+        label: 'Environment',
+        labelKey: 'ai.nav.environments',
+        path: 'environments',
       },
     ],
   })
@@ -107,14 +106,14 @@ function renderPage(ui: ReactNode, path: string) {
 }
 
 describe('AI i18n live-switch contracts', () => {
-  it('switches the Setting navigation label without remounting', () => {
+  it('switches the Environment navigation label without remounting', () => {
     act(() => setLocale('en-US'))
-    renderWithWorkbench(<NavigationSlot />, 'settings')
+    renderWithWorkbench(<NavigationSlot />, 'environments')
 
-    expect(screen.getByRole('link', { name: 'Setting' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Environment' })).toBeInTheDocument()
 
     act(() => setLocale('zh-CN'))
-    expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '环境' })).toBeInTheDocument()
   })
 
   it('switches the Chat creation flow labels live', () => {
@@ -186,20 +185,6 @@ describe('AI i18n live-switch contracts', () => {
 
     act(() => setLocale('zh-CN'))
     expect(screen.getByRole('heading', { name: '选择 Agent' })).toBeInTheDocument()
-  })
-
-  it('switches Settings labels live', async () => {
-    act(() => setLocale('en-US'))
-    renderPage(<HarnessSettingsPage />, 'settings')
-
-    expect(await screen.findByLabelText('Maximum retries')).toBeInTheDocument()
-    expect(screen.getByLabelText('Backoff strategy')).toBeInTheDocument()
-    expect(screen.getByText('Automatic retry')).toBeInTheDocument()
-
-    act(() => setLocale('zh-CN'))
-    expect(screen.getByLabelText('最大重试次数')).toBeInTheDocument()
-    expect(screen.getByLabelText('退避策略')).toBeInTheDocument()
-    expect(screen.getByText('自动重试')).toBeInTheDocument()
   })
 
   it('switches Environment empty-state labels live', async () => {

@@ -30,20 +30,35 @@ function stringifyJsonContent(value: unknown): string {
   return String(value)
 }
 
-export function toArtifactAttachment(content: Record<string, unknown>): ToolAttachment[] {
-  if (getString(content.type) !== 'artifact') {
+/**
+ * Canonical resource content -> attachment: `{type:'resource', uri, mediaType, name, size,
+ * sha256, preview?}`. The URI is the stable display/link identity; file:/s3: URIs are never
+ * treated as base64 payloads.
+ */
+export function toResourceAttachment(content: Record<string, unknown>): ToolAttachment[] {
+  if (getString(content.type) !== 'resource') {
+    return []
+  }
+  const uri = getString(content.uri)
+  if (!uri.trim()) {
     return []
   }
   const mediaType = getString(content.mediaType)
-  const type = artifactType(mediaType)
-  const artifactId = getString(content.artifactId)
-  if (!artifactId) {
-    return []
-  }
-  return [{ type, name: artifactId, mime: mediaType, data: `/api/ai/runtime/artifacts/${encodeURIComponent(artifactId)}` }]
+  const name = getString(content.name)
+  return [
+    {
+      type: resourceAttachmentType(mediaType),
+      name: name || uri,
+      mime: mediaType,
+      data: uri,
+      preview: getString(content.preview) || undefined,
+      size: typeof content.size === 'number' ? content.size : null,
+      sha256: getString(content.sha256) || null,
+    },
+  ]
 }
 
-function artifactType(mediaType: string): ToolAttachmentType {
+export function resourceAttachmentType(mediaType: string): ToolAttachmentType {
   if (mediaType.startsWith('image/')) {
     return 'image'
   }

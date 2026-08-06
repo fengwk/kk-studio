@@ -34,7 +34,7 @@ describe('ThreadComposer and commands', () => {
     expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'tree')?.disabled).toBe(true)
-    expect(threadCommandsForScene('bound').every((c) => !c.disabled)).toBe(true)
+    expect(threadCommandsForScene('bound').every((c) => c.id === 'session' || !c.disabled)).toBe(true)
     expect(filterThreadCommands('yo').map((c) => c.id)).toEqual(['yolo'])
     expect(filterThreadCommands('sto').map((c) => c.id)).toEqual(['stop'])
     expect(filterThreadCommands('tree')[0]?.id).toBe('tree')

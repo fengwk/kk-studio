@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -9,7 +10,10 @@ import java.time.Instant;
 public class HarnessSessionEntryDTO {
   private String entryId;
   private String sessionId;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String parentEntryId;
+
   private String entryType;
   private String payloadJson;
   private Instant createTime;

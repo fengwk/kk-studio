@@ -21,7 +21,6 @@ export interface ChatPaneState {
   layout: ChatLayout
   focusedPaneId: string
   panes: ChatPane[]
-  sessionSort: PaneSortPreference
   threadSort: PaneSortPreference
 }
 
@@ -55,7 +54,6 @@ function createDefaultChatPaneState(layout: ChatLayout = 'single'): ChatPaneStat
     layout,
     focusedPaneId: panes[0]?.id ?? 'pane-1',
     panes,
-    sessionSort: 'recent',
     threadSort: 'recent',
   }
 }
@@ -118,7 +116,6 @@ function normalizeChatPaneState(raw: unknown): ChatPaneState {
     layout,
     focusedPaneId,
     panes,
-    sessionSort: parseSort(raw.sessionSort),
     threadSort: parseSort(raw.threadSort),
   }
 }
@@ -200,48 +197,4 @@ export function saveChatPaneState(
 
 export function isPaneBound(threadId: string | null | undefined): threadId is string {
   return Boolean(threadId && threadId.trim())
-}
-
-export type Timestamped = {
-  createTime?: unknown
-  updateTime?: unknown
-  status?: string
-}
-
-function backendTimeValue(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  if (Array.isArray(value) && value.length >= 3) {
-    const [year, month, day, hour = 0, minute = 0, second = 0] = value.map((part) => Number(part))
-    const time = Date.UTC(year, (month || 1) - 1, day || 1, hour, minute, second)
-    return Number.isFinite(time) ? time : 0
-  }
-  return 0
-}
-
-function isRunningStatus(status: string | undefined): boolean {
-  return status === 'RUNNING' || status === 'WAITING' || status === 'RUNNABLE'
-}
-
-/** Running items first, then user sort preference (recent=updateTime, created=createTime). */
-export function sortWithRunningFirst<T extends Timestamped>(
-  items: T[],
-  sort: PaneSortPreference,
-  isRunning: (item: T) => boolean = (item) => isRunningStatus(item.status),
-): T[] {
-  return [...items].sort((left, right) => {
-    const leftRunning = isRunning(left)
-    const rightRunning = isRunning(right)
-    if (leftRunning !== rightRunning) {
-      return leftRunning ? -1 : 1
-    }
-    const leftTime = backendTimeValue(sort === 'created' ? left.createTime : left.updateTime)
-    const rightTime = backendTimeValue(sort === 'created' ? right.createTime : right.updateTime)
-    return rightTime - leftTime
-  })
 }

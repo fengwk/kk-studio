@@ -1,13 +1,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
+import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessSessionEntryDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
-import { queryKeys } from '@/shared/lib/query-keys'
+import type {
+  HarnessBranchSettingsDTO,
+  HarnessModelSelectionDTO,
+  HarnessSessionEntryDTO,
+  HarnessThreadCommandDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -18,87 +25,108 @@ vi.mock('@/shared/api/agent-service', () => ({
 }))
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
+    listChats: vi.fn(),
+    createChat: vi.fn(),
+    getChat: vi.fn(),
+    updateChat: vi.fn(),
+    deleteChat: vi.fn(),
     listChatThreads: vi.fn(),
+    createChatThread: vi.fn(),
     associateThread: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
-    listSessions: vi.fn(),
-    listThreads: vi.fn(),
-    listSessionEntries: vi.fn(),
-    createThreadRealtimeStream: vi.fn(),
+    enqueueCommands: vi.fn(),
     updateThreadHead: vi.fn(),
-    updateThreadEnvironment: vi.fn(),
-    submitThreadMessage: vi.fn(),
     stopThread: vi.fn(),
+    decideApproval: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn().mockResolvedValue([]),
   },
 }))
 
 class FakeEventSource {
   close = vi.fn()
   addEventListener = vi.fn()
+  removeEventListener = vi.fn()
 }
 
-const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
+const page = <T,>(results: T[]) => ({
+  pageNumber: 1,
+  pageSize: 50,
+  totalCount: results.length,
+  results,
+})
 
-function thread(overrides: Partial<HarnessThreadDTO>): HarnessThreadDTO {
+function modelSelection(overrides: Partial<HarnessModelSelectionDTO> = {}): HarnessModelSelectionDTO {
+  return {
+    providerName: 'minimax',
+    modelName: 'MiniMax',
+    variant: 'default',
+    ...overrides,
+  }
+}
+
+function branchSettings(
+  overrides: Partial<HarnessBranchSettingsDTO> = {},
+): HarnessBranchSettingsDTO {
+  return {
+    environmentId: null,
+    agentName: 'assistant',
+    model: modelSelection(),
+    thinkingLevel: 'off',
+    activeTools: [],
+    ...overrides,
+  }
+}
+
+function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
   return {
     threadId: 't1',
     sessionId: 's1',
-    sessionTitle: 'S1',
     headEntryId: 'e-assistant',
-    environmentName: 'local',
-    executionEpoch: 5,
-    status: 'IDLE',
-    inputSequence: 1,
+    yoloEnabled: false,
+    nextCommandSequence: '1',
     revision: '0',
+    status: 'IDLE',
     processing: false,
+    branchSettings: branchSettings(),
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-02T00:00:00Z',
     ...overrides,
   }
 }
 
-function snapshot(currentThread: HarnessThreadDTO) {
+function snapshot(
+  currentThread: HarnessThreadDTO,
+  extras: Partial<HarnessThreadSnapshotDTO> = {},
+): HarnessThreadSnapshotDTO {
   return {
     revision: currentThread.revision,
     thread: currentThread,
     entries: [],
-    inputs: [],
-    modelInvocations: [],
+    queuedCommands: [],
+    modelInvocation: null,
     toolInvocations: [],
-    openInteractions: [],
-    usage: {
-      scopeType: 'thread',
-      scopeId: currentThread.threadId,
-      recordCount: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      cacheWriteLongTokens: 0,
-      reasoningTokens: 0,
-      providerTotalTokens: 0,
-      cacheEligibleRecordCount: 0,
-      cacheHitRecordCount: 0,
-      cacheHitRatio: 0,
-      tokenReadRatio: 0,
-      unamortizedCacheWriteTokens: 0,
-      costs: [],
-    },
+    ...extras,
   }
 }
 
 function entry(
   entryId: string,
   parentEntryId: string | null,
-  role: string,
+  role: 'USER' | 'ASSISTANT' | 'TOOL' | 'SYSTEM',
   text: string,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
+    sessionId: 's1',
     parentEntryId,
     entryType: 'MESSAGE',
     payloadJson: JSON.stringify({ message: { role, contents: [{ type: 'text', text }] } }),
@@ -106,18 +134,67 @@ function entry(
   }
 }
 
+function toolCallEntry(
+  entryId: string,
+  parentEntryId: string,
+  toolCallId: string,
+  toolName: string,
+): HarnessSessionEntryDTO {
+  return {
+    entryId,
+    sessionId: 's1',
+    parentEntryId,
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({
+      message: {
+        role: 'ASSISTANT',
+        contents: [
+          { type: 'text', text: 'run' },
+          { type: 'tool_call', toolCallId, toolName, argumentsJson: '{"command":"ls"}' },
+        ],
+      },
+    }),
+    createTime: null,
+  }
+}
+
+function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
+  return {
+    id: 'inv-1',
+    modelInvocationId: 'm-1',
+    assistantEntryId: '40',
+    ordinal: 0,
+    status: 'WAITING_APPROVAL',
+    attempt: 1,
+    toolCallId: 'call-1',
+    toolName: 'bash',
+    toolVersion: '1',
+    toolType: 'shell',
+    environmentId: null,
+    argumentsJson: '{"command":"ls"}',
+    approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+    resultJson: null,
+    errorJson: null,
+    resultEntryId: null,
+    createTime: '2026-07-28T10:00:00Z',
+    updateTime: '2026-07-28T10:00:00Z',
+    ...overrides,
+  }
+}
+
 /** ROOT -> USER -> ASSISTANT, so the USER row has a parent and is a valid rebind target. */
-function sessionEntries(sessionId: string): HarnessSessionEntryDTO[] {
+function sessionEntries(): HarnessSessionEntryDTO[] {
   return [
     {
-      entryId: `${sessionId}-root`,
+      entryId: 's1-root',
+      sessionId: 's1',
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
       createTime: null,
     },
-    entry(`${sessionId}-user`, `${sessionId}-root`, 'USER', `${sessionId} prompt`),
-    entry(`${sessionId}-assistant`, `${sessionId}-user`, 'ASSISTANT', `${sessionId} reply`),
+    entry('s1-user', 's1-root', 'USER', 's1 prompt'),
+    entry('s1-assistant', 's1-user', 'ASSISTANT', 's1 reply'),
   ]
 }
 
@@ -129,6 +206,7 @@ const agents = [
     model: 'minimax/MiniMax',
     variant: 'default',
     config: { tools: [], skills: [] },
+    version: '0',
     createTime: null,
     updateTime: null,
   },
@@ -138,40 +216,86 @@ const agents = [
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { tools: [], skills: [] },
+    config: { tools: ['web-search'], skills: [] },
+    version: '0',
     createTime: null,
     updateTime: null,
   },
 ]
 
+function modelEntry() {
+  return {
+    providerName: 'minimax',
+    name: 'MiniMax',
+    description: null,
+    config: {
+      limit: { context: 128000, output: 8192 },
+      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: {
+        currency: 'USD',
+        pricingTier: 'default',
+        serviceTier: 'default',
+        serviceTierMultiplier: 1,
+        version: 'v1',
+        inputPerMillionTokens: 0,
+        outputPerMillionTokens: 0,
+        cacheReadPerMillionTokens: 0,
+        cacheWritePerMillionTokens: 0,
+        cacheWriteLongPerMillionTokens: 0,
+        reasoningPerMillionTokens: 0,
+      },
+      defaultVariant: 'default',
+      variants: [{ id: 'default' }],
+    },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  }
+}
+
 function renderBoundPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
+  onThreadSortChange?: (sort: 'recent' | 'created') => void
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
 }) {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
+  const onThreadSortChange = overrides?.onThreadSortChange ?? vi.fn()
   const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
   const onYoloChange = overrides?.onYoloChange ?? vi.fn(async () => undefined)
-  const onSessionSortChange = vi.fn()
-  const onThreadSortChange = vi.fn()
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   render(
     <QueryClientProvider client={queryClient}>
       <ChatWorkspacePane
-        chat={{ id: 'chat-1', title: 'C', agentName: 'assistant', yoloEnabled: false, version: '1', createTime: null, updateTime: null }}
+        chat={{
+          id: 'chat-1',
+          title: 'C',
+          agentName: 'assistant',
+          yoloEnabled: false,
+          version: '1',
+          createTime: null,
+          updateTime: null,
+        }}
         agents={agents}
         environments={[
-          { name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
-          { name: 'remote', status: 'READY', lastSeen: null, tools: [], skills: [] },
-          { name: 'connecting', status: 'CONNECTING', lastSeen: null, tools: [], skills: [] },
+          { id: 'env-local', name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { id: 'env-remote', name: 'remote', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          {
+            id: 'env-connecting',
+            name: 'connecting',
+            status: 'CONNECTING',
+            lastSeen: null,
+            tools: [],
+            skills: [],
+          },
         ]}
         pane={{ id: 'pane-1', threadId: 't1' }}
         focused
-        sessionSort="recent"
         threadSort="recent"
         onFocus={() => undefined}
         onThreadChange={onThreadChange}
-        onSessionSortChange={onSessionSortChange}
         onThreadSortChange={onThreadSortChange}
         onAgentChange={onAgentChange}
         onYoloChange={onYoloChange}
@@ -181,7 +305,6 @@ function renderBoundPane(overrides?: {
   return {
     queryClient,
     onThreadChange,
-    onSessionSortChange,
     onThreadSortChange,
     onAgentChange,
     onYoloChange,
@@ -192,165 +315,127 @@ describe('ChatWorkspacePane commands', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(agentService.listAgents).mockResolvedValue(page(agents))
-    vi.mocked(agentService.listModels).mockResolvedValue(page([{
-      providerName: 'minimax', name: 'MiniMax', description: null,
-      config: {
-        limit: { context: 128000, output: 8192 },
-        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-        pricing: {
-          currency: 'USD',
-          pricingTier: 'default',
-          serviceTier: 'default',
-          serviceTierMultiplier: 1,
-          version: 'v1',
-          inputPerMillionTokens: 0,
-          outputPerMillionTokens: 0,
-          cacheReadPerMillionTokens: 0,
-          cacheWritePerMillionTokens: 0,
-          cacheWriteLongPerMillionTokens: 0,
-          reasoningPerMillionTokens: 0,
-        },
-        defaultVariant: 'default',
-        variants: [{ id: 'default' }],
-      },
-      createTime: null, updateTime: null,
-    }]))
-    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource() as EventSource)
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
-    vi.mocked(harnessService.listSessions).mockResolvedValue([
-      {
-        sessionId: 's1', title: 'S1', createTime: '2026-01-01T00:00:00Z', updateTime: '2026-01-02T00:00:00Z',
-      },
-      {
-        sessionId: 's2', title: 'S2', createTime: '2026-01-04T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
-      },
-    ])
-    vi.mocked(harnessService.listThreads).mockResolvedValue({
-      items: [
-        thread({}),
-        thread({
-          threadId: 't2', status: 'IDLE', inputSequence: 0, executionEpoch: 1,
-          createTime: '2026-01-03T00:00:00Z', updateTime: '2026-01-01T00:00:00Z',
-        }),
-      ],
-      nextCursor: null,
-    })
-    vi.mocked(harnessService.listSessionEntries).mockImplementation(async (sessionId: string) =>
-      sessionEntries(sessionId),
+    vi.mocked(agentService.listModels).mockResolvedValue(page([modelEntry()]))
+    vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
+    vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(
+      new FakeEventSource() as unknown as EventSource,
     )
-    vi.mocked(harnessService.updateThreadHead).mockResolvedValue(thread({ executionEpoch: 6 }))
-    let environmentEpoch = 5
-    let environmentRevision = 0
-    vi.mocked(harnessService.updateThreadEnvironment).mockImplementation(async (_threadId, data) => {
-      environmentEpoch += 1
-      environmentRevision += 1
-      return {
-        threadId: 't1',
-        environmentName: data.environmentName,
-        executionEpoch: environmentEpoch,
-        revision: String(environmentRevision),
-      } as HarnessThreadDTO
-    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread({})))
+    vi.mocked(chatService.listChatThreads).mockResolvedValue([
+      thread({}),
+      thread({
+        threadId: 't2',
+        status: 'IDLE',
+        nextCommandSequence: '0',
+        updateTime: '2026-01-03T00:00:00Z',
+        createTime: '2026-01-03T00:00:00Z',
+      }),
+    ])
+    vi.mocked(harnessService.enqueueCommands).mockResolvedValue([] as HarnessThreadCommandDTO[])
+    vi.mocked(harnessService.updateThreadHead).mockImplementation(async (_threadId, _data) =>
+      thread({ revision: '1' }),
+    )
   })
 
-  it('updates the visible Chat Agent without mutating the Thread', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('updates agent/environment/yolo as a draft-local pane state without mutating services', async () => {
     const user = userEvent.setup()
-    const { onThreadSortChange, onAgentChange } = renderBoundPane()
+    const { onThreadSortChange, onAgentChange, onYoloChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
-    await user.keyboard('/thread{Enter}')
-    expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
-    await user.click(screen.getByRole('button', { name: '最近更新' }))
-    expect(onThreadSortChange).toHaveBeenCalledWith('recent')
-    await user.click(screen.getByRole('button', { name: /t2/ }))
-
-    await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/agent{Enter}')
     expect(await screen.findByText('选择 Agent')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /coder/ }))
-    await waitFor(() => expect(onAgentChange).toHaveBeenCalledWith('coder'))
+    await waitFor(() => expect(onAgentChange).not.toHaveBeenCalled())
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/environment{Enter}')
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    await user.click(within(screen.getByLabelText('选择 Environment')).getByRole('button', { name: /^remote/ }))
+    await waitFor(() => expect(harnessService.updateThreadHead).not.toHaveBeenCalled())
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/yolo{Enter}')
+    await waitFor(() => expect(onYoloChange).not.toHaveBeenCalled())
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
+    expect(onThreadSortChange).not.toHaveBeenCalled()
+  })
+
+  it('keeps the Environment selector open and only filters READY environments by id', async () => {
+    const user = userEvent.setup()
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/environment{Enter}')
+    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
+    // Only READY environments appear; the CONNECTING one is filtered out by status.
+    const envModal = screen.getByLabelText('选择 Environment')
+    expect(within(envModal).getByRole('button', { name: /^remote/ })).toBeInTheDocument()
+    expect(within(envModal).getByRole('button', { name: /^local/ })).toBeInTheDocument()
+    expect(within(envModal).queryByRole('button', { name: /connecting/ })).not.toBeInTheDocument()
+    await user.click(within(envModal).getByRole('button', { name: /^remote/ }))
+
+    // Bound pane updates the draft only; the footer still reflects the thread snapshot until
+    // send, and no harness call is made yet.
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
+  })
+
+  it('sends a USER_MESSAGE plus a SET_* diff batch using the snapshot CAS cursors', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        thread({
+          branchSettings: branchSettings({
+            agentName: 'assistant',
+            environmentId: null,
+          }),
+        }),
+      ),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // Edit agent (SET_AGENT) + environment (SET_ENVIRONMENT) in the draft.
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: /coder/ }))
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/environment{Enter}')
+    await user.click(within(await screen.findByLabelText('选择 Environment')).getByRole('button', { name: /^remote/ }))
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.type(composer, 'hello world')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
+    const [threadIdArg, batchArg] = vi.mocked(harnessService.enqueueCommands).mock.calls[0]!
+    expect(threadIdArg).toBe('t1')
+    expect(batchArg.expectedHeadEntryId).toBe('e-assistant')
+    expect(batchArg.expectedNextCommandSequence).toBe('1')
+    const types = batchArg.commands.map((command) => command.type)
+    expect(types).toContain('SET_AGENT')
+    expect(types).toContain('SET_ENVIRONMENT')
+    expect(types[types.length - 1]).toBe('USER_MESSAGE')
+    const message = batchArg.commands[batchArg.commands.length - 1]!
+    expect(message.content).toBe('hello world')
+    // Strict wire: USER_MESSAGE never carries role.
+    expect(message).not.toHaveProperty('role')
+    expect(message).toHaveProperty('clientCommandId')
+    const setAgent = batchArg.commands.find((command) => command.type === 'SET_AGENT')!
+    expect(setAgent.agentName).toBe('coder')
+    const setEnv = batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')!
+    expect(setEnv.environmentId).toBe('env-remote')
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
   })
 
-  it('switches Environment through /environment and the footer, offering only READY targets', async () => {
-    const user = userEvent.setup()
-    const { queryClient } = renderBoundPane()
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-
-    await user.click(composer)
-    await user.keyboard('/environment{Enter}')
-    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'remote' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'connecting' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'remote' }))
-
-    await waitFor(() =>
-      expect(harnessService.updateThreadEnvironment).toHaveBeenCalledWith('t1', {
-        environmentName: 'remote',
-        expectedExecutionEpoch: 5,
-      }),
-    )
-    expect(screen.getByRole('button', { name: '环境：remote' })).toBeInTheDocument()
-    expect(
-      queryClient.getQueryData<ReturnType<typeof snapshot>>(
-        queryKeys.threads.snapshot('t1'),
-      )?.thread.sessionId,
-    ).toBe('s1')
-
-    await user.click(screen.getByRole('button', { name: '环境：remote' }))
-    expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '（无）' }))
-    await waitFor(() =>
-      expect(harnessService.updateThreadEnvironment).toHaveBeenLastCalledWith('t1', {
-        environmentName: null,
-        expectedExecutionEpoch: 6,
-      }),
-    )
-    expect(screen.getByRole('button', { name: '环境：（无）' })).toBeInTheDocument()
-  })
-
-  it('keeps the Environment selector open when a bound mutation fails', async () => {
-    const user = userEvent.setup()
-    vi.mocked(harnessService.updateThreadEnvironment).mockRejectedValueOnce(
-      new ApiError('thread is not idle', 409),
-    )
-    renderBoundPane()
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-
-    await user.click(composer)
-    await user.keyboard('/environment{Enter}')
-    await user.click(screen.getByRole('button', { name: 'remote' }))
-
-    await waitFor(() => expect(screen.getByText(/thread is not idle/)).toBeInTheDocument())
-    expect(screen.getByLabelText('选择 Environment')).toBeInTheDocument()
-  })
-
-  it('blocks message submission while the Thread Environment update is pending', async () => {
-    const user = userEvent.setup()
-    let resolveUpdate!: (value: HarnessThreadDTO) => void
-    vi.mocked(harnessService.updateThreadEnvironment).mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveUpdate = resolve
-      }),
-    )
-    renderBoundPane()
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-
-    await user.click(composer)
-    await user.keyboard('/environment{Enter}')
-    await user.click(screen.getByRole('button', { name: 'remote' }))
-
-    await waitFor(() => expect(composer).toBeDisabled())
-    await user.keyboard('must not submit{Enter}')
-    expect(harnessService.submitThreadMessage).not.toHaveBeenCalled()
-
-    resolveUpdate(thread({ environmentName: 'remote', executionEpoch: 6, revision: '1' }))
-    await waitFor(() => expect(composer).not.toBeDisabled())
-  })
-
-  it('/thread only switches the pane target and never mutates a Thread', async () => {
+  it('shows /thread as a chat-scoped picker and only rebinds the pane', async () => {
     const user = userEvent.setup()
     const { onThreadChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -358,108 +443,445 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '全局 Thread' }))
-    await user.click(screen.getByRole('button', { name: /t2/ }))
+    await waitFor(() => expect(chatService.listChatThreads).toHaveBeenCalledWith('chat-1'))
+
+    await user.click(await screen.findByRole('button', { name: /t2/ }))
 
     expect(onThreadChange).toHaveBeenCalledWith('t2')
+    expect(chatService.associateThread).not.toHaveBeenCalled()
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
-    // Threads are listed globally, not per Session.
-    expect(harnessService.listThreads).toHaveBeenCalled()
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
-  it('/tree rebinds the current Thread head with PUT /head and keeps the pane target', async () => {
+  it('treats /session as a disabled global command with no-op behavior', async () => {
     const user = userEvent.setup()
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    // Typing /session opens the slash palette with the disabled session command (and the
+    // /new command whose description also contains "Session").
+    await user.keyboard('/session')
+    const options = await screen.findAllByRole('option')
+    const sessionOption = options.find((option) => {
+      const text = option.textContent ?? ''
+      return text.startsWith('session') && option.getAttribute('aria-disabled') === 'true'
+    })
+    expect(sessionOption).toBeDefined()
+    // Pressing Enter on the disabled command is a no-op: the Thread picker must NOT open
+    // for /session (only /thread triggers it).
+    await user.keyboard('{Enter}')
+    expect(screen.queryByRole('dialog', { name: /选择 Thread/ })).not.toBeInTheDocument()
+    expect(chatService.listChatThreads).not.toHaveBeenCalled()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
+  })
+
+  it('rebinds via /tree PUT /head with the snapshot revision as the CAS cursor', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ revision: '3' }), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+
+    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    await waitFor(() =>
+      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
+        targetEntryId: 's1-root',
+        expectedRevision: '3',
+      }),
+    )
+  })
+
+  it('requires window.confirm when the draft is dirty and aborts relocation when cancelled', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ revision: '0' }), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // Make the draft dirty by editing the agent.
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: /coder/ }))
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/tree{Enter}')
+    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+
+    confirmSpy.mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+    await waitFor(() => expect(harnessService.updateThreadHead).toHaveBeenCalled())
+  })
+
+  it('blocks relocation while queued commands are pending with the threadRunning reason text', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        thread({}),
+        {
+          entries: sessionEntries(),
+          queuedCommands: [
+            {
+              commandId: 'c-pending',
+              threadId: 't1',
+              sequence: '1',
+              type: 'USER_MESSAGE',
+              state: 'QUEUED',
+              clientCommandId: 'cid-pending',
+              payloadJson: '{}',
+              consumedTurnStartEntryId: null,
+              cancelledAt: null,
+              createTime: null,
+            },
+          ],
+        },
+      ),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+  })
+
+
+  it('adopts the selected Agent name + activeTools while freezing model/thinking/environment/yolo', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        thread({
+          branchSettings: branchSettings({
+            agentName: 'assistant',
+            environmentId: null,
+            thinkingLevel: 'high',
+          }),
+        }),
+      ),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: /coder/ }))
+
+    // Footer labels follow the pane draft immediately (no service round-trip).
+    expect(await screen.findByRole('button', { name: /agent:coder/ })).toBeInTheDocument()
+    expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
+
+    await user.type(composer, 'run')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
+    const batchArg = vi.mocked(harnessService.enqueueCommands).mock.calls[0]![1]
+    const setAgent = batchArg.commands.find((command) => command.type === 'SET_AGENT')!
+    expect(setAgent.agentName).toBe('coder')
+    const setTools = batchArg.commands.find((command) => command.type === 'SET_ACTIVE_TOOLS')!
+    expect(setTools.activeTools).toEqual(['web-search'])
+    // Freeze rule: an agent-only change never re-emits model/thinking/environment/yolo.
+    expect(batchArg.commands.find((command) => command.type === 'SET_MODEL')).toBeUndefined()
+    expect(batchArg.commands.find((command) => command.type === 'SET_THINKING_LEVEL')).toBeUndefined()
+    expect(batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')).toBeUndefined()
+    expect(batchArg.commands.find((command) => command.type === 'SET_YOLO')).toBeUndefined()
+  })
+
+  it('blocks /thread while queued commands are pending and never opens the picker', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        queuedCommands: [
+          {
+            commandId: 'c-pending',
+            threadId: 't1',
+            sequence: '1',
+            type: 'USER_MESSAGE',
+            state: 'QUEUED',
+            clientCommandId: 'cid-pending',
+            payloadJson: '{}',
+            consumedTurnStartEntryId: null,
+            cancelledAt: null,
+            createTime: null,
+          },
+        ],
+      }),
+    )
     const { onThreadChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
-    await user.keyboard('/tree{Enter}')
-    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
-    // /tree derives the Entry Tree from the current Thread's Session.
-    await waitFor(() => expect(harnessService.listSessionEntries).toHaveBeenCalledWith('s1'))
-
-    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
-    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
-
-    // Selecting an editable USER Entry rewinds the head to its parent (ROOT) so the prompt
-    // can be re-sent, and fences the write with the Thread's current epoch.
-    await waitFor(() =>
-      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
-        headEntryId: 's1-root',
-        expectedExecutionEpoch: 5,
-      }),
-    )
-    // The editable source text is restored into the composer for re-submission.
-    expect(await screen.findByDisplayValue('s1 prompt')).toBeInTheDocument()
-    // Rebinding never creates a Thread and never re-targets the pane.
+    await user.keyboard('/thread{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /选择 Thread/ })).not.toBeInTheDocument()
+    expect(chatService.listChatThreads).not.toHaveBeenCalled()
     expect(onThreadChange).not.toHaveBeenCalled()
   })
 
-  it('/session picks a foreign Session then rebinds the same Thread across Sessions', async () => {
-    const user = userEvent.setup()
-    const { onThreadChange, onSessionSortChange } = renderBoundPane()
-    const composer = await screen.findByLabelText('给 AI 发送消息')
-
-    await user.click(composer)
-    await user.keyboard('/session{Enter}')
-    expect(await screen.findByText('选择 Session')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '创建时间' }))
-    expect(onSessionSortChange).toHaveBeenCalledWith('created')
-
-    await user.click(await screen.findByRole('button', { name: /S2/ }))
-    // Selecting a Session opens *its* Entry Tree instead of jumping to a main Thread.
-    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
-    await waitFor(() => expect(harnessService.listSessionEntries).toHaveBeenCalledWith('s2'))
-
-    await user.click(await screen.findByRole('button', { name: /助手 · s2 reply/ }))
-    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
-
-    // Cross-Session move keeps the same Thread and fences with its current epoch.
-    await waitFor(() =>
-      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
-        headEntryId: 's2-assistant',
-        expectedExecutionEpoch: 5,
-      }),
-    )
-    expect(onThreadChange).not.toHaveBeenCalled()
-  })
-
-  it('refuses to open /session or /tree while the Thread is ACTIVE', async () => {
+  it('blocks /new while queued commands are pending', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({ status: 'RUNNING', processing: true })),
+      snapshot(thread({}), {
+        queuedCommands: [
+          {
+            commandId: 'c-pending',
+            threadId: 't1',
+            sequence: '1',
+            type: 'USER_MESSAGE',
+            state: 'QUEUED',
+            clientCommandId: 'cid-pending',
+            payloadJson: '{}',
+            consumedTurnStartEntryId: null,
+            cancelledAt: null,
+            createTime: null,
+          },
+        ],
+      }),
     )
-    renderBoundPane()
+    const { onThreadChange } = renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
-    await user.keyboard('/tree{Enter}')
-    expect(await screen.findByText(/当前 Thread 正在运行，无法重定位/)).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+    await user.keyboard('/new{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行/)).toBeInTheDocument()
+    expect(onThreadChange).not.toHaveBeenCalled()
+  })
+
+  it('asks for confirmation before /new when the draft is dirty', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { onThreadChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: /coder/ }))
 
     await user.click(screen.getByLabelText('给 AI 发送消息'))
-    await user.keyboard('/session{Enter}')
-    expect(screen.queryByText('选择 Session')).not.toBeInTheDocument()
+    await user.keyboard('/new{Enter}')
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(onThreadChange).not.toHaveBeenCalled()
+
+    // Accepting discards the draft and opens the blank pane.
+    confirmSpy.mockReturnValue(true)
+    await user.keyboard('/new{Enter}')
+    expect(onThreadChange).toHaveBeenCalledWith(null)
+    expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
+  })
+
+  it('selecting the currently bound Thread from /thread needs no confirmation', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { onThreadChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/agent{Enter}')
+    await user.click(await screen.findByRole('button', { name: /coder/ }))
+
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('/thread{Enter}')
+    await user.click(await screen.findByRole('button', { name: /t1/ }))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(onThreadChange).not.toHaveBeenCalled()
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
   })
 
-  it('surfaces a 409 from PUT /head inside the history panel instead of closing it', async () => {
+
+  it('treats non-empty composer text as pane-dirty for /tree relocation', async () => {
     const user = userEvent.setup()
-    vi.mocked(harnessService.updateThreadHead).mockRejectedValue(
-      new ApiError('expected execution epoch mismatch', 409),
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ revision: '0' }), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // Open the history panel first, then type into the composer: the history panel is a
+    // plain panel (not a modal), so unsent composer text coexists with relocation.
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    await user.click(composer)
+    await user.type(composer, 'unsent text')
+    await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+
+    confirmSpy.mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
+    await waitFor(() => expect(harnessService.updateThreadHead).toHaveBeenCalled())
+  })
+
+  it('blocks /thread while an approval decision is in flight (panePending)', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.decideApproval).mockReturnValue(new Promise(() => undefined))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        entries: [toolCallEntry('40', 's1-root', 'call-1', 'bash')],
+        toolInvocations: [toolInvocation()],
+      }),
+    )
+    const { onThreadChange } = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(await screen.findByRole('button', { name: '允许' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '允许' })).toBeDisabled(),
+    )
+
+    await user.click(composer)
+    await user.keyboard('/thread{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /选择 Thread/ })).not.toBeInTheDocument()
+    expect(onThreadChange).not.toHaveBeenCalled()
+  })
+
+  it('blocks /tree when the Thread status is not IDLE/CONTINUATION_DUE', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ status: 'MODEL_STREAMING' }), { entries: sessionEntries() }),
     )
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
+    expect(await screen.findByText(/当前 Thread 正在运行/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+  })
+
+  it('restores the branch target draft into the composer after a successful /tree rebind', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ revision: '3' }), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/tree{Enter}')
+    expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+
+    // USER entries rewind the head to their parent and restore their editable text.
     await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
     await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
 
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('无法重定位 Thread')
-    expect(alert).toHaveTextContent('expected execution epoch mismatch')
-    // The panel stays open so the user can retry after the Thread refreshes.
-    expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(harnessService.updateThreadHead).toHaveBeenCalledWith('t1', {
+        targetEntryId: 's1-root',
+        expectedRevision: '3',
+      }),
+    )
+    expect(await screen.findByDisplayValue('s1 prompt')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
+  })
+
+
+  it('disables approval buttons pane-wide while the approval request is in flight and re-enables after', async () => {
+    const user = userEvent.setup()
+    let resolveApproval: (value: unknown) => void = () => undefined
+    vi.mocked(harnessService.decideApproval).mockReturnValue(
+      new Promise((resolve) => {
+        resolveApproval = resolve
+      }),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        entries: [toolCallEntry('40', 's1-root', 'call-1', 'bash')],
+        toolInvocations: [toolInvocation()],
+      }),
+    )
+    renderBoundPane()
+    const allowButton = await screen.findByRole('button', { name: '允许' })
+    const denyButton = screen.getByRole('button', { name: '拒绝' })
+    expect(allowButton).toBeEnabled()
+
+    await user.click(allowButton)
+    // The global approvalPending propagates through the whole stack: both buttons disable
+    // while the HTTP request is pending.
+    await waitFor(() => expect(allowButton).toBeDisabled())
+    expect(denyButton).toBeDisabled()
+
+    await act(async () => {
+      resolveApproval({})
+    })
+    // The snapshot refetch after a successful decision re-renders the bar: buttons re-enable
+    // (the durable snapshot still shows undecided, so the bar remains interactive).
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '允许' })).toBeEnabled(),
+    )
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
+  })
+
+  it('never sends a second same-CAS batch while the first request is still in flight', async () => {
+    const user = userEvent.setup()
+    let resolveSend: (value: unknown) => void = () => undefined
+    vi.mocked(harnessService.enqueueCommands).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSend = resolve
+      }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.type(composer, 'only once')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // While pending, the composer and send button are disabled: double clicks and Enter
+    // keydowns cannot mint a second batch against the same CAS cursors.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled(),
+    )
+    expect(screen.getByLabelText('给 AI 发送消息')).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await user.keyboard('{Enter}')
+    expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveSend([])
+    })
+    await waitFor(() =>
+      expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1),
+    )
+  })
+
+  it('surfaces a 409 from send as the threadStateChanged message without clearing the draft', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.enqueueCommands).mockRejectedValueOnce(
+      new ApiError('expected revision mismatch', 409),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.type(composer, 'will collide')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/Thread 状态已变化/)).toBeInTheDocument(),
+    )
+    expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
+    // The draft is restored so the user can retry without retyping.
+    expect(await screen.findByDisplayValue('will collide')).toBeInTheDocument()
   })
 })

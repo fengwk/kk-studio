@@ -26,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Stale executionEpoch or a non-quiescent Thread; the caller must refresh before retrying. */
+/** Stale revision or a non-quiescent Thread; the caller must refresh before retrying. */
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }

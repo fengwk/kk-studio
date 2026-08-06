@@ -50,19 +50,35 @@ describe('chatService', () => {
     expect(service.detachChatSession).toBeUndefined()
   })
 
-  it('maps Chat-scoped Thread pagination, creation, and idempotent association', async () => {
+  it('maps the full-draft Chat Thread creation and list endpoints', async () => {
     const client = createClient()
     const service = createChatService(client)
-    await service.listChatThreads('chat /1', { sort: 'created', cursor: 'opaque/cursor', limit: 7 })
-    await service.createChatThread('chat /1', { environmentName: 'local' })
-    await service.associateThread('chat /1', 'thread /2')
+    await service.listChatThreads('chat /1')
+    await service.createChatThread('chat /1', {
+      title: 'New Thread',
+      branchSettings: {
+        environmentId: null,
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+        thinkingLevel: 'off',
+        activeTools: ['web-search'],
+      },
+      yoloEnabled: true,
+    })
 
-    expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
-      params: { sort: 'created', limit: 7, cursor: 'opaque/cursor' },
-    })
+    expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
     expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
-      environmentName: 'local',
+      title: 'New Thread',
+      branchSettings: {
+        environmentId: null,
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+        thinkingLevel: 'off',
+        activeTools: ['web-search'],
+      },
+      yoloEnabled: true,
     })
-    expect(client.put).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads/thread%20%2F2')
+    // No pagination params, no cursor: the Chat returns the full Thread array.
+    expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
   })
 })

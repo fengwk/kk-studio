@@ -19,33 +19,15 @@ export const queryKeys = {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
   },
-  harness: {
-    retryPolicy: ['harness', 'retry-policy'] as const,
-    realtimeStreamPolicy: ['harness', 'realtime-stream-policy'] as const,
-  },
   chats: {
     all: ['chats'] as const,
     list: ['chats', 'list'] as const,
     detail: (chatId: string) => ['chats', 'detail', chatId] as const,
+    threads: (chatId: string) => ['chats', 'threads', chatId] as const,
   },
   threads: {
     all: ['threads'] as const,
-    list: ['threads', 'list'] as const,
-    page: (scope: 'current' | 'global', sort: 'recent' | 'created', chatId?: string) =>
-      ['threads', 'list', scope, sort, chatId ?? ''] as const,
     snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
-  },
-  sessions: {
-    all: ['sessions'] as const,
-    list: ['sessions', 'list'] as const,
-    threadIndex: (sort: 'recent' | 'created') => ['sessions', 'thread-index', sort] as const,
-    detail: (sessionId: string) => ['sessions', 'detail', sessionId] as const,
-    entries: (sessionId: string) => ['sessions', 'detail', sessionId, 'entries'] as const,
-  },
-  usage: {
-    all: ['usage'] as const,
-    session: (sessionId: string) => ['usage', 'sessions', sessionId] as const,
-    model: (modelName: string) => ['usage', 'models', modelName] as const,
   },
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,

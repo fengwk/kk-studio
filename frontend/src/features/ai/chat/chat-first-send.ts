@@ -1,101 +1,95 @@
-import { createClientMessageId } from '@/features/ai/runtime'
 import type {
-  ThreadMessagePayload,
-  ThreadMessageReplay,
-} from '@/features/ai/runtime/thread-message-retry'
-import type { HarnessThreadDTO, HarnessThreadInputDTO } from '@/shared/api/contracts/ai-runtime'
+  HarnessBranchSettingsDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
+import type { CommandBatchReplay } from '@/features/ai/runtime'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
-import { translate } from '@/shared/i18n'
+import {
+  buildFirstSendMessagePlan,
+  type CommandBatchPlan,
+} from '@/features/ai/chat/command-batch-plan'
 
 export interface FirstSendResult {
-  sessionId: string
-  thread: HarnessThreadDTO
-  userMessageInput: HarnessThreadInputDTO
-}
-
-export interface FirstSendReplay extends ThreadMessageReplay {
   threadId: string
+  snapshot: HarnessThreadSnapshotDTO
+  /** The exact USER_MESSAGE-only batch sent after creation (replay identity). */
+  plan: CommandBatchPlan
 }
 
-/** Carries the atomically created Thread across a failed first-message request. */
+/**
+ * First-send recovery handed to the bound pane:
+ * - `replay` present: network/uncertain failure — restore the text AND keep the exact batch
+ *   (same command ids + original expected cursors) for byte-for-byte replay;
+ * - `replay` absent: known 409 — the server explicitly rejected the stale batch, so the text
+ *   is restored but the NEXT submit rebuilds fresh cursors + fresh command ids.
+ */
+export interface FirstSendRecovery {
+  content: string
+  replay?: CommandBatchReplay
+}
+
+/**
+ * Carries the atomically created Thread + exact message batch across a failed first-message
+ * request so the bound pane can restore the draft and replay byte-for-byte.
+ */
 export class FirstSendMessageError extends Error {
-  readonly replay: FirstSendReplay
-  readonly thread: HarnessThreadDTO
+  readonly snapshot: HarnessThreadSnapshotDTO
+  readonly plan: CommandBatchPlan
   readonly cause: unknown
 
   constructor(
-    thread: HarnessThreadDTO,
-    payload: ThreadMessagePayload,
-    clientMessageId: string,
+    snapshot: HarnessThreadSnapshotDTO,
+    plan: CommandBatchPlan,
     cause: unknown,
   ) {
     super(cause instanceof Error ? cause.message : String(cause))
     this.name = 'FirstSendMessageError'
-    this.replay = {
-      threadId: thread.threadId,
-      ...payload,
-      clientMessageId,
-    }
-    this.thread = thread
+    this.snapshot = snapshot
+    this.plan = plan
     this.cause = cause
   }
 }
 
 /**
  * Blank pane first send order:
- * 1) create a fully bound Thread atomically associated with the Chat
- * 2) enqueue USER_MESSAGE against the returned Thread epoch
+ * 1) create a Chat Thread atomically carrying the full branch draft (`branchSettings` +
+ *    `yoloEnabled`) and return its snapshot;
+ * 2) enqueue a USER_MESSAGE-only batch against the returned Thread's head cursors.
+ *
+ * On message failure the created Thread and the exact batch are preserved for replay; the
+ * branch draft itself is already durable in the Thread creation.
  */
 export async function performBlankPaneFirstSend(options: {
   chatId: string
   content: string
-  agentName: string
-  environmentName: string | null
+  title: string | null
+  branchSettings: HarnessBranchSettingsDTO
   yoloEnabled: boolean
+  clientCommandId?: string
   createChatThread?: typeof chatService.createChatThread
-  submitThreadMessage?: typeof harnessService.submitThreadMessage
-  createIds?: () => { userMessageId: string }
+  enqueueCommands?: typeof harnessService.enqueueCommands
 }): Promise<FirstSendResult> {
   const createChatThread = options.createChatThread ?? chatService.createChatThread
-  const submitThreadMessage = options.submitThreadMessage ?? harnessService.submitThreadMessage
-  const ids = options.createIds?.() ?? ({ userMessageId: createClientMessageId() } as const)
-  const payload: ThreadMessagePayload = {
-    kind: 'USER_MESSAGE',
-    role: 'user',
-    content: options.content,
-    agentName: options.agentName,
+  const enqueueCommands = options.enqueueCommands ?? harnessService.enqueueCommands
+  const snapshot = await createChatThread(options.chatId, {
+    title: options.title,
+    branchSettings: options.branchSettings,
     yoloEnabled: options.yoloEnabled,
-    firstSendContext: { chatId: options.chatId },
-  }
-
-  const created = await createChatThread(options.chatId, {
-    environmentName: options.environmentName,
   })
-  if (!created.sessionId) {
-    throw new Error(translate('ai.runtime.action.firstSendMissingSession'))
-  }
-  let userMessageInput: HarnessThreadInputDTO
+  const plan = buildFirstSendMessagePlan({
+    thread: snapshot.thread,
+    content: options.content,
+    clientCommandId: options.clientCommandId,
+  })
   try {
-    userMessageInput = await submitThreadMessage(created.threadId, {
-      content: options.content,
-      agentName: options.agentName,
-      yoloEnabled: options.yoloEnabled,
-      clientMessageId: ids.userMessageId,
-      expectedExecutionEpoch: created.executionEpoch,
-    })
+    await enqueueCommands(snapshot.thread.threadId, plan.batch)
   } catch (error) {
-    throw new FirstSendMessageError(
-      created,
-      payload,
-      ids.userMessageId,
-      error,
-    )
+    throw new FirstSendMessageError(snapshot, plan, error)
   }
-
   return {
-    sessionId: created.sessionId,
-    thread: created,
-    userMessageInput,
+    threadId: snapshot.thread.threadId,
+    snapshot,
+    plan,
   }
 }

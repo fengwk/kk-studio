@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -23,12 +24,24 @@ public class ToolInvocationDTO {
   private String toolName;
   private String toolVersion;
   private String toolType;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentId;
+
   private String argumentsJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String approvalJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultEntryId;
+
   private Instant createTime;
   private Instant updateTime;
 }

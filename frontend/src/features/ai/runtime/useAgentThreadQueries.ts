@@ -1,7 +1,8 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
-import { toAgentModelViews, type AgentModelView } from '@/features/ai/catalog'
+import { toAgentModelViews } from '@/features/ai/catalog'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export function useAgentThreadQueries(threadId: string) {
@@ -22,19 +23,28 @@ export function useAgentThreadQueries(threadId: string) {
   const thread = snapshot?.thread
   const sessionId = thread?.sessionId ?? ''
 
-  const models: AgentModelView[] = toAgentModelViews(modelsQuery.data?.results ?? [])
+  // Stable identities for derived arrays so hooks depending on them do not re-run per render.
+  const agents = useMemo(() => agentsQuery.data?.results ?? [], [agentsQuery.data])
+  const models = useMemo(
+    () => toAgentModelViews(modelsQuery.data?.results ?? []),
+    [modelsQuery.data],
+  )
+  const entries = useMemo(() => snapshot?.entries ?? [], [snapshot])
+  const queuedCommands = useMemo(() => snapshot?.queuedCommands ?? [], [snapshot])
+  const toolInvocations = useMemo(() => snapshot?.toolInvocations ?? [], [snapshot])
+  const modelInvocation = useMemo(() => snapshot?.modelInvocation ?? null, [snapshot])
+
   return {
     agentsQuery,
     modelsQuery,
     snapshotQuery,
-    agents: agentsQuery.data?.results ?? [],
+    agents,
     models,
     thread,
     sessionId,
-    entries: snapshot?.entries ?? [],
-    inputs: snapshot?.inputs ?? [],
-    modelInvocations: snapshot?.modelInvocations ?? [],
-    toolInvocations: snapshot?.toolInvocations ?? [],
-    usage: snapshot?.usage,
+    entries,
+    queuedCommands,
+    modelInvocation,
+    toolInvocations,
   }
 }

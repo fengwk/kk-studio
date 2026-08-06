@@ -1406,6 +1406,7 @@ class DaemonRuntimeTest {
    * welcomeSequence + 1} 起严格递增。
    */
   private void completeHandshake(long welcomeSequence) throws InterruptedException {
+    handshakeTransport.awaitNextMessageType(DaemonMessageType.HELLO);
     handshakeTransport.receive(platformMessage(DaemonMessageType.WELCOME, welcomeSequence));
   }
 
@@ -1575,6 +1576,16 @@ class DaemonRuntimeTest {
         messages.add(codec.decode(message));
       }
       return messages;
+    }
+
+    private void awaitNextMessageType(DaemonMessageType expected) throws InterruptedException {
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TEST_TIMEOUT_SECONDS);
+      String message;
+      while ((message = sent.peek()) == null && System.nanoTime() < deadline) {
+        TimeUnit.MILLISECONDS.sleep(1);
+      }
+      assertTrue(message != null, "expected daemon message " + expected);
+      assertEquals(expected, codec.decode(message).messageType());
     }
 
     private DaemonEnvelope takeNextMessage() throws InterruptedException {

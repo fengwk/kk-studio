@@ -30,10 +30,6 @@ const EnvironmentsPage = lazy(async () => {
   const module = await import('@/features/ai/environment/EnvironmentsPage')
   return { default: module.EnvironmentsPage }
 })
-const HarnessSettingsPage = lazy(async () => {
-  const module = await import('@/features/ai/settings/HarnessSettingsPage')
-  return { default: module.HarnessSettingsPage }
-})
 const ResourceEditorModal = lazy(async () => {
   const module = await import('@/features/ai/catalog/AiConsoleResourceEditorModal')
   return { default: module.ResourceEditorModal }
@@ -135,16 +131,6 @@ export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
   return (
     <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingEnvironment')}</div>}>
       <EnvironmentsPage />
-      {children}
-    </Suspense>
-  )
-}
-
-export function HarnessSettingsRoute({ children }: ExtensionComponentProps) {
-  const { t } = useI18n()
-  return (
-    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingSettings')}</div>}>
-      <HarnessSettingsPage />
       {children}
     </Suspense>
   )

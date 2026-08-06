@@ -22,7 +22,7 @@ describe('NavigationSlot', () => {
           labelKey: 'ai.nav.environments',
           path: 'environments',
         },
-        { id: 'ai.nav.settings', label: 'Setting', labelKey: 'ai.nav.setting', path: 'settings' },
+
       ],
     })
 
@@ -43,7 +43,6 @@ describe('NavigationSlot', () => {
       '模型',
       '提供商',
       '环境',
-      '设置',
     ])
 
     act(() => {
@@ -55,7 +54,6 @@ describe('NavigationSlot', () => {
       'Model',
       'Provider',
       'Environment',
-      'Setting',
     ])
   })
 })
