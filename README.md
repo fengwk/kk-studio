@@ -4,7 +4,7 @@
 
 | 域 | 说明 |
 | --- | --- |
-| **Harness / AI** | 可恢复 Agent Thread、Tool 与观测 |
+| **Harness / AI** | 可恢复 Agent Thread、Tool 与实时投影 |
 | **Studio / Canvas** | 全局单实例画布工作台，持久化 Canvas 文档/节点/连线/幂等命令 |
 
 架构事实源：
@@ -12,20 +12,23 @@
 - [docs/technical-solution/architecture.md](docs/technical-solution/architecture.md)
 - [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
 - [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
+- [docs/technical-solution/prompt-to-resource.md](docs/technical-solution/prompt-to-resource.md)
 
 ## 能力摘要
 
-- Harness：Session 共享 append-only Entry Tree；HarnessThread 是可复用 durable runtime process（head 重定位 + epoch fencing + ordered mailbox）；PostgreSQL truth + durable activation queue，Redis 仅用于 realtime
+- Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + revision CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；Redis 仅用于 realtime overlay
 - Studio：Canvas 持久化 document / node / link / command-dedup（硬删除节点）；FUNCTION 节点只暴露 `system.generate-text` v1
-- 前端：AI 接真实 Thread API；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
+- 前端：AI 接真实 Thread API（snapshot-first SSE + 命令 batch）；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 
 ## 模块
 
 ```text
 share / studio / core / web
-harness-tool / harness-runtime / harness-daemon
+harness-tool / harness-runtime / harness-runtime-spring / harness-daemon
 frontend
 ```
+
+`harness-runtime` 是纯 Java 领域状态机；`harness-runtime-spring` 只做 Store/Work/Redis 适配。
 
 ## 开发
 
@@ -74,7 +77,7 @@ docker compose -f deploy/local/compose.yaml down -v
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/ai/runtime/threads> 等 |
+| Harness API | <http://localhost:8080/api/ai/runtime/threads/{threadId}/snapshot> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码：`kk_studio`） |
 | Redis | `redis://localhost:6379` |
@@ -88,6 +91,6 @@ docker compose -f deploy/local/compose.yaml down -v
 - `V2__dev_seed.sql` 只写入 local-only 的 stub provider（`stub-key`），
   不携带任何真实凭证。
 - 真实 Provider 的 `credential` 必须通过 UI 的 Provider 页面或
-  `PUT /api/ai/catalog/providers/{id}` 在运行时注入，**绝不**写入镜像或仓库。
+  `PUT /api/ai/catalog/providers/{name}` 在运行时注入，**绝不**写入镜像或仓库。
 
 端口覆盖与并行 smoke 见 [`deploy/local/README.md`](deploy/local/README.md)。

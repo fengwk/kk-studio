@@ -14,9 +14,9 @@ node scripts/e2e/run-matrix.mjs --list
 ./scripts/e2e.sh                         # 默认 L1，免费
 ./scripts/e2e.sh --rebuild               # Java 21 clean package 后启动服务
 ./scripts/e2e.sh --real                  # L2 真实 MiniMax
-./scripts/e2e.sh --real --with-branch    # L3 分支路径
-./scripts/e2e.sh --with-tools             # L4 Environment projection
-./scripts/e2e.sh --real --with-tools      # L4 真实 Tool turn
+./scripts/e2e.sh --real --with-branch    # L3 同 Session 分支
+./scripts/e2e.sh --with-tools            # L4 Environment projection
+./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
 ./scripts/e2e.sh --ui                    # Playwright UI smoke
 ./scripts/e2e.sh --list
 ./scripts/e2e.sh --docs
@@ -51,10 +51,10 @@ npm --prefix frontend run e2e:docs
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD、名称身份、逐消息设置、Thread/Session、head、Environment capability projection、planning failure、policy、i18n 与 proxy |
-| L2 | `--real` | MiniMax | 文本轮次、queued batch、stop partial、Usage |
-| L3 | `--real --with-branch` | MiniMax | 历史 Entry 路径切换后的 Usage |
-| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、ToolInvocation |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、i18n 与 proxy |
+| L2 | `--real` | MiniMax | 文本轮次 durable 边界、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
+| L3 | `--real --with-branch` | MiniMax | 同一 Thread 同 Session move head 回退到历史 Entry 后继续 |
+| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流与 Resource 外部化 |
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
 
@@ -68,17 +68,17 @@ npm --prefix frontend run e2e:docs
 seed.structured_model_config
 seed.agent_and_provider
 thread.chat_scoped_create_atomic
-thread.stale_epoch_rejected
+thread.branch_settings_projection
+thread.user_message_strict_wire
+thread.custom_message_strict_wire
+thread.command_idempotent_replay
+thread.stale_command_cas_rejected
 thread.rebind_same_session
-thread.rebind_cross_session
-thread.stop_then_rebind
-thread.turn_settings_wysiwyg_failure
-thread.environment_capability_projection
-thread.custom_message_turn_settings
+thread.rebind_cross_session_rejected
+thread.stop_idle_noop
+thread.branch_settings_diff_commands
 thread_snapshot.unknown_thread_404
 frontend.proxy_model_contract
-harness.retry_policy_round_trip
-harness.realtime_stream_policy_round_trip
 crud.provider.invalid_name
 crud.provider.invalid_missing_type
 crud.model.invalid_update_config
@@ -88,10 +88,10 @@ crud.provider.lifecycle
 crud.model.lifecycle
 crud.agent.lifecycle
 crud.chat.invalid_agent_name
-crud.chat.visible_settings
+crud.chat.thread_branch_settings_independent
 crud.model.delete_unknown_rejected
 crud.chat.lifecycle
-crud.chat.thread_association_pagination
+crud.chat.thread_association_list
 i18n.error_response_accept_language
 matrix.model.setup_provider
 config.model.valid.minimal
@@ -122,37 +122,38 @@ L1 的关键语义断言：
 
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、删除；
 - Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；
-- Chat CRUD 仅持久化 `agentName`、`yoloEnabled`，不包含 Environment；
-- Chat-scoped Thread create body 设置 `environmentName`，Thread DTO 返回当前 Environment；
-- Chat-scoped Thread 原子产生 Session、ROOT 与非空 head；
-- 静止 Thread 的 Environment PUT 携带 `expectedExecutionEpoch`，成功递增 epoch/revision；
-- 每条 USER/CUSTOM message 只携带精确的 `agentName`、`yoloEnabled` 与幂等/fencing 字段；
-- 缺失能力产生 `ASSISTANT_ERROR`，不产生 ModelInvocation；
-- null/stale/offline Environment 只贡献零 Environment Tool/Skill；Provider 返回本次不可见 Tool 时，`ASSISTANT_ERROR` 包含请求名与 `available tools`，且不产生 ToolInvocation；
-- `PUT /head` 只使用非空 Entry 和当前 epoch；
-- stale version/epoch、未知请求目标与 invalid DTO/请求体引用分别验证 `409`、`404`、`400`；
-- retry/realtime policy 通过 GET → PUT → GET 往返验证；
+- Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 默认值，不包含 Environment；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
+- Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
+- Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
+- snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
+- 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
+- `USER_MESSAGE` 只能携带 `type/clientCommandId/content`（多余字段 400）；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
+- 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
+- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO` 六类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队，消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空；消费证据必须是 `ASSISTANT_ERROR` + `TURN_END(FAILED)`（environmentId=null 且 activeTools 含 read 时 resolver 稳定拒绝 `environment tool requires a selected environment`），USER MESSAGE 自身不算消费证据；
+- `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
+- `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
+- 未知 Thread snapshot 404；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 
 ### L2/L3/L4（6）
 
 ```text
 real.text_turn
-real.queued_input_batch
+real.queued_command_batch
 real.stop_partial_continue
-branch.path_usage
+branch.same_session_move_head
 daemon.ready
 tool.read_turn
 ```
 
 | Case | 开关 | 重点验证 |
 | --- | --- | --- |
-| `real.text_turn` | `--real` | 真实 Provider 文本、Assistant Entry 与 Usage |
-| `real.queued_input_batch` | `--real` | 运行期间入队消息在下一轮按 batch 处理 |
-| `real.stop_partial_continue` | `--real` | 安全 text/thinking partial、stop barrier 与后续轮次 |
-| `branch.path_usage` | `--real --with-branch` | head 切换到历史 Entry 后的路径 Usage |
-| `daemon.ready` | `--with-tools` | READY Environment 与 `GET /api/ai/environment` 的固定十个 Tool |
-| `tool.read_turn` | `--real --with-tools` | Agent 选择 `read`；Thread create 绑定 Environment；消息只发送 Agent/YOLO；ToolInvocation 冻结 Environment route 并成功 |
+| `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
+| `real.queued_command_batch` | `--real` | 运行中用最新 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
+| `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
+| `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
+| `daemon.ready` | `--with-tools` | READY Environment、UUID 路由身份与固定十个 Tool |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentId`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256） |
 
 ## 4. API 契约与验证方式
 
@@ -172,7 +173,7 @@ GET /api/ai/catalog/tools
 
 - Provider/Agent response 使用 `name`，没有 bigint resource ID；
 - Model response 使用 `providerName`、`name`、结构化 `config`；
-- Model ref 为 `providerName/modelName`，只切第一个 `/`；
+- Model ref 为 `providerName/modelName`，只切第一个 `/`（model name 内可含 `/`）；
 - Catalog PUT/DELETE 的 `expectedVersion` 使用十进制字符串；
 - 空白名称、Provider/Agent 名称含 `/`、缺字段、非法 variant、非法 config 和未知字段返回 `400`；
 - 未知名称返回 `404`，版本冲突返回 `409`。
@@ -182,104 +183,86 @@ GET /api/ai/catalog/tools
 ```text
 GET|POST /api/ai/chat
 GET|PUT|DELETE /api/ai/chat/{chatId}
-GET /api/ai/chat/{chatId}/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
-POST /api/ai/chat/{chatId}/threads
-PUT /api/ai/chat/{chatId}/threads/{threadId}
+GET /api/ai/chat/{chatId}/threads            -> HarnessThreadDTO[]（关联时间新到旧）
+POST /api/ai/chat/{chatId}/threads           -> 201 HarnessThreadSnapshotDTO
+PUT /api/ai/chat/{chatId}/threads/{threadId} -> 幂等关联
 
-GET /api/ai/runtime/threads?sort={recent|created}&cursor={opaque}&limit={1..100}
-GET /api/ai/runtime/threads/{threadId}
-GET /api/ai/runtime/threads/{threadId}/snapshot
-PUT /api/ai/runtime/threads/{threadId}/head
-PUT /api/ai/runtime/threads/{threadId}/environment
-POST /api/ai/runtime/threads/{threadId}/messages
-POST /api/ai/runtime/threads/{threadId}/messages/custom
+GET  /api/ai/runtime/threads/{threadId}/snapshot
+POST /api/ai/runtime/threads/{threadId}/commands          -> 202
+PUT  /api/ai/runtime/threads/{threadId}/head
 POST /api/ai/runtime/threads/{threadId}/stop
-GET /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
+POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
+GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
 ```
 
-Chat-scoped POST 的验证顺序是：
-
-```text
-create Session + ROOT + bound Thread
-  -> associate Chat
-  -> return HarnessThreadDTO
-```
-
-Chat create body 只包含 Chat 自身的可见设置：
+Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 
 ```json
 {
-  "title": "...",
-  "agentName": "...",
+  "title": null,
+  "branchSettings": {
+    "environmentId": null,
+    "agentName": "default-assistant",
+    "model": { "providerName": "minimax", "modelName": "MiniMax-M2.7", "variant": "default" },
+    "thinkingLevel": "off",
+    "activeTools": []
+  },
   "yoloEnabled": false
 }
 ```
 
-Chat update body 仍只更新这些 Chat 字段，并额外携带当前版本：
+命令 batch body（CAS cursor + ordered commands；`clientCommandId` 稳定；创建后 `expectedNextCommandSequence` 为 `"1"`）：
 
 ```json
 {
-  "agentName": "...",
-  "yoloEnabled": false,
-  "expectedVersion": "0"
+  "expectedHeadEntryId": "1",
+  "expectedNextCommandSequence": "1",
+  "commands": [
+    { "type": "USER_MESSAGE", "clientCommandId": "...", "content": "..." }
+  ]
 }
 ```
 
-Chat-scoped Thread create body 负责选择当前 Thread 的 Environment：
+`USER_MESSAGE` 只能携带 `type/clientCommandId/content`；`CUSTOM_MESSAGE` 额外携带 `role`（仅 `SYSTEM|USER`）。六类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentId)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_THINKING_LEVEL(thinkingLevel)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+
+head move 与 stop 均为 revision CAS：
 
 ```json
-{
-  "environmentName": null
-}
+{ "targetEntryId": "1", "expectedRevision": "0" }
+{ "stopRequestId": "...", "expectedRevision": "0" }
 ```
 
-静止 Thread 可以用当前 epoch fenced 地更换或清除 Environment；非静止或 stale epoch 为 `409`，成功会递增 execution epoch 与 durable revision：
+- `PUT /head`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision、非静止、跨 Session target、TURN_END continuation 义务均为 409；成功 revision+1；
+- `POST /stop` 响应 `{status, thread, stoppedTurnEndEntryId, cancelledCommandCount}`；status 三态：
+  - `STOPPED`：真实停止一个 Turn（revision+1，`stoppedTurnEndEntryId` 非空，TURN_END closeRequestId = `STOP/{threadId}/{stopRequestId}`）；
+  - `REPLAYED`：同 `stopRequestId` 再次调用命中持久 TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；
+  - `IDLE`：无活动 Turn（无持久 marker，`stoppedTurnEndEntryId=null`；同 `stopRequestId` 再调用仍是 IDLE）；
+  - stale revision 409；
+- 命令 batch 整批同 `clientCommandId` 重放返回既有命令；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
+
+Tool approval：
 
 ```json
-{
-  "environmentName": "tool-e2e",
-  "expectedExecutionEpoch": 0
-}
+{ "decision": "ALLOW", "decisionId": "...", "actor": "web", "reason": null }
 ```
 
-每个 message/custom message body 都包含：
+- `decision` 输入仅 `ALLOW|DENY`，durable `approvalJson.decision` 编码为 `ALLOWED|DENIED`（ToolApprovalDecision 枚举）；`decisionId` 是客户端稳定幂等键，已决策后 exact replay 保留原 `decidedAt`；
+- yolo=false 时工具调用进入 `TOOL_WAITING_APPROVAL`（快照 `toolInvocations` 含 `WAITING_APPROVAL` 项）；ALLOWED 恢复为 READY 并请求 Tool Work，DENIED 终止为 FAILED；
+- 快照 `toolInvocations` 只暴露 classifier-applicable active siblings：IDLE 后为空，不可回查历史 invocation；工具终态结果从 durable TOOL MESSAGE entry 的嵌套 `tool_result.contents` 读取；
+- INPUT turn 的 durable entry 顺序固定为 `TURN_START -> USER/CUSTOM Message -> assistant MESSAGE -> TURN_END`（TurnPlanBuilder 先追加 TURN_START 再追加消息）。
 
-```json
-{
-  "content": "...",
-  "agentName": "...",
-  "yoloEnabled": false,
-  "clientMessageId": "...",
-  "expectedExecutionEpoch": 0
-}
-```
-
-服务端把 message 中的 `agentName`、`yoloEnabled` 保存为 compact TurnSettings；Environment 只从 Thread durable binding 读取。Resolver 每次 planning 读取最新 Agent、Provider、Model、Variant，并把当前 READY Environment 的 Environment Tool/Skill 与 Platform Tool 一起冻结到本次 ModelInvocation。null、stale 或 offline Environment 不阻断 planning，只省略不可用的 Environment Tool/Skill；Agent 仍可正常使用 Platform Tool 或不携带 Tool。
-
-每次新 ModelInvocation 都持久化本次可见 Tool binding。Provider 如果返回本次请求不可见的 Tool，最终写入明确的 `ASSISTANT_ERROR`，文案包含请求 Tool 名和当前 `available tools` 列表，且不物化 ToolInvocation。Tool 产品分类只有 `PLATFORM` 与 `ENVIRONMENT`。
-
-`PUT /head` body 必须含非空 `headEntryId` 与 `expectedExecutionEpoch`。静止检查失败或 epoch 过期为 `409`；未知 Entry/Thread/Session 为 `404`。snapshot 的 `revision` 是十进制 durable cursor，SSE revision 帧携带同一 cursor，Redis realtime 没有 SSE id。
-
-### 查询、Usage 与 Environment
+Environment 路由身份：
 
 ```text
-GET /api/ai/runtime/sessions
-GET /api/ai/runtime/sessions/{sessionId}
-GET /api/ai/runtime/sessions/{sessionId}/entries
-GET /api/ai/runtime/interactions/{id}
-GET /api/ai/runtime/interactions/open
-POST /api/ai/runtime/interactions/{id}/response
-GET /api/ai/runtime/tool-invocations/{id}
-GET /api/ai/runtime/artifacts/{id}
-GET /api/ai/runtime/usage/sessions/{sessionId}
-GET /api/ai/runtime/usage/models?providerName={providerName}&modelName={modelName}
-GET|PUT /api/ai/runtime/settings/retry-policy
-GET|PUT /api/ai/runtime/settings/realtime-stream-policy
-GET /api/ai/environment
-WebSocket /api/ai/environment/daemon/v1
+GET /api/ai/environment            -> LiveEnvironmentDTO[]（id = lowercase UUID 路由身份，name 仅展示）
+WebSocket /api/ai/environment/daemon/v2
 ```
 
-Model Usage 以写入时冻结的 `provider_name`、`model_name` 查询，不对 Catalog 建 FK。查询接口使用独立的 `providerName`、`modelName` 参数，因此 Model name 中的 `/` 不依赖 encoded-slash 路由行为。
+- Thread create / `SET_ENVIRONMENT` 的 `environmentId` 只接受 canonical lowercase UUID（或 null 清除），非法 UUID 400；mapper 不查注册表，turn 执行时 resolver 才按 registry 精确查找——**非 null `environmentId` 无论 activeTools 内容都要求命中且 READY**（missing/offline 确定性拒绝），null 只允许 platform-only 且无 skills 的 turn；
+- Chat 默认值（agentName/yoloEnabled）仅作 blank pane 初始值；Thread `branchSettings` 独立持久化，Environment identity immutable；
+- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB。
+
+SSE：`afterRevision` 与 `Last-Event-ID` 是 canonical decimal durable cursor；Redis realtime delta 无 SSE id。
 
 ## 5. 实现结构与报告
 
@@ -288,7 +271,7 @@ Model Usage 以写入时冻结的 `provider_name`、`model_name` 查询，不对
 | `scripts/e2e.sh` | 环境启停、凭证同步、矩阵与 UI smoke 编排 |
 | `scripts/e2e/run-matrix.mjs` | Node case 注册、筛选、执行和报告 |
 | `scripts/e2e/lib/registry.mjs` | case 注册表 |
-| `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、head、snapshot、Input 等共享步骤 |
+| `scripts/e2e/lib/harness.mjs` | Chat-scoped Thread、命令 batch、head/stop CAS、approval、快照轮询、SSE 等共享步骤 |
 | `scripts/e2e/cases/*.mjs` | API case |
 | `scripts/e2e/ui-smoke.mjs` | Playwright UI smoke |
 
@@ -310,5 +293,5 @@ reports/e2e/latest/report.md
 
 1. API 字段、状态或验证变化时，同步 case 与本文件。
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
-3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`，首发由 Chat-scoped Thread POST 设置 Environment，再发送只含 Agent/YOLO 的 message。
+3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；Thread 创建携带完整 `branchSettings`，后续变更通过命令 batch 表达。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。

@@ -1,36 +1,32 @@
 # Harness Runtime 架构
 
-本文是当前 Harness 执行架构事实源，只描述现行模块、durable 事实、写者边界与 activation 协议。
+本文是当前 Harness 执行架构事实源，只描述现行模块、durable 事实、写者边界、Agent Loop 与并发协议。
 
 ## 1. Runtime 目标与边界
 
-- PostgreSQL 保存唯一 durable truth，`harness_execution_activation` 保存唯一 durable activation queue。
-- Thread 的 Entry/head 推进串行；Model、Tool、Interaction 通过各自 durable facts 继续执行。
-- Thread activation 只做短时状态收敛，不在 activation 内等待外部 I/O。
-- PostgreSQL listener、dispatcher wake、Environment READY 和 nearest-due timer 驱动 activation。
-- Runtime domain 不依赖 Spring、数据库、Redis、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
+- PostgreSQL 保存唯一 durable truth；`harness_work` 保存唯一调度 mailbox。
+- Thread 的 Entry/head 推进串行；Model、Tool 通过各自 Invocation + Work 继续执行。
+- Processor 每次处理都是短事务，不在事务内等待外部 I/O（Provider/Tool 执行在事务外）。
+- `harness-runtime` 是纯 Java 模块：不依赖 Spring、数据库、Redis、HTTP、WebSocket、Provider SDK 或业务 Tool 实现。
+- `harness-runtime-spring` 只做持久化与调度适配：`HarnessStore`（PostgreSQL）、Work dispatcher（claim/NOTIFY/poll）、Redis overlay、本地 Resource store。
+- `core` 只提供 Catalog/TurnResolver/ModelGateway/ToolGateway/Environment gateway 适配，不写 `harness_*` 表。
 
 ## 2. 模块
 
 ```text
 harness/
-├── tool/       # Tool API、descriptor、RemoteTool、Daemon 协议
-├── runtime/    # Session/Entry/Thread/Invocation/Interaction/Reconciler/Model 契约
-└── daemon/     # 独立 Environment 进程，只依赖 tool
+├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v2 wire
+├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
+├── runtime-spring/      # Store/Work/Redis/Resource 适配（PostgreSQL、dispatcher）
+└── daemon/              # 独立 Environment 进程，只依赖 tool
 ```
-
-| 模块 | 当前职责 |
-| --- | --- |
-| `harness-tool` | `ToolDescriptor`、Tool API、schema、RemoteTool、Daemon wire |
-| `harness-runtime` | Session、Entry、HarnessThread、ThreadInput、Planner、Reconciler、Model/Tool Worker、Interaction |
-| `harness-daemon` | Environment 连接、本地 Tool 执行与 invocation journal |
-| `core` | Spring composition、PostgreSQL adapter、dispatcher、Catalog/Environment resolver、Provider adapter |
-| `web` | HTTP/SSE/WebSocket 与 DTO 适配 |
 
 依赖方向：
 
 ```text
-web -> core application API / share DTO
+web composition root -> core application API / share DTO
+web composition root -> harness-runtime-spring -> harness-runtime -> harness-tool
+web composition root -> harness-runtime
 core -> harness-runtime -> harness-tool
 core -> harness-tool
 harness-daemon -> harness-tool
@@ -40,174 +36,206 @@ harness-daemon -> harness-tool
 
 ### Session 与 Entry
 
-Session 只组织一棵 append-only Entry Tree。Entry 类型固定为：
+Session 只组织一棵 append-only Entry Tree。Entry 类型固定为七种：
 
 ```text
 ROOT
+TURN_START
 MESSAGE
 CUSTOM_MESSAGE
 ASSISTANT_ERROR
 ASSISTANT_ABORTED
+TURN_END
 ```
 
-`ROOT` 是每个 Session 的唯一无 parent 根。Chat-scoped Thread 创建事务原子生成 Session、ROOT 与 head 指向 ROOT 的 Thread。
+- `ROOT` 是每个 Session 的唯一无 parent 根，payload 携带初始完整 `BranchSettings`。
+- `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION`）。
+- `MESSAGE` 是对话消息；`USER` / `ASSISTANT` / `TOOL` 语义由 payload 子类型决定（Tool 结果消息带 ToolResult 元数据）。
+- `CUSTOM_MESSAGE` 是业务扩展注入的对话消息。
+- `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：stable `code` + 非空 `message`（≤2048 字符），不投影到 Provider Context。
+- `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
+- `TURN_END` 关闭一次 turn，payload 携带 `TurnEndOutcome`（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）与 `TurnEndReason`（`USER_STOP` / `HISTORY_CUT` / `CANCELLED` / `TURN_FAILED`），以及 continuation obligation。
 
-USER/CUSTOM message 的 Entry payload 还保存 compact `TurnSettings`：
+`BranchSettings` 是完整不可变设置快照：
 
 ```java
-public record TurnSettings(
+public record BranchSettings(
+    EnvironmentId environmentId,   // canonical UUID route，null 表示未选择
     String agentName,
-    boolean yoloEnabled) {}
+    ModelSelection model,          // providerName/modelName/variant
+    String thinkingLevel,
+    List<String> activeTools) {}
 ```
 
-该值只携带 Agent 名称与 YOLO 开关，不包含 Agent、Model、Provider、Tool、Skill 或 Environment
-定义。消息 DTO 不携带 `environmentName`。
+YOLO 不在分支历史中：它是 Thread 运行时策略。
 
 ### Thread
 
-`HarnessThread` 保存：
+`ThreadState` 的 durable 字段只有：
 
 ```text
 id
-headEntryId      # 始终非空
-environmentName  # nullable，Thread 当前选择的 Environment
-inputSequence
-runnable
-executionEpoch
-revision
-processor lease
+headEntryId            # 始终非空
+yoloEnabled            # Thread 当前运行时策略（每次 ModelInvocationRequest 再冻结一次）
+nextCommandSequence    # 从 1 开始；每次命令 batch 预留后 +N
+revision               # 非负；每次可见状态变化恰好 +1
 createdAt / updatedAt
 ```
 
-Thread 行只保存当前 nullable `environmentName` 与运行控制事实，不复制 active Agent、Model、Variant、
-Tools 或 Skills 配置。当前 Session 从 head Entry 派生，运行状态由查询投影：
+Session、Environment、status 与 branch settings 都由 head Entry 分支派生；Thread 行**不**保存 execution epoch、processor lease 或 runnable 标志。`validateTransition` 保证 identity 不变、`nextCommandSequence`/`revision`/`updatedAt` 不回退、可见变化 revision 恰好 +1；exact replay 恒被接受。
+
+### ThreadCommand
+
+有序 mailbox，只接受八类命令：
 
 ```text
-有效 processor lease                         -> RUNNING
-open Interaction / 非终态 Invocation / queued Input -> WAITING
-runnable=true                                -> RUNNABLE
-无上述工作                                    -> IDLE
+USER_MESSAGE
+CUSTOM_MESSAGE
+SET_ENVIRONMENT
+SET_AGENT
+SET_MODEL
+SET_THINKING_LEVEL
+SET_ACTIVE_TOOLS
+SET_YOLO
 ```
 
-head 重定位是非空 Entry 的 CAS 更新，支持同 Session 或跨 Session 的历史路径切换。
+每行保存 `(thread_id, sequence)`（唯一）、`client_command_id`（thread 内唯一幂等键）、`consumed_turn_start_entry_id`（被哪个 TURN_START 消费）与 `cancelled_at`。`USER_MESSAGE` 与 `CUSTOM_MESSAGE` 之外都是 settings diff 命令，被 TURN_START/CONTINUATION 消费但不产生 Message Entry。
 
-Chat-scoped Thread 创建时可在同一事务中原子指定 `environmentName`。静止 Thread 可通过
-`PUT /api/ai/runtime/threads/{threadId}/environment` 设置或清除它；请求携带
-`expectedExecutionEpoch`，成功同时递增 `executionEpoch` 与 `revision`，运行中或 epoch 陈旧返回
-`409`。Environment 名称在设置时只做 canonical 校验，不要求当时已经 READY。
+### Invocation
 
-### ThreadInput
+| 事实 | durable 字段（要点） |
+| --- | --- |
+| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
+| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding）、status、attempt、`approval` JSON、`result`/`error`/`result_entry_id`、时间 |
 
-mailbox 只接受 `USER_MESSAGE` 与 `CUSTOM_MESSAGE`。输入通过幂等键去重，按 sequence 排序，状态为 `QUEUED`、`APPLIED` 或 `CANCELLED`。
-
-## 4. Reconciler
-
-`ThreadReconciler` 持有短时 processor lease，是执行阶段 Entry/head 的唯一写者。一个 activation 的优先级为：
-
-1. 应用 terminal Model Invocation；
-2. 应用同一 Assistant 的 terminal Tool sibling；
-3. 有 blocker 时挂起并等待 continuation；
-4. 对当前 response debt 进行 planning；
-5. 没有主要工作时按 sequence harvest snapshot 中全部 queued Input；
-6. 从最终 head 最多创建一次 Model Invocation；
-7. 没有工作时在 Thread 锁内 recheck 并 quiesce。
-
-TURN_INPUT_BATCH 的边界是 activation 开始时读取的全部 queued Input。batch 之后到达的 Input 留给下一轮；已有 response debt 总是先于更晚输入完成。
-
-## 5. Per-turn resolution 与 planning
-
-`ModelInvocationPlanner` 从 root-to-head path 找到 response debt，并定位最近的 USER/CUSTOM TurnSettings。每次 plan 都调用 `DatabaseTurnExecutionResolver`：
-
-1. 按 `agentName` 读取最新 Agent；
-2. 从 Agent 读取 `providerName`、`modelName` 与 variant；
-3. 按名称读取最新 Provider 和 `(providerName, modelName)` Model，并读取 Provider 当前 version；
-4. 解析 Model config 与 effective Variant；
-5. 读取最新 ToolCatalog 与 Thread 当前 `environmentName`；
-6. Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`；Platform Tool 总可候选，只有 READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；
-7. 读取 ProviderFactory 的 cache capability 与 pricing；
-8. 返回本轮的 system prompt、带冻结 `providerVersion` 的 ModelDescriptor、Variant、bindings 与 YOLO。
-
-Thread Environment 为 null、stale 或 offline 时只贡献零 Environment Tool/Skill，不产生 Environment
-或 Skill 缺失错误。缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 typed
-`PlanningFailure`；Reconciler 追加 `ASSISTANT_ERROR` barrier，不会创建虚假的 ProviderRequest 或
-ModelInvocation。有 Skill binding 时隐式加入内部 Platform Tool `load_skill`。
-
-## 6. ModelInvocation
-
-规划器先投影语义消息，构造 Provider tools，应用 Prompt Cache finalizer，再创建：
-
-```java
-public record ModelInvocationRequest(
-    ProviderRequest providerRequest,
-    List<ToolBinding> toolBindings,
-    List<SkillBinding> skillBindings,
-    boolean yoloEnabled) {}
-```
-
-`providerRequest` 是 exact Provider transport payload。ModelDescriptor 的 `providerName/providerVersion` 是 Provider revision identity。Provider tools 与 `toolBindings` 按顺序、名称、描述和 schema 一一对应；每个 ToolBinding 同时冻结 descriptor、type 与 `environmentName`；SkillBinding 和 YOLO 同时冻结。写入 `harness_model_invocation.request` 后，ModelWorker 只回放这份 request，retry 也只解析同一 Provider revision。
-
-Model Invocation 状态为 `QUEUED`、`RUNNING`、`RETRY_WAIT`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`UNKNOWN`。retry 仍属于同一个 Invocation，只增加 attempt 并重新调度相同 request。Provider 已开始但 ownership 不确定时写 `UNKNOWN`。
-
-## 7. ToolInvocation
-
-Model terminal apply 时，Reconciler 按 Provider tool call 与冻结 ToolBinding materialize
-ToolInvocation。ToolInvocation 保存含 type 的 descriptor、arguments、`environmentName`、permission
-state 与 request 的 `yoloEnabled`。
+状态机（Model）：
 
 ```text
-ToolBinding.type == PLATFORM
-  -> ToolWorker -> local Platform Tool
-
-ToolBinding.type == ENVIRONMENT
-  -> ToolWorker -> RemoteTool -> transport -> Daemon -> Tool
+READY -> DISPATCHING -> RUNNING -> SUCCEEDED
+                             \-> FAILED
+                             \-> CANCELLED
+                             \-> UNKNOWN     （ownership 不确定时收敛，不重放副作用）
 ```
 
-Provider 返回不可见或未知 Tool 时，Model invocation 产生可恢复 `ASSISTANT_ERROR`，错误消息包含请求
-名称和本次可用 Tool 名称；Reconciler 不物化 ToolInvocation，也不会因该错误卡住。
-
-Tool permission 在任何外部 I/O 前完成：
+状态机（Tool）：
 
 ```text
-QUEUED + PENDING
-  -> ALLOW -> persist ALLOWED -> external I/O
-  -> ASK   -> WAITING_INTERACTION + OPEN Interaction
-  -> DENY  -> FAILED + DENIED
+WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING -> SUCCEEDED
+      \-> FAILED                                       \-> FAILED
+      \-> CANCELLED                                    \-> CANCELLED
+                                                       \-> UNKNOWN
 ```
 
-批准只恢复原 Invocation 的 `QUEUED + ALLOWED`，继续使用原 binding；不重新解析 Agent 或 Environment。
+terminal 事实约束：`result` 与 `error` 互斥；`result_entry_id` 在**各自表内**唯一（每张 Invocation 表各自的 partial unique index），terminal 且挂 result Entry 的 Invocation 不再被 apply。
 
-## 8. 写者边界
+### Work
 
-| 写者 | 可写事实 | 不写 |
-| --- | --- | --- |
-| `ThreadCommandCoordinator` / command transaction | Session、ROOT、带 Environment 的 Thread 创建；Environment/head CAS；Input；Stop | 执行中的 Entry/head 语义推进 |
-| `ThreadReconciler` | Input apply、Entry/head、Model/Tool materialization、Usage apply | Provider/Tool 外部 I/O |
-| `ModelWorker` | Model Invocation lease、delta、terminal | Entry/head |
-| `ToolWorker` | Tool Invocation lease、partial、terminal | Entry/head |
-| Interaction transaction | Interaction 与 owner activation/runnable | 越权 Entry |
+`harness_work` 是唯一调度 mailbox：
 
-Model terminal 与 Thread `runnable=true` 同事务；Reconciler 再在同一事务中写 Assistant Entry、Usage、ToolInvocation 与 head。
+```text
+(target_type, target_id)   # THREAD / MODEL / TOOL
+available_at               # 最早可 claim 时间
+wake_version               # 每次 wake +1，fence 丢失的 wake
+lease_token / lease_until  # claim 后独占；过期可被重新 claim
+```
 
-## 9. Activation
+它不是事件日志、不是 job queue、不保存任何业务状态。claim 在 `available_at <= now` 且 lease 过期时授予；wake 用 `least(available_at, excluded)` + `wake_version+1` 合并。
+
+## 4. ThreadContext 分类
+
+`ThreadContextClassifier` 基于当前 head 路径与本 Thread 当前 open Turn 的 Invocation 纯分类（unlocked 读），每个 kind 只携带锁定/应用所需的最小事实：
+
+```text
+IdleOrHistorical        # 无 open Turn 且无需 continuation，或 open Turn 对 Thread 无 live Model/Tool
+ContinuationDue         # head 为 continueModel=true 的 TURN_END，应立即启动 continuation
+ModelActive             # open Turn 的 Model 非 terminal 且 head == basis：Work-only 挂起
+ModelTerminalPending    # Model terminal 且 head == basis、结果未 apply：立即 apply
+ToolActive              # open Turn 的 Tool siblings 非全部 terminal：Work-only 挂起
+ToolTerminalPending     # siblings 全部 terminal 且全部未挂结果：按 ordinal 原子 apply
+```
+
+IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model 与 tools；Model 上下文只暴露 Model；Tool 上下文暴露 Model + 全部 Tool siblings。分类器对破坏的不变量以 `IllegalStateException` 拒绝，绝不降级为业务 kind。
+
+## 5. Agent Loop（ThreadProcessor）
+
+ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，每步短事务按分类执行固定优先级：
+
+```text
+1. MODEL_TERMINAL_PENDING  -> 原子 apply Model terminal：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId；
+                              无 ToolCall 时追加 TURN_END(COMPLETED, continueModel=false)；
+                              有 ToolCall 时按 response ordinal 创建全部 READY ToolInvocation（非终态，等 TOOL Work）
+                              FAILED/错误追加 ASSISTANT_ERROR + FAILED TURN_END
+2. TOOL_TERMINAL_PENDING   -> 按 ordinal 原子 apply 全部 terminal Tool siblings（Tool Result MESSAGE Entry），
+                              并固定追加 TURN_END(COMPLETED, continueModel=true)，随后 classifier 进入
+                              CONTINUATION_DUE 启动 continuation（不是普通结束）
+3. MODEL_ACTIVE / TOOL_ACTIVE -> 完成 claim 返回 SUSPENDED（等 Model/Tool Work）
+4. CONTINUATION_DUE        -> 启动 continuation：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/YOLO），
+                              保留 SET_ENVIRONMENT（留给后续 INPUT 完整收割进入 BranchSettings），不产生 Message Entry
+5. 有 queued USER/CUSTOM   -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）
+6. 否则                    -> 完成 claim 返回 QUIESCENT
+```
+
+Turn 启动采用 speculative plan 两段式：
+
+1. **短事务**：锁 Thread、读取 queued Command 快照与 cutoff、分配 candidate Entry ID、构造完整合法 candidate EntryPath（TURN_START + Message），**不写任何 durable 状态**；事务外调用 `TurnResolver`（期间 `WorkHeartbeat` 维持 lease）。
+2. **第二短事务**：以 source head / YOLO / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。
+
+任何 CAS / claim 损失一律完整 no-op 返回 `LOST_OWNERSHIP`；Resolver 异常/null/heartbeat 失败按单一固定失败延迟（`resolveFailureDelay`）reschedule，绝不静默丢弃 Work。历史/非 applicable open Turn 只做 unlocked 读，绝不先锁 Model/Tool 再落 INPUT normalization。
+
+## 6. ModelProcessor
+
+ModelProcessor 消费 MODEL Work：
+
+1. claim 校验（fake/expired lease token → `LOST_OWNERSHIP` no-op，绝不 cancel 合法 active execution）；
+2. 两阶段激活：`ModelGateway.start` 返回 `Started` 后由 Processor 在 durable `markRunning` 之后调用 `Handle.activate` 打开回调 gate；`start` 返回 `Busy` 稍后重试；`Rejected` 确定性终结；`Indeterminate` 收敛为 `UNKNOWN`；
+3. 回调（serialized FIFO 单 drainer）：`MODEL_DELTA` 节流写 `stream_checkpoint`（首个 safe delta 立即 flush；tool-call fragment 只推 sequence 不入 checkpoint），**commit 后才 best-effort 发布 Redis realtime delta**；terminal 一次生效，duplicate/stale 回调 no-op；
+4. terminal `resultJson`（ProviderResponse 全量 `{text, thinking, toolCalls, stopReason, usage, cost, requestId, serviceTier, rawUsageJson}`）写入 Invocation，并请求 THREAD Work 做 apply。
+
+## 7. ToolProcessor 与结果外部化边界
+
+ToolProcessor 消费 TOOL Work：
+
+1. claim 校验（lost/stale → 完整 no-op）；
+2. `ToolGateway.start` 两阶段激活与 Model 同构；`ToolGateway` 先做 preflight（未取消/未过期、冻结 `name@version` 命中固定目录、arguments 是 JSON object），admission 不确定收敛 `UNKNOWN`；
+3. **ToolProcessor 接收已外部化的 terminal ToolResult**，先做领域校验（toolCallId、禁止 inline Binary、canonical size 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），不做任何存储外部化；
+4. terminal 后请求 THREAD Work 做 sibling apply。本地执行取消（Stop 后）通过 process-local `modelExecutionCanceller` / `toolExecutionCanceller` best-effort 回调。
+
+**durable Resource 外部化发生在 CoreToolGateway 的 callback bridge**（`ToolResultExternalizer`，core 侧）：terminal success 回调在桥内 all-or-nothing 地做 managed externalization（先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 必须与计划精确相等），随后才把已外部化的 ToolResult 交给 ToolProcessor 落库；partial 拒绝 Binary/Resource 且零存储 I/O。
+
+## 8. Command 控制面（HarnessRuntime）
+
+`HarnessRuntime` 是同步 command/control/query 门面，每个方法恰好一个事务，锁序固定：
+
+```text
+Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
+```
+
+实现 `createThread`、`enqueueCommands`、`moveHead`、`stop`、`decideToolApproval` 与 `getThreadSnapshot`。
+
+- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在且 payload 相同、sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/不同 payload/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER/CUSTOM、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
+- `moveHead`：revision CAS；同 target no-op；**只允许同 Session**；无 queued command；无 live/terminal-pending context；不能指向 `continueModel=true` 的 TURN_END。
+- `stop`：先 `findReplay`（同 thread + stopRequestId 的 durable TURN_END，在 revision CAS **之前**）→ `REPLAYED`；否则 revision CAS。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 revision +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。所有 STOPPED 路径同时取消 queued 并 fence 后续 callback。
+- `decideToolApproval`：`decisionId` 幂等；已决定请求精确 replay（保留原 `decidedAt`，无 revision bump，不请求 Work）；未决定请求必须位于锁定的 TOOL_ACTIVE 上下文，`ALLOWED` → `READY` + TOOL Work，`DENIED` → `FAILED` + THREAD Work，revision 恰好 touch 一次。
+
+## 9. Dispatcher 与 Work 协议
 
 ```text
 durable mutation
-  -> execution activation
-  -> PostgreSQL NOTIFY
-  -> listener
-  -> dispatcher wake
-  -> lock due activation
-  -> dispatch target identity
-  -> Reconciler / ModelWorker / ToolWorker
+  -> work wake（available_at = least(...), wake_version+1）
+  -> PostgreSQL NOTIFY（harness_runtime_work channel，仅可用性提示）
+  -> listener -> dispatcher wake（合并，单 drain）
+  -> periodic poll（due scan）
+  -> claim next work（Work-only 短事务，round-robin THREAD/MODEL/TOOL）
+  -> bounded handoff -> ThreadProcessor / ModelProcessor / ToolProcessor
 ```
 
-Dispatcher 每次重新读取 durable facts 与当前 READY Environment snapshot。通知可重复、乱序或丢失；启动/重连 wake 与 nearest-due timer 提供最终收敛。
+通知可重复、乱序或丢失；`wake_version` fence 丢失的 wake，periodic poll 与启动/重连 wake 提供最终收敛。claim 成功后必须二选一：worker 已接受 handoff 或立即 reschedule，禁止 claim→reject 热循环。
 
-## 10. Stop、fencing 与 realtime
+## 10. Stop、approval 与 realtime
 
-Stop 通过 `expectedExecutionEpoch` 锁定当前 Thread，按 head response debt 写安全的 `ASSISTANT_ABORTED` 或 `ASSISTANT_ERROR(CANCELLED)`，取消可取消事实并递增 epoch。head 重定位使用同一 epoch CAS。旧 epoch 的 callback 因 token/epoch 不匹配而不能提交。
-
-客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供 text/thinking overlay；revision/resync 只触发 snapshot invalidate。
+- Stop 的 durable key 是 `(threadId, stopRequestId)`：重试同 ID 恒命中 replay，`expectedRevision` 只用于未 replay 的首发 CAS；`REPLAYED` 返回被重放的 `stoppedTurnEndEntryId` 且 `cancelledCommandCount=0`。
+- 前端对 ambiguous Stop 保留完整操作（stopRequestId + 原始 expectedRevision + basis head/revision）：basis 未变时精确重试，basis 被权威 snapshot 证明变化时自动 retire 并 mint 新 ID（同步 fence 见 [frontend-implementation-design.md](frontend-implementation-design.md)）。
+- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供 text/thinking/tool partial overlay；revision/resync 只触发 snapshot invalidate；terminal `resultJson`/`errorJson` 是 durable 边界，前端无条件压过更高 sequence 的 Redis overlay。
 
 相关文档：
 

@@ -18,7 +18,7 @@ flowchart TD
     B --> G[frontend-implementation-design.md]
     B --> H[harness-capability-wiring.md]
     B --> N[prompt-cache-usage-cost.md]
-    B --> O[prompt-to-artifact.md]
+    B --> O[prompt-to-resource.md]
     B --> P[s3-presign.md]
     B --> Q[comfyui-workflow-api.md]
     B --> R[environment-daemon-gateway.md]
@@ -32,10 +32,11 @@ flowchart TD
 | [technical-solution/README.md](technical-solution/README.md) | 技术方案入口 | 汇总已落地架构与实现边界 |
 | [technical-solution/domain-map.md](technical-solution/domain-map.md) | 领域词汇 | Harness/Studio 双域词汇与前后端映射 |
 | [product-design/frontend-design-system.md](product-design/frontend-design-system.md) | 前端设计规范 | 全局 token、AppShell、组件约定 |
-| [technical-solution/harness-runtime-architecture.md](technical-solution/harness-runtime-architecture.md) | Harness 架构事实源 | Session Tree、Thread、Invocation、统一 ToolCatalog、Interaction 与 durable actor 边界 |
-| [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | 类型、状态机、端口与事务契约 |
+| [technical-solution/harness-runtime-architecture.md](technical-solution/harness-runtime-architecture.md) | Harness 架构事实源 | Entry/Thread/Command/Invocation/Work、Agent Loop 与 processor |
+| [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | JSON/DTO、命令 batch、CAS、replay、snapshot 与 wire 契约 |
 | [technical-solution/architecture.md](technical-solution/architecture.md) | 架构总览 | 模块边界、双域不变量与 Studio 当前事实 |
-| [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness、Canvas 当前持久化表与索引；最终 schema 为 V1 |
+| [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness（精确 7 表）、Canvas 当前持久化表；最终 schema 为 V1 |
+| [technical-solution/prompt-to-resource.md](technical-solution/prompt-to-resource.md) | 数据流 | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 
 ## 维护规则
 

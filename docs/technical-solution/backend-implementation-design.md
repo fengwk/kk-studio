@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web` 与 Harness Runtime 的后端边界。Runtime 负责 framework-free 领域编排，Core 负责 Spring composition、持久化和外部 adapter，Web 负责 HTTP/SSE/WebSocket。
+本文描述当前 `share`、`core`、`web` 与 Harness Runtime 的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment、Goal 与 Chat 应用能力；`web` 是生产组合根并映射 HTTP/SSE/WebSocket。
 
 ## 1. 分层
 
@@ -8,37 +8,57 @@
 flowchart LR
     Client[Browser / Daemon]
     Web[web controllers]
-    Core[core application services]
+    Core[core application services / adapters]
+    RuntimeSpring[harness-runtime-spring]
     Runtime[harness-runtime]
     Store[(PostgreSQL / Redis / S3)]
 
-    Client --> Web --> Core --> Runtime
+    Client --> Web
+    Web --> Core
+    Web --> RuntimeSpring --> Runtime
+    Web --> Runtime
+    Core --> Runtime
     Core --> Store
 ```
 
 | 层 | 职责 |
 | --- | --- |
 | `share` | DTO、JSON 字段、分页与错误边界 |
-| `web` | 路由、参数校验、HTTP 状态、SSE emitter、WebSocket adapter |
+| `web` | 生产组合根、Runtime/dispatcher/listener 生命周期、路由、参数校验、HTTP 状态、SSE emitter、WebSocket v2 adapter |
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
-| `core.ai.chat` | Chat CRUD、`agentName`/`yoloEnabled` 可见发送设置、Thread Environment 初始绑定与 Chat↔Thread 关系 |
-| `core.ai.runtime` | PostgreSQL command/query、resolver、worker、dispatcher、Redis 与 Provider adapter |
-| `harness-runtime` | Thread、Entry、Input、Reconciler、Invocation 与 Interaction 契约 |
-| `harness-tool` | Tool API、descriptor、RemoteTool 与 Daemon wire |
+| `core.ai.chat` | Chat CRUD、`agentName`/`yoloEnabled` 可见发送设置与 Chat↔Thread 关系 |
+| `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
+| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、`LocalFileResourceStore` |
+| `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
+| `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v2 wire |
 
 ## 2. 身份与公开数据
 
-Runtime durable ID 在 HTTP 中编码为十进制字符串。Catalog 不使用 bigint resource ID：
+Runtime durable ID 在 HTTP 中编码为 strict decimal strings（id `[1-9][0-9]*`、revision `0|[1-9][0-9]*`）。Catalog 不使用 bigint resource ID：
 
 - Provider 和 Agent 的 identity 是永久保留的 immutable `name`，删除只写 `deleted_at`。
 - Model 的 identity 是永久保留的 `(providerName, name)`。
 - 所有名称必须非空、拒绝首尾 Unicode whitespace；Provider/Agent 名称还必须是单路径段，禁止包含 `/`。
 - API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分，因此 Model 名称可以包含 `/`。
-- Catalog version 是独立的并发 token，以十进制字符串传输。Provider 的每个成功版本另有 append-only revision，runtime 只按 `(providerName, providerVersion)` dispatch。
+- Catalog version 是独立的并发 token，以十进制字符串传输。
 
 Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `name` 两个字段。Provider、Model、Agent 的 PUT/DELETE 都用名称定位并携带 `expectedVersion`。
 
-## 3. HTTP API
+## 3. Composition root
+
+生产组合根位于 `web`；它把 Core ports 与 runtime-spring adapters 装配成完整 Runtime。Core 的 Spring beans 只提供应用能力与端口适配，不写 `harness_*` 表：
+
+| 配置 | 装配 |
+| --- | --- |
+| `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/listener/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
+| `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST/SSE 只经 `HarnessRuntime` 门面 |
+| `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
+| `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + `ToolResultExternalizer` durable 外部化） |
+| `RuntimeToolsConfiguration` | 装配 `load_skill` 与 Goal 工具（`create_goal`/`get_goal`/`update_goal`，`@ConditionalOnBean(GoalStore.class)`）；`ToolCatalog(descriptors, Set.of(load_skill))`——`load_skill` 是唯一 internal name |
+| `DatabaseGoalStore` | Core application-owned 的 `agent_thread_goal` 存储（`GoalStore` 实现；不是 Runtime 第 8 表，无 `harness_` 前缀） |
+| `HarnessRuntimeWebMapper` | strict decimal/JSON 校验：DTO → 领域命令 |
+
+## 4. HTTP API
 
 ### Catalog
 
@@ -50,7 +70,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | PUT/DELETE | `/api/ai/catalog/models?providerName=&modelName=` | Model 全量更新/按复合名称删除 |
 | GET/POST | `/api/ai/catalog/agents` | Agent 分页查询/创建 |
 | PUT/DELETE | `/api/ai/catalog/agents/{name}` | Agent 全量更新/按版本删除 |
-| GET | `/api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog；不返回内部 `load_skill` |
+| GET | `/api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog |
 
 ### Chat 与 Thread
 
@@ -59,85 +79,55 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | GET/POST | `/api/ai/chat` | Chat 列表/创建 |
 | GET/PUT/DELETE | `/api/ai/chat/{chatId}` | Chat 读取/部分设置更新/按版本删除 |
 | GET | `/api/ai/chat/{chatId}/threads?sort&cursor&limit` | Chat 关系的 opaque keyset 分页 |
-| POST | `/api/ai/chat/{chatId}/threads` | 可携带 nullable `environmentName`，原子创建 Session、ROOT、已绑定 Thread 并关联 Chat |
+| POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT（BranchSettings）、Thread 并关联 Chat；返回 snapshot |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
-| GET | `/api/ai/runtime/threads?sort&cursor&limit` | 全局 Thread 分页 |
-| GET | `/api/ai/runtime/threads/{threadId}` | Thread 运行事实投影 |
-| GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、Entries、Inputs、Invocation、Interaction 与 Usage |
-| PUT | `/api/ai/runtime/threads/{threadId}/environment` | 静止 Thread 以 `expectedExecutionEpoch` CAS 设置或清除当前 Environment |
-| PUT | `/api/ai/runtime/threads/{threadId}/head` | 静止 Thread 的非空 head 重定位 |
-| POST | `/api/ai/runtime/threads/{threadId}/messages` | USER message 入队，202 |
-| POST | `/api/ai/runtime/threads/{threadId}/messages/custom` | SYSTEM/USER custom message 入队，202 |
-| POST | `/api/ai/runtime/threads/{threadId}/stop` | epoch fence、取消可取消事实并生成 stop barrier |
-| GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision 与 Redis realtime SSE |
+| GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation |
+| POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（8 类命令），202 |
+| PUT | `/api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
+| POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
+| POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
+| GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + Redis realtime overlay |
 
-Thread 创建只由 Chat-scoped POST 暴露。创建事务生成 Session、ROOT 与 Thread，Thread 的 `headEntryId` 非空且直接指向 ROOT；请求可同时原子指定 nullable `environmentName`。
+**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 查询、无 `/messages` 或 `/messages/custom` 端点（消息由 `/commands` 的 `USER_MESSAGE`/`CUSTOM_MESSAGE` 命令表达）、无 `expectedExecutionEpoch` 字段。
 
-`PUT /api/ai/runtime/threads/{threadId}/environment` 的请求体为：
-
-```json
-{
-  "environmentName": null,
-  "expectedExecutionEpoch": 3
-}
-```
-
-命令只接受静止 Thread；epoch 匹配时写入新 Environment 或 `null`，并同时递增 `executionEpoch` 与 `revision`。Thread 运行中或 epoch 陈旧统一返回 `409`。
-
-### 查询与设置
+### Environment
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
-| GET | `/api/ai/runtime/sessions` | Session 列表 |
-| GET | `/api/ai/runtime/sessions/{sessionId}` | Session 详情 |
-| GET | `/api/ai/runtime/sessions/{sessionId}/entries` | Entry Tree |
-| GET | `/api/ai/runtime/tool-invocations/{id}` | Tool invocation 详情 |
-| GET | `/api/ai/runtime/interactions/{id}` | Interaction 详情 |
-| GET | `/api/ai/runtime/interactions/open` | OPEN Interaction 列表 |
-| POST | `/api/ai/runtime/interactions/{id}/response` | 提交 Interaction response |
-| GET | `/api/ai/runtime/artifacts/{id}` | Artifact bytes |
-| GET | `/api/ai/runtime/usage/sessions/{sessionId}` | Session Usage 聚合 |
-| GET | `/api/ai/runtime/usage/models?providerName=&modelName=` | 按 Model 复合名称聚合 Usage |
-| GET/PUT | `/api/ai/runtime/settings/retry-policy` | 全局 retry 策略 |
-| GET/PUT | `/api/ai/runtime/settings/realtime-stream-policy` | Redis Stream 容量策略 |
-| GET | `/api/ai/environment` | READY Environment 内存投影 |
-| WebSocket | `/api/ai/environment/daemon/v1` | Daemon v1 连接 |
+| GET | `/api/ai/environment` | 当前 live Environment 内存投影（id/name/status/tools/skills/lastSeen，status 可为 CONNECTING/READY） |
+| WebSocket | `/api/ai/environment/daemon/v2` | Daemon v2 连接（HELLO/WELCOME/READY/INVOKE/回调/心跳） |
 
-## 4. 请求与错误
+## 5. 请求与错误
 
-Chat 的唯一可见发送设置是 `agentName` 与 `yoloEnabled`。前端提交任一设置时会暂时阻止该 Chat 的全部 pane 发送，只有服务端确认并刷新 Chat 后才允许下一条消息。每个 message/custom message 请求包含 `content`、`agentName`、`yoloEnabled`、`clientMessageId` 与 `expectedExecutionEpoch`，不携带 `environmentName`；Reconcile 时从消息 payload 的 `TurnSettings` 读取名称/开关，并从 Thread 读取当前 Environment。
-
-`PUT /head` 请求包含非空 `headEntryId` 与 `expectedExecutionEpoch`。head 重定位要求当前 Thread 无 processor lease、无 runnable work、无 queued Input、无当前 epoch 的非终态 Invocation/OPEN Interaction；成功后递增 epoch 并清理 lease。
+`POST /commands` 请求包含 `expectedHeadEntryId`、`expectedNextCommandSequence` 与命令数组（每项 `clientCommandId`）。`PUT /head` 包含非空 `targetEntryId` 与 `expectedRevision`。`POST /stop` 包含 `stopRequestId` 与 `expectedRevision`。
 
 统一行为：
 
 | 情况 | HTTP |
 | --- | --- |
-| DTO、名称格式、Model config、Model ref 或请求体中的 Catalog 引用非法 | `400` |
-| 作为请求目标的 Thread、Session、Entry 或 Catalog 名称不存在 | `404` |
-| Chat version 或 execution epoch 过期，或 Thread 尚未静止；Thread Environment 更新时运行中或 epoch 陈旧 | `409` |
-| message/custom message 被接受进入 mailbox | `202` |
-| Chat-scoped Thread 创建成功 | `201` |
+| DTO、名称格式、Model config、Model ref、decimal string 或请求体中的 Catalog 引用非法 | 400 |
+| 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/commands/head/stop 路径） | 404 |
+| 命令 cursor / revision CAS 过期、Thread 非 quiescent、terminal apply pending、跨 Session move、ordered replay 冲突 | 409 |
+| approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`）、已决定但请求不匹配（`APPROVAL_DECISION_MISMATCH`） | 409（approval 路径的 Thread/target 缺失不是 404） |
+| 命令 batch 被接受进入 mailbox | 202 |
+| Chat-scoped Thread 创建成功 | 201 |
 
 HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字段不随语言变化。
 
-## 5. 应用服务与写者
+## 6. 应用服务与写者
 
 | 组件 | 职责 |
 | --- | --- |
-| `ChatThreadServiceImpl` | 在一个事务中调用 Thread command 创建 Session/ROOT/Thread，写入 Chat 关系并返回查询投影 |
-| `ThreadCommandCoordinator` | 创建带初始 Environment 的 Thread、Environment/head CAS 更新、消息 payload 构造、幂等短路与 stop |
-| `PostgresqlThreadCommandTransactions` | Session/ROOT/Thread 原子写入、Environment/head CAS、Input enqueue、stop |
-| `DatabaseTurnExecutionResolver` | 以 TurnSettings 名称和 Thread 当前 Environment 在同一 PostgreSQL repeatable-read snapshot 中读取最新 Agent、Model、Provider、ToolCatalog 与 Variant，并把 active Provider version 冻结进 ModelDescriptor；READY Environment 才贡献 Environment Tool/Skill；Thread 行并发更新导致的 `40001` 在新事务中有界重试 |
-| `DatabaseProviderResolutionService` | 只按冻结的 `(providerName, providerVersion)` 读取 `agent_provider_revision`；不读取当前 Provider 行，因此更新/软删除不影响已有 invocation 的首次 dispatch 与 retry |
-| `ThreadReconciler` | TURN_INPUT_BATCH、planning、Model/Tool terminal apply、Entry/head 推进 |
-| `ModelWorker` | 回放冻结 ProviderRequest，写 ModelInvocation terminal 与 realtime |
-| `ToolWorker` | 按冻结 descriptor/type/environmentName ToolBinding 执行本地 Platform Tool 或指定 Environment 的 RemoteTool |
-| `PostgresqlExecutionActivationDispatcher` | 根据 durable ExecutionActivation 唤醒 Thread、Model、Tool worker |
+| `ChatThreadServiceImpl` | 调用 `HarnessRuntime.createThread`（Session/ROOT/Thread 原子）并写入 Chat 关系 |
+| `StudioHarnessThreadController` | 仅映射 `HarnessRuntime` 门面 + SSE tail + typed 异常翻译 |
+| `HarnessRuntime` | `createThread`/`enqueueCommands`/`moveHead`/`stop`/`decideToolApproval`/`getThreadSnapshot` 单事务控制面 |
+| `ThreadProcessor` | Agent Loop：terminal apply、continuation、INPUT turn、QUIESCENT |
+| `ModelProcessor` | 两阶段激活、checkpoint/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
+| `ToolProcessor` | 两阶段激活、preflight、接收已外部化 terminal ToolResult、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
+| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；fail closed：非 null `environmentId` 必须命中且 READY（无论 activeTools），null 只允许 platform-only 无 skills；skills 需显式 `load_skill`；确定性拒绝共用 `PLANNING_FAILED` |
+| `HarnessWorkDispatcher` | Work-only claim、round-robin、bounded handoff、NOTIFY/poll 合并 |
 
-Resolver 对缺失 Agent、Provider、Model、Variant 或未知可选择 Tool 返回 `PlanningFailure`；Platform Tool 总可候选，READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集，null、stale 或 offline Environment 只产生零 Environment Tool/Skill，不返回 Environment/Skill 缺失错误。Reconciler 追加 `ASSISTANT_ERROR`，不创建伪 ModelInvocation，也不切换到隐式资源。Provider 返回本次 invocation 不可见的 Tool 时，产生包含请求名称和本次可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不创建 ToolInvocation，Reconciler 可继续处理后续输入。
-
-## 6. Snapshot-first SSE
+## 7. Snapshot-first SSE
 
 客户端先读取：
 
@@ -151,11 +141,13 @@ GET /api/ai/runtime/threads/{threadId}/snapshot
 GET /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
 ```
 
-revision 帧使用 durable SSE id；Redis `realtime` delta 没有 SSE id，只作为临时 text/thinking overlay。重连通过 revision 重新读取 snapshot，Redis Stream 不承担恢复职责。
+revision 帧使用 durable SSE id（`Last-Event-ID` 覆盖 `afterRevision`）；Redis `realtime` delta 没有 SSE id，只作为临时 overlay。重连通过 revision 重新读取 snapshot，Redis Stream 不承担恢复职责。
 
-## 7. 代码入口
+## 8. 代码入口
 
 - [StudioHarnessThreadController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioHarnessThreadController.java)
 - [StudioChatController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioChatController.java)
-- [ChatThreadServiceImpl](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/chat/service/impl/ChatThreadServiceImpl.java)
-- [DatabaseTurnExecutionResolver](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnExecutionResolver.java)
+- [StudioToolEnvironmentController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioToolEnvironmentController.java)
+- [HarnessRuntime](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)
+- [HarnessRuntimeWebMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeWebMapper.java)
+- [DatabaseTurnResolver](../../core/src/main/java/fun/fengwk/kkstudio/core/ai/runtime/thread/command/DatabaseTurnResolver.java)
