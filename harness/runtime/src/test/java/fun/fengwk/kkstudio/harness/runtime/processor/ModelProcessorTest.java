@@ -513,6 +513,36 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
+  /** 成功终态在 THREAD Work 已被消费后仍按升序重建 THREAD Work，不能卡在 RUNNING。 */
+  @Test
+  void successTerminalRecreatesConsumedThreadWork() {
+    Fixture fixture = fixture();
+    FakeHandle handle = new FakeHandle();
+    fixture.gateway.queue(new ModelGateway.Started(handle));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    fixture.store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          assertTrue(
+              tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, thread.id())),
+              "the thread work must be consumable before model terminal persistence");
+          return null;
+        });
+
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onSucceeded(response("answer", ProviderStopReason.COMPLETED));
+
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+  }
+
   /**
    * TRANSIENT + 策略允许：RUNNING -&gt; READY（retryReady）+ revision+1 + 按策略延迟 reschedule，不请求 THREAD
    * wake。
@@ -673,6 +703,10 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertEquals(1, model.attempt());
     assertNull(model.streamCheckpoint());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
     assertTrue(fixture.sink.events.isEmpty());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
@@ -721,6 +755,10 @@ class ModelProcessorTest {
 
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
