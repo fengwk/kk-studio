@@ -1,257 +1,234 @@
 # Harness Runtime 契约
 
-本文定义当前 Runtime 实现必须遵守的类型、状态、规划、写者、事务与 fencing 契约。
+本文定义当前 Runtime 实现必须遵守的类型、JSON、状态、命令、CAS、replay、快照、异常与 wire 契约。
 
 ## 1. 模块与 ID
 
-Runtime 模块包含 `session`、`entry`、`thread`、`model`、`tool`、`reconcile`、`interaction`、`usage`、`retry` 与 `realtime`。Runtime 内部使用 `long` durable ID；HTTP 边界使用十进制字符串。Catalog 资源使用永久名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`；普通 lookup 只看 active 行。
+Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）与 `cache`。Runtime 内部使用 `long` durable ID；HTTP 边界使用 strict decimal strings：
+
+```text
+id / sequence          -> [1-9][0-9]*
+revision / afterRevision -> 0|[1-9][0-9]*
+```
+
+非法格式由 mapper 抛 `IllegalArgumentException`，Controller 统一映射为 400。Catalog 资源使用永久名称身份：Provider/Agent 是 `name`，Model 是 `(providerName, name)`。
 
 ## 2. Session、Entry、Thread
 
 ```java
-public record Session(long id, String title, Instant createdAt) {}
-
-public record HarnessThread(
+public record ThreadState(
     long id,
-    long headEntryId,
-    String environmentName,
-    long inputSequence,
-    boolean runnable,
-    long executionEpoch,
-    long revision,
-    Lease processorLease,
+    long headEntryId,        // 必须为正
+    boolean yoloEnabled,
+    long nextCommandSequence, // 必须 >= 1（创建即为 1）
+    long revision,           // 必须 >= 0
     Instant createdAt,
     Instant updatedAt) {}
 ```
 
-`headEntryId` 必须为正数；`environmentName` 可为 null，否则必须是 canonical 非空名称。Session 不保存 Thread；Thread 的当前 Session 通过 head Entry 查询派生。已提交 Entry append-only。创建 Thread 时可原子指定 Environment，静止 Thread 可通过 fenced Environment command 设置或清除它。
+- `headEntryId` 必须为正；Thread 的当前 Session、Environment、status 与 branch settings 由 head Entry 分支派生。
+- 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
+- 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
 
-Entry 类型固定为：
+Entry 类型固定为七种：
 
 ```java
-ROOT, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED
+ROOT, TURN_START, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
-Input 类型固定为：
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentId` 是 canonical 非 nil UUID 或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。
+
+## 3. 命令 batch
+
+八类命令：
 
 ```java
-USER_MESSAGE, CUSTOM_MESSAGE
+USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
+SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 ```
 
-USER `MESSAGE` 与 `CUSTOM_MESSAGE` payload 必须携带：
+请求 wire（`HarnessThreadCommandBatchDTO`）：
 
-```java
-public record TurnSettings(
-    String agentName,
-    boolean yoloEnabled) {}
-```
-
-`agentName` 必须是 canonical 非空名称。该值只保存 Agent 名称引用和 YOLO 开关；消息 DTO 不携带
-`environmentName`。Planning 额外读取 Thread 当前 Environment，Environment 不可用时只贡献零
-Environment Tool/Skill。
-
-## 3. Invocation 状态
-
-```java
-public enum InvocationStatus {
-  QUEUED,
-  RUNNING,
-  RETRY_WAIT,
-  SUCCEEDED,
-  FAILED,
-  CANCELLED,
-  UNKNOWN
+```json
+{
+  "expectedHeadEntryId": "1",
+  "expectedNextCommandSequence": "3",
+  "commands": [
+    { "type": "SET_AGENT", "clientCommandId": "cid-1", "agentName": "coder" },
+    { "type": "USER_MESSAGE", "clientCommandId": "cid-2", "content": "hello" }
+  ]
 }
 ```
 
-- `SUCCEEDED`、`FAILED`、`CANCELLED`、`UNKNOWN` 是 terminal。
-- `RUNNING` 必须拥有 worker lease、startedAt、deadlineAt 与 activity。
-- `RETRY_WAIT` 必须拥有 `nextAttemptAt`，但不拥有 worker lease。
-- Provider I/O 已开始且 ownership 不确定时使用 `UNKNOWN`，不自动重放副作用。
+契约：
 
-## 4. Per-turn resolver
+- `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
+- `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
+- `USER_MESSAGE` 携带 `content`，**不携带 role**（role 恒为 USER，strict mapper 拒绝多余字段）；`CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
+- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_THINKING_LEVEL` 携带 `thinkingLevel`；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentId`（canonical lowercase nonnil UUID 或 null）。
+- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `role`/`content` 等不相关字段。
 
-```java
-@FunctionalInterface
-public interface TurnExecutionResolver {
-  Resolution resolve(TurnSettings settings, String environmentName);
+### Ordered command-set replay
+
+幂等查找发生在任何 head/sequence/live 检查之前；**没有 batch 级 identity**，replay 是 ordered command-set replay：
+
+- **全部 `clientCommandId` 已存在**：仅当每个存储 payload 与请求 payload 相同，且存储 sequence 在请求顺序上连续（`seq[i] == seq[0] + i`）时接受——**忽略 `expectedHeadEntryId`/`expectedNextCommandSequence` 与 QUEUED/APPLIED/CANCELLED lifecycle**，返回原行不变。
+- 仅部分 id 存在 → `PARTIAL_COMMAND_REPLAY`（缺失命令永不补齐）；已存在 id 但 payload 不同 → `COMMAND_ID_REUSED`；id 全部存在、payload 相同但 sequence 非连续 → `COMMAND_REPLAY_ORDER_MISMATCH`。
+
+### Fresh batch admission
+
+全新 batch 才做双 cursor CAS（任一不匹配 → `STALE_COMMAND_CURSOR` 409），成功后一次性预留全部 sequence（`nextCommandSequence += commands.length`，revision +1）、全部命令写入 QUEUED、请求 THREAD Work，整体原子提交。
+
+包含 `SET_ENVIRONMENT` 的全新 batch 额外要求**真正静止的前置状态**：无 queued USER/CUSTOM 消息、共享 classifier 结果为 `IDLE_OR_HISTORICAL`、且 **THREAD Work 行完全不存在**（行存在即 fence 投机 Resolver/runnable mailbox，无论是否已 lease）。Exact replay 绕过该 admission 检查。
+
+## 4. Snapshot
+
+`GET /{threadId}/snapshot` 返回单事务一致投影：
+
+```json
+{
+  "revision": "7",
+  "thread": { "threadId": "1", "sessionId": "2", "headEntryId": "5",
+              "yoloEnabled": false, "nextCommandSequence": "4", "revision": "7",
+              "status": "TOOL_RUNNING", "processing": true, "branchSettings": {...},
+              "createTime": "...", "updateTime": "..." },
+  "entries": [ ... root-to-head path ... ],
+  "queuedCommands": [ ... 未消费未取消 ... ],
+  "modelInvocation": null | { ... },
+  "toolInvocations": [ ... ]
 }
 ```
 
-`Resolution` 只有 `Resolved(ResolvedTurnExecution)` 与 `Failed(PlanningFailure)`。`DatabaseTurnExecutionResolver` 每次调用都读取最新：
+- `entries` 是当前 head 的 root-to-head path（recursive CTE 顺序）。
+- `modelInvocation` 是当前 open Turn 的活跃 Model（**单数**；无则 null）；`toolInvocations` 是其 Tool siblings；IDLE/historical/continuation 快照不暴露 Invocation。
+- `status` 与 `processing` 是派生展示字段（`IDLE / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING`；仅 IDLE 时 `processing=false`），不是 durable 列。
+- `queuedCommands` 只包含 `consumed_turn_start_entry_id is null and cancelled_at is null` 的命令。
 
-```text
-TurnSettings.agentName
-  -> AgentDefinition
-  -> providerName/modelName
-  -> active AgentProvider
-  -> AgentModel
-  -> effective Variant
-  -> ToolCatalog
-  -> Thread environmentName
-  -> READY LiveEnvironment contributions
-  -> ToolBinding / SkillBinding
-```
+## 5. 异常映射
 
-Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`。Platform Tool 总可候选，
-READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集；
-null、stale 或 offline Environment 只产生零 Environment Tool/Skill，不产生 Environment/Skill 缺失错误。
-Planning 成功时 ModelDescriptor
-额外冻结当前 Provider 的非负 `providerVersion`。ModelWorker 随后只按 `(providerName, providerVersion)`
-读取 append-only Provider revision；Provider 更新或软删除不会改变已持久化 invocation 的首次
-dispatch/retry。缺失项对应 `PlanningFailureKind`：
+| 情形 | HTTP |
+| --- | --- |
+| DTO 字段非法、id/revision 非 strict decimal、未知命令 type、非 canonical 名称/UUID | 400 |
+| 作为请求目标的 Thread/Entry 不存在（snapshot、commands、head、stop 路径） | 404 |
+| 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、Thread 非 quiescent、terminal apply pending、跨 Session move、move 到 continueModel TURN_END、ordered replay 冲突 | 409 |
+| approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
+| approval 已决定且请求未精确 replay 存储决策（`APPROVAL_DECISION_MISMATCH`） | 409 |
+| 命令 batch 被接受进入 mailbox | 202 |
+| Thread 创建成功 | 201 |
 
-```text
-MISSING_TURN_SETTINGS
-AGENT_NOT_FOUND
-PROVIDER_NOT_FOUND
-MODEL_NOT_FOUND
-VARIANT_NOT_FOUND
-TOOL_NOT_FOUND
-INVALID_TURN_SETTINGS
-```
+typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_NOT_QUIESCENT`、`TERMINAL_APPLY_PENDING`、`MOVE_TARGET_CROSS_SESSION`、`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
 
-解析失败由 Reconciler 写成 `ASSISTANT_ERROR` barrier；不产生假的 ProviderRequest，也不产生 ModelInvocation。
-
-## 5. ModelInvocationPlanner
+## 6. MOVE_HEAD
 
 ```java
-PlanningResult plan(
-    long sessionId,
-    long sourceHeadEntryId,
-    String environmentName,
-    List<SessionEntry> rootToHead);
+public record MoveHeadCommand(long threadId, long targetEntryId, long expectedRevision) {}
 ```
 
-约束：
+- 同 target → no-op（返回当前 Thread，不 bump revision）。
+- revision CAS；target 必须存在；**target 必须与当前 head 同 Session**（`MOVE_TARGET_CROSS_SESSION`）。
+- 必须无 queued commands、无 live Model/Tool context、无 terminal apply pending（`THREAD_NOT_QUIESCENT` / `TERMINAL_APPLY_PENDING`）。
+- 不能指向 `continueModel=true` 的 TURN_END（`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`）。
+- 成功后 `advanceHead`（revision +1）并删除 THREAD Work。
 
-- path 必须从无 parent ROOT 开始，parent 连续，最后 Entry 等于 `sourceHeadEntryId`。
-- Planner 只读取传入 path 与 resolver，不直接访问 Store、Spring、Clock 或 Provider。
-- 先检测 response debt，再定位 debt 前缀中最近的 USER/CUSTOM TurnSettings。
-- 使用 resolver 的最新结果投影 system prompt、消息、Skill system section 和 Provider tool definitions。
-- Prompt Cache finalizer 在冻结前生成最终 cache control。
-- queued message 不会修改已经存在 response debt 的 request。
-
-`PlanningResult` 为 `NoDebt`、`Planned(ModelInvocationPlan)` 或 `Failed(PlanningFailure)`。
-
-## 6. ModelInvocationRequest
+## 7. Stop
 
 ```java
-public record ToolBinding(
-    ToolDescriptor descriptor,
-    ToolType type,
-    String environmentName) {}
+public record StopCommand(long threadId, String stopRequestId, long expectedRevision) {}
+```
 
+协议（在 Thread 行锁内）：
+
+```text
+lock Thread
+  -> load head path
+  -> findReplay(threadId, stopRequestId)   // 在 revision CAS 之前
+  -> 命中 -> REPLAYED（返回被重放的 stoppedTurnEndEntryId，cancelledCommandCount=0，零 mutation）
+  -> revision CAS（STALE_REVISION 409）
+  -> 无 live Turn（IDLE）：
+       有 queued Commands -> 取消它们（cancelled_at），revision +1（touchRevision），
+                            不写任何 stop marker，返回 IDLE + cancelledCommandCount
+       无 queued          -> 真正 no-op（revision 不变，返回原 Thread）
+  -> CONTINUATION_DUE：
+       追加 TURN_START(CONTINUATION) + ASSISTANT_ERROR(CANCELLED)
+       再追加 TURN_END(STOPPED, USER_STOP)
+  -> Model/Tool active：
+       有安全 text/thinking -> ASSISTANT_ABORTED
+       Model 无安全内容      -> CANCELLED barrier（ASSISTANT_ERROR）
+       Tool siblings         -> 按当前状态写 CANCELLED/UNKNOWN Tool Result
+       追加 TURN_END(STOPPED, USER_STOP)
+       取消全部 queued Commands（cancelled_at）
+       更新 Thread（advanceHead，revision +1）并清理/唤醒 Work
+```
+
+`StopResult.Status`：`STOPPED`（本次停止了一个 Turn）、`IDLE`（无 live Turn：可取消 queued 且 revision +1，不写 durable stop 标记；无 queued 时真正 no-op）、`REPLAYED`（精确重放先前 Stop，不取消命令）。客户端重试必须发送**完全相同**的 `stopRequestId` 与**原始** `expectedRevision`；服务端 replay 先于 CAS，因此原始 revision 重试恒安全。
+
+## 8. Tool approval
+
+输入 wire（`HarnessToolApprovalDTO`）：
+
+```json
+{
+  "decision": "ALLOW" | "DENY",
+  "decisionId": "stable-client-key",
+  "actor": "web",
+  "reason": null | "text"
+}
+```
+
+durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入值）。契约：
+
+- 未决定请求必须命中锁定的 TOOL_ACTIVE 上下文中的 `WAITING_APPROVAL` Invocation；`ALLOWED` → `READY`（请求 TOOL Work），`DENIED` → `FAILED`（请求 THREAD Work）；revision 恰好 touch 一次。
+- 已决定请求按 `(threadId, toolInvocationId, decisionId)` 精确 replay：返回当前锁定 Invocation（原 `decidedAt` 保留），无 revision bump、无 Work 请求；不一致 → `APPROVAL_DECISION_MISMATCH` 409。
+- 前端对同一 decision 复用同一 `decisionId`；切换 decision 时 mint 新 ID。
+
+## 9. Invocation 冻结请求
+
+`ModelInvocationRequest`：
+
+```java
 public record ModelInvocationRequest(
-    ProviderRequest providerRequest,
+    EnvironmentId environmentId,      // 本请求的单一 Environment route（可 null）
+    ProviderRequest providerRequest,  // exact Provider transport payload
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     boolean yoloEnabled) {}
 ```
 
-这是一次 Model Invocation 的唯一冻结请求：
+- `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill binding 名称不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
+- `ToolBinding(descriptor, type, environmentId)`：`PLATFORM` binding 的 environmentId 为 null，`ENVIRONMENT` binding 指向具体 route；descriptor 的 type 与 binding type 一致。
+- retry 重放同一份 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
+- JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
 
-- `providerRequest` 是完整、exact 的 Provider transport payload；
-- `providerRequest.tools` 与 `toolBindings` 数量、顺序、名称、description、input schema 必须完全一致；
-- 每个 `ToolBinding` 同时冻结 descriptor、product-level `type` 与 `environmentName`；`PLATFORM` binding 的目标为 null，`ENVIRONMENT` binding 指向具体 Environment；
-- `skillBindings` 是本次选中的 Skill binding；
-- `yoloEnabled` 与 request 同时冻结；
-- 有 Skill binding 时隐式加入内部 Platform Tool `load_skill`，它不属于 Agent 可选择目录；
-- JSON codec 只接受这四个顶层字段并严格校验嵌套结构。
-
-Model retry 从持久化 request 重放同一份 ProviderRequest、ToolBinding、SkillBinding 与 YOLO。ToolInvocation 执行同一 binding，不从最新 Agent 或 Environment 重新选择。
-
-Provider 返回的 ToolCall 必须命中本次冻结 `providerRequest.tools`。如果返回不可见或未知 Tool，
-Model invocation 终结为可恢复错误，错误消息包含请求的 Tool 名称和本次可用 Tool 名称；Reconciler
-追加 `ASSISTANT_ERROR` barrier，不物化 ToolInvocation，后续输入仍可继续处理。
-
-## 7. ToolInvocation 与 Interaction
-
-ToolInvocation 的 durable 字段包括 Thread、Assistant Entry、Model Invocation、ordinal、
-toolCallId、含 type 的 descriptor、arguments、`environmentName`、epoch、状态、attempt、lease、
-deadline、result/error、`appliedAt`、permission state 与 YOLO。
-
-`PLATFORM` binding 由本地 Platform Tool 执行；`ENVIRONMENT` binding 经 RemoteTool 发送到冻结的
-Environment。外部 I/O 前必须先持久化最终 descriptor/arguments 与 permission decision：
-
-```text
-PENDING -> ALLOWED -> external Tool I/O
-PENDING -> ASKED  -> OPEN Interaction
-PENDING -> DENIED -> FAILED
-```
-
-批准恢复同一 ToolInvocation 为 `QUEUED + ALLOWED`，拒绝为 `FAILED + DENIED`。每个 Tool 最多一个 OPEN Interaction。
-
-## 8. Command coordinator
+`ProviderResponse` 是 terminal `resultJson` 的 canonical shape：
 
 ```java
-HarnessThread createThread(String title, String environmentName);
-
-HarnessThread updateHead(
-    long threadId,
-    long expectedExecutionEpoch,
-    long headEntryId);
-
-HarnessThread updateEnvironment(
-    long threadId,
-    long expectedExecutionEpoch,
-    String environmentName);
-
-EnqueueResult submitUserMessage(
-    long threadId,
-    TurnSettings settings,
-    String content,
-    String idempotencyKey,
-    long expectedExecutionEpoch);
-
-EnqueueResult submitCustomMessage(
-    long threadId,
-    TurnSettings settings,
-    String role,
-    String content,
-    String idempotencyKey,
-    long expectedExecutionEpoch);
-
-StopResult stop(long threadId, long expectedExecutionEpoch);
+public record ProviderResponse(
+    String text, String thinking,
+    List<ProviderToolCall> toolCalls,
+    ProviderStopReason stopReason,
+    ModelUsage usage, ModelCost cost,
+    String requestId, String serviceTier, String rawUsageJson) {}
 ```
 
-`createThread` 的 PostgreSQL transaction 原子写入 Session、ROOT 和已绑定 Thread，可同时写入 nullable
-Environment。`updateHead` 只接受正 `headEntryId`，要求 Thread 静止并以 epoch CAS fencing。
-`updateEnvironment` 同样要求 Thread 静止与 epoch 匹配，可设置或清除 Environment；成功递增
-`executionEpoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。message/custom message 先按幂等键
-短路，再写 Input、sequence、runnable 和 execution activation。
+## 10. TurnResolver
 
-## 9. Reconciler transactions
+```java
+sealed interface TurnResolver.Result
+    permits Resolved, Rejected {}
 
-事务端口至少提供：
-
-- claim/renew/release Thread lease；
-- 读取当前 head path、queued Inputs、terminal Invocations 与 blockers；
-- 追加 Entry 并应用 planning failure；
-- harvest 一个 TURN_INPUT_BATCH；
-- 创建 ModelInvocation 并释放 Thread lease；
-- 应用 Model terminal、Tool sibling terminal、Usage 与 head；
-- 在锁内 recheck 后 quiesce。
-
-所有 mutation 都校验 Thread token、execution epoch 和当前 head。Model terminal、Thread runnable 与 execution activation 在同一事务提交。
-
-## 10. Stop 与 head fencing
-
-Stop 与 head update 都先锁 Thread 并检查 `expectedExecutionEpoch`：
-
-```text
-lock Thread
-  -> verify epoch and quiescent state
-  -> append stop barrier when required
-  -> cancel queued/cancellable facts
-  -> epoch++
-  -> clear lease and runnable/activation
+record Resolved(ModelInvocationRequest request) {}
+record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable barrier
 ```
 
-旧 epoch 的 Model/Tool terminal callback 必须返回 ownership lost，不能写入新 head。
+- 同步、无副作用、事务外：调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
+- 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
+- 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
+- **Environment route 规则**：非 null `environmentId` **无论 activeTools 内容**都必须 registry 精确命中且 READY（`environment not found` / `environment is not ready` 拒绝）；null `environmentId` 只允许 platform-only 且无 skills 的 turn——任何 ENVIRONMENT tool（`environment tool requires a selected environment: <name>`）或 Agent skill（`agent skills require a selected environment`）都是确定性拒绝，绝不静默省略。
+- Agent skills 只从 Agent config 读取，必须由选中 READY Environment 精确提供，且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
 
-## 11. Realtime 与 ports
+## 11. Realtime
 
-`RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。`ExecutionActivationStore` 维护 Thread/Model/Tool 的 ExecutionActivation，并以 PostgreSQL NOTIFY 唤醒 dispatcher。Runtime 不执行 SQL，也不直接调用 Provider、Redis、HTTP 或 WebSocket。
-
-客户端恢复顺序是 REST snapshot → durable revision SSE → Redis realtime overlay。revision 是唯一 durable cursor。
+- `RealtimeEventSink.append` 只写 bounded Redis projection；sink 失败不改变 durable terminal。
+- revision SSE 帧使用 durable revision 作为 `Last-Event-ID`/`afterRevision` cursor；Redis delta 事件没有 SSE id。
+- 客户端恢复顺序：REST snapshot → durable revision SSE → Redis realtime overlay；revision 是唯一 durable cursor。
+- 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。

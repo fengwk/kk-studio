@@ -6,32 +6,33 @@
 
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
-| Harness / AI | `harness-tool`、`harness-runtime`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Model/Tool Invocation、Interaction |
+| Harness / AI | `harness-tool`、`harness-runtime`、`harness-runtime-spring`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、Work |
 | Studio / Canvas | `studio`、`core.studio`、`features/canvas` | Canvas document、node、link、command dedup |
 
 ```text
 frontend
   -> web
     -> core
-      -> studio
-      -> harness-runtime -> harness-tool
-      -> harness-tool
+    -> harness-runtime-spring -> harness-runtime -> harness-tool
+    -> harness-runtime
+core -> harness-runtime -> harness-tool
+core -> harness-tool
   -> share
 harness-daemon -> harness-tool
 ```
 
-`studio` 不依赖 Spring、MyBatis、Harness 或 Web；`harness-*` 不依赖 `studio`。Agent 进入 Studio 通过 `system.agent.execute` FunctionRef。
+`harness-runtime` 不依赖 Spring、MyBatis、Harness Tool 实现或 Web；`harness-*` 不依赖 `studio`。
 
 ## 2. Catalog 词汇
 
 | 概念 | 含义 |
 | --- | --- |
-| Provider | 以 immutable `name` 标识的连接配置 |
+| Provider | 以 immutable `name` 标识的连接配置（revision append-only） |
 | Model | 以 `(providerName, name)` 标识的模型配置 |
 | Agent | 以 immutable `name` 标识的系统提示、Model/Variant 与 tools/skills 配置 |
 | Model ref | `providerName/modelName`；解析只切第一个 `/` |
 | Variant | Model config 中的 variant `id`；Agent 可指定覆盖值 |
-| ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；Agent 可选择 Tool 与内部 Platform Tool 分离，`load_skill` 属于后者 |
+| ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；selectable 含 Goal 工具（`create_goal`/`get_goal`/`update_goal`，GoalStore 条件装配）；内部 Platform Tool 与可选择目录分离，`load_skill` 是唯一 internal name |
 
 Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。
 
@@ -39,20 +40,21 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 
 | 概念 | 含义 |
 | --- | --- |
-| Chat | 保存唯一可见发送设置 `agentName`、`yoloEnabled` 的持久集合 |
+| Chat | 保存唯一可见发送设置 `agentName`、`yoloEnabled` 的持久对象 |
 | Session | append-only Entry Tree 的边界 |
-| Entry | 语义持久事实：`ROOT`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` |
-| HarnessThread | 持有 nullable `environmentName`、非空 head、mailbox、runnable、revision、epoch 与 lease 的 durable runtime process |
-| ThreadInput | 有序消息 mailbox，只允许 `USER_MESSAGE` 与 `CUSTOM_MESSAGE` |
-| TurnSettings | 每条响应生产消息携带的 `agentName` 与 `yoloEnabled` compact 引用 |
-| ModelInvocation | 一次冻结 `ModelInvocationRequest` 的 Provider 调用 |
-| ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实 |
-| Interaction | Tool permission 等待与解决事实 |
-| Environment | READY Daemon 的服务器内存资源，以名称唯一 |
-| Usage ledger | 按 Provider/Model 名称记录历史用量、价格和缓存事实的不可变账本 |
-| Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层 |
+| Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`TURN_END` |
+| BranchSettings | Entry 分支的完整不可变设置快照（environmentId/agentName/model/thinkingLevel/activeTools） |
+| HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
+| ThreadCommand | 有序 mailbox，八类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
+| ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）的 Provider 调用 |
+| ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result）；partial 只进入 Redis realtime projection |
+| Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
+| ThreadGoal | Core application-owned 的 per-Thread Goal（`agent_thread_goal` 表，无 `harness_` 前缀，**不是** Runtime 第 8 表）；经 selectable Platform tools `create_goal`/`get_goal`/`update_goal` 读写 |
+| Resource | Tool Result 中 Text/Json ≤8KB 保持 inline ToolContent；超过阈值或 Binary 转为 canonical 引用 `{uri, mediaType, name, size, sha256}`（外部 `file:` URI） |
+| Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentId`（lowercase UUID）唯一，状态为 CONNECTING/READY；name 只展示，只有 READY 可运行 |
+| Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的 tools/skills 决定本次运行能力；每次规划通过 `DatabaseTurnExecutionResolver` 读取最新 Agent、Provider、Model、ToolCatalog 与 Thread 当前 Environment。Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 返回 `TOOL_NOT_FOUND`；Platform Tool 总可候选，READY Environment 才贡献 Environment Tool/Skill，配置的 Environment Tool/Skill 与当前能力取交集。null、stale 或 offline Environment 只贡献零 Environment Tool/Skill。解析失败形成 typed `PlanningFailure`，最终写成 `ASSISTANT_ERROR`。
+Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route。fail closed：**非 null `environmentId` 无论 activeTools 都必须 registry 命中且 READY**；**null `environmentId` 只允许 platform-only 且无 skills 的 turn**——ENVIRONMENT tool 或 Agent skill 均确定性拒绝，绝不静默省略；skills 必须由选中 READY Environment 精确提供且 `activeTools` 显式包含 `load_skill`。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 
@@ -61,10 +63,14 @@ Agent 的 tools/skills 决定本次运行能力；每次规划通过 `DatabaseTu
 | Chat 卡片 | `ChatDTO`：标题、Agent/YOLO 可见设置、版本 |
 | Chat 工作区 | `localStorage` 中的八个 Pane 槽位 |
 | Pane | 本地 `threadId` 绑定；服务端通过 Chat↔Thread 历史关系聚合 |
-| Composer | 每次发送构造包含当前 `agentName`/`yoloEnabled` 的 USER message 请求；消息 DTO 不携带 Environment |
-| Thread transcript | `HarnessThreadSnapshotDTO` 的当前 `environmentName`、entries 与 queued inputs |
-| `/session`、`/tree` | 选择 Entry 后调用 `PUT /api/ai/runtime/threads/{threadId}/head` |
-| Footer | 依据当前 Chat 设置、Agent Catalog 和 Model ref 展示运行标签 |
+| Blank pane | 本地 `BranchDraft`（frozenDraft）物化自 Chat defaults + Catalog |
+| Bound pane | `branchState` 从 snapshot `branchSettings` 初始化；queued SET_* 投影 `effectiveBase` |
+| Composer | 每次发送构造 SET_* diff batch + `USER_MESSAGE`（不携带 role） |
+| Thread transcript | `HarnessThreadSnapshotDTO` 的 entries（root-to-head）、queuedCommands 与活跃 Invocation |
+| `/tree` | 选择历史 Entry 后调用 `PUT /api/ai/runtime/threads/{threadId}/head`（同 Session） |
+| Footer | 依据 pane 本地 draft 与 Catalog 展示 agent/model/environment 标签 |
+| Approval | `POST /tool-invocations/{id}/approval`，输入 `ALLOW`/`DENY` |
+| Stop | `POST /stop`，`stopRequestId` + `expectedRevision`，三态结果 |
 
 ## 5. Canvas 词汇
 
@@ -85,16 +91,20 @@ Agent 的 tools/skills 决定本次运行能力；每次规划通过 `DatabaseTu
 | `GET/POST /api/ai/catalog/models` | Model 分页查询与创建 |
 | `GET/POST /api/ai/catalog/agents` | Agent 分页查询与创建 |
 | `GET/POST /api/ai/chat` | Chat 列表与创建 |
-| `POST /api/ai/chat/{chatId}/threads` | 可携带初始 Environment，原子创建 Session、ROOT、Thread 并关联 Chat |
-| `GET /api/ai/runtime/threads` | 全局 Thread 分页查询 |
-| `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread runtime 投影 |
-| `PUT /api/ai/runtime/threads/{threadId}/environment` | 静止 Thread 以 epoch CAS 设置或清除当前 Environment |
-| `POST /api/ai/runtime/threads/{threadId}/messages` | USER message 入队 |
-| `POST /api/ai/runtime/threads/{threadId}/messages/custom` | SYSTEM/USER custom message 入队 |
-| `PUT /api/ai/runtime/threads/{threadId}/head` | 静止 Thread 的非空 head 重定位 |
-| `GET /api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog；不返回内部 `load_skill` |
-| `GET /api/ai/environment` | READY Environment 内存投影 |
+| `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 分页 |
+| `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
+| `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
+| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（八类），202 |
+| `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
+| `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
+| `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定 |
+| `GET /api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + realtime overlay |
+| `GET /api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog |
+| `GET /api/ai/environment` | 当前 live Environment 内存投影（含 CONNECTING/READY status） |
+| WebSocket `/api/ai/environment/daemon/v2` | Daemon v2 连接 |
+
+**不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `/commands` 命令表达）、无 `expectedExecutionEpoch`。
 
 ## 7. 一句话实现
 
-Harness 以 Session Entry Tree 记录语义事实，以带 nullable Environment 的非空 head Thread 记录执行控制面，以每条消息的 `TurnSettings(agentName, yoloEnabled)` 驱动逐轮 Catalog 解析，并以冻结的 Model/Tool/Usage 事实支持恢复；Studio 独立承载 Canvas。
+Harness 以 Session Entry Tree 记录语义事实（TURN_START/MESSAGE/TOOL/TURN_END），以 head 非空的 Thread 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮 Catalog/Environment 解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；Studio 独立承载 Canvas。

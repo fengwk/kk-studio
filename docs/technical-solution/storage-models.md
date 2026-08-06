@@ -1,6 +1,6 @@
 # 存储模型
 
-PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。权威 DDL 是 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)，由 Flyway 执行。Redis 只保存 realtime projection；S3 保存 ComfyUI 与浏览器直传对象。
+PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。权威 DDL 是 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（Flyway 执行；其中 Harness 部分与 `harness-runtime-spring` 的 `harness-runtime-schema.sql` byte-identical）。Redis 只保存 realtime overlay；S3 保存 ComfyUI 与浏览器直传对象。
 
 ## 1. Catalog 表
 
@@ -13,91 +13,70 @@ PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。�
 
 Catalog 表不使用 bigint resource ID。普通 page/get/runtime 查询只返回 `deleted_at is null` 的行；删除是带版本递增的 soft-delete，原名称不能重新创建。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
 
-Provider 创建写入 revision `0`；每次成功更新在同一事务写入 `expectedVersion + 1`。Provider 删除不创建新 revision，已冻结的 invocation 仍可通过旧 revision 重放。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。
+Provider 创建写入 revision `0`；每次成功更新在同一事务写入 `expectedVersion + 1`。Provider 删除不创建新 revision。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。
 
-## 2. Chat 与关系
+## 2. ComfyUI Workflow API
+
+| 表 | 字段与职责 |
+| --- | --- |
+| `comfyui_workflow_api` | bigint `id`、唯一 `api_name`、名称/描述、workflow/input bindings JSON、default selector、enabled、version 与时间 |
+
+该表只保存工作流 API 定义；ComfyUI 产物与浏览器直传对象位于对象存储，不进入 Harness Runtime 表。
+
+## 3. Chat 与关系
 
 | 表 | 字段与职责 |
 | --- | --- |
 | `chat` | `id`、`title`、`agent_name`、`yolo_enabled`、`version`、时间；两项名称/开关是 Chat 唯一可见发送设置 |
 | `chat_thread` | `(chat_id, thread_id)` 主键，表示 Chat 与 Thread 的历史多对多关系 |
 
-Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；每条消息捕获这两项并写入该消息的 `TurnSettings`。Thread 自己保存 nullable `environment_name`，它不是 Chat 字段，也不由消息 DTO 携带。
+Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch 设置来自 head Entry 的 `BranchSettings` 快照。
 
-## 3. Session、Entry、Thread
+## 4. Harness 表（精确 7 张）
 
 | 表 | 关键字段与约束 |
 | --- | --- |
 | `harness_session` | `id`、`title`、`created_at`；只作为 Entry Tree 容器 |
-| `harness_entry` | `id`、`session_id`、`parent_entry_id`、`entry_type`、`payload`、`created_at`；ROOT 无 parent，其余 Entry 有 parent |
-| `harness_thread` | `id`、非空 `head_entry_id`、nullable `environment_name`、`input_sequence`、`runnable`、`execution_epoch`、`revision`、processor lease、时间 |
-| `harness_thread_input` | `thread_id`、sequence、`input_type`、payload、幂等键、状态、时间 |
+| `harness_entry` | `id`、`session_id`、`parent_entry_id`、`entry_type`、`payload`、`created_at`；ROOT 无 parent，其余 Entry 有 parent；每 Session 唯一 ROOT |
+| `harness_thread` | `id`、非空 `head_entry_id`、`yolo_enabled`、`next_command_sequence`（≥1）、`revision`（≥0）、时间 |
+| `harness_thread_command` | `thread_id`、`sequence`、`command_type`、`payload`、`client_command_id`、`consumed_turn_start_entry_id`、`cancelled_at` |
+| `harness_model_invocation` | `thread_id`、`turn_start_entry_id`、`basis_head_entry_id`、`request`、status、attempt、`stream_checkpoint`、`result`/`error`/`result_entry_id` |
+| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`、`request`、status、attempt、`approval`、`result`/`error`/`result_entry_id` |
+| `harness_work` | `(target_type, target_id)`、`available_at`、`wake_version`、`lease_token`、`lease_until` |
 
 `harness_entry.entry_type` 只允许：
 
 ```text
-ROOT
-MESSAGE
-CUSTOM_MESSAGE
-ASSISTANT_ERROR
-ASSISTANT_ABORTED
+ROOT, TURN_START, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
-`harness_thread_input.input_type` 只允许：
+`harness_thread_command.command_type` 只允许：
 
 ```text
-USER_MESSAGE
-CUSTOM_MESSAGE
+USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
+SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 ```
 
-Chat-scoped Thread 创建事务按 Session → ROOT → Thread 的顺序写入，Thread head 直接指向 ROOT，并可在同一事务原子写入初始 `environment_name`。`PUT /head` 的 `head_entry_id` 是必填非空引用，并用 `expectedExecutionEpoch` 做静止校验与 CAS fencing。`PUT /api/ai/runtime/threads/{threadId}/environment` 只允许静止 Thread 设置或清除 `environment_name`，请求体携带 `expectedExecutionEpoch`；成功递增 `execution_epoch` 与 `revision`，运行中或 epoch 陈旧返回 `409`。
+Chat-scoped Thread 创建事务按 Session → ROOT（完整 `BranchSettings`）→ Thread 的顺序写入，Thread head 直接指向 ROOT（`nextCommandSequence=1`、`revision=0`）。`harness_work` 是唯一调度 mailbox（见 [harness-storage-runtime.md](harness-storage-runtime.md)）。
 
-USER/CUSTOM Input 的 payload 与 harvest 后的对应 Entry 都保存：
-
-```json
-{
-  "turnSettings": {
-    "agentName": "agent-name",
-    "yoloEnabled": false
-  }
-}
-```
-
-这份引用不展开 Agent、Model、Provider、Tool 或 Skill 定义。规划阶段再读取最新 Agent、Provider、Model、ToolCatalog 与 Thread 当前 Environment。
-
-## 4. Invocation 与 activation
-
-| 表 | 关键事实 |
-| --- | --- |
-| `harness_model_invocation` | source head、epoch、完整 `ModelInvocationRequest`、状态、attempt、lease、deadline、result/error、`applied_at` 与安全流快照 |
-| `harness_tool_invocation` | Assistant Entry、Model Invocation、ordinal、tool call、descriptor/type/arguments、`environment_name`、权限、YOLO、状态、lease、结果 |
-| `harness_interaction` | Tool permission 的 request/response、`OPEN/RESOLVED` 与 version |
-| `harness_execution_activation` | Thread、Model、Tool 的唯一 durable activation queue；`activation_state` 使用 `SCHEDULED/PARKED` 表达可调度性 |
-
-`ModelInvocationRequest` 的 `providerRequest`、exact `toolBindings`（descriptor/type/environmentName）、`skillBindings` 与 `yoloEnabled` 是同一份冻结事实。`providerRequest.model` 还冻结 `providerName` 与非负 `providerVersion`。Retry 只改变 invocation attempt 与调度时间，按该版本的 Provider revision 重放相同 request；ToolWorker 使用 request 中的原 binding，不重新选择 Environment。Provider 返回本次 request 不可见的 Tool 时，Reconciler 写入包含请求名称和本次可用 Tool 名称的可恢复 `ASSISTANT_ERROR`，不物化 `harness_tool_invocation`。
-
-## 5. Usage ledger
-
-`harness_model_usage` 每个 Assistant Entry 只写一条记录，保存：
+### `agent_thread_goal`（Core application-owned）
 
 ```text
-provider_name
-model_name
-provider_type
-prompt_cache_mode
-prompt_cache_retention
-cache_eligible
-cache_affinity_key
-stop_reason
-usage_*_tokens
-pricing_*
-request_id
-reported_service_tier
-raw_usage
-created_at
+thread_id      # PK，FK -> harness_thread(id)
+objective      # 非空（btrim 后长度 > 0）
+token_budget   # 可选，> 0
+status         # active | complete | blocked
+reason         # active 时 null；complete/blocked 时非空
+created_at / updated_at
 ```
 
-账本通过 `thread_id` 与 `(session_id, assistant_entry_id)` 约束归属，通过 `(provider_name, model_name, id)` 建立查询索引。`provider_name`、`model_name` 是写入时冻结的历史事实；Usage ledger 不对 Catalog 表建立外键，因此 Catalog 删除或更新不会改写历史账本。
+这是 **Core application-owned 的 Goal 表**：没有 `harness_` 前缀，**不是 Harness Runtime 的第 8 张表**（runtime-spring schema 不含它；`harness_runtime_id_seq` 不为其分配 ID）。Goal 产品能力通过 selectable Platform tools `create_goal` / `get_goal` / `update_goal`（`DatabaseGoalStore` 实现 `GoalStore`，由 `RuntimeToolsConfiguration` 条件装配）暴露给 Agent。
+
+**不存在的表**：没有 dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
+
+## 5. Invocation 冻结事实
+
+`ModelInvocationRequest` 的 `environmentId`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
 
 ## 6. Canvas
 
@@ -110,14 +89,10 @@ created_at
 
 当前 `DurableCanvasService` 支持创建 Canvas、创建文本/生成文本节点、创建 link、移动节点和删除节点。
 
-## 7. 其他 durable 表
+## 7. 事务不变量
 
-`harness_retry_policy`、`harness_realtime_stream_policy`、`harness_thread_goal`、`harness_artifact` 与账本共同组成 Runtime 的辅助事实。Environment registry、Daemon 连接与 Redis Stream 都不是 durable truth。
-
-## 8. 事务不变量
-
-- Thread、Invocation、Interaction、Entry/Input 的锁序由 Runtime 契约统一定义。
-- Assistant Entry、Usage、ToolInvocation materialization 与 head 推进在 Reconciler 事务中保持原子。
-- Input sequence、幂等键与 `runnable=true` 在同一事务更新。
-- Model/Tool terminal 与后续 Thread activation 在同一事务更新。
-- PostgreSQL trigger 在事务提交后发送 NOTIFY；通知只负责唤醒，不承载事实。
+- Thread、Command、ModelInvocation、ToolInvocation siblings、Work 的锁序由 [harness-runtime-contracts.md](harness-runtime-contracts.md) 统一定义（Thread → Commands → Model → Tool siblings → Work）。
+- 每次可见 Thread 变化 `revision` 恰好 +1；`next_command_sequence` 不回退。
+- 命令 batch 的 sequence 预留、命令行写入与 THREAD Work wake 在同一事务。
+- terminal apply（Entry + head + Invocation 挂 resultEntryId）与后续 Work 请求在同一事务。
+- Stop 的 replay 查找在 revision CAS 之前；approval 的 replay 不 bump revision。

@@ -1,6 +1,6 @@
 # 前端落地设计
 
-本文描述 `frontend/` 当前的 Chat 工作区、Pane、Thread snapshot、逐消息设置和 transcript 投影。运行时类型与持久化语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)。
+本文描述 `frontend/` 当前的 Chat 工作区、Pane、Thread snapshot、命令 batch、replay 身份与 transcript 投影。运行时类型与持久化语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)。
 
 ## 1. 前端摘要
 
@@ -11,21 +11,14 @@
 | 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位与全局 Locale |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
-| Runtime API | `/api/ai/runtime/threads`、`snapshot`、`environment`、`sessions`、`interactions`、`tool-invocations`、`usage` |
+| Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval` / `events/stream` |
 | Realtime | REST snapshot first；durable revision SSE + 无 id 的 Redis realtime overlay |
 | 浏览器路由 | `BrowserRouter`，服务端对 SPA 路径回退 `index.html` |
 | 视觉规范 | [前端设计规范](../product-design/frontend-design-system.md) |
 
-## 2. Catalog 与 Chat 设置
+## 2. Chat defaults 与 Pane BranchDraft
 
-Catalog 以名称为身份：
-
-- Provider 和 Agent 使用 immutable `name`。
-- Model 使用 `(providerName, name)`，前端显示/引用为 `providerName/modelName`。
-- Model ref 的 canonical 解析只切第一个 `/`。
-- Catalog DTO 不包含 bigint resource ID；版本字段仍以十进制字符串用于并发更新。
-
-Chat DTO 保存并展示唯一的发送设置：
+Chat DTO 保存唯一的可见发送设置：
 
 ```ts
 interface ChatDTO {
@@ -37,97 +30,102 @@ interface ChatDTO {
 }
 ```
 
-Chat 编辑器更新这两项设置时携带 `expectedVersion`。Thread snapshot 单独展示 nullable `environmentName`；静止 Thread 通过 `/api/ai/runtime/threads/{threadId}/environment` 设置或清除它。Agent 编辑器只维护 Agent 的 system prompt、Model ref、variant、tools 与 skills；Model/Variant/Tool/Skill 的选择由 Agent 决定。
-
-## 3. Chat 工作区与 Pane
-
-`ChatPaneState` 按 `chatId` 存在 `localStorage`：
-
-| 字段 | 语义 |
-| --- | --- |
-| `layout` | `single`、`split-2`、`split-3`、`grid-4`、`grid-6`、`grid-8` |
-| `focusedPaneId` | 当前焦点 Pane |
-| `panes` | 固定 `pane-1..pane-8`，每项保存 `threadId: string \| null` |
-| `sessionSort` / `threadSort` | `recent` 或 `created` |
-
-服务端不保存 Pane。进入 Chat 时，已有 localStorage Thread 绑定通过幂等 `PUT /api/ai/chat/{chatId}/threads/{threadId}` 补建关系；失败不会清掉本地绑定。
-
-## 4. 首发与每次发送
-
-空 Pane 首发的唯一顺序是：
-
-```text
-POST /api/ai/chat/{chatId}/threads
-  -> 可携带初始 environmentName，返回 Session、非空 head、executionEpoch=0 的已绑定 Thread
-POST /api/ai/runtime/threads/{threadId}/messages
-  -> 携带 Chat 当前可见 agentName/yoloEnabled
-  -> 携带返回 Thread 的 executionEpoch 与 clientMessageId
-把 threadId 写入 Pane
-```
-
-实现位于 `frontend/src/features/ai/chat/chat-first-send.ts`。服务端第一步已经完成 Session、ROOT、Thread 和 Chat 关系的原子创建，前端不再另行准备运行配置。
-
-绑定 Pane 的每次发送都直接从当前 Chat 设置捕获：
+Chat 编辑器更新这两项设置时携带 `expectedVersion`，pending 期间锁定该 Chat 的发送。Pane 本地维护完整 `BranchDraft`：
 
 ```ts
-{
-  content,
-  agentName,
-  yoloEnabled,
-  clientMessageId,
-  expectedExecutionEpoch,
+interface BranchDraft {
+  environmentId: string | null   // canonical UUID
+  agentName: string
+  model: { providerName, modelName, variant }
+  thinkingLevel: string
+  activeTools: string[]
+  yoloEnabled: boolean
 }
 ```
 
-CUSTOM message 使用 `/messages/custom`，额外携带 `role: 'system' | 'user'`。Input 与 Entry 中的 `TurnSettings` 只保存 `agentName` 与 `yoloEnabled`；Environment 由 Thread 当前字段提供，消息 DTO 不携带 `environmentName`。每次 planning 再读取最新 Agent、Model、Provider、Variant、ToolCatalog 与 Thread Environment。
+- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/env/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。
+- **Bound pane**：`branchState` 从 Thread snapshot 的 `branchSettings` 初始化（base）；queued SET_* 命令投影出 `effectiveBase`，dirty = `effectiveBase` 与用户 `draft` 不等；durable base 跟随 snapshot，用户 draft 不被覆盖。
 
-HTTP 重试沿用同一 `clientMessageId`，服务端直接返回已存在 Input，保留第一次发送的 TurnSettings。草稿只在相同内容的提交失败重放时复用该 id。
+## 3. Blank first send
 
-## 5. Thread 操作
+空 Pane 首发的唯一顺序（`performBlankPaneFirstSend`）：
 
-| UI 行为 | API |
+```text
+POST /api/ai/chat/{chatId}/threads
+  -> 原子创建 Session + ROOT（完整 BranchSettings）+ Thread，返回 snapshot
+POST /api/ai/runtime/threads/{threadId}/commands
+  -> USER_MESSAGE-only batch（expectedHeadEntryId + expectedNextCommandSequence 来自创建返回）
+把 threadId 写入 Pane
+```
+
+失败恢复（`FirstSendMessageError` 携带 snapshot/plan/cause）：
+
+- **非 409（网络/不确定）**：绑定已创建 Thread，恢复 composer 文本，并把 exact plan 交给 controller `replayRef`（byte-for-byte 重放，同 command id + 原始 cursors）。
+- **known 409**：服务端明确未接受 stale batch。仍绑定已创建 Thread、恢复 composer 文本、invalidate/refetch 新 snapshot；**不**设置 replay——下一次 submit 基于新 snapshot 构造 fresh cursors + fresh command IDs。
+
+`ChatWorkspacePane` 的 recovery state 为 `{threadId, content, replay?}`；BoundThreadPane 接收独立 `initialDraft` 与可选 `initialReplay`，controller 以 `initialDraft` 恢复文本、仅在 `initialReplay` 存在时设置 `replayRef`；Chat 切换/Thread 切换清理 recovery。
+
+## 4. Bound 发送：固定 diff 顺序与 CAS
+
+每次发送由 `buildMessageBatchPlan` 构造：
+
+```text
+SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
+           SET_THINKING_LEVEL -> SET_ACTIVE_TOOLS -> SET_YOLO）
++ USER_MESSAGE（不携带 role）
+```
+
+- batch 的 `expectedHeadEntryId` / `expectedNextCommandSequence` 来自最新 snapshot Thread DTO。
+- `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
+- 服务端 202 只表示已接受；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/SSE 投影。
+
+## 5. Ambiguous exact replay 与 409 rebuild
+
+`replayRef` 保存 `{plan, content}`；`CommandBatchPlan.identity = {threadId, content, draft}`（**不含 effectiveBase**：queued SET_* 投影变化不改变用户意图）。
+
+- 发送失败（网络/不确定）：composer 为空时恢复文本并保留 exact plan——重试发送**完全相同的 batch**（同 command ids/payload/order + 原始 expected cursors）；服务端 ordered command-set replay 绕过移动的 cursors。
+- 编辑内容或目标 draft → identity 变化 → mint 全新 batch。
+- **known 409**：batch 未被接受 → 清 `replayRef`，下一次发送基于刷新后 snapshot 重建（新 cursors + 新 command IDs）。
+
+## 6. Pane 门禁（dirty/pending）
+
+| 状态 | 定义 |
 | --- | --- |
-| Thread 列表 | `GET /api/ai/runtime/threads?sort&cursor&limit` |
-| Chat 内 Thread 列表 | `GET /api/ai/chat/{chatId}/threads?sort&cursor&limit` |
-| 绑定已有 Thread | `PUT /api/ai/chat/{chatId}/threads/{threadId}` |
-| 设置/清除 Thread Environment | `PUT /api/ai/runtime/threads/{threadId}/environment` |
-| `/session` 或 `/tree` 选择历史 Entry | `PUT /api/ai/runtime/threads/{threadId}/head` |
-| `/stop` | `POST /api/ai/runtime/threads/{threadId}/stop` |
-| 读取运行态 | `GET /api/ai/runtime/threads/{threadId}/snapshot` |
+| Blank `paneDirty` | composer 文本非空 / pendingContent 存在 / frozenDraft 相对 initialFrozenDraft 不等 |
+| Blank `panePending` | first-send HTTP in-flight（阻塞 `/thread`） |
+| Bound `paneDirty` | branch draft dirty 或 composer 文本非空 |
+| Bound `panePending` | queued commands 非空 / controller.pending / rebind pending / stop pending / stop replay pending / approval pending / replay pending |
 
-head 与 Environment 请求始终使用当前 `executionEpoch`。head 仍要求非空 `headEntryId` 与 Thread 静止；Environment 请求体为 `environmentName: string | null` 与 `expectedExecutionEpoch`，mutation pending 期间锁定同一 Pane 的发送，成功后按 revision 合并返回值并刷新 snapshot。任一命令在 Thread 运行中或 epoch 陈旧时返回 `409`，不吞掉冲突。
+`/thread`、`/new`、`/tree` 切换在 `panePending` 时拒绝，在 `paneDirty` 时要求确认丢弃草稿；replay/stop-replay pending 时切换会静默丢弃 exact retry，因此同样被 `panePending` 阻止。202 清空 composer 是既定语义（accepted 消息不再留在输入框）。
 
-前端不把 Environment 放入消息请求：Chat 的 Agent/YOLO 修改仍由 Chat API 负责，Thread Environment 通过独立的 fenced command 设置或清除。用户在 Chat 工作区修改可见设置后，后续每条消息都使用最新 `agentName`/`yoloEnabled`；Agent 的 Model、Variant、Tools、Skills 随 Agent 名称在服务端逐轮解析。
+## 7. 同 Session relocation（/tree）
 
-## 6. Query 与 realtime
+`/tree` 只允许逻辑静止 Thread（IDLE/CONTINUATION_DUE 且无 panePending）：`PUT /head` 携带 `targetEntryId` + `expectedRevision`；服务端约束同 Session、无 queued、无 live/terminal context、不能指向 continueModel TURN_END。成功后重新初始化 branch draft 与 composer 文本（USER/CUSTOM 来源 Entry 恢复可编辑文本）。
 
-`threads.snapshot(threadId)` 是 Thread 业务状态的唯一 React Query key。恢复顺序：
+## 8. Approval / Stop 身份
 
-1. 读取 snapshot；
-2. 用 `snapshot.revision` 创建 `EventSource`；
-3. revision/resync 事件只 invalidate snapshot；
-4. Redis `realtime` 事件叠加流式 text/thinking，不作为业务恢复 cursor。
+- **Approval**：同一 `(invocationId, decision)` 复用同一 `decisionId`；切换 ALLOW↔DENY mint 新 ID；输入 `ALLOW`/`DENY`，durable 值 `ALLOWED`/`DENIED`；成功后 invalidate snapshot + chats。
+- **Stop**：失败后保留完整 `PendingStopOperation {stopRequestId, expectedRevision, basisHeadEntryId, basisRevision}`。重试发送**完全相同** body（同 ID + 原始 expectedRevision，绝不从新 snapshot 重推导）；成功/已知 409 清空；网络失败保留并暴露 `stopReplayPending`；**同步 basis fence**：`stopThread` 在复用前比较当前渲染 thread 的 headEntryId/revision 与 basis，任一不同立即 retire 并 mint 新 ID + 当前 expectedRevision（不依赖被动 effect）；权威 snapshot 证明 basis 变化时 effect 同样 retire。
 
-同一 Thread 出现在多个 Pane 时，snapshot query 可以复用，但每个已挂载 Pane 建立自己的 `EventSource`。
+## 9. Snapshot-first realtime / gap / terminal / duplicate
 
-## 7. Transcript 投影
+`useHarnessThreadRealtime`（`threads.snapshot(threadId)` 是唯一业务 query key）：
 
-`buildThreadTimeline(entries, inputs, realtime)` 的基线是当前 head 的 Entry path：
+1. 读取 snapshot；用 `revision` 创建 EventSource；revision/resync 事件只 invalidate snapshot。
+2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进，TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。
+3. **Gap recovery**：缺失 sequence 触发 `useGapRecoveryLoop`——单飞、指数退避（200→2000ms、最多 8 次）refetch snapshot；immutable per-recovery token 防旧 Thread tick 干扰新 Thread；refetch 失败继续退避不冻结；caught-up/stale/terminal 停止。
+4. **Terminal fence**：`resultJson`/`errorJson`/`resultEntryId` 是 durable 边界——late MODEL_DELTA 被拒绝；snapshot reconcile 中 `status:'done'|'error'` 的 durable projection **无条件**压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后 overlay 移除；timeline 按 `modelStream.status` 渲染，terminal projection 绝不标 streaming。
+5. TOOL_PARTIAL 永不携带 Resource；Tool overlay 投影按 `(assistantEntryId, ordinal)` durable identity + toolCallId 一致性匹配，禁止 first-candidate fallback。
 
-| 来源 | 前端行为 |
-| --- | --- |
-| `MESSAGE` | USER、ASSISTANT、TOOL 语义消息 |
-| `CUSTOM_MESSAGE` | SYSTEM/USER 业务上下文消息 |
-| `ASSISTANT_ERROR` | 错误气泡与 planning/provider 错误 |
-| `ASSISTANT_ABORTED` | 仅 text/thinking 的 partial assistant turn，并标记已停止 |
-| `ROOT` | 结构根，不渲染为气泡 |
-| QUEUED Input | Working 装饰栏，不进入稳定 transcript |
-| Redis realtime | 当前 Model 的临时 text/thinking overlay |
-| Artifact ref | 请求 `/api/ai/runtime/artifacts/{artifactId}` 读取 bytes |
+## 10. Resource 安全呈现
 
-Entry 类型集合固定为 `ROOT/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED`；Input 类型集合固定为 `USER_MESSAGE/CUSTOM_MESSAGE`。
+Tool Result 的 Resource（`ResourceRef {uri, mediaType, name, size, sha256}` + 可选文本 preview）：
 
-## 8. 前端目录
+- **仅 `data:` URI** 自动媒体预览（图片等）；http/https/file/s3 只展示稳定 URI 文本 + 显式 `rel="noopener noreferrer"` 链接。
+- 允许的 scheme 集合仍是 data/file/s3/http/https；未知 scheme 不渲染链接。
+- preview 保持 `<pre>` 文本块，不执行富内容。
+
+## 11. 前端目录
 
 ```text
 frontend/src
@@ -135,10 +133,9 @@ frontend/src
 ├── platform/
 ├── features/ai/
 │   ├── catalog/
-│   ├── chat/
+│   ├── chat/            # ChatWorkspacePane / BlankComposerPane / BoundThreadPane / command-batch-plan
 │   ├── environment/
-│   ├── runtime/
-│   └── settings/
+│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline
 ├── features/canvas/
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
@@ -150,7 +147,7 @@ frontend/src
 └── styles.css
 ```
 
-## 9. 验证
+## 12. 验证
 
 ```bash
 cd frontend
@@ -159,4 +156,4 @@ npm run lint
 npm run build
 ```
 
-前端 API 契约重点覆盖名称身份、Model ref、逐消息设置、幂等重放、非空 head 与 snapshot-first SSE。
+前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first SSE 与 terminal 投影。
