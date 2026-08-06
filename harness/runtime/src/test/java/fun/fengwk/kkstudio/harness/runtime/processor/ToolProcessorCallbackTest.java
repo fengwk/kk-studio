@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ResourceToolContent;
@@ -196,6 +199,30 @@ class ToolProcessorCallbackTest {
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** 成功终态在 THREAD Work 已被消费后仍按升序重建 THREAD Work，不能卡在 RUNNING。 */
+  @Test
+  void successRecreatesConsumedThreadWork() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          assertTrue(
+              tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())),
+              "the thread work must be consumable before tool terminal persistence");
+          return null;
+        });
+
+    listener.onSucceeded(
+        ToolProcessorTestSupport.successResult("call-1", new TextToolContent("done")));
+
+    assertEquals(
+        ToolInvocationStatus.SUCCEEDED,
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertNotNull(ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId()));
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
   /** success toolCallId 不匹配：FAILED(INVALID_RESULT)，不写 SUCCEEDED。 */
@@ -566,6 +593,10 @@ class ToolProcessorCallbackTest {
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
     assertTrue(fixture.sink.events.isEmpty());
     assertFalse(fixture.processor.hasActiveExecution());
   }
@@ -598,6 +629,10 @@ class ToolProcessorCallbackTest {
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -961,6 +996,10 @@ class ToolProcessorCallbackTest {
     assertEquals(
         ToolInvocationStatus.UNKNOWN,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
@@ -996,6 +1035,10 @@ class ToolProcessorCallbackTest {
     assertEquals(
         "CANCELLED",
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).error().kind());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }

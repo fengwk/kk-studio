@@ -538,64 +538,70 @@ final class ToolExecution implements ToolGateway.Listener {
 
   private boolean commitSuccess(ToolResult result) {
     Instant now = clock.instant();
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null) {
-                return false;
-              }
-              tx.lockWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              tx.updateToolInvocations(List.of(tool.succeed(result, now)));
-              tx.updateThread(thread.touchRevision(now));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-              tx.completeWork(claim, now);
-              return true;
-            }));
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
+                if (tool == null) {
+                  return false;
+                }
+                if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
+                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                tx.updateToolInvocations(List.of(tool.succeed(result, now)));
+                tx.updateThread(thread.touchRevision(now));
+                tx.completeWork(claim, now);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
   }
 
   private boolean commitTerminal(TerminalKind kind, ToolInvocationError error) {
     Instant now = clock.instant();
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null) {
-                return false;
-              }
-              tx.lockWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              ToolInvocation next =
-                  switch (kind) {
-                    case FAILED -> tool.fail(error, now);
-                    case CANCELLED -> tool.cancel(error, now);
-                    case UNKNOWN -> tool.unknown(error, now);
-                  };
-              tx.updateToolInvocations(List.of(next));
-              tx.updateThread(thread.touchRevision(now));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-              tx.completeWork(claim, now);
-              return true;
-            }));
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
+                if (tool == null) {
+                  return false;
+                }
+                if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
+                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                ToolInvocation next =
+                    switch (kind) {
+                      case FAILED -> tool.fail(error, now);
+                      case CANCELLED -> tool.cancel(error, now);
+                      case UNKNOWN -> tool.unknown(error, now);
+                    };
+                tx.updateToolInvocations(List.of(next));
+                tx.updateThread(thread.touchRevision(now));
+                tx.completeWork(claim, now);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
   }
 
   private boolean safeTerminal(BooleanSupplier action) {
@@ -661,6 +667,10 @@ final class ToolExecution implements ToolGateway.Listener {
       ToolInvocationError error) {}
 
   private record Publish(ToolResult partial, Instant createdAt) {}
+
+  private static final class ClaimLostSignal extends RuntimeException {
+    private ClaimLostSignal() {}
+  }
 
   private enum Applied {
     PROGRESSED,

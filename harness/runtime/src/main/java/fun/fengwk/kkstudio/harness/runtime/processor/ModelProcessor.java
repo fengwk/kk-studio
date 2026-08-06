@@ -32,8 +32,8 @@ import java.util.function.BiFunction;
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ModelGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
  * Entry / head / Usage 写入。所有 durable mutation 都在短事务内通过 store 锁序（Thread -&gt; ModelInvocation -&gt;
- * Work；同事务含 THREAD Work 时先按 (type, id) 预锁 THREAD Work 再 lockClaimed MODEL Work）与 claim ownership
- * 校验完成，lost / stale 一律完整 no-op。
+ * Work；同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）与 claim
+ * ownership 校验完成，lost / stale 一律完整 no-op。
  *
  * <p>admission 后 listener 由 {@link ModelExecution} 门控缓冲，callback 不可能早于 durable RUNNING 落地；heartbeat
  * 只 renew 当前 Work lease。进程内 execution registry 以 invocationId 为键，{@link #cancel} 提供唯一本地取消入口， {@link
@@ -116,12 +116,16 @@ public final class ModelProcessor implements AutoCloseable {
         // 不同新 token：claimOwned 已证明新 claim 真实 owned（旧 lease 必然过期），supersede 旧本地 execution 安全。
         releaseExecution(active);
       }
-      Prepare prepare = store.transaction(tx -> prepare(tx, claim));
-      return switch (prepare) {
-        case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
-        case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
-        case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
-      };
+      try {
+        Prepare prepare = store.transaction(tx -> prepare(tx, claim));
+        return switch (prepare) {
+          case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
+          case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
+          case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
+        };
+      } catch (ClaimLostSignal ignored) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
     } finally {
       admissionGuard.release(invocationId, token);
     }
@@ -345,9 +349,9 @@ public final class ModelProcessor implements AutoCloseable {
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
-    tx.lockWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
-      return new Prepare.Lost();
+      throw new ClaimLostSignal();
     }
     ModelInvocationError error =
         new ModelInvocationError(
@@ -355,7 +359,6 @@ public final class ModelProcessor implements AutoCloseable {
             "model work lease expired; provider outcome cannot be confirmed");
     tx.updateModelInvocation(model.unknown(error, now));
     tx.updateThread(thread.touchRevision(now));
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
   }
@@ -371,14 +374,11 @@ public final class ModelProcessor implements AutoCloseable {
       Instant now) {
     boolean needsThreadWake = model.resultEntryId() == null;
     if (needsThreadWake) {
-      // 锁序：同层 Work 按 (type, id) 升序，THREAD Work 必须先于 MODEL Work 预锁。
-      tx.lockWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
-      return new Prepare.Lost();
-    }
-    if (needsThreadWake) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      throw new ClaimLostSignal();
     }
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
@@ -430,35 +430,42 @@ public final class ModelProcessor implements AutoCloseable {
       Prepare.Dispatched dispatched,
       BiFunction<ModelInvocation, Instant, ModelInvocation> transition) {
     Instant now = clock.instant();
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
-              if (model == null) {
-                return false;
-              }
-              tx.lockWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                return false;
-              }
-              if (model.status() != ModelInvocationStatus.DISPATCHING
-                  || model.attempt() != dispatched.attempt()) {
-                return false;
-              }
-              tx.updateModelInvocation(transition.apply(model, now));
-              tx.updateThread(thread.touchRevision(now));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()), now);
-              tx.completeWork(claim, now);
-              return true;
-            }));
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
+                if (model == null) {
+                  return false;
+                }
+                if (model.status() != ModelInvocationStatus.DISPATCHING
+                    || model.attempt() != dispatched.attempt()) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()), now);
+                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                tx.updateModelInvocation(transition.apply(model, now));
+                tx.updateThread(thread.touchRevision(now));
+                tx.completeWork(claim, now);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
   }
 
   private void release(ModelExecution execution) {
     executions.remove(execution.invocationId(), execution);
+  }
+
+  private static final class ClaimLostSignal extends RuntimeException {
+    private ClaimLostSignal() {}
   }
 
   private sealed interface Prepare permits Prepare.Lost, Prepare.Dispatched, Prepare.Terminated {

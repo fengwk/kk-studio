@@ -493,73 +493,79 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private boolean commitSuccess(ProviderResponse response, long finalSequence) {
     Instant now = clock.instant();
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null) {
-                return false;
-              }
-              tx.lockWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                return false;
-              }
-              if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
-                return false;
-              }
-              String text = accumulator.text();
-              String thinking = accumulator.thinking();
-              if (!text.isBlank() || !thinking.isBlank()) {
-                ModelInvocation checkpointed =
-                    model.checkpoint(
-                        new StreamCheckpoint(attempt, finalSequence, text, thinking), now);
-                tx.updateModelInvocation(checkpointed);
-                model = checkpointed;
-              }
-              tx.updateModelInvocation(model.succeed(response, now));
-              tx.updateThread(thread.touchRevision(now));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-              tx.completeWork(claim, now);
-              return true;
-            }));
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+                if (model == null) {
+                  return false;
+                }
+                if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
+                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                String text = accumulator.text();
+                String thinking = accumulator.thinking();
+                if (!text.isBlank() || !thinking.isBlank()) {
+                  ModelInvocation checkpointed =
+                      model.checkpoint(
+                          new StreamCheckpoint(attempt, finalSequence, text, thinking), now);
+                  tx.updateModelInvocation(checkpointed);
+                  model = checkpointed;
+                }
+                tx.updateModelInvocation(model.succeed(response, now));
+                tx.updateThread(thread.touchRevision(now));
+                tx.completeWork(claim, now);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
   }
 
   private boolean commitTerminal(TerminalKind kind, ModelInvocationError error) {
     Instant now = clock.instant();
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null) {
-                return false;
-              }
-              tx.lockWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                return false;
-              }
-              if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
-                return false;
-              }
-              ModelInvocation next =
-                  switch (kind) {
-                    case FAILED -> model.fail(error, now);
-                    case CANCELLED -> model.cancel(error, now);
-                    case UNKNOWN -> model.unknown(error, now);
-                  };
-              tx.updateModelInvocation(next);
-              tx.updateThread(thread.touchRevision(now));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-              tx.completeWork(claim, now);
-              return true;
-            }));
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+                if (model == null) {
+                  return false;
+                }
+                if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
+                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                ModelInvocation next =
+                    switch (kind) {
+                      case FAILED -> model.fail(error, now);
+                      case CANCELLED -> model.cancel(error, now);
+                      case UNKNOWN -> model.unknown(error, now);
+                    };
+                tx.updateModelInvocation(next);
+                tx.updateThread(thread.touchRevision(now));
+                tx.completeWork(claim, now);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
   }
 
   private void deliverFailure(ModelInvocationError error) {
@@ -676,4 +682,8 @@ final class ModelExecution implements ModelGateway.Listener {
       ModelInvocationError error) {}
 
   private record Publish(ProviderStreamEvent event, long sequence) {}
+
+  private static final class ClaimLostSignal extends RuntimeException {
+    private ClaimLostSignal() {}
+  }
 }

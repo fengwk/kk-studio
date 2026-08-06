@@ -26,7 +26,7 @@ class AiBoundedContextArchitectureTest {
   void sharedContractsUseOnlyExplicitDomainRoots() throws IOException {
     // Keeping the shared root exact prevents a generic share.model package from returning.
     assertEquals(
-        Set.of("ai", "api", "comfyui", "storage", "studio"),
+        Set.of("ai", "comfyui", "storage", "studio"),
         directDirectoryNames(
             repositoryRoot().resolve("share/src/main/java/fun/fengwk/kkstudio/share")));
   }
