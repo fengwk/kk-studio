@@ -78,7 +78,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | --- | --- | --- |
 | GET/POST | `/api/ai/chat` | Chat 列表/创建 |
 | GET/PUT/DELETE | `/api/ai/chat/{chatId}` | Chat 读取/部分设置更新/按版本删除 |
-| GET | `/api/ai/chat/{chatId}/threads?sort&cursor&limit` | Chat 关系的 opaque keyset 分页 |
+| GET | `/api/ai/chat/{chatId}/threads` | Chat 关联的全部 Thread，按关联时间从新到旧 |
 | POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT（BranchSettings）、Thread 并关联 Chat；返回 snapshot |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
 | GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation |

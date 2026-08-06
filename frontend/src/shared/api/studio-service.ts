@@ -4,7 +4,7 @@ import type { CanvasDocumentDTO } from '@/shared/api/contracts/studio'
 /**
  * Studio HTTP contract for the global single-instance product.
  *
- * Canvas list/create are durable. The editor keeps its current interaction projection locally.
+ * Canvas list/create are durable. The editor keeps its current projection locally.
  */
 
 export function listCanvases(): Promise<CanvasDocumentDTO[]> {

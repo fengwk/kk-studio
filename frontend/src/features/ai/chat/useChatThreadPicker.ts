@@ -33,7 +33,7 @@ export function sortThreads(
   threads: HarnessThreadDTO[],
   sort: PaneSortPreference,
 ): HarnessThreadDTO[] {
-  // Both client sorts stay newest-first (mirrors the removed server-side list ordering).
+  // Both client sorts stay newest-first for a stable picker presentation.
   const sorted = [...threads]
   if (sort === 'created') {
     sorted.sort((left, right) => compareTimes(right.createTime, left.createTime))

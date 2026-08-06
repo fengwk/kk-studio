@@ -53,15 +53,6 @@ export function normalizeEditModelDraftProvider(
     : { ...draft, providerName: immutableProviderName }
 }
 
-/** Backwards-compatible create-mode entry point for callers that do not carry an edit modal. */
-export function normalizeModelDraftProvider(
-  draft: ModelDraft,
-  providers: AgentProviderDTO[],
-  preferredProviderName?: string | null,
-): ModelDraft {
-  return normalizeCreateModelDraftProvider(draft, providers, preferredProviderName)
-}
-
 export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelView[]): AgentDraft {
   const selectedModel = models.find((model) => modelRef(model) === draft.model)
   if (!selectedModel) {
@@ -138,15 +129,6 @@ export function normalizeEditAgentDraftSelection(
   return selectedModel
     ? normalizeAgentDraftDefaultVariant(identityDraft, models)
     : identityDraft
-}
-
-/** Backwards-compatible create-mode entry point for callers that do not carry an edit modal. */
-export function normalizeAgentDraftSelection(
-  draft: AgentDraft,
-  models: AgentModelView[],
-  preferredModel?: string | null,
-): AgentDraft {
-  return normalizeCreateAgentDraftSelection(draft, models, preferredModel)
 }
 
 export function applyAgentModelSelection(

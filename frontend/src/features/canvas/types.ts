@@ -3,7 +3,7 @@
  *
  * This is not the React Flow contract and not the wire DTO.
  * Durable Studio vocabulary is `StudioNodeKind` + backend `studio` module.
- * Mapping: `./domain-map.ts` and `docs/technical-solution/domain-map.md`.
+ * The current demo projection assigns `domainKind` at node construction sites.
  */
 
 /** Backend CanvasNodeKind. Presentation nodes always carry this. */

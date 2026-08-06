@@ -149,16 +149,6 @@ function sameStringList(left: string[], right: string[]): boolean {
   return true
 }
 
-/** Canonical SET_* command type order for branch diffs (stable product order). */
-export const BRANCH_DIFF_COMMAND_TYPES = [
-  'SET_ENVIRONMENT',
-  'SET_AGENT',
-  'SET_MODEL',
-  'SET_THINKING_LEVEL',
-  'SET_ACTIVE_TOOLS',
-  'SET_YOLO',
-] as const
-
 /**
  * Builds the minimal settings command diff between the effective base and the draft in the
  * fixed order SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO.
