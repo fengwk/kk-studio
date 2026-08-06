@@ -1443,6 +1443,10 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
   }
 
   /** Indeterminate 且期间 ownership 丢失：LOST_OWNERSHIP。 */
@@ -1461,6 +1465,10 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
   }
 
   /** 恢复路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */

@@ -320,6 +320,10 @@ class ToolProcessorAdmissionTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
   }
 
   /** Indeterminate 且期间 ownership 丢失：LOST_OWNERSHIP。 */
@@ -342,6 +346,10 @@ class ToolProcessorAdmissionTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
   }
 
   /** Started 且 markRunning 事务期间 ownership 丢失：LOST + cancel handle，durable 保持 DISPATCHING。 */

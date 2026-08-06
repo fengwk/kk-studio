@@ -601,6 +601,10 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).revision());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
     assertEquals(0, fixture.gateway.startCalls);
   }
 
