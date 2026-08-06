@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -18,10 +19,19 @@ public class ModelInvocationDTO {
   private String basisHeadEntryId;
   private String status;
   private Integer attempt;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String streamCheckpointJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultEntryId;
+
   private Instant createTime;
   private Instant updateTime;
 }

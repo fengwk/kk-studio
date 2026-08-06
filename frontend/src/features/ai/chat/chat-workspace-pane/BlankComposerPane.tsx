@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ThreadComposer,
@@ -8,16 +8,25 @@ import {
 import { BLANK_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
 import { type PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
-import { toThreadSelectionItem } from '@/features/ai/chat/chat-session-picker'
+import { toThreadSelectionItem } from '@/features/ai/chat/thread-selection'
 import {
   FirstSendMessageError,
-  type FirstSendReplay,
   performBlankPaneFirstSend,
+  type FirstSendRecovery,
 } from '@/features/ai/chat/chat-first-send'
+import {
+  branchDraftsEqual,
+  materializeAgentBranchDraft,
+  materializeBlankBranchDraft,
+  type BranchDraft,
+} from '@/features/ai/chat/branch-draft'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
-  extractContextWindow,
-  modelRef,
+  AgentSelectionModal,
+  EnvironmentSelectionModal,
+  SelectionListModal,
+} from '@/features/ai/chat/SelectionListModal'
+import {
   toAgentModelViews,
   type AgentModelView,
 } from '@/features/ai/catalog'
@@ -25,48 +34,9 @@ import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import { agentService } from '@/shared/api/agent-service'
-import { chatService } from '@/shared/api/chat-service'
+import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
-import {
-  AgentSelectionModal,
-  EnvironmentSelectionModal,
-  SelectionListModal,
-} from '@/features/ai/chat/SelectionListModal'
-import { translate, useI18n } from '@/shared/i18n'
-
-function resolveChatAgent(
-  chat: ChatDTO | undefined,
-  agents: AgentDefinitionDTO[],
-): AgentDefinitionDTO | undefined {
-  if (!chat?.agentName) {
-    return undefined
-  }
-  return agents.find((agent) => agent.name === chat.agentName)
-}
-
-/** 空白 pane 尚无 Thread 时，用当前可见 Chat Agent 的 model/variant 填 footer。 */
-function resolveBlankPaneFooterLabels(
-  agent: AgentDefinitionDTO | undefined,
-  models: AgentModelView[],
-) {
-  if (!agent) {
-    return {
-      agentName: translate('ai.runtime.action.blankAgent'),
-      providerName: undefined as string | undefined,
-      modelName: undefined as string | undefined,
-      variantName: undefined as string | undefined,
-      contextWindow: undefined as number | undefined,
-    }
-  }
-  const model = models.find((item) => modelRef(item) === agent.model)
-  return {
-    agentName: agent.name || translate('ai.runtime.action.blankAgent'),
-    providerName: model?.providerName || undefined,
-    modelName: model ? modelRef(model) : agent.model || undefined,
-    variantName: agent.variant || undefined,
-    contextWindow: extractContextWindow(model),
-  }
-}
+import { useI18n } from '@/shared/i18n'
 
 export function BlankComposerPane({
   chat,
@@ -77,10 +47,6 @@ export function BlankComposerPane({
   onFocus,
   onThreadChange,
   onThreadSortChange,
-  agentName,
-  yoloEnabled,
-  settingsPending,
-  isSettingsMutationLocked = () => false,
   onAgentChange,
   onYoloChange = async () => undefined,
   onFirstSendRecovery,
@@ -93,24 +59,24 @@ export function BlankComposerPane({
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
-  agentName: string
-  yoloEnabled: boolean
-  settingsPending: boolean
-  isSettingsMutationLocked?: () => boolean
   onAgentChange: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
-  onFirstSendRecovery: (replay: FirstSendReplay) => void
+  onFirstSendRecovery: (threadId: string, recovery: FirstSendRecovery) => void
 }) {
   const { t } = useI18n()
+  // Blank draft: first-resolvable value copy of the Chat defaults materialized through the
+  // catalog, then frozen. Later Chat/Catalog refetches never silently rewrite it.
+  const [frozenDraft, setFrozenDraft] = useState<BranchDraft | null>(null)
   const [draft, setDraft] = useState('')
-  const [environmentDraft, setEnvironmentDraft] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
-  const [threadAssociationPending, setThreadAssociationPending] = useState(false)
+  // First-resolvable materialized draft: later pane-local edits (agent/env/yolo) mark the
+  // pane dirty relative to this immutable initial value (state mirror, never a render-ref).
+  const [initialFrozenDraft, setInitialFrozenDraft] = useState<BranchDraft | null>(null)
   const queryClient = useQueryClient()
   const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
   const modelsQuery = useQuery({
@@ -118,37 +84,82 @@ export function BlankComposerPane({
     queryFn: () => agentService.listModels(),
   })
   const models: AgentModelView[] = toAgentModelViews(modelsQuery.data?.results ?? [])
-  const chatAgent = resolveChatAgent(chat, agents)
-  const footerLabels = resolveBlankPaneFooterLabels(chatAgent, models)
-  const agentLabel =
-    chatAgent?.name
-    || (chat?.agentName
-      ? t('ai.runtime.action.agentMissing')
-      : t('ai.runtime.action.blankAgent'))
+  const chatAgent = useMemo(
+    () => (chat?.agentName ? agents.find((agent) => agent.name === chat.agentName) : undefined),
+    [agents, chat],
+  )
+  const environmentNames = useMemo(
+    () => new Map(environments.map((environment) => [environment.id, environment.name])),
+    [environments],
+  )
 
-  async function runFirstSend(content: string, effectiveAgentName = agentName) {
+  useEffect(() => {
+    if (frozenDraft != null || !chat) {
+      return
+    }
+    // Materialize as soon as the first parse is possible (catalog may still be loading).
+    if (chatAgent != null && modelsQuery.isLoading) {
+      return
+    }
+    const materialized = materializeBlankBranchDraft(chatAgent, chat.yoloEnabled, models)
+    if (materialized != null) {
+      setInitialFrozenDraft((current) => current ?? materialized)
+      setFrozenDraft(materialized)
+    }
+    // Missing/stale agent or unresolved model/variant: stay unfrozen; the composer surfaces an
+    // explicit error and the agent picker completes the draft before any Thread is created.
+  }, [chat, chatAgent, frozenDraft, models, modelsQuery.isLoading])
+
+  async function runFirstSend(content: string, effective: BranchDraft | null = frozenDraft) {
+    if (!chat || effective == null) {
+      return
+    }
     setPending(true)
     setActionError(null)
     try {
       const result = await performBlankPaneFirstSend({
-        chatId: chat?.id ?? '',
+        chatId: chat.id,
         content,
-        agentName: effectiveAgentName,
-        environmentName: environmentDraft,
-        yoloEnabled,
+        // Session rejects blank titles; Chat title is nullable — null stays null.
+        title: chat.title ?? null,
+        branchSettings: {
+          environmentId: effective.environmentId,
+          agentName: effective.agentName,
+          model: { ...effective.model },
+          thinkingLevel: effective.thinkingLevel,
+          activeTools: [...effective.activeTools],
+        },
+        yoloEnabled: effective.yoloEnabled,
       })
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.list }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.list }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions.detail(result.sessionId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(result.thread.threadId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.chats.threads(chat.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(result.threadId) }),
       ])
       setDraft('')
       setPendingContent(null)
-      onThreadChange(result.thread.threadId)
+      onThreadChange(result.threadId)
     } catch (error) {
       if (error instanceof FirstSendMessageError) {
-        onFirstSendRecovery(error.replay)
+        if (isConflictError(error.cause)) {
+          // Known 409: the server explicitly rejected the stale batch (cursors moved). Still
+          // bind the created Thread and restore the composer text, but NEVER hand the stale
+          // plan to the controller replayRef: the next submit rebuilds fresh cursors + fresh
+          // command ids against the refreshed snapshot.
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.threads.snapshot(error.snapshot.thread.threadId),
+            }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.chats.threads(chat.id) }),
+          ])
+          onFirstSendRecovery(error.snapshot.thread.threadId, { content })
+          return
+        }
+        // Network/uncertain failure: preserve the exact batch (same command id + full replay)
+        // for the bound pane.
+        onFirstSendRecovery(error.snapshot.thread.threadId, {
+          content,
+          replay: { plan: error.plan, content },
+        })
         return
       }
       setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
@@ -160,22 +171,19 @@ export function BlankComposerPane({
 
   async function handleSubmit() {
     const content = draft.trim()
-    if (
-      !content
-      || content.startsWith('/')
-      || pending
-      || settingsPending
-      || isSettingsMutationLocked()
-    ) {
+    if (!content || content.startsWith('/') || pending) {
       return
     }
     onFocus()
-    if (!chatAgent) {
+    if (!frozenDraft) {
+      // Either the catalog is still loading or the Chat agent/model could not be resolved;
+      // opening the agent picker completes the draft (never create a Thread with an empty
+      // provider/model/variant that the strict mapper would reject).
       setPendingContent(content)
       setAgentModalOpen(true)
       return
     }
-    await runFirstSend(content)
+    await runFirstSend(content, frozenDraft)
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -185,6 +193,10 @@ export function BlankComposerPane({
     }
     switch (command.id) {
       case 'thread':
+        if (panePending) {
+          setActionError(t('ai.runtime.action.threadRunning'))
+          return
+        }
         setThreadModalOpen(true)
         return
       case 'agent':
@@ -204,65 +216,96 @@ export function BlankComposerPane({
     }
   }
 
-  async function selectThread(selectedThreadId: string) {
-    setThreadAssociationPending(true)
-    try {
-      if (threadPicker.scope === 'global' && chat?.id) {
-        await chatService.associateThread(chat.id, selectedThreadId)
-        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.list })
-      }
-      setThreadModalOpen(false)
-      onThreadChange(selectedThreadId)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.action.associateThreadFailed')))
-    } finally {
-      setThreadAssociationPending(false)
-    }
-  }
-
-  async function handleAgentSelected(selectedAgentName: string) {
-    if (settingsPending || isSettingsMutationLocked()) {
+  function selectThread(selectedThreadId: string) {
+    // Chat-scoped picker: switching panes is pane-local; no Thread mutation happens.
+    setThreadModalOpen(false)
+    if (panePending) {
+      setActionError(t('ai.runtime.action.threadRunning'))
       return
     }
-    const content = pendingContent?.trim()
+    if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
+      return
+    }
+    onThreadChange(selectedThreadId)
+  }
+
+  function handleAgentSelected(selectedAgentName: string) {
+    const agent = agents.find((item) => item.name === selectedAgentName)
+    const next =
+      agent != null
+        ? materializeAgentBranchDraft(agent, models, frozenDraft, chat?.yoloEnabled)
+        : null
+    if (next == null) {
+      setActionError(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))
+      return
+    }
+    // Freeze rule: when the draft already has a valid model selection, keep
+    // model/thinking/environment/yolo and only adopt the agent name + activeTools; otherwise
+    // the draft is fully materialized from the selected Agent + catalog.
+    setFrozenDraft(next)
+    // Picker materialization is also a pane-local baseline: only the first successful
+    // materialization establishes the immutable initial draft, so later agent/env/yolo
+    // edits compare against it (never against null).
+    setInitialFrozenDraft((current) => current ?? next)
+    setAgentModalOpen(false)
     setActionError(null)
-    try {
-      await onAgentChange(selectedAgentName)
-      setAgentModalOpen(false)
-      if (content) {
-        await runFirstSend(content, selectedAgentName)
-      }
-    } catch (error) {
+    // Sync the Chat default for future blank panes; the frozen draft keeps this pane's value.
+    void onAgentChange(selectedAgentName).catch((error: unknown) => {
       setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
-      if (content) {
-        setDraft(content)
-      }
+    })
+    const content = pendingContent?.trim()
+    if (content) {
+      void runFirstSend(content, next)
     }
   }
 
-  async function handleEnvironmentSelected(environmentName: string | null) {
+  function handleEnvironmentSelected(environmentId: string | null) {
     if (pending) {
       return
     }
-    setEnvironmentDraft(environmentName)
+    setFrozenDraft((current) => (current ? { ...current, environmentId } : current))
     setEnvironmentModalOpen(false)
   }
 
   async function toggleYolo() {
-    if (settingsPending || isSettingsMutationLocked()) {
+    if (pending) {
       return
     }
+    setFrozenDraft((current) => {
+      if (!current) {
+        return current
+      }
+      const next = { ...current, yoloEnabled: !current.yoloEnabled }
+      void onYoloChange(next.yoloEnabled).catch((error: unknown) => {
+        setActionError(errorMessage(error, t('ai.runtime.action.updateYoloFailed')))
+      })
+      return next
+    })
     setActionError(null)
-    try {
-      await onYoloChange(!yoloEnabled)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.action.updateYoloFailed')))
-    }
   }
+
+  // Pane transition gates: first-send HTTP pending blocks /thread; a non-empty composer,
+  // a pending first-send payload, or pane-local draft edits require confirmation to discard.
+  const panePending = pending
+  const paneDirty =
+    draft.trim() !== ''
+    || pendingContent != null
+    || (
+      frozenDraft != null
+      && initialFrozenDraft != null
+      && !branchDraftsEqual(initialFrozenDraft, frozenDraft)
+    )
+
+  const footerAgentName =
+    frozenDraft?.agentName
+    || (chat?.agentName
+      ? t('ai.runtime.action.agentMissing')
+      : t('ai.runtime.action.blankAgent'))
+  const environmentId = frozenDraft?.environmentId ?? null
+  const environmentDisplayName = environmentId == null ? null : (environmentNames.get(environmentId) ?? environmentId)
 
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus}>
-      {/* 与有 Thread 时同一套 shell / composer 结构，避免 blank 与 thread 输入框样式分叉 */}
       <section className="chat-shell thread-panel blank-pane">
         <main className="chat-main thread-panel-main">
           <div className="blank-pane-body">
@@ -272,8 +315,8 @@ export function BlankComposerPane({
           </div>
           <ThreadComposer
             draft={draft}
-            pending={pending || settingsPending}
-            disabled={pending || settingsPending}
+            pending={pending}
+            disabled={pending}
             onDraftChange={setDraft}
             onSubmit={() => {
               void handleSubmit()
@@ -282,13 +325,16 @@ export function BlankComposerPane({
             commands={BLANK_PANE_COMMANDS}
           />
           <ThreadStatusFooter
-            agentName={chatAgent ? footerLabels.agentName : agentLabel}
-            providerName={chatAgent ? footerLabels.providerName : undefined}
-            modelName={chatAgent ? footerLabels.modelName : undefined}
-            variantName={chatAgent ? footerLabels.variantName : undefined}
-            contextWindow={chatAgent ? footerLabels.contextWindow : undefined}
-            environmentName={environmentDraft}
-            yoloEnabled={yoloEnabled}
+            agentName={footerAgentName}
+            providerName={frozenDraft?.model.providerName || undefined}
+            modelName={
+              frozenDraft?.model.providerName && frozenDraft.model.modelName
+                ? `${frozenDraft.model.providerName}/${frozenDraft.model.modelName}`
+                : undefined
+            }
+            variantName={frozenDraft?.model.variant || undefined}
+            environmentDisplayName={environmentDisplayName}
+            yoloEnabled={frozenDraft?.yoloEnabled ?? chat?.yoloEnabled}
             onAgentClick={() => {
               onFocus()
               setAgentModalOpen(true)
@@ -302,7 +348,6 @@ export function BlankComposerPane({
       </section>
       <AgentSelectionModal
         open={agentModalOpen}
-        selectionPending={settingsPending}
         agents={agents.map((agent) => ({
           name: agent.name,
           description: agent.description,
@@ -312,17 +357,17 @@ export function BlankComposerPane({
           setPendingContent(null)
         }}
         onSelect={(selectedAgentName) => {
-          void handleAgentSelected(selectedAgentName)
+          handleAgentSelected(selectedAgentName)
         }}
       />
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentName={environmentDraft}
+        selectedEnvironmentId={environmentId}
         selectionPending={pending}
         onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(environmentName) => {
-          void handleEnvironmentSelected(environmentName)
+        onSelect={(selectedId) => {
+          handleEnvironmentSelected(selectedId)
         }}
       />
       {/* /thread only rebinds the pane; no Thread is mutated. */}
@@ -332,15 +377,7 @@ export function BlankComposerPane({
         items={threadPicker.items.map((thread) => toThreadSelectionItem(thread, threadSort))}
         sort={threadSort}
         onSortChange={onThreadSortChange}
-        scope={threadPicker.scope}
-        onScopeChange={threadPicker.setScope}
         loading={threadPicker.isLoading}
-        hasMore={threadPicker.hasNextPage}
-        loadingMore={threadPicker.isFetchingNextPage}
-        onLoadMore={() => {
-          void threadPicker.loadMore()
-        }}
-        selectionPending={threadAssociationPending}
         emptyText={t('ai.chat.noThreads')}
         onClose={() => setThreadModalOpen(false)}
         onSelect={selectThread}

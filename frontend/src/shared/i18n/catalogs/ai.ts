@@ -21,10 +21,6 @@ export const aiCatalog = {
     'en-US': 'Environment',
     'zh-CN': '环境',
   },
-  'ai.nav.setting': {
-    'en-US': 'Setting',
-    'zh-CN': '设置',
-  },
   'ai.catalog.resourceType.agent': {
     'en-US': 'Agent',
     'zh-CN': 'Agent',
@@ -65,9 +61,45 @@ export const aiCatalog = {
     'en-US': 'Loading Environment',
     'zh-CN': '正在加载 Environment',
   },
-  'ai.common.loadingSettings': {
-    'en-US': 'Loading settings',
-    'zh-CN': '正在加载设置',
+  'ai.chat.running': {
+    'en-US': 'RUNNING',
+    'zh-CN': '运行中',
+  },
+  'ai.chat.history.confirmDiscardDraft': {
+    'en-US': 'The pane has unsent edits. Relocate anyway and discard them?',
+    'zh-CN': '面板有未发送的修改，仍要重定位并丢弃这些修改吗？',
+  },
+  'ai.runtime.approval.title': {
+    'en-US': 'Tool approval',
+    'zh-CN': '工具审批',
+  },
+  'ai.runtime.approval.requested': {
+    'en-US': 'This tool call requires approval:',
+    'zh-CN': '此工具调用需要审批：',
+  },
+  'ai.runtime.approval.allow': {
+    'en-US': 'Allow',
+    'zh-CN': '允许',
+  },
+  'ai.runtime.approval.deny': {
+    'en-US': 'Deny',
+    'zh-CN': '拒绝',
+  },
+  'ai.runtime.approval.allowed': {
+    'en-US': 'Allowed',
+    'zh-CN': '已允许',
+  },
+  'ai.runtime.approval.denied': {
+    'en-US': 'Denied',
+    'zh-CN': '已拒绝',
+  },
+  'ai.runtime.action.approvalFailed': {
+    'en-US': 'approve the tool call',
+    'zh-CN': '审批工具调用',
+  },
+  'ai.runtime.action.agentUnresolvable': {
+    'en-US': 'The agent {agent} has no resolvable model; pick another agent.',
+    'zh-CN': 'Agent {agent} 没有可解析的模型，请选择其他 Agent。',
   },
   'ai.common.loadingResourceEditor': {
     'en-US': 'Loading resource editor',
@@ -1281,10 +1313,6 @@ export const aiCatalog = {
     'en-US': 'First send failed',
     'zh-CN': '首发失败',
   },
-  'ai.runtime.action.associateThreadFailed': {
-    'en-US': 'Failed to associate Thread',
-    'zh-CN': '关联 Thread 失败',
-  },
   'ai.runtime.action.updateAgentFailed': {
     'en-US': 'Failed to update Agent',
     'zh-CN': '更新 Agent 失败',
@@ -1356,125 +1384,5 @@ export const aiCatalog = {
   'ai.environment.skills': {
     'en-US': 'Skills',
     'zh-CN': 'Skills',
-  },
-  'ai.settings.loadingRetry': {
-    'en-US': 'Loading retry policy',
-    'zh-CN': '正在加载重试策略',
-  },
-  'ai.settings.retryLoadFailed': {
-    'en-US': 'Failed to load retry policy',
-    'zh-CN': '加载重试策略失败',
-  },
-  'ai.settings.retryTitle': {
-    'en-US': 'Automatic retry',
-    'zh-CN': '自动重试',
-  },
-  'ai.settings.retryDescription': {
-    'en-US': 'Applies only to transient Provider failures such as network, rate-limit, and server errors. Authentication, billing, parameter errors, and cancellation stop immediately.',
-    'zh-CN': '仅对网络、限流和服务端等瞬态 Provider 故障生效。鉴权、计费、参数错误和取消会立即停止。',
-  },
-  'ai.settings.maxRetries': {
-    'en-US': 'Maximum retries',
-    'zh-CN': '最大重试次数',
-  },
-  'ai.settings.maxRetriesHint': {
-    'en-US': 'Does not include the initial request; 0 disables automatic retry.',
-    'zh-CN': '不包含首次请求；设为 0 时不自动重试。',
-  },
-  'ai.settings.backoffStrategy': {
-    'en-US': 'Backoff strategy',
-    'zh-CN': '退避策略',
-  },
-  'ai.settings.exponentialBackoff': {
-    'en-US': 'Exponential backoff',
-    'zh-CN': '指数退避',
-  },
-  'ai.settings.fixedInterval': {
-    'en-US': 'Fixed interval',
-    'zh-CN': '固定间隔',
-  },
-  'ai.settings.baseDelay': {
-    'en-US': 'Base interval (seconds)',
-    'zh-CN': '基础间隔（秒）',
-  },
-  'ai.settings.maxDelay': {
-    'en-US': 'Maximum interval (seconds)',
-    'zh-CN': '最大间隔（秒）',
-  },
-  'ai.settings.fixedExplanation': {
-    'en-US': 'Wait {{seconds}} seconds after each failure.',
-    'zh-CN': '每次失败后固定等待 {{seconds}} 秒。',
-  },
-  'ai.settings.exponentialExplanation': {
-    'en-US': 'The wait doubles after each failure, up to {{seconds}} seconds.',
-    'zh-CN': '等待间隔按 2 倍递增，最大不超过 {{seconds}} 秒。',
-  },
-  'ai.settings.saving': {
-    'en-US': 'Saving…',
-    'zh-CN': '保存中…',
-  },
-  'ai.settings.saveRetry': {
-    'en-US': 'Save retry policy',
-    'zh-CN': '保存重试策略',
-  },
-  'ai.settings.saveRetryFailed': {
-    'en-US': 'Failed to save retry policy',
-    'zh-CN': '保存重试策略失败',
-  },
-  'ai.settings.invalidInteger': {
-    'en-US': '{{label}} must be an integer',
-    'zh-CN': '{{label}}必须是整数',
-  },
-  'ai.settings.integerRange': {
-    'en-US': '{{label}} must be between {{min}} and {{max}}',
-    'zh-CN': '{{label}}必须在 {{min}} 到 {{max}} 之间',
-  },
-  'ai.settings.invalidSeconds': {
-    'en-US': '{{label}} must be a number of seconds with at most three decimal places',
-    'zh-CN': '{{label}}必须是秒数，最多保留三位小数',
-  },
-  'ai.settings.secondsRange': {
-    'en-US': '{{label}} must be between 1 and 60 seconds',
-    'zh-CN': '{{label}}必须在 1 到 60 秒之间',
-  },
-  'ai.settings.maxLessThanBase': {
-    'en-US': 'Maximum interval cannot be less than the base interval',
-    'zh-CN': '最大间隔不能小于基础间隔',
-  },
-  'ai.settings.loadingRealtime': {
-    'en-US': 'Loading realtime stream settings',
-    'zh-CN': '正在加载实时流设置',
-  },
-  'ai.settings.realtimeLoadFailed': {
-    'en-US': 'Failed to load realtime stream settings',
-    'zh-CN': '加载实时流设置失败',
-  },
-  'ai.settings.realtimeTitle': {
-    'en-US': 'Realtime stream cache',
-    'zh-CN': '实时流缓存',
-  },
-  'ai.settings.realtimeDescription': {
-    'en-US': 'Controls how many realtime events each Thread keeps in Redis. This is a short-lived projection and does not affect PostgreSQL history.',
-    'zh-CN': '控制每个 Thread 在 Redis 中最多保留多少条 realtime event；它是短期投影，不影响 PostgreSQL 历史。',
-  },
-  'ai.settings.maxEvents': {
-    'en-US': 'Maximum retained events',
-    'zh-CN': '最大保留事件数',
-  },
-  'ai.settings.maxEventsHint': {
-    'en-US': 'A larger value raises the Redis memory ceiling for each Thread.',
-    'zh-CN': '数值越大，单个 Thread 的 Redis 内存上限越高。',
-  },
-  'ai.settings.realtimeHelp': {
-    'en-US': 'After saving, the next write to any existing or new Thread Stream in this instance uses the value; other instances refresh within about one second. Lowering trims on the next write; raising does not restore trimmed events. No TTL is set and idle Streams are not actively processed.',
-    'zh-CN': '保存后在本实例的任意既有或新 Thread Stream 下一次写入生效；其他实例最多约一秒刷新。调小会在下一次写入裁剪；调大不会恢复已裁掉的事件。当前不设置 TTL，也不会主动处理空闲 Stream。',
-  },
-  'ai.settings.saveRealtime': {
-    'en-US': 'Save realtime stream settings',
-    'zh-CN': '保存实时流设置',
-  },
-  'ai.settings.saveRealtimeFailed': {
-    'en-US': 'Failed to save realtime stream settings',
-    'zh-CN': '保存实时流设置失败',
   },
 } satisfies LocaleCatalog

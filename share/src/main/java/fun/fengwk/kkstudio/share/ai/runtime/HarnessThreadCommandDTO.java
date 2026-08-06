@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -19,7 +20,12 @@ public class HarnessThreadCommandDTO {
   private String state;
   private String clientCommandId;
   private String payloadJson;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String consumedTurnStartEntryId;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Instant cancelledAt;
+
   private Instant createTime;
 }

@@ -5,9 +5,12 @@ import {
   type ThreadPanelActivityInput,
   type ThreadPanelComposerInput,
   type ThreadPanelTranscriptInput,
-  type ThreadUsageSummary,
 } from '@/features/ai/runtime/thread-panel'
-import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueMessage,
+  QueuedThreadMessage,
+  ToolDialogueMessage,
+} from '@/features/ai/runtime/thread-timeline-types'
 
 /** Stable runtime/model identity surfaced in the footer; fields may be absent while a pane is blank. */
 export interface ChatPanelLabels {
@@ -15,7 +18,7 @@ export interface ChatPanelLabels {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentName?: string | null
+  environmentDisplayName?: string | null
   contextWindow?: number
 }
 
@@ -29,15 +32,17 @@ export interface ChatPanelTranscriptInput {
   bodyRef: RefObject<HTMLDivElement | null>
   loading: boolean
   error: unknown
+  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  approvalPending?: boolean
 }
 
 /** Composer call sites and forwarded callbacks. */
 export type ChatPanelComposerInput = ThreadPanelComposerInput
 
-/** Narrow footer data; callers adapt backend DTOs into ThreadUsageSummary outside the panel. */
+/** Narrow footer data: runtime identity + click targets. Aggregate usage is not on the snapshot. */
 export interface ChatPanelFooterInput {
   yoloEnabled?: boolean
-  usage?: ThreadUsageSummary
   onAgentClick?: () => void
   onModelClick?: () => void
   onVariantClick?: () => void
@@ -74,6 +79,8 @@ export function ChatPanel({
     loading: transcript.loading,
     error: transcript.error,
     bodyRef: transcript.bodyRef,
+    onDecideApproval: transcript.onDecideApproval,
+    approvalPending: transcript.approvalPending,
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
@@ -92,10 +99,8 @@ export function ChatPanel({
             providerName={labels.providerName}
             modelName={labels.modelName}
             variantName={labels.variantName}
-            environmentName={labels.environmentName}
-            contextWindow={labels.contextWindow}
+            environmentDisplayName={labels.environmentDisplayName}
             yoloEnabled={footer.yoloEnabled}
-            usage={footer.usage}
             onAgentClick={footer.onAgentClick}
             onModelClick={footer.onModelClick}
             onVariantClick={footer.onVariantClick}

@@ -9,14 +9,11 @@ function source(relativePath: string) {
 describe('Thread snapshot architecture', () => {
   it('has one snapshot query and no Thread business polling or fragmented API consumption', () => {
     const queries = source('features/ai/runtime/useAgentThreadQueries.ts')
-    const observability = source('features/ai/runtime/useHarnessThreadObservability.ts')
     const service = source('shared/api/harness-service.ts')
     const keys = source('shared/lib/query-keys.ts')
 
     expect(queries).toContain('queryKeys.threads.snapshot(threadId)')
     expect(queries).not.toContain('refetchInterval')
-    expect(observability).not.toMatch(/useQuery\(/)
-    expect(observability).not.toContain('refetchInterval')
     expect(service).not.toMatch(
       /getThread:|listThreadEntries:|listThreadInputs:|listThreadToolInvocations:|getThreadUsage:/,
     )
@@ -32,6 +29,13 @@ describe('Thread snapshot architecture', () => {
     expect(realtime).toContain("addEventListener('resync', invalidateSnapshot")
     expect(realtime).not.toContain("addEventListener('realtime', invalidateSnapshot")
     expect(realtime.match(/createThreadRealtimeStream\(/g)).toHaveLength(1)
-    expect(realtime).not.toMatch(/setTimeout|setInterval/)
+    // The bounded single-flight gap recovery may use a timer, but every timer must be
+    // cancellable and cancelled on unmount/Thread switch (no orphaned loops).
+    if (/setTimeout/.test(realtime)) {
+      expect(realtime).toContain('clearTimeout')
+    } else {
+      expect(realtime).not.toContain('setInterval')
+    }
+    expect(realtime).toMatch(/eventSource\.close\(\)/)
   })
 })

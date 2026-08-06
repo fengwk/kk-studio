@@ -41,13 +41,11 @@ export function ChatWorkspacePage() {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
-  const [settingsMutationPending, setSettingsMutationPending] = useState(false)
   const [authoritativeChat, setAuthoritativeChat] = useState<{
     chatId: string
     chat: ChatDTO
   } | null>(null)
   const authoritativeChatRef = useRef<{ chatId: string; chat: ChatDTO } | null>(null)
-  const settingsMutationLockRef = useRef(false)
 
   useEffect(() => {
     setPaneState(loadChatPaneState(chatId))
@@ -165,16 +163,10 @@ export function ChatWorkspacePage() {
       yoloEnabled?: boolean
     },
   ) {
-    // React state has not rendered yet within the same tick, so this ref is the actual mutex.
-    if (settingsMutationLockRef.current) {
-      return
-    }
     const chat = currentChat()
     if (!chat) {
       return
     }
-    settingsMutationLockRef.current = true
-    setSettingsMutationPending(true)
     try {
       await updateChatMutation.mutateAsync({
         ...patch,
@@ -190,9 +182,6 @@ export function ChatWorkspacePage() {
         }
       }
       throw error
-    } finally {
-      settingsMutationLockRef.current = false
-      setSettingsMutationPending(false)
     }
   }
 
@@ -206,10 +195,6 @@ export function ChatWorkspacePage() {
 
   function setThread(paneId: string, threadId: string | null) {
     setPaneState((current) => updatePaneThread(current, paneId, threadId))
-  }
-
-  function setSessionSort(sort: PaneSortPreference) {
-    setPaneState((current) => ({ ...current, sessionSort: sort }))
   }
 
   function setThreadSort(sort: PaneSortPreference) {
@@ -240,7 +225,6 @@ export function ChatWorkspacePage() {
   }
   const title = chat.title || chat.id
   const visiblePanes = visibleChatPanes(paneState)
-  const settingsPending = settingsMutationPending || updateChatMutation.isPending
 
   return (
     <section className="chat-workspace screen active">
@@ -274,19 +258,15 @@ export function ChatWorkspacePage() {
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
         {visiblePanes.map((pane) => (
           <ChatWorkspacePane
-            key={pane.id}
+            key={`${chat.id}:${pane.id}`}
             chat={chat}
             agents={agents}
             environments={environments}
             pane={pane}
-            settingsPending={settingsPending}
-            isSettingsMutationLocked={() => settingsMutationLockRef.current}
             focused={paneState.focusedPaneId === pane.id}
-            sessionSort={paneState.sessionSort}
             threadSort={paneState.threadSort}
             onFocus={() => setFocused(pane.id)}
             onThreadChange={(threadId) => setThread(pane.id, threadId)}
-            onSessionSortChange={setSessionSort}
             onThreadSortChange={setThreadSort}
             onAgentChange={async (agentName) => {
               await updateChatSettings({ agentName })

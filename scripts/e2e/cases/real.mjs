@@ -1,11 +1,19 @@
-import { assert, envelopeData, pageResults, sleep, cid } from '../lib/http.mjs'
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { assert, envelopeData, sleep, cid } from '../lib/http.mjs'
 import {
+  approveToolInvocation,
+  branchSettingsOf,
+  createChat,
   createChatThread,
-  createConfiguredChatThread,
+  enqueueCommands,
   getThread,
   getThreadSnapshot,
+  listEnvironments,
   snapshotEntries,
-  rebindWhenQuiescent,
+  stopThread,
+  updateThreadHead,
+  userMessageCommand,
   waitForModelTextDeltaAfterSseConnected,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
@@ -14,59 +22,91 @@ import { registerCase, getCase } from '../lib/registry.mjs'
 registerCase({
   id: 'real.text_turn',
   level: 'L2',
-  title: '真实 Provider 文本轮次成功并记账',
+  title: '真实 Provider 文本轮次成功并持久化',
   requires: ['real'],
-  docs: '仅 minimax/MiniMax-M2.7：Chat 原子建 Thread 后发消息等到 IDLE；assistant entry；usage>0',
+  docs: '仅 minimax/MiniMax-M2.7：完整 branchSettings 建 Thread 后入队 USER_MESSAGE 等到 IDLE；durable TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED) 边界；IDLE 后快照 modelInvocation=null（快照只暴露 active invocation，不是历史列表）；queuedCommands 清空',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
       ctx.vars.provider?.configured && ctx.vars.provider?.baseUrl,
       'minimax requires TEST_MINIMAX_BASE_URL and TEST_MINIMAX_API_KEY',
     )
-    const { session, thread } = await createConfiguredChatThread(ctx, {
-      agentName: ctx.vars.agent.name,
+    const { snapshot } = await createConfiguredChatThread(ctx, {
+      agent: ctx.vars.agent,
+      model: modelSelectionOf(ctx),
       title: `e2e-real-${cid().slice(0, 8)}`,
     })
-    const tid = thread.threadId
-    await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-      ...defaultTurnSettings(ctx),
-      content: '只回复单词 OK，不要调用工具，不要解释。',
-      clientMessageId: cid(),
-      expectedExecutionEpoch: Number(thread.executionEpoch),
+    const tid = snapshot.thread.threadId
+    const marker = `只回复单词 OK，不要调用工具，不要解释。${cid().slice(0, 6)}`
+    const commandsDto = await enqueueCommands(ctx, tid, {
+      expectedHeadEntryId: snapshot.thread.headEntryId,
+      expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+      commands: [userMessageCommand(marker, cid())],
     })
-    let finalStatus = null
-    for (let i = 0; i < 90; i++) {
-      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
-      const thread = envelopeData(json)
-      finalStatus = thread.status
-      if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
-      await sleep(1000)
-    }
-    assert(finalStatus === 'IDLE', `expected IDLE, got ${finalStatus}`)
+    assert(commandsDto[0].type === 'USER_MESSAGE', JSON.stringify(commandsDto))
+    const finalThread = await waitForQuiescentThread(ctx, tid, {
+      timeoutMs: 180_000,
+      intervalMs: 500,
+    })
+    assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const threadSnapshot = await getThreadSnapshot(ctx, tid)
-    const assistantEntries = []
-    for (const entry of threadSnapshot.entries || []) {
-      if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') continue
-      const payload = JSON.parse(entry.payloadJson || '{}')
-      if (String(payload.message?.role || '').toUpperCase() === 'ASSISTANT') assistantEntries.push(entry)
-    }
+    const entries = threadSnapshot.entries || []
+    const assistantEntries = normalAssistantEntries(entries)
     assert(assistantEntries.length > 0, 'no assistant entry')
-    const usage = threadSnapshot.usage
-    assert(Number(usage.recordCount || 0) >= 1, JSON.stringify(usage))
+    const assistantEntry = assistantEntries.at(-1)
+    const text = messageText(assistantEntry)
+    assert(text.trim().length > 0, `assistant reply empty: ${JSON.stringify(entries)}`)
+    // 快照只暴露 active model invocation：IDLE 后必须为 null（不存在 modelInvocations[] 历史列表）。
+    assert(
+      threadSnapshot.modelInvocation === null,
+      `IDLE snapshot must expose no active model invocation: ${JSON.stringify(threadSnapshot.modelInvocation)}`,
+    )
+    assert(
+      !('modelInvocations' in threadSnapshot),
+      `snapshot DTO has no modelInvocations[]: ${JSON.stringify(Object.keys(threadSnapshot))}`,
+    )
+    assert(
+      (threadSnapshot.queuedCommands || []).length === 0,
+      `commands must be consumed: ${JSON.stringify(threadSnapshot.queuedCommands)}`,
+    )
+    // Durable turn boundary (TurnPlanBuilder fact): TURN_START(INPUT) is appended FIRST, then
+    // the USER/CUSTOM message entries, then the assistant MESSAGE, then TURN_END.
+    const userIndex = findUserEntryIndex(entries, marker)
+    const turnStartIndex = entries.findIndex((entry) => entryType(entry) === 'TURN_START')
+    const assistantIndex = entries.findIndex(
+      (entry) => String(entry.entryId) === String(assistantEntry.entryId),
+    )
+    const turnEndIndex = entries.findIndex((entry) => entryType(entry) === 'TURN_END')
+    assert(
+      userIndex >= 0
+        && turnStartIndex >= 0
+        && turnStartIndex < userIndex
+        && userIndex < assistantIndex
+        && assistantIndex < turnEndIndex,
+      `expected TURN_START -> USER -> assistant -> TURN_END: ${JSON.stringify(entries)}`,
+    )
+    const turnEndPayload = parseEntryPayload(entries[turnEndIndex])
+    assert(
+      turnEndPayload.outcome === 'COMPLETED'
+        && turnEndPayload.continueModel === false
+        && turnEndPayload.reason == null
+        && turnEndPayload.closeRequestId == null,
+      `expected COMPLETED TURN_END: ${JSON.stringify(turnEndPayload)}`,
+    )
     ctx.vars.realThreadId = tid
-    ctx.vars.realSessionId = session.sessionId
-    ctx.vars.assistantEntryId = String(assistantEntries.at(-1).entryId)
-    ctx.writeArtifact('usage.json', JSON.stringify(usage, null, 2))
+    ctx.vars.realSessionId = snapshot.thread.sessionId
+    ctx.vars.assistantEntryId = String(assistantEntry.entryId)
+    ctx.vars.turnEndEntryId = String(entries[turnEndIndex].entryId)
+    ctx.writeArtifact('real-turn.json', JSON.stringify(threadSnapshot, null, 2))
   },
 })
 
 registerCase({
-  id: 'real.queued_input_batch',
+  id: 'real.queued_command_batch',
   level: 'L2',
-  title: '运行中连续入队消息在下一 turn 合并收割',
+  title: '运行中一次原子 batch 入队两条消息合并收割',
   requires: ['real'],
-  docs:
-    '首轮流式执行期间连续入队两条 USER_MESSAGE；下一 turn 同批 APPLIED，只创建一个 ModelInvocation 和一个 assistant MESSAGE',
+  docs: '首轮流式执行期间用最新快照 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant MESSAGE；queuedCommands 最终清空',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -77,51 +117,59 @@ registerCase({
     const initialMarker = `QUEUE-INITIAL-${cid()}`
     const firstMarker = `QUEUE-FIRST-${cid()}`
     const secondMarker = `QUEUE-SECOND-${cid()}`
-    const { thread } = await createConfiguredChatThread(ctx, {
-      agentName: ctx.vars.agent.name,
+    const { snapshot } = await createConfiguredChatThread(ctx, {
+      agent: ctx.vars.agent,
+      model: modelSelectionOf(ctx),
       title: `e2e-queue-batch-${cid().slice(0, 8)}`,
     })
-    const tid = String(thread.threadId)
-    const epoch = Number(thread.executionEpoch)
+    const tid = String(snapshot.thread.threadId)
     const { signal: firstDelta, startResult } =
       await waitForModelTextDeltaAfterSseConnected(
         ctx,
         tid,
         () =>
-          ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-            ...defaultTurnSettings(ctx),
-            content:
-              `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
-              + '不要总结，不要提前结束。',
-            clientMessageId: cid(),
-            expectedExecutionEpoch: epoch,
+          enqueueCommands(ctx, tid, {
+            expectedHeadEntryId: snapshot.thread.headEntryId,
+            expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+            commands: [
+              userMessageCommand(
+                `${initialMarker}\n不要调用工具。立即逐行输出 80 行短句，每行以“批次等待”开头并带连续编号；`
+                  + '不要总结，不要提前结束。',
+                cid(),
+              ),
+            ],
           }),
         { timeoutMs: 90_000 },
       )
-    assert(startResult.status === 202, `initial message status ${startResult.status}`)
+    assert(
+      Array.isArray(startResult) && startResult.length === 1 && startResult[0].type === 'USER_MESSAGE',
+      `initial message batch: ${JSON.stringify(startResult)}`,
+    )
     assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
 
-    const firstQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-      ...defaultTurnSettings(ctx),
-      content: `${firstMarker}\n这是下一 turn 队列批次的第一条消息。`,
-      clientMessageId: cid(),
-      expectedExecutionEpoch: epoch,
+    // 运行中入队：一次原子 batch 两条 USER_MESSAGE。cursor 在入队时推进（消费不推进），
+    // 运行中快照 cursor 必然有效；sequence 连续由同一 batch 保证。
+    const running = await getThreadSnapshot(ctx, tid)
+    const queued = await enqueueCommands(ctx, tid, {
+      expectedHeadEntryId: running.thread.headEntryId,
+      expectedNextCommandSequence: running.thread.nextCommandSequence,
+      commands: [
+        userMessageCommand(`${firstMarker}\n这是下一 turn 队列批次的第一条消息。`, cid()),
+        userMessageCommand(`${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`, cid()),
+      ],
     })
-    const secondQueued = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-      ...defaultTurnSettings(ctx),
-      content: `${secondMarker}\n结合前一条消息，只回复单词 BATCHED，不要解释。`,
-      clientMessageId: cid(),
-      expectedExecutionEpoch: epoch,
-    })
-    assert(firstQueued.status === 202, `first queued message status ${firstQueued.status}`)
-    assert(secondQueued.status === 202, `second queued message status ${secondQueued.status}`)
+    assert(queued.length === 2, JSON.stringify(queued))
+    assert(
+      Number(queued[1].sequence) === Number(queued[0].sequence) + 1,
+      `batch sequences must be contiguous: ${JSON.stringify(queued)}`,
+    )
 
     const finalThread = await waitForQuiescentThread(ctx, tid, {
       timeoutMs: 180_000,
       intervalMs: 500,
     })
-    const snapshot = await getThreadSnapshot(ctx, tid)
-    const entries = snapshot.entries || []
+    const finalSnapshot = await getThreadSnapshot(ctx, tid)
+    const entries = finalSnapshot.entries || []
     const initialUserIndex = findUserEntryIndex(entries, initialMarker)
     const firstUserIndex = findUserEntryIndex(entries, firstMarker)
     const secondUserIndex = findUserEntryIndex(entries, secondMarker)
@@ -144,37 +192,14 @@ registerCase({
       && secondUserIndex < batchedAssistantIndex,
       `expected initial USER -> assistant -> queued USER -> queued USER -> one assistant: ${JSON.stringify(entries)}`,
     )
-
-    const inputs = snapshot.inputs || []
-    const queuedBatchInputs = inputs.filter((input) => {
-      const payload = String(input.payloadJson || '')
-      return payload.includes(firstMarker) || payload.includes(secondMarker)
-    })
+    // 全部命令已消费，queuedCommands 清空。
     assert(
-      queuedBatchInputs.length === 2
-      && queuedBatchInputs.every((input) => input.status === 'APPLIED'),
-      `queued batch inputs were not both APPLIED: ${JSON.stringify(inputs)}`,
-    )
-    const modelInvocations = snapshot.modelInvocations || []
-    assert(
-      modelInvocations.length === 2,
-      `expected one initial and one batched ModelInvocation: ${JSON.stringify(modelInvocations)}`,
-    )
-    const secondUserEntry = entries[secondUserIndex]
-    assert(
-      modelInvocations.some(
-        (invocation) =>
-          String(invocation.sourceHeadEntryId) === String(secondUserEntry.entryId),
-      ),
-      `batched invocation must use the final queued USER as source head: ${JSON.stringify(modelInvocations)}`,
+      (finalSnapshot.queuedCommands || []).length === 0,
+      `queued commands must be consumed: ${JSON.stringify(finalSnapshot.queuedCommands)}`,
     )
     ctx.writeArtifact(
-      'queued-input-batch.json',
-      JSON.stringify(
-        { firstDelta, finalThread, entries, inputs, modelInvocations },
-        null,
-        2,
-      ),
+      'queued-command-batch.json',
+      JSON.stringify({ firstDelta, finalThread, entries }, null, 2),
     )
   },
 })
@@ -182,10 +207,9 @@ registerCase({
 registerCase({
   id: 'real.stop_partial_continue',
   level: 'L2',
-  title: '真实流式 /stop 持久化 partial 并继续新一轮',
+  title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs:
-    '仅 minimax/MiniMax-M2.7：首个非空文本 delta 后 stop；durable ASSISTANT_ABORTED 关闭旧 debt；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '仅 minimax/MiniMax-M2.7：首个非空文本 delta 后 stop（stopRequestId + revision CAS）=> status STOPPED、revision+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedRevision exact replay => status REPLAYED、同 stoppedTurnEndEntryId、revision 不再变化；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     await requireRealMiniMaxM27(ctx)
     assert(
@@ -201,47 +225,52 @@ registerCase({
       + '不要总结，不要提前结束。'
     const followUpPrompt =
       `${followUpMarker}\n只回复单词 CONTINUED，不要调用工具，不要解释。`
-    const { thread } = await createConfiguredChatThread(ctx, {
-      agentName: ctx.vars.agent.name,
+    const { snapshot } = await createConfiguredChatThread(ctx, {
+      agent: ctx.vars.agent,
+      model: modelSelectionOf(ctx),
       title: `e2e-stop-partial-${cid().slice(0, 8)}`,
       yoloEnabled: false,
     })
-    const tid = String(thread.threadId)
+    const tid = String(snapshot.thread.threadId)
 
     const { signal: firstDelta, startResult } =
       await waitForModelTextDeltaAfterSseConnected(
         ctx,
         tid,
         () =>
-          ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-            ...defaultTurnSettings(ctx),
-            content: initialPrompt,
-            clientMessageId: cid(),
-            expectedExecutionEpoch: Number(thread.executionEpoch),
+          enqueueCommands(ctx, tid, {
+            expectedHeadEntryId: snapshot.thread.headEntryId,
+            expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+            commands: [userMessageCommand(initialPrompt, cid())],
           }),
         { timeoutMs: 90_000 },
       )
-    assert(startResult.status === 202, `initial message status ${startResult.status}`)
+    // startResult 是 command DTO 数组（202 accepted），不是 {status}。
+    assert(
+      Array.isArray(startResult) && startResult.length === 1 && startResult[0].type === 'USER_MESSAGE',
+      `initial message batch: ${JSON.stringify(startResult)}`,
+    )
     assert(firstDelta.text.trim(), `expected non-empty text delta: ${JSON.stringify(firstDelta)}`)
 
     const beforeStop = await getThread(ctx, tid)
-    const { status: stopStatus, json: stopJson } = await ctx.call(
-      'POST',
-      `/api/ai/runtime/threads/${tid}/stop`,
-      { expectedExecutionEpoch: Number(beforeStop.executionEpoch) },
-    )
-    assert(stopStatus === 200, `stop status ${stopStatus}: ${JSON.stringify(stopJson)}`)
-    const stop = envelopeData(stopJson)
+    const stopRequestId = cid()
+    const expectedRevision = beforeStop.revision
+    const stop = await stopThread(ctx, tid, {
+      stopRequestId,
+      expectedRevision,
+    })
+    assert(stop.status === 'STOPPED', JSON.stringify(stop))
     assert(
-      Number(stop.executionEpoch) === Number(beforeStop.executionEpoch) + 1,
-      JSON.stringify({ beforeStop, stop }),
+      stop.stoppedTurnEndEntryId != null && /^[1-9]\d*$/.test(String(stop.stoppedTurnEndEntryId)),
+      JSON.stringify(stop),
+    )
+    assert(
+      Number(stop.thread.revision) === Number(beforeStop.revision) + 1,
+      `active stop must bump revision by one: ${JSON.stringify({ beforeStop, stop })}`,
     )
 
-    const stopped = await getThread(ctx, tid)
     const entriesAfterStop = await snapshotEntries(ctx, tid)
-    const abortedEntries = entriesAfterStop.filter(
-      (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ABORTED',
-    )
+    const abortedEntries = entriesAfterStop.filter((entry) => entryType(entry) === 'ASSISTANT_ABORTED')
     assert(
       abortedEntries.length === 1,
       `expected exactly one ASSISTANT_ABORTED: ${JSON.stringify(entriesAfterStop)}`,
@@ -249,9 +278,7 @@ registerCase({
     const abortedEntry = abortedEntries[0]
     assertAssistantAbortedEntry(abortedEntry)
     assert(
-      !entriesAfterStop.some(
-        (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ERROR',
-      ),
+      !entriesAfterStop.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
       `expected partial aborted barrier, not ASSISTANT_ERROR: ${JSON.stringify(entriesAfterStop)}`,
     )
     assert(
@@ -267,26 +294,41 @@ registerCase({
       abortedIndex > initialUserIndex,
       `ASSISTANT_ABORTED must follow initial USER: ${JSON.stringify(entriesAfterStop)}`,
     )
+
+    // Exact replay：同 stopRequestId + 原 expectedRevision。StopControl.findReplay 在 revision CAS
+    // 之前按 durableKey 命中 TURN_END => REPLAYED，返回同一 stoppedTurnEndEntryId、不再 bump。
+    const replay = await stopThread(ctx, tid, {
+      stopRequestId,
+      expectedRevision,
+    })
+    assert(replay.status === 'REPLAYED', JSON.stringify(replay))
+    assert(
+      String(replay.stoppedTurnEndEntryId) === String(stop.stoppedTurnEndEntryId),
+      `replay must identify the same stopped TURN_END: ${JSON.stringify({ stop, replay })}`,
+    )
+    assert(replay.cancelledCommandCount === 0, JSON.stringify(replay))
+    assert(
+      String(replay.thread.headEntryId) === String(stop.thread.headEntryId)
+        && String(replay.thread.revision) === String(stop.thread.revision),
+      `replay must not mutate the Thread: ${JSON.stringify({ stop, replay })}`,
+    )
     ctx.writeArtifact(
       'stop-partial-after-stop.json',
-      JSON.stringify({ firstDelta, beforeStop, stop, stopped, entriesAfterStop }, null, 2),
+      JSON.stringify({ firstDelta, beforeStop, stop, replay, entriesAfterStop }, null, 2),
     )
 
-    const { status: followUpStatus } = await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-      ...defaultTurnSettings(ctx),
-      content: followUpPrompt,
-      clientMessageId: cid(),
-      expectedExecutionEpoch: Number(stopped.executionEpoch),
+    const followUp = await enqueueCommands(ctx, tid, {
+      expectedHeadEntryId: stop.thread.headEntryId,
+      expectedNextCommandSequence: stop.thread.nextCommandSequence,
+      commands: [userMessageCommand(followUpPrompt, cid())],
     })
-    assert(followUpStatus === 202, `follow-up status ${followUpStatus}`)
+    assert(followUp.length === 1, `follow-up batch: ${JSON.stringify(followUp)}`)
     const finalThread = await waitForQuiescentThread(ctx, tid, {
       timeoutMs: 120_000,
       intervalMs: 500,
     })
     const finalEntries = await snapshotEntries(ctx, tid)
-    const finalAbortedEntries = finalEntries.filter(
-      (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ABORTED',
-    )
+    const finalAbortedEntries = finalEntries.filter((entry) => entryType(entry) === 'ASSISTANT_ABORTED')
     assert(
       finalAbortedEntries.length === 1
       && String(finalAbortedEntries[0].entryId) === String(abortedEntry.entryId),
@@ -314,15 +356,13 @@ registerCase({
       `expected USER -> ASSISTANT_ABORTED -> follow-up USER -> assistant MESSAGE: ${JSON.stringify(finalEntries)}`,
     )
     assert(
-      !finalEntries.some(
-        (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ERROR',
-      ),
+      !finalEntries.some((entry) => entryType(entry) === 'ASSISTANT_ERROR'),
       `unexpected cancellation barrier after durable partial: ${JSON.stringify(finalEntries)}`,
     )
     ctx.writeArtifact(
       'stop-partial-continue.json',
       JSON.stringify(
-        { firstDelta, beforeStop, stop, stopped, entriesAfterStop, finalThread, finalEntries },
+        { firstDelta, beforeStop, stop, replay, entriesAfterStop, finalThread, finalEntries },
         null,
         2,
       ),
@@ -331,60 +371,78 @@ registerCase({
 })
 
 registerCase({
-  id: 'branch.path_usage',
+  id: 'branch.same_session_move_head',
   level: 'L3',
-  title: '分支 Thread usage 路径语义',
+  title: '同 Session 分支：同一 Thread head 回退到历史 assistant 后继续',
   requires: ['real', 'branch'],
-  docs: '另一条 Thread rebind 到历史 assistant Entry 后再发一轮；session 去重 vs thread 可重复计共享前缀',
+  docs: '在 real.text_turn 的同一 Thread 上，从 TURN_END head 回退到该 Session 内历史 assistant Entry：sessionId 不变、revision+1、root-to-head 路径切换到分支并继续产生分支 turn（不创建另一 Thread/Session）',
   async run(ctx) {
     if (!ctx.vars.realThreadId) await getCase('real.text_turn').run(ctx)
     const mainTid = ctx.vars.realThreadId
     const sessionId = ctx.vars.realSessionId
-    // Branching is just another Thread whose head is relocated onto a historical Entry.
-    const { thread: spare } = await createConfiguredChatThread(ctx, {
-      agentName: ctx.vars.agent.name,
-      title: `e2e-branch-${cid().slice(0, 8)}`,
+    const assistantEntryId = ctx.vars.assistantEntryId
+    // 同一 Thread：head 当前在 TURN_END，回退到同 Session 历史 assistant MESSAGE Entry。
+    const current = await getThread(ctx, mainTid)
+    assert(String(current.sessionId) === String(sessionId), JSON.stringify(current))
+    const moved = await updateThreadHead(ctx, mainTid, {
+      targetEntryId: assistantEntryId,
+      expectedRevision: current.revision,
     })
-    const branched = await rebindWhenQuiescent(ctx, spare.threadId, ctx.vars.assistantEntryId)
-    const branchTid = branched.threadId
-    assert(branched.headEntryId === String(ctx.vars.assistantEntryId), JSON.stringify(branched))
-    await ctx.call('POST', `/api/ai/runtime/threads/${branchTid}/messages`, {
-      ...defaultTurnSettings(ctx),
-      content: '在分支上只回复单词 BRANCH，不要调用工具。',
-      clientMessageId: cid(),
-      expectedExecutionEpoch: Number(branched.executionEpoch),
+    assert(String(moved.headEntryId) === String(assistantEntryId), JSON.stringify(moved))
+    assert(
+      String(moved.sessionId) === String(sessionId),
+      `branch must stay in the same Session: ${JSON.stringify({ sessionId, moved })}`,
+    )
+    assert(
+      Number(moved.revision) === Number(current.revision) + 1,
+      'move head must advance revision',
+    )
+
+    await enqueueCommands(ctx, mainTid, {
+      expectedHeadEntryId: moved.headEntryId,
+      expectedNextCommandSequence: moved.nextCommandSequence,
+      commands: [userMessageCommand('在分支上只回复单词 BRANCH，不要调用工具。', cid())],
     })
-    let finalStatus = null
-    for (let i = 0; i < 90; i++) {
-      const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${branchTid}`)
-      const thread = envelopeData(json)
-      finalStatus = thread.status
-      if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !thread.processing) break
-      await sleep(1000)
-    }
-    assert(finalStatus === 'IDLE', `branch expected IDLE, got ${finalStatus}`)
-    const mainU = (await getThreadSnapshot(ctx, mainTid)).usage
-    const branchU = (await getThreadSnapshot(ctx, branchTid)).usage
-    const sessionU = envelopeData((await ctx.call('GET', `/api/ai/runtime/usage/sessions/${sessionId}`)).json)
-    const mainN = Number(mainU.recordCount || 0)
-    const branchN = Number(branchU.recordCount || 0)
-    const sessionN = Number(sessionU.recordCount || 0)
-    assert(mainN >= 1 && branchN >= 1, JSON.stringify({ mainU, branchU }))
-    assert(sessionN <= mainN + branchN, JSON.stringify({ sessionN, mainN, branchN }))
-    assert(sessionN >= Math.max(mainN, branchN), JSON.stringify({ sessionN, mainN, branchN }))
-    ctx.writeArtifact('usage-compare.json', JSON.stringify({ mainU, branchU, sessionU }, null, 2))
+    const finalThread = await waitForQuiescentThread(ctx, mainTid, {
+      timeoutMs: 180_000,
+      intervalMs: 500,
+    })
+    assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+    assert(
+      Number(finalThread.revision) > Number(moved.revision),
+      `branch turn must advance revision beyond the move: ${JSON.stringify(finalThread)}`,
+    )
+    const entries = await snapshotEntries(ctx, mainTid)
+    // root-to-head 路径切换：分支 USER 位于历史 assistant 之后，新 assistant 在其后。
+    const branchUserIndex = findUserEntryIndex(entries, '在分支上只回复单词 BRANCH')
+    const assistantIndex = entries.findIndex(
+      (entry) =>
+        String(entry.entryId) === String(normalAssistantEntries(entries).at(-1)?.entryId),
+    )
+    assert(
+      branchUserIndex >= 0 && branchUserIndex < assistantIndex,
+      `branch turn must follow the moved head: ${JSON.stringify(entries)}`,
+    )
+    const branchAssistant = normalAssistantEntries(entries).at(-1)
+    const text = messageText(branchAssistant)
+    assert(/\bBRANCH\b/i.test(text), `expected BRANCH reply, got: ${text}`)
+    assert(
+      String(entries[0].sessionId) === String(sessionId),
+      `session must stay unchanged: ${JSON.stringify(entries[0])}`,
+    )
+    ctx.writeArtifact('branch-snapshot.json', JSON.stringify({ finalThread, entries }, null, 2))
   },
 })
 
 registerCase({
   id: 'daemon.ready',
   level: 'L4',
-  title: 'Environment GET projection',
+  title: 'Environment GET 投影与 UUID 路由身份',
   requires: ['tools'],
-  docs: 'Environment READY；GET /api/ai/environment 投影固定10个 tools（version=1）+ skills',
+  docs: 'Environment READY；id 是 lowercase UUID（路由身份），name 仅展示；投影固定 10 个 tools（version=1）+ skills',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/ai/environment')
-    const match = (envelopeData(json) || []).find((e) => e.name === ctx.daemonEnv)
+    const environments = await listEnvironments(ctx)
+    const match = environments.find((environment) => environment.name === ctx.daemonEnv)
     assert(match?.status === 'READY', JSON.stringify(match))
     const expectedToolNames = [
       'read',
@@ -407,15 +465,16 @@ registerCase({
       JSON.stringify({ expectedToolNames, actualTools }),
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
+    ctx.vars.daemonEnvironment = match
   },
 })
 
 registerCase({
   id: 'tool.read_turn',
   level: 'L4',
-  title: 'YOLO 下 tool invocation',
+  title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：临时 Agent exact tools=[read]；Thread create 绑定 Environment，消息只发送 Agent/YOLO；断言 ToolInvocation frozen route',
+  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentId、无 environmentName/location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，core externalizer 将其外部化为 Resource；durable TOOL MESSAGE entry 的 tool_result.contents 携带 canonical file: URI（uri/mediaType/size/sha256）',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -425,7 +484,7 @@ registerCase({
       description: 'Temporary E2E agent with the daemon read tool.',
       systemPrompt:
         'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
-        + 'When asked to inspect the environment root, call read with path "." and summarize only its result.',
+        + 'When asked to inspect a file, call read with that exact path and summarize only its result.',
       model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
       variant: ctx.vars.seedModel.config.defaultVariant,
       config: {
@@ -445,50 +504,182 @@ registerCase({
           && JSON.stringify(agentConfig.skills) === JSON.stringify([]),
         `temporary tool Agent config must be exactly tools=[read], skills=[]: ${JSON.stringify(toolAgent)}`,
       )
-      const { json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
+      const environmentId = ctx.vars.daemonEnvironment.id
+      // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
+      // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
+      // core externalizer 确定性外部化为 Resource（LocalFileResourceStore 的 file:/// URI）。
+      const envRoot = process.env.DAEMON_ENV_ROOT || '/tmp/kk-studio-e2e-env'
+      const fixturePath = path.join(envRoot, 'e2e-resource.txt')
+      writeFileSync(fixturePath, `E2E-RESOURCE-FIXTURE ${'x'.repeat(16 * 1024)}\n`)
+      chat = await createChat(ctx, {
         title: `e2e-tool-chat-${suffix}`,
         agentName: toolAgent.name,
-        yoloEnabled: true,
+        yoloEnabled: false,
       })
-      chat = envelopeData(chatJson)
-      const thread = await createChatThread(ctx, chat.id, {
-        environmentName: ctx.daemonEnv,
+      const snapshot = await createChatThread(ctx, chat.id, {
+        title: null,
+        yoloEnabled: false,
+        branchSettings: branchSettingsOf(
+          toolAgent,
+          {
+            providerName: ctx.vars.seedModel.providerName,
+            modelName: ctx.vars.seedModel.name,
+            variant: ctx.vars.seedModel.config.defaultVariant,
+          },
+          { environmentId, thinkingLevel: 'high', activeTools: ['read'] },
+        ),
       })
-      const tid = thread.threadId
-      await ctx.call('POST', `/api/ai/runtime/threads/${tid}/messages`, {
-        agentName: toolAgent.name,
-        yoloEnabled: true,
-        content:
-          '必须调用 read 工具读取环境根目录。请使用参数 {"path":"."}，不要猜测或跳过工具，'
-          + '然后用一句话总结读取结果。',
-        clientMessageId: cid(),
-        expectedExecutionEpoch: Number(thread.executionEpoch),
+      const tid = snapshot.thread.threadId
+      assert(
+        snapshot.thread.branchSettings.environmentId === environmentId,
+        JSON.stringify(snapshot.thread.branchSettings),
+      )
+      await enqueueCommands(ctx, tid, {
+        expectedHeadEntryId: snapshot.thread.headEntryId,
+        expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+        commands: [
+          userMessageCommand(
+            '必须调用 read 工具读取文件 e2e-resource.txt，使用参数 {"path":"e2e-resource.txt"}，'
+              + '不要猜测或跳过工具，然后用一句话总结读取结果。',
+            cid(),
+          ),
+        ],
       })
-      let finalStatus = null
+      // 非 YOLO：等待 durable TOOL_WAITING_APPROVAL 状态（快照 classifier 投影）。
+      let waiting = null
       for (let i = 0; i < 120; i++) {
-        const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${tid}`)
-        const current = envelopeData(json)
-        finalStatus = current.status
-        if ((finalStatus === 'IDLE' || finalStatus === 'FAILED') && !current.processing) break
+        const current = await getThreadSnapshot(ctx, tid)
+        if (current.thread.status === 'TOOL_WAITING_APPROVAL') {
+          waiting = current
+          break
+        }
+        if (current.thread.status === 'IDLE' || current.thread.status === 'FAILED') {
+          break
+        }
         await sleep(1000)
       }
-      const snapshot = await getThreadSnapshot(ctx, tid)
-      const invocations = snapshot.toolInvocations || []
-      ctx.writeArtifact('thread-snapshot.json', JSON.stringify(snapshot, null, 2))
-      ctx.writeArtifact('tool-invocations.json', JSON.stringify(invocations, null, 2))
-      const readInvocation = invocations.find((invocation) => invocation.toolName === 'read')
-      assert(readInvocation, `no read tool invocation; status=${finalStatus}`)
+      assert(waiting, `never reached TOOL_WAITING_APPROVAL on thread ${tid}`)
+      const readInvocation = waiting.toolInvocations.find(
+        (invocation) => invocation.toolName === 'read',
+      )
+      assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
+      assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
       assert(
-        readInvocation.environmentName === ctx.daemonEnv,
-        `read invocation used unexpected environment: ${JSON.stringify(readInvocation)}`,
+        readInvocation.environmentId === environmentId,
+        `read invocation must freeze the Environment route UUID: ${JSON.stringify({
+          readInvocation,
+          environmentId,
+        })}`,
       )
       assert(
-        !Object.hasOwn(readInvocation, 'location'),
-        `ToolInvocationDTO must not expose location: ${JSON.stringify(readInvocation)}`,
+        !Object.hasOwn(readInvocation, 'environmentName')
+          && !Object.hasOwn(readInvocation, 'location'),
+        `ToolInvocationDTO must not expose display/location: ${JSON.stringify(readInvocation)}`,
       )
       assert(
-        readInvocation.status === 'SUCCEEDED',
-        `read invocation did not succeed: ${JSON.stringify(readInvocation)}`,
+        readInvocation.toolCallId && Number.isSafeInteger(readInvocation.attempt) && readInvocation.attempt >= 1,
+        JSON.stringify(readInvocation),
+      )
+      const approvalJson = JSON.parse(readInvocation.approvalJson || '{}')
+      assert(
+        approvalJson.required === true && approvalJson.decision == null,
+        `approval must be required and undecided: ${JSON.stringify(approvalJson)}`,
+      )
+      ctx.writeArtifact(
+        'waiting-approval.json',
+        JSON.stringify({ waiting, readInvocation }, null, 2),
+      )
+
+      // approval ALLOW（decisionId 幂等），随后 exact replay 不改变决策。
+      const decisionId = cid()
+      const decided = await approveToolInvocation(ctx, tid, readInvocation.id, {
+        decision: 'ALLOW',
+        decisionId,
+        actor: 'web',
+        reason: null,
+      })
+      assert(String(decided.id) === String(readInvocation.id), JSON.stringify(decided))
+      assert(decided.status === 'READY', JSON.stringify(decided))
+      const decidedApproval = JSON.parse(decided.approvalJson || '{}')
+      assert(
+        decidedApproval.decision === 'ALLOWED' && decidedApproval.decisionId === decisionId,
+        `durable decision is ALLOWED (input is ALLOW): ${JSON.stringify(decidedApproval)}`,
+      )
+      const replay = await approveToolInvocation(ctx, tid, readInvocation.id, {
+        decision: 'ALLOW',
+        decisionId,
+        actor: 'web',
+        reason: null,
+      })
+      const replayApproval = JSON.parse(replay.approvalJson || '{}')
+      assert(
+        replayApproval.decision === 'ALLOWED'
+          && replayApproval.decidedAt === decidedApproval.decidedAt,
+        `approval replay must keep the original decision: ${JSON.stringify(replayApproval)}`,
+      )
+
+      const finalThread = await waitForQuiescentThread(ctx, tid, {
+        timeoutMs: 180_000,
+        intervalMs: 500,
+      })
+      assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      // 从 durable TOOL MESSAGE entry 的嵌套 tool_result.contents 验证结果（快照 toolInvocations
+      // 在 IDLE 后为空：只暴露 classifier-applicable active siblings）。
+      const finalSnapshot = await getThreadSnapshot(ctx, tid)
+      assert(
+        finalSnapshot.toolInvocations.length === 0,
+        `IDLE snapshot exposes no tool siblings: ${JSON.stringify(finalSnapshot.toolInvocations)}`,
+      )
+      const toolEntries = (finalSnapshot.entries || []).filter((entry) => {
+        if (entryType(entry) !== 'MESSAGE') return false
+        const payload = parseEntryPayload(entry)
+        return payload.message?.role === 'TOOL'
+      })
+      assert(
+        toolEntries.length > 0,
+        `no durable TOOL MESSAGE entry: ${JSON.stringify(finalSnapshot.entries)}`,
+      )
+      const resources = []
+      const toolResultContents = []
+      for (const entry of toolEntries) {
+        const contents = parseEntryPayload(entry).message?.contents || []
+        for (const content of contents) {
+          if (content?.type !== 'tool_result') continue
+          toolResultContents.push(content)
+          for (const child of content.contents || []) {
+            if (child?.type === 'resource') resources.push(child)
+          }
+        }
+      }
+      assert(
+        toolResultContents.length > 0,
+        `tool_result contents missing: ${JSON.stringify(finalSnapshot.entries)}`,
+      )
+      assert(
+        resources.length >= 1,
+        `expected at least one externalized resource: ${JSON.stringify(toolResultContents)}`,
+      )
+      for (const resource of resources) {
+        assert(
+          /^file:/i.test(String(resource.uri || '')),
+          `resource URI must be a canonical file: URI: ${JSON.stringify(resource)}`,
+        )
+        assert(
+          /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(resource.mediaType || '')),
+          `resource mediaType must be canonical: ${JSON.stringify(resource)}`,
+        )
+        assert(
+          typeof resource.size === 'number' && resource.size > 0,
+          `resource size must be present: ${JSON.stringify(resource)}`,
+        )
+        assert(
+          /^[0-9a-f]{64}$/.test(String(resource.sha256 || '')),
+          `resource sha256 must be a 64-hex digest: ${JSON.stringify(resource)}`,
+        )
+      }
+      ctx.writeArtifact(
+        'tool-turn-final.json',
+        JSON.stringify({ finalThread, finalSnapshot }, null, 2),
       )
     } finally {
       if (chat?.id) {
@@ -530,10 +721,19 @@ async function requireRealMiniMaxM27(ctx) {
   )
 }
 
-function defaultTurnSettings(ctx) {
+/** 由 seed Agent + seed Model 构造 branchSettings.model 引用（只切第一个 '/'，保留 model name 内 '/'）。 */
+function modelSelectionOf(ctx) {
+  const agent = ctx.vars.agent
+  const model = ctx.vars.seedModel
+  const separator = String(agent.model || '').indexOf('/')
+  assert(separator > 0, `agent.model must be provider/model: ${JSON.stringify(agent)}`)
+  const providerName = String(agent.model).slice(0, separator)
+  const modelName = String(agent.model).slice(separator + 1)
+  assert(providerName && modelName, `agent.model must be provider/model: ${JSON.stringify(agent)}`)
   return {
-    agentName: ctx.vars.agent.name,
-    yoloEnabled: false,
+    providerName,
+    modelName,
+    variant: agent.variant || model.config.defaultVariant,
   }
 }
 
@@ -573,22 +773,34 @@ function assertAssistantAbortedEntry(entry) {
   )
 }
 
+function entryType(entry) {
+  return String(entry?.entryType || '').toUpperCase()
+}
+
 function normalAssistantEntries(entries) {
   return entries.filter((entry) => {
-    if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
+    if (entryType(entry) !== 'MESSAGE') return false
     return parseEntryPayload(entry).message?.role === 'ASSISTANT'
   })
 }
 
 function findUserEntryIndex(entries, marker) {
   return entries.findIndex((entry) => {
-    if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
+    if (entryType(entry) !== 'MESSAGE') return false
     const message = parseEntryPayload(entry).message
     if (message?.role !== 'USER' || !Array.isArray(message.contents)) return false
     return message.contents.some(
       (content) => content?.type === 'text' && String(content.text || '').includes(marker),
     )
   })
+}
+
+function messageText(entry) {
+  const payload = parseEntryPayload(entry)
+  return (payload.message?.contents || [])
+    .filter((content) => content?.type === 'text')
+    .map((content) => String(content.text || ''))
+    .join('\n')
 }
 
 function parseEntryPayload(entry) {
@@ -603,6 +815,3 @@ function parseEntryPayload(entry) {
     throw new Error(`invalid entry payload for ${entry?.entryId}: ${error.message}`)
   }
 }
-
-// silence unused
-void pageResults

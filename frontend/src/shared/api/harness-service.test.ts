@@ -9,133 +9,74 @@ function createClient(): HttpClient {
 describe('harnessService', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('exposes flat Session read endpoints and the snapshot-first Thread command surface', async () => {
+  it('exposes the snapshot-first Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
-    await service.listSessions()
-    await service.listSessionEntries('session /1')
-    await service.submitThreadMessage('thread /1', {
-      content: 'hello',
-      agentName: 'assistant',
-      yoloEnabled: true,
-      clientMessageId: 'cid-1',
-      expectedExecutionEpoch: 3,
-    })
-    await service.submitCustomMessage('thread /1', {
-      role: 'system',
-      content: 'policy',
-      agentName: 'assistant',
-      yoloEnabled: true,
-      clientMessageId: 'cid-custom',
-      expectedExecutionEpoch: 4,
-    })
-    await service.stopThread('thread /1', { expectedExecutionEpoch: 4 })
     await service.getThreadSnapshot('thread /1')
-    await service.getRetryPolicy()
-    await service.updateRetryPolicy({
-      maxRetries: 3,
-      backoffStrategy: 'EXPONENTIAL',
-      baseDelayMillis: 2_000,
-      maxDelayMillis: 60_000,
+    await service.enqueueCommands('thread /1', {
+      expectedHeadEntryId: '1',
+      expectedNextCommandSequence: '0',
+      commands: [
+        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', content: 'hello', role: 'user' },
+        { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
+      ],
     })
-    await service.getRealtimeStreamPolicy()
-    await service.updateRealtimeStreamPolicy({ maxLength: 5_000 })
-
-    expect(client.post).not.toHaveBeenCalledWith('/ai/runtime/sessions', expect.anything())
-    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/messages', {
-      content: 'hello',
-      agentName: 'assistant',
-      yoloEnabled: true,
-      clientMessageId: 'cid-1',
-      expectedExecutionEpoch: 3,
-    })
-    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/messages/custom', {
-      role: 'system',
-      content: 'policy',
-      agentName: 'assistant',
-      yoloEnabled: true,
-      clientMessageId: 'cid-custom',
-      expectedExecutionEpoch: 4,
-    })
-    // stop is no longer a bodyless POST: it carries the epoch fencing token too.
-    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/runtime/threads/thread%20%2F1/stop', { expectedExecutionEpoch: 4 })
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions')
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/sessions/session%20%2F1/entries')
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/snapshot')
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/settings/retry-policy')
-    expect(client.get).toHaveBeenLastCalledWith('/ai/runtime/settings/realtime-stream-policy')
-    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/runtime/settings/retry-policy', {
-      maxRetries: 3,
-      backoffStrategy: 'EXPONENTIAL',
-      baseDelayMillis: 2_000,
-      maxDelayMillis: 60_000,
-    })
-    expect(client.put).toHaveBeenNthCalledWith(2, '/ai/runtime/settings/realtime-stream-policy', { maxLength: 5_000 })
-    expect(client.put).not.toHaveBeenCalledWith(expect.stringContaining('/toolset'), expect.anything())
-    expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/decision'), expect.anything())
-    // Session-scoped Thread create/list are gone from the contract.
-    expect(client.get).not.toHaveBeenCalledWith(expect.stringContaining('/ai/runtime/sessions/session%20%2F1/threads'))
-    expect(client.post).not.toHaveBeenCalledWith(
-      expect.stringContaining('/ai/runtime/sessions/session%20%2F1/threads'),
-      expect.anything(),
-    )
-  })
-
-  it('maps global Thread listing and head rebind without a separate bind lifecycle', async () => {
-    const client = createClient()
-    const service = createHarnessService(client)
-    await service.listThreads()
+    await service.stopThread('thread /1', { stopRequestId: 'stop-1', expectedRevision: '5' })
     await service.updateThreadHead('thread /1', {
-      headEntryId: '9007199254740993',
-      expectedExecutionEpoch: 1,
+      targetEntryId: '9007199254740993',
+      expectedRevision: '5',
+    })
+    await service.decideApproval('thread /1', 'inv-9', {
+      decision: 'ALLOW',
+      decisionId: 'dec-1',
+      actor: 'web',
+      reason: null,
     })
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/runtime/threads', {
-      params: { sort: 'recent', limit: 20 },
+    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads/thread%20%2F1/snapshot')
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/commands', {
+      expectedHeadEntryId: '1',
+      expectedNextCommandSequence: '0',
+      commands: [
+        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', content: 'hello', role: 'user' },
+        { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
+      ],
+    })
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/runtime/threads/thread%20%2F1/stop', {
+      stopRequestId: 'stop-1',
+      expectedRevision: '5',
+    })
+    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/runtime/threads/thread%20%2F1/tool-invocations/inv-9/approval', {
+      decision: 'ALLOW',
+      decisionId: 'dec-1',
+      actor: 'web',
+      reason: null,
     })
     expect(client.put).toHaveBeenNthCalledWith(1, '/ai/runtime/threads/thread%20%2F1/head', {
-      headEntryId: '9007199254740993',
-      expectedExecutionEpoch: 1,
+      targetEntryId: '9007199254740993',
+      expectedRevision: '5',
     })
   })
 
-  it('maps the epoch-fenced Thread Environment update endpoint', async () => {
+  it('exposes only the snapshot-first Thread command surface', async () => {
     const client = createClient()
     const service = createHarnessService(client)
-    await service.updateThreadEnvironment('thread /1', {
-      environmentName: null,
-      expectedExecutionEpoch: '9007199254740993',
-    })
-
-    expect(client.put).toHaveBeenCalledWith(
-      '/ai/runtime/threads/thread%20%2F1/environment',
-      {
-        environmentName: null,
-        expectedExecutionEpoch: '9007199254740993',
-      },
-    )
-  })
-
-  it('exposes the current snapshot-first Session and Thread command surface', async () => {
-    const client = createClient()
-    const service = createHarnessService(client)
-    expect(service.listThreads).toBeTypeOf('function')
     expect(service.getThreadSnapshot).toBeTypeOf('function')
+    expect(service.enqueueCommands).toBeTypeOf('function')
     expect(service.updateThreadHead).toBeTypeOf('function')
-    expect(service.submitThreadMessage).toBeTypeOf('function')
-    expect(service.submitCustomMessage).toBeTypeOf('function')
     expect(service.stopThread).toBeTypeOf('function')
-    expect(service.getRetryPolicy).toBeTypeOf('function')
-    expect(service.updateRetryPolicy).toBeTypeOf('function')
-    expect(service.getRealtimeStreamPolicy).toBeTypeOf('function')
-    expect(service.updateRealtimeStreamPolicy).toBeTypeOf('function')
-    expect(service.listSessions).toBeTypeOf('function')
-    expect(service.listSessionEntries).toBeTypeOf('function')
+    expect(service.decideApproval).toBeTypeOf('function')
     expect(service.createThreadRealtimeStream).toBeTypeOf('function')
 
-    // End-to-end call shape for the Session entries endpoint.
-    await service.listSessionEntries('42')
-    expect(client.get).toHaveBeenLastCalledWith('/ai/runtime/sessions/42/entries')
+    // Old endpoints are gone from the contract entirely.
+    expect(service).not.toHaveProperty('listThreads')
+    expect(service).not.toHaveProperty('listSessions')
+    expect(service).not.toHaveProperty('listSessionEntries')
+    expect(service).not.toHaveProperty('submitThreadMessage')
+    expect(service).not.toHaveProperty('submitCustomMessage')
+    expect(service).not.toHaveProperty('updateThreadEnvironment')
+    expect(service).not.toHaveProperty('getRetryPolicy')
+    expect(service).not.toHaveProperty('getRealtimeStreamPolicy')
   })
 
   it('uses the durable revision as the SSE resume cursor', () => {
@@ -143,14 +84,5 @@ describe('harnessService', () => {
     vi.stubGlobal('EventSource', eventSource)
     createHarnessService(createClient()).createThreadRealtimeStream('1', '9007199254740993')
     expect(eventSource).toHaveBeenCalledWith('/api/ai/runtime/threads/1/events/stream?afterRevision=9007199254740993')
-  })
-
-  it('passes opaque keyset pagination parameters without decoding the cursor', async () => {
-    const client = createClient()
-    const service = createHarnessService(client)
-    await service.listThreads({ sort: 'created', cursor: 'opaque/cursor', limit: 3 })
-    expect(client.get).toHaveBeenCalledWith('/ai/runtime/threads', {
-      params: { sort: 'created', limit: 3, cursor: 'opaque/cursor' },
-    })
   })
 })

@@ -1,70 +1,51 @@
 import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  HarnessSessionDTO,
-  HarnessSessionEntryDTO,
+  HarnessThreadCommandBatchDTO,
+  HarnessThreadCommandDTO,
   HarnessThreadDTO,
-  HarnessThreadCustomMessageCreateDTO,
-  HarnessThreadEnvironmentUpdateDTO,
-  HarnessThreadPage,
   HarnessThreadHeadUpdateDTO,
-  HarnessThreadInputDTO,
-  HarnessThreadMessageCreateDTO,
-  HarnessRetryPolicyDTO,
-  HarnessRealtimeStreamPolicyDTO,
+  HarnessThreadSnapshotDTO,
   HarnessThreadStopDTO,
   HarnessThreadStopResultDTO,
-  HarnessThreadSnapshotDTO,
-  ThreadListSort,
+  HarnessToolApprovalDTO,
+  ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
-export interface ThreadListOptions {
-  sort?: ThreadListSort
-  cursor?: string
-  limit?: number
-}
-
+/**
+ * Harness runtime thread control/query plane:
+ * - GET snapshot (coherent PostgreSQL projection)
+ * - POST commands (202 accepted, returns the durable command list)
+ * - PUT head / POST stop / POST approval (revision CAS)
+ * - GET events/stream (snapshot-first SSE tail over the Redis overlay)
+ */
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
-    listThreads: (options: ThreadListOptions = {}): Promise<HarnessThreadPage> => {
-      const params: Record<string, unknown> = {
-        sort: options.sort ?? 'recent',
-        limit: options.limit ?? 20,
-      }
-      if (options.cursor) {
-        params.cursor = options.cursor
-      }
-      return client.get('/ai/runtime/threads', { params })
-    },
     getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
       client.get(`/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`),
-    updateThreadHead: (threadId: string, data: HarnessThreadHeadUpdateDTO): Promise<HarnessThreadDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/head`, data),
-    updateThreadEnvironment: (
+    enqueueCommands: (
       threadId: string,
-      data: HarnessThreadEnvironmentUpdateDTO,
+      data: HarnessThreadCommandBatchDTO,
+    ): Promise<HarnessThreadCommandDTO[]> =>
+      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/commands`, data),
+    updateThreadHead: (
+      threadId: string,
+      data: HarnessThreadHeadUpdateDTO,
     ): Promise<HarnessThreadDTO> =>
-      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/environment`, data),
-    submitThreadMessage: (threadId: string, data: HarnessThreadMessageCreateDTO): Promise<HarnessThreadInputDTO> =>
-      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/messages`, data),
-    submitCustomMessage: (
+      client.put(`/ai/runtime/threads/${encodeURIComponent(threadId)}/head`, data),
+    stopThread: (
       threadId: string,
-      data: HarnessThreadCustomMessageCreateDTO,
-    ): Promise<HarnessThreadInputDTO> =>
-      client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/messages/custom`, data),
-    stopThread: (threadId: string, data: HarnessThreadStopDTO): Promise<HarnessThreadStopResultDTO> =>
+      data: HarnessThreadStopDTO,
+    ): Promise<HarnessThreadStopResultDTO> =>
       client.post(`/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`, data),
-    getRetryPolicy: (): Promise<HarnessRetryPolicyDTO> => client.get('/ai/runtime/settings/retry-policy'),
-    updateRetryPolicy: (data: HarnessRetryPolicyDTO): Promise<HarnessRetryPolicyDTO> =>
-      client.put('/ai/runtime/settings/retry-policy', data),
-    getRealtimeStreamPolicy: (): Promise<HarnessRealtimeStreamPolicyDTO> =>
-      client.get('/ai/runtime/settings/realtime-stream-policy'),
-    updateRealtimeStreamPolicy: (
-      data: HarnessRealtimeStreamPolicyDTO,
-    ): Promise<HarnessRealtimeStreamPolicyDTO> =>
-      client.put('/ai/runtime/settings/realtime-stream-policy', data),
-    listSessions: (): Promise<HarnessSessionDTO[]> => client.get('/ai/runtime/sessions'),
-    listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
-      client.get(`/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`),
+    decideApproval: (
+      threadId: string,
+      toolInvocationId: string,
+      data: HarnessToolApprovalDTO,
+    ): Promise<ToolInvocationDTO> =>
+      client.post(
+        `/ai/runtime/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+        data,
+      ),
     /** Snapshot-first SSE: durable revisions get ids; lossy Redis deltas deliberately do not. */
     createThreadRealtimeStream: (threadId: string, afterRevision = '0'): EventSource => {
       const query = new URLSearchParams({ afterRevision })

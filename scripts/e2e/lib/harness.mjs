@@ -1,185 +1,351 @@
 import { assert, envelopeData, sleep } from './http.mjs'
 
-function threadIdOf(thread) {
-  const threadId = String(thread?.threadId || '')
-  assert(/^\d+$/.test(threadId), `expected decimal threadId: ${JSON.stringify(thread)}`)
+/**
+ * Harness Runtime 单轨契约 helper（Chat-scoped Thread + 唯一 Runtime 数据面）。
+ *
+ * 端点事实源（web 模块）：
+ * - GET  /api/ai/chat/{chatId}/threads                 Chat-scoped Thread 数组（新到旧）
+ * - POST /api/ai/chat/{chatId}/threads                 {title,branchSettings,yoloEnabled} → 201 snapshot
+ * - GET  /api/ai/runtime/threads/{id}/snapshot         一致快照（单事务）
+ * - POST /api/ai/runtime/threads/{id}/commands         命令 batch（202；clientCommandId 幂等 replay）
+ * - PUT  /api/ai/runtime/threads/{id}/head             {targetEntryId,expectedRevision}
+ * - POST /api/ai/runtime/threads/{id}/stop             {stopRequestId,expectedRevision}（同 id 幂等 replay）
+ * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
+ * - GET  /api/ai/runtime/threads/{id}/events/stream    快照优先 SSE
+ * - GET  /api/ai/environment                           只读 Environment 注册表（id = 路由身份 UUID）
+ */
+
+function positiveDecimal(value, field) {
+  const raw = String(value ?? '')
+  assert(/^[1-9]\d*$/.test(raw), `expected positive decimal ${field}: ${JSON.stringify(value)}`)
+  return raw
+}
+
+function nonNegativeDecimal(value, field) {
+  const raw = String(value ?? '')
+  assert(/^(0|[1-9]\d*)$/.test(raw), `expected non-negative decimal ${field}: ${JSON.stringify(value)}`)
+  return raw
+}
+
+/** 严格校验 Thread 投影 DTO 的 decimal 标识字段并返回 threadId。 */
+export function threadIdOf(thread) {
+  const threadId = positiveDecimal(thread?.threadId, 'threadId')
+  assert(thread.sessionId && /^[1-9]\d*$/.test(String(thread.sessionId)), JSON.stringify(thread))
+  assert(
+    thread.headEntryId && /^[1-9]\d*$/.test(String(thread.headEntryId)),
+    JSON.stringify(thread),
+  )
+  assert(
+    thread.nextCommandSequence && /^[1-9]\d*$/.test(String(thread.nextCommandSequence)),
+    `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
+  )
+  nonNegativeDecimal(thread.revision, 'revision')
   return threadId
 }
 
-function executionEpochOf(thread) {
-  const epoch = Number(thread?.executionEpoch)
-  assert(
-    Number.isSafeInteger(epoch) && epoch >= 0,
-    `expected non-negative executionEpoch: ${JSON.stringify(thread)}`,
-  )
-  return epoch
+/** 创建 Chat（name-based Agent 引用；Thread 的 branchSettings 与 Chat 默认值独立）。 */
+export async function createChat(ctx, { title, agentName, yoloEnabled = false }) {
+  const { status, json } = await ctx.call('POST', '/api/ai/chat', {
+    title,
+    agentName,
+    yoloEnabled,
+  })
+  assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
+  const chat = envelopeData(json)
+  assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
+  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
+  return chat
 }
 
-export function threadPageData(json, description = 'Thread page') {
-  const data = envelopeData(json)
-  assert(
-    data && typeof data === 'object' && Array.isArray(data.items),
-    `expected ${description} with items: ${JSON.stringify(json)}`,
-  )
-  assert(
-    data.nextCursor == null || typeof data.nextCursor === 'string',
-    `expected ${description} nextCursor: ${JSON.stringify(json)}`,
-  )
-  return {
-    items: data.items,
-    nextCursor: data.nextCursor ?? null,
-  }
-}
-
-function listData(json, description) {
-  const data = envelopeData(json)
-  assert(Array.isArray(data), `expected ${description} array: ${JSON.stringify(json)}`)
-  return data
-}
-
-/** Chat-scoped POST atomically creates Session, ROOT, Thread, and association. */
-export async function createChatThread(ctx, chatId, { environmentName = null } = {}) {
+/**
+ * 以完整 branchSettings 原子创建 Thread（201 返回 HarnessThreadSnapshotDTO）。
+ * branchSettings: {environmentId, agentName, model:{providerName,modelName,variant}, thinkingLevel, activeTools}
+ */
+export async function createChatThread(ctx, chatId, { title = null, branchSettings, yoloEnabled = false }) {
   const { status, json } = await ctx.call(
     'POST',
     `/api/ai/chat/${encodeURIComponent(chatId)}/threads`,
-    { environmentName },
+    { title, branchSettings, yoloEnabled },
   )
   assert(status === 201, `create Chat thread status ${status}: ${JSON.stringify(json)}`)
-  const thread = envelopeData(json)
-  threadIdOf(thread)
-  executionEpochOf(thread)
-  assert(Object.hasOwn(thread, 'environmentName'), `Thread omitted environmentName: ${JSON.stringify(thread)}`)
-  assert(thread.status === 'IDLE', `Chat thread must be bound: ${JSON.stringify(thread)}`)
-  assert(
-    thread.sessionId && thread.headEntryId,
-    `Chat thread must have a session/head: ${JSON.stringify(thread)}`,
-  )
-  return thread
-}
-
-export async function createConfiguredChatThread(ctx, options) {
-  const { status: chatStatus, json: chatJson } = await ctx.call('POST', '/api/ai/chat', {
-    title: options?.title,
-    agentName: options?.agentName,
-    yoloEnabled: Boolean(options?.yoloEnabled),
-  })
-  assert(chatStatus === 201, `create Chat status ${chatStatus}: ${JSON.stringify(chatJson)}`)
-  const chat = envelopeData(chatJson)
-  assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
-  const thread = await createChatThread(ctx, chat.id, {
-    environmentName: options?.threadEnvironmentName ?? null,
-  })
-  return {
-    chat,
-    thread,
-    session: { sessionId: thread.sessionId },
-  }
-}
-
-export async function getThread(ctx, threadId) {
-  const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${encodeURIComponent(threadId)}`)
-  const thread = envelopeData(json)
-  threadIdOf(thread)
-  executionEpochOf(thread)
-  assert(Object.hasOwn(thread, 'environmentName'), `Thread omitted environmentName: ${JSON.stringify(thread)}`)
-  return thread
-}
-
-export async function getThreadSnapshot(ctx, threadId) {
-  const { json } = await ctx.call('GET', `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`)
   const snapshot = envelopeData(json)
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
   threadIdOf(snapshot.thread)
-  executionEpochOf(snapshot.thread)
+  assert(Array.isArray(snapshot.entries), JSON.stringify(snapshot))
+  assert(Array.isArray(snapshot.queuedCommands), JSON.stringify(snapshot))
   assert(
-    Object.hasOwn(snapshot.thread, 'environmentName'),
-    `Thread snapshot omitted environmentName: ${JSON.stringify(snapshot)}`,
+    snapshot.modelInvocation === null || typeof snapshot.modelInvocation === 'object',
+    JSON.stringify(snapshot),
   )
+  assert(Array.isArray(snapshot.toolInvocations), JSON.stringify(snapshot))
   return snapshot
 }
 
-export async function updateThreadHead(ctx, thread, headEntryId) {
-  const threadId = threadIdOf(thread)
-  const targetHeadEntryId = String(headEntryId || '')
-  assert(/^\d+$/.test(targetHeadEntryId), `expected decimal headEntryId: ${headEntryId}`)
+/** 创建 Chat + Thread，返回 {chat, snapshot}（snapshot.thread 即新 Thread 投影）。 */
+export async function createConfiguredChatThread(
+  ctx,
+  { agent, model, title, yoloEnabled = false, environmentId = null, thinkingLevel = 'off', activeTools = [] } = {},
+) {
+  assert(agent?.name, `agent required: ${JSON.stringify(agent)}`)
+  const chat = await createChat(ctx, {
+    title: title ?? `e2e-${Math.random().toString(36).slice(2, 10)}`,
+    agentName: agent.name,
+    yoloEnabled,
+  })
+  const snapshot = await createChatThread(ctx, chat.id, {
+    title: null,
+    yoloEnabled,
+    branchSettings: branchSettingsOf(agent, model, {
+      environmentId,
+      thinkingLevel,
+      activeTools,
+    }),
+  })
+  return { chat, snapshot }
+}
+
+/** 由 Agent + Model 引用构造完整 branchSettings（environmentId 是 Environment 路由 UUID，仅展示名可空）。 */
+export function branchSettingsOf(
+  agent,
+  model,
+  { environmentId = null, thinkingLevel = 'off', activeTools = [] } = {},
+) {
+  assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
+  assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  return {
+    environmentId: environmentId ?? null,
+    agentName: agent.name,
+    model: {
+      providerName: model.providerName,
+      modelName: model.modelName,
+      variant: model.variant,
+    },
+    thinkingLevel: thinkingLevel ?? null,
+    activeTools: [...(activeTools ?? [])],
+  }
+}
+
+export async function getThreadSnapshot(ctx, threadId) {
+  const { json } = await ctx.call(
+    'GET',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/snapshot`,
+  )
+  const snapshot = envelopeData(json)
+  assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
+  threadIdOf(snapshot.thread)
+  return snapshot
+}
+
+export async function getThread(ctx, threadId) {
+  return (await getThreadSnapshot(ctx, threadId)).thread
+}
+
+export async function snapshotEntries(ctx, threadId) {
+  return (await getThreadSnapshot(ctx, threadId)).entries || []
+}
+
+/** Chat-scoped Thread 数组（关联时间新到旧）。 */
+export async function listChatThreads(ctx, chatId) {
+  const { json } = await ctx.call('GET', `/api/ai/chat/${encodeURIComponent(chatId)}/threads`)
+  const threads = envelopeData(json)
+  assert(Array.isArray(threads), `expected Chat Thread array: ${JSON.stringify(json)}`)
+  for (const thread of threads) {
+    threadIdOf(thread)
+  }
+  return threads
+}
+
+/** 只读 Environment 注册表；id 是 canonical lowercase UUID 路由身份，name 仅展示。 */
+export async function listEnvironments(ctx) {
+  const { json } = await ctx.call('GET', '/api/ai/environment')
+  const environments = envelopeData(json)
+  assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
+  for (const environment of environments) {
+    assert(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(environment.id || '')),
+      `Environment id must be a lowercase UUID: ${JSON.stringify(environment)}`,
+    )
+    assert(typeof environment.name === 'string', JSON.stringify(environment))
+  }
+  return environments
+}
+
+export function userMessageCommand(content, clientCommandId) {
+  assert(typeof content === 'string' && content.trim(), 'content required')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/content.
+  return { type: 'USER_MESSAGE', clientCommandId, content }
+}
+
+export function customMessageCommand(role, content, clientCommandId) {
+  assert(role === 'SYSTEM' || role === 'USER', `custom role must be SYSTEM|USER: ${role}`)
+  assert(typeof content === 'string' && content.trim(), 'content required')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'CUSTOM_MESSAGE', role, clientCommandId, content }
+}
+
+export function setEnvironmentCommand(environmentId, clientCommandId) {
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_ENVIRONMENT', clientCommandId, environmentId }
+}
+
+export function setAgentCommand(agentName, clientCommandId) {
+  assert(agentName && typeof agentName === 'string', 'agentName required')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_AGENT', clientCommandId, agentName }
+}
+
+export function setModelCommand(model, clientCommandId) {
+  assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_MODEL', clientCommandId, model }
+}
+
+export function setThinkingLevelCommand(thinkingLevel, clientCommandId) {
+  assert(thinkingLevel && typeof thinkingLevel === 'string', 'thinkingLevel required')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_THINKING_LEVEL', clientCommandId, thinkingLevel }
+}
+
+export function setActiveToolsCommand(activeTools, clientCommandId) {
+  assert(Array.isArray(activeTools), 'activeTools must be an array')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_ACTIVE_TOOLS', clientCommandId, activeTools }
+}
+
+export function setYoloCommand(yoloEnabled, clientCommandId) {
+  assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
+  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
+  return { type: 'SET_YOLO', clientCommandId, yoloEnabled }
+}
+
+/**
+ * 原子入队命令 batch（202 accepted）。clientCommandId 幂等：整批已存在则 replay 返回既有命令，
+ * 部分存在 => 409 PARTIAL_COMMAND_REPLAY。
+ */
+export async function enqueueCommands(
+  ctx,
+  threadId,
+  { expectedHeadEntryId, expectedNextCommandSequence, commands },
+) {
+  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/commands`,
+    {
+      expectedHeadEntryId: positiveDecimal(expectedHeadEntryId, 'expectedHeadEntryId'),
+      expectedNextCommandSequence: positiveDecimal(
+        expectedNextCommandSequence,
+        'expectedNextCommandSequence',
+      ),
+      commands,
+    },
+  )
+  assert(status === 202, `enqueue commands status ${status}: ${JSON.stringify(json)}`)
+  const commandsDto = envelopeData(json)
+  assert(Array.isArray(commandsDto) && commandsDto.length === commands.length, JSON.stringify(json))
+  return commandsDto
+}
+
+/** 同步重定位 head（revision CAS；同 target no-op 不 bump；跨 Session target 409）。 */
+export async function updateThreadHead(ctx, threadId, { targetEntryId, expectedRevision }) {
   const { status, json } = await ctx.call(
     'PUT',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/head`,
     {
-      headEntryId: targetHeadEntryId,
-      expectedExecutionEpoch: executionEpochOf(thread),
+      targetEntryId: positiveDecimal(targetEntryId, 'targetEntryId'),
+      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
     },
   )
   assert(status === 200, `update head status ${status}: ${JSON.stringify(json)}`)
   const updated = envelopeData(json)
-  assert(threadIdOf(updated) === threadId, `head update changed thread: ${JSON.stringify(updated)}`)
+  threadIdOf(updated)
   return updated
 }
 
-export async function updateThreadEnvironment(ctx, thread, environmentName) {
-  const threadId = threadIdOf(thread)
-  const expectedExecutionEpoch = executionEpochOf(thread)
+/** 原子 stop（stopRequestId 幂等 replay；revision CAS）。 */
+export async function stopThread(ctx, threadId, { stopRequestId, expectedRevision }) {
+  assert(stopRequestId && typeof stopRequestId === 'string', 'stopRequestId required')
   const { status, json } = await ctx.call(
-    'PUT',
-    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/environment`,
+    'POST',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/stop`,
     {
-      environmentName: environmentName ?? null,
-      expectedExecutionEpoch,
+      stopRequestId,
+      expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
     },
   )
-  assert(status === 200, `update environment status ${status}: ${JSON.stringify(json)}`)
-  const updated = envelopeData(json)
-  assert(threadIdOf(updated) === threadId, `environment update changed thread: ${JSON.stringify(updated)}`)
+  assert(status === 200, `stop status ${status}: ${JSON.stringify(json)}`)
+  const stop = envelopeData(json)
+  assert(stop?.thread, `expected stop result thread: ${JSON.stringify(json)}`)
+  assert(typeof stop.status === 'string', JSON.stringify(stop))
+  if (stop.stoppedTurnEndEntryId != null) {
+    positiveDecimal(stop.stoppedTurnEndEntryId, 'stoppedTurnEndEntryId')
+  }
   assert(
-    Number(updated.executionEpoch) === expectedExecutionEpoch + 1,
-    `environment update must advance epoch: ${JSON.stringify({ thread, updated })}`,
+    Number.isSafeInteger(stop.cancelledCommandCount) && stop.cancelledCommandCount >= 0,
+    JSON.stringify(stop),
   )
-  assert(
-    Number(updated.revision) === Number(thread.revision) + 1,
-    `environment update must advance revision: ${JSON.stringify({ thread, updated })}`,
-  )
-  assert(
-    (updated.environmentName ?? null) === (environmentName ?? null),
-    `environment update did not persist binding: ${JSON.stringify({ thread, updated, environmentName })}`,
-  )
-  return updated
+  return stop
 }
 
-export async function snapshotEntries(ctx, threadId) {
-  const snapshot = await getThreadSnapshot(ctx, threadId)
-  return snapshot.entries || []
-}
-
-export async function snapshotInputs(ctx, threadId) {
-  const snapshot = await getThreadSnapshot(ctx, threadId)
-  return snapshot.inputs || []
-}
-
-export async function waitForThreadInputApplied(
+/**
+ * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。返回当前 ToolInvocationDTO。
+ * Java 事实：HarnessToolApprovalDTO {decision: ALLOW|DENY, decisionId, actor, reason}；
+ * ALLOWED 恢复为 READY 并请求 TOOL Work，DENIED 终止为 FAILED；Thread revision touch 一次。
+ */
+export async function approveToolInvocation(
   ctx,
   threadId,
-  inputId,
-  { timeoutMs = 15_000, intervalMs = 250 } = {},
+  toolInvocationId,
+  { decision, decisionId, actor = 'web', reason = null },
+) {
+  assert(decision === 'ALLOW' || decision === 'DENY', `decision must be ALLOW|DENY: ${decision}`)
+  assert(decisionId && typeof decisionId === 'string', 'decisionId required')
+  assert(actor && typeof actor === 'string', 'actor required')
+  assert(reason == null || typeof reason === 'string', 'reason must be string|null')
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+    { decision, decisionId, actor, reason },
+  )
+  assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)
+  const invocation = envelopeData(json)
+  assert(
+    invocation?.id && /^[1-9]\d*$/.test(String(invocation.id)) && invocation.status,
+    `invalid ToolInvocationDTO: ${JSON.stringify(json)}`,
+  )
+  return invocation
+}
+
+/**
+ * 轮询完整快照直到 Thread 真正 quiescent 并返回最终 Thread 投影。
+ *
+ * 判定基于完整 snapshot 而不是单字段：status=IDLE、processing=false、queuedCommands 为空、
+ * modelInvocation=null、toolInvocations 为空。单看 status 会在刚入队、命令尚未被 claim 时立即
+ * 返回 IDLE，导致 final assertions 抢跑。
+ */
+export async function waitForQuiescentThread(
+  ctx,
+  threadId,
+  { timeoutMs = 30_000, intervalMs = 250 } = {},
 ) {
   const deadline = Date.now() + timeoutMs
   let last = null
   while (Date.now() <= deadline) {
-    const inputs = await snapshotInputs(ctx, threadId)
-    const input = inputs.find((candidate) => String(candidate.inputId) === String(inputId))
-    const thread = await getThread(ctx, threadId)
-    last = { input, thread, inputs }
-    if (input?.status === 'APPLIED' && !thread.processing) {
+    const snapshot = await getThreadSnapshot(ctx, threadId)
+    last = snapshot.thread
+    if (
+      last.status === 'IDLE'
+      && !last.processing
+      && (snapshot.queuedCommands || []).length === 0
+      && snapshot.modelInvocation === null
+      && (snapshot.toolInvocations || []).length === 0
+    ) {
       return last
     }
     await sleep(intervalMs)
   }
-  throw new Error(`Thread input did not apply: ${JSON.stringify(last)}`)
-}
-
-export async function listSessionEntries(ctx, sessionId) {
-  const { json } = await ctx.call('GET', `/api/ai/runtime/sessions/${encodeURIComponent(sessionId)}/entries`)
-  return listData(json, 'session entries')
+  throw new Error(`thread did not become quiescent: ${JSON.stringify(last)}`)
 }
 
 /**
@@ -193,8 +359,7 @@ export async function waitForModelTextDeltaAfterSseConnected(
   startWork,
   { timeoutMs = 90_000 } = {},
 ) {
-  const expectedThreadId = String(threadId || '')
-  assert(/^\d+$/.test(expectedThreadId), `expected decimal threadId: ${expectedThreadId}`)
+  const expectedThreadId = positiveDecimal(threadId, 'threadId')
   assert(typeof startWork === 'function', 'startWork must be a function')
   assert(
     typeof ctx?.baseUrl === 'string' && ctx.baseUrl.trim(),
@@ -252,28 +417,6 @@ export async function waitForModelTextDeltaAfterSseConnected(
   }
 }
 
-export async function waitForQuiescentThread(
-  ctx,
-  threadId,
-  { timeoutMs = 30_000, intervalMs = 250 } = {},
-) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  while (Date.now() <= deadline) {
-    last = await getThread(ctx, threadId)
-    if (last.status === 'IDLE' && !last.processing) {
-      return last
-    }
-    await sleep(intervalMs)
-  }
-  throw new Error(`thread did not become IDLE: ${JSON.stringify(last)}`)
-}
-
-export async function rebindWhenQuiescent(ctx, threadId, headEntryId, options) {
-  const thread = await waitForQuiescentThread(ctx, threadId, options)
-  return updateThreadHead(ctx, thread, headEntryId)
-}
-
 async function readModelTextDelta(reader, expectedThreadId) {
   const decoder = new TextDecoder()
   let buffer = ''
@@ -327,8 +470,7 @@ function parseModelTextDelta(record, expectedThreadId) {
     envelope.type !== 'MODEL_DELTA'
     || envelope.subjectKind !== 'MODEL_INVOCATION'
     || envelope.threadId !== expectedThreadId
-    || typeof envelope.subjectId !== 'string'
-    || !/^\d+$/.test(envelope.subjectId)
+    || !/^[1-9]\d*$/.test(String(envelope.subjectId || ''))
     || !Number.isSafeInteger(envelope.attempt)
     || envelope.attempt <= 0
     || typeof envelope.createdAt !== 'string'

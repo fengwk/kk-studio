@@ -52,7 +52,7 @@ import java.util.regex.Pattern;
  * <p>Speaks the Daemon v2 wire protocol: every envelope is scoped by the canonical {@link
  * EnvironmentId} bound at HELLO; the display {@code environmentName} is metadata only and never
  * routes. Does not own durable ToolInvocation claim/lease/terminal/retry lifecycle. Durable
- * execution is owned by {@code ToolWorker}; this class supplies the core-side {@link
+ * execution is owned by the Runtime {@code ToolProcessor}; this class supplies the core-side {@link
  * RemoteToolTransport} and forwards daemon callbacks to the registered Tool listener with strict
  * environment/connection/invocation ownership.
  */

@@ -85,27 +85,24 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
 ]
 
 /**
- * Commands usable on an empty pane. `/thread` picks an existing Thread globally; `/session`
- * rebinds the *current* Thread and therefore needs a pane selection first.
+ * Commands usable on an empty pane. `/thread` picks an existing Chat-scoped Thread.
+ * `/session` (global Session rebind) no longer exists: the tree is current-Session only, so the
+ * command stays visible but disabled in every scene.
  */
 const BLANK_SCENE_ENABLED = new Set(['thread', 'agent', 'environment', 'yolo'])
+const NEVER_ENABLED = new Set(['session'])
 
 /** Project stable command list with scene availability (disabled stays listed). */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
   return THREAD_COMMANDS.map((command) => {
-    if (scene === 'bound' || BLANK_SCENE_ENABLED.has(command.id)) {
-      return {
-        ...command,
-        disabled: false,
-        disabledReason: undefined,
-        disabledReasonKey: undefined,
-      }
-    }
+    const disabled =
+      NEVER_ENABLED.has(command.id)
+      || (scene === 'blank' && !BLANK_SCENE_ENABLED.has(command.id))
     return {
       ...command,
-      disabled: true,
+      disabled,
       disabledReason: undefined,
-      disabledReasonKey: 'ai.runtime.command.disabledReason',
+      disabledReasonKey: disabled ? 'ai.runtime.command.disabledReason' : undefined,
     }
   })
 }

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -44,7 +45,10 @@ import java.util.List;
  */
 class HarnessRuntimeWebMapperTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
+  private static final ObjectMapper MAPPER =
+      new ObjectMapper()
+          .findAndRegisterModules()
+          .setSerializationInclusion(JsonInclude.Include.NON_NULL);
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
 
@@ -377,9 +381,12 @@ class HarnessRuntimeWebMapperTest {
   void mapsIdleSnapshotWithProcessingFalseAndEmptyLists() throws Exception {
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeWebMapper.toSnapshotDto(HarnessRuntimeTestFixtures.idleSnapshot());
+    dto.getThread().getBranchSettings().setEnvironmentId(null);
     JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(dto));
     assertEquals("IDLE", json.path("thread").path("status").asText());
     assertFalse(json.path("thread").path("processing").asBoolean());
+    assertTrue(json.path("thread").path("branchSettings").path("environmentId").isNull());
+    assertTrue(json.path("entries").get(0).path("parentEntryId").isNull());
     assertTrue(json.path("modelInvocation").isNull());
     assertTrue(json.path("toolInvocations").isArray());
     assertEquals(0, json.path("toolInvocations").size());

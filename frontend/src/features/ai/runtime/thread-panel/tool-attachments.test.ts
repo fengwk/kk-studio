@@ -1,37 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { formatToolAttachmentFallback, getToolAttachmentLabel, toToolAttachmentSrc } from '@/features/ai/runtime/thread-panel/tool-attachments'
+import {
+  formatToolAttachmentFallback,
+  getToolAttachmentHref,
+  getToolAttachmentLabel,
+  isPreviewableAttachment,
+  toToolAttachmentSrc,
+} from '@/features/ai/runtime/thread-panel/tool-attachments'
 
 describe('tool-attachments', () => {
-  it('builds data urls for base64 payloads', () => {
-    // Raw base64 is the backend contract today, so the UI must normalize it into a renderable src.
+  it('auto-preview only data: URIs; http(s)/file/s3 are never inlined media src', () => {
     expect(
       toToolAttachmentSrc({
         type: 'image',
         name: 'cover.png',
         mime: 'image/png',
-        data: 'aW1n',
+        data: 'data:image/png;base64,aW1n',
       }),
     ).toBe('data:image/png;base64,aW1n')
-  })
-
-  it('keeps ready-made urls unchanged', () => {
-    // Existing data/blob/http URLs should stay stable instead of being wrapped a second time.
-    expect(
-      toToolAttachmentSrc({
-        type: 'video',
-        name: 'preview.mp4',
-        mime: 'video/mp4',
-        data: 'data:video/mp4;base64,dmlkZW8=',
-      }),
-    ).toBe('data:video/mp4;base64,dmlkZW8=')
-    expect(
-      toToolAttachmentSrc({
-        type: 'image',
-        name: 'artifact',
-        mime: 'image/png',
-        data: '/api/ai/runtime/artifacts/1',
-      }),
-    ).toBe('/api/ai/runtime/artifacts/1')
+    expect(isPreviewableAttachment({
+      type: 'image',
+      name: 'cover.png',
+      mime: 'image/png',
+      data: 'data:image/png;base64,aW1n',
+    })).toBe(true)
+    // Untrusted remote/local Tool Resources must NOT land in media src (no automatic GET);
+    // they stay explicit links.
     expect(
       toToolAttachmentSrc({
         type: 'image',
@@ -39,11 +32,70 @@ describe('tool-attachments', () => {
         mime: 'image/png',
         data: 'https://example.test/image.png',
       }),
-    ).toBe('https://example.test/image.png')
+    ).toBeNull()
+    expect(
+      toToolAttachmentSrc({
+        type: 'image',
+        name: 'insecure',
+        mime: 'image/png',
+        data: 'http://example.test/image.png',
+      }),
+    ).toBeNull()
+    expect(isPreviewableAttachment({
+      type: 'image',
+      name: 'remote',
+      mime: 'image/png',
+      data: 'https://example.test/image.png',
+    })).toBe(false)
+    expect(isPreviewableAttachment({
+      type: 'image',
+      name: 'local',
+      mime: 'image/png',
+      data: 'file:///tmp/cover.png',
+    })).toBe(false)
+    // http(s) remain canonical LINK targets (explicit open-raw only).
+    expect(getToolAttachmentHref({
+      type: 'image',
+      name: 'remote',
+      mime: 'image/png',
+      data: 'https://example.test/image.png',
+    })).toBe('https://example.test/image.png')
+  })
+
+  it('returns null src for file:/s3: URIs but keeps href pointing to the URI', () => {
+    const fileAttachment = {
+      type: 'file' as const,
+      name: 'result.json',
+      mime: 'application/json',
+      data: 'file:///tmp/result.json',
+    }
+    expect(toToolAttachmentSrc(fileAttachment)).toBeNull()
+    expect(isPreviewableAttachment(fileAttachment)).toBe(false)
+    expect(getToolAttachmentHref(fileAttachment)).toBe('file:///tmp/result.json')
+    expect(formatToolAttachmentFallback(fileAttachment)).toBe('[file] result.json')
+
+    const s3Attachment = {
+      type: 'file' as const,
+      name: 'blob.bin',
+      mime: 'application/octet-stream',
+      data: 's3://bucket/obj',
+    }
+    expect(toToolAttachmentSrc(s3Attachment)).toBeNull()
+    expect(isPreviewableAttachment(s3Attachment)).toBe(false)
+    expect(getToolAttachmentHref(s3Attachment)).toBe('s3://bucket/obj')
+    expect(formatToolAttachmentFallback(s3Attachment)).toBe('[file] blob.bin')
+  })
+
+  it('only links canonical data/file/s3/http/https schemes', () => {
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'https://x/y' })).toBe('https://x/y')
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'file:///tmp/a' })).toBe('file:///tmp/a')
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 's3://b/a' })).toBe('s3://b/a')
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'javascript:alert(1)' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'ftp://x/y' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: '' })).toBeNull()
   })
 
   it('exposes consistent labels and fallbacks', () => {
-    // Labels should prefer human-readable names, while fallback text stays available for empty payload cases.
     const attachment = {
       type: 'audio' as const,
       name: '',
@@ -53,6 +105,7 @@ describe('tool-attachments', () => {
 
     expect(getToolAttachmentLabel(attachment)).toBe('audio/mpeg')
     expect(toToolAttachmentSrc(attachment)).toBeNull()
+    expect(getToolAttachmentHref(attachment)).toBeNull()
     expect(formatToolAttachmentFallback(attachment)).toBe('[audio] audio/mpeg')
     expect(getToolAttachmentLabel({ ...attachment, mime: '' })).toBe('audio attachment')
     expect(formatToolAttachmentFallback({ ...attachment, mime: '', name: 'preview.mp3' })).toBe('[audio] preview.mp3')

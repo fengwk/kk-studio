@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 /**
@@ -12,6 +13,9 @@ import lombok.Data;
 public class HarnessThreadStopResultDTO {
   private String status;
   private HarnessThreadDTO thread;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String stoppedTurnEndEntryId;
+
   private Integer cancelledCommandCount;
 }

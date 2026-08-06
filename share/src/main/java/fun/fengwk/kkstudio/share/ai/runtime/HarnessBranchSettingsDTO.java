@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.util.List;
@@ -13,7 +14,9 @@ import java.util.List;
  */
 @Data
 public class HarnessBranchSettingsDTO {
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentId;
+
   private String agentName;
   private HarnessModelSelectionDTO model;
   private String thinkingLevel;

@@ -20,7 +20,13 @@ public record EnvironmentId(String value) {
     if (!value.equals(value.strip())) {
       throw new IllegalArgumentException("environmentId must not contain surrounding whitespace");
     }
-    UUID parsed = UUID.fromString(value);
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          "environmentId must be a canonical lowercase UUID: " + value, error);
+    }
     if (!parsed.toString().equals(value)) {
       throw new IllegalArgumentException(
           "environmentId must be a canonical lowercase UUID: " + value);

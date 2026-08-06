@@ -1,59 +1,41 @@
-import type {
-  BackendBigDecimal,
-  BackendDateTime,
-  BackendLong,
-  CursorPage,
-  InstantTimestamp,
-} from '@/shared/api/contracts/base'
+import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
 
-interface ModelUsageCostSummaryDTO {
-  currency: string
-  input: BackendBigDecimal
-  output: BackendBigDecimal
-  cacheRead: BackendBigDecimal
-  cacheWrite: BackendBigDecimal
-  cacheWriteLong: BackendBigDecimal
-  reasoning: BackendBigDecimal
-  total: BackendBigDecimal
+/**
+ * Immutable provider/model/variant selection frozen into a branch settings snapshot.
+ */
+export interface HarnessModelSelectionDTO {
+  providerName: string
+  modelName: string
+  variant: string
 }
 
-export interface ModelUsageSummaryDTO {
-  scopeType: 'thread' | 'session' | 'model'
-  scopeId: string
-  recordCount: BackendLong
-  inputTokens: BackendLong
-  outputTokens: BackendLong
-  cacheReadTokens: BackendLong
-  cacheWriteTokens: BackendLong
-  cacheWriteLongTokens: BackendLong
-  reasoningTokens: BackendLong
-  providerTotalTokens: BackendLong
-  cacheEligibleRecordCount: BackendLong
-  cacheHitRecordCount: BackendLong
-  cacheHitRatio: BackendBigDecimal
-  tokenReadRatio: BackendBigDecimal
-  unamortizedCacheWriteTokens: BackendLong
-  costs: ModelUsageCostSummaryDTO[]
-}
-
-/** Flat Session query projection; Sessions are created as part of Chat-scoped Thread creation. */
-export interface HarnessSessionDTO {
-  sessionId: string
-  title: string | null
-  createTime: BackendDateTime
-  /** Observable last-entry time; not a stored column. */
-  updateTime: BackendDateTime
+/**
+ * Complete branch settings snapshot of one Entry branch.
+ *
+ * environmentId is a nullable canonical lowercase UUID route identity; display names never
+ * enter this durable snapshot.
+ */
+export interface HarnessBranchSettingsDTO {
+  environmentId: string | null
+  agentName: string
+  model: HarnessModelSelectionDTO
+  thinkingLevel: string
+  activeTools: string[]
 }
 
 export type EntryType =
   | 'ROOT'
+  | 'TURN_START'
   | 'MESSAGE'
   | 'CUSTOM_MESSAGE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
+  | 'TURN_END'
 
+/** Session Entry query projection; ids are strict positive decimal strings. */
 export interface HarnessSessionEntryDTO {
   entryId: string
+  sessionId: string
   parentEntryId: string | null
   entryType: EntryType
   payloadJson: string
@@ -61,173 +43,166 @@ export interface HarnessSessionEntryDTO {
 }
 
 /**
- * HarnessThread query projection; ids are decimal strings.
+ * HarnessThread query projection; ids are strict positive decimal strings, revision is the
+ * durable snapshot cursor.
+ *
+ * status/processing are derived display fields (processing is false only for IDLE);
+ * branchSettings is the complete settings snapshot of the head Entry branch.
  */
 export interface HarnessThreadDTO {
   threadId: string
+  /** Current Session primary key (derived from the head Entry). */
   sessionId: string
-  sessionTitle: string | null
+  /** Current head Entry. */
   headEntryId: string
-  /** Current Thread Environment; null means platform tools only. */
-  environmentName: string | null
-  /** CAS fencing token; every external mutation must echo the currently known value. */
-  executionEpoch: BackendLong
-  /** PostgreSQL durable snapshot cursor, always a decimal bigint string. */
+  /** Current frozen YOLO runtime policy. */
+  yoloEnabled: boolean
+  /** Allocated command sequence high-water mark + 1. */
+  nextCommandSequence: string
+  /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string). */
   revision: string
-  /** Derived display status: RUNNING > WAITING > RUNNABLE > IDLE. */
-  status: ThreadStatus
-  inputSequence: BackendLong
+  /** Display status (derived): IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING. */
+  status: string
+  /** Whether the runtime is currently processing this Thread (derived). */
   processing: boolean
+  /** Complete settings snapshot of the head Entry branch. */
+  branchSettings: HarnessBranchSettingsDTO
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
-export interface HarnessThreadCreateDTO {
-  environmentName: string | null
+/** Durable Thread mailbox command projection. */
+export interface HarnessThreadCommandDTO {
+  commandId: string
+  threadId: string
+  sequence: string
+  type: string
+  state: 'QUEUED' | 'APPLIED' | 'CANCELLED' | string
+  clientCommandId: string
+  payloadJson: string
+  consumedTurnStartEntryId: string | null
+  cancelledAt: InstantTimestamp
+  createTime: BackendDateTime
 }
-
-export type ThreadListSort = 'recent' | 'created'
-export type HarnessThreadPage = CursorPage<HarnessThreadDTO>
-
-/** Every external Thread mutation carries the expected epoch; a stale value yields 409. */
-interface HarnessThreadEpochGuardDTO {
-  expectedExecutionEpoch: BackendLong
-}
-
-/** Moves the Thread head within or across Sessions. */
-export interface HarnessThreadHeadUpdateDTO extends HarnessThreadEpochGuardDTO {
-  headEntryId: string
-}
-
-export interface HarnessThreadMessageCreateDTO extends HarnessThreadEpochGuardDTO {
-  content: string
-  agentName: string
-  yoloEnabled: boolean
-  clientMessageId: string
-}
-
-export interface HarnessThreadCustomMessageCreateDTO extends HarnessThreadEpochGuardDTO {
-  role: 'system' | 'user'
-  content: string
-  agentName: string
-  yoloEnabled: boolean
-  clientMessageId: string
-}
-
-export interface HarnessThreadEnvironmentUpdateDTO extends HarnessThreadEpochGuardDTO {
-  environmentName: string | null
-}
-
-export type HarnessThreadStopDTO = HarnessThreadEpochGuardDTO
 
 /**
- * Query-derived Thread status only. Invocation retry waits are projected as WAITING.
+ * Typed Thread mailbox command request.
+ *
+ * The discriminated union mirrors the Java mapper's strict per-type field rules: USER_MESSAGE
+ * must NOT carry role (the mapper forbids it — the role is always USER); CUSTOM_MESSAGE carries
+ * an uppercase role (SYSTEM/USER). clientCommandId is the stable idempotency key.
  */
-type ThreadStatus = 'IDLE' | 'RUNNING' | 'WAITING' | 'RUNNABLE'
+export type HarnessThreadCommandCreateDTO =
+  | { type: 'USER_MESSAGE'; clientCommandId: string; content: string }
+  | { type: 'CUSTOM_MESSAGE'; clientCommandId: string; content: string; role: 'SYSTEM' | 'USER' }
+  | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
+  | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
+  | { type: 'SET_THINKING_LEVEL'; clientCommandId: string; thinkingLevel: string }
+  | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
+  | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
+  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentId: string | null }
 
-/** Global automatic retry policy; PUT bodies are complete replacements. */
-export interface HarnessRetryPolicyDTO {
-  /** Extra attempts after the initial provider request. */
-  maxRetries: number
-  backoffStrategy: 'FIXED' | 'EXPONENTIAL'
-  baseDelayMillis: number
-  maxDelayMillis: number
+/** Atomic Thread mailbox enqueue request; expected cursors come from the latest thread DTO. */
+export interface HarnessThreadCommandBatchDTO {
+  expectedHeadEntryId: string
+  expectedNextCommandSequence: string
+  commands: HarnessThreadCommandCreateDTO[]
 }
 
-/** Global per-Thread Redis realtime Stream capacity policy. */
-export interface HarnessRealtimeStreamPolicyDTO {
-  maxLength: number
+/** Create a Thread atomically with a complete branch settings snapshot; title is nullable. */
+export interface HarnessThreadCreateDTO {
+  title: string | null
+  branchSettings: HarnessBranchSettingsDTO
+  yoloEnabled: boolean
 }
 
-export type ThreadInputType =
-  | 'USER_MESSAGE'
-  | 'CUSTOM_MESSAGE'
-
-type ThreadInputStatus = 'QUEUED' | 'APPLIED' | 'CANCELLED'
-
-export interface HarnessThreadInputDTO {
-  inputId: string
-  threadId: string
-  sequence: number
-  inputType: ThreadInputType
-  payloadJson: string
-  clientMessageId: string
-  status: ThreadInputStatus
-  resolvedAt: BackendDateTime
-  createTime: BackendDateTime
+/** Thread head relocation request; expectedRevision is the exact revision CAS cursor. */
+export interface HarnessThreadHeadUpdateDTO {
+  targetEntryId: string
+  expectedRevision: string
 }
 
+/** Thread stop request; stopRequestId is the stable idempotency key. */
+export interface HarnessThreadStopDTO {
+  stopRequestId: string
+  expectedRevision: string
+}
+
+/**
+ * Stop result; status is STOPPED / IDLE / REPLAYED. IDLE means no Turn was stopped but queued
+ * commands may have been cancelled; stoppedTurnEndEntryId is non-null only for STOPPED/REPLAYED.
+ */
 export interface HarnessThreadStopResultDTO {
-  /** convention4j serializes Java Long as decimal string on the wire. */
-  executionEpoch: BackendLong
-  cancelledInputs: HarnessThreadInputDTO[]
-}
-
-export interface ToolInvocationDTO {
-  id: string
-  threadId: string
-  assistantEntryId: string
-  ordinal: number
-  toolCallId: string
-  toolName: string
-  toolVersion: string
-  environmentName: string | null
-  argumentsJson: string
   status: string
-  permissionAction: string
-  permissionDecision: string | null
-  deadlineAt: BackendDateTime
-  leaseOwner: string | null
-  leaseUntil: BackendDateTime
-  cancelRequestedAt: BackendDateTime
-  resultJson: string | null
-  errorMessage: string | null
-  createTime: BackendDateTime
-  startedAt: BackendDateTime
-  finishedAt: BackendDateTime
-  updateTime: BackendDateTime
+  thread: HarnessThreadDTO
+  stoppedTurnEndEntryId: string | null
+  cancelledCommandCount: number
 }
 
+/** Tool approval decision request; decisionId is the stable client idempotency key. */
+export interface HarnessToolApprovalDTO {
+  decision: 'ALLOW' | 'DENY'
+  decisionId: string
+  actor: string
+  reason: string | null
+}
+
+/**
+ * ModelInvocation query projection; ids are strict positive decimal strings.
+ * streamCheckpointJson / resultJson / errorJson are canonical runtime codec JSON, non-null only
+ * in their corresponding phase; resultEntryId is the result Entry after TURN_END application.
+ */
 export interface ModelInvocationDTO {
   id: string
   threadId: string
-  sourceHeadEntryId: string
-  executionEpoch: BackendLong
-  requestJson: string
+  turnStartEntryId: string
+  basisHeadEntryId: string
   status: string
   attempt: number
-  nextAttemptAt: InstantTimestamp
-  workerUntil: InstantTimestamp
-  deadlineAt: InstantTimestamp
-  lastActivityAt: InstantTimestamp
+  streamCheckpointJson: string | null
   resultJson: string | null
   errorJson: string | null
-  appliedAt: InstantTimestamp
-  createdAt: InstantTimestamp
-  startedAt: InstantTimestamp
-  finishedAt: InstantTimestamp
-  safeStreamSnapshotJson: string | null
+  resultEntryId: string | null
+  createTime: BackendDateTime
+  updateTime: BackendDateTime
 }
 
-interface InteractionDTO {
+/**
+ * ToolInvocation query projection; ids are strict positive decimal strings.
+ * approvalJson / resultJson / errorJson are canonical runtime codec JSON, non-null only in
+ * their corresponding phase; environmentId is a nullable canonical lowercase UUID route identity.
+ */
+export interface ToolInvocationDTO {
   id: string
-  toolInvocationId: string
-  projectionJson: string
+  modelInvocationId: string
+  assistantEntryId: string
+  ordinal: number
   status: string
-  responseJson: string | null
-  version: string
-  createdAt: InstantTimestamp
-  resolvedAt: InstantTimestamp
+  attempt: number
+  toolCallId: string
+  toolName: string
+  toolVersion: string
+  toolType: string
+  environmentId: string | null
+  argumentsJson: string
+  approvalJson: string | null
+  resultJson: string | null
+  errorJson: string | null
+  resultEntryId: string | null
+  createTime: BackendDateTime
+  updateTime: BackendDateTime
 }
 
-/** Coherent PostgreSQL Thread projection used as the sole chat-runtime query. */
+/**
+ * Coherent Thread snapshot projection; all fields come from the same database snapshot.
+ * modelInvocation is the active model invocation of the current Turn (null when none);
+ * toolInvocations are its tool siblings.
+ */
 export interface HarnessThreadSnapshotDTO {
   revision: string
   thread: HarnessThreadDTO
   entries: HarnessSessionEntryDTO[]
-  inputs: HarnessThreadInputDTO[]
-  modelInvocations: ModelInvocationDTO[]
+  queuedCommands: HarnessThreadCommandDTO[]
+  modelInvocation: ModelInvocationDTO | null
   toolInvocations: ToolInvocationDTO[]
-  openInteractions: InteractionDTO[]
-  usage: ModelUsageSummaryDTO
 }

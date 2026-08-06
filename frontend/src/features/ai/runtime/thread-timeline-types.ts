@@ -15,7 +15,21 @@ export interface ToolAttachment {
   type: ToolAttachmentType
   name: string
   mime: string
+  /** Stable URI (data:/http:/https:/file:/s3:/...); never a base64 payload on its own. */
   data: string
+  /** Optional canonical preview text embedded in the resource content. */
+  preview?: string
+  size?: number | null
+  sha256?: string | null
+}
+
+/** Undecided/decided Tool approval state projected from the ToolInvocation approvalJson. */
+/** Projected approval state; the persisted enum is ALLOWED/DENIED (not the input ALLOW/DENY). */
+export interface ToolApprovalState {
+  required: boolean
+  decision: 'ALLOWED' | 'DENIED' | null
+  decisionId: string | null
+  reason: string | null
 }
 
 interface BaseDialogueMessage {
@@ -52,6 +66,16 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   arguments: string
   attachments: ToolAttachment[]
   errorMessage?: string
+  /** ToolInvocation id carrying this call's durable state (approval/partial). */
+  invocationId?: string
+  /** Transient TOOL_PARTIAL / terminal-result overlay attachments for the active call. */
+  partialAttachments?: ToolAttachment[]
+  /** Transient error message projected from errorJson while no durable result Entry exists. */
+  partialErrorText?: string
+  /** Transient TOOL_PARTIAL overlay aggregated for the active invocation attempt. */
+  partial?: string
+  /** Projected approval state (null when the tool invocation carries no approval). */
+  approval?: ToolApprovalState
 }
 
 export interface MetaDialogueMessage extends BaseDialogueMessage {
@@ -82,17 +106,18 @@ export type DialogueMessage =
   | MetaDialogueMessage
   | EntryEventDialogueMessage
 
+/** QUEUED mailbox command shown outside the durable transcript; sequence stays a decimal string. */
 export interface QueuedThreadMessage {
-  inputId: string
+  commandId: string
   role: 'user' | 'system'
   text: string
-  sequence: number
+  sequence: string
 }
 
 export interface ThreadTimeline {
   messages: DialogueMessage[]
-  /** QUEUED mailbox messages shown outside the durable transcript. */
+  /** QUEUED USER_MESSAGE / CUSTOM_MESSAGE commands shown outside the durable transcript. */
   queuedMessages: QueuedThreadMessage[]
-  /** True when the mailbox contains a queued user-visible input. */
+  /** True when the mailbox contains a queued user-visible command. */
   hasPendingInputs: boolean
 }

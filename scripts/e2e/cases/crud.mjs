@@ -1,10 +1,11 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
+  branchSettingsOf,
+  createChat,
   createChatThread,
-  createConfiguredChatThread,
-  threadPageData,
-  updateThreadEnvironment,
+  getThreadSnapshot,
+  listChatThreads,
 } from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
@@ -305,24 +306,19 @@ registerCase({
 })
 
 registerCase({
-  id: 'crud.chat.visible_settings',
+  id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
-  title: 'Chat 仅保存 Agent/YOLO；Thread 独立保存 Environment',
-  docs: 'Chat CRUD 不含 Environment；Chat-scoped Thread POST 设置 Environment，静止 Thread PUT 可更换或清除并递增 epoch/revision',
+  title: 'Chat 默认值与 Thread branchSettings 相互独立',
+  docs: 'Chat 仅保存 agentName/yoloEnabled 默认值；Thread 创建携带完整 branchSettings（Environment 路由 UUID 或 null）；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
-    const initialEnvironment = `e2e-chat-env-${suffix}`
-    const updatedEnvironment = `e2e-chat-env-updated-${suffix}`
-    let chat = envelopeData(
-      (
-        await ctx.call('POST', '/api/ai/chat', {
-          title: `e2e-chat-env-${suffix}`,
-          agentName: agent.name,
-          yoloEnabled: false,
-        })
-      ).json,
-    )
+    const chat = await createChat(ctx, {
+      title: `e2e-chat-env-${suffix}`,
+      agentName: agent.name,
+      yoloEnabled: false,
+    })
+    let cleanupChat = chat
     try {
       assert(
         chat.agentName === agent.name
@@ -330,7 +326,27 @@ registerCase({
           && !Object.hasOwn(chat, 'environmentName'),
         JSON.stringify(chat),
       )
-      chat = envelopeData(
+      // 先创建 Thread，再更新 Chat 默认值，最后 reread 同一 Thread：更新 Chat 不影响既有 Thread
+      // 的 branchSettings（immutable Environment identity；Thread 快照是运行时事实）。
+      const requested = {
+        environmentId: null,
+        agentName: agent.name,
+        model: modelSelectionFor(agent),
+        thinkingLevel: 'off',
+        activeTools: [],
+      }
+      const threadSnapshot = await createChatThread(ctx, chat.id, {
+        title: null,
+        yoloEnabled: false,
+        branchSettings: requested,
+      })
+      const thread = threadSnapshot.thread
+      assert(thread.yoloEnabled === false, JSON.stringify(thread))
+      assert(
+        JSON.stringify(thread.branchSettings) === JSON.stringify(requested),
+        JSON.stringify({ expected: requested, actual: thread.branchSettings }),
+      )
+      const updated = envelopeData(
         (
           await ctx.call('PUT', `/api/ai/chat/${chat.id}`, {
             yoloEnabled: true,
@@ -338,28 +354,27 @@ registerCase({
           })
         ).json,
       )
+      cleanupChat = updated
       assert(
-        chat.agentName === agent.name
-          && chat.yoloEnabled === true
-          && !Object.hasOwn(chat, 'environmentName'),
-        JSON.stringify(chat),
+        updated.agentName === agent.name
+          && updated.yoloEnabled === true
+          && !Object.hasOwn(updated, 'environmentName'),
+        JSON.stringify(updated),
       )
+      // 同一 Thread reread：branchSettings 逐字段不变。
+      const reread = await getThreadSnapshot(ctx, thread.threadId)
+      assert(
+        JSON.stringify(reread.thread.branchSettings) === JSON.stringify(requested),
+        JSON.stringify({ expected: requested, actual: reread.thread.branchSettings }),
+      )
+      assert(reread.thread.yoloEnabled === false, JSON.stringify(reread.thread))
+      // 缺 branchSettings 的创建 => 400（mapper requireNonNull）。
       await expectHttpError(
-        () =>
-          ctx.call('POST', `/api/ai/chat/${encodeURIComponent(chat.id)}/threads`, {
-            environmentName: ` invalid-${suffix} `,
-          }),
-        { status: 400, messageIncludes: /environmentName|whitespace|canonical/i },
+        () => ctx.call('POST', `/api/ai/chat/${encodeURIComponent(chat.id)}/threads`, { title: null }),
+        { status: 400, messageIncludes: /branchSettings/i },
       )
-      let thread = await createChatThread(ctx, chat.id, {
-        environmentName: initialEnvironment,
-      })
-      assert(thread.environmentName === initialEnvironment, JSON.stringify(thread))
-      thread = await updateThreadEnvironment(ctx, thread, updatedEnvironment)
-      thread = await updateThreadEnvironment(ctx, thread, null)
-      assert(thread.environmentName == null, JSON.stringify(thread))
     } finally {
-      await deleteChat(ctx, chat)
+      await deleteChat(ctx, cleanupChat)
     }
   },
 })
@@ -420,71 +435,96 @@ registerCase({
 })
 
 registerCase({
-  id: 'crud.chat.thread_association_pagination',
+  id: 'crud.chat.thread_association_list',
   level: 'L1',
-  title: 'Chat 原子建 Thread、跨 Chat 关联与 opaque cursor 分页',
-  docs: 'Chat-scoped POST 直接返回 bound Thread；PUT association 幂等；Chat/global 列表均使用 {items,nextCursor}',
+  title: 'Chat Thread 数组列表与幂等 association',
+  docs: 'Chat-scoped POST 返回创建快照；PUT /threads/{threadId} association 幂等；GET 返回数组且新到旧；未知 Thread 关联 => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
-    const target = await createConfiguredChatThread(ctx, {
+    const chat = await createChat(ctx, {
       title: `e2e-chat-thread-${suffix}`,
       agentName: agent.name,
-      threadEnvironmentName: `e2e-chat-thread-env-${suffix}`,
       yoloEnabled: true,
     })
-    const source = await createConfiguredChatThread(ctx, {
-      title: `e2e-source-thread-${suffix}`,
-      agentName: agent.name,
+    const first = await createChatThread(ctx, chat.id, {
+      title: null,
+      yoloEnabled: true,
+      branchSettings: branchSettingsOf(
+        { name: agent.name },
+        modelSelectionFor(agent),
+        { environmentId: null },
+      ),
+    })
+    const second = await createChatThread(ctx, chat.id, {
+      title: null,
+      yoloEnabled: true,
+      branchSettings: branchSettingsOf(
+        { name: agent.name },
+        modelSelectionFor(agent),
+        { environmentId: null },
+      ),
     })
     try {
-      assert(target.thread.status === 'IDLE', JSON.stringify(target.thread))
-      assert(Number(target.thread.executionEpoch) === 0, JSON.stringify(target.thread))
-      assert(target.thread.sessionId && target.thread.headEntryId, JSON.stringify(target.thread))
-      await ctx.call(
-        'PUT',
-        `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads/${encodeURIComponent(source.thread.threadId)}`,
-      )
-      await ctx.call(
-        'PUT',
-        `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads/${encodeURIComponent(source.thread.threadId)}`,
-      )
-      const scopedPage = threadPageData(
-        (
-          await ctx.call(
-            'GET',
-            `/api/ai/chat/${encodeURIComponent(target.chat.id)}/threads?sort=created&limit=100`,
-          )
-        ).json,
-        'Chat Thread page',
-      )
-      const scopedIds = new Set(scopedPage.items.map((thread) => String(thread.threadId)))
-      assert(scopedIds.has(String(target.thread.threadId)), 'target Thread missing')
-      assert(scopedIds.has(String(source.thread.threadId)), 'associated Thread missing')
+      assert(first.thread.status === 'IDLE', JSON.stringify(first.thread))
+      assert(String(first.thread.revision) === '0', JSON.stringify(first.thread))
+      assert(first.thread.sessionId && first.thread.headEntryId, JSON.stringify(first.thread))
 
-      const firstGlobal = threadPageData(
-        (await ctx.call('GET', '/api/ai/runtime/threads?sort=recent&limit=1')).json,
+      // 幂等 association（同一 Thread 两次 PUT 均 204）。
+      const third = await createChatThread(ctx, chat.id, {
+        title: null,
+        yoloEnabled: true,
+        branchSettings: branchSettingsOf(
+          { name: agent.name },
+          modelSelectionFor(agent),
+          { environmentId: null },
+        ),
+      })
+      await ctx.call(
+        'PUT',
+        `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${encodeURIComponent(first.thread.threadId)}`,
       )
-      assert(firstGlobal.items.length === 1 && firstGlobal.nextCursor, JSON.stringify(firstGlobal))
-      const secondGlobal = threadPageData(
-        (
-          await ctx.call(
-            'GET',
-            `/api/ai/runtime/threads?sort=recent&cursor=${encodeURIComponent(firstGlobal.nextCursor)}&limit=1`,
-          )
-        ).json,
+      await ctx.call(
+        'PUT',
+        `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/${encodeURIComponent(first.thread.threadId)}`,
       )
-      const firstIds = new Set(firstGlobal.items.map((thread) => String(thread.threadId)))
-      assert(
-        secondGlobal.items.every((thread) => !firstIds.has(String(thread.threadId))),
-        'keyset pages must be disjoint',
+      const scoped = await listChatThreads(ctx, chat.id)
+      const scopedIds = scoped.map((thread) => String(thread.threadId))
+      assert(scopedIds.includes(String(first.thread.threadId)), 'first Thread missing')
+      assert(scopedIds.includes(String(second.thread.threadId)), 'second Thread missing')
+      assert(scopedIds.includes(String(third.thread.threadId)), 'third Thread missing')
+      // 新到旧：最近创建（third）排在最前。
+      assert(scopedIds[0] === String(third.thread.threadId), `expected newest-first: ${JSON.stringify(scoped)}`)
+
+      // 未知 Thread 关联 => 404。
+      await expectHttpError(
+        () =>
+          ctx.call(
+            'PUT',
+            `/api/ai/chat/${encodeURIComponent(chat.id)}/threads/999999999`,
+          ),
+        { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
-      await deleteChat(ctx, target.chat)
-      await deleteChat(ctx, source.chat)
+      await deleteChat(ctx, chat)
     }
   },
 })
+
+
+/** 由 Agent 的 provider/model 字符串构造 model selection（只切第一个 '/'，保留 model name 内后续 '/'）。 */
+function modelSelectionFor(agent) {
+  const separator = String(agent.model || '').indexOf('/')
+  if (separator <= 0) {
+    throw new Error(`agent.model must be provider/model: ${JSON.stringify(agent)}`)
+  }
+  const providerName = String(agent.model).slice(0, separator)
+  const modelName = String(agent.model).slice(separator + 1)
+  if (!providerName || !modelName) {
+    throw new Error(`agent.model must be provider/model: ${JSON.stringify(agent)}`)
+  }
+  return { providerName, modelName, variant: agent.variant || 'default' }
+}
 
 async function firstModel(ctx) {
   const models = pageResults(

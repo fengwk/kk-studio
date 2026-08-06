@@ -3,15 +3,8 @@ import type { ChatCreateDTO, ChatDTO, ChatUpdateDTO } from '@/shared/api/contrac
 import type {
   HarnessThreadCreateDTO,
   HarnessThreadDTO,
-  HarnessThreadPage,
-  ThreadListSort,
+  HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
-
-export interface ChatThreadListOptions {
-  sort?: ThreadListSort
-  cursor?: string
-  limit?: number
-}
 
 export function createChatService(client: HttpClient = apiClient) {
   return {
@@ -22,20 +15,11 @@ export function createChatService(client: HttpClient = apiClient) {
       client.put(`/ai/chat/${encodeURIComponent(chatId)}`, data),
     deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
       client.delete(`/ai/chat/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
-    listChatThreads: (
-      chatId: string,
-      options: ChatThreadListOptions = {},
-    ): Promise<HarnessThreadPage> => {
-      const params: Record<string, unknown> = {
-        sort: options.sort ?? 'recent',
-        limit: options.limit ?? 20,
-      }
-      if (options.cursor) {
-        params.cursor = options.cursor
-      }
-      return client.get(`/ai/chat/${encodeURIComponent(chatId)}/threads`, { params })
-    },
-    createChatThread: (chatId: string, data: HarnessThreadCreateDTO): Promise<HarnessThreadDTO> =>
+    /** All Threads associated with this Chat (association order newest first); client sorts. */
+    listChatThreads: (chatId: string): Promise<HarnessThreadDTO[]> =>
+      client.get(`/ai/chat/${encodeURIComponent(chatId)}/threads`),
+    /** Create a Thread atomically with the complete branch draft and return its snapshot. */
+    createChatThread: (chatId: string, data: HarnessThreadCreateDTO): Promise<HarnessThreadSnapshotDTO> =>
       client.post(`/ai/chat/${encodeURIComponent(chatId)}/threads`, data),
     associateThread: (chatId: string, threadId: string): Promise<void> =>
       client.put(

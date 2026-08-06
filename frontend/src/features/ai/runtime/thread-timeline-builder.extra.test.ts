@@ -2,13 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type {
   EntryType,
   HarnessSessionEntryDTO,
-  HarnessThreadInputDTO,
-  ThreadInputType,
+  HarnessThreadCommandDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
 
 describe('thread timeline edge branches', () => {
-  it('projects system messages, empty user content, tool artifacts, and assistant errors', () => {
+  it('projects system messages, empty user content, tool resources, and assistant errors', () => {
     const timeline = buildThreadTimeline(
       [
         entry('2', 'MESSAGE', messagePayload('SYSTEM', [{ type: 'text', text: '系统提示' }])),
@@ -34,17 +33,38 @@ describe('thread timeline edge branches', () => {
               contents: [
                 { type: 'text', text: 'fail' },
                 { type: 'json', json: '{"x":1}' },
-                { type: 'artifact', artifactId: 'art-1', mediaType: 'image/png', preview: null },
-                { type: 'artifact', artifactId: 'art-2', mediaType: 'audio/wav', preview: null },
-                { type: 'artifact', artifactId: 'art-3', mediaType: 'video/mp4', preview: null },
-                { type: 'artifact', artifactId: 'art-4', mediaType: 'application/pdf', preview: null },
+                {
+                  type: 'resource',
+                  uri: 'data:image/png;base64,aW1n',
+                  mediaType: 'image/png',
+                  name: 'a.png',
+                },
+                {
+                  type: 'resource',
+                  uri: 'data:audio/wav;base64,YR4=',
+                  mediaType: 'audio/wav',
+                  name: 'a.wav',
+                },
+                {
+                  type: 'resource',
+                  uri: 'data:video/mp4;base64,AAAAAAAA',
+                  mediaType: 'video/mp4',
+                  name: 'a.mp4',
+                },
+                {
+                  type: 'resource',
+                  uri: 'file:///tmp/a.pdf',
+                  mediaType: 'application/pdf',
+                  name: 'a.pdf',
+                },
               ],
             },
           ]),
         ),
         entry('7', 'ASSISTANT_ERROR', { error: { kind: 'TRANSIENT', message: 'boom' } }),
       ],
-      [input('applied', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: 'done' }]), true)],
+      [command('applied', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: 'done' }]), 'APPLIED')],
+      [],
     )
 
     expect(timeline.messages.some((m) => m.role === 'system' && m.text === '系统提示')).toBe(true)
@@ -59,9 +79,10 @@ describe('thread timeline edge branches', () => {
     const timeline = buildThreadTimeline(
       [],
       [
-        input('blank', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '' }]), false),
-        input('ok', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '可见' }]), false),
+        command('blank', '1', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '' }]), 'QUEUED'),
+        command('ok', '2', 'USER_MESSAGE', messagePayload('USER', [{ type: 'text', text: '可见' }]), 'QUEUED'),
       ],
+      [],
     )
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages).toMatchObject([{ role: 'user', text: '可见' }])
@@ -75,9 +96,10 @@ describe('thread timeline edge branches', () => {
         entry('custom-user', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'durable user')),
       ],
       [
-        input('queued-system', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', 'queued system'), false),
-        input('queued-user', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued user'), false),
+        command('queued-system', '1', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', 'queued system'), 'QUEUED'),
+        command('queued-user', '2', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued user'), 'QUEUED'),
       ],
+      [],
     )
 
     expect(timeline.messages).toMatchObject([
@@ -90,79 +112,31 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
-  it('projects turn usage from durable assistantMetadata', () => {
-    const assistantPayload = {
-      message: {
-        role: 'ASSISTANT',
-        contents: [{ type: 'text', text: 'a1' }],
-      },
-      assistantMetadata: {
-        stopReason: 'COMPLETED',
-        usage: {
-          inputTokens: 100,
-          outputTokens: 50,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          cacheWriteLongTokens: 0,
-          reasoningTokens: 0,
-          providerTotalTokens: 150,
-        },
-        cost: {
-          currency: 'USD',
-          input: '0.01',
-          output: '0.002',
-          cacheRead: '0',
-          cacheWrite: '0',
-          cacheWriteLong: '0',
-          reasoning: '0',
-          total: '0.012',
-        },
-      },
-    }
+  it('does not emit any dialogue message for TURN_START / TURN_END even if user-visible content sneaks in', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('10', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'q1' }])),
-        entry('11', 'MESSAGE', assistantPayload),
-        entry('12', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'q2' }])),
-        entry('13', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'a2' }])),
+        entry('turn-start', 'TURN_START', { reason: 'USER_MESSAGE', settings: {} }),
+        entry('turn-end', 'TURN_END', {
+          turnStartEntryId: 'turn-start',
+          outcome: 'COMPLETED',
+          continueModel: false,
+          reason: 'no-continuation',
+          closeRequestId: null,
+        }),
       ],
       [],
+      [],
     )
-    const roles = timeline.messages.map((m) =>
-      m.role === 'meta' ? `meta:${m.kind}` : `${m.role}:${'text' in m ? m.text : ''}`,
-    )
-    expect(roles).toEqual([
-      'user:q1',
-      'assistant:a1',
-      'meta:turn_usage',
-      'user:q2',
-      'assistant:a2',
-    ])
-    expect(timeline.messages[2]?.text).toContain('$0.012')
-  })
-
-  it('projects durable usage for a tool-call-only assistant entry', () => {
-    const payload = messagePayload('ASSISTANT', [
-      { type: 'tool_call', toolCallId: 'call-only', toolName: 'read', argumentsJson: '{"path":"README.md"}' },
-    ])
-    payload.assistantMetadata = {
-      ...payload.assistantMetadata!,
-      usage: { ...payload.assistantMetadata!.usage, inputTokens: 10, outputTokens: 2, providerTotalTokens: 12 },
-      cost: { ...payload.assistantMetadata!.cost, total: '0.001' },
-    }
-
-    const timeline = buildThreadTimeline([entry('tool-only', 'MESSAGE', payload)], [])
-
-    expect(timeline.messages).toMatchObject([
-      { role: 'tool', phase: 'call', toolName: 'read', subjectEntryId: 'tool-only' },
-      { role: 'meta', kind: 'turn_usage', subjectEntryId: 'tool-only' },
-    ])
+    expect(timeline.messages).toEqual([])
+    expect(timeline.queuedMessages).toEqual([])
+    expect(timeline.hasPendingInputs).toBe(false)
   })
 })
 
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {
   return {
     entryId,
+    sessionId: 's1',
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
@@ -170,21 +144,23 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
   }
 }
 
-function input(
-  inputId: string,
-  inputType: ThreadInputType,
+function command(
+  commandId: string,
+  sequence: string,
+  type: 'USER_MESSAGE' | 'CUSTOM_MESSAGE',
   payload: Record<string, unknown>,
-  applied: boolean,
-): HarnessThreadInputDTO {
+  state: 'QUEUED' | 'APPLIED',
+): HarnessThreadCommandDTO {
   return {
-    inputId,
-    threadId: '1',
-    sequence: 1,
-    inputType,
+    commandId,
+    threadId: 't1',
+    sequence,
+    type,
+    state,
+    clientCommandId: `cid-${commandId}`,
     payloadJson: JSON.stringify(payload),
-    clientMessageId: `cid-${inputId}`,
-    status: applied ? 'APPLIED' : 'QUEUED',
-    resolvedAt: null,
+    consumedTurnStartEntryId: null,
+    cancelledAt: null,
     createTime: '2026-01-01T00:00:00',
   }
 }
@@ -192,37 +168,9 @@ function input(
 function messagePayload(role: string, contents: Array<Record<string, unknown>>) {
   return {
     message: { role, contents },
-    assistantMetadata: role === 'ASSISTANT'
-      ? zeroAssistantMetadata(contents.some((content) => content.type === 'tool_call') ? 'TOOL_CALLS' : 'COMPLETED')
-      : null,
   }
 }
 
 function customMessagePayload(role: 'SYSTEM' | 'USER', text: string) {
   return { message: { role, contents: [{ type: 'text', text }] } }
-}
-
-function zeroAssistantMetadata(stopReason: 'COMPLETED' | 'TOOL_CALLS') {
-  return {
-    stopReason,
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      cacheWriteLongTokens: 0,
-      reasoningTokens: 0,
-      providerTotalTokens: 0,
-    },
-    cost: {
-      currency: 'USD',
-      input: '0',
-      output: '0',
-      cacheRead: '0',
-      cacheWrite: '0',
-      cacheWriteLong: '0',
-      reasoning: '0',
-      total: '0',
-    },
-  }
 }

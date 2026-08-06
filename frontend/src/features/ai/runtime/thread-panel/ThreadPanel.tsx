@@ -4,7 +4,11 @@ import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadError
 import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
-import type { DialogueMessage, QueuedThreadMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueMessage,
+  QueuedThreadMessage,
+  ToolDialogueMessage,
+} from '@/features/ai/runtime/thread-timeline-types'
 
 /**
  * Transcript zone: durable timeline + live mailbox messages.
@@ -16,6 +20,10 @@ export interface ThreadPanelTranscriptInput {
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
+  /** Decides a pending ToolInvocation approval; absent when the surface has no Thread context. */
+  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  approvalPending?: boolean
 }
 
 /**
@@ -73,6 +81,8 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
           loading={transcript.loading}
           error={transcript.error}
           bodyRef={transcript.bodyRef}
+          onDecideApproval={transcript.onDecideApproval}
+          approvalPending={transcript.approvalPending}
         />
         <ThreadWidgetStack
           working={activity.working || composer.pending}

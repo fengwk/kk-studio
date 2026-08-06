@@ -221,6 +221,10 @@ function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFil
  * every other Entry becomes the head itself.
  */
 export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
+  if (entry.entryType === 'TURN_START' || entry.entryType === 'TURN_END') {
+    // Control boundaries are not branch targets; branching lands on their parent.
+    return { headEntryId: entry.parentEntryId ?? null, draft: '' }
+  }
   const kind = sessionEntryKind(entry)
   if (kind === 'user' || kind === 'custom') {
     return { headEntryId: entry.parentEntryId ?? null, draft: sessionEntryText(entry) }

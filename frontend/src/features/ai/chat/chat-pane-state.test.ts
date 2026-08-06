@@ -5,7 +5,6 @@ import {
   isPaneBound,
   loadChatPaneState,
   saveChatPaneState,
-  sortWithRunningFirst,
   updatePaneThread,
 } from '@/features/ai/chat/chat-pane-state'
 
@@ -38,6 +37,7 @@ describe('chat-pane-state', () => {
     expect(state.panes).toHaveLength(8)
     expect(state.panes[0].threadId).toBeNull()
     expect(state.focusedPaneId).toBe(state.panes[0].id)
+    expect(state.threadSort).toBe('recent')
   })
 
   it('retains pane thread bindings when expanding and shrinking layouts', () => {
@@ -122,15 +122,5 @@ describe('chat-pane-state', () => {
     const expanded = applyChatLayout(state, 'grid-8')
     expect(expanded.panes[1].threadId).toBe('t2')
     expect(expanded.panes[7].threadId).toBe('t8')
-  })
-
-  it('sorts running items first then by preferred time', () => {
-    const items = [
-      { id: 'a', status: 'IDLE', updateTime: '2026-01-03T00:00:00Z', createTime: '2026-01-01T00:00:00Z' },
-      { id: 'b', status: 'RUNNING', updateTime: '2026-01-02T00:00:00Z', createTime: '2026-01-02T00:00:00Z' },
-      { id: 'c', status: 'IDLE', updateTime: '2026-01-04T00:00:00Z', createTime: '2026-01-03T00:00:00Z' },
-    ]
-    expect(sortWithRunningFirst(items, 'recent').map((item) => item.id)).toEqual(['b', 'c', 'a'])
-    expect(sortWithRunningFirst(items, 'created').map((item) => item.id)).toEqual(['b', 'c', 'a'])
   })
 })

@@ -1,8 +1,7 @@
-import type { ThreadUsageSummary } from '@/features/ai/runtime/thread-panel/thread-status-types'
 import { translate } from '@/shared/i18n'
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'environment' | 'usage'
+  key: 'agent' | 'model' | 'environment'
   className: string
   text: string
   title: string
@@ -20,7 +19,6 @@ export interface ThreadStatusModel {
   agentText: string
   modelText: string
   environmentText: string
-  usageText: string
   segments: ThreadStatusSegment[]
 }
 
@@ -29,10 +27,8 @@ export interface ThreadStatusModelInput {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentName?: string | null
+  environmentDisplayName?: string | null
   yoloEnabled?: boolean
-  usage?: ThreadUsageSummary
-  contextWindow?: number
   onAgentClick?: () => void
   onModelClick?: () => void
   onVariantClick?: () => void
@@ -48,55 +44,9 @@ function clean(value?: string | null): string {
   return text
 }
 
-function formatTokens(count: number): string {
-  if (!Number.isFinite(count) || count <= 0) {
-    return '0'
-  }
-  if (count < 1000) {
-    return String(Math.round(count))
-  }
-  if (count < 10_000) {
-    return `${(count / 1000).toFixed(1)}k`
-  }
-  if (count < 1_000_000) {
-    return `${Math.round(count / 1000)}k`
-  }
-  if (count < 10_000_000) {
-    return `${(count / 1_000_000).toFixed(1)}M`
-  }
-  return `${Math.round(count / 1_000_000)}M`
-}
 
-function asInt(value: unknown): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0
-}
 
-function asNumber(value: unknown): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : 0
-}
 
-function resolveCacheHitPercent(
-  usage: ThreadUsageSummary | undefined,
-  cacheRead: number,
-  input: number,
-): number {
-  const ratio = asNumber(usage?.cacheHitRatio)
-  if (ratio > 0) {
-    return ratio > 1 ? ratio : ratio * 100
-  }
-  const hits = asInt(usage?.cacheHitRecordCount)
-  const eligible = asInt(usage?.cacheEligibleRecordCount)
-  if (eligible > 0) {
-    return (hits / eligible) * 100
-  }
-  const prompt = input + cacheRead
-  if (prompt > 0 && cacheRead > 0) {
-    return (cacheRead / prompt) * 100
-  }
-  return 0
-}
 
 /** Build the stable text-only status model from panel inputs. No layout, no DOM. */
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
@@ -105,18 +55,8 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
   const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
   const environment =
-    clean(input.environmentName) || translate('ai.runtime.status.environmentFallback')
+    clean(input.environmentDisplayName) || translate('ai.runtime.status.environmentFallback')
   const yoloOn = Boolean(input.yoloEnabled)
-
-  const tokensIn = asInt(input.usage?.inputTokens)
-  const tokensOut = asInt(input.usage?.outputTokens)
-  const cacheRead = asInt(input.usage?.cacheReadTokens)
-  const cacheWrite =
-    asInt(input.usage?.cacheWriteTokens) + asInt(input.usage?.cacheWriteLongTokens)
-  const used = tokensIn + tokensOut
-  const limit = input.contextWindow && input.contextWindow > 0 ? input.contextWindow : 0
-  const hitPercent = resolveCacheHitPercent(input.usage, cacheRead, tokensIn)
-  const cost = (input.usage?.costs ?? []).reduce((sum, item) => sum + asNumber(item.total), 0)
 
   // modelName may already be the canonical provider/model ref from callers.
   const composedModelRef =
@@ -129,16 +69,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     ? translate('ai.runtime.status.agentYoloText', { name: agentLabel })
     : translate('ai.runtime.status.agentText', { name: agentLabel })
   const environmentText = translate('ai.runtime.status.environmentText', { name: environment })
-  // 未开对话 / 零用量也展示，便于看到 context 上限与费用位（与 pi/opencode 一致）
-  const usageText = [
-    `↑${formatTokens(tokensIn)}`,
-    `↓${formatTokens(tokensOut)}`,
-    `R${formatTokens(cacheRead)}`,
-    `W${formatTokens(cacheWrite)}`,
-    `CH${hitPercent.toFixed(1)}%`,
-    limit > 0 ? `${formatTokens(used)}/${formatTokens(limit)}` : formatTokens(used),
-    `$${cost.toFixed(3)}`,
-  ].join(' · ')
 
   const segments: ThreadStatusSegment[] = [
     {
@@ -170,12 +100,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
         : environmentText,
       onClick: input.onEnvironmentClick,
     },
-    {
-      key: 'usage',
-      className: 'thread-status-usage',
-      text: usageText,
-      title: usageText,
-    },
   ]
 
   return {
@@ -188,7 +112,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     agentText,
     modelText,
     environmentText,
-    usageText,
     segments,
   }
 }

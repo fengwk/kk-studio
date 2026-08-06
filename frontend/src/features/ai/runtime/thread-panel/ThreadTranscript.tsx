@@ -2,7 +2,10 @@ import { MessageSquare } from 'lucide-react'
 import type { RefObject } from 'react'
 import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
 import { isVisibleDialogueMessage } from '@/features/ai/runtime/thread-panel/visibility'
-import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  DialogueMessage,
+  ToolDialogueMessage,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
 /** Dialogue zone: full-height scroll, block transcript. */
@@ -11,11 +14,16 @@ export function ThreadTranscript({
   loading,
   error,
   bodyRef,
+  onDecideApproval,
+  approvalPending = false,
 }: {
   messages: DialogueMessage[]
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
+  onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
+  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  approvalPending?: boolean
 }) {
   const { t } = useI18n()
   const hasError = Boolean(error)
@@ -34,7 +42,11 @@ export function ThreadTranscript({
         </div>
       )}
       <div className="thread-blocks">
-        <MessageList messages={visibleMessages} />
+        <MessageList
+          messages={visibleMessages}
+          onDecideApproval={onDecideApproval}
+          approvalPending={approvalPending}
+        />
       </div>
     </div>
   )
