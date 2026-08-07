@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -156,17 +155,14 @@ class ProviderAdapterContractTest {
                       ProviderType.OPENAI,
                       server.endpoint("/v1"),
                       timeoutPolicy(Duration.ofSeconds(5))));
+      assertPromptCacheKeyForControl(provider, ProviderCacheControl.none(), null, server);
       assertPromptCacheKeyForControl(
-          ProviderType.OPENAI, provider, ProviderCacheControl.none(), null, server);
-      assertPromptCacheKeyForControl(
-          ProviderType.OPENAI,
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "aff-key"),
           "aff-key",
           server);
       // LONG/breakpoints/AFFINITY-其它 retention 全部在 validateRequest 抛 INVALID_REQUEST。
       assertControlRejected(
-          ProviderType.OPENAI,
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.LONG, "aff-key"),
           "OpenAI prompt cache retention",
@@ -192,16 +188,13 @@ class ProviderAdapterContractTest {
                       ProviderType.OPENAI_RESPONSES,
                       server.endpoint("/v1"),
                       timeoutPolicy(Duration.ofSeconds(5))));
+      assertPromptCacheKeyForControl(provider, ProviderCacheControl.none(), null, server);
       assertPromptCacheKeyForControl(
-          ProviderType.OPENAI_RESPONSES, provider, ProviderCacheControl.none(), null, server);
-      assertPromptCacheKeyForControl(
-          ProviderType.OPENAI_RESPONSES,
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "aff-key-2"),
           "aff-key-2",
           server);
       assertControlRejected(
-          ProviderType.OPENAI_RESPONSES,
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.LONG, "aff-key-2"),
           "OpenAI prompt cache retention",
@@ -257,7 +250,6 @@ class ProviderAdapterContractTest {
           true,
           server);
       assertControlRejected(
-          ProviderType.ANTHROPIC,
           provider,
           ProviderCacheControl.breakpoints(
               PromptCacheRetention.LONG,
@@ -266,7 +258,6 @@ class ProviderAdapterContractTest {
           "Anthropic prompt cache retention",
           server);
       assertControlRejected(
-          ProviderType.ANTHROPIC,
           provider,
           ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "model-anthropic"),
           "Anthropic BREAKPOINTS requires at least SYSTEM or TOOLS",
@@ -291,64 +282,15 @@ class ProviderAdapterContractTest {
                       server.endpoint("/v1beta"),
                       timeoutPolicy(Duration.ofSeconds(5))));
       RecordedRequest none =
-          runAndAwait(
-              provider,
-              request(ProviderCacheControl.none(), ProviderType.GOOGLE),
-              server,
-              error -> {});
+          runAndAwait(provider, request(ProviderCacheControl.none()), server, error -> {});
       assertNoExplicitGoogleCache(none);
       RecordedRequest ignoredAffinity =
           runAndAwait(
               provider,
-              request(
-                  ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "ignored"),
-                  ProviderType.GOOGLE),
+              request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "ignored")),
               server,
               error -> {});
       assertNoExplicitGoogleCache(ignoredAffinity);
-    }
-  }
-
-  /** 模型描述符的 providerType 与 Adapter 类型不一致时 stream 必须在启动前失败。 */
-  @Test
-  void rejectsRequestWhenModelProviderTypeDoesNotMatchAdapter() throws Exception {
-    String probe = "{\"error\":{\"message\":\"unused\",\"type\":\"invalid_request_error\"}}";
-    try (ProbeServer server = new ProbeServer(probe)) {
-      server.start();
-      ModelProvider provider =
-          new OpenAiProviderAdapter("test-api-key")
-              .create(
-                  new ProviderDescriptor(
-                      "provider",
-                      ProviderType.OPENAI,
-                      server.endpoint("/v1"),
-                      timeoutPolicy(Duration.ofSeconds(5))));
-      // descriptor 与 adapter 一致，但 model.providerType=GOOGLE 必须被拒绝。
-      CountDownLatch done = new CountDownLatch(1);
-      AtomicReference<ProviderException> error = new AtomicReference<>();
-      provider.stream(
-          request(ProviderCacheControl.none(), ProviderType.GOOGLE),
-          new ProviderStreamHandler() {
-            @Override
-            public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-            @Override
-            public void onComplete(ProviderResponse response, ProviderStream stream) {
-              done.countDown();
-            }
-
-            @Override
-            public void onError(ProviderException providerError, ProviderStream stream) {
-              error.set(providerError);
-              done.countDown();
-            }
-          });
-      assertTrue(done.await(5, TimeUnit.SECONDS));
-      assertNotNull(error.get());
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.get().kind());
-      assertNull(
-          server.pollRequest(200, TimeUnit.MILLISECONDS),
-          "no HTTP call should be issued when model type mismatches adapter type");
     }
   }
 
@@ -373,7 +315,7 @@ class ProviderAdapterContractTest {
       CountDownLatch done = new CountDownLatch(1);
       AtomicReference<ProviderException> error = new AtomicReference<>();
       provider.stream(
-          request(ProviderCacheControl.none(), type),
+          request(ProviderCacheControl.none()),
           new ProviderStreamHandler() {
             @Override
             public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
@@ -424,13 +366,11 @@ class ProviderAdapterContractTest {
                   server.endpoint(endpointPath),
                   timeoutPolicy(Duration.ofSeconds(5))));
       return jsonBody(
-          runAndAwait(
-              provider, request(ProviderCacheControl.none(), type, "high"), server, error -> {}));
+          runAndAwait(provider, request(ProviderCacheControl.none(), "high"), server, error -> {}));
     }
   }
 
   private static void assertPromptCacheKeyForControl(
-      ProviderType modelType,
       ModelProvider provider,
       ProviderCacheControl control,
       String expectedPromptCacheKey,
@@ -439,7 +379,7 @@ class ProviderAdapterContractTest {
     AtomicReference<ProviderException> error = new AtomicReference<>();
     CountDownLatch done = new CountDownLatch(1);
     provider.stream(
-        request(control, modelType),
+        request(control),
         new ProviderStreamHandler() {
           @Override
           public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
@@ -477,7 +417,7 @@ class ProviderAdapterContractTest {
     AtomicReference<ProviderException> error = new AtomicReference<>();
     CountDownLatch done = new CountDownLatch(1);
     provider.stream(
-        request(control, ProviderType.ANTHROPIC),
+        request(control),
         new ProviderStreamHandler() {
           @Override
           public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
@@ -503,7 +443,6 @@ class ProviderAdapterContractTest {
   }
 
   private static void assertControlRejected(
-      ProviderType modelType,
       ModelProvider provider,
       ProviderCacheControl control,
       String containsMessage,
@@ -511,7 +450,7 @@ class ProviderAdapterContractTest {
     AtomicReference<ProviderException> error = new AtomicReference<>();
     CountDownLatch done = new CountDownLatch(1);
     provider.stream(
-        request(control, modelType),
+        request(control),
         new ProviderStreamHandler() {
           @Override
           public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
@@ -622,20 +561,17 @@ class ProviderAdapterContractTest {
     return false;
   }
 
-  private static ProviderRequest request(ProviderCacheControl control, ProviderType modelType) {
-    return request(control, modelType, null);
+  private static ProviderRequest request(ProviderCacheControl control) {
+    return request(control, null);
   }
 
-  private static ProviderRequest request(
-      ProviderCacheControl control, ProviderType modelType, String reasoningEffort) {
+  private static ProviderRequest request(ProviderCacheControl control, String reasoningEffort) {
     ModelVariant variant =
         new ModelVariant("default", 256, 0.0, null, null, null, null, List.of(), reasoningEffort);
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
-            0L,
             "MiniMax-M2.7",
-            modelType,
             true,
             true,
             new ModelPricing(
@@ -649,8 +585,7 @@ class ProviderAdapterContractTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            PromptCachePolicy.disabled());
+                BigDecimal.ZERO));
     return new ProviderRequest(
         model,
         variant,

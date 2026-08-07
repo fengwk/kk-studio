@@ -51,7 +51,6 @@ public class AgentModelServiceImpl implements AgentModelService {
     referenceResolver.requireProviderForUpdate(ref.providerName());
     AgentModel model =
         modelMutationFactory.newModel(ref.providerName(), ref.modelName(), createDTO);
-    referenceResolver.ensureNameAvailable(ref.providerName(), ref.modelName());
     try {
       if (!agentModelRepository.create(model)) {
         throw new IllegalStateException("create agent model failed");

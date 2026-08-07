@@ -196,6 +196,7 @@ public record ModelInvocationRequest(
 
 - `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill binding 名称不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
 - `ToolBinding(descriptor, type, environmentId)`：`PLATFORM` binding 的 environmentId 为 null，`ENVIRONMENT` binding 指向具体 route；descriptor 的 type 与 binding type 一致。
+- `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 - retry 重放同一份 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
 - JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
 

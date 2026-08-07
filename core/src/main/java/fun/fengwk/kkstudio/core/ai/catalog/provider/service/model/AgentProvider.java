@@ -19,5 +19,4 @@ public class AgentProvider {
   private Long version;
   private Instant createTime;
   private Instant updateTime;
-  private Instant deletedAt;
 }

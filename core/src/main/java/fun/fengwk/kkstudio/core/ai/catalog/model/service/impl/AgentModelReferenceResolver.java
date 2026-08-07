@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
@@ -56,13 +55,6 @@ final class AgentModelReferenceResolver {
           PROVIDER_RESOURCE, PROVIDER_RESOURCE + " not found: " + name);
     }
     return provider;
-  }
-
-  void ensureNameAvailable(String providerName, String name) {
-    if (agentModelRepository.getByProviderNameAndName(providerName, name) != null) {
-      throw new AiDuplicateException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " name already exists under this provider: " + name);
-    }
   }
 
   void ensureDeletable(String providerName, String name) {

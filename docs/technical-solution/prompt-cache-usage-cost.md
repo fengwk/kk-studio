@@ -18,12 +18,13 @@ flowchart LR
 
 事实边界：
 
-1. Resolver 先生成含 `ProviderCacheControl` 的 ProviderRequest；
-2. `PromptCacheRequestFinalizer` 是最终 cache control 的唯一生成点；
-3. `ModelInvocationRequest` 冻结 ProviderRequest、route、ToolBinding、SkillBinding 与 YOLO；
-4. ModelProcessor 只使用冻结 ProviderRequest；
-5. terminal `ProviderResponse` 的 `usage`/`cost` 冻结进 `resultJson`；
-6. apply 时由 `HistoryPayloadMapper` 把 `stopReason`、`usage`、`cost` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（`turn_usage` 前端 meta 消息展示）。
+1. Resolver 先生成含 `ProviderCacheControl` 的 ProviderRequest（policy 由当前行的 `ProviderFactory` capability 解析）；
+2. `PromptCacheRequestFinalizer` 是 turn-time cache control 的唯一生成点；
+3. `ModelInvocationRequest` 冻结 ProviderRequest、route、ToolBinding、SkillBinding 与 YOLO；`ModelDescriptor` 只含 providerName/modelName/tools/reasoning/pricing 五个字段；
+4. ModelProcessor 调度冻结 ProviderRequest；
+5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；CoreModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 request 字段保持不变，不兼容能力降级为 `none()`；
+6. terminal `ProviderResponse` 的 `usage`/`cost` 冻结进 `resultJson`；
+7. apply 时由 `HistoryPayloadMapper` 把 `stopReason`、`usage`、`cost` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`（`turn_usage` 前端 meta 消息展示）。
 
 ## 2. Prompt Cache
 
@@ -106,14 +107,14 @@ total
 
 - terminal `ProviderResponse` 的 `usage`/`cost`/`requestId`/`serviceTier`/`rawUsageJson` 与 `stopReason` 一起写入 `harness_model_invocation.result`；
 - apply 时 `HistoryPayloadMapper` 把 `stopReason`、`usage`、`cost` 快照进 ASSISTANT Message Entry 的 `AssistantMessageMetadata`；
-- `provider_name`/`model_name` 等身份是写入时冻结的历史事实，不随 Catalog 当前内容变化；
+- `provider_name`/`model_name` 等身份是写入时冻结的**名称引用**（字符串本身不变，解析发生在下一 turn / 每次 attempt），不随 Catalog 当前内容变化；
 - **不存在** `harness_model_usage` 账本表、usage 聚合 API（`/usage/...`）或 settings API；前端只从 snapshot Entry 的 `turn_usage` meta 读取单次调用的 usage/cost。
 
 ## 6. Model config 与运行时解析
 
 Model config 写入时严格校验：`limit.context`/`limit.output` 为正整数且 output 不超过 context；`abilities.tools`/`abilities.reasoning` 为 boolean；`inputModalities` 非空且只包含受支持 enum；`variants` 非空、variant id 唯一且命中 `defaultVariant`；pricing 字段完整、单价非负、multiplier 为正。Agent config 写入时校验可选择 Tool 名与 Skill 字段结构。
 
-每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 重新读取最新 Agent、Provider、Model、Variant、ToolCatalog 与 Environment route，并把结果冻结进 `ModelInvocationRequest`。缺失 Agent/Provider/Model/Variant 或未知可选择 Tool → `ASSISTANT_ERROR` barrier；非 null Environment route 无论 activeTools 都必须存在且 READY，null route 只允许 platform-only 且无 skills 的 turn。违反这些 fail-closed 规则时不创建 Provider 调用。
+每次 turn 由 `DatabaseTurnResolver` 从 `BranchSettings` 重新读取最新 Agent、Provider、Model、Variant、ToolCatalog 与 Environment route，并把结果冻结进 `ModelInvocationRequest`（Agent/Model 修改下一 turn 生效）。缺失 Agent/Provider/Model/Variant 或未知可选择 Tool → `ASSISTANT_ERROR` barrier；非 null Environment route 无论 activeTools 都必须存在且 READY，null route 只允许 platform-only 且无 skills 的 turn。违反这些 fail-closed 规则时不创建 Provider 调用。每次 Model attempt 再由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。effective cache control 按 attempt 时当前 capability 规范化。
 
 ## 7. 实现与测试入口
 

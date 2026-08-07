@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.cache;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -20,6 +21,8 @@ import java.util.Set;
  *
  * <ul>
  *   <li>构造时绑定 sessionId，永远覆盖请求中已有的 {@link ProviderCacheControl}；不存在执行时 hook 重写路径。
+ *   <li>{@link PromptCachePolicy} 由调用方显式传入且不随 {@link ProviderRequest} 或 ModelDescriptor 持久化；具体解析与
+ *       调用时点由调用方（Core）决定。
  *   <li>{@link PromptCacheRetention#NONE} 一律输出 {@link ProviderCacheControl#none()}。
  *   <li>policy capability 为 {@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} /
  *       {@link PromptCacheMode#AUTOMATIC} 一律输出 {@code none()}；harness 不向 Provider 传递 cache hint。
@@ -47,29 +50,27 @@ public final class PromptCacheRequestFinalizer {
     this(sessionId, new PromptCacheAffinityKeyFactory());
   }
 
-  public ProviderRequest apply(ProviderRequest request) {
+  public ProviderRequest apply(ProviderRequest request, PromptCachePolicy policy) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(request.model(), "request.model()");
-    PromptCacheCapability capability = request.model().promptCachePolicy().capability();
-    PromptCacheRetention retention = request.model().promptCachePolicy().retention();
-    ProviderCacheControl resolved = resolve(request, capability, retention);
+    Objects.requireNonNull(policy, "policy");
+    ProviderCacheControl resolved = resolve(request, policy);
     return new ProviderRequest(
         request.model(), request.variant(), request.messages(), request.tools(), resolved);
   }
 
-  private ProviderCacheControl resolve(
-      ProviderRequest request, PromptCacheCapability capability, PromptCacheRetention retention) {
+  private ProviderCacheControl resolve(ProviderRequest request, PromptCachePolicy policy) {
+    PromptCacheCapability capability = policy.capability();
+    PromptCacheRetention retention = policy.retention();
+    // PromptCachePolicy 构造校验保证：非 NONE retention 只可能搭配 AFFINITY / BREAKPOINTS capability，
+    // UNKNOWN/UNSUPPORTED/AUTOMATIC 一律走 NONE 分支输出 none()。
     if (retention == PromptCacheRetention.NONE) {
       return ProviderCacheControl.none();
     }
-    PromptCacheMode mode = capability.mode();
-    if (mode == PromptCacheMode.AFFINITY) {
+    if (capability.mode() == PromptCacheMode.AFFINITY) {
       return ProviderCacheControl.affinity(retention, keyFactory.create(sessionId, request));
     }
-    if (mode == PromptCacheMode.BREAKPOINTS) {
-      return breakpointControl(request, capability, retention);
-    }
-    return ProviderCacheControl.none();
+    return breakpointControl(request, capability, retention);
   }
 
   private ProviderCacheControl breakpointControl(

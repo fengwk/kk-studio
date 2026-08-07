@@ -13,20 +13,18 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRevisionRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProviderRevision;
 import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
@@ -36,12 +34,11 @@ public class AgentProviderServiceImplTest {
   @Test
   public void shouldRejectFailedRepositoryMutations() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
-    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
+        new AgentProviderServiceImpl(repository, converter, factory, guard);
 
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
@@ -53,6 +50,7 @@ public class AgentProviderServiceImplTest {
     when(repository.create(provider)).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createProvider(create));
 
+    // 创建直接依赖主键唯一约束：数据库重复键映射为 AiDuplicateException。
     when(repository.create(provider)).thenThrow(new DuplicateKeyException("dup"));
     assertThrows(AiDuplicateException.class, () -> service.createProvider(create));
 
@@ -65,7 +63,6 @@ public class AgentProviderServiceImplTest {
     when(repository.getByName("provider")).thenReturn(null);
     assertThrows(
         AiResourceNotFoundException.class, () -> service.updateProvider("provider", update));
-    verify(revisions, never()).create(any());
 
     AgentProvider reread = new AgentProvider();
     reread.setName("provider");
@@ -85,12 +82,11 @@ public class AgentProviderServiceImplTest {
   @Test
   public void shouldPrioritizeStaleVersionOverDeletionChecks() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
-    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
+        new AgentProviderServiceImpl(repository, converter, factory, guard);
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
     provider.setVersion(1L);
@@ -111,14 +107,13 @@ public class AgentProviderServiceImplTest {
   }
 
   @Test
-  public void shouldWriteTheNextProviderRevisionOnlyAfterSuccessfulCas() {
+  public void updateSucceedsWithoutAnyRevisionSideEffect() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
-    AgentProviderRevisionRepository revisions = mock(AgentProviderRevisionRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, revisions, converter, factory, guard);
+        new AgentProviderServiceImpl(repository, converter, factory, guard);
 
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
@@ -129,21 +124,18 @@ public class AgentProviderServiceImplTest {
     provider.setConfigJson("{\"old\":true}");
     when(guard.requireProvider("provider")).thenReturn(provider);
     when(repository.updateByName(provider, 4L)).thenReturn(true);
-    when(revisions.create(any())).thenReturn(true);
     when(repository.getByName("provider")).thenReturn(provider);
+    AgentProviderDTO dto = new AgentProviderDTO();
+    dto.setName("provider");
+    when(converter.convert(provider)).thenReturn(dto);
 
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setExpectedVersion("4");
-    service.updateProvider("provider", update);
+    AgentProviderDTO updated = service.updateProvider("provider", update);
 
-    ArgumentCaptor<AgentProviderRevision> captor =
-        ArgumentCaptor.forClass(AgentProviderRevision.class);
-    verify(revisions).create(captor.capture());
-    AgentProviderRevision revision = captor.getValue();
-    assertEquals("provider", revision.getProviderName());
-    assertEquals(Long.valueOf(5L), revision.getProviderVersion());
-    assertEquals("https://old.example", revision.getBaseUrl());
-    assertEquals("old-secret", revision.getCredential());
-    assertEquals("{\"old\":true}", revision.getConfigJson());
+    // 更新只落当前行（CAS 后 version 由数据库自增），不再写入任何 revision 快照。
+    assertEquals("provider", updated.getName());
+    verify(repository).updateByName(provider, 4L);
+    verify(repository, never()).create(any());
   }
 }

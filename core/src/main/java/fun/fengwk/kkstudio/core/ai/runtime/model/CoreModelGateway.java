@@ -114,7 +114,7 @@ public final class CoreModelGateway implements ModelGateway {
     StartGate gate = new StartGate();
     GatewayHandle handle = new GatewayHandle(gate, listener);
     TransportTask task =
-        new TransportTask(resolved, execution.request().providerRequest(), listener, handle, gate);
+        new TransportTask(resolved, resolved.effectiveRequest(), listener, handle, gate);
     try {
       executor.execute(task);
     } catch (RejectedExecutionException rejected) {

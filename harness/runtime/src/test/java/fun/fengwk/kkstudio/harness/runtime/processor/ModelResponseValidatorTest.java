@@ -10,14 +10,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -135,9 +133,7 @@ class ModelResponseValidatorTest {
     return new ProviderRequest(
         new ModelDescriptor(
             "provider",
-            1L,
             "model",
-            ProviderType.OPENAI,
             true,
             true,
             new ModelPricing(
@@ -151,8 +147,7 @@ class ModelResponseValidatorTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            PromptCachePolicy.disabled()),
+                BigDecimal.ZERO)),
         new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         List.of(tools),

@@ -29,7 +29,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
 import java.util.List;
 
-/** Agent definitions are global and reference immutable model names. */
+/** Agent 定义全局唯一并引用当前模型名称；记录存续期间名称不可变，硬删除后可同名重建。 */
 public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -79,9 +79,10 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
         AiVersionConflictException.class, () -> agentDefinitionService.updateAgent(name, stale));
 
     agentDefinitionService.deleteAgent(name, updated.getVersion());
-    assertThrows(
-        AiDuplicateException.class,
-        () -> agentDefinitionService.createAgent(agent(modelRef, name)));
+    // 硬删除：同名立即可重建。
+    AgentDefinitionDTO recreated = agentDefinitionService.createAgent(agent(modelRef, name));
+    assertEquals("0", recreated.getVersion());
+    agentDefinitionService.deleteAgent(name, recreated.getVersion());
     assertThrows(
         AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
     agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());

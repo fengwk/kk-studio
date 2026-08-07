@@ -52,7 +52,6 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
 
       @Override
       protected void validateRequest(ProviderRequest request) {
-        OpenAiProviderAdapter.requireProviderType(request, providerType());
         // 校验与键解析与 chatModel 完全一致；幂等并提前抛错，避免在 stub 模型已建立后才 fail。
         CacheRequestValidator.requireOpenAiAffinity(request.cacheControl());
       }

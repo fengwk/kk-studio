@@ -140,7 +140,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertTrue(rs.next());
       assertEquals(1L, rs.getLong(1));
     }
-    assertSingleCount(conn, "agent_provider_revision", 1L);
   }
 
   private static void assertE2eSeedContent(Connection conn) throws Exception {
@@ -154,7 +153,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "no e2e provider may carry a credential; a real secret must never be checked in");
     }
     assertSingleCount(conn, "agent_provider", 7L);
-    assertSingleCount(conn, "agent_provider_revision", 7L);
     assertSingleCount(conn, "agent_model", 19L);
     assertSingleCount(conn, "agent_definition", 1L);
     try (Statement st = conn.createStatement()) {

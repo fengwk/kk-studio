@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.io.IOException;
@@ -119,28 +117,17 @@ class ProviderRequestJsonCodecTest {
   void roundTripsEveryLegalPromptCacheModeAndControlShape() {
     List<CacheCase> cases =
         List.of(
-            new CacheCase(
-                PromptCacheCapability.unknown(),
-                PromptCacheRetention.NONE,
-                ProviderCacheControl.none()),
-            new CacheCase(
-                PromptCacheCapability.unsupported(),
-                PromptCacheRetention.NONE,
-                ProviderCacheControl.none()),
-            new CacheCase(
-                PromptCacheCapability.automatic(),
-                PromptCacheRetention.NONE,
-                ProviderCacheControl.none()),
+            new CacheCase(PromptCacheCapability.unknown(), ProviderCacheControl.none()),
+            new CacheCase(PromptCacheCapability.unsupported(), ProviderCacheControl.none()),
+            new CacheCase(PromptCacheCapability.automatic(), ProviderCacheControl.none()),
             new CacheCase(
                 PromptCacheCapability.affinity(
                     EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG)),
-                PromptCacheRetention.LONG,
                 ProviderCacheControl.affinity(PromptCacheRetention.LONG, "affinity")),
             new CacheCase(
                 PromptCacheCapability.breakpoints(
                     EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
                     EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)),
-                PromptCacheRetention.SHORT,
                 ProviderCacheControl.breakpoints(
                     PromptCacheRetention.SHORT,
                     "affinity",
@@ -211,14 +198,6 @@ class ProviderRequestJsonCodecTest {
         root -> pricing(root).remove("currency"),
         root -> pricing(root).put("inputPerMillionTokens", 3));
     assertStrictLayer(
-        root -> policy(root).put("extra", true),
-        root -> policy(root).remove("retention"),
-        root -> policy(root).put("retention", 1));
-    assertStrictLayer(
-        root -> capability(root).put("extra", true),
-        root -> capability(root).remove("mode"),
-        root -> capability(root).set("supportedRetentions", NODES.objectNode()));
-    assertStrictLayer(
         root -> cacheControl(root).put("extra", true),
         root -> cacheControl(root).remove("affinityKey"),
         root -> cacheControl(root).put("affinityKey", true));
@@ -247,18 +226,7 @@ class ProviderRequestJsonCodecTest {
   /** Unknown enum names and content discriminators must never be interpreted as legacy aliases. */
   @Test
   void rejectsUnknownEnumsAndDiscriminators() {
-    assertRejected(root -> model(root).put("providerType", "LEGACY"));
     assertRejected(root -> message(root, 0).put("role", "DEVELOPER"));
-    assertRejected(root -> capability(root).put("mode", "MANUAL"));
-    assertRejected(root -> policy(root).put("retention", "FOREVER"));
-    assertRejected(
-        root ->
-            ((ArrayNode) capability(root).path("supportedRetentions"))
-                .set(0, NODES.textNode("FOREVER")));
-    assertRejected(
-        root ->
-            ((ArrayNode) capability(root).path("supportedBreakpoints"))
-                .set(0, NODES.textNode("MESSAGE")));
     assertRejected(root -> cacheControl(root).put("retention", "FOREVER"));
     assertRejected(
         root ->
@@ -295,9 +263,6 @@ class ProviderRequestJsonCodecTest {
         root -> ((ArrayNode) variant(root).path("stopSequences")).set(0, NODES.textNode(" ")));
     assertRejected(root -> pricing(root).put("serviceTierMultiplier", "bad"));
     assertRejected(root -> pricing(root).put("serviceTierMultiplier", "0"));
-    assertRejected(
-        root ->
-            ((ArrayNode) capability(root).path("supportedRetentions")).set(0, NODES.numberNode(1)));
     assertRejected(root -> cacheControl(root).putNull("affinityKey"));
     assertRejected(root -> cacheControl(root).put("affinityKey", " "));
     assertRejected(
@@ -349,20 +314,8 @@ class ProviderRequestJsonCodecTest {
     ModelVariant selectedVariant =
         new ModelVariant(
             "balanced", 1024, 0.2, 0.8, 40, -0.1, 0.1, List.of("END", "STOP"), "medium");
-    PromptCacheCapability capability =
-        PromptCacheCapability.breakpoints(
-            EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-            EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
     ModelDescriptor model =
-        new ModelDescriptor(
-            "openai",
-            0L,
-            "gpt-5-mini",
-            ProviderType.OPENAI,
-            true,
-            true,
-            canonicalPricing(),
-            PromptCachePolicy.breakpointsShort(capability));
+        new ModelDescriptor("openai", "gpt-5-mini", true, true, canonicalPricing());
     ProviderToolCall call = new ProviderToolCall("call-1", "lookup", ARGUMENTS_JSON);
     return new ProviderRequest(
         model,
@@ -421,19 +374,8 @@ class ProviderRequestJsonCodecTest {
 
   private static ProviderRequest requestWithCache(CacheCase cacheCase) {
     ProviderRequest source = canonicalRequest();
-    ModelDescriptor model = source.model();
-    ModelDescriptor updatedModel =
-        new ModelDescriptor(
-            model.providerName(),
-            model.providerVersion(),
-            model.modelName(),
-            model.providerType(),
-            model.tools(),
-            model.reasoning(),
-            model.pricing(),
-            new PromptCachePolicy(cacheCase.capability(), cacheCase.retention()));
     return new ProviderRequest(
-        updatedModel, source.variant(), source.messages(), source.tools(), cacheCase.control());
+        source.model(), source.variant(), source.messages(), source.tools(), cacheCase.control());
   }
 
   private static ObjectNode canonicalNode() {
@@ -470,14 +412,6 @@ class ProviderRequestJsonCodecTest {
     return (ObjectNode) model(root).path("pricing");
   }
 
-  private static ObjectNode policy(ObjectNode root) {
-    return (ObjectNode) model(root).path("promptCachePolicy");
-  }
-
-  private static ObjectNode capability(ObjectNode root) {
-    return (ObjectNode) policy(root).path("capability");
-  }
-
   private static ObjectNode cacheControl(ObjectNode root) {
     return (ObjectNode) root.path("cacheControl");
   }
@@ -502,8 +436,5 @@ class ProviderRequestJsonCodecTest {
     return content(root, 3, 0);
   }
 
-  private record CacheCase(
-      PromptCacheCapability capability,
-      PromptCacheRetention retention,
-      ProviderCacheControl control) {}
+  private record CacheCase(PromptCacheCapability capability, ProviderCacheControl control) {}
 }

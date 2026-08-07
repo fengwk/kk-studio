@@ -27,14 +27,14 @@ harness-daemon -> harness-tool
 
 | 概念 | 含义 |
 | --- | --- |
-| Provider | 以 immutable `name` 标识的连接配置（revision append-only） |
+| Provider | 以 immutable `name` 标识的当前连接配置（行内更新覆盖；硬删除后同名可重建） |
 | Model | 以 `(providerName, name)` 标识的模型配置 |
 | Agent | 以 immutable `name` 标识的系统提示、Model/Variant 与 tools/skills 配置 |
 | Model ref | `providerName/modelName`；解析只切第一个 `/` |
 | Variant | Model config 中的 variant `id`；Agent 可指定覆盖值 |
 | ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；selectable 含 Goal 工具（`create_goal`/`get_goal`/`update_goal`，GoalStore 条件装配）；内部 Platform Tool 与可选择目录分离，`load_skill` 是唯一 internal name |
 
-Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。
+Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除：记录存续期间名称不可修改，删除后同名立即可重建（重建行 version 从 0 重新开始）；旧名称引用在删除到重建之间 fail closed，重建后解析到当前同名资源。
 
 ## 3. Harness 词汇
 
@@ -54,7 +54,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentId`（lowercase UUID）唯一，状态为 CONNECTING/READY；name 只展示，只有 READY 可运行 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route。fail closed：**非 null `environmentId` 无论 activeTools 都必须 registry 命中且 READY**；**null `environmentId` 只允许 platform-only 且无 skills 的 turn**——ENVIRONMENT tool 或 Agent skill 均确定性拒绝，绝不静默省略；skills 必须由选中 READY Environment 精确提供且 `activeTools` 显式包含 `load_skill`。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。fail closed：**非 null `environmentId` 无论 activeTools 都必须 registry 命中且 READY**；**null `environmentId` 只允许 platform-only 且无 skills 的 turn**——ENVIRONMENT tool 或 Agent skill 均确定性拒绝，绝不静默省略；skills 必须由选中 READY Environment 精确提供且 `activeTools` 显式包含 `load_skill`。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 

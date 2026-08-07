@@ -56,7 +56,6 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     AgentDefinition definition =
         definitionMutationFactory.newAgent(
             name, modelRef.providerName(), modelRef.modelName(), createDTO);
-    referenceResolver.ensureNameAvailable(definition.getName());
     validateVariant(modelRef, definition.getVariant());
     validateConfig(configCodec.decode(definition.getConfigJson()));
     try {

@@ -6,11 +6,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -65,15 +63,7 @@ final class InvocationCodecTestFixtures {
               TOOL_DESCRIPTOR_CODEC.encodeInputSchema(tool.inputSchema())));
     }
     return new ProviderRequest(
-        new ModelDescriptor(
-            "provider",
-            1,
-            "model",
-            ProviderType.OPENAI,
-            tools.length > 0,
-            true,
-            pricing(),
-            PromptCachePolicy.disabled()),
+        new ModelDescriptor("provider", "model", tools.length > 0, true, pricing()),
         new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
         List.of(),
         definitions,

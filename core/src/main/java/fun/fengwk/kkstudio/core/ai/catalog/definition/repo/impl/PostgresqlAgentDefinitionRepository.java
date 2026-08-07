@@ -83,7 +83,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     result.setVersion(definition.getVersion());
     result.setCreateTime(definition.getCreateTime());
     result.setUpdateTime(definition.getUpdateTime());
-    result.setDeletedAt(definition.getDeletedAt());
     return result;
   }
 }

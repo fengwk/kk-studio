@@ -7,8 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
@@ -69,7 +67,6 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
 
       @Override
       protected void validateRequest(ProviderRequest request) {
-        requireProviderType(request, providerType());
         prepareCacheControl(request);
       }
 
@@ -124,16 +121,6 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
     Objects.requireNonNull(descriptor, "descriptor");
     if (descriptor.type() != expected) {
       throw new IllegalArgumentException("provider descriptor type does not match adapter");
-    }
-  }
-
-  /** 模型描述符上的 providerType 与 adapter 类型不一致时拒绝启动。 */
-  static void requireProviderType(ProviderRequest request, ProviderType expected) {
-    Objects.requireNonNull(request, "request");
-    if (request.model().providerType() != expected) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "model providerType does not match adapter type " + expected);
     }
   }
 }

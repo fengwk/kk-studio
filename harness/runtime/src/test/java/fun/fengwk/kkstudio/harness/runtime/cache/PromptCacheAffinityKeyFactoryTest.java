@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.math.BigDecimal;
@@ -282,37 +280,49 @@ class PromptCacheAffinityKeyFactoryTest {
   @Test
   void providerNameChangeChangesKey() {
     assertNotEquals(
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider-a", "m1", ProviderType.OPENAI))),
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider-b", "m1", ProviderType.OPENAI))));
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider-a", "m1"))),
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider-b", "m1"))));
   }
 
   @Test
   void modelNameChangeChangesKey() {
     assertNotEquals(
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1", ProviderType.OPENAI))),
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m2", ProviderType.OPENAI))));
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1"))),
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m2"))));
   }
 
+  /** providerType 已不再是 descriptor/digest 输入；除 providerName/modelName 外的 descriptor 内容不得影响 key。 */
   @Test
-  void providerTypeChangeChangesKey() {
-    assertNotEquals(
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1", ProviderType.OPENAI))),
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1", ProviderType.ANTHROPIC))));
+  void descriptorIdentityIsOnlyProviderNameAndModelName() {
+    ModelDescriptor identity = model("provider", "m1");
+    ModelDescriptor sameIdentityDifferentFlags =
+        new ModelDescriptor(
+            "provider",
+            "m1",
+            !identity.tools(),
+            !identity.reasoning(),
+            new ModelPricing(
+                "CNY",
+                "other-tier",
+                "other",
+                BigDecimal.TEN,
+                "v2",
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                BigDecimal.ONE,
+                BigDecimal.ONE));
+    assertEquals(
+        factory.create(SESSION_ID, baseRequestWithModel(identity)),
+        factory.create(SESSION_ID, baseRequestWithModel(sameIdentityDifferentFlags)));
   }
 
   @Test
   void modelNameChangeAlsoChangesKeyWhenProviderStaysTheSame() {
     assertNotEquals(
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "model-a", ProviderType.OPENAI))),
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "model-b", ProviderType.OPENAI))));
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider", "model-a"))),
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider", "model-b"))));
   }
 
   @Test
@@ -325,20 +335,11 @@ class PromptCacheAffinityKeyFactoryTest {
     assertNotEquals(baseKey, factory.create(SESSION_ID + 1, base));
     // 修改 modelName 后缀（"m1" -> "m1x"）必须切 key。
     assertNotEquals(
-        baseKey,
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1x", ProviderType.OPENAI))));
+        baseKey, factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1x"))));
     // providerName 跨长度边界也必须切 key。
     assertNotEquals(
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1", ProviderType.OPENAI))),
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider-long", "m1", ProviderType.OPENAI))));
-    // providerType 变化：m1 同名但 OPENAI vs ANTHROPIC 必须切 key。
-    assertNotEquals(
-        baseKey,
-        factory.create(
-            SESSION_ID, baseRequestWithModel(model("provider", "m1", ProviderType.ANTHROPIC))));
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1"))),
+        factory.create(SESSION_ID, baseRequestWithModel(model("provider-long", "m1"))));
   }
 
   /**
@@ -416,11 +417,11 @@ class PromptCacheAffinityKeyFactoryTest {
   }
 
   private static ProviderRequest baseRequest() {
-    return baseRequestWithModel(model("provider", "m1", ProviderType.OPENAI));
+    return baseRequestWithModel(model("provider", "m1"));
   }
 
   private static ProviderRequest baseRequest(ProviderToolDefinition... tools) {
-    ModelDescriptor m = model("provider", "m1", ProviderType.OPENAI);
+    ModelDescriptor m = model("provider", "m1");
     ModelVariant variant =
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(m, variant, List.of(), List.of(tools), ProviderCacheControl.none());
@@ -503,12 +504,10 @@ class PromptCacheAffinityKeyFactoryTest {
     return List.copyOf(messages);
   }
 
-  private static ModelDescriptor model(String providerName, String modelName, ProviderType type) {
+  private static ModelDescriptor model(String providerName, String modelName) {
     return new ModelDescriptor(
         providerName,
-        0L,
         modelName,
-        type,
         true,
         false,
         new ModelPricing(
@@ -522,7 +521,6 @@ class PromptCacheAffinityKeyFactoryTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
-            BigDecimal.ZERO),
-        PromptCachePolicy.disabled());
+            BigDecimal.ZERO));
   }
 }

@@ -86,7 +86,6 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
     result.setVersion(provider.getVersion());
     result.setCreateTime(provider.getCreateTime());
     result.setUpdateTime(provider.getUpdateTime());
-    result.setDeletedAt(provider.getDeletedAt());
     return result;
   }
 }

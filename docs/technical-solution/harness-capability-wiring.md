@@ -17,10 +17,15 @@ HarnessToolGatewayConfiguration
   -> CoreToolGateway（preflight + 两阶段激活 + FIFO 回调桥）
 
 DatabaseTurnResolver
-  -> Agent/Provider/Model/Variant Catalog 查询
+  -> Agent/Provider/Model/Variant Catalog 查询（按名称读最新行）
   -> ToolCatalog + LiveEnvironmentRegistry
-  -> ProviderFactory 解析 adapter
-  -> 冻结 ModelInvocationRequest
+  -> ProviderFactory（由当前行 providerType 解析，派生 cache policy）
+  -> 冻结 ModelInvocationRequest（Provider/Model 只按名称引用）
+
+CoreModelGateway.start（每次 attempt）
+  -> DatabaseProviderResolutionService 按 providerName 读取当前 agent_provider 行
+  -> 当前 ProviderFactory.create(当前 credential/config) -> attempt-local adapter
+  -> 持久 cache control 按当前 capability 规范化
 ```
 
 ## 2. Provider
@@ -44,7 +49,7 @@ public interface ProviderFactory {
 | `anthropicProviderFactory` | `ANTHROPIC` | BREAKPOINTS |
 | `googleProviderFactory` | `GOOGLE` | AUTOMATIC |
 
-`ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源由 Catalog revision 描述；ProviderFactory 只负责把冻结 revision 解析成 adapter，不读取或回退到当前 Provider 行。credential 只在写入 DTO 反序列化与 revision 内部 dispatch 使用，不进入 response 或 invocation JSON。
+`ProviderFactories` 按 ProviderType 建立不可变索引，重复注册在构造阶段失败。Provider 资源就是当前 `agent_provider` 行：每次 Model attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前行，以当前 providerType/baseUrl/credential/config 选择 `ProviderFactory` 并构造短生命周期 attempt-local adapter；Provider 更新后下一 attempt 立即使用新值，当前行缺失时确定性 not found，同名重建后解析到新行。credential 只在写入 DTO 反序列化与 attempt 时 adapter 构造使用，不进入 response 或 invocation JSON。
 
 `CoreModelGateway` 是 `ModelGateway` 端口适配：admission 两阶段激活（`start` → Processor `markRunning` 后 `activate`），回调桥是 serialized FIFO 单 drainer 状态机，terminal-once；`Busy` 重试、`Rejected` 确定性终结、`Indeterminate` 收敛 `UNKNOWN`。
 
@@ -84,8 +89,8 @@ candidate path 最近 TURN_START 的 BranchSettings
   -> Provider / (providerName, modelName) Model / effective Variant
   -> ToolCatalog + activeTools（必须命中可选择目录）
   -> environmentId 路由 + LiveEnvironmentRegistry（READY 才可用）
-  -> ProviderFactory（冻结 provider revision）
-  -> 冻结 ModelInvocationRequest
+  -> ProviderFactory（按当前行 providerType 派生 cache policy）
+  -> 冻结 ModelInvocationRequest（Agent/Model 修改下一 turn 生效）
 ```
 
 **fail closed（Environment route 规则）**：
@@ -107,7 +112,9 @@ candidate path 最近 TURN_START 的 BranchSettings
 - `providerRequest.tools` 与 `toolBindings` 数量、顺序、名称一一对应；
 - `ToolBinding(descriptor, type, environmentId)`：`PLATFORM` 的 route 为 null，`ENVIRONMENT` 指向具体 route；descriptor 的 type 与 binding type 一致；
 - tool/skill binding 名称不重复；每个 environment-bound tool/skill 引用本请求 route；
-- retry 重放同一 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
+- `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
+- retry 重放同一 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
+- attempt 时 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造短生命周期 Provider，并把持久 cache control 按当前 factory capability 规范化：不兼容能力降级为 `none()`，兼容时按当前 capability 重求形态与断点。
 
 ## 6. Interceptor chain
 

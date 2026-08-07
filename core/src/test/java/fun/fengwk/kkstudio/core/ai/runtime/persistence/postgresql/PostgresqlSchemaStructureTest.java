@@ -36,7 +36,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static final List<String> EXPECTED_TABLES =
       Arrays.asList(
           "agent_provider",
-          "agent_provider_revision",
           "agent_model",
           "agent_definition",
           "flyway_schema_history",
@@ -143,17 +142,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version",
-        "deleted_at");
-    assertColumns(
-        "agent_provider_revision",
-        "provider_name",
-        "provider_version",
-        "provider_type",
-        "base_url",
-        "credential",
-        "config",
-        "created_at");
+        "version");
     assertColumns(
         "agent_model",
         "provider_name",
@@ -162,8 +151,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version",
-        "deleted_at");
+        "version");
     assertColumns(
         "agent_definition",
         "name",
@@ -175,8 +163,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "config",
         "created_at",
         "updated_at",
-        "version",
-        "deleted_at");
+        "version");
     assertColumns(
         "comfyui_workflow_api",
         "id",
@@ -339,7 +326,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_tool_invocation", "result");
     assertColumnType("jsonb", "harness_tool_invocation", "error");
     assertColumnType("jsonb", "agent_provider", "config");
-    assertColumnType("jsonb", "agent_provider_revision", "config");
     assertColumnType("jsonb", "agent_model", "config");
     assertColumnType("jsonb", "agent_definition", "config");
   }
@@ -371,7 +357,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "harness_tool_invocation", "updated_at");
     assertColumnType("timestamp with time zone", "harness_work", "available_at");
     assertColumnType("timestamp with time zone", "harness_work", "lease_until");
-    assertColumnType("timestamp with time zone", "agent_provider_revision", "created_at");
   }
 
   @Test
@@ -679,6 +664,44 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(),
         deferred,
         "revision and head binding are runtime-owned: no FK needs deferral in the new protocol");
+  }
+
+  @Test
+  void catalogRowsAreHardDeletedAndNamesAreReusable() throws SQLException {
+    // 硬删除契约：DELETE 物理移除行，主键释放后同名立即可重建。
+    String name = "hard-delete-probe-" + FIXTURE_IDS.incrementAndGet();
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into agent_provider (name, provider_type, config) values (?,"
+                    + " 'openai', '{}'::jsonb)")) {
+      ps.setString(1, name);
+      assertEquals(1, ps.executeUpdate());
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("delete from agent_provider where name = ? and version = 0")) {
+      ps.setString(1, name);
+      assertEquals(1, ps.executeUpdate(), "hard delete must remove exactly the expected row");
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement("select count(*) from agent_provider where name = ?")) {
+      ps.setString(1, name);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertTrue(rs.next());
+        assertEquals(0L, rs.getLong(1), "deleted row must be physically gone");
+      }
+    }
+    // 同名重建：主键不再被 tombstone 占据。
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "insert into agent_provider (name, provider_type, config) values (?,"
+                    + " 'openai', '{}'::jsonb)")) {
+      ps.setString(1, name);
+      assertEquals(1, ps.executeUpdate(), "same-name re-create must succeed after hard delete");
+    }
   }
 
   @Test

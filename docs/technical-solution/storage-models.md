@@ -6,14 +6,11 @@ PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。�
 
 | 表 | 身份与关键约束 |
 | --- | --- |
-| `agent_provider` | `name` 主键永久保留；`deleted_at` 软删除；Provider/Agent 使用名称引用 |
-| `agent_provider_revision` | `(provider_name, provider_version)` 复合主键；append-only 保存 Provider 类型、endpoint、credential 与 config |
-| `agent_model` | `(provider_name, name)` 复合主键永久保留；`deleted_at` 软删除；`provider_name` 外键到 `agent_provider(name)` |
-| `agent_definition` | `name` 主键永久保留；`deleted_at` 软删除；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
+| `agent_provider` | `name` 主键；当前行的 `provider_type`/`base_url`/`credential`/`config` 是唯一连接事实；`version` 是 CRUD CAS token |
+| `agent_model` | `(provider_name, name)` 复合主键；`provider_name` 外键到 `agent_provider(name)`；`config` 保存结构化 Model 配置 |
+| `agent_definition` | `name` 主键；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
 
-Catalog 表不使用 bigint resource ID。普通 page/get/runtime 查询只返回 `deleted_at is null` 的行；删除是带版本递增的 soft-delete，原名称不能重新创建。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
-
-Provider 创建写入 revision `0`；每次成功更新在同一事务写入 `expectedVersion + 1`。Provider 删除不创建新 revision。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。
+Catalog 只有上述三张名称资源表。三张表不使用 bigint resource ID，均以名称（Provider/Agent 为 `name`，Model 为 `(providerName, name)`）作为身份与全部引用；`version` 是当前行的 CRUD 乐观锁（CAS）token。删除是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
 
 ## 2. ComfyUI Workflow API
 
@@ -76,7 +73,7 @@ created_at / updated_at
 
 ## 5. Invocation 冻结事实
 
-`ModelInvocationRequest` 的 `environmentId`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+`ModelInvocationRequest` 的 `environmentId`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
 
 ## 6. Canvas
 

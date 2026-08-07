@@ -53,7 +53,6 @@ public final class GoogleProviderAdapter implements ProviderAdapter {
 
       @Override
       protected void validateRequest(ProviderRequest request) {
-        OpenAiProviderAdapter.requireProviderType(request, providerType());
         // AUTOMATIC 模式下 Provider 自行决定缓存命中，control 被忽略。
       }
     };

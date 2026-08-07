@@ -15,8 +15,9 @@
  *       fun.fengwk.kkstudio.harness.runtime.model.ModelUsage} and {@link
  *       fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality} describe a model, its
  *       modalities, its usage/cost accounting and its variants.
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.cache}: prompt-cache policy, capability,
- *       mode, retention and provider control value objects that travel with the request.
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.cache}: prompt-cache 的 policy、capability、
+ *       mode、retention 与 provider control 值对象。Policy/capability 由调用方显式传入且永不持久化； 只有最终派生的 {@code
+ *       ProviderCacheControl} 随请求保存。
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.provider}: Provider-facing request,
  *       response, message, content-block, stream and exception contracts that all SDK adapters must
  *       speak. Specific Provider SDK adapter implementations live in the {@code core} module under

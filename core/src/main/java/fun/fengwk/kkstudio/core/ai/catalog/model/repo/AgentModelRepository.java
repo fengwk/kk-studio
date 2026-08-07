@@ -21,7 +21,10 @@ public interface AgentModelRepository {
   /** Atomic CAS update on (providerName, name, expectedVersion). */
   boolean updateByName(AgentModel model, long expectedVersion);
 
-  /** Atomic soft-delete CAS on (providerName, name, expectedVersion). */
+  /**
+   * 硬删除 CAS on (providerName, name, expectedVersion)：行物理删除后同名立即可重建；返回 false 表示 identity 缺失或 version
+   * 不匹配。
+   */
   boolean deleteByName(String providerName, String name, long expectedVersion);
 
   boolean hasAgents(String providerName, String name);

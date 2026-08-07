@@ -186,13 +186,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             selection.providerName(),
-            requireProviderVersion(provider),
             selection.modelName(),
-            providerType,
             parsedModel.tools(),
             parsedModel.reasoning(),
-            parsedModel.pricing(),
-            cachePolicy(providerFactory));
+            parsedModel.pricing());
     ProviderRequest providerRequest =
         providerRequest(
             descriptor,
@@ -201,7 +198,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             skillBindings,
             path,
             toolBindings,
-            sessionId);
+            sessionId,
+            cachePolicy(providerFactory));
     return new ModelInvocationRequest(
         settings.environmentId(), providerRequest, toolBindings, skillBindings, yoloEnabled);
   }
@@ -335,7 +333,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       List<SkillBinding> skillBindings,
       EntryPath path,
       List<ToolBinding> toolBindings,
-      long sessionId) {
+      long sessionId,
+      PromptCachePolicy cachePolicy) {
     List<AgentMessage> semanticMessages = new ArrayList<>();
     String composedPrompt = composeSystemPrompt(systemPrompt, skillBindings);
     if (!composedPrompt.isBlank()) {
@@ -367,7 +366,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
             messageProjector.project(semanticMessages),
             providerTools,
             ProviderCacheControl.none());
-    return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory).apply(baseRequest);
+    // cache policy 由当前 ProviderFactory 显式解析并传入；不随 descriptor/request 持久化。
+    return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory)
+        .apply(baseRequest, cachePolicy);
   }
 
   private static String composeSystemPrompt(String systemPrompt, List<SkillBinding> skillBindings) {
@@ -413,13 +414,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       case anthropic -> ProviderType.ANTHROPIC;
       case google -> ProviderType.GOOGLE;
     };
-  }
-
-  private static long requireProviderVersion(AgentProvider provider) {
-    if (provider.getVersion() == null || provider.getVersion() < 0) {
-      throw rejection("provider version must be non-negative");
-    }
-    return provider.getVersion();
   }
 
   private static <T> T require(T value, String message) {
