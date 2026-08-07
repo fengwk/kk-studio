@@ -137,7 +137,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
 
-      // 硬删除后同名重建：旧名称引用必须解析到当前新行，而不是继续缺失。
+      // 硬删除后同名重建：既有名称引用必须解析到当前新行，而不是继续缺失。
       String reboundSystemPrompt = "Rebound assistant: resolved from the re-created current row.";
       AgentDefinitionCreateDTO rebound = new AgentDefinitionCreateDTO();
       rebound.setName("default-assistant");

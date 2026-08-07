@@ -107,7 +107,7 @@ public class AgentProviderServiceImplTest {
   }
 
   @Test
-  public void updateSucceedsWithoutAnyRevisionSideEffect() {
+  public void updateMutatesCurrentRowWithCas() {
     AgentProviderRepository repository = mock(AgentProviderRepository.class);
     AgentProviderConverter converter = mock(AgentProviderConverter.class);
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
@@ -119,9 +119,9 @@ public class AgentProviderServiceImplTest {
     provider.setName("provider");
     provider.setVersion(4L);
     provider.setProviderType(AgentProviderType.openai);
-    provider.setBaseUrl("https://old.example");
-    provider.setCredential("old-secret");
-    provider.setConfigJson("{\"old\":true}");
+    provider.setBaseUrl("https://initial.example");
+    provider.setCredential("initial-secret");
+    provider.setConfigJson("{\"initial\":true}");
     when(guard.requireProvider("provider")).thenReturn(provider);
     when(repository.updateByName(provider, 4L)).thenReturn(true);
     when(repository.getByName("provider")).thenReturn(provider);
@@ -133,8 +133,9 @@ public class AgentProviderServiceImplTest {
     update.setExpectedVersion("4");
     AgentProviderDTO updated = service.updateProvider("provider", update);
 
-    // 更新只落当前行（CAS 后 version 由数据库自增），不再写入任何 revision 快照。
+    // 更新当前行并重新读取转换后的结果；不会走创建路径。
     assertEquals("provider", updated.getName());
+    verify(factory).update(provider, update);
     verify(repository).updateByName(provider, 4L);
     verify(repository, never()).create(any());
   }

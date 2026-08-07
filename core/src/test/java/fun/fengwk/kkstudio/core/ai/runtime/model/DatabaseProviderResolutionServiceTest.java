@@ -396,10 +396,10 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   @Test
-  void affinityCapabilityKeepsPersistedKeyAndDropsOldBreakpoints() {
+  void affinityCapabilityKeepsPersistedKeyAndDropsBreakpoints() {
     when(repository.getByName(PROVIDER_NAME))
         .thenReturn(provider(AgentProviderType.openai, ENDPOINT));
-    // 旧类型是 BREAKPOINTS 形态（携带 breakpoints），当前 capability 是 AFFINITY：丢弃 breakpoints、沿用 key 与
+    // 持久 control 是 BREAKPOINTS 形态，当前 capability 是 AFFINITY：丢弃 breakpoints、沿用 key 与
     // retention。
     ProviderCacheControl persisted =
         ProviderCacheControl.breakpoints(

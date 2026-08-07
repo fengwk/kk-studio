@@ -34,7 +34,7 @@ harness-daemon -> harness-tool
 | Variant | Model config 中的 variant `id`；Agent 可指定覆盖值 |
 | ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；selectable 含 Goal 工具（`create_goal`/`get_goal`/`update_goal`，GoalStore 条件装配）；内部 Platform Tool 与可选择目录分离，`load_skill` 是唯一 internal name |
 
-Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除：记录存续期间名称不可修改，删除后同名立即可重建（重建行 version 从 0 重新开始）；旧名称引用在删除到重建之间 fail closed，重建后解析到当前同名资源。
+Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除：记录存续期间名称不可修改，删除后同名立即可重建（重建行 version 从 0 重新开始）；既有名称引用在删除到重建之间 fail closed，重建后解析到当前同名资源。
 
 ## 3. Harness 词汇
 

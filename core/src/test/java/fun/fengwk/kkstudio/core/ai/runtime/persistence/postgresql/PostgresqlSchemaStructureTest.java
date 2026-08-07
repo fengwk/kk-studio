@@ -693,7 +693,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         assertEquals(0L, rs.getLong(1), "deleted row must be physically gone");
       }
     }
-    // 同名重建：主键不再被 tombstone 占据。
+    // 同名重建：硬删除后主键已经释放。
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(

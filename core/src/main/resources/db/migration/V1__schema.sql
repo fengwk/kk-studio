@@ -185,7 +185,7 @@ create table chat (
     id                  bigint        primary key default nextval('kk_studio_id_seq'),
     title               varchar(256),
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
-    -- （turn/attempt fail closed），同名重建后旧 Chat 引用解析到当前 AgentDefinition。
+    -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,

@@ -343,7 +343,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
   }
 
   @Test
-  public void shouldRejectMalformedModelRefsAndLegacyNumericContracts() throws Exception {
+  public void shouldRejectMalformedModelRefsAndDatabaseIdContracts() throws Exception {
     String suffix = Long.toString(System.nanoTime());
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
@@ -363,41 +363,41 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.errors.resource").value("agent_definition"));
 
-    AgentModelCreateDTO modelShape = new AgentModelCreateDTO();
-    modelShape.setName("legacy-model-" + suffix);
-    configureExecutableModel(modelShape);
-    ObjectNode legacyModel = objectMapper.valueToTree(modelShape);
-    legacyModel.remove("providerName");
-    legacyModel.put("providerId", "1");
+    AgentModelCreateDTO idBasedModel = new AgentModelCreateDTO();
+    idBasedModel.setName("id-based-model-" + suffix);
+    configureExecutableModel(idBasedModel);
+    ObjectNode idBasedModelBody = objectMapper.valueToTree(idBasedModel);
+    idBasedModelBody.remove("providerName");
+    idBasedModelBody.put("providerId", "1");
     mockMvc
         .perform(
             post("/api/ai/catalog/models")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(legacyModel.toString()))
+                .content(idBasedModelBody.toString()))
         .andExpect(status().isBadRequest());
 
-    AgentDefinitionCreateDTO agentShape = new AgentDefinitionCreateDTO();
-    agentShape.setName("legacy-agent-" + suffix);
-    agentShape.setVariant("default");
-    agentShape.setConfig(config);
-    ObjectNode legacyAgent = objectMapper.valueToTree(agentShape);
-    legacyAgent.remove("model");
-    legacyAgent.put("modelId", "1");
+    AgentDefinitionCreateDTO idBasedAgent = new AgentDefinitionCreateDTO();
+    idBasedAgent.setName("id-based-agent-" + suffix);
+    idBasedAgent.setVariant("default");
+    idBasedAgent.setConfig(config);
+    ObjectNode idBasedAgentBody = objectMapper.valueToTree(idBasedAgent);
+    idBasedAgentBody.remove("model");
+    idBasedAgentBody.put("modelId", "1");
     mockMvc
         .perform(
             post("/api/ai/catalog/agents")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(legacyAgent.toString()))
+                .content(idBasedAgentBody.toString()))
         .andExpect(status().isBadRequest());
 
-    ObjectNode legacyProvider = objectMapper.createObjectNode();
-    legacyProvider.put("id", "1");
-    legacyProvider.put("providerType", "openai");
+    ObjectNode idBasedProviderBody = objectMapper.createObjectNode();
+    idBasedProviderBody.put("id", "1");
+    idBasedProviderBody.put("providerType", "openai");
     mockMvc
         .perform(
             post("/api/ai/catalog/providers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(legacyProvider.toString()))
+                .content(idBasedProviderBody.toString()))
         .andExpect(status().isBadRequest());
 
     mockMvc.perform(get("/api/ai/catalog/providers/1")).andExpect(status().isMethodNotAllowed());

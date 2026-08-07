@@ -54,7 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-/** 当前四种 Provider 对本地 HTTP 探针保持与旧 agent 相同的请求契约。 */
+/** Verifies the external HTTP request contract of all four Provider adapters. */
 class ProviderAdapterContractTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();

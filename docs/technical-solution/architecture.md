@@ -84,7 +84,7 @@ harness-daemon -> harness-tool
 
 公开 Model ref 的格式是 `providerName/modelName`。`ModelRef.parse` 只在第一个 `/` 切分，因此 `modelName` 可以包含额外 `/`。Catalog response 只使用名称、结构化 config 和版本字段，不使用 bigint resource ID。
 
-Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名称资源表。三表都是带 `expectedVersion` CAS 的硬删除：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。所有引用都只按名称：Chat 的 `agentName`、Thread 的 `BranchSettings`、Model 的 `providerName` 都不绑定资源 ID。Agent/Model 修改在下一 turn 由 `DatabaseTurnResolver` 解析最新行生效；每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config）形成短生命周期 attempt-local Provider。硬删除到同名重建之间旧名称引用 fail closed（turn 拒绝 / attempt 确定性失败）；重建后旧 Chat/Thread 的名称引用解析到当前同名资源。
+Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名称资源表。三表都是带 `expectedVersion` CAS 的硬删除：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。所有引用都只按名称：Chat 的 `agentName`、Thread 的 `BranchSettings`、Model 的 `providerName` 都不绑定资源 ID。Agent/Model 修改在下一 turn 由 `DatabaseTurnResolver` 解析最新行生效；每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config）形成短生命周期 attempt-local Provider。硬删除到同名重建之间既有名称引用 fail closed（turn 拒绝 / attempt 确定性失败）；重建后既有 Chat/Thread 的名称引用解析到当前同名资源。
 
 ## 4. Harness 所有权模型
 
