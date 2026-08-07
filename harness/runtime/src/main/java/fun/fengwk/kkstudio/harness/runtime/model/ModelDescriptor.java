@@ -5,9 +5,9 @@ import java.util.Objects;
 /**
  * 当前 turn 所选 Model 的运行时描述。
  *
- * <p>{@code providerName} 与 {@code modelName} 是解析当前 Provider / Model 定义的 Catalog 名称引用，刻意使用字符串而非
- * 数据库资源 ID 或含义模糊的上游 {@code modelId}；能力以 {@code tools} / {@code reasoning} 两个 primitive 布尔直接表达。本
- * turn 选中的有效 variant 存放在 ephemeral 执行值与 durable invocation request 中，与该 descriptor 并列。
+ * <p>{@code providerName} 与 {@code modelName} 是解析当前 Provider / Model 定义的 Catalog 名称引用；能力以 {@code
+ * tools} / {@code reasoning} 两个 primitive 布尔直接表达。本 turn 选中的有效 variant 存放在 ephemeral 执行值与 durable
+ * invocation request 中，与该 descriptor 并列。
  *
  * <p>Provider 类型、capability 与 prompt-cache policy 不随本 descriptor 冻结，由调用方按需从当前 ProviderFactory
  * 解析并显式传入（例如 {@code PromptCacheRequestFinalizer}）。

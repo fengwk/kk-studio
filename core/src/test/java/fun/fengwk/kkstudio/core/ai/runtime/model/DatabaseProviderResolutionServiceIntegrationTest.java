@@ -61,14 +61,14 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     AgentProviderDTO created =
         createProvider(name, "openai", "https://original.example/v1", "original-secret", 12_000L);
     ProviderRequest request =
-        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-old"));
+        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"));
 
     // 第一次 resolve：使用创建行的 openai factory 与连接事实。
     ProviderResolutionService.ResolvedExecution first = resolution.resolve(request);
     assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-old"),
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"),
         first.effectiveRequest().cacheControl(),
-        "openai affinity capability 与持久 hint 兼容，retention 沿用 SHORT");
+        "openai affinity capability 与持久 hint 匹配，retention 沿用 SHORT");
     assertEquals(
         Duration.ofSeconds(12), first.timeoutPolicy().modelCallTimeout(), "超时策略来自当前行 config");
     first.openProvider(first.timeoutPolicy());
@@ -92,9 +92,9 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
     ProviderResolutionService.ResolvedExecution second = resolution.resolve(request);
     assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-old"),
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"),
         second.effectiveRequest().cacheControl(),
-        "openai_response 同样支持 affinity SHORT，hint 继续兼容");
+        "openai_response 同样支持 affinity SHORT，持久 hint 继续生效");
     assertEquals(Duration.ofSeconds(60), second.timeoutPolicy().modelCallTimeout(), "超时策略来自更新后的行");
     second.openProvider(second.timeoutPolicy());
     assertEquals("updated-secret", openAiResponses.credential, "adapter 使用更新行 credential");
@@ -107,7 +107,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         configurationCodec.readTimeoutPolicy(openAiResponses.configJson).modelCallTimeout(),
         "adapter 使用更新行 config");
     assertEquals(1, openAiResponses.openCount, "更新后必须使用新 providerType 的 factory");
-    assertEquals(1, openAi.openCount, "更新后不得再使用旧 providerType 的 factory");
+    assertEquals(1, openAi.openCount, "更新后不得再使用更新前 providerType 的 factory");
   }
 
   @Test
@@ -126,7 +126,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         assertThrows(IllegalArgumentException.class, () -> resolution.resolve(request));
     assertTrue(
         failure.getMessage().contains("provider not found: " + name),
-        "当前行删除后必须确定性 not found，而不是回退到任何历史连接事实");
+        "当前行删除后必须确定性 not found，不得使用其他连接配置");
   }
 
   @Test
@@ -153,13 +153,13 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
   }
 
   @Test
-  void incompatibleCacheHintDegradesSafelyAfterProviderTypeChange() {
+  void cacheHintUnsupportedByCurrentCapabilityDegradesAfterProviderTypeChange() {
     String name = "type-change-provider-" + System.nanoTime();
     CapturingFactory anthropic = new CapturingFactory(ProviderType.ANTHROPIC);
     CapturingFactory google = new CapturingFactory(ProviderType.GOOGLE);
     DatabaseProviderResolutionService resolution = resolution(anthropic, google);
 
-    // 先以 anthropic（BREAKPOINTS + SYSTEM/TOOLS）创建，持久 request 携带旧 OpenAI 风格的 affinity hint。
+    // 持久 request 携带 AFFINITY hint；当前 anthropic capability 会按请求内容重建 BREAKPOINTS 形态。
     AgentProviderDTO created =
         createProvider(name, "anthropic", "https://anthropic.example/v1", "secret", 12_000L);
     ProviderRequest request =
@@ -180,7 +180,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         first.effectiveRequest().cacheControl(),
         "leading SYSTEM 与当前 BREAKPOINTS capability 求交集得到 SYSTEM");
 
-    // Provider 类型切换到 google（AUTOMATIC）：不兼容 hint 必须降级为 none()，绝不沿用旧类型派生的 hint。
+    // Provider 类型切换到 google（AUTOMATIC）：当前 capability 不接受显式 hint，因此降级为 none()。
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setProviderType("google");
     update.setBaseUrl("https://google.example/v1");
@@ -191,7 +191,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals(
         ProviderCacheControl.none(),
         second.effectiveRequest().cacheControl(),
-        "AUTOMATIC capability 下旧 affinity hint 必须安全降级为 none()");
+        "AUTOMATIC capability 下持久 affinity hint 必须降级为 none()");
     second.openProvider(second.timeoutPolicy());
     assertEquals(
         "https://google.example/v1",

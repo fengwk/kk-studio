@@ -33,7 +33,8 @@ import java.util.Set;
  * 立即使用新连接事实，删除后确定性 not found，同名重建后解析到新行。
  *
  * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 factory 的 {@link
- * ProviderFactory#promptCacheCapability()} 安全规范化：不兼容能力降级为 {@code none()}，兼容时按当前 capability 重求形态与断点。
+ * ProviderFactory#promptCacheCapability()} 规范化：当前 capability 无法表达时降级为 {@code none()}，否则按当前
+ * capability 重求形态、retention 与断点。
  */
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
@@ -124,8 +125,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   }
 
   /**
-   * 把持久 request 的 cache control 按当前 capability 规范化。永远不构造 capability 不支持的 control；保留旧类型派生的 cache
-   * hint 只会发生在它与当前 capability 兼容时，否则安全降级为 {@code none()}。
+   * 把持久 request 的 cache control 按当前 capability 规范化。仅保留当前 capability 可表达的 retention 与 affinity
+   * key，并按当前 capability 重建形态与断点；无法表达时降级为 {@code none()}。
    */
   private static ProviderCacheControl normalizeCacheControl(
       ProviderRequest request, PromptCacheCapability capability) {
