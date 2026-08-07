@@ -22,7 +22,14 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
@@ -109,6 +116,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
+      // 同一 EntryPath 先后用于"删除后确定性拒绝"与"同名重建后解析到当前新行"；模型选择指向 dev seed 的 stub/acceptance-stub。
       EntryPath path =
           new EntryPath(
               List.of(
@@ -120,14 +128,39 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                           new BranchSettings(
                               null,
                               "default-assistant",
-                              new ModelSelection("provider", "model", "v1"),
-                              "low",
+                              new ModelSelection("stub", "acceptance-stub", "default"),
+                              "off",
                               List.of())),
                       Instant.parse("2026-08-02T00:00:00Z"))));
       TurnResolver.Result resolution = turnResolver.resolve(1L, path, false);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
+
+      // 硬删除后同名重建：旧名称引用必须解析到当前新行，而不是继续缺失。
+      String reboundSystemPrompt = "Rebound assistant: resolved from the re-created current row.";
+      AgentDefinitionCreateDTO rebound = new AgentDefinitionCreateDTO();
+      rebound.setName("default-assistant");
+      rebound.setModel("stub/acceptance-stub");
+      rebound.setVariant("default");
+      AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
+      reboundConfig.setTools(List.of());
+      reboundConfig.setSkills(List.of());
+      rebound.setConfig(reboundConfig);
+      rebound.setSystemPrompt(reboundSystemPrompt);
+      AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
+      try {
+        TurnResolver.Result reboundResolution = turnResolver.resolve(1L, path, false);
+        TurnResolver.Resolved resolved =
+            assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
+        ProviderMessage leadingSystem = resolved.request().providerRequest().messages().get(0);
+        assertEquals(ProviderMessageRole.SYSTEM, leadingSystem.role());
+        assertTrue(
+            textOf(leadingSystem).contains(reboundSystemPrompt),
+            "同名重建后的当前行 systemPrompt 必须出现在有效请求的 leading SYSTEM 中");
+      } finally {
+        agentDefinitionService.deleteAgent("default-assistant", reboundAgent.getVersion());
+      }
 
       ChatUpdateDTO staleAgentUpdate = new ChatUpdateDTO();
       staleAgentUpdate.setTitle("still editable");
@@ -150,5 +183,13 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       }
     }
     return Integer.MAX_VALUE;
+  }
+
+  private static String textOf(ProviderMessage message) {
+    StringBuilder text = new StringBuilder();
+    for (ProviderContentBlock content : message.contents()) {
+      text.append(((ProviderTextBlock) content).text());
+    }
+    return text.toString();
   }
 }

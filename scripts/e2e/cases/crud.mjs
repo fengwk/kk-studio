@@ -150,8 +150,8 @@ registerCase({
 registerCase({
   id: 'crud.provider.lifecycle',
   level: 'L1',
-  title: 'Provider name identity 创建/更新/删除',
-  docs: 'name 创建后不可修改；PUT 仅更新 editable properties；按 name path 删除',
+  title: 'Provider name identity 创建/更新/硬删除/同名重建',
+  docs: '记录存续期间 name 不可修改；PUT 仅更新 editable properties；DELETE 带 expectedVersion 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const created = envelopeData(
@@ -188,14 +188,40 @@ registerCase({
       (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
+
+    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 v2 baseUrl 不残留）。
+    const recreated = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/providers', {
+          ...providerCreateBody(suffix),
+          description: 'e2e provider recreated',
+          baseUrl: 'https://example.com/v3',
+        })
+      ).json,
+    )
+    assert(recreated.name === created.name, JSON.stringify(recreated))
+    assert(String(recreated.version) === '0', JSON.stringify(recreated))
+    assert(
+      recreated.baseUrl === 'https://example.com/v3'
+        && recreated.description === 'e2e provider recreated',
+      JSON.stringify(recreated),
+    )
+    const relisted = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+    )
+    assert(
+      relisted.some((provider) => provider.name === created.name),
+      'recreated Provider not listed',
+    )
+    await deleteProvider(ctx, recreated)
   },
 })
 
 registerCase({
   id: 'crud.model.lifecycle',
   level: 'L1',
-  title: 'Model 复合 name identity 创建/更新/删除',
-  docs: 'Model 由 providerName/name 标识；PUT 不修改 identity；modelName 可包含 /',
+  title: 'Model 复合 name identity 创建/更新/硬删除/同名重建',
+  docs: '记录存续期间 providerName/name 不可修改；PUT 不修改 identity；modelName 可包含 /；DELETE 硬删除后同名可重建，version 从 0 重新开始；Provider 保持到最后再删',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -238,6 +264,30 @@ registerCase({
     assert(updated.config.defaultVariant === 'fast', JSON.stringify(updated.config))
     await deleteModel(ctx, updated)
     assert(!(await findModel(ctx, provider.name, name)), 'Model still listed')
+
+    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 updated 配置不残留）。
+    const recreated = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/models', {
+          providerName: provider.name,
+          name,
+          description: 'recreated',
+          config: baseModelConfig(),
+        })
+      ).json,
+    )
+    assert(
+      recreated.providerName === provider.name && recreated.name === name,
+      JSON.stringify(recreated),
+    )
+    assert(String(recreated.version) === '0', JSON.stringify(recreated))
+    assert(recreated.description === 'recreated', JSON.stringify(recreated))
+    assert(
+      recreated.config.defaultVariant === 'default',
+      `recreated Model must not carry old config: ${JSON.stringify(recreated)}`,
+    )
+    assert(await findModel(ctx, provider.name, name), 'recreated Model not listed')
+    await deleteModel(ctx, recreated)
     await deleteProvider(ctx, provider)
   },
 })
@@ -245,8 +295,8 @@ registerCase({
 registerCase({
   id: 'crud.agent.lifecycle',
   level: 'L1',
-  title: 'Agent name identity 创建/更新/删除',
-  docs: 'Agent name/model 创建后不可修改；PUT 仅更新 prompt/variant/config 等 editable properties',
+  title: 'Agent name identity 创建/更新/硬删除/同名重建',
+  docs: '记录存续期间 name/model 不可修改；PUT 仅更新 prompt/variant/config 等 editable properties；DELETE 硬删除后同名可重建，version 从 0 重新开始且读取到新数据',
   async run(ctx) {
     const model = await firstModel(ctx)
     const name = `e2e-agent-${cid().slice(0, 8)}`
@@ -284,6 +334,31 @@ registerCase({
       (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
     )
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
+
+    // 硬删除后同名可重建：version 从 0 重新开始，且读取到新 body 的数据（旧 updated prompt 不残留）。
+    const recreated = envelopeData(
+      (
+        await ctx.call('POST', '/api/ai/catalog/agents', {
+          name,
+          description: 'recreated',
+          systemPrompt: 'recreated prompt',
+          model: modelRef(model),
+          variant: model.config.defaultVariant,
+          config: { tools: [], skills: [] },
+        })
+      ).json,
+    )
+    assert(recreated.name === name && recreated.model === modelRef(model), JSON.stringify(recreated))
+    assert(String(recreated.version) === '0', JSON.stringify(recreated))
+    assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
+    const relisted = pageResults(
+      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+    )
+    assert(relisted.some((candidate) => candidate.name === name), 'recreated Agent not listed')
+    await ctx.call(
+      'DELETE',
+      `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
+    )
   },
 })
 

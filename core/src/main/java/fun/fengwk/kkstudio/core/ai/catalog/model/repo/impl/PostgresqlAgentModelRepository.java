@@ -82,7 +82,6 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
     result.setVersion(model.getVersion());
     result.setCreateTime(model.getCreateTime());
     result.setUpdateTime(model.getUpdateTime());
-    result.setDeletedAt(model.getDeletedAt());
     return result;
   }
 }

@@ -1,38 +1,24 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-
 import java.util.Objects;
 
 /**
- * The runtime-facing description of a model selected for the current turn.
+ * 当前 turn 所选 Model 的运行时描述。
  *
- * <p>{@code providerName} and {@code modelName} are the catalog names used to resolve the current
- * provider and model definition. They are deliberately strings rather than database resource IDs or
- * an ambiguous upstream {@code modelId}. Functional capabilities are expressed directly as the
- * primitive {@code tools} / {@code reasoning} booleans. The effective variant chosen for the turn
- * lives beside this descriptor in the ephemeral execution value and the durable invocation request.
+ * <p>{@code providerName} 与 {@code modelName} 是解析当前 Provider / Model 定义的 Catalog 名称引用，刻意使用字符串而非
+ * 数据库资源 ID 或含义模糊的上游 {@code modelId}；能力以 {@code tools} / {@code reasoning} 两个 primitive 布尔直接表达。本
+ * turn 选中的有效 variant 存放在 ephemeral 执行值与 durable invocation request 中，与该 descriptor 并列。
+ *
+ * <p>Provider 类型、capability 与 prompt-cache policy 不随本 descriptor 冻结，由调用方按需从当前 ProviderFactory
+ * 解析并显式传入（例如 {@code PromptCacheRequestFinalizer}）。
  */
 public record ModelDescriptor(
-    String providerName,
-    long providerVersion,
-    String modelName,
-    ProviderType providerType,
-    boolean tools,
-    boolean reasoning,
-    ModelPricing pricing,
-    PromptCachePolicy promptCachePolicy) {
+    String providerName, String modelName, boolean tools, boolean reasoning, ModelPricing pricing) {
 
   public ModelDescriptor {
     providerName = requireName(providerName, "providerName");
-    if (providerVersion < 0) {
-      throw new IllegalArgumentException("providerVersion must not be negative");
-    }
     modelName = requireName(modelName, "modelName");
-    providerType = Objects.requireNonNull(providerType, "providerType");
     pricing = Objects.requireNonNull(pricing, "pricing");
-    promptCachePolicy = Objects.requireNonNull(promptCachePolicy, "promptCachePolicy");
   }
 
   private static String requireName(String value, String name) {

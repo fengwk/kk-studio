@@ -20,6 +20,6 @@ public interface AgentDefinitionRepository {
   /** Atomic CAS update on (name, expectedVersion). */
   boolean updateByName(AgentDefinition agentDefinition, long expectedVersion);
 
-  /** Atomic soft-delete CAS on (name, expectedVersion). */
+  /** 硬删除 CAS on (name, expectedVersion)：行物理删除后同名立即可重建；返回 false 表示 name 缺失或 version 不匹配。 */
   boolean deleteByName(String name, long expectedVersion);
 }

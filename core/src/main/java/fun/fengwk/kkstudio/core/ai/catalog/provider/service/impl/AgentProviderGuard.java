@@ -5,11 +5,10 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
-/** Provider lookup, global uniqueness and deletion checks. */
+/** Provider lookup and deletion checks. */
 @AllArgsConstructor
 @Component
 final class AgentProviderGuard {
@@ -32,12 +31,6 @@ final class AgentProviderGuard {
       throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + name);
     }
     return provider;
-  }
-
-  void ensureNameAvailable(String name) {
-    if (agentProviderRepository.getByName(name) != null) {
-      throw new AiDuplicateException(RESOURCE, RESOURCE + " name already exists: " + name);
-    }
   }
 
   void ensureDeletable(String name) {

@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -87,9 +86,7 @@ class OpenAiProviderAdapterTest {
     ModelDescriptor model =
         new ModelDescriptor(
             "provider",
-            0L,
             "proxy-model",
-            ProviderType.OPENAI,
             true,
             reasoning,
             new ModelPricing(
@@ -103,8 +100,7 @@ class OpenAiProviderAdapterTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            PromptCachePolicy.disabled());
+                BigDecimal.ZERO));
     return new ProviderRequest(model, variant, List.of(), List.of(), ProviderCacheControl.none());
   }
 }

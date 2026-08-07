@@ -120,7 +120,7 @@ matrix.agent.teardown_model
 
 L1 的关键语义断言：
 
-- Provider/Agent name 与 Model `(providerName,name)` 创建、更新、删除；
+- Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（旧值不残留）；
 - Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 默认值，不包含 Environment；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
@@ -176,7 +176,8 @@ GET /api/ai/catalog/tools
 - Model ref 为 `providerName/modelName`，只切第一个 `/`（model name 内可含 `/`）；
 - Catalog PUT/DELETE 的 `expectedVersion` 使用十进制字符串；
 - 空白名称、Provider/Agent 名称含 `/`、缺字段、非法 variant、非法 config 和未知字段返回 `400`；
-- 未知名称返回 `404`，版本冲突返回 `409`。
+- 未知名称返回 `404`，版本冲突返回 `409`；
+- 三张名称资源表（agent_provider/agent_model/agent_definition）均为硬删除：删除后同名可重建，重建行的 `version` 从 `"0"` 重新开始；记录存续期间名称（Provider/Agent name、Model 的 `providerName/name`）不可修改。
 
 ### Chat 与 Thread
 

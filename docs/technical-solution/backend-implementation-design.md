@@ -36,8 +36,8 @@ flowchart LR
 
 Runtime durable ID 在 HTTP 中编码为 strict decimal strings（id `[1-9][0-9]*`、revision `0|[1-9][0-9]*`）。Catalog 不使用 bigint resource ID：
 
-- Provider 和 Agent 的 identity 是永久保留的 immutable `name`，删除只写 `deleted_at`。
-- Model 的 identity 是永久保留的 `(providerName, name)`。
+- Provider 和 Agent 的 identity 是 immutable `name`，Model 的 identity 是 `(providerName, name)`；记录存续期间名称不可修改。
+- Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始。
 - 所有名称必须非空、拒绝首尾 Unicode whitespace；Provider/Agent 名称还必须是单路径段，禁止包含 `/`。
 - API Model ref 是 `providerName/modelName`，只在第一个 `/` 处切分，因此 Model 名称可以包含 `/`。
 - Catalog version 是独立的并发 token，以十进制字符串传输。

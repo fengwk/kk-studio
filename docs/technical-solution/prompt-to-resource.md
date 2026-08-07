@@ -83,7 +83,7 @@ yoloEnabled        # 冻结运行时策略
 
 ## 4. Model 执行与 usage/cost 冻结
 
-`harness_model_invocation.request` 保存 exact 冻结请求。`ModelProcessor` 两阶段激活后：
+`harness_model_invocation.request` 保存 exact 冻结请求。`ModelProcessor` 两阶段激活后（每次 attempt 由 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造 attempt-local Provider，见 [harness-capability-wiring.md](harness-capability-wiring.md)）：
 
 - `MODEL_DELTA` 节流持久化 `stream_checkpoint`（attempt-local），**commit 后**才 best-effort 发布 Redis realtime delta；
 - terminal `resultJson` 是 canonical `ProviderResponse`：

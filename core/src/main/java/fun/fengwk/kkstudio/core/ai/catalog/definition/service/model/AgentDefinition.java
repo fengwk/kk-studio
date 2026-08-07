@@ -18,5 +18,4 @@ public class AgentDefinition {
   private Long version;
   private Instant createTime;
   private Instant updateTime;
-  private Instant deletedAt;
 }

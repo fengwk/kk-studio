@@ -54,7 +54,6 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
 
       @Override
       protected void validateRequest(ProviderRequest request) {
-        OpenAiProviderAdapter.requireProviderType(request, providerType());
         // 提前执行 BREAKPOINTS 校验，确保非法 control 在 chatModel 之前 fail。
         CacheRequestValidator.requireAnthropicBreakpoints(request.cacheControl());
       }

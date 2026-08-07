@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
-/** Model names are immutable within a provider and are addressed by a composite name. */
+/** 模型名称在 Provider 内唯一并按复合名称寻址；记录存续期间名称不可变，硬删除后可同名重建。 */
 public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -81,9 +81,10 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
     agentModelService.deleteModel(provider.getName(), modelName, updated.getVersion());
     agentModelService.deleteModel(otherProvider.getName(), modelName, "0");
-    assertThrows(
-        AiDuplicateException.class,
-        () -> agentModelService.createModel(model(provider.getName(), modelName)));
+    // 硬删除：同名立即可重建，重建后解析到新行。
+    AgentModelDTO recreated = agentModelService.createModel(model(provider.getName(), modelName));
+    assertEquals("0", recreated.getVersion());
+    agentModelService.deleteModel(provider.getName(), modelName, recreated.getVersion());
     assertThrows(
         AiResourceNotFoundException.class,
         () -> agentModelService.deleteModel(provider.getName(), modelName, "0"));

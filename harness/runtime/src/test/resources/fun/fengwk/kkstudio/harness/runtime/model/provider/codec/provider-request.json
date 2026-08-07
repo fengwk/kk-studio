@@ -1,9 +1,7 @@
 {
   "model": {
     "providerName": "openai",
-    "providerVersion": 0,
     "modelName": "gpt-5-mini",
-    "providerType": "OPENAI",
     "tools": true,
     "reasoning": true,
     "pricing": {
@@ -18,14 +16,6 @@
       "cacheWritePerMillionTokens": "3.750000000000",
       "cacheWriteLongPerMillionTokens": "0",
       "reasoningPerMillionTokens": "0"
-    },
-    "promptCachePolicy": {
-      "capability": {
-        "mode": "BREAKPOINTS",
-        "supportedRetentions": ["LONG", "SHORT"],
-        "supportedBreakpoints": ["SYSTEM", "TOOLS"]
-      },
-      "retention": "SHORT"
     }
   },
   "variant": {

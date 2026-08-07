@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,7 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
@@ -30,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
@@ -106,6 +106,30 @@ class CoreModelGatewayTest {
   }
 
   @Test
+  void transportUsesEffectiveRequestFromResolutionNotTheOriginal() throws Exception {
+    // 解析器把持久 request 的 cache control 按当前 capability 规范化后返回有效请求；transport 必须使用它。
+    ProviderRequest effective =
+        new ProviderRequest(
+            PROVIDER_REQUEST.model(),
+            PROVIDER_REQUEST.variant(),
+            PROVIDER_REQUEST.messages(),
+            PROVIDER_REQUEST.tools(),
+            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-effective-key"));
+    ControlledProvider provider = new ControlledProvider();
+    try (Fixture fixture =
+        new Fixture(
+            new Resolution(effective, ignored -> provider),
+            provider,
+            Executors.newSingleThreadExecutor())) {
+      fixture.startAndActivate();
+      provider.awaitStarted();
+
+      assertSame(effective, provider.request.get());
+      assertNotSame(PROVIDER_REQUEST, provider.request.get());
+    }
+  }
+
+  @Test
   void forwardsFrozenRequestAndConfiguredTimeoutPolicyToProvider() throws Exception {
     ControlledProvider provider = new ControlledProvider();
     try (Fixture fixture = new Fixture(provider)) {
@@ -170,13 +194,13 @@ class CoreModelGatewayTest {
   void rejectsDeterministicResolutionFailureWithInvalidRequest() {
     try (Fixture fixture = new Fixture(new ControlledProvider())) {
       fixture.resolution.resolveFailure =
-          new IllegalArgumentException("persisted provider revision not found: provider@1");
+          new IllegalArgumentException("provider not found: provider");
 
       ModelGateway.StartResult result = fixture.start();
 
       ModelGateway.Rejected rejected = assertInstanceOf(ModelGateway.Rejected.class, result);
       assertEquals(ProviderErrorKind.INVALID_REQUEST, rejected.error().kind());
-      assertEquals("persisted provider revision not found: provider@1", rejected.error().message());
+      assertEquals("provider not found: provider", rejected.error().message());
       assertEquals(0, fixture.listener.terminalCount());
     }
   }
@@ -943,9 +967,7 @@ class CoreModelGatewayTest {
     ModelDescriptor descriptor =
         new ModelDescriptor(
             "provider",
-            1L,
             "frozen-model",
-            ProviderType.OPENAI,
             true,
             false,
             new ModelPricing(
@@ -959,8 +981,7 @@ class CoreModelGatewayTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            PromptCachePolicy.disabled());
+                BigDecimal.ZERO));
     return new ProviderRequest(
         descriptor, variant, List.of(), List.of(), ProviderCacheControl.none());
   }
@@ -1049,9 +1070,16 @@ class CoreModelGatewayTest {
     private final AtomicInteger openCount = new AtomicInteger();
     private final AtomicReference<ModelCallTimeoutPolicy> openedPolicy = new AtomicReference<>();
     private final Function<ModelCallTimeoutPolicy, ModelProvider> opener;
+    private final ProviderRequest effectiveRequest;
     private volatile RuntimeException resolveFailure;
 
     private Resolution(Function<ModelCallTimeoutPolicy, ModelProvider> opener) {
+      this(null, opener);
+    }
+
+    private Resolution(
+        ProviderRequest effectiveRequest, Function<ModelCallTimeoutPolicy, ModelProvider> opener) {
+      this.effectiveRequest = effectiveRequest;
       this.opener = opener;
     }
 
@@ -1061,7 +1089,10 @@ class CoreModelGatewayTest {
       if (resolveFailure != null) {
         throw resolveFailure;
       }
+      // effectiveRequest 为空时原样透传，模拟"解析未改写请求"的路径。
+      ProviderRequest effective = effectiveRequest == null ? request : effectiveRequest;
       return new ResolvedExecution(
+          effective,
           TIMEOUT_POLICY,
           policy -> {
             openCount.incrementAndGet();

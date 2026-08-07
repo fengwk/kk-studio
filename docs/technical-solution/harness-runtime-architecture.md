@@ -108,6 +108,8 @@ SET_YOLO
 | `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding）、status、attempt、`approval` JSON、`result`/`error`/`result_entry_id`、时间 |
 
+冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
+
 状态机（Model）：
 
 ```text

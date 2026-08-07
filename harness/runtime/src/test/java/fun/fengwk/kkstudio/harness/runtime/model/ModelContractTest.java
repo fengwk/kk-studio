@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -23,109 +22,26 @@ import java.util.Set;
 /** 模型描述、用量与成本公共契约测试。 */
 class ModelContractTest {
 
-  /** 模型描述必须使用非空 name；pricing / cache policy 不可为空。 */
+  /** 模型描述必须使用非空 name；pricing 不可为空。 */
   @Test
   void enforcesDescriptorResourceAndIdentityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                "provider",
-                -1L,
-                "model",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
+        () -> new ModelDescriptor("", "model", true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                "",
-                0L,
-                "model",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                "provider",
-                0L,
-                "",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
+        () -> new ModelDescriptor("provider", "", true, false, pricing()));
     assertThrows(
         NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                "provider",
-                0L,
-                "model",
-                null,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                "provider",
-                0L,
-                "model",
-                ProviderType.OPENAI,
-                true,
-                false,
-                null,
-                PromptCachePolicy.disabled()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                "provider", 0L, "model", ProviderType.OPENAI, true, false, pricing(), null));
+        () -> new ModelDescriptor("provider", "model", true, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                "\u2003provider",
-                0L,
-                "model",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
+        () -> new ModelDescriptor("\u2003provider", "model", true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelDescriptor(
-                "provider/alias",
-                0L,
-                "model",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
+        () -> new ModelDescriptor("provider/alias", "model", true, false, pricing()));
     assertDoesNotThrow(
-        () ->
-            new ModelDescriptor(
-                "provider",
-                0L,
-                "model/with/slash",
-                ProviderType.OPENAI,
-                true,
-                false,
-                pricing(),
-                PromptCachePolicy.disabled()));
+        () -> new ModelDescriptor("provider", "model/with/slash", true, false, pricing()));
   }
 
   /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */

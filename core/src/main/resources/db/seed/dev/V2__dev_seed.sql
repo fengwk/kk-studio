@@ -15,15 +15,6 @@ insert into agent_provider (
 )
 on conflict (name) do nothing;
 
-insert into agent_provider_revision (
-    provider_name, provider_version, provider_type, base_url, credential, config, created_at
-)
-select name, 0, provider_type, base_url, credential, config, current_timestamp
-from agent_provider
-where name = 'stub'
-  and deleted_at is null
-on conflict (provider_name, provider_version) do nothing;
-
 insert into agent_model (
     provider_name, name, description, config,
     created_at, updated_at, version

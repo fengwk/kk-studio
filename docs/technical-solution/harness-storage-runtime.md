@@ -67,7 +67,7 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | --- | --- |
 | `thread_id` / `turn_start_entry_id` | `(thread_id, turn_start_entry_id)` 唯一 |
 | `basis_head_entry_id` | 创建时的 head |
-| `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/YOLO） |
+| `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/YOLO；Provider/Model 只按名称引用） |
 | `status` | READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `attempt` | `>= 0` |
 | `stream_checkpoint` | attempt-local 单调 checkpoint；新 attempt 清空，防止跨 attempt partial 混入 |

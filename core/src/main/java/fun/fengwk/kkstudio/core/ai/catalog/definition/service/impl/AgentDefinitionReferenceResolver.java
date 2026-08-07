@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionReposi
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.core.ai.error.AiDuplicateException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
 /** Resolves global Agent definition and model references. */
@@ -56,12 +55,5 @@ final class AgentDefinitionReferenceResolver {
           MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
     }
     return model;
-  }
-
-  void ensureNameAvailable(String name) {
-    if (agentDefinitionRepository.getByName(name) != null) {
-      throw new AiDuplicateException(
-          DEFINITION_RESOURCE, DEFINITION_RESOURCE + " name already exists: " + name);
-    }
   }
 }

@@ -33,14 +33,6 @@ insert into agent_provider (
      current_timestamp, current_timestamp, 0)
 on conflict (name) do nothing;
 
-insert into agent_provider_revision (
-    provider_name, provider_version, provider_type, base_url, credential, config, created_at
-)
-select name, 0, provider_type, base_url, credential, config, current_timestamp
-from agent_provider
-where deleted_at is null
-on conflict (provider_name, provider_version) do nothing;
-
 -- Effective Pi 0.82.1 model snapshot. `minimax-responses` is mapped to provider
 -- `minimax`; all other provider names match. Variants are Pi's supported thinking
 -- levels after applying ~/.pi/agent/models.json and clamping its default `max` level.

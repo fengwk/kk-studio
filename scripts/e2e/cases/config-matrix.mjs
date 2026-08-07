@@ -12,7 +12,7 @@ import { registerCase } from '../lib/registry.mjs'
  * 共享一个临时 provider，在第一个 case 创建，最后一个 case 删除。
  */
 let sharedProviderName = null
-let sharedProviderVersion = null
+let sharedProviderExpectedVersion = null
 let sharedModelRefForAgent = null
 let sharedModelVersionForAgent = null
 
@@ -25,7 +25,7 @@ registerCase({
     const { json } = await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
     const provider = envelopeData(json)
     sharedProviderName = String(provider.name)
-    sharedProviderVersion = String(provider.version)
+    sharedProviderExpectedVersion = String(provider.version)
     ctx.vars.matrixProviderName = sharedProviderName
   },
 })
@@ -77,10 +77,10 @@ registerCase({
     if (sharedProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderVersion)}`,
+        `/api/ai/catalog/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderExpectedVersion)}`,
       )
       sharedProviderName = null
-      sharedProviderVersion = null
+      sharedProviderExpectedVersion = null
     }
   },
 })
@@ -99,7 +99,7 @@ registerCase({
     const provider = envelopeData(pCreate)
     const providerName = String(provider.name)
     ctx.vars.agentMatrixProviderName = providerName
-    ctx.vars.agentMatrixProviderVersion = String(provider.version)
+    ctx.vars.agentMatrixProviderExpectedVersion = String(provider.version)
     const { json: mCreate } = await ctx.call('POST', '/api/ai/catalog/models', {
       providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
@@ -192,11 +192,11 @@ registerCase({
       await ctx.call(
         'DELETE',
         `/api/ai/catalog/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
-          ctx.vars.agentMatrixProviderVersion,
+          ctx.vars.agentMatrixProviderExpectedVersion,
         )}`,
       )
       ctx.vars.agentMatrixProviderName = null
-      ctx.vars.agentMatrixProviderVersion = null
+      ctx.vars.agentMatrixProviderExpectedVersion = null
     }
   },
 })

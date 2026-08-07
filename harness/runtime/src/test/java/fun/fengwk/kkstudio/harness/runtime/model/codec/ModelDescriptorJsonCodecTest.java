@@ -15,23 +15,17 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * {@link ModelDescriptorJsonCodec} 的契约与 round-trip 测试，覆盖 descriptor 与 variant 完整字段、所有 strict
@@ -88,46 +82,20 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(first, second);
   }
 
-  /** Set<Enum> 字段按 enum name 排序输出。 */
+  /** descriptor 字段顺序固定。 */
   @Test
-  void enumSetsAreSortedByName() throws Exception {
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            "provider",
-            0L,
-            "claude",
-            ProviderType.ANTHROPIC,
-            true,
-            true,
-            new ModelPricing(
-                "USD",
-                "t",
-                "s",
-                BigDecimal.ONE,
-                "v",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
-            new PromptCachePolicy(
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.LONG, PromptCacheRetention.SHORT),
-                    Set.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)),
-                PromptCacheRetention.LONG));
-
-    String json = codec.encodeDescriptor(descriptor);
-    JsonNode root = OBJECT_MAPPER.readTree(json);
-    ArrayNode retentions =
-        (ArrayNode) root.get("promptCachePolicy").get("capability").get("supportedRetentions");
+  void descriptorFieldsAreInFixedOrder() throws Exception {
+    JsonNode root = OBJECT_MAPPER.readTree(codec.encodeDescriptor(canonicalDescriptor()));
+    ArrayNode names = NODES.arrayNode();
+    root.fieldNames().forEachRemaining(names::add);
     assertEquals(
-        List.of("LONG", "SHORT"), List.of(retentions.get(0).asText(), retentions.get(1).asText()));
-    ArrayNode breakpoints =
-        (ArrayNode) root.get("promptCachePolicy").get("capability").get("supportedBreakpoints");
-    assertEquals(
-        List.of("SYSTEM", "TOOLS"),
-        List.of(breakpoints.get(0).asText(), breakpoints.get(1).asText()));
+        List.of("providerName", "modelName", "tools", "reasoning", "pricing"),
+        List.of(
+            names.get(0).asText(),
+            names.get(1).asText(),
+            names.get(2).asText(),
+            names.get(3).asText(),
+            names.get(4).asText()));
   }
 
   /** BigDecimal 字段以 plain 字符串输出。 */
@@ -141,33 +109,6 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(
         new BigDecimal("3.000000000000"),
         new BigDecimal(pricing.get("inputPerMillionTokens").asText()));
-  }
-
-  /** descriptor 字段顺序固定。 */
-  @Test
-  void descriptorFieldsAreInFixedOrder() throws Exception {
-    JsonNode root = OBJECT_MAPPER.readTree(codec.encodeDescriptor(canonicalDescriptor()));
-    ArrayNode names = NODES.arrayNode();
-    root.fieldNames().forEachRemaining(names::add);
-    assertEquals(
-        List.of(
-            "providerName",
-            "providerVersion",
-            "modelName",
-            "providerType",
-            "tools",
-            "reasoning",
-            "pricing",
-            "promptCachePolicy"),
-        List.of(
-            names.get(0).asText(),
-            names.get(1).asText(),
-            names.get(2).asText(),
-            names.get(3).asText(),
-            names.get(4).asText(),
-            names.get(5).asText(),
-            names.get(6).asText(),
-            names.get(7).asText()));
   }
 
   // ---------- Strict rejection ----------
@@ -204,14 +145,6 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
-  /** 未知 providerType 必须拒绝。 */
-  @Test
-  void rejectsUnknownProviderType() {
-    ObjectNode node = canonicalDescriptorNode();
-    node.put("providerType", "LEGACY");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
   /** 未知 variant 字段必须拒绝。 */
   @Test
   void rejectsUnknownVariantField() {
@@ -226,15 +159,6 @@ class ModelDescriptorJsonCodecTest {
     ObjectNode node = canonicalDescriptorNode();
     ObjectNode pricing = (ObjectNode) node.get("pricing");
     pricing.put("extra", true);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
-  /** 未知 prompt cache mode 必须拒绝。 */
-  @Test
-  void rejectsUnknownPromptCacheMode() {
-    ObjectNode node = canonicalDescriptorNode();
-    ObjectNode capability = (ObjectNode) node.get("promptCachePolicy").get("capability");
-    capability.put("mode", "MANUAL");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
@@ -270,16 +194,13 @@ class ModelDescriptorJsonCodecTest {
     String json =
         "{"
             + "\"providerName\":\"provider\",\"providerName\":\"other\","
-            + "\"modelName\":\"x\",\"providerType\":\"OPENAI\","
+            + "\"modelName\":\"x\","
             + "\"tools\":false,\"reasoning\":false,"
             + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
             + "\"serviceTier\":\"s\",\"serviceTierMultiplier\":\"1\",\"version\":\"v\","
             + "\"inputPerMillionTokens\":\"0\",\"outputPerMillionTokens\":\"0\","
             + "\"cacheReadPerMillionTokens\":\"0\",\"cacheWritePerMillionTokens\":\"0\","
-            + "\"cacheWriteLongPerMillionTokens\":\"0\",\"reasoningPerMillionTokens\":\"0\"},"
-            + "\"promptCachePolicy\":{\"capability\":{\"mode\":\"UNKNOWN\","
-            + "\"supportedRetentions\":[],\"supportedBreakpoints\":[]},"
-            + "\"retention\":\"NONE\"}"
+            + "\"cacheWriteLongPerMillionTokens\":\"0\",\"reasoningPerMillionTokens\":\"0\"}"
             + "}";
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
   }
@@ -296,14 +217,6 @@ class ModelDescriptorJsonCodecTest {
     ObjectNode str = canonicalDescriptorNode();
     str.put("providerName", 10);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
-  }
-
-  /** providerVersion 只能是非负整数。 */
-  @Test
-  void rejectsNegativeProviderVersion() {
-    ObjectNode node = canonicalDescriptorNode();
-    node.put("providerVersion", -1L);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
   // ---------- Cross-codec consistency ----------
@@ -369,21 +282,7 @@ class ModelDescriptorJsonCodecTest {
   // ---------- Fixture / helpers ----------
 
   private static ModelDescriptor canonicalDescriptor() {
-    return new ModelDescriptor(
-        "openai",
-        0L,
-        "gpt-5-mini",
-        ProviderType.OPENAI,
-        true,
-        true,
-        canonicalPricing(),
-        PromptCachePolicy.breakpointsShort(canonicalCapability()));
-  }
-
-  private static PromptCacheCapability canonicalCapability() {
-    return PromptCacheCapability.breakpoints(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-        Set.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM));
+    return new ModelDescriptor("openai", "gpt-5-mini", true, true, canonicalPricing());
   }
 
   private static ModelPricing canonicalPricing() {

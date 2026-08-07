@@ -159,12 +159,6 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings(null, "default", "low"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.provider.setVersion(-1L);
-    assertEquals(
-        "provider version must be non-negative",
-        fixture.rejected(fixture.path(settings(null, "default", "low"))).error().message());
-
-    fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.failModelConfig(new IllegalArgumentException("broken model config"));
     assertEquals(
         "invalid model configuration: broken model config",
@@ -560,10 +554,11 @@ class DatabaseTurnResolverTest {
               mapping.getValue(),
               PromptCacheCapability.unsupported(),
               true);
+      // 持久 providerType 只用于在解析时选择当前 ProviderFactory；descriptor 不再冻结类型。
       ModelInvocationRequest request =
           fixture.resolved(fixture.path(settings(null, "default", "low")));
-      assertEquals(mapping.getValue(), request.providerRequest().model().providerType());
-      assertEquals(0L, request.providerRequest().model().providerVersion());
+      assertEquals("provider", request.providerRequest().model().providerName());
+      assertEquals("model", request.providerRequest().model().modelName());
     }
   }
 

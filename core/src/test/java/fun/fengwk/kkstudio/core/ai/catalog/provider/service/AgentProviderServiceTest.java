@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-/** Provider names are immutable global identities and credentials never cross the API boundary. */
+/** Provider 名称全局唯一；记录存续期间名称不可变，硬删除后可同名重建。凭据绝不越过 API 边界。 */
 public class AgentProviderServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
@@ -58,12 +58,6 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
     assertEquals(name, updated.getName());
     assertTrue(updated.isConfigured());
     assertEquals("1", updated.getVersion());
-    assertEquals(
-        2,
-        jdbc.queryForObject(
-            "select count(*) from agent_provider_revision where provider_name = ?",
-            Integer.class,
-            name));
     assertThrows(
         AiVersionConflictException.class, () -> agentProviderService.updateProvider(name, update));
 
@@ -74,16 +68,15 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
         AiResourceNotFoundException.class,
         () -> agentProviderService.updateProvider("missing-" + name, update));
 
+    // 硬删除：行物理消失且同名立即可重建。
     agentProviderService.deleteProvider(name, updated.getVersion());
     assertEquals(
-        1,
+        0,
         jdbc.queryForObject(
-            "select count(*) from agent_provider where name = ? and deleted_at is not null",
-            Integer.class,
-            name));
-    assertThrows(
-        AiDuplicateException.class,
-        () -> agentProviderService.createProvider(provider(name, "replacement")));
+            "select count(*) from agent_provider where name = ?", Integer.class, name));
+    AgentProviderDTO recreated = agentProviderService.createProvider(provider(name, "replacement"));
+    assertEquals(name, recreated.getName());
+    agentProviderService.deleteProvider(name, recreated.getVersion());
     assertThrows(
         AiResourceNotFoundException.class, () -> agentProviderService.deleteProvider(name, "0"));
   }
@@ -104,7 +97,7 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  public void concurrentUpdatesCreateOneRevisionForTheWinningCas() throws Exception {
+  public void concurrentUpdatesAllowExactlyOneWinningCas() throws Exception {
     String name = "provider-concurrent-" + System.nanoTime();
     AgentProviderDTO created = agentProviderService.createProvider(provider(name, "secret"));
     AgentProviderUpdateDTO first = update("first-secret", created.getVersion());
@@ -132,12 +125,6 @@ public class AgentProviderServiceTest extends PostgresSpringTestSupport {
         }
       }
       assertEquals(1, successes);
-      assertEquals(
-          2,
-          jdbc.queryForObject(
-              "select count(*) from agent_provider_revision where provider_name = ?",
-              Integer.class,
-              name));
       agentProviderService.deleteProvider(name, currentVersion);
     } finally {
       executor.shutdownNow();
