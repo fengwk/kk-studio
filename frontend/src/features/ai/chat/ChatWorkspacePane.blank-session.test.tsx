@@ -74,7 +74,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     status: 'IDLE',
     processing: false,
     branchSettings: {
-      environmentId: null,
+      environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       thinkingLevel: 'off',
@@ -143,8 +143,10 @@ function renderBlankPane(overrides?: {
   onThreadChange?: (threadId: string | null) => void
   onAgentChange?: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   agentName?: string | null
   yoloEnabled?: boolean
+  environmentName?: string | null
   initialThreadId?: string | null
   title?: string | null
   agents?: Array<typeof assistantAgent>
@@ -152,6 +154,7 @@ function renderBlankPane(overrides?: {
   const onThreadChange = overrides?.onThreadChange ?? vi.fn()
   const onAgentChange = overrides?.onAgentChange ?? vi.fn(async () => undefined)
   const onYoloChange = overrides?.onYoloChange ?? vi.fn(async () => undefined)
+  const onEnvironmentChange = overrides?.onEnvironmentChange ?? vi.fn(async () => undefined)
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -167,6 +170,7 @@ function renderBlankPane(overrides?: {
           id: 'chat-1',
           title: overrides?.title === undefined ? 'C' : overrides.title,
           agentName: overrides?.agentName === undefined ? 'assistant' : overrides.agentName,
+          environmentName: overrides?.environmentName ?? null,
           yoloEnabled: overrides?.yoloEnabled ?? false,
           version: '1',
           createTime: null,
@@ -174,10 +178,10 @@ function renderBlankPane(overrides?: {
         }}
         agents={overrides?.agents ?? [assistantAgent]}
         environments={[
-          { id: 'env-local', name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
           {
-            id: 'env-connecting',
             name: 'connecting',
+            ready: false,
             status: 'CONNECTING',
             lastSeen: null,
             tools: [],
@@ -195,6 +199,7 @@ function renderBlankPane(overrides?: {
         onThreadSortChange={() => undefined}
         onAgentChange={onAgentChange}
         onYoloChange={onYoloChange}
+        onEnvironmentChange={onEnvironmentChange}
       />
     )
   }
@@ -203,7 +208,7 @@ function renderBlankPane(overrides?: {
       <Harness />
     </QueryClientProvider>,
   )
-  return { onThreadChange, onAgentChange, onYoloChange }
+  return { onThreadChange, onAgentChange, onYoloChange, onEnvironmentChange }
 }
 
 describe('BlankComposerPane /thread and agent error handling', () => {
@@ -263,12 +268,12 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(within(envModal).getByRole('button', { name: /^local/ }))
 
     // 空面板 footer 立即反映 draft。
-    expect(await screen.findByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ }))
+    await user.click(screen.getByRole('button', { name: /env:local/ }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModalAgain).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
-    expect(await screen.findByRole('button', { name: /\u73af\u5883[\uff1a:]\uff08\u65e0\uff09/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
   })
 
   it('materializes the blank pane frozen draft from the catalog (footer shows agent/model)', async () => {
@@ -279,7 +284,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(await screen.findByRole('button', { name: /agent:assistant/ })).toBeInTheDocument()
     expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\uff08\u65e0\uff09/ }),
+      screen.getByRole('button', { name: /env:none/ }),
     ).toBeInTheDocument()
     expect(agentService.listModels).toHaveBeenCalled()
     // draft 编辑没有触发任何 service 调用。
@@ -287,9 +292,83 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
 
+  it('starts the blank pane draft from the Chat default Environment and allows changing it before first send', async () => {
+    const user = userEvent.setup()
+    renderBlankPane({ environmentName: 'local' })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // Chat 默认 Environment 是空面板草稿的起点：footer 立即反映 env:local。
+    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+
+    // 发送前可清空：显式选择（无）=> env:none。
+    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    let envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+
+    // 发送前可重新更改：选回 local 后首次发送携带 environmentName。
+    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    const createdThread = thread({ threadId: 't-created', environmentName: 'local' })
+    vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
+    await user.click(composer)
+    await user.type(composer, 'hello with default env')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
+    const createArgs = vi.mocked(chatService.createChatThread).mock.calls.at(-1)!
+    expect(createArgs[1].branchSettings.environmentName).toBe('local')
+  })
+
+  it('syncs the Chat default Environment when selected or explicitly cleared in the blank pane', async () => {
+    const user = userEvent.setup()
+    const onEnvironmentChange = vi.fn(async () => undefined)
+    renderBlankPane({ onEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    let envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    expect(onEnvironmentChange).toHaveBeenCalledWith('local')
+
+    // 显式清空：null 同步为 Chat 默认（清空语义，绝不能被当作缺省忽略）。
+    await user.click(screen.getByRole('button', { name: /env:local/ }))
+    envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
+    expect(await screen.findByRole('button', { name: /env:none/ })).toBeInTheDocument()
+    expect(onEnvironmentChange).toHaveBeenCalledWith(null)
+    expect(chatService.createChatThread).not.toHaveBeenCalled()
+  })
+
+  it('uses the pane-local Environment for the first send even when the Chat default update fails', async () => {
+    const user = userEvent.setup()
+    const onEnvironmentChange = vi.fn(async () => {
+      throw new Error('update failed')
+    })
+    renderBlankPane({ onEnvironmentChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    const envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    expect(await screen.findByRole('button', { name: /env:local/ })).toBeInTheDocument()
+    // 更新失败仅提示（错误 banner）；不阻塞发送。
+    expect(await screen.findByText('update failed')).toBeInTheDocument()
+
+    const createdThread = thread({ threadId: 't-created', environmentName: 'local' })
+    vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
+    await user.click(composer)
+    await user.type(composer, 'hello with local env')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
+    const createArgs = vi.mocked(chatService.createChatThread).mock.calls.at(-1)!
+    expect(createArgs[1].branchSettings.environmentName).toBe('local')
+  })
+
   it('performs atomic createChatThread + enqueueCommands first send', async () => {
     const user = userEvent.setup()
-    const createdThread = thread({ threadId: 't-created', environmentId: null })
+    const createdThread = thread({ threadId: 't-created', environmentName: null })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
     renderBlankPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -306,7 +385,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
         yoloEnabled: false,
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentId: null,
+          environmentName: null,
           model: expect.objectContaining({
             providerName: 'minimax',
             modelName: 'MiniMax',
@@ -328,8 +407,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(batchArg.commands[0]).not.toHaveProperty('role')
     expect(batchArg.commands[0]?.clientCommandId).toBeTruthy()
     // 首次发送的 command batch 中没有 environment：environment 已在创建 Thread 时
-    // 通过 branchSettings.environmentId 烘焙进去。
-    expect(batchArg.commands[0]).not.toHaveProperty('environmentId')
+    // 通过 branchSettings.environmentName 烘焙进去。
+    expect(batchArg.commands[0]).not.toHaveProperty('environmentName')
 
     // 面板绑定到已创建的 Thread 后，空面板正文随即消失。
     await waitFor(() =>
@@ -502,7 +581,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
         yoloEnabled: false,
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentId: null,
+          environmentName: null,
           model: expect.objectContaining({
             providerName: 'minimax',
             modelName: 'MiniMax',
@@ -569,7 +648,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
     expect(payload.branchSettings).toEqual({
-      environmentId: null,
+      environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       thinkingLevel: 'off',

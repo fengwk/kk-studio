@@ -39,7 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -665,8 +665,8 @@ class HarnessRuntimeEnqueueTest {
   }
 
   private static NewThreadCommand setEnvironment(
-      String clientCommandId, EnvironmentId environmentId) {
-    return new NewThreadCommand(new SetEnvironmentCommandPayload(environmentId), clientCommandId);
+      String clientCommandId, EnvironmentName environmentName) {
+    return new NewThreadCommand(new SetEnvironmentCommandPayload(environmentName), clientCommandId);
   }
 
   private static NewThreadCommand setYolo(String clientCommandId, boolean yolo) {

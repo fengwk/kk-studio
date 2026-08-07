@@ -46,7 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -62,7 +62,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * {@link ThreadContextClassifier} 纯单元测试：直接构造 ThreadState / EntryPath / ModelInvocation /
@@ -847,7 +846,7 @@ class ThreadContextClassifierTest {
 
   private static ModelInvocationRequest modelRequest() {
     return new ModelInvocationRequest(
-        new EnvironmentId(UUID.randomUUID().toString()),
+        new EnvironmentName("env-1"),
         new ProviderRequest(
             modelDescriptor(),
             new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
@@ -923,7 +922,7 @@ class ThreadContextClassifierTest {
 
   private static BranchSettings branchSettings() {
     return new BranchSettings(
-        new EnvironmentId(UUID.randomUUID().toString()),
+        new EnvironmentName("env-2"),
         "agent",
         new ModelSelection("provider", "model", "v1"),
         "low",

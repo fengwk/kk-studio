@@ -18,7 +18,8 @@ export interface ChatPanelLabels {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentDisplayName?: string | null
+  environmentName?: string | null
+  environmentReady?: boolean
   contextWindow?: number
 }
 
@@ -99,7 +100,8 @@ export function ChatPanel({
             providerName={labels.providerName}
             modelName={labels.modelName}
             variantName={labels.variantName}
-            environmentDisplayName={labels.environmentDisplayName}
+            environmentName={labels.environmentName}
+            environmentReady={labels.environmentReady}
             yoloEnabled={footer.yoloEnabled}
             onAgentClick={footer.onAgentClick}
             onModelClick={footer.onModelClick}

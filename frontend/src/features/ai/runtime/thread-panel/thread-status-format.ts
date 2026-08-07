@@ -27,7 +27,10 @@ export interface ThreadStatusModelInput {
   providerName?: string
   modelName?: string
   variantName?: string
-  environmentDisplayName?: string | null
+  /** canonical 路由名称（可 null）：null/空白 => `env:none`。 */
+  environmentName?: string | null
+  /** 该名称的实时可用标记（统一可用性规则）；false/未知 => `env:<name> (unavailable)`。 */
+  environmentReady?: boolean
   yoloEnabled?: boolean
   onAgentClick?: () => void
   onModelClick?: () => void
@@ -54,8 +57,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const provider = clean(input.providerName)
   const model = clean(input.modelName) || translate('ai.runtime.status.modelFallback')
   const variant = clean(input.variantName) || translate('ai.runtime.status.variantFallback')
-  const environment =
-    clean(input.environmentDisplayName) || translate('ai.runtime.status.environmentFallback')
+  const environmentName = clean(input.environmentName)
   const yoloOn = Boolean(input.yoloEnabled)
 
   // 调用方传入的 modelName 可能已是规范的 provider/model 引用。
@@ -68,7 +70,12 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const agentText = yoloOn
     ? translate('ai.runtime.status.agentYoloText', { name: agentLabel })
     : translate('ai.runtime.status.agentText', { name: agentLabel })
-  const environmentText = translate('ai.runtime.status.environmentText', { name: environment })
+  const environmentText =
+    environmentName === ''
+      ? translate('ai.runtime.status.environmentNoneText')
+      : input.environmentReady === false
+        ? translate('ai.runtime.status.environmentUnavailableText', { name: environmentName })
+        : translate('ai.runtime.status.environmentText', { name: environmentName })
 
   const segments: ThreadStatusSegment[] = [
     {
@@ -107,7 +114,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     provider,
     model,
     variant,
-    environment,
+    environment: environmentName,
     yoloOn,
     agentText,
     modelText,

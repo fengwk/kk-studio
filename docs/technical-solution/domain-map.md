@@ -43,7 +43,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Chat | 保存唯一可见发送设置 `agentName`、`yoloEnabled` 的持久对象 |
 | Session | append-only Entry Tree 的边界 |
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`TURN_END` |
-| BranchSettings | Entry 分支的完整不可变设置快照（environmentId/agentName/model/thinkingLevel/activeTools） |
+| BranchSettings | Entry 分支的完整不可变设置快照（environmentName/agentName/model/thinkingLevel/activeTools） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，八类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
 | ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）的 Provider 调用 |
@@ -51,10 +51,10 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | ThreadGoal | Core application-owned 的 per-Thread Goal（`agent_thread_goal` 表，无 `harness_` 前缀，**不是** Runtime 第 8 表）；经 selectable Platform tools `create_goal`/`get_goal`/`update_goal` 读写 |
 | Resource | Tool Result 中 Text/Json ≤8KB 保持 inline ToolContent；超过阈值或 Binary 转为 canonical 引用 `{uri, mediaType, name, size, sha256}`（外部 `file:` URI） |
-| Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentId`（lowercase UUID）唯一，状态为 CONNECTING/READY；name 只展示，只有 READY 可运行 |
+| Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。fail closed：**非 null `environmentId` 无论 activeTools 都必须 registry 命中且 READY**；**null `environmentId` 只允许 platform-only 且无 skills 的 turn**——ENVIRONMENT tool 或 Agent skill 均确定性拒绝，绝不静默省略；skills 必须由选中 READY Environment 精确提供且 `activeTools` 显式包含 `load_skill`。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝（实际 start 不可用 → 确定性 Rejected，模型可见的 durable FAILED ToolResult）；Agent skills 必须由最新选中且 live 的 Environment 精确提供且 `activeTools` 显式包含 `load_skill`（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 

@@ -85,7 +85,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentId: null,
+    environmentName: null,
     agentName: 'assistant',
     model: modelSelection(),
     thinkingLevel: 'off',
@@ -226,7 +226,7 @@ describe('useAgentThreadController', () => {
           toolName: 'demo',
           toolVersion: '1',
           toolType: 'PLATFORM',
-          environmentId: null,
+          environmentName: null,
           argumentsJson: '{}',
           approvalJson: '{}',
           resultJson: null,
@@ -737,7 +737,7 @@ describe('useAgentThreadController', () => {
         toolName: 'demo',
         toolVersion: '1',
         toolType: 'PLATFORM',
-        environmentId: null,
+        environmentName: null,
         argumentsJson: '{}',
         approvalJson: '{}',
         resultJson: null,
@@ -811,9 +811,10 @@ describe('useAgentThreadController', () => {
   })
 
   it('exposes runtimeLabels from the snapshot branch settings and environment map', async () => {
-    const environments = new Map<string, string>([['env-local', 'local']])
+    // name -> ready（统一可用性标记）；display name 已不存在。
+    const environments = new Map<string, boolean>([['env-local', true]])
     const currentThread = threadFixture({
-      branchSettings: branchSettings({ environmentId: 'env-local' }),
+      branchSettings: branchSettings({ environmentName: 'env-local' }),
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(currentThread))
 
@@ -823,7 +824,8 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
     expect(result.current.runtimeLabels.agentName).toBe('assistant')
-    expect(result.current.runtimeLabels.environmentDisplayName).toBe('local')
+    expect(result.current.runtimeLabels.environmentName).toBe('env-local')
+    expect(result.current.runtimeLabels.environmentReady).toBe(true)
     expect(result.current.runtimeLabels.modelName).toBe('minimax/MiniMax')
     expect(result.current.thread?.headEntryId).toBe('h1')
     expect(result.current.thread?.nextCommandSequence).toBe('1')

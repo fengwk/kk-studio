@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.JsonToolContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
@@ -82,8 +82,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
-  private static final EnvironmentId ENVIRONMENT_ID =
-      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("environment");
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
@@ -94,6 +93,46 @@ class DaemonRuntimeTest {
     if (runtime != null) {
       runtime.close();
     }
+  }
+
+  /** 名称已被另一 live daemon 持有是终态冲突：daemon 进入 FAILED、停止重连并释放终止闩。 */
+  @Test
+  void nameConflictErrorIsTerminalFailureWithoutReconnect() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+
+    transport.receiveRaw(
+        "{\"protocolVersion\":2,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + "\"sequence\":1,\"payload\":{\"code\":\"ENVIRONMENT_NAME_CONFLICT\","
+            + "\"message\":\"environment already bound to another active daemon\"}}");
+
+    assertEquals(DaemonRuntimeState.FAILED, runtime.state());
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertTrue(runtime.failureReason().contains("environment name is held by another live daemon"));
+
+    // FAILED 后不得安排新的重连：连接计数保持现状，不会再有新的 HELLO。
+    transport.awaitNoNewConnection(500);
+  }
+
+  /** 非冲突 ERROR（如普通协议提示）不终止 daemon。 */
+  @Test
+  void nonConflictErrorDoesNotTerminate() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestTool());
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+    transport.receiveRaw(
+        "{\"protocolVersion\":2,\"messageType\":\"ERROR\",\"environmentName\":\"environment\","
+            + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
   /** 断线后必须重连并重新完成 HELLO/WELCOME/READY 的握手，使 daemon 在新连接上重新进入 READY 状态。 */
@@ -129,7 +168,7 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "environment",
+            new EnvironmentName("environment"),
             "daemon",
             Duration.ofMinutes(1),
             Duration.ZERO,
@@ -140,7 +179,7 @@ class DaemonRuntimeTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> new DaemonRuntime(config, ENVIRONMENT_ID, registry, DaemonSkillRegistry.empty()));
+        () -> new DaemonRuntime(config, registry, DaemonSkillRegistry.empty()));
   }
 
   /**
@@ -246,7 +285,7 @@ class DaemonRuntimeTest {
     assertTrue(messages.get(1).payloadJson().contains("unknown environment tool"));
   }
 
-  /** 引用错误的 Environment（id 或 display name）或非法 INVOKE payload 必须得到明确 ERROR 响应。 */
+  /** 引用错误的 Environment 逻辑名称或非法 INVOKE payload 必须得到明确 ERROR 响应。 */
   @Test
   void rejectsWrongScopeAndMalformedInvocationPayload() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -260,8 +299,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_ID,
-            "other-environment",
+            new EnvironmentName("other-environment"),
             "wrong-scope",
             1,
             "{\"toolName\":\"test\",\"arguments\":{}}"));
@@ -271,19 +309,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
-            new EnvironmentId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"),
-            "environment",
-            "wrong-id",
-            1,
-            "{\"toolName\":\"test\",\"arguments\":{}}"));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-
-    transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
-            DaemonMessageType.INVOKE,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "bad-payload",
             2,
             "{\"toolName\":\"test\",\"arguments\":[]}"));
@@ -323,17 +349,13 @@ class DaemonRuntimeTest {
     completeHandshake(0);
     transport.takeMessages(2);
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\",\"environmentId\":\""
-            + ENVIRONMENT_ID
-            + "\","
+        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{\"toolName\":\"test\","
             + "\"toolVersion\":\"1.0.0\",\"arguments\":{}}}");
 
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     transport.receiveRaw(
-        "{\"protocolVersion\":2,\"messageType\":\"CANCEL\",\"environmentId\":\""
-            + ENVIRONMENT_ID
-            + "\","
+        "{\"protocolVersion\":2,\"messageType\":\"CANCEL\","
             + "\"environmentName\":\"environment\",\"sequence\":1,\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -455,8 +477,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.INVOKE,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "file-path-alias",
             1,
             "{\"toolName\":\"read\",\"toolVersion\":\"1.0.0\","
@@ -948,8 +969,7 @@ class DaemonRuntimeTest {
           new DaemonEnvelope(
               DaemonProtocol.VERSION_2,
               DaemonMessageType.LOAD_SKILL,
-              ENVIRONMENT_ID,
-              "environment",
+              ENVIRONMENT_NAME,
               "skill-1",
               1,
               skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("demo"))));
@@ -981,8 +1001,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "skill-missing",
             1,
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("nope"))));
@@ -1097,16 +1116,13 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "stale-skill",
             1,
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
     transport.receiveRawFromConnection(
         0,
-        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\",\"environmentId\":\""
-            + ENVIRONMENT_ID
-            + "\","
+        "{\"protocolVersion\":2,\"messageType\":\"INVOKE\","
             + "\"environmentName\":\"environment\",\"sequence\":2,\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
@@ -1114,8 +1130,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "current-skill",
             1,
             skillCodec.encodeRequest(new DaemonSkillLoadCodec.LoadSkillRequest("missing"))));
@@ -1168,13 +1183,7 @@ class DaemonRuntimeTest {
 
     transport.receive(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
-            DaemonMessageType.HELLO,
-            ENVIRONMENT_ID,
-            "environment",
-            null,
-            1,
-            "{}"));
+            DaemonProtocol.VERSION_2, DaemonMessageType.HELLO, ENVIRONMENT_NAME, null, 1, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
     transport.receive(cancel("unknown-cancel", 1));
@@ -1184,8 +1193,7 @@ class DaemonRuntimeTest {
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             DaemonMessageType.LOAD_SKILL,
-            ENVIRONMENT_ID,
-            "environment",
+            ENVIRONMENT_NAME,
             "invalid-skill-payload",
             2,
             "{}"));
@@ -1288,7 +1296,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "environment",
+            new EnvironmentName("environment"),
             "daemon",
             Duration.ofMinutes(1),
             Duration.ZERO,
@@ -1296,7 +1304,6 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             List.of()),
-        ENVIRONMENT_ID,
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1312,7 +1319,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "environment",
+            new EnvironmentName("environment"),
             "daemon",
             Duration.ofMinutes(1),
             Duration.ZERO,
@@ -1320,7 +1327,6 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(10),
             "test-gateway-token",
             List.of()),
-        ENVIRONMENT_ID,
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1367,7 +1373,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "environment",
+            new EnvironmentName("environment"),
             "daemon",
             heartbeatInterval,
             Duration.ZERO,
@@ -1375,7 +1381,6 @@ class DaemonRuntimeTest {
             defaultToolTimeout,
             "test-gateway-token",
             List.of()),
-        ENVIRONMENT_ID,
         transport,
         registry,
         skillRegistry,
@@ -1423,8 +1428,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_ID,
-        "environment",
+        ENVIRONMENT_NAME,
         invocationId,
         sequence,
         "{\"toolName\":\""
@@ -1441,8 +1445,7 @@ class DaemonRuntimeTest {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         DaemonMessageType.INVOKE,
-        ENVIRONMENT_ID,
-        "environment",
+        ENVIRONMENT_NAME,
         invocationId,
         sequence,
         "{\"toolName\":\""
@@ -1454,15 +1457,14 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2, messageType, ENVIRONMENT_ID, "environment", null, sequence, "{}");
+        DaemonProtocol.VERSION_2, messageType, ENVIRONMENT_NAME, null, sequence, "{}");
   }
 
   private DaemonEnvelope cancel(String invocationId, long sequence) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         DaemonMessageType.CANCEL,
-        ENVIRONMENT_ID,
-        "environment",
+        ENVIRONMENT_NAME,
         invocationId,
         sequence,
         "{}");
@@ -1562,6 +1564,13 @@ class DaemonRuntimeTest {
 
     private void awaitConnections(int expected) throws InterruptedException {
       assertTrue(connections.tryAcquire(expected, ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+
+    /** 断言在给定毫秒内没有新的连接尝试（终态失败后不得重连）。 */
+    private void awaitNoNewConnection(long millis) throws InterruptedException {
+      if (connections.tryAcquire(1, millis, TimeUnit.MILLISECONDS)) {
+        throw new AssertionError("unexpected additional connection attempt");
+      }
     }
 
     private boolean awaitConnection(Duration timeout) throws InterruptedException {

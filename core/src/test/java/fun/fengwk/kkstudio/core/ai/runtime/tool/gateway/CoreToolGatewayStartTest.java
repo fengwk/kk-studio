@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * {@link CoreToolGateway#start}：PLATFORM / ENVIRONMENT 路由、admission 分类与同步回调门控。
  *
- * <p>ENVIRONMENT 断言只依赖冻结 {@code environmentId}（display name 完全不参与）；PLATFORM 断言精确的 {@link
+ * <p>ENVIRONMENT 断言只依赖冻结 {@code environmentName}（display name 完全不参与）；PLATFORM 断言精确的 {@link
  * ToolExecutionRequest}（descriptor / 冻结 call / Duration.ZERO / 精确 ToolExecutionContext）。
  */
 class CoreToolGatewayStartTest {
@@ -79,7 +79,7 @@ class CoreToolGatewayStartTest {
   }
 
   @Test
-  void environmentRouteUsesFrozenEnvironmentIdOnlyAndSameDisplayNamesAreIrrelevant() {
+  void environmentRouteUsesFrozenEnvironmentNameOnlyAndSameDisplayNamesAreIrrelevant() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -103,8 +103,8 @@ class CoreToolGatewayStartTest {
       assertInstanceOf(ToolGateway.Started.class, startedA);
       assertInstanceOf(ToolGateway.Started.class, startedB);
       awaitSize(transport.invocations, 2);
-      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environmentId());
-      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environmentId());
+      assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environmentName());
+      assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environmentName());
       // 冻结 call 原样发送，携带与 PLATFORM 相同的 durable 上下文（daemon gateway 需要 invocationId）。
       assertSame(requestA.call(), transport.invocations.get(0).request().call());
       assertEquals(
@@ -225,7 +225,28 @@ class CoreToolGatewayStartTest {
   }
 
   @Test
-  void environmentOfflineIsBusyWithWholeMillisecondDelay() {
+  void environmentToolWithoutRouteIsDeterministicRejectionWithoutTransport() {
+    // 冻结 binding 的 route 为 null（分支最新 settings 未选中/已清空）：发送前确定性拒绝，
+    // transport 绝不能收到 null route 调用（否则会变成不确定结果）。
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    CoreToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor());
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.environmentRequest("call-1", null)),
+            new ToolGatewayTestSupport.RecordingListener());
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("UNAVAILABLE", rejected.error().kind());
+    assertEquals(0, transport.invocations.size());
+  }
+
+  @Test
+  void environmentUnavailableIsDeterministicRejectionVisibleToModel() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
     CoreToolGateway gateway =
@@ -239,9 +260,10 @@ class CoreToolGatewayStartTest {
             ToolGatewayTestSupport.execution(
                 ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
             new ToolGatewayTestSupport.RecordingListener());
-    ToolGateway.Busy busy = assertInstanceOf(ToolGateway.Busy.class, result);
-    assertEquals(ToolGatewayTestSupport.CONFIG.busyRetryDelay(), busy.retryAfter());
-    assertEquals(busy.retryAfter().toMillis(), busy.retryAfter().toNanos() / 1_000_000);
+    // 发送前目标不可用（路由缺失/未 READY/心跳过期）是确定性拒绝：durable、model-visible，
+    // 让 turn 正常继续收敛，而不是无限重试。
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("UNAVAILABLE", rejected.error().kind());
   }
 
   @Test

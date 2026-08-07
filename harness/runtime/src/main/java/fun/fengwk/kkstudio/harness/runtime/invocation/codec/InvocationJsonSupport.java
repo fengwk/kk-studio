@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -176,9 +176,9 @@ final class InvocationJsonSupport {
     }
   }
 
-  static EnvironmentId nullableEnvironmentId(ObjectNode node, String field, String context) {
+  static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
     String value = nullableText(node, field, context);
-    return value == null ? null : new EnvironmentId(value);
+    return value == null ? null : new EnvironmentName(value);
   }
 
   static String jsonObjectText(ObjectNode node, String field, String context) {
@@ -210,7 +210,7 @@ final class InvocationJsonSupport {
     putNullable(node, field, value == null ? null : value.toString());
   }
 
-  static void putNullable(ObjectNode node, String field, EnvironmentId value) {
+  static void putNullable(ObjectNode node, String field, EnvironmentName value) {
     putNullable(node, field, value == null ? null : value.value());
   }
 

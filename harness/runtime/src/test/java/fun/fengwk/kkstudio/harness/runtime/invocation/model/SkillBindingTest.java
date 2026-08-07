@@ -6,24 +6,22 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
-
-import java.util.UUID;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 /** SkillBinding 的 canonical 元数据以及 nullable 的来源 environment。 */
 class SkillBindingTest {
 
-  private static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  private static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
 
   @Test
   void acceptsCanonicalMetadataWithNullableEnvironment() {
     SkillBinding withoutEnv = new SkillBinding("web_search", "Search the web", null);
     assertEquals("web_search", withoutEnv.name());
     assertEquals("Search the web", withoutEnv.description());
-    assertNull(withoutEnv.sourceEnvironmentId());
+    assertNull(withoutEnv.sourceEnvironmentName());
 
     SkillBinding withEnv = new SkillBinding("web_search", "Search the web", ENV_ID);
-    assertEquals(ENV_ID, withEnv.sourceEnvironmentId());
+    assertEquals(ENV_ID, withEnv.sourceEnvironmentName());
 
     SkillBinding longDescription = new SkillBinding("web_search", "d".repeat(1024), null);
     assertEquals(1024, longDescription.description().length());

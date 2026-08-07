@@ -5,5 +5,8 @@ public enum DaemonRuntimeState {
   STOPPED,
   CONNECTING,
   READY,
-  DISCONNECTED
+  DISCONNECTED,
+
+  /** 终态失败：HELLO 声称的名称已被另一个 live daemon 持有；进程应停止重连并非零退出。 */
+  FAILED
 }

@@ -34,9 +34,6 @@ class CodingToolArgumentAliasesTest {
     String both = "{\"path\":\"canonical\",\"filePath\":\"legacy\"}";
 
     assertEquals(both, CodingToolArgumentAliases.normalize("read", both));
-    assertEquals(
-        "{\"filePath\":\"x\"}",
-        CodingToolArgumentAliases.normalize("apply_patch", "{\"filePath\":\"x\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> CodingToolArgumentAliases.normalize("read", "{not-json}"));

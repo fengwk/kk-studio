@@ -32,12 +32,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -66,11 +65,7 @@ class CoreModelGatewayTest {
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
   private static final ModelInvocationRequest INVOCATION_REQUEST =
       new ModelInvocationRequest(
-          new EnvironmentId(UUID.randomUUID().toString()),
-          PROVIDER_REQUEST,
-          List.of(),
-          List.of(),
-          false);
+          new EnvironmentName("env-1"), PROVIDER_REQUEST, List.of(), List.of(), false);
 
   @Test
   void startReturnsStartedImmediatelyAndBridgesStreamCallbacks() throws Exception {

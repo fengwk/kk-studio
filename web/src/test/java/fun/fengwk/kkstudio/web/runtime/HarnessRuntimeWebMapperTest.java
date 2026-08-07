@@ -96,7 +96,7 @@ class HarnessRuntimeWebMapperTest {
     yolo.setYoloEnabled(true);
 
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env");
-    environment.setEnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+    environment.setEnvironmentName("123e4567-e89b-12d3-a456-426614174000");
 
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(
@@ -135,14 +135,14 @@ class HarnessRuntimeWebMapperTest {
         batch,
         7,
         ThreadCommandType.SET_ENVIRONMENT,
-        "{\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\"}");
+        "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}");
   }
 
   @Test
-  void setEnvironmentAcceptsNullToClearAndMapsToNullEnvironmentId() {
+  void setEnvironmentAcceptsNullToClearAndMapsToNullEnvironmentName() {
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env-clear");
     ThreadCommandBatch batch = HarnessRuntimeWebMapper.toCommandBatch("1", batch(environment));
-    assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":null}");
+    assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}");
   }
 
   @Test
@@ -170,7 +170,7 @@ class HarnessRuntimeWebMapperTest {
 
     HarnessThreadCommandCreateDTO yoloWithEnvironment = command("SET_YOLO", "c-4");
     yoloWithEnvironment.setYoloEnabled(false);
-    yoloWithEnvironment.setEnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+    yoloWithEnvironment.setEnvironmentName("123e4567-e89b-12d3-a456-426614174000");
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(yoloWithEnvironment)));
@@ -322,9 +322,7 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("3", thread.path("revision").asText());
     assertEquals("TOOL_WAITING_APPROVAL", thread.path("status").asText());
     assertTrue(thread.path("processing").asBoolean());
-    assertEquals(
-        "123e4567-e89b-12d3-a456-426614174000",
-        thread.path("branchSettings").path("environmentId").asText());
+    assertEquals("env-1", thread.path("branchSettings").path("environmentName").asText());
     assertEquals("default-assistant", thread.path("branchSettings").path("agentName").asText());
     assertEquals("gpt-5", thread.path("branchSettings").path("model").path("modelName").asText());
     assertEquals("low", thread.path("branchSettings").path("thinkingLevel").asText());
@@ -371,7 +369,7 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("web_search", tool.path("toolName").asText());
     assertEquals("1.0", tool.path("toolVersion").asText());
     assertEquals("PLATFORM", tool.path("toolType").asText());
-    assertTrue(tool.path("environmentId").isNull());
+    assertTrue(tool.path("environmentName").isNull());
     assertEquals("{}", tool.path("argumentsJson").asText());
     assertTrue(tool.path("approvalJson").asText().contains("\"required\":true"));
     assertTrue(tool.path("approvalJson").asText().contains("\"decision\":null"));
@@ -381,11 +379,11 @@ class HarnessRuntimeWebMapperTest {
   void mapsIdleSnapshotWithProcessingFalseAndEmptyLists() throws Exception {
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeWebMapper.toSnapshotDto(HarnessRuntimeTestFixtures.idleSnapshot());
-    dto.getThread().getBranchSettings().setEnvironmentId(null);
+    dto.getThread().getBranchSettings().setEnvironmentName(null);
     JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(dto));
     assertEquals("IDLE", json.path("thread").path("status").asText());
     assertFalse(json.path("thread").path("processing").asBoolean());
-    assertTrue(json.path("thread").path("branchSettings").path("environmentId").isNull());
+    assertTrue(json.path("thread").path("branchSettings").path("environmentName").isNull());
     assertTrue(json.path("entries").get(0).path("parentEntryId").isNull());
     assertTrue(json.path("modelInvocation").isNull());
     assertTrue(json.path("toolInvocations").isArray());
@@ -398,7 +396,7 @@ class HarnessRuntimeWebMapperTest {
     HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
     create.setTitle("new chat");
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
-    settings.setEnvironmentId(null);
+    settings.setEnvironmentName(null);
     settings.setAgentName("default-assistant");
     HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
     selection.setProviderName("openai");
@@ -412,7 +410,7 @@ class HarnessRuntimeWebMapperTest {
 
     CreateThreadCommand created = HarnessRuntimeWebMapper.toCreateThreadCommand(create);
     assertEquals("new chat", created.title());
-    assertNull(created.branchSettings().environmentId());
+    assertNull(created.branchSettings().environmentName());
     assertEquals("default-assistant", created.branchSettings().agentName());
     assertEquals("gpt-5", created.branchSettings().model().modelName());
     assertEquals(List.of("web_search"), created.branchSettings().activeTools());

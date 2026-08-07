@@ -85,7 +85,7 @@ export function useAgentThreadController(
   initialDraft = '',
   initialReplay?: CommandBatchReplay,
   buildBatch: ((content: string) => CommandBatchPlan | null) | null = null,
-  environmentNames: ReadonlyMap<string, string> | null = null,
+  environmentReadyByName: ReadonlyMap<string, boolean> | null = null,
 ) {
   const { t } = useI18n()
   const [draft, setDraftState] = useState(initialDraft)
@@ -134,7 +134,7 @@ export function useAgentThreadController(
     realtime.toolStreams,
   )
   const working = isThreadWorking(thread, timeline)
-  const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentNames)
+  const runtimeLabels = resolveRuntimeLabels(thread, agents, models, environmentReadyByName)
 
   useChatTranscriptAutoScroll(
     bodyRef,
@@ -425,22 +425,24 @@ function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
   agents: AgentDefinitionDTO[],
   models: AgentModelView[],
-  environmentNames: ReadonlyMap<string, string> | null,
+  environmentReadyByName: ReadonlyMap<string, boolean> | null,
 ) {
   const settings = thread?.branchSettings
   const agent = agents.find((item) => item.name === settings?.agentName)
   const model = models.find((item) => modelRef(item) === agent?.model)
   const contextWindow = extractContextWindow(model)
-  const environmentId = settings?.environmentId ?? null
+  const environmentName = settings?.environmentName ?? null
   return {
     agentName: settings?.agentName || translate('ai.runtime.action.blankAgent'),
     providerName: settings?.model.providerName || undefined,
     // 规范的展示身份是 provider/model。
     modelName: formatModelRef(settings?.model.providerName, settings?.model.modelName),
     variantName: settings?.model.variant || undefined,
-    environmentDisplayName: environmentId == null
-      ? null
-      : (environmentNames?.get(environmentId) ?? environmentId),
+    // canonical 名称即展示身份；ready 标记来自 live 列表，缺失/未知 => 不可用。
+    environmentName,
+    environmentReady: environmentName == null
+      ? undefined
+      : (environmentReadyByName?.get(environmentName) ?? false),
     contextWindow,
   }
 }

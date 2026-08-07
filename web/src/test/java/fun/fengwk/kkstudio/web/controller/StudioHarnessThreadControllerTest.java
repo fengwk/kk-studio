@@ -104,7 +104,7 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "c-5"},
             {"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "c-6"},
             {"type": "SET_ENVIRONMENT",
-             "environmentId": "123e4567-e89b-12d3-a456-426614174000", "clientCommandId": "c-7"},
+             "environmentName": "123e4567-e89b-12d3-a456-426614174000", "clientCommandId": "c-7"},
             {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "c-8"}
           ]
         }
@@ -134,7 +134,7 @@ class StudioHarnessThreadControllerTest {
         COMMAND_PAYLOADS.encode(batch.commands().get(0).payload()));
     assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(6).payload().type());
     assertEquals(
-        "{\"environmentId\":\"123e4567-e89b-12d3-a456-426614174000\"}",
+        "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}",
         COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
     assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(7).payload().type());
   }
@@ -295,7 +295,7 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_THINKING_LEVEL", "thinkingLevel": "low", "clientCommandId": "c-5"},
             {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "c-6"},
             {"type": "SET_YOLO", "yoloEnabled": false, "clientCommandId": "c-7"},
-            {"type": "SET_ENVIRONMENT", "environmentId": null, "clientCommandId": "c-8"}
+            {"type": "SET_ENVIRONMENT", "environmentName": null, "clientCommandId": "c-8"}
           ]
         }
         """;
@@ -311,7 +311,7 @@ class StudioHarnessThreadControllerTest {
     ThreadCommandBatch batch = captor.getValue();
     assertEquals(8, batch.commands().size());
     assertEquals(
-        "{\"environmentId\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(7).payload()));
+        "{\"environmentName\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(7).payload()));
     assertEquals(
         "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
   }

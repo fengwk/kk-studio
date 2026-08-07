@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -53,7 +53,7 @@ public final class HarnessRuntimeTestFixtures {
 
   public static BranchSettings settings() {
     return new BranchSettings(
-        new EnvironmentId("123e4567-e89b-12d3-a456-426614174000"),
+        new EnvironmentName("env-1"),
         "default-assistant",
         new ModelSelection("openai", "gpt-5", "default"),
         "low",

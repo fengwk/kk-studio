@@ -437,9 +437,9 @@ registerCase({
 registerCase({
   id: 'daemon.ready',
   level: 'L4',
-  title: 'Environment GET 投影与 UUID 路由身份',
+  title: 'Environment GET 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；id 是 lowercase UUID（路由身份），name 仅展示；投影固定 10 个 tools（version=1）+ skills',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 9 个 tools（version=1）+ skills',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -448,7 +448,6 @@ registerCase({
       'read',
       'write',
       'edit',
-      'apply_patch',
       'bash',
       'grep',
       'find',
@@ -465,6 +464,7 @@ registerCase({
       JSON.stringify({ expectedToolNames, actualTools }),
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
+    assert(match.ready === true, JSON.stringify(match))
     ctx.vars.daemonEnvironment = match
   },
 })
@@ -474,7 +474,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentId、无 environmentName/location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，core externalizer 将其外部化为 Resource；durable TOOL MESSAGE entry 的 tool_result.contents 携带 canonical file: URI（uri/mediaType/size/sha256）',
+  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentName、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，core externalizer 将其外部化为 Resource；durable TOOL MESSAGE entry 的 tool_result.contents 携带 canonical file: URI（uri/mediaType/size/sha256）',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -504,7 +504,7 @@ registerCase({
           && JSON.stringify(agentConfig.skills) === JSON.stringify([]),
         `temporary tool Agent config must be exactly tools=[read], skills=[]: ${JSON.stringify(toolAgent)}`,
       )
-      const environmentId = ctx.vars.daemonEnvironment.id
+      const environmentName = ctx.vars.daemonEnvironment.name
       // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
       // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
       // core externalizer 确定性外部化为 Resource（LocalFileResourceStore 的 file:/// URI）。
@@ -526,12 +526,12 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentId, thinkingLevel: 'high', activeTools: ['read'] },
+          { environmentName, thinkingLevel: 'high', activeTools: ['read'] },
         ),
       })
       const tid = snapshot.thread.threadId
       assert(
-        snapshot.thread.branchSettings.environmentId === environmentId,
+        snapshot.thread.branchSettings.environmentName === environmentName,
         JSON.stringify(snapshot.thread.branchSettings),
       )
       await enqueueCommands(ctx, tid, {
@@ -565,16 +565,15 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${JSON.stringify(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', JSON.stringify(readInvocation))
       assert(
-        readInvocation.environmentId === environmentId,
-        `read invocation must freeze the Environment route UUID: ${JSON.stringify({
+        readInvocation.environmentName === environmentName,
+        `read invocation must freeze the Environment route name: ${JSON.stringify({
           readInvocation,
-          environmentId,
+          environmentName,
         })}`,
       )
       assert(
-        !Object.hasOwn(readInvocation, 'environmentName')
-          && !Object.hasOwn(readInvocation, 'location'),
-        `ToolInvocationDTO must not expose display/location: ${JSON.stringify(readInvocation)}`,
+        !Object.hasOwn(readInvocation, 'location'),
+        `ToolInvocationDTO must not expose location: ${JSON.stringify(readInvocation)}`,
       )
       assert(
         readInvocation.toolCallId && Number.isSafeInteger(readInvocation.attempt) && readInvocation.attempt >= 1,

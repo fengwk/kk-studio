@@ -1,9 +1,8 @@
 /**
  * Platform 与 Environment Daemon 共享的 WebSocket JSON wire 协议。
  *
- * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
- * environmentId}（Environment 的唯一持久路由身份）与实时 display {@code environmentName}；路由只使用
- * environmentId，display name 仅用于人读标签。
+ * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical
+ * {@code environmentName}（Environment 的唯一路由身份：bounded 小写名称，无空白/无 {@code '/'}）；不存在展示名或 UUID。
  *
  * <p>v2 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec} 编解码，形状为 {@code

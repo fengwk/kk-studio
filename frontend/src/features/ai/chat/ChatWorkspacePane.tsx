@@ -28,6 +28,7 @@ export function ChatWorkspacePane({
   onThreadSortChange,
   onAgentChange,
   onYoloChange = async () => undefined,
+  onEnvironmentChange = async () => undefined,
 }: {
   chat: ChatDTO | undefined
   agents: AgentDefinitionDTO[]
@@ -40,6 +41,7 @@ export function ChatWorkspacePane({
   onThreadSortChange: (sort: PaneSortPreference) => void
   onAgentChange: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
 }) {
   const [firstSendRecovery, setFirstSendRecovery] = useState<{
     threadId: string
@@ -101,6 +103,7 @@ export function ChatWorkspacePane({
       onThreadSortChange={onThreadSortChange}
       onAgentChange={onAgentChange}
       onYoloChange={onYoloChange}
+      onEnvironmentChange={onEnvironmentChange}
       onFirstSendRecovery={recoverFirstSend}
     />
   )

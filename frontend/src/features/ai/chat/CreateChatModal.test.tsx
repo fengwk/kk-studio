@@ -67,7 +67,9 @@ describe('CreateChatModal', () => {
     expect(onTitleChange).toHaveBeenCalled()
     await user.selectOptions(screen.getByLabelText('Agent'), 'assistant')
     expect(onSelectAgent).toHaveBeenCalledWith('assistant')
-    expect(screen.queryByLabelText('Environment')).not.toBeInTheDocument()
+    // 可选的默认 Environment（可空）：未提供 live 环境时只有 (None) 选项。
+    expect(screen.getByLabelText('Environment')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '（无）' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认创建' }))
     expect(onSubmit).toHaveBeenCalled()
   })

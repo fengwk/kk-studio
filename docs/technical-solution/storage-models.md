@@ -73,7 +73,7 @@ created_at / updated_at
 
 ## 5. Invocation 冻结事实
 
-`ModelInvocationRequest` 的 `environmentId`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
 
 ## 6. Canvas
 

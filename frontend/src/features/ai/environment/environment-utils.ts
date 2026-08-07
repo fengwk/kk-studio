@@ -10,6 +10,7 @@ export function filterEnvironments(
     .sort((left, right) => naturalNameCompare(left.name, right.name))
 }
 
+/** 统一可用性规则（服务端 ready 标记：READY + 连接打开 + 心跳未过期）；过期/未连接一律不可选。 */
 export function filterReadyEnvironments(environments: LiveEnvironmentDTO[]): LiveEnvironmentDTO[] {
-  return environments.filter((environment) => String(environment.status).toUpperCase() === 'READY')
+  return environments.filter((environment) => environment.ready)
 }

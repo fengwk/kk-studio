@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -46,7 +46,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -69,8 +68,8 @@ final class ToolGatewayTestSupport {
 
   static final Path WORKDIR = Path.of("/workspace").toAbsolutePath().normalize();
   static final Path ENVIRONMENT_ROOT = Path.of("/environment-root").toAbsolutePath().normalize();
-  static final EnvironmentId ENV_A = new EnvironmentId(UUID.randomUUID().toString());
-  static final EnvironmentId ENV_B = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV_A = new EnvironmentName("env-1");
+  static final EnvironmentName ENV_B = new EnvironmentName("env-2");
   static final long INVOCATION_ID = 42L;
   static final long THREAD_ID = 7L;
   static final int PROPOSED_ATTEMPT = 3;
@@ -102,11 +101,11 @@ final class ToolGatewayTestSupport {
   }
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
-  static ToolInvocationRequest environmentRequest(String callId, EnvironmentId environmentId) {
+  static ToolInvocationRequest environmentRequest(String callId, EnvironmentName environmentName) {
     ToolDescriptor descriptor = EnvironmentToolCatalog.require("bash");
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", "{\"command\":\"ls\"}"),
-        new ToolBinding(descriptor, ToolType.ENVIRONMENT, environmentId));
+        new ToolBinding(descriptor, ToolType.ENVIRONMENT, environmentName));
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
@@ -309,14 +308,16 @@ final class ToolGatewayTestSupport {
     }
 
     record InvokeRecord(
-        EnvironmentId environmentId,
+        EnvironmentName environmentName,
         ToolExecutionRequest request,
         ToolExecutionListener listener) {}
 
     @Override
     public ToolExecutionHandle invoke(
-        EnvironmentId environmentId, ToolExecutionRequest request, ToolExecutionListener listener) {
-      invocations.add(new InvokeRecord(environmentId, request, listener));
+        EnvironmentName environmentName,
+        ToolExecutionRequest request,
+        ToolExecutionListener listener) {
+      invocations.add(new InvokeRecord(environmentName, request, listener));
       switch (action) {
         case SYNC_COMPLETE:
           listener.onComplete(syncResult);

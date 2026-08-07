@@ -64,7 +64,7 @@ TURN_END
 
 ```java
 public record BranchSettings(
-    EnvironmentId environmentId,   // canonical UUID route，null 表示未选择
+    EnvironmentName environmentName, // canonical 路由名称，null 表示未选择
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
     String thinkingLevel,

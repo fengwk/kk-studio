@@ -6,7 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,10 +14,10 @@ import java.util.List;
 /** Branch settings 的 immutable snapshot、Environment route identity 和 active tool 规范化。 */
 class BranchSettingsTest {
 
-  private static final EnvironmentId ENV =
-      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentId OTHER =
-      new EnvironmentId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  private static final EnvironmentName ENV =
+      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentName OTHER =
+      new EnvironmentName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
 
   @Test
   void preservesEnvironmentAndDeduplicatesToolsInOrder() {
@@ -31,7 +31,7 @@ class BranchSettingsTest {
             sourceTools);
 
     sourceTools.add("write");
-    assertEquals(ENV, settings.environmentId());
+    assertEquals(ENV, settings.environmentName());
     assertEquals(List.of("read", "grep", "bash"), settings.activeTools());
     assertThrows(UnsupportedOperationException.class, () -> settings.activeTools().add("write"));
   }
@@ -46,12 +46,12 @@ class BranchSettingsTest {
             "high",
             List.of());
 
-    assertNull(settings.environmentId());
+    assertNull(settings.environmentName());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BranchSettings(
-                new EnvironmentId("123E4567-E89B-12D3-A456-426614174000"),
+                new EnvironmentName("123E4567-E89B-12D3-A456-426614174000"),
                 "coding",
                 settings.model(),
                 "high",
@@ -74,11 +74,11 @@ class BranchSettingsTest {
             "high",
             List.of("read"));
 
-    BranchSettings cleared = base.withEnvironmentId(null);
-    BranchSettings rebound = cleared.withEnvironmentId(OTHER);
+    BranchSettings cleared = base.withEnvironmentName(null);
+    BranchSettings rebound = cleared.withEnvironmentName(OTHER);
 
-    assertNull(cleared.environmentId());
-    assertEquals(OTHER, rebound.environmentId());
+    assertNull(cleared.environmentName());
+    assertEquals(OTHER, rebound.environmentName());
     assertEquals(base.agentName(), rebound.agentName());
     assertEquals(base.model(), rebound.model());
   }

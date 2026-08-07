@@ -15,7 +15,7 @@ import java.util.Objects;
  *
  * <p>用新的 {@link ModelInvocationRequestJsonCodec} 解码冻结的请求，并把持久的 {@link
  * fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding}（canonical {@code
- * EnvironmentId} 路由，平台技能可为 null）映射回 {@code LoadSkillTool} 消费的旧 {@link SkillBinding} 表面；没有源
+ * EnvironmentName} 路由，平台技能可为 null）映射回 {@code LoadSkillTool} 消费的旧 {@link SkillBinding} 表面；没有源
  * environment 的平台技能没有可加载正文，按 fail-closed 处理。
  */
 @Component
@@ -44,12 +44,13 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
     var frozen = REQUEST_CODEC.decode(requestJson).skillBindings();
     List<SkillBinding> mapped = new ArrayList<>(frozen.size());
     for (var skill : frozen) {
-      if (skill.sourceEnvironmentId() == null) {
+      if (skill.sourceEnvironmentName() == null) {
         throw new IllegalArgumentException(
             "skill binding has no source environment: " + skill.name());
       }
       mapped.add(
-          new SkillBinding(skill.name(), skill.description(), skill.sourceEnvironmentId().value()));
+          new SkillBinding(
+              skill.name(), skill.description(), skill.sourceEnvironmentName().value()));
     }
     return List.copyOf(mapped);
   }

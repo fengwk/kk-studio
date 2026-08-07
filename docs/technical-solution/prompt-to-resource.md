@@ -66,15 +66,15 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/
 
 `TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
 
-1. 从 candidate path 前缀的最近 TURN_START `BranchSettings` 读取 `environmentId`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
+1. 从 candidate path 前缀的最近 TURN_START `BranchSettings` 读取 `environmentName`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
-3. 按 `activeTools` 与 `environmentId` 构造 tool set（fail closed）：**非 null `environmentId` 无论 activeTools 内容都必须 registry 命中且 READY**（`environment not found` / `environment is not ready` 拒绝）；**null `environmentId` 只允许 platform-only 且无 skills 的 turn**——任何 ENVIRONMENT tool（`environment tool requires a selected environment: <name>`）或 Agent skill（`agent skills require a selected environment`）确定性拒绝，绝不静默省略；Agent skills 只从 Agent config 读取、由选中 READY Environment 精确提供、且 `activeTools` 必须显式包含内部 `load_skill`；
+3. 按 `activeTools` 与 `environmentName` 构造 tool set：ENVIRONMENT 工具一律按最新名称绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
 4. 生成 `ModelInvocationRequest`：
 
 ```text
-environmentId      # 本请求的单一 Environment route（可 null）
+environmentName    # 本请求的单一 Environment route（可 null）
 providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
-toolBindings       # (descriptor, type, environmentId) 与 providerRequest.tools 一一对应
+toolBindings       # (descriptor, type, environmentName) 与 providerRequest.tools 一一对应
 skillBindings      # 选中 skill（必须显式选中 load_skill，非隐式追加）
 yoloEnabled        # 冻结运行时策略
 ```

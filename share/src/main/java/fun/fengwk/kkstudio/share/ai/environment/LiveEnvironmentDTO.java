@@ -8,18 +8,18 @@ import java.util.List;
 /**
  * 单个服务端内存 live Environment 注册表条目的紧凑读模型。
  *
- * <p>{@code id} 是 canonical durable 路由身份（lowercase UUID）；{@code name} 是仅用于展示的标签， 可以在不同 id 之间复用。
+ * <p>{@code name} 是 canonical 逻辑路由身份（也是唯一键）；不存在独立的展示名或 UUID。
  */
 @Data
 public class LiveEnvironmentDTO {
-  /** 服务端内存 live Environment 注册表条目的路由身份：canonical lowercase UUID（非 nil）。 */
-  private String id;
-
-  /** 仅展示用的标签（HELLO 时绑定）：可被不同 id 复用，永不参与路由。 */
+  /** live Environment 注册表条目的唯一路由身份：canonical bounded 小写路由名称。 */
   private String name;
 
   /** 连接生命周期状态，取 {@code LiveEnvironmentStatus} 枚举名：CONNECTING（HELLO 已接受，READY 未完成）或 READY（可派发）。 */
   private String status;
+
+  /** 按统一可用性规则（READY + 连接打开 + 心跳未过期）计算的可用标记，供前端标注 unavailable。 */
+  private boolean ready;
 
   /** 最近一次活跃时间（UTC Instant，注册表心跳/更新维护）。 */
   private Instant lastSeen;

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.environment.gateway;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 /**
  * Environment daemon 连接的不可变 READY 桥。
@@ -10,6 +10,6 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 @FunctionalInterface
 public interface EnvironmentReadyListener {
 
-  /** 通知绑定到 {@code environmentId} 的 environment 已 READY，可以进行 ENVIRONMENT tool 派发。 */
-  void onEnvironmentReady(EnvironmentId environmentId);
+  /** 通知绑定到 {@code environmentName} 的 environment 已 READY，可以进行 ENVIRONMENT tool 派发。 */
+  void onEnvironmentReady(EnvironmentName environmentName);
 }

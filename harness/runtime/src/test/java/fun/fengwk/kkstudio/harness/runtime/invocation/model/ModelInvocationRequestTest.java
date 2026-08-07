@@ -13,11 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /** ModelInvocationRequest 的 freeze、ordering 以及 provider-tool 对应关系检查。 */
 class ModelInvocationRequestTest {
@@ -29,7 +28,7 @@ class ModelInvocationRequestTest {
     ModelInvocationRequest request =
         new ModelInvocationRequest(ENV_ID, providerRequest(bindings), bindings, List.of(), true);
 
-    assertEquals(ENV_ID, request.environmentId());
+    assertEquals(ENV_ID, request.environmentName());
     assertTrue(request.yoloEnabled());
     assertEquals(List.of("bash", "fs"), names(request.toolBindings()));
     assertEquals(List.of("bash", "fs"), providerNames(request));
@@ -40,7 +39,7 @@ class ModelInvocationRequestTest {
     ModelInvocationRequest request =
         new ModelInvocationRequest(null, providerRequest(List.of()), List.of(), List.of(), false);
 
-    assertNull(request.environmentId());
+    assertNull(request.environmentName());
     assertFalse(request.yoloEnabled());
     assertTrue(request.toolBindings().isEmpty());
     assertTrue(request.skillBindings().isEmpty());
@@ -113,7 +112,7 @@ class ModelInvocationRequestTest {
 
   @Test
   void requiresMatchingEnvironmentRoutes() {
-    EnvironmentId otherEnv = new EnvironmentId(UUID.randomUUID().toString());
+    EnvironmentName otherEnv = new EnvironmentName("env-2");
     List<ToolBinding> envMismatch = List.of(environment("fs", otherEnv));
     assertThrows(
         IllegalArgumentException.class,

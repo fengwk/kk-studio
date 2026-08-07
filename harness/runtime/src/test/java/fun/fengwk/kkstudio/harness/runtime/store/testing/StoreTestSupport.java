@@ -44,7 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -58,7 +58,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
@@ -69,7 +68,7 @@ import java.util.function.Consumer;
  */
 final class StoreTestSupport {
 
-  static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
   static final Instant T0 = Instant.ofEpochMilli(1000);
   static final Instant T1 = Instant.ofEpochMilli(2000);
   static final Instant T2 = Instant.ofEpochMilli(3000);

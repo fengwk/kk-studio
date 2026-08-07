@@ -45,7 +45,17 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const environments = [
+      {
+        name: 'dev',
+        ready: true,
+        status: 'READY',
+        lastSeen: null,
+        tools: [],
+        skills: [],
+      },
+    ]
+    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     expect(result.current.createChatModal.open).toBe(true)
@@ -71,7 +81,46 @@ describe('useChatListController', () => {
       expect(chatService.createChat).toHaveBeenCalledWith({
         title: 'Hello',
         agentName: 'assistant',
+        environmentName: null,
       }),
     )
+  })
+
+  it('creates a Chat with the selected default Environment name', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    const environments = [
+      {
+        name: 'dev',
+        ready: true,
+        status: 'READY',
+        lastSeen: null,
+        tools: [],
+        skills: [],
+      },
+    ]
+    const { result } = renderHook(() => useChatListController(agents, true, environments), { wrapper })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+    act(() => result.current.openCreateChat('assistant'))
+    act(() => {
+      result.current.createChatModal.onTitleChange('Chat')
+      result.current.createChatModal.onSelectEnvironment('dev')
+    })
+    expect(result.current.createChatModal.selectedEnvironmentName).toBe('dev')
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+    await waitFor(() => {
+      const lastCall = vi.mocked(chatService.createChat).mock.calls.at(-1)!
+      expect(lastCall[0]).toEqual({
+        title: 'Chat',
+        agentName: 'assistant',
+        environmentName: 'dev',
+      })
+    })
   })
 })

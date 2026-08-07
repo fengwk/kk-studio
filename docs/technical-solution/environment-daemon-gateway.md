@@ -4,12 +4,12 @@
 
 ## 职责与边界
 
-产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentId`（lowercase nonnil UUID）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，READY 后补齐 skills 并转为 `READY`；只有 READY 可参与 resolve/dispatch。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
+产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，READY 后补齐 skills 并转为 `READY`；可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
 
 | 层 | 职责 |
 | --- | --- |
 | `core/ai/environment` | `LiveEnvironmentRegistry`、`EnvironmentDaemonGateway`（endpoint/skill loader/transport）、daemon 协议 codec |
-| `harness-tool` | route-neutral Tool API、`EnvironmentId`、`ResourceRef`、`RemoteTool`、Daemon v2 envelope/result codec |
+| `harness-tool` | route-neutral Tool API、`EnvironmentName`、`ResourceRef`、`RemoteTool`、Daemon v2 envelope/result codec |
 | `harness-daemon` | 独立 Daemon 连接、重连、本地工具执行、invocation journal 与 skill 发现 |
 | `harness-runtime` | 统一 `ToolProcessor`、ToolInvocation durable 状态与冻结 route 路由 |
 | `web` | 提供 `/api/ai/environment/daemon/v2` WebSocket 文本帧与只读 `GET /api/ai/environment`；不直接消费 Harness 类型 |
@@ -18,9 +18,8 @@
 
 ## Environment 身份
 
-- **route identity 是 `environmentId`**：canonical lowercase nonnil UUID，由 Daemon 在环境根目录的身份文件（`.kkstudio` 子目录）加载/创建，绝不通过名称路由。
-- `environmentName` 只是 display label：同一 name 可绑定不同 id，路由永不回退到 name。
-- `LiveEnvironmentRegistry` 按 `environmentId` 唯一，**first connected id wins**：后到的 HELLO 不挤占已占用的 id；断线移除条目。无 create/update/delete API，全部是服务器内存投影。
+- **route identity 是 `environmentName`**：canonical bounded 小写路由名称（`^[a-z0-9]+(-[a-z0-9]+)*$`，≤64 字符，无空白/无 `'/'`），由 Daemon 以 `--environment-name` 声明；不存在 UUID、身份文件或展示名。
+- `LiveEnvironmentRegistry` 按 `environmentName` 唯一：持有者连接打开且心跳未过期时，后到的同名 HELLO 是 typed 冲突（ERROR payload 携带 `code=ENVIRONMENT_NAME_CONFLICT`），连接被拒绝；持有者连接已关闭或心跳租约过期时，同名 HELLO **原子接管**（旧连接交还 Gateway 恰好清理一次，见下）；断线移除条目。无 create/update/delete API，全部是服务器内存投影。
 
 ## 配置与连接
 
@@ -46,11 +45,15 @@ java ... DaemonMain \
   --daemon-id optional-stable-daemon-name
 ```
 
-`environment-name` 与 `gateway-token` 必填；`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。Environment 身份从 `CodingToolsConfig.environmentRoot()` 的根目录身份文件加载/创建，随每个 envelope 参与作用域校验。
+`environment-name` 与 `gateway-token` 必填；`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
 
 ## 认证、绑定与目录
 
-Daemon 连接后的首帧必须是 HELLO。`environmentId`（canonical UUID）与 display `environmentName` 位于 **envelope**；HELLO **payload** 字段为 `{"daemonId","protocolVersion","toolCatalogVersion","gatewayToken"}`。Gateway 验证 envelope 作用域、共享密钥、协议版本与非空 `environmentName`，并以 `environmentId` 绑定实时 Environment；**同一 environmentId 的首个连接获胜**（后到 HELLO 不挤占），display name 在同一连接内必须稳定（从不重路由 binding）。
+Daemon 连接后的首帧必须是 HELLO。canonical `environmentName` 位于 **envelope**；HELLO **payload** 字段为 `{"daemonId","protocolVersion","toolCatalogVersion","gatewayToken"}`。Gateway 验证 envelope 作用域、共享密钥与协议版本，并以 `environmentName` 绑定实时 Environment。绑定是原子的三态判定（`BindResult`）：
+
+- **Accepted**：无现有条目或同连接幂等重绑，正常完成握手；
+- **Rejected**：现有持有者连接仍打开且心跳未过期（租约有效）——后到同名 HELLO 收到 typed ERROR（`code=ENVIRONMENT_NAME_CONFLICT`）并关闭连接，Daemon 视为终态失败停止重连并以非零码退出；
+- **Replaced**：现有持有者连接已关闭或心跳超过配置超时（lastSeen 租约过期）——registry 原子切换到新持有者，Gateway 把被替换的旧连接状态恰好清理一次（旧连接 close、其 active remote 按不确定收敛、pending skill load 失败），绝不触碰新持有者，也不泄漏任何执行工作。CONNECTING 的新鲜声明（打开 + 心跳未过期）与 READY 同等受保护，绝不能被抢走。
 
 握手顺序：
 
@@ -58,9 +61,9 @@ Daemon 连接后的首帧必须是 HELLO。`environmentId`（canonical UUID）�
 HELLO -> WELCOME {} -> READY {"skills":[...]}
 ```
 
-READY 后 `HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该 id。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
+READY 后 `HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
-**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用，已存在 active 时新 INVOKE 确定性失败（`environmentId already has an active remote tool invocation`）。发送 CANCEL 只做幂等取消请求；active 槽位在 terminal callback 或连接 cleanup 时释放。
+**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用，已存在 active 时新 INVOKE 确定性失败（`environmentName already has an active remote tool invocation`）。发送 CANCEL 只做幂等取消请求；active 槽位在 terminal callback 或连接 cleanup 时释放。
 
 只读查询：
 
@@ -68,13 +71,13 @@ READY 后 `HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该 id。固�
 GET /api/ai/environment
 ```
 
-返回 `id`（canonical UUID）/ `name`（display only）/ `status` / `tools` / `skills` / `lastSeen`。无 create/update/delete API。
+返回 `name`（canonical 路由身份，唯一键）/ `status` / `ready`（统一可用性标记）/ `tools` / `skills` / `lastSeen`。无 create/update/delete API。
 
 Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool，不出现在 Agent 可选择目录中，必须由 Agent 的 `activeTools` 显式选择（Resolver 不做隐式追加）。
 
 ## Invocation 分发
 
-`harness_tool_invocation.request` 冻结 binding（descriptor/type/environmentId）。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
+`harness_tool_invocation.request` 冻结 binding（descriptor/type/environmentName）。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
 
 ```text
 claim TOOL Work（Work-only 短事务）
@@ -96,9 +99,9 @@ sequenceDiagram
     participant TP as ToolProcessor
     participant DB as PostgreSQL
 
-    D->>W: HELLO (environmentId, token)
+    D->>W: HELLO (environmentName, token)
     W->>G: HELLO envelope
-    G->>R: tryBind(id, name, connection)
+    G->>R: tryBind(name, connection)
     G-->>W: WELCOME {}
     W-->>D: WELCOME {}
     D->>W: READY(skills)
@@ -115,7 +118,7 @@ sequenceDiagram
     TP->>DB: partial -> Redis overlay; terminal -> ToolInvocation + Work
 ```
 
-Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。每个 envelope 由 `environmentId` 作用域校验；连接/环境/invocation ownership 不匹配的回调被拒绝。
+Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。每个 envelope 由 `environmentName` 作用域校验；连接/环境/invocation ownership 不匹配的回调被拒绝。
 
 分发前校验：
 
@@ -153,10 +156,10 @@ Daemon 仅依赖 `harness-tool`，不反向依赖 runtime/model。
 
 ### Coding tools
 
-独立 Daemon 进程通过 `CodingTools.registerAll` 注册固定目录中的十个 coding tool：
+独立 Daemon 进程通过 `CodingTools.registerAll` 注册固定目录中的九个 coding tool：
 
 ```text
-read, write, edit, apply_patch, bash, grep, find,
+read, write, edit, bash, grep, find,
 lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 ```
 

@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.Iterator;
 import java.util.Set;
@@ -16,7 +16,7 @@ import java.util.Set;
  * Daemon v2 envelope 的 JSON codec。
  *
  * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
- * 消息传给运行时；{@code environmentId} 必须是 canonical 小写 UUID 文本。
+ * 消息传给运行时；{@code environmentName} 必须是 canonical 有界小写路由名称。
  */
 public final class DaemonEnvelopeCodec {
 
@@ -31,19 +31,17 @@ public final class DaemonEnvelopeCodec {
       Set.of(
           "protocolVersion",
           "messageType",
-          "environmentId",
           "environmentName",
           "invocationId",
           "sequence",
           "payload");
 
-  /** 将 envelope 编码为协议规定的 JSON 字段；environmentId 编码为小写 UUID 文本。 */
+  /** 将 envelope 编码为协议规定的 JSON 字段；environmentName 编码为 canonical 路由名称文本。 */
   public String encode(DaemonEnvelope envelope) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     root.put("protocolVersion", envelope.protocolVersion());
     root.put("messageType", envelope.messageType().name());
-    root.put("environmentId", envelope.environmentId().value());
-    root.put("environmentName", envelope.environmentName());
+    root.put("environmentName", envelope.environmentName().value());
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
     }
@@ -80,18 +78,18 @@ public final class DaemonEnvelopeCodec {
       throw new DaemonProtocolException("payload must be a JSON object");
     }
     String invocationId = optionalText(root, "invocationId");
-    EnvironmentId environmentId;
+    EnvironmentName environmentName;
     try {
-      environmentId = new EnvironmentId(requiredText(root, "environmentId"));
+      environmentName = new EnvironmentName(requiredText(root, "environmentName"));
     } catch (IllegalArgumentException error) {
-      throw new DaemonProtocolException("environmentId must be a canonical lowercase UUID", error);
+      throw new DaemonProtocolException(
+          "environmentName must be a canonical bounded lowercase route name", error);
     }
     try {
       return new DaemonEnvelope(
           protocolVersion,
           messageType,
-          environmentId,
-          requiredText(root, "environmentName"),
+          environmentName,
           invocationId,
           sequence,
           writeJson(payload));

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
@@ -26,7 +26,7 @@ public final class ToolBindingJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("descriptor", DESCRIPTOR_CODEC.encodeNode(binding.descriptor()));
     node.put("type", binding.type().name());
-    InvocationJsonSupport.putNullable(node, "environmentId", binding.environmentId());
+    InvocationJsonSupport.putNullable(node, "environmentName", binding.environmentName());
     return node;
   }
 
@@ -36,12 +36,12 @@ public final class ToolBindingJsonCodec {
 
   public ToolBinding decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
-    InvocationJsonSupport.requireFields(node, CONTEXT, "descriptor", "type", "environmentId");
+    InvocationJsonSupport.requireFields(node, CONTEXT, "descriptor", "type", "environmentName");
     ToolDescriptor descriptor =
         DESCRIPTOR_CODEC.decodeNode(InvocationJsonSupport.required(node, "descriptor", CONTEXT));
     ToolType type = InvocationJsonSupport.requiredEnum(node, "type", ToolType.class, CONTEXT);
-    EnvironmentId environmentId =
-        InvocationJsonSupport.nullableEnvironmentId(node, "environmentId", CONTEXT);
-    return new ToolBinding(descriptor, type, environmentId);
+    EnvironmentName environmentName =
+        InvocationJsonSupport.nullableEnvironmentName(node, "environmentName", CONTEXT);
+    return new ToolBinding(descriptor, type, environmentName);
   }
 }

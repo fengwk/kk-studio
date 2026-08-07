@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -24,12 +24,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** invocation.model 包共享的测试 fixture。 */
 final class InvocationTestData {
 
-  static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
 
   private InvocationTestData() {}
 
@@ -53,9 +52,9 @@ final class InvocationTestData {
     return environment(name, ENV_ID);
   }
 
-  static ToolBinding environment(String name, EnvironmentId environmentId) {
+  static ToolBinding environment(String name, EnvironmentName environmentName) {
     return new ToolBinding(
-        toolDescriptor(name, ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, environmentId);
+        toolDescriptor(name, ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, environmentName);
   }
 
   static ModelDescriptor modelDescriptor() {

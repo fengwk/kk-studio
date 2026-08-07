@@ -124,7 +124,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ThreadProcessor` | Agent Loop：terminal apply、continuation、INPUT turn、QUIESCENT |
 | `ModelProcessor` | 两阶段激活、checkpoint/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
 | `ToolProcessor` | 两阶段激活、preflight、接收已外部化 terminal ToolResult、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
-| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；fail closed：非 null `environmentId` 必须命中且 READY（无论 activeTools），null 只允许 platform-only 无 skills；skills 需显式 `load_skill`；确定性拒绝共用 `PLANNING_FAILED` |
+| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝（start 时不可用即确定性 Rejected）；skills 需最新选中 Environment live + 显式 `load_skill`；确定性拒绝共用 `PLANNING_FAILED` |
 | `HarnessWorkDispatcher` | Work-only claim、round-robin、bounded handoff、NOTIFY/poll 合并 |
 
 ## 7. Snapshot-first SSE

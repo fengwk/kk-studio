@@ -28,10 +28,9 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Resolved 请求与 candidate branch 事实的机械一致性校验：任何不一致都是 Resolver 契约 / 编程错误，抛 ISE 且零 Entry / Command /
@@ -41,8 +40,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
   void routeMismatchIsContractErrorWithZeroMutation() {
-    assertMismatchRollsBack(
-        branchSettings().withEnvironmentId(new EnvironmentId(UUID.randomUUID().toString())));
+    assertMismatchRollsBack(branchSettings().withEnvironmentName(new EnvironmentName("env-2")));
   }
 
   @Test

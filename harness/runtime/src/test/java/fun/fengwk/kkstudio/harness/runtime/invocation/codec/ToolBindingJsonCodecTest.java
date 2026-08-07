@@ -26,7 +26,7 @@ class ToolBindingJsonCodecTest {
     String environmentJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(environment.descriptor())
-            + ",\"type\":\"ENVIRONMENT\",\"environmentId\":\""
+            + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
             + ENVIRONMENT_ID
             + "\"}";
     assertEquals(environmentJson, codec.encode(environment));
@@ -37,10 +37,10 @@ class ToolBindingJsonCodecTest {
     String platformJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(platform.descriptor())
-            + ",\"type\":\"PLATFORM\",\"environmentId\":null}";
+            + ",\"type\":\"PLATFORM\",\"environmentName\":null}";
     assertEquals(platformJson, codec.encode(platform));
     assertEquals(platform, codec.decode(platformJson));
-    assertNull(codec.decode(platformJson).environmentId());
+    assertNull(codec.decode(platformJson).environmentName());
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -66,7 +66,7 @@ class ToolBindingJsonCodecTest {
     String valid =
         "{\"descriptor\":"
             + descriptor
-            + ",\"type\":\"ENVIRONMENT\",\"environmentId\":\""
+            + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
             + ENVIRONMENT_ID
             + "\"}";
 
@@ -75,27 +75,27 @@ class ToolBindingJsonCodecTest {
         () -> codec.decode(valid.substring(0, valid.length() - 1) + ",\"extra\":true}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(valid.replace(",\"environmentId\":\"" + ENVIRONMENT_ID + "\"", "")));
+        () -> codec.decode(valid.replace(",\"environmentName\":\"" + ENVIRONMENT_ID + "\"", "")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    ",\"type\":\"ENVIRONMENT\",\"environmentId\":",
-                    ",\"type\":1,\"environmentId\":")));
+                    ",\"type\":\"ENVIRONMENT\",\"environmentName\":",
+                    ",\"type\":1,\"environmentName\":")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    ",\"type\":\"ENVIRONMENT\",\"environmentId\":",
-                    ",\"type\":\"OTHER\",\"environmentId\":")));
+                    ",\"type\":\"ENVIRONMENT\",\"environmentName\":",
+                    ",\"type\":\"OTHER\",\"environmentName\":")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 valid.replace(
-                    "\"environmentId\":\"" + ENVIRONMENT_ID + "\"", "\"environmentId\":1")));
+                    "\"environmentName\":\"" + ENVIRONMENT_ID + "\"", "\"environmentName\":1")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -107,15 +107,15 @@ class ToolBindingJsonCodecTest {
             codec.decode(
                 "{\"descriptor\":"
                     + descriptorCodec.encode(descriptor(ToolType.PLATFORM))
-                    + ",\"type\":\"ENVIRONMENT\",\"environmentId\":\""
+                    + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
                     + ENVIRONMENT_ID
                     + "\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"descriptor\":"
-                    + descriptor
-                    + ",\"type\":\"ENVIRONMENT\",\"environmentId\":null}"));
+    // ENVIRONMENT binding 的 route 可为 null（最新 branch 未选中/已清空时冻结为 null）。
+    ToolBinding nullRoute =
+        codec.decode(
+            "{\"descriptor\":"
+                + descriptor
+                + ",\"type\":\"ENVIRONMENT\",\"environmentName\":null}");
+    assertNull(nullRoute.environmentName());
   }
 }

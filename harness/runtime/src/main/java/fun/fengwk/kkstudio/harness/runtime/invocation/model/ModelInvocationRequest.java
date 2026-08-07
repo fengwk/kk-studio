@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.List;
@@ -11,13 +11,13 @@ import java.util.Objects;
 /**
  * 一次 Model invocation 的完整冻结请求。
  *
- * <p>实际 Environment 路由（{@code environmentId}）是该请求的唯一路由，Thread YOLO policy （{@code
+ * <p>实际 Environment 路由（{@code environmentName}）是该请求的唯一路由，Thread YOLO policy （{@code
  * yoloEnabled}）也在这里冻结；后续的 Environment 下线、branch rebinding、relocation 或 {@code SET_YOLO} 都不会改变已存在的
  * invocation。{@code providerRequest.tools()} 必须与有序的 {@code toolBindings} descriptor 一一对应，tool 和
  * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的路由。
  */
 public record ModelInvocationRequest(
-    EnvironmentId environmentId,
+    EnvironmentName environmentName,
     ProviderRequest providerRequest,
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
@@ -32,7 +32,7 @@ public record ModelInvocationRequest(
     requireOneToOneProviderTools(providerRequest, toolBindings);
     requireUniqueToolNames(toolBindings);
     requireUniqueSkillNames(skillBindings);
-    requireConsistentRoutes(environmentId, toolBindings, skillBindings);
+    requireConsistentRoutes(environmentName, toolBindings, skillBindings);
   }
 
   private static void requireOneToOneProviderTools(
@@ -78,21 +78,21 @@ public record ModelInvocationRequest(
   }
 
   private static void requireConsistentRoutes(
-      EnvironmentId environmentId,
+      EnvironmentName environmentName,
       List<ToolBinding> toolBindings,
       List<SkillBinding> skillBindings) {
     for (ToolBinding binding : toolBindings) {
       if (binding.type() == ToolType.ENVIRONMENT
-          && !Objects.equals(environmentId, binding.environmentId())) {
+          && !Objects.equals(environmentName, binding.environmentName())) {
         throw new IllegalArgumentException(
-            "tool binding environment route must match request environmentId");
+            "tool binding environment route must match request environmentName");
       }
     }
     for (SkillBinding skill : skillBindings) {
-      if (skill.sourceEnvironmentId() != null
-          && !skill.sourceEnvironmentId().equals(environmentId)) {
+      if (skill.sourceEnvironmentName() != null
+          && !skill.sourceEnvironmentName().equals(environmentName)) {
         throw new IllegalArgumentException(
-            "skill source environment must match request environmentId");
+            "skill source environment must match request environmentName");
       }
     }
   }

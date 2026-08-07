@@ -267,7 +267,7 @@ public class HarnessRuntimeConfiguration {
   @Bean
   public EnvironmentReadyListener harnessEnvironmentReadyListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider) {
-    return environmentId -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+    return environmentName -> dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
   }
 
   @Bean

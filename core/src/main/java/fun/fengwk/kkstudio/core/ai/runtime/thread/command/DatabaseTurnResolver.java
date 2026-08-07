@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfig
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
@@ -42,7 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -52,6 +53,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -61,12 +63,13 @@ import java.util.Optional;
  * 生产 Core 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的 {@link
  * ModelInvocationRequest}。
  *
- * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environmentId / agentName / {@link
+ * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environmentName / agentName / {@link
  * ModelSelection} / thinkingLevel / ordered activeTools）与调用方冻结的 YOLO 开关；实现只按这些精确引用读取最新 catalog /
  * environment 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/thinking/tools，也绝不静默丢弃缺失能力。
- * environmentId 是不可变 route：非 null 时只按 {@link LiveEnvironmentRegistry#find} 精确查找并要求 READY；null 时任何
- * ENVIRONMENT tool 或 Agent skill 都是确定性拒绝。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error
- * code {@value #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。
+ * environmentName 是最新 branch 的不可变逻辑路由：ENVIRONMENT 工具一律按最新 {@code settings.environmentName()} 绑定（可为
+ * null 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的
+ * branch settings。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value
+ * #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -82,6 +85,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ProviderFactories providerFactories;
   private final ToolCatalog toolCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
+  private final EnvironmentGatewayProperties environmentGatewayProperties;
+  private final Clock clock;
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
@@ -94,7 +99,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
       ToolCatalog toolCatalog,
-      LiveEnvironmentRegistry environmentRegistry) {
+      LiveEnvironmentRegistry environmentRegistry,
+      EnvironmentGatewayProperties environmentGatewayProperties,
+      Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
@@ -104,6 +111,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.environmentGatewayProperties =
+        Objects.requireNonNull(environmentGatewayProperties, "environmentGatewayProperties");
+    this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
     this.toolDescriptorCodec = new ToolDescriptorJsonCodec();
     this.cacheKeyFactory = new PromptCacheAffinityKeyFactory();
@@ -162,10 +172,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + providerType
                 + ")");
 
-    LiveEnvironment environment = resolveEnvironment(settings.environmentId());
-    List<ToolBinding> toolBindings = resolveTools(settings, environment);
-    List<SkillBinding> skillBindings =
-        resolveSkills(agentConfig.getSkills(), settings, environment);
+    List<ToolBinding> toolBindings = resolveTools(settings);
+    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -201,7 +209,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             sessionId,
             cachePolicy(providerFactory));
     return new ModelInvocationRequest(
-        settings.environmentId(), providerRequest, toolBindings, skillBindings, yoloEnabled);
+        settings.environmentName(), providerRequest, toolBindings, skillBindings, yoloEnabled);
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
@@ -220,22 +228,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  private LiveEnvironment resolveEnvironment(EnvironmentId environmentId) {
-    if (environmentId == null) {
-      return null;
-    }
-    LiveEnvironment environment = environmentRegistry.find(environmentId).orElse(null);
-    if (environment == null) {
-      throw rejection("environment not found: " + environmentId);
-    }
-    if (!environment.isReady()) {
-      throw rejection("environment is not ready: " + environmentId);
-    }
-    return environment;
-  }
-
-  /** 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定；缺失或不可用立即拒绝，绝不静默跳过。 */
-  private List<ToolBinding> resolveTools(BranchSettings settings, LiveEnvironment environment) {
+  /**
+   * 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的 {@code
+   * settings.environmentName()}（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝， 绝不静默跳过。
+   */
+  private List<ToolBinding> resolveTools(BranchSettings settings) {
     List<ToolBinding> bindings = new ArrayList<>(settings.activeTools().size());
     for (String name : settings.activeTools()) {
       Optional<ToolDescriptor> selectable = toolCatalog.findSelectable(name);
@@ -248,20 +245,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
         bindings.add(new ToolBinding(internal.get(), ToolType.PLATFORM, null));
         continue;
       }
-      // selectable catalog 合并了 Environment 工具；ENVIRONMENT 工具必须由选中 Environment 精确提供。
+      // selectable catalog 合并了 Environment 工具；ENVIRONMENT 工具由固定 catalog 精确提供。
       Optional<ToolDescriptor> environmentTool =
           selectable
               .filter(descriptor -> descriptor.type() == ToolType.ENVIRONMENT)
               .or(() -> EnvironmentToolCatalog.find(name));
       if (environmentTool.isPresent()) {
-        if (environment == null) {
-          throw rejection("environment tool requires a selected environment: " + name);
-        }
-        if (!environment.tools().contains(environmentTool.get())) {
-          throw rejection("environment does not provide tool: " + name);
-        }
         bindings.add(
-            new ToolBinding(environmentTool.get(), ToolType.ENVIRONMENT, settings.environmentId()));
+            new ToolBinding(
+                environmentTool.get(), ToolType.ENVIRONMENT, settings.environmentName()));
         continue;
       }
       throw rejection("tool not found: " + name);
@@ -269,14 +261,32 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(bindings);
   }
 
-  /** Agent skills 只从 Agent config 读取，且必须由选中 Environment 精确提供；load_skill 必须显式出现在 activeTools 中。 */
-  private List<SkillBinding> resolveSkills(
-      List<String> skillNames, BranchSettings settings, LiveEnvironment environment) {
+  /**
+   * Agent skills 只从 Agent config 读取，且必须由最新选中的 Environment 精确提供（live descriptors）； load_skill
+   * 必须显式出现在 activeTools 中。
+   */
+  private List<SkillBinding> resolveSkills(List<String> skillNames, BranchSettings settings) {
     if (skillNames.isEmpty()) {
       return List.of();
     }
+    EnvironmentName environmentName = settings.environmentName();
+    if (environmentName == null) {
+      throw rejection(
+          "agent skills require the latest selected environment but the branch has no environmentName");
+    }
+    // skills 需要最新 Environment 提供 live descriptors：按最新名称精确查找并要求 READY（同一可用性规则），
+    // 缺失/未 READY 确定性拒绝，绝不回看更旧的 branch settings。
+    LiveEnvironment environment = environmentRegistry.find(environmentName).orElse(null);
     if (environment == null) {
-      throw rejection("agent skills require a selected environment");
+      throw rejection(
+          "agent skills require the latest selected environment which is not live: "
+              + environmentName);
+    }
+    if (!environment.isReady(
+        clock.instant(), environmentGatewayProperties.requireHeartbeatTimeout())) {
+      throw rejection(
+          "agent skills require the latest selected environment which is not ready: "
+              + environmentName);
     }
     if (!settings.activeTools().contains(LoadSkillTool.NAME)) {
       throw rejection("agent has skills but activeTools must include " + LoadSkillTool.NAME);
@@ -289,9 +299,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
               .findFirst()
               .orElse(null);
       if (skill == null) {
-        throw rejection("skill not found: " + skillName);
+        throw rejection(
+            "skill not found on the latest environment "
+                + settings.environmentName()
+                + ": "
+                + skillName);
       }
-      bindings.add(new SkillBinding(skill.name(), skill.description(), settings.environmentId()));
+      bindings.add(new SkillBinding(skill.name(), skill.description(), settings.environmentName()));
     }
     return List.copyOf(bindings);
   }

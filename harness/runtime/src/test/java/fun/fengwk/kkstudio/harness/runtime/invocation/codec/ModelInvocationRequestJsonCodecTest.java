@@ -28,14 +28,14 @@ class ModelInvocationRequestJsonCodecTest {
   void roundTripsEnvironmentRequestWithCanonicalJson() {
     ModelInvocationRequest request = environmentModelRequest();
     String expected =
-        "{\"environmentId\":\""
+        "{\"environmentName\":\""
             + ENVIRONMENT_ID
             + "\",\"providerRequest\":"
             + providerCodec.encode(request.providerRequest())
             + ",\"toolBindings\":["
             + bindingCodec.encode(request.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
-            + "\"sourceEnvironmentId\":\""
+            + "\"sourceEnvironmentName\":\""
             + ENVIRONMENT_ID
             + "\"}],\"yoloEnabled\":true}";
 
@@ -54,11 +54,11 @@ class ModelInvocationRequestJsonCodecTest {
     String encoded = codec.encode(request);
 
     assertEquals(request, codec.decode(encoded));
-    assertNull(codec.decode(encoded).environmentId());
-    assertNull(codec.decode(encoded).toolBindings().getFirst().environmentId());
-    assertNull(codec.decode(encoded).skillBindings().getFirst().sourceEnvironmentId());
+    assertNull(codec.decode(encoded).environmentName());
+    assertNull(codec.decode(encoded).toolBindings().getFirst().environmentName());
+    assertNull(codec.decode(encoded).skillBindings().getFirst().sourceEnvironmentName());
     assertEquals(
-        "{\"environmentId\":null,\"providerRequest\":",
+        "{\"environmentName\":null,\"providerRequest\":",
         encoded.substring(0, encoded.indexOf('{', 1)));
   }
 
@@ -68,10 +68,10 @@ class ModelInvocationRequestJsonCodecTest {
     String json = codec.encode(environmentModelRequest());
     String duplicate =
         json.replace(
-            "\"environmentId\":\"" + ENVIRONMENT_ID + "\"",
-            "\"environmentId\":\""
+            "\"environmentName\":\"" + ENVIRONMENT_ID + "\"",
+            "\"environmentName\":\""
                 + ENVIRONMENT_ID
-                + "\",\"environmentId\":\""
+                + "\",\"environmentName\":\""
                 + OTHER_ENVIRONMENT_ID
                 + "\"");
 
@@ -96,11 +96,11 @@ class ModelInvocationRequestJsonCodecTest {
     assertInvalid(missing);
 
     ObjectNode environmentType = encodedNode();
-    environmentType.put("environmentId", 1);
+    environmentType.put("environmentName", 1);
     assertInvalid(environmentType);
 
     ObjectNode environmentCanonical = encodedNode();
-    environmentCanonical.put("environmentId", ENVIRONMENT_ID.value().toUpperCase());
+    environmentCanonical.put("environmentName", ENVIRONMENT_ID.value().toUpperCase());
     assertInvalid(environmentCanonical);
 
     ObjectNode providerNull = encodedNode();
@@ -124,7 +124,7 @@ class ModelInvocationRequestJsonCodecTest {
     assertInvalid(skillNameType);
 
     ObjectNode skillEnvironmentType = encodedNode();
-    firstSkill(skillEnvironmentType).put("sourceEnvironmentId", false);
+    firstSkill(skillEnvironmentType).put("sourceEnvironmentName", false);
     assertInvalid(skillEnvironmentType);
   }
 
@@ -142,8 +142,8 @@ class ModelInvocationRequestJsonCodecTest {
             "\"toolBindings\":[" + bindingJson + "," + bindingJson + "]"));
     assertInvalid(
         json.replace(
-            "\"sourceEnvironmentId\":\"" + ENVIRONMENT_ID + "\"",
-            "\"sourceEnvironmentId\":\"" + OTHER_ENVIRONMENT_ID + "\""));
+            "\"sourceEnvironmentName\":\"" + ENVIRONMENT_ID + "\"",
+            "\"sourceEnvironmentName\":\"" + OTHER_ENVIRONMENT_ID + "\""));
   }
 
   private void assertInvalid(String json) {

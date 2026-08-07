@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.ai.environment.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,8 +12,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
@@ -46,19 +48,17 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Gateway 仅承担连接/协议传输职责。durable 的 claim/lease/terminal 由 Harness Runtime 负责。路由使用 HELLO 时确定的
- * canonical EnvironmentId；display name 永不参与路由。
+ * canonical EnvironmentName；display name 永不参与路由。
  */
 class EnvironmentDaemonGatewayFinalTest {
-  private static final EnvironmentId ENVIRONMENT_ID =
-      new EnvironmentId("0f8fad5b-d9cb-469f-a165-70867728950e");
-  private static final EnvironmentId OTHER_ENVIRONMENT_ID =
-      new EnvironmentId("1f8fad5b-d9cb-469f-a165-70867728950e");
-  private static final String ENVIRONMENT_NAME = "env-42";
+  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
+  private static final EnvironmentName OTHER_ENVIRONMENT_NAME = new EnvironmentName("env-2");
   private static final long INVOCATION_ID = 9001L;
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
   private static final String GATEWAY_TOKEN = "gateway-test-token";
@@ -73,21 +73,20 @@ class EnvironmentDaemonGatewayFinalTest {
 
   @Test
   void readyNotifiesHandlerAndInvokeSendsProtocolThenMapsCompletion() {
-    List<EnvironmentId> ready = new ArrayList<>();
+    List<EnvironmentName> ready = new ArrayList<>();
     Fixture fixture = fixture(ready::add);
     FakeConnection connection = fixture.connectReady("connection-a");
 
-    assertEquals(List.of(ENVIRONMENT_ID), ready);
+    assertEquals(List.of(ENVIRONMENT_NAME), ready);
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
 
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
-        fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+        fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connection.envelopes()));
     DaemonEnvelope invoke = connection.envelopes().get(1);
-    assertEquals(ENVIRONMENT_ID, invoke.environmentId());
     assertEquals(ENVIRONMENT_NAME, invoke.environmentName());
     assertEquals(Long.toString(INVOCATION_ID), invoke.invocationId());
     assertTrue(invoke.payloadJson().contains("\"toolName\":\"read\""));
@@ -105,7 +104,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-partial");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
 
     fixture.gateway.receive(connection.connectionId(), partial(2, resultPayload("chunk")));
     assertEquals("chunk", ((TextToolContent) listener.partial.contents().get(0)).text());
@@ -128,7 +127,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-binary");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
 
     String payload =
         resultCodec.encodeCompleted(
@@ -152,11 +151,11 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-cancel");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(
-            ENVIRONMENT_ID,
+            ENVIRONMENT_NAME,
             DaemonMessageType.CANCELLED,
             Long.toString(INVOCATION_ID),
             2,
@@ -172,7 +171,7 @@ class EnvironmentDaemonGatewayFinalTest {
         RemoteToolUnavailableException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_ID, request(fixture.descriptor), new RecordingListener()));
+                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
   }
 
   @Test
@@ -184,13 +183,13 @@ class EnvironmentDaemonGatewayFinalTest {
         ArithmeticException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_ID,
+                ENVIRONMENT_NAME,
                 request(fixture.descriptor, Duration.ofSeconds(Long.MAX_VALUE)),
                 new RecordingListener()));
 
     ToolExecutionHandle handle =
         fixture.gateway.invoke(
-            ENVIRONMENT_ID, request(fixture.descriptor), new RecordingListener());
+            ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener());
     assertNotNull(handle);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
@@ -202,7 +201,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-drop");
     RecordingListener listener = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
     fixture.gateway.close(connection.connectionId());
     assertTrue(listener.error instanceof RemoteToolSendUncertainException);
     assertNull(listener.completed);
@@ -215,13 +214,13 @@ class EnvironmentDaemonGatewayFinalTest {
     AtomicReference<EnvironmentDaemonGateway> gatewayRef = new AtomicReference<>();
     Fixture fixture =
         fixture(
-            environmentId -> {
+            environmentName -> {
               // 重新进入 gateway monitor（loadSkill）但不再分派 READY。若 READY 仍持有
               // ConnectionState 或 gateway 锁，则会发生死锁。
               try {
                 gatewayRef
                     .get()
-                    .loadSkill(environmentId, "missing-skill", Duration.ofMillis(20))
+                    .loadSkill(environmentName, "missing-skill", Duration.ofMillis(20))
                     .get();
               } catch (Exception ignored) {
                 // Offline/timeout 路径仍会执行加锁区段。
@@ -242,7 +241,7 @@ class EnvironmentDaemonGatewayFinalTest {
             completeSawLockFree.set(true);
           }
         };
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
     fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("done")));
     assertTrue(completeSawLockFree.get());
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
@@ -256,7 +255,7 @@ class EnvironmentDaemonGatewayFinalTest {
     RecordingListener listener = new RecordingListener();
     assertThrows(
         RemoteToolSendUncertainException.class,
-        () -> fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener));
+        () -> fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener));
     assertNull(listener.error);
     assertNull(listener.completed);
   }
@@ -265,16 +264,20 @@ class EnvironmentDaemonGatewayFinalTest {
   void uncertainInvokeSendUnregistersReadyEnvironmentAndClosesConnection() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-uncertain-cleanup");
-    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_ID));
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     connection.failNextSend = true;
     assertThrows(
         RemoteToolSendUncertainException.class,
         () ->
             fixture.gateway.invoke(
-                ENVIRONMENT_ID, request(fixture.descriptor), new RecordingListener()));
+                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
     assertTrue(connection.closed);
-    assertFalse(fixture.environmentRegistry.isReady(ENVIRONMENT_ID));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
+    assertFalse(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
   @Test
@@ -283,7 +286,7 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection connection = fixture.connectReady("connection-cancel-idempotent");
     RecordingListener listener = new RecordingListener();
     ToolExecutionHandle handle =
-        fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listener);
+        fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
     handle.cancel();
     handle.cancel();
     long cancelCount =
@@ -303,9 +306,11 @@ class EnvironmentDaemonGatewayFinalTest {
   void readyRegistersAdvertisedSkillsAndStaticTools() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-skills");
-    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_ID));
-    var registered = fixture.environmentRegistry.find(ENVIRONMENT_ID).orElseThrow();
-    assertEquals(ENVIRONMENT_ID, registered.id());
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    var registered = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
+    assertEquals(ENVIRONMENT_NAME, registered.name());
     assertEquals(ENVIRONMENT_NAME, registered.name());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
     // 工具来自静态 EnvironmentToolCatalog；wire READY 不会对外声明它们。
@@ -320,7 +325,7 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.receive(connection.connectionId(), helloWithVersion("1", 0));
     assertTrue(connection.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
   @Test
@@ -331,72 +336,197 @@ class EnvironmentDaemonGatewayFinalTest {
     fixture.gateway.receive(connection.connectionId(), helloWithCatalogVersion("2", 0));
     assertTrue(connection.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
   @Test
-  void sameIdConcurrentBindIsRejectedWithoutDisplacingFirstConnection() {
+  void sameNameConcurrentBindIsTerminalConflictWithTypedCode() {
     Fixture fixture = fixture();
     FakeConnection first = fixture.connectReady("connection-first");
     FakeConnection second = new FakeConnection("connection-second");
     fixture.gateway.open(second);
-    fixture.gateway.receive(second.connectionId(), hello(0, ENVIRONMENT_ID, "renamed"));
+    fixture.gateway.receive(second.connectionId(), hello(0, ENVIRONMENT_NAME));
     assertTrue(second.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(second.envelopes()));
     assertEquals(
-        ENVIRONMENT_NAME, fixture.environmentRegistry.find(ENVIRONMENT_ID).orElseThrow().name());
+        DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT,
+        envelopeCodec.readPayload(second.envelopes().get(0)).path("code").asText());
+    assertEquals(
+        ENVIRONMENT_NAME, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().name());
     assertEquals(
         LiveEnvironmentStatus.READY,
-        fixture.environmentRegistry.find(ENVIRONMENT_ID).orElseThrow().status());
+        fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().status());
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(first.envelopes()));
   }
 
   @Test
-  void sameIdReconnectWithChangedNameIsAcceptedAfterClose() {
+  void sameNameReconnectIsAcceptedAfterClose() {
     Fixture fixture = fixture();
     FakeConnection first = fixture.connectReady("connection-first");
     fixture.gateway.close(first.connectionId());
 
     FakeConnection second = new FakeConnection("connection-second");
     fixture.gateway.open(second);
-    fixture.gateway.receive(second.connectionId(), hello(0, ENVIRONMENT_ID, "renamed"));
+    fixture.gateway.receive(second.connectionId(), hello(0, ENVIRONMENT_NAME));
     assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
-    fixture.gateway.receive(second.connectionId(), ready(1, ENVIRONMENT_ID, "renamed"));
-    assertEquals("renamed", fixture.environmentRegistry.find(ENVIRONMENT_ID).orElseThrow().name());
-    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_ID));
+    fixture.gateway.receive(second.connectionId(), ready(1, ENVIRONMENT_NAME));
+    assertEquals(
+        ENVIRONMENT_NAME, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().name());
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
   }
 
   @Test
-  void wrongIdOnBoundConnectionIsRejectedWithoutRerouting() {
+  void expiredLeaseHolderIsTakenOverByHelloAndDisplacedConnectionIsClosedExactlyOnce() {
     Fixture fixture = fixture();
-    FakeConnection connection = fixture.connectReady("connection-wrong-id");
-    // 已绑定连接绝不能接受作用域为其他环境 id 的 envelope。
+    FakeConnection first = fixture.connectReady("connection-lease-expired");
+    RecordingListener listener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listener);
+    CompletableFuture<EnvironmentSkillLoadResult> pendingSkill =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5));
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.LOAD_SKILL),
+        messageTypes(first.envelopes()));
+
+    // 心跳超过配置超时：连接仍打开，但租约过期——HELLO 原子接管而非冲突。
+    fixture.now.set(NOW.plus(fixture.heartbeatTimeout).plusSeconds(1));
+    FakeConnection second = new FakeConnection("connection-lease-taker");
+    fixture.gateway.open(second);
+    fixture.gateway.receive(second.connectionId(), hello(0));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
+    // 被替换的旧连接恰好关闭一次；active remote 与 pending skill load 不泄漏。
+    assertEquals(1, first.closeCount);
+    assertTrue(listener.error instanceof RemoteToolSendUncertainException);
+    assertTrue(pendingSkill.join() instanceof EnvironmentSkillLoadResult.Failed);
+    assertEquals(
+        second.connectionId(),
+        fixture
+            .environmentRegistry
+            .find(ENVIRONMENT_NAME)
+            .orElseThrow()
+            .connection()
+            .connectionId());
+
+    // 新 holder 完整可用：READY 后 invoke 路由到新连接。
+    fixture.gateway.receive(second.connectionId(), ready(1));
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    RecordingListener secondListener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), secondListener);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
+        messageTypes(second.envelopes()));
+
+    // 旧连接的迟到 close 回调不得影响新 holder。
+    fixture.gateway.close(first.connectionId());
+    assertEquals(1, first.closeCount);
+    assertTrue(second.isOpen());
+    assertEquals(
+        second.connectionId(),
+        fixture
+            .environmentRegistry
+            .find(ENVIRONMENT_NAME)
+            .orElseThrow()
+            .connection()
+            .connectionId());
+  }
+
+  @Test
+  void closedHolderConnectionIsTakenOverAndFreshConnectingClaimIsNeverStolen() {
+    Fixture fixture = fixture();
+    FakeConnection first = fixture.connectReady("connection-dead");
+    // transport 死亡但 gateway/registry 尚未清理（例如 close 事件丢失）。
+    first.close();
+
+    FakeConnection second = new FakeConnection("connection-taker");
+    fixture.gateway.open(second);
+    fixture.gateway.receive(second.connectionId(), hello(0));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(second.envelopes()));
+    assertEquals(
+        2, first.closeCount, "displaced connection must be closed exactly once by takeover");
+    assertEquals(
+        second.connectionId(),
+        fixture
+            .environmentRegistry
+            .find(ENVIRONMENT_NAME)
+            .orElseThrow()
+            .connection()
+            .connectionId());
+
+    // CONNECTING 的新鲜声明（打开 + 心跳未过期）绝不能被抢走：typed 冲突。
+    FakeConnection third = new FakeConnection("connection-sneaky");
+    fixture.gateway.open(third);
+    fixture.gateway.receive(third.connectionId(), hello(0));
+    assertTrue(third.closed);
+    assertEquals(
+        DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT,
+        envelopeCodec.readPayload(third.envelopes().get(0)).path("code").asText());
+    assertEquals(
+        second.connectionId(),
+        fixture
+            .environmentRegistry
+            .find(ENVIRONMENT_NAME)
+            .orElseThrow()
+            .connection()
+            .connectionId());
+    assertTrue(second.isOpen());
+  }
+
+  @Test
+  void loadSkillUsesSameHeartbeatFreshnessRuleAsInvokeAndQuery() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-skill-stale");
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    fixture.now.set(NOW.plus(fixture.heartbeatTimeout).plusSeconds(1));
+
+    // 心跳过期：与 invoke/query 完全相同的规则下立即 Failed，绝不发送 LOAD_SKILL。
+    EnvironmentSkillLoadResult result =
+        fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofSeconds(5)).join();
+    assertInstanceOf(EnvironmentSkillLoadResult.Failed.class, result);
+    assertThrows(
+        RemoteToolUnavailableException.class,
+        () ->
+            fixture.gateway.invoke(
+                ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener()));
+    assertFalse(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
+  void wrongNameOnBoundConnectionIsRejectedWithoutRerouting() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-wrong-name");
+    // 已绑定连接绝不能接受作用域为其他环境名称的 envelope。
     fixture.gateway.receive(
         connection.connectionId(),
-        envelope(OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
+        envelope(OTHER_ENVIRONMENT_NAME, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
     assertTrue(connection.closed);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
-    assertTrue(fixture.environmentRegistry.find(OTHER_ENVIRONMENT_ID).isEmpty());
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
   }
 
   @Test
-  void nameMismatchWithinConnectionProtocolFailsWithoutChangingRoute() {
+  void mismatchedHeartbeatScopeClosesConnectionAndFreesName() {
     Fixture fixture = fixture();
-    FakeConnection connection = fixture.connectReady("connection-name-mismatch");
-    // 同一 canonical id 携带不同 display name 属于协议一致性失败：连接被关闭，
-    // 路由也绝不会改用呈现的名称重新寻址。
+    FakeConnection connection = fixture.connectReady("connection-scope-mismatch");
+    // 已绑定连接收到不同名称的 HEARTBEAT 属于协议一致性失败：连接被关闭、名称被释放，
+    // 新连接可立即重新绑定。
     fixture.gateway.receive(
         connection.connectionId(),
-        envelope(ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}", "renamed"));
+        envelope(OTHER_ENVIRONMENT_NAME, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
     assertTrue(connection.closed);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
-    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
-    // 该 id 可立即用新连接重新绑定。
+    assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
     FakeConnection rebind = new FakeConnection("connection-rebind");
     fixture.gateway.open(rebind);
     fixture.gateway.receive(rebind.connectionId(), hello(0));
@@ -404,21 +534,19 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
-  void sameDisplayNameOnTwoIdsRoutesInvokeAndSkillLoadByExactId() {
+  void distinctNamesRouteInvokeAndSkillLoadByExactName() {
     Fixture fixture = fixture();
     FakeConnection connectionA = fixture.connectReady("connection-a");
     FakeConnection connectionB = new FakeConnection("connection-b");
     fixture.gateway.open(connectionB);
-    // 两个环境使用相同的 display name；只有 canonical id 用于路由。
-    fixture.gateway.receive(
-        connectionB.connectionId(), hello(0, OTHER_ENVIRONMENT_ID, ENVIRONMENT_NAME));
-    fixture.gateway.receive(
-        connectionB.connectionId(), ready(1, OTHER_ENVIRONMENT_ID, ENVIRONMENT_NAME));
+    // 每个 canonical 名称只绑定一个连接；路由按精确名称寻址。
+    fixture.gateway.receive(connectionB.connectionId(), hello(0, OTHER_ENVIRONMENT_NAME));
+    fixture.gateway.receive(connectionB.connectionId(), ready(1, OTHER_ENVIRONMENT_NAME));
 
     RecordingListener listenerA = new RecordingListener();
     RecordingListener listenerB = new RecordingListener();
-    fixture.gateway.invoke(ENVIRONMENT_ID, request(fixture.descriptor), listenerA);
-    fixture.gateway.invoke(OTHER_ENVIRONMENT_ID, request(fixture.descriptor), listenerB);
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listenerA);
+    fixture.gateway.invoke(OTHER_ENVIRONMENT_NAME, request(fixture.descriptor), listenerB);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connectionA.envelopes()));
@@ -426,8 +554,8 @@ class EnvironmentDaemonGatewayFinalTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
         messageTypes(connectionB.envelopes()));
 
-    fixture.gateway.loadSkill(ENVIRONMENT_ID, "dev", Duration.ofMillis(100));
-    fixture.gateway.loadSkill(OTHER_ENVIRONMENT_ID, "dev", Duration.ofMillis(100));
+    fixture.gateway.loadSkill(ENVIRONMENT_NAME, "dev", Duration.ofMillis(100));
+    fixture.gateway.loadSkill(OTHER_ENVIRONMENT_NAME, "dev", Duration.ofMillis(100));
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.LOAD_SKILL),
         messageTypes(connectionA.envelopes()));
@@ -440,12 +568,14 @@ class EnvironmentDaemonGatewayFinalTest {
   void heartbeatKeepsEnvironmentAliveAfterReady() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-heartbeat");
-    assertTrue(fixture.environmentRegistry.isReady(ENVIRONMENT_ID));
+    assertTrue(
+        fixture.environmentRegistry.isReady(
+            ENVIRONMENT_NAME, fixture.now.get(), fixture.heartbeatTimeout));
     Instant heartbeatAt = NOW.plusSeconds(10);
     fixture.now.set(heartbeatAt);
     fixture.gateway.receive(connection.connectionId(), heartbeat(2));
     assertEquals(
-        heartbeatAt, fixture.environmentRegistry.find(ENVIRONMENT_ID).orElseThrow().lastSeenAt());
+        heartbeatAt, fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow().lastSeenAt());
   }
 
   private ToolExecutionRequest request(ToolDescriptor descriptor) {
@@ -492,12 +622,12 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private String hello(long sequence) {
-    return hello(sequence, ENVIRONMENT_ID, ENVIRONMENT_NAME);
+    return hello(sequence, ENVIRONMENT_NAME);
   }
 
-  private String hello(long sequence, EnvironmentId environmentId, String environmentName) {
+  private String hello(long sequence, EnvironmentName environmentName) {
     return envelope(
-        environmentId,
+        environmentName,
         DaemonMessageType.HELLO,
         null,
         sequence,
@@ -505,13 +635,12 @@ class EnvironmentDaemonGatewayFinalTest {
             + EnvironmentToolCatalog.version()
             + "\",\"gatewayToken\":\""
             + GATEWAY_TOKEN
-            + "\"}",
-        environmentName);
+            + "\"}");
   }
 
   private String helloWithVersion(String protocolVersion, long sequence) {
     return envelope(
-        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
         DaemonMessageType.HELLO,
         null,
         sequence,
@@ -526,7 +655,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private String helloWithCatalogVersion(String catalogVersion, long sequence) {
     return envelope(
-        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
         DaemonMessageType.HELLO,
         null,
         sequence,
@@ -538,31 +667,34 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private String ready(long sequence) {
-    return ready(sequence, ENVIRONMENT_ID, ENVIRONMENT_NAME);
+    return ready(sequence, ENVIRONMENT_NAME);
   }
 
-  private String ready(long sequence, EnvironmentId environmentId, String environmentName) {
+  private String ready(long sequence, EnvironmentName environmentName) {
     return envelope(
-        environmentId,
+        environmentName,
         DaemonMessageType.READY,
         null,
         sequence,
-        skillsCodec.encode(ADVERTISED_SKILLS),
-        environmentName);
+        skillsCodec.encode(ADVERTISED_SKILLS));
   }
 
   private String heartbeat(long sequence) {
-    return envelope(ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, sequence, "{}");
+    return envelope(ENVIRONMENT_NAME, DaemonMessageType.HEARTBEAT, null, sequence, "{}");
   }
 
   private String partial(long sequence, String payload) {
     return envelope(
-        ENVIRONMENT_ID, DaemonMessageType.PARTIAL, Long.toString(INVOCATION_ID), sequence, payload);
+        ENVIRONMENT_NAME,
+        DaemonMessageType.PARTIAL,
+        Long.toString(INVOCATION_ID),
+        sequence,
+        payload);
   }
 
   private String completed(long sequence, String payload) {
     return envelope(
-        ENVIRONMENT_ID,
+        ENVIRONMENT_NAME,
         DaemonMessageType.COMPLETED,
         Long.toString(INVOCATION_ID),
         sequence,
@@ -570,26 +702,15 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private String envelope(
-      EnvironmentId environmentId,
+      EnvironmentName environmentName,
       DaemonMessageType messageType,
       String invocationId,
       long sequence,
       String payload) {
-    return envelope(environmentId, messageType, invocationId, sequence, payload, ENVIRONMENT_NAME);
-  }
-
-  private String envelope(
-      EnvironmentId environmentId,
-      DaemonMessageType messageType,
-      String invocationId,
-      long sequence,
-      String payload,
-      String environmentName) {
     return envelopeCodec.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION_2,
             messageType,
-            environmentId,
             environmentName,
             invocationId,
             sequence,
@@ -601,7 +722,7 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private Fixture fixture() {
-    return fixture(environmentId -> {});
+    return fixture(environmentName -> {});
   }
 
   private Fixture fixture(EnvironmentReadyListener readyListener) {
@@ -615,6 +736,7 @@ class EnvironmentDaemonGatewayFinalTest {
   private final class Fixture {
     final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry();
     final AtomicReference<Instant> now = new AtomicReference<>(NOW);
+    final Duration heartbeatTimeout = Duration.ofSeconds(60);
     final EnvironmentDaemonGateway gateway;
     final ToolDescriptor descriptor;
 
@@ -680,6 +802,7 @@ class EnvironmentDaemonGatewayFinalTest {
     private final List<DaemonEnvelope> envelopes = new ArrayList<>();
     private boolean open = true;
     private boolean closed;
+    private int closeCount;
     private boolean failNextSend;
 
     private FakeConnection(String connectionId) {
@@ -707,6 +830,7 @@ class EnvironmentDaemonGatewayFinalTest {
     public void close() {
       open = false;
       closed = true;
+      closeCount += 1;
     }
 
     @Override

@@ -24,7 +24,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     status: 'IDLE',
     processing: false,
     branchSettings: {
-      environmentId: null,
+      environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'p', modelName: 'm', variant: 'v' },
       thinkingLevel: 'default',

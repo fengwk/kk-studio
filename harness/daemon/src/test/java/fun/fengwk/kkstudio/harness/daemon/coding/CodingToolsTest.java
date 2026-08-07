@@ -44,7 +44,6 @@ class CodingToolsTest {
             "read",
             "write",
             "edit",
-            "apply_patch",
             "bash",
             "grep",
             "find",

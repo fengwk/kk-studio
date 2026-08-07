@@ -9,13 +9,12 @@ public final class CodingTools {
 
   private CodingTools() {}
 
-  /** 注册 read、write、edit、apply_patch、bash、grep、find 以及三个 LSP 基线工具。 */
+  /** 注册 read、write、edit、bash、grep、find 以及三个 LSP 基线工具。 */
   public static void registerAll(DaemonToolRegistry registry, CodingToolsConfig config) {
     Objects.requireNonNull(registry, "registry");
     registry.register(new ReadTool(config));
     registry.register(new WriteTool(config));
     registry.register(new EditTool(config));
-    registry.register(new ApplyPatchTool(config));
     registry.register(new BashTool(config));
     registry.register(new GrepTool(config));
     registry.register(new FindTool(config));

@@ -193,7 +193,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: '创建时完整 branchSettings 精确投影到 Thread 快照',
-  docs: 'environmentId/agentName/model/thinkingLevel/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
+  docs: 'environmentName/agentName/model/thinkingLevel/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -203,7 +203,7 @@ registerCase({
       yoloEnabled: false,
     })
     const requested = {
-      environmentId: null,
+      environmentName: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
       thinkingLevel: 'high',
@@ -578,7 +578,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 可见；消费证据 = ASSISTANT_ERROR + TURN_END(FAILED)（environmentId null + read 工具的稳定 resolver rejection）；额外字段与非法 environmentId => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 可见；消费证据 = durable TOOL MESSAGE 的 model-visible UNAVAILABLE 拒绝 + 最终 TURN_END(COMPLETED, continueModel=false) 收敛到 IDLE（environmentName null 时 ENVIRONMENT 工具规划不再拒绝，实际 start 是确定性 Rejected）；额外字段与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -632,7 +632,7 @@ registerCase({
     assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
     const finalSnapshot = await getThreadSnapshot(ctx, thread.threadId)
     const expectedSettings = {
-      environmentId: null,
+      environmentName: null,
       agentName: ctx.vars.agent.name,
       model: {
         providerName: modelSelection.providerName,
@@ -654,34 +654,37 @@ registerCase({
       finalSnapshot.queuedCommands.length === 0,
       `SET_* batch must be consumed: ${JSON.stringify(finalSnapshot.queuedCommands)}`,
     )
-    // 输入 USER entry 可见；消费证据必须明确为 ASSISTANT_ERROR + TURN_END(FAILED)——environmentId
-    // 为 null 且 activeTools 含 read（ENVIRONMENT tool）时，turn resolver 稳定拒绝
-    // "environment tool requires a selected environment: read"，产生 ASSISTANT_ERROR + FAILED
-    // TURN_END。不能让 USER MESSAGE 自身满足消费证据。
+    // 输入 USER entry 可见；消费证据 = durable TOOL MESSAGE 的 model-visible UNAVAILABLE 拒绝 +
+    // 最终 TURN_END(COMPLETED, continueModel=false) 收敛到 IDLE。environmentName 为 null 时规划不再
+    // 拒绝：ENVIRONMENT 工具按 null route 绑定，实际 start 时是确定性 Rejected（durable FAILED
+    // ToolResult 对模型可见，turn 继续收敛）。不能让 USER MESSAGE 自身满足消费证据。
     const userEntry = finalSnapshot.entries.find((entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
       const message = JSON.parse(entry.payloadJson).message
       return message?.role === 'USER' && JSON.stringify(message).includes(marker)
     })
     assert(userEntry, `USER entry missing: ${JSON.stringify(finalSnapshot.entries)}`)
-    const assistantErrorEntries = finalSnapshot.entries.filter(
-      (entry) => String(entry.entryType || '').toUpperCase() === 'ASSISTANT_ERROR',
+    const failedToolMessage = finalSnapshot.entries.find((entry) => {
+      if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
+      const message = JSON.parse(entry.payloadJson).message
+      const result = (message?.contents ?? []).find(
+        (content) => content?.type === 'tool_result' && content.error === true,
+      )
+      const text = (result?.contents ?? []).map((content) => content?.text ?? '').join('')
+      return text.includes('has no environment route')
+    })
+    assert(
+      failedToolMessage,
+      `expected a durable model-visible UNAVAILABLE ToolResult: ${JSON.stringify(finalSnapshot.entries)}`,
     )
     const turnEndEntries = finalSnapshot.entries.filter(
       (entry) => String(entry.entryType || '').toUpperCase() === 'TURN_END',
     )
+    assert(turnEndEntries.length >= 1, `expected at least one TURN_END: ${JSON.stringify(finalSnapshot.entries)}`)
+    const lastTurnEnd = JSON.parse(turnEndEntries.at(-1).payloadJson)
     assert(
-      assistantErrorEntries.length === 1,
-      `expected exactly one ASSISTANT_ERROR (resolver rejection): ${JSON.stringify(finalSnapshot.entries)}`,
-    )
-    assert(
-      turnEndEntries.length === 1,
-      `expected exactly one TURN_END: ${JSON.stringify(finalSnapshot.entries)}`,
-    )
-    const turnEndPayload = JSON.parse(turnEndEntries[0].payloadJson)
-    assert(
-      turnEndPayload.outcome === 'FAILED' && turnEndPayload.reason === 'TURN_FAILED',
-      `expected FAILED TURN_END: ${JSON.stringify(turnEndPayload)}`,
+      lastTurnEnd.outcome === 'COMPLETED' && lastTurnEnd.continueModel === false,
+      `expected the final TURN_END to converge: ${JSON.stringify(lastTurnEnd)}`,
     )
 
     // 额外字段 => 400（每类命令 requireForbidden）；400 不推进 cursor，可复用 quiescent 后最新 cursor。
@@ -695,15 +698,15 @@ registerCase({
         }),
       { status: 400, messageIncludes: /content/i },
     )
-    // SET_ENVIRONMENT 只接受 canonical lowercase UUID（mapper EnvironmentId 校验；resolver 运行时才查 registry READY）。
+    // SET_ENVIRONMENT 只接受 canonical bounded 小写路由名称（mapper EnvironmentName 校验；resolver 运行时才查 registry READY）。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: fresh.thread.headEntryId,
           expectedNextCommandSequence: fresh.thread.nextCommandSequence,
-          commands: [setEnvironmentCommand('not-a-uuid', cid())],
+          commands: [setEnvironmentCommand('Not-A-Name', cid())],
         }),
-      { status: 400, messageIncludes: /environmentId/i },
+      { status: 400, messageIncludes: /environmentName/i },
     )
   },
 })

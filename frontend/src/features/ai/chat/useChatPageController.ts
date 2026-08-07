@@ -4,6 +4,7 @@ import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
 import { filterChats } from '@/features/ai/chat/chat-utils'
 import { useChatListController } from '@/features/ai/chat/useChatListController'
 import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
@@ -17,7 +18,12 @@ export function useChatPageController() {
     queryFn: () => agentService.listAgents(),
   })
   const agents = agentsQuery.data?.results ?? []
-  const chatController = useChatListController(agents, true)
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
+  })
+  const environments = environmentsQuery.data ?? []
+  const chatController = useChatListController(agents, true, environments)
   const chats = useMemo(
     () => filterChats(chatController.chats, deferredSearch),
     [chatController.chats, deferredSearch],
