@@ -113,7 +113,11 @@ final class TurnPlanBuilder {
                   sessionId,
                   parentId,
                   new CustomMessagePayload(
-                      ((CustomMessageCommandPayload) command.payload()).message()),
+                      CustomMessagePayload.CORE_PLUGIN_ID,
+                      CustomMessagePayload.CORE_CUSTOM_TYPE,
+                      CustomMessagePayload.CORE_RENDERER_KEY,
+                      ((CustomMessageCommandPayload) command.payload()).message(),
+                      CustomMessagePayload.CORE_DETAILS_JSON),
                   now));
           parentId = entryId;
         }

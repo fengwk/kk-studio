@@ -17,6 +17,7 @@
 harness/
 ├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v2 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
+├── plugin/              # 纯 Java build-time 插件 API：PluginCatalog/BranchView/intents/prompt 模板
 ├── runtime-spring/      # Store/Work/Redis/Resource 适配（PostgreSQL、dispatcher）
 └── daemon/              # 独立 Environment 进程，只依赖 tool
 ```
@@ -27,6 +28,7 @@ harness/
 web composition root -> core application API / share DTO
 web composition root -> harness-runtime-spring -> harness-runtime -> harness-tool
 web composition root -> harness-runtime
+core -> harness-plugin -> harness-runtime -> harness-tool
 core -> harness-runtime -> harness-tool
 core -> harness-tool
 harness-daemon -> harness-tool
@@ -36,12 +38,13 @@ harness-daemon -> harness-tool
 
 ### Session 与 Entry
 
-Session 只组织一棵 append-only Entry Tree。Entry 类型固定为七种：
+Session 只组织一棵 append-only Entry Tree。Entry 类型固定为八种：
 
 ```text
 ROOT
 TURN_START
 MESSAGE
+CUSTOM
 CUSTOM_MESSAGE
 ASSISTANT_ERROR
 ASSISTANT_ABORTED
@@ -51,7 +54,8 @@ TURN_END
 - `ROOT` 是每个 Session 的唯一无 parent 根，payload 携带初始完整 `BranchSettings`。
 - `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION`）。
 - `MESSAGE` 是对话消息；`USER` / `ASSISTANT` / `TOOL` 语义由 payload 子类型决定（Tool 结果消息带 ToolResult 元数据）。
-- `CUSTOM_MESSAGE` 是业务扩展注入的对话消息。
+- `CUSTOM` 是业务插件追加的透明 branch state 节点：允许 ROOT 后任意位置（含 open/closed turn），不参与 turn grammar，provider 消息投影默认忽略；payload 为 `(pluginId, customType, schemaVersion, data)`。
+- `CUSTOM_MESSAGE` 是业务扩展注入的对话消息：冻结 `AgentMessage`（SYSTEM/USER）保持 model-visible，`details` 绝不投影；非插件命令消息使用稳定 core 元数据（`pluginId=core`、`customType=message`、`rendererKey=message`、`details={}`）。
 - `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：stable `code` + 非空 `message`（≤2048 字符），不投影到 Provider Context。
 - `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
 - `TURN_END` 关闭一次 turn，payload 携带 `TurnEndOutcome`（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）与 `TurnEndReason`（`USER_STOP` / `HISTORY_CUT` / `CANCELLED` / `TURN_FAILED`），以及 continuation obligation。

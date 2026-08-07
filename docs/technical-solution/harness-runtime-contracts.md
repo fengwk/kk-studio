@@ -30,13 +30,13 @@ public record ThreadState(
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
 - 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
 
-Entry 类型固定为七种：
+Entry 类型固定为八种：
 
 ```java
-ROOT, TURN_START, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
-Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentId` 是 canonical 非 nil UUID 或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentId` 是 canonical 非 nil UUID 或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider。
 
 ## 3. 命令 batch
 

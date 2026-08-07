@@ -9,6 +9,7 @@ public sealed interface EntryPayload
     permits RootPayload,
         TurnStartPayload,
         MessagePayload,
+        CustomEntryPayload,
         CustomMessagePayload,
         AssistantErrorPayload,
         AssistantAbortedPayload,

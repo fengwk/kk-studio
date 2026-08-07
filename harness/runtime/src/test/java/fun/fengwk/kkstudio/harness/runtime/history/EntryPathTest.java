@@ -26,6 +26,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** EntryPath 链的不变量：同一 head 的 settings、turn 顺序、tool 前缀与结局。 */
 class EntryPathTest {
@@ -599,6 +600,50 @@ class EntryPathTest {
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, end)));
   }
 
+  @Test
+  void customEntriesAreTransparentToTurnGrammar() {
+    Entry root = root(settings("root"));
+    Entry customBeforeTurn = customEntry(2L, 1L, "goal");
+    Entry start = turnStart(3L, 2L, TurnStartReason.INPUT, settings("turn"));
+    Entry customInsideTurn = customEntry(4L, 3L, "goal");
+    Entry user = userMessage(5L, 4L);
+    Entry assistant = assistantMessage(6L, 5L);
+    Entry customAfterAssistant = customEntry(7L, 6L, "goal");
+    Entry end = turnEnd(8L, 7L, 3L, TurnEndOutcome.COMPLETED, null, null);
+    Entry customAfterTurn = customEntry(9L, 8L, "goal");
+
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                root,
+                customBeforeTurn,
+                start,
+                customInsideTurn,
+                user,
+                assistant,
+                customAfterAssistant,
+                end,
+                customAfterTurn));
+
+    assertEquals(
+        4,
+        path.entries().stream()
+            .filter(entry -> entry.payload() instanceof CustomEntryPayload)
+            .count());
+    // CUSTOM 不打开/关闭 turn：closed turn 之后 openTurnStart 为空。
+    assertEquals(Optional.empty(), path.openTurnStart());
+    assertEquals(settings("turn"), path.baseSettings());
+  }
+
+  @Test
+  void customEntryAfterRootWithoutAnyTurnIsAccepted() {
+    Entry root = root(settings("root"));
+    Entry custom = customEntry(2L, 1L, "goal");
+    EntryPath path = new EntryPath(List.of(root, custom));
+    assertEquals(custom, path.head());
+    assertEquals(Optional.empty(), path.openTurnStart());
+  }
+
   private static Entry root(BranchSettings settings) {
     return new Entry(1L, SESSION, null, new RootPayload(settings), BASE);
   }
@@ -641,7 +686,20 @@ class EntryPathTest {
         SESSION,
         parentId,
         new CustomMessagePayload(
-            new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys")))),
+            CustomMessagePayload.CORE_PLUGIN_ID,
+            CustomMessagePayload.CORE_CUSTOM_TYPE,
+            CustomMessagePayload.CORE_RENDERER_KEY,
+            new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys"))),
+            CustomMessagePayload.CORE_DETAILS_JSON),
+        time(id));
+  }
+
+  private static Entry customEntry(long id, long parentId, String customType) {
+    return new Entry(
+        id,
+        SESSION,
+        parentId,
+        new CustomEntryPayload("com.example.goal", customType, 1, "{\"s\":1}"),
         time(id));
   }
 

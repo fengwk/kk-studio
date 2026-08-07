@@ -13,14 +13,15 @@ import java.util.List;
  * package-private EntryPath turn-sequence validation state（KISS：非通用 workflow/state-machine）。
  *
  * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须在 open TURN_START
- * 内；input 阶段只允许 USER/CUSTOM MESSAGE；INPUT turn 在 Assistant 结果前必须已有至少一条 USER/CUSTOM；CONTINUATION
- * turn 偿还上一 TURN_END 的 continueModel obligation，不消费 USER/CUSTOM（配置 Commands 只体现在
- * TURN_START.settings， 不形成 Message），可零 input 直接产生 Assistant 结果；Assistant 结果（ASSISTANT MESSAGE /
- * ASSISTANT_ERROR / ASSISTANT_ABORTED）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带
- * ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0 开始的严格前缀（ordinal 连续、toolCallId/toolName
- * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE 且 ToolResult 完整；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有
- * stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase 关闭）。路径可以在任意 prefix 截断。
+ * 内（CUSTOM 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；INPUT turn 在 Assistant
+ * 结果前必须已有至少一条 USER/CUSTOM；CONTINUATION turn 偿还上一 TURN_END 的 continueModel obligation，不消费
+ * USER/CUSTOM（配置 Commands 只体现在 TURN_START.settings， 不形成 Message），可零 input 直接产生 Assistant
+ * 结果；Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED）只能出现一次且之后 不得再出现
+ * USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0
+ * 开始的严格前缀（ordinal 连续、toolCallId/toolName 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END
+ * 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE 且 ToolResult
+ * 完整；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意
+ * open phase 关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
@@ -35,6 +36,11 @@ final class TurnPathValidator {
   /** 按 root-to-head 顺序访问一个非 ROOT Entry。 */
   void visit(Entry entry) {
     EntryPayload payload = entry.payload();
+    if (payload instanceof CustomEntryPayload) {
+      // CUSTOM 是透明 branch state：允许 ROOT 后任意位置（含 open/closed turn），不参与 input/assistant/ordinal
+      // 判定，也不打开/关闭 turn。
+      return;
+    }
     if (payload instanceof TurnStartPayload start) {
       if (openTurnStart != null) {
         throw new IllegalArgumentException(

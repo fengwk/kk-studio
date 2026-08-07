@@ -26,7 +26,7 @@ PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 ove
 - 允许的 `entry_type`（check 约束）：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
 - payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码；root-to-head path 由 recursive CTE 读取。

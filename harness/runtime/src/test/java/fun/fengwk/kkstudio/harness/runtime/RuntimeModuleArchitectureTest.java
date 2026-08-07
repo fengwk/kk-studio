@@ -83,6 +83,9 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(
+        harnessRoot.resolve("plugin/pom.xml"),
+        Set.of("fun.fengwk.kk-studio:kk-studio-harness-runtime"));
+    assertDirectProductionDependencies(
         harnessRoot.resolve("runtime-spring/pom.xml"),
         Set.of(
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
@@ -145,8 +148,10 @@ class RuntimeModuleArchitectureTest {
       modules.add(matcher.group(1).trim());
     }
     assertTrue(
-        modules.equals(List.of("tool", "runtime", "runtime-spring", "daemon")),
-        () -> "harness modules must be exactly tool/runtime/runtime-spring/daemon, got " + modules);
+        modules.equals(List.of("tool", "runtime", "plugin", "runtime-spring", "daemon")),
+        () ->
+            "harness modules must be exactly tool/runtime/plugin/runtime-spring/daemon, got "
+                + modules);
   }
 
   private static void assertDirectProductionDependencies(Path pom, Set<String> allowed)

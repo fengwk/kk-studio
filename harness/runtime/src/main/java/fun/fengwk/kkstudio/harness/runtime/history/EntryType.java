@@ -8,6 +8,8 @@ public enum EntryType {
   TURN_START,
   /** 对话消息；具体结构由 payload 子类型决定。 */
   MESSAGE,
+  /** 业务插件追加的透明 branch state 节点：不参与 turn grammar，默认不投影给 provider。 */
+  CUSTOM,
   /** 由业务扩展注入的对话消息。 */
   CUSTOM_MESSAGE,
   /** Provider/Assistant-side 错误审计。 */

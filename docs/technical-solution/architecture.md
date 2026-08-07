@@ -93,7 +93,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Chat | 保存 `agentName`、`yoloEnabled` 两个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
-| Entry | 对话与运行审计事实，只允许七种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
+| Entry | 对话与运行审计事实，只允许八种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许八类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
 | ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）及其状态、attempt 与 terminal 事实 |
