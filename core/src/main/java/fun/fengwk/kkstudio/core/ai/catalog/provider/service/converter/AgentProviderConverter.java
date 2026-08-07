@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
-/** Converts providers to credential-free public DTOs. */
+/** 将 provider 转换为不含凭据的公开 DTO。 */
 @Component
 public class AgentProviderConverter {
 

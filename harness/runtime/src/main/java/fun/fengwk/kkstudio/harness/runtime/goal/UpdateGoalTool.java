@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** PLATFORM tool: mark the durable Thread goal complete or blocked. */
+/** PLATFORM tool：将 durable Thread goal 标记为 complete 或 blocked。 */
 public final class UpdateGoalTool implements Tool {
   public static final String NAME = "update_goal";
   public static final String VERSION = "1";
@@ -34,12 +34,10 @@ public final class UpdateGoalTool implements Tool {
           GoalToolPrompts.load("goal-update-tool.md"),
           NAME,
           new ToolParamsSchema(
-              "Update the current Thread goal to a terminal status.",
+              "将当前 Thread 的 goal 更新为终态。",
               Map.of(
-                  "status", new ToolEnumSchema("Terminal status.", List.of("complete", "blocked")),
-                  "reason",
-                      new ToolStringSchema(
-                          "Detailed rationale and concrete evidence supporting this completion or blocked status.")),
+                  "status", new ToolEnumSchema("终态状态。", List.of("complete", "blocked")),
+                  "reason", new ToolStringSchema("支持完成或阻塞状态的详细依据和具体证据。")),
               Set.of("status", "reason"),
               false),
           ToolSideEffect.IDEMPOTENT,

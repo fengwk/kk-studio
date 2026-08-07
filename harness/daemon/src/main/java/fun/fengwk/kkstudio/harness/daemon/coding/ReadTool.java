@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** Reads bounded text windows or deterministic directory listings. */
+/** 读取有界文本窗口或确定性的目录清单。 */
 public final class ReadTool extends AbstractCodingTool {
 
   private static final int DEFAULT_LIMIT = 200;

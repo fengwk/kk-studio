@@ -1,26 +1,25 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
 /**
- * Stable machine-readable error codes for AI catalog domain failures.
+ * AI catalog 领域失败的稳定机器可读错误码。
  *
- * <p>The codes are part of the HTTP contract: clients use them to branch on retry/refresh behavior
- * without parsing messages. New codes may be added; existing codes are frozen.
+ * <p>这些错误码属于 HTTP 契约的一部分：客户端用它们分支处理重试/刷新行为，而无需解析消息。 可以新增错误码；既有错误码冻结不变。
  */
 public enum DomainErrorCode {
 
-  /** Request body or parameter failed validation. */
+  /** 请求体或参数校验失败。 */
   VALIDATION("validation"),
 
-  /** Resource referenced by id does not exist. */
+  /** 按 id 引用的资源不存在。 */
   RESOURCE_NOT_FOUND("resource_not_found"),
 
-  /** Update/delete CAS lost the optimistic-version race; client must refresh. */
+  /** 更新/删除 CAS 在乐观版本竞争中失败；客户端必须刷新。 */
   VERSION_CONFLICT("version_conflict"),
 
-  /** Unique name / provider+name conflict (detected as race after create/update). */
+  /** 唯一 name / provider+name 冲突（在 create/update 后作为竞争检测到）。 */
   DUPLICATE("duplicate"),
 
-  /** Resource cannot be removed because it is still referenced. */
+  /** 资源仍被引用而无法移除。 */
   IN_USE("in_use");
 
   private final String code;

@@ -21,8 +21,8 @@ import java.time.Clock;
 import java.util.Set;
 
 /**
- * Wires runtime tools ({@code load_skill}, goal tools) as Spring {@code Tool} beans and exposes
- * them as {@link ToolFactory} beans for {@code ToolFactories}.
+ * 把 runtime 工具（{@code load_skill}、goal 工具）装配为 Spring {@code Tool} bean，并为 {@code ToolFactories} 暴露为
+ * {@link ToolFactory} bean。
  */
 @Configuration(proxyBeanMethods = false)
 public class RuntimeToolsConfiguration {

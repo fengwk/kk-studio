@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Strict deterministic JSON codec for one frozen Model invocation request. */
+/** 一个冻结 Model invocation request 的严格、确定性 JSON codec。 */
 public final class ModelInvocationRequestJsonCodec {
 
   private static final String CONTEXT = "modelInvocationRequest";

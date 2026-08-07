@@ -11,7 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Guards the single Flyway bootstrap path used by production and integration tests. */
+/** 守护生产与集成测试共用的唯一 Flyway 引导路径。 */
 class FlywayBootstrapArchitectureTest {
 
   private static final List<String> LEGACY_RESOURCES =

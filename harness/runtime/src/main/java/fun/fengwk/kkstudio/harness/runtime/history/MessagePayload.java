@@ -12,14 +12,13 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Durable conversation message.
+ * durable 会话消息。
  *
- * <p>SYSTEM messages belong to {@link CustomMessagePayload}. USER messages carry no metadata;
- * ASSISTANT messages must carry {@link AssistantMessageMetadata} and no tool result metadata, and
- * {@code stopReason == TOOL_CALLS} must match the presence of {@link ToolCallMessageContent};
- * assistant tool call ids must be unique so ordinal/prefix validation stays deterministic. TOOL
- * messages must carry {@link ToolResultMetadata} and no assistant metadata, and the unique {@link
- * ToolResultMessageContent#toolCallId()} must match the metadata.
+ * <p>SYSTEM 消息属于 {@link CustomMessagePayload}。USER 消息不携带 metadata；ASSISTANT 消息必须携带 {@link
+ * AssistantMessageMetadata} 且不能携带 tool result metadata，且 {@code stopReason == TOOL_CALLS} 必须与是否存在
+ * {@link ToolCallMessageContent} 匹配；assistant tool call id 必须唯一，以保证 ordinal/prefix 校验的确定性。TOOL
+ * 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的 {@link
+ * ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。
  */
 public record MessagePayload(
     AgentMessage message,

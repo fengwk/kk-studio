@@ -78,7 +78,7 @@ function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
 }
 
 describe('ai-model-draft-codec', () => {
-  /** A full persisted config must round-trip through every nested schema field used by the form. */
+  /** 完整的持久化 config 必须能往返覆盖表单使用的每一个嵌套 schema 字段。 */
   it('reads nested limit, abilities, pricing, defaultVariant, and variant fields', () => {
     const source = model()
 
@@ -115,12 +115,12 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
   })
 
-  /** New model drafts default to TEXT only (not every modality). */
+  /** 新建 model 草稿默认仅 TEXT（而非包含所有 modality）。 */
   it('defaults to TEXT-only input modalities on empty drafts', () => {
     expect(emptyModelDraft().inputModalities).toEqual<AgentModelInputModality[]>(['TEXT'])
   })
 
-  /** Serialization uses the structured config object and omits empty optional variant fields. */
+  /** 序列化使用结构化 config 对象，并省略空的 optional variant 字段。 */
   it('writes the structured config and omits empty optional variant fields', () => {
     const base = emptyModelDraft().variants[0]
     const input = draft({
@@ -194,7 +194,7 @@ describe('ai-model-draft-codec', () => {
     expect(editable.name).toBe('model-a')
     expect(editable.description).toBe('model desc')
   })
-  /** Disabling reasoning must prevent stale hidden reasoning-effort values from reaching providers. */
+  /** 关闭 reasoning 时必须防止陈旧的隐藏 reasoning-effort 值传到 providers。 */
   it('omits reasoningEffort when reasoning is disabled', () => {
     const base = emptyModelDraft().variants[0]
     const input = draft({
@@ -206,7 +206,7 @@ describe('ai-model-draft-codec', () => {
     expect(config.variants).toEqual([{ id: 'medium' }])
   })
 
-  /** Invalid variant/default relationships are rejected before issuing a mutation request. */
+  /** 在发起 mutation 请求前，必须拒绝无效的 variant/default 关系。 */
   it('rejects empty, duplicate, unmatched, and invalid optional variants', () => {
     const base = emptyModelDraft().variants[0]
     expect(() => buildModelConfig(draft({ variants: [] }))).toThrow(/at least one variant/i)
@@ -239,7 +239,7 @@ describe('ai-model-draft-codec', () => {
     ).toThrow('contains duplicate value')
   })
 
-  /** Generic variants preserve finite negative penalties supported by OpenAI-compatible providers. */
+  /** 通用 variant 保留 OpenAI 兼容 providers 支持的有限负值 penalty。 */
   it('preserves negative frequency and presence penalties', () => {
     const base = emptyModelDraft().variants[0]
     const config = buildModelConfig(
@@ -254,7 +254,7 @@ describe('ai-model-draft-codec', () => {
     })
   })
 
-  /** Create update DTOs are built without string-encoded JSON. */
+  /** 创建/更新 DTO 不使用字符串编码的 JSON 构建。 */
   it('produces structured create / update payloads', () => {
     const input = draft({ name: 'stub', contextWindow: '4096', maxOutputTokens: '512' })
     const config = buildModelConfig(input)
@@ -265,7 +265,7 @@ describe('ai-model-draft-codec', () => {
     expect(toEditableModelUpdate(input)).not.toHaveProperty('providerName')
   })
 
-  /** Toggling via immutable arrays never drops the last input modality. */
+  /** 通过不可变数组切换时，永远不会丢失最后一个 input modality。 */
   it('keeps at least one input modality when toggling', () => {
     const base = emptyModelDraft()
     const onlyText = base.inputModalities.filter((m) => m !== 'TEXT')
@@ -273,7 +273,7 @@ describe('ai-model-draft-codec', () => {
     expect(toggled).toEqual<AgentModelInputModality[]>(['TEXT'])
   })
 
-  /** Edit must preserve every persisted pricing metadata field; new drafts use canonical defaults. */
+  /** 编辑时必须保留每个持久化的 pricing 元数据字段；新建草稿使用规范默认值。 */
   it('round-trips pricing metadata across toModelDraft -> buildModelConfig', () => {
     const source = model({
       ...fullConfig(),
@@ -308,7 +308,7 @@ describe('ai-model-draft-codec', () => {
     })
   })
 
-  /** buildModelConfig rejects non-positive multipliers and negative per-million prices. */
+  /** buildModelConfig 拒绝非正 multiplier 和负的每百万 token 价格。 */
   it('rejects non-positive multiplier and negative prices', () => {
     const base = draft()
     expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, serviceTierMultiplier: '0' } })).toThrow(
@@ -322,7 +322,7 @@ describe('ai-model-draft-codec', () => {
     )
   })
 
-  /** buildModelConfig rejects blank name + non-blank providerName even before reaching config. */
+  /** buildModelConfig 甚至在到达 config 之前就拒绝 name 为空且 providerName 非空的组合。 */
   it('rejects blank name in toEditableModel and toEditableModelUpdate', () => {
     expect(() => toEditableModel(draft({ name: '   ' }))).toThrow(/name/)
     expect(toEditableModelUpdate(draft({ name: '' }))).toEqual(
@@ -330,12 +330,12 @@ describe('ai-model-draft-codec', () => {
     )
   })
 
-  /** toEditableModel rejects a blank providerName. */
+  /** toEditableModel 拒绝空的 providerName。 */
   it('rejects blank providerName in toEditableModel', () => {
     expect(() => toEditableModel(draft({ providerName: '' }))).toThrow(/providerName is required/)
   })
 
-  /** Pricing metadata is required and must not be silently reconstructed during edit. */
+  /** pricing 元数据为必填项，编辑时不得静默重建。 */
   it('rejects blank pricing metadata', () => {
     const base = draft()
     expect(() =>
@@ -346,13 +346,13 @@ describe('ai-model-draft-codec', () => {
     ).toThrow(/pricing\.version must not be blank/)
   })
 
-  /** Missing models do not invent a Variant ID. */
+  /** 缺失的 model 不会凭空生成 Variant ID。 */
   it('returns no variant data for missing models', () => {
     expect(extractVariantIdsFromModel(undefined)).toEqual([])
     expect(extractDefaultVariantFromModel(undefined)).toBe('')
   })
 
-  /** Incomplete wire models must not crash list/filter projections. */
+  /** 不完整的 wire model 不得让列表/过滤投影崩溃。 */
   it('tolerates models whose structured config is missing', () => {
     const incomplete = { id: '1', name: 'broken' } as AgentModelDTO
     expect(extractVariantIdsFromModel(incomplete)).toEqual([])
@@ -361,14 +361,14 @@ describe('ai-model-draft-codec', () => {
     expect(extractMaxOutputTokens(incomplete)).toBeUndefined()
   })
 
-  /** emptyModelDraft without a model or provider keeps an empty providerName and TEXT only. */
+  /** emptyModelDraft 在未提供 model 或 provider 时，保留空的 providerName 且仅 TEXT。 */
   it('returns empty providerName when neither model nor provider is supplied', () => {
     const blank = emptyModelDraft(null)
     expect(blank.providerName).toBe('')
     expect(blank.inputModalities).toEqual(['TEXT'])
   })
 
-  /** emptyModelDraft respects an explicit provider argument. */
+  /** emptyModelDraft 遵循显式传入的 provider 参数。 */
   it('uses the explicit provider argument when no model is supplied', () => {
     const seeded = emptyModelDraft({ name: 'provider-x' })
     expect(seeded.providerName).toBe('provider-x')

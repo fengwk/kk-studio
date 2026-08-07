@@ -11,8 +11,8 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
- * Transcript zone: durable timeline + live mailbox messages.
- * Consumers provide already-loaded data; this surface never reaches into a controller.
+ * Transcript 区域：持久 timeline + 实时 mailbox 消息。
+ * 由调用方提供已加载的数据；该面板不会访问 controller。
  */
 export interface ThreadPanelTranscriptInput {
   messages: DialogueMessage[]
@@ -20,15 +20,15 @@ export interface ThreadPanelTranscriptInput {
   loading: boolean
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
-  /** Decides a pending ToolInvocation approval; absent when the surface has no Thread context. */
+  /** 处理待决 ToolInvocation 的审批；当面板没有 Thread 上下文时为空。 */
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
-  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }
 
 /**
- * Composer zone: slash command input + send button. All callbacks are required because
- * the composer is a pure controlled component and owns no state of its own.
+ * Composer 区域：slash 命令输入 + 发送按钮。所有回调都必填，因为
+ * composer 是纯受控组件，自身不持有任何状态。
  */
 export interface ThreadPanelComposerInput {
   draft: string
@@ -41,7 +41,7 @@ export interface ThreadPanelComposerInput {
 }
 
 /**
- * Activity zone: working status, queued inputs, and an optional dismissible feedback banner.
+ * Activity 区域：工作状态、排队中的输入，以及可选的可关闭反馈横幅。
  */
 export interface ThreadPanelActivityInput {
   working: boolean
@@ -51,9 +51,9 @@ export interface ThreadPanelActivityInput {
 }
 
 /**
- * Optional layout slots: permanent sidebar rendered before the main column, and footer rendered
- * after the composer. They are intentionally raw ReactNodes so callers can compose any
- * presentation contract (status, history shortcut, etc.) without altering this surface.
+ * 可选的布局槽位：在主列之前渲染常驻侧边栏，以及在 composer 之后渲染 footer。
+ * 它们刻意暴露为原生 ReactNode，以便调用方自由组合任意展示契约
+ * （status、history 快捷键等），而无需改动本面板。
  */
 interface ThreadPanelSlots {
   sidebar?: ReactNode
@@ -68,8 +68,8 @@ interface ThreadPanelProps {
 }
 
 /**
- * Full-bleed thread panel:
- * durable/live dialogue -> decoration widgets/queue -> slash-command input -> footer
+ * 全宽 thread 面板：
+ * 持久/实时对话 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
 export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPanelProps) {
   return (

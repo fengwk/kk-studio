@@ -62,10 +62,7 @@ class ProviderRequestJsonCodecTest {
 
   private final ProviderRequestJsonCodec codec = new ProviderRequestJsonCodec();
 
-  /**
-   * The canonical fixture exercises the complete request graph and compares the exact deterministic
-   * wire output, including enum-name ordering and raw JSON strings.
-   */
+  /** 规范 fixture 覆盖完整的 request graph，并对比 deterministic wire 输出，包含 enum-name 顺序与 raw JSON 字符串。 */
   @Test
   void roundTripsCompleteRequestAndMatchesCanonicalFixture() {
     ProviderRequest request = canonicalRequest();
@@ -112,7 +109,7 @@ class ProviderRequestJsonCodecTest {
         new BigDecimal("3.000000000000"), decoded.model().pricing().inputPerMillionTokens());
   }
 
-  /** Every legal cache capability shape must survive the same strict request boundary. */
+  /** 所有合法的 cache capability 形态都必须通过同一严格的 request boundary。 */
   @Test
   void roundTripsEveryLegalPromptCacheModeAndControlShape() {
     List<CacheCase> cases =
@@ -142,9 +139,7 @@ class ProviderRequestJsonCodecTest {
     assertEquals(PromptCacheMode.values().length, cases.size());
   }
 
-  /**
-   * String and raw-JSON boundaries reject duplicate fields and trailing documents symmetrically.
-   */
+  /** String 与 raw-JSON boundary 对 duplicate field 与 trailing document 的拒绝行为对称。 */
   @Test
   void rejectsDuplicateAndTrailingDocumentsAtStrictJsonBoundaries() {
     ProviderRequest request = canonicalRequest();
@@ -175,10 +170,7 @@ class ProviderRequestJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidRequest));
   }
 
-  /**
-   * Each object layer rejects an extra field, a missing field, and a field with the wrong JSON
-   * type, preventing partially compatible persisted payloads.
-   */
+  /** 每个对象层都拒绝额外字段、缺失字段以及 JSON 类型错误的字段，避免部分兼容的持久化 payload。 */
   @Test
   void rejectsUnknownMissingAndWrongTypedFieldsAtEveryObjectLayer() {
     assertStrictLayer(
@@ -223,7 +215,7 @@ class ProviderRequestJsonCodecTest {
         root -> toolResult(root).put("error", "false"));
   }
 
-  /** Unknown enum names and content discriminators must never be interpreted as legacy aliases. */
+  /** 未知 enum 名与 content discriminator 绝不能被解释为旧别名。 */
   @Test
   void rejectsUnknownEnumsAndDiscriminators() {
     assertRejected(root -> message(root, 0).put("role", "DEVELOPER"));
@@ -235,10 +227,7 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> content(root, 0, 0).remove("type"));
   }
 
-  /**
-   * Malformed roots, collections, numbers, and raw JSON strings are rejected before they can enter
-   * the durable request snapshot.
-   */
+  /** Malformed 根节点、集合、数字以及 raw JSON 字符串必须在进入持久化 request snapshot 前被拒绝。 */
   @Test
   void rejectsMalformedRootsCollectionsNumbersAndRawJson() {
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{"));

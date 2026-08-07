@@ -9,27 +9,27 @@ export function getToolAttachmentLabel(attachment: ToolAttachment): string {
   )
 }
 
-/** Canonical resource schemes the UI treats as safe link/preview targets. */
+/** UI 视作安全的链接/预览目标的资源 scheme。 */
 const RESOURCE_URI_PATTERN = /^(data:|file:|s3:|https?:\/\/)/i
 
 /**
- * Auto-previewable when the URI is an inline data: resource. Remote http(s) and local
- * file:/s3: resources are NEVER placed in media src: an untrusted Tool Resource would make
- * the browser issue automatic GET requests (remote/local network). They render as a stable
- * URI text + explicit link instead.
+ * 当 URI 是内联 data: 资源时可自动预览。远程 http(s) 与本地
+ * file:/s3: 资源绝不会被放进 media src：不可信的 Tool 资源会让
+ * 浏览器发出自动 GET 请求（远程/本地网络）。它们仅以稳定
+ * URI 文本 + 显式链接的形式渲染。
  */
 export function isPreviewableAttachment(attachment: ToolAttachment): boolean {
   return /^data:/i.test(attachment.data.trim())
 }
 
-/** True when the URI is a canonical data/file/s3/http/https resource reference. */
+/** 当 URI 属于规范的 data/file/s3/http/https 资源引用时返回 true。 */
 export function isCanonicalResourceUri(uri: string): boolean {
   return RESOURCE_URI_PATTERN.test(uri.trim())
 }
 
 /**
- * Renderable media src for data: resources only. http(s)/file:/s3: are never inlined: the
- * stable URI is shown as text with an explicit link instead (no automatic remote/local GET).
+ * 仅 data: 资源可以作为可渲染的 media src。http(s)/file:/s3: 绝不会被内联：
+ * 稳定 URI 仅以文本 + 显式链接的形式展示（不会触发自动远程/本地 GET）。
  */
 export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
   const uri = attachment.data.trim()
@@ -42,7 +42,7 @@ export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
   return null
 }
 
-/** The stable URI as a link target; only canonical data/file/s3/http/https schemes qualify. */
+/** 返回稳定 URI 作为链接目标；只有规范的 data/file/s3/http/https scheme 符合条件。 */
 export function getToolAttachmentHref(attachment: ToolAttachment): string | null {
   const uri = attachment.data.trim()
   if (!uri || !isCanonicalResourceUri(uri)) {

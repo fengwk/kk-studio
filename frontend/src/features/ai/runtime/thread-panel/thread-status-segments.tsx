@@ -5,7 +5,7 @@ import type { ThreadStatusSegment } from '@/features/ai/runtime/thread-panel/thr
 const SEP_SLOT_PX = 16
 
 /**
- * Responsive segment row layout for the thread status footer.
+ * 为 thread 状态 footer 提供自适应的分段行布局。
  *
  * - 宽够时 1 行；变窄 2+1 → 1+1+1
  * - │ 只画在行内

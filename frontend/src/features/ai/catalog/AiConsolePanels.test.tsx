@@ -119,7 +119,7 @@ describe('AiConsolePanels', () => {
     )
     expect(screen.getByText('One')).toBeInTheDocument()
     expect(screen.getByText('assistant')).toBeInTheDocument()
-    // Model cards use the canonical provider/model display ref.
+    // Model 卡片使用规范的 provider/model 展示 ref。
     expect(screen.getAllByText(/minimax\/MiniMax/i).length).toBeGreaterThan(0)
     expect(screen.getByText(/ctx 128000/)).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: '新建 Chat' })[0]!)

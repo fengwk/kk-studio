@@ -175,7 +175,7 @@ final class HistoryValueCodecs {
     return new AssistantMessageMetadata(stopReason, usage, cost);
   }
 
-  // ---------- Generic JSON helpers ----------
+  // ---------- 通用 JSON 工具方法 ----------
 
   static ObjectNode requireObject(JsonNode value, String context) {
     if (!(value instanceof ObjectNode object)) {

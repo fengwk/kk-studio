@@ -16,16 +16,14 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
-/** Complete frozen Model request wire, including route-owned Tool and Skill bindings. */
+/** 完整 frozen 的 Model 请求 wire，包含 route 拥有的 Tool 与 Skill binding。 */
 class ModelInvocationRequestJsonCodecTest {
 
   private final ModelInvocationRequestJsonCodec codec = new ModelInvocationRequestJsonCodec();
   private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
   private final ToolBindingJsonCodec bindingCodec = new ToolBindingJsonCodec();
 
-  /**
-   * Exact composition proves top-level order while nested codecs remain their single authorities.
-   */
+  /** 精确组合既证明顶层字段顺序，又让嵌套 codec 各自保持单一权威。 */
   @Test
   void roundTripsEnvironmentRequestWithCanonicalJson() {
     ModelInvocationRequest request = environmentModelRequest();
@@ -49,7 +47,7 @@ class ModelInvocationRequestJsonCodecTest {
         () -> codec.decode(expected).toolBindings().add(request.toolBindings().getFirst()));
   }
 
-  /** Null routes stay explicit for platform-only requests and do not gain fallback identities. */
+  /** 仅 platform 请求的 null route 保持显式，不获得 fallback 身份。 */
   @Test
   void roundTripsPlatformRequestWithExplicitNullRoutes() {
     ModelInvocationRequest request = platformModelRequest();
@@ -64,7 +62,7 @@ class ModelInvocationRequestJsonCodecTest {
         encoded.substring(0, encoded.indexOf('{', 1)));
   }
 
-  /** Strict parser settings reject malformed top-level documents before nested decoding. */
+  /** 严格 parser 设置在嵌套 decode 之前拒绝畸形的顶层文档。 */
   @Test
   void rejectsMalformedDocumentBoundaries() {
     String json = codec.encode(environmentModelRequest());
@@ -85,7 +83,7 @@ class ModelInvocationRequestJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** Exact fields and scalar/container types reject corrupt JSONB rows deterministically. */
+  /** 精确字段与标量/容器类型以 deterministic 方式拒绝被破坏的 JSONB 行。 */
   @Test
   void rejectsUnknownMissingAndWrongTypeFacts() {
     ObjectNode extra = encodedNode();
@@ -130,7 +128,7 @@ class ModelInvocationRequestJsonCodecTest {
     assertInvalid(skillEnvironmentType);
   }
 
-  /** Aggregate construction rechecks provider/binding cardinality and one-route ownership. */
+  /** 聚合构造重新校验 provider/binding 基数以及单一 route 所有权。 */
   @Test
   void rejectsDomainInvariantMismatchesAfterJsonDecoding() {
     String json = codec.encode(environmentModelRequest());

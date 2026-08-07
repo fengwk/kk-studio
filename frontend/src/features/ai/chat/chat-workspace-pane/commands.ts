@@ -3,8 +3,8 @@ import {
   type ThreadCommand,
 } from '@/features/ai/runtime'
 
-/** Blank pane: full stable command table; unsupported entries stay disabled (grayed). */
+/** 空面板：完整的稳定 command 表；不支持的条目保持禁用（灰显）。 */
 export const BLANK_PANE_COMMANDS: ThreadCommand[] = threadCommandsForScene('blank')
 
-/** Bound pane: every stable command is enabled (the bound Thread can carry any action). */
+/** 绑定面板：每个稳定 command 都已启用（绑定的 Thread 可以执行任意操作）。 */
 export const BOUND_PANE_COMMANDS: ThreadCommand[] = threadCommandsForScene('bound')

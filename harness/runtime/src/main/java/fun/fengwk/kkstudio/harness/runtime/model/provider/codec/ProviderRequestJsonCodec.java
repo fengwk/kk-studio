@@ -40,13 +40,11 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Strict, deterministic JSON codec for {@link ProviderRequest}. Top-level strict fields are {@code
- * model}, {@code variant}, {@code messages}, {@code tools}, {@code cacheControl}; every nested
- * layer also requires an exact field set and rejects unknown/missing/wrong-type values.
+ * {@link ProviderRequest} 的严格、确定性 JSON codec。顶层严格字段为 {@code model}、{@code variant}、{@code
+ * messages}、 {@code tools}、{@code cacheControl}；每个嵌套层同样要求精确字段集合，并拒绝未知/缺失/类型错误的值。
  *
- * <p>Raw JSON strings ({@code json}, {@code argumentsJson}, {@code detailsJson}, {@code
- * inputSchemaJson}) are preserved verbatim; enum {@code Set} fields are sorted by enum name so
- * output is deterministic across JVMs.
+ * <p>原始 JSON 字符串（{@code json}、{@code argumentsJson}、{@code detailsJson}、{@code
+ * inputSchemaJson}）原样保留； enum {@code Set} 字段按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
  */
 public final class ProviderRequestJsonCodec {
 
@@ -370,7 +368,7 @@ public final class ProviderRequestJsonCodec {
         text(node, "id"), text(node, "name"), jsonObjectText(node, "argumentsJson"));
   }
 
-  // ---------- helpers ----------
+  // ---------- 工具方法 ----------
 
   private static ObjectNode object(JsonNode value, String name) {
     if (!(value instanceof ObjectNode object)) {

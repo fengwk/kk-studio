@@ -7,17 +7,15 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Durable current state of one Model invocation.
+ * 一次 Model invocation 的 durable 当前状态。
  *
- * <p>{@code attempt} counts confirmed Provider call starts; BUSY/OVERLOADED or definite pre-start
- * rejections do not increase it. {@code resultEntryId} links the execution result to the Session
- * history and is only present (possibly) on terminal states. {@code streamCheckpoint} is the safe
- * partial of the current attempt and is never a second result.
+ * <p>{@code attempt} 统计已确认的 Provider 调用启动次数；BUSY/OVERLOADED 或启动前的明确拒绝不会增加它。 {@code resultEntryId}
+ * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
+ * partial，永远不是第二个 result。
  *
- * <p>{@code DISPATCHING} means the Work lease is held and Gateway admission is in flight: whether
- * the external side accepted the call is not yet durably confirmed. All state changes go through
- * the pure transition methods below; the Store must run {@link #validateTransition} before every
- * {@code update*} write so direct record construction stays limited to persistence decode.
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用 尚未被 durable
+ * 确认。所有状态变更都通过下面的纯转换方法进行；Store 必须在每次 {@code update*} 写入 之前调用 {@link #validateTransition}，从而把直接构造
+ * record 的场景限制在持久化解码。
  */
 public record ModelInvocation(
     long id,
@@ -64,14 +62,11 @@ public record ModelInvocation(
   }
 
   /**
-   * Validates that {@code next} is a legal transition of the stored {@code stored} row: identity
-   * and request are immutable, updatedAt never regresses, attempt advances by exactly one only on
-   * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN (confirmed start) or
-   * DISPATCHING-&gt;CANCELLED (Stop window where the call may already have started); terminal facts
-   * are immutable (only {@code resultEntryId} may attach from null to positive); a checkpoint may
-   * only be introduced or grown on RUNNING-&gt;RUNNING, and any transition away from RUNNING or
-   * inside a terminal may only keep the exact stored checkpoint or clear it. Exact replay is always
-   * accepted.
+   * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt 仅在
+   * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN（已确认启动）以及 DISPATCHING-&gt;CANCELLED（Stop
+   * 窗口内调用可能已开始）这几种情形下恰好 +1；terminal 事实不可变 （仅 {@code resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在
+   * RUNNING-&gt;RUNNING 时被引入 或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它。
+   * 精确 replay 始终被接受。
    */
   public static void validateTransition(ModelInvocation stored, ModelInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -172,9 +167,8 @@ public record ModelInvocation(
   }
 
   /**
-   * A checkpoint may only be introduced or grown on a RUNNING-&gt;RUNNING transition. Entering a
-   * terminal state or retrying as READY may keep the exact stored checkpoint or clear it; inside a
-   * terminal no checkpoint may be introduced, grown or forked.
+   * checkpoint 仅能在 RUNNING-&gt;RUNNING 转换时被引入或增长。进入 terminal 状态或以 READY 重试时， 可以保留完全相同的 stored
+   * checkpoint 或清除它；在 terminal 内部不能再引入、增长或分叉 checkpoint。
    */
   private static void requireCheckpointTransition(ModelInvocation stored, ModelInvocation next) {
     StreamCheckpoint storedCheckpoint = stored.streamCheckpoint();
@@ -231,18 +225,14 @@ public record ModelInvocation(
     return actualValue.startsWith(actualPrefix);
   }
 
-  /**
-   * READY -&gt; DISPATCHING: the Work lease is held and Gateway admission starts; attempt
-   * unchanged.
-   */
+  /** READY -&gt; DISPATCHING：Work lease 已持有，Gateway admission 启动；attempt 不变。 */
   public ModelInvocation beginDispatch(Instant now) {
     return withState(ModelInvocationStatus.DISPATCHING, attempt, null, null, null, null, now);
   }
 
   /**
-   * DISPATCHING -&gt; FAILED: the Gateway definitely rejected before any Provider start; attempt
-   * unchanged. Only a dispatch in flight can be rejected, and {@link #fail} refuses DISPATCHING, so
-   * this is the only path that fails a dispatch.
+   * DISPATCHING -&gt; FAILED：Gateway 在任何 Provider 启动之前明确拒绝了该调用；attempt 不变。 仅进行中的 dispatch 能被拒绝，且
+   * {@link #fail} 拒绝 DISPATCHING，所以这是失败 dispatch 的唯一路径。
    */
   public ModelInvocation rejectDispatch(ModelInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -252,10 +242,7 @@ public record ModelInvocation(
     return withState(ModelInvocationStatus.FAILED, attempt, null, null, error, null, now);
   }
 
-  /**
-   * DISPATCHING -&gt; READY: BUSY/OVERLOADED admission; attempt unchanged. Only a dispatch in
-   * flight can bounce back to READY.
-   */
+  /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
   public ModelInvocation dispatchBusy(Instant now) {
     if (status != ModelInvocationStatus.DISPATCHING) {
       throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
@@ -263,18 +250,13 @@ public record ModelInvocation(
     return withState(ModelInvocationStatus.READY, attempt, null, null, null, null, now);
   }
 
-  /**
-   * DISPATCHING -&gt; RUNNING: the Gateway confirmed the start; attempt advances by exactly one.
-   */
+  /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
   public ModelInvocation markRunning(Instant now) {
     return withState(
         ModelInvocationStatus.RUNNING, Math.addExact(attempt, 1), null, null, null, null, now);
   }
 
-  /**
-   * RUNNING -&gt; READY: the execution side reported a retryable failure, so the same attempt is
-   * re-scheduled from scratch; attempt stays confirmed and the safe checkpoint is dropped.
-   */
+  /** RUNNING -&gt; READY：执行端报告了可重试的失败，因此同一个 attempt 被从头重新调度；attempt 保持已确认， 安全 checkpoint 被丢弃。 */
   public ModelInvocation retryReady(Instant now) {
     if (status != ModelInvocationStatus.RUNNING) {
       throw new IllegalArgumentException("retryReady requires RUNNING status");
@@ -282,15 +264,13 @@ public record ModelInvocation(
     return withState(ModelInvocationStatus.READY, attempt, null, null, null, null, now);
   }
 
-  /**
-   * RUNNING -&gt; RUNNING with a monotonic safe text/thinking checkpoint of the current attempt.
-   */
+  /** RUNNING -&gt; RUNNING，附带当前 attempt 的一个单调安全 text/thinking checkpoint。 */
   public ModelInvocation checkpoint(StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(checkpoint, "checkpoint");
     return withState(ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, now);
   }
 
-  /** RUNNING -&gt; SUCCEEDED with the complete Provider result; attempt must be positive. */
+  /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result；attempt 必须为正数。 */
   public ModelInvocation succeed(ProviderResponse result, Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(
@@ -298,8 +278,8 @@ public record ModelInvocation(
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED with a terminal error; attempt unchanged. DISPATCHING is refused:
-   * a dispatch in flight may only be failed through {@link #rejectDispatch}.
+   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。DISPATCHING 被拒绝： 进行中的 dispatch
+   * 只能通过 {@link #rejectDispatch} 失败。
    */
   public ModelInvocation fail(ModelInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -312,9 +292,8 @@ public record ModelInvocation(
   }
 
   /**
-   * READY / DISPATCHING / RUNNING -&gt; CANCELLED with a terminal error. READY and RUNNING keep
-   * their confirmed attempt; DISPATCHING is the Stop window where the call may already have
-   * started, so attempt advances by exactly one.
+   * READY / DISPATCHING / RUNNING -&gt; CANCELLED，并附带一个 terminal error。READY 和 RUNNING 保持其已确认的
+   * attempt；DISPATCHING 是 Stop 窗口，调用可能已经开始，因此 attempt 恰好 +1。
    */
   public ModelInvocation cancel(ModelInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -324,9 +303,8 @@ public record ModelInvocation(
   }
 
   /**
-   * DISPATCHING / RUNNING -&gt; UNKNOWN with a terminal error: indeterminate admission or recovered
-   * lease may have started the call, so DISPATCHING advances attempt by exactly one while RUNNING
-   * keeps its already-confirmed attempt.
+   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的 admission 或恢复的 lease
+   * 可能已经启动了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
    */
   public ModelInvocation unknown(ModelInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -335,18 +313,12 @@ public record ModelInvocation(
     return withState(ModelInvocationStatus.UNKNOWN, nextAttempt, null, null, error, null, now);
   }
 
-  /**
-   * Terminal -&gt; same terminal linking the execution result Entry; the safe checkpoint may be
-   * cleared while every other terminal fact stays immutable.
-   */
+  /** Terminal -&gt; 同一 terminal 状态，并链接执行结果 Entry；可以清除安全 checkpoint，其他 terminal 事实保持不变。 */
   public ModelInvocation attachResultEntry(long resultEntryId, Instant now) {
     return withState(status, attempt, null, result, error, resultEntryId, now);
   }
 
-  /**
-   * Copies this row with only the given current-state fields replaced and validates the transition
-   * in one place; identity, frozen request and createdAt are preserved by construction.
-   */
+  /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen request 和 createdAt 通过构造得以保留。 */
   private ModelInvocation withState(
       ModelInvocationStatus status,
       int attempt,

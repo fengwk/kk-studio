@@ -10,13 +10,12 @@ import org.springframework.web.socket.server.standard.ServletServerContainerFact
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 
 /**
- * WebSocket transport registration for the Daemon v2 Environment gateway.
+ * Daemon v2 Environment gateway 的 WebSocket 传输注册。
  *
- * <p>Daemon {@code READY} frames may exceed Tomcat's default 8 KiB text buffer when skills are
- * advertised. A tolerant {@link ServletServerContainerFactoryBean} raises the JSR-356 {@link
- * jakarta.websocket.server.ServerContainer} buffer limits when a real servlet container is present
- * and stays a no-op in non-container Spring contexts so MockMvc and {@code WebEnvironment.MOCK}
- * tests can boot.
+ * <p>当 Daemon 宣告 skills 时，{@code READY} 帧可能超过 Tomcat 默认的 8 KiB 文本缓冲区。存在真实 servlet container 时，宽容的
+ * {@link ServletServerContainerFactoryBean} 会提高 JSR-356 {@link
+ * jakarta.websocket.server.ServerContainer} 的缓冲区上限；在非容器 Spring 上下文中则保持 no-op，以便 MockMvc 与 {@code
+ * WebEnvironment.MOCK} 测试可以启动。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
@@ -34,9 +33,8 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
   }
 
   /**
-   * Raise the JSR-356 text/binary frame buffer limits via Spring's standard factory bean. The
-   * tolerant subclass detects missing {@code ServerContainer} attribute (non-container contexts)
-   * and skips configuration instead of throwing.
+   * 通过 Spring 标准 factory bean 提高 JSR-356 文本/二进制帧缓冲区上限。宽容子类会检测缺失的 {@code ServerContainer}
+   * 属性（非容器上下文）并跳过配置而不是抛异常。
    */
   @Bean
   public ServletServerContainerFactoryBean environmentDaemonWebSocketContainer(

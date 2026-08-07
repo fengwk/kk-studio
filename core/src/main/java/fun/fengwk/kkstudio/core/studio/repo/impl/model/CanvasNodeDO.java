@@ -2,36 +2,37 @@ package fun.fengwk.kkstudio.core.studio.repo.impl.model;
 
 import lombok.Data;
 
-/** {@code canvas_node} row mapping: canvas node. */
+/** {@code canvas_node} 行映射：canvas 节点。 */
 @Data
 public class CanvasNodeDO {
-  /** Business id. */
+
+  /** 业务主键（bigint，由 kk_studio_id_seq 生成，> 0）。 */
   private Long id;
 
-  /** Owning canvas id. */
+  /** 所属 canvas 文档 id（外键引用 canvas_document.id，级联删除，> 0）。 */
   private Long canvasId;
 
-  /** Domain kind: RESOURCE / FUNCTION. */
+  /** 节点领域类型（varchar(32)，必填）：RESOURCE / FUNCTION。 */
   private String kind;
 
-  /** Node type name. */
+  /** 节点类型名（varchar(128)，必填：非空白）。 */
   private String nodeType;
 
-  /** Display name. */
+  /** 显示名（varchar(256)，必填：非空白）。 */
   private String name;
 
-  /** Canvas x. */
+  /** 画布 x 坐标（double precision，必填）。 */
   private Double x;
 
-  /** Canvas y. */
+  /** 画布 y 坐标（double precision，必填）。 */
   private Double y;
 
-  /** Width. */
+  /** 节点宽度（double precision，必填：> 0）。 */
   private Double width;
 
-  /** Height. */
+  /** 节点高度（double precision，必填：> 0）。 */
   private Double height;
 
-  /** Subtype payload JSON. */
+  /** 子类型负载 JSON（jsonb，必填）。 */
   private String dataJson;
 }

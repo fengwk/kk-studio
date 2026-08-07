@@ -36,15 +36,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Real {@link WebEnvironment#RANDOM_PORT} end-to-end proof that the Daemon WebSocket adapter
- * tolerates {@code READY} (skills) frames larger than Tomcat's 8 KiB default text buffer.
+ * 真实 {@link WebEnvironment#RANDOM_PORT} 端到端验证 Daemon WebSocket 适配器能容忍超过 Tomcat 8 KiB 默认文本缓冲区的
+ * {@code READY}（skills）帧。
  *
- * <p>Without the configured buffer raise, the embedded Tomcat closes the connection with close code
- * 1009 the instant it receives the oversized frame, so the live registry never reaches READY. This
- * test sends a {@code READY} frame carrying a fat skills payload well above the default threshold
- * and asserts that {@link LiveEnvironmentRegistry#isReady(EnvironmentId)} becomes {@code true}
- * within a deadline. Any future change that drops or weakens the buffer initializer will surface
- * here as a registry that never reaches READY together with an observed close code 1009.
+ * <p>若未调高缓冲区配置，内嵌 Tomcat 在收到超长帧时会立刻以 close code 1009 关闭连接，导致实时注册表永远无法进入 READY。本测试发送一个携带远超默认阈值的厚重
+ * skills payload 的 {@code READY} 帧，并断言 {@link LiveEnvironmentRegistry#isReady(EnvironmentId)}
+ * 在截止时间内变为 {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
@@ -63,13 +60,10 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @Autowired private EnvironmentGatewayProperties properties;
 
   @MockitoBean private ResourceStore resourceStore;
-  // The Gateway's READY wake is wired by the durable-target dispatcher slice; suppress here.
+  // Gateway 的 READY 唤醒由 durable-target dispatcher 切片装配，本切片将其抑制。
   @MockitoBean private EnvironmentReadyListener environmentReadyListener;
 
-  /**
-   * A {@code READY} skills frame comfortably larger than 8 KiB is accepted by the embedded
-   * container and the handshake reaches READY; close code 1009 must never be observed.
-   */
+  /** 远大于 8 KiB 的 {@code READY} skills 帧被内嵌容器接受，握手进入 READY；绝不能观察到 close code 1009。 */
   @Test
   void largeCapabilitiesFrameReachesReadyWithoutClose1009() throws Exception {
     int minBytes = TOMCAT_DEFAULT_TEXT_BUFFER_BYTES + 4 * 1024;
@@ -96,9 +90,9 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       String welcomeJson = listener.awaitText(5_000);
       assertEquals("WELCOME", readMessageType(welcomeJson));
 
-      // The dangerous frame: must NOT trigger close code 1009 because the buffer was raised.
+      // 危险帧：因为缓冲区已被调高，绝不能触发 close code 1009。
       socket.sendText(readyEnvelope, true).get(5, TimeUnit.SECONDS);
-      // poll for up to 10s for the registry to mark READY
+      // 轮询最多 10 秒，等待注册表标记为 READY
       readyReached = awaitReady();
     } finally {
       closeQuietly(socket);
@@ -123,8 +117,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     try {
       socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(5, TimeUnit.SECONDS);
     } catch (Exception ignored) {
-      // Server may have closed already; the test only cares about whether the handshake
-      // completed without close code 1009, which is asserted above.
+      // 服务端可能已经关闭；测试只关心握手是否完成且未出现 close code 1009，这一点在前面已经断言。
     }
   }
 

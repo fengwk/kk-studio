@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 
 import java.util.List;
 
-/** PostgreSQL-backed global provider repository. */
+/** 基于 PostgreSQL 的全局 provider 仓库。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlAgentProviderRepository implements AgentProviderRepository {

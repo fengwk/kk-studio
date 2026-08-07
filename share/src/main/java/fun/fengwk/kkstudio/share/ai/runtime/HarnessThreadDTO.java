@@ -13,6 +13,7 @@ import java.time.Instant;
  */
 @Data
 public class HarnessThreadDTO {
+  /** Thread 主键：strict positive decimal string。 */
   private String threadId;
 
   /** 当前 Session 主键（由 head Entry 派生）。 */
@@ -39,6 +40,9 @@ public class HarnessThreadDTO {
   /** head Entry 分支的完整设置快照。 */
   private HarnessBranchSettingsDTO branchSettings;
 
+  /** Thread 创建时间（UTC Instant）。 */
   private Instant createTime;
+
+  /** Thread 最后更新时间（UTC Instant）。 */
   private Instant updateTime;
 }

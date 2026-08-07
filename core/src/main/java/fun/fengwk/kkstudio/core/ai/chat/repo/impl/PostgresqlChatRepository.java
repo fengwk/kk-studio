@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** PostgreSQL-backed Chat collection repository. */
+/** 基于 PostgreSQL 的 Chat 集合仓库。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlChatRepository implements ChatRepository {

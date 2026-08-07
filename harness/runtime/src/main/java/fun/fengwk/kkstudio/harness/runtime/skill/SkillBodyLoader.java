@@ -5,17 +5,17 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Loads full SKILL.md body from a named Environment without exposing local paths.
+ * 从指定 Environment 加载完整 SKILL.md body，不暴露本地路径。
  *
- * <p>Thin runtime port over Core's Environment skill loader so PLATFORM tools do not depend on Host
- * lifecycle beans directly.
+ * <p>在 Core 的 Environment skill loader 之上做的轻量 Runtime port，使 PLATFORM tool 不直接依赖 Host lifecycle
+ * bean。
  */
 public interface SkillBodyLoader {
 
   CompletableFuture<SkillBodyLoadResult> load(
       String environmentName, String skillName, Duration timeout);
 
-  /** Bounded skill body load outcome. */
+  /** 有界 skill body 加载结果。 */
   sealed interface SkillBodyLoadResult
       permits SkillBodyLoadResult.Loaded, SkillBodyLoadResult.Failed {
     String skillName();

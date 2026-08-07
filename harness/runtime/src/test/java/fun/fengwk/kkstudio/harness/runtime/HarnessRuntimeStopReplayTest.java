@@ -49,8 +49,8 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 
 /**
- * Stop idempotency: the thread-scoped durable key decides replay strictly before revision checks,
- * never aliases across Threads, and conflicts on non-Stop closes or duplicated keys.
+ * Stop 幂等性：thread 作用域的 durable key 在 revision 检查之前就严格决定 replay， 绝不在 Thread 之间产生别名冲突，且在非 Stop 关闭或重复
+ * key 时必须失败。
  */
 class HarnessRuntimeStopReplayTest {
 
@@ -164,9 +164,8 @@ class HarnessRuntimeStopReplayTest {
   }
 
   /**
-   * The minimal ownership counterexample: T2 relocates onto T1's stopped continuation branch. The
-   * raw external id is present on T2's path, but the durable key is scoped to T1, so T2 must not
-   * replay it.
+   * 最小的 ownership 反例：T2 迁移到 T1 已停止的 continuation 分支。T2 的路径上虽然存在 原始 external id，但 durable key 限定在 T1
+   * 作用域内，因此 T2 不应 replay 该 id。
    */
   @Test
   void anotherThreadOnTheStoppedBranchDoesNotReplayTheRawExternalId() {
@@ -370,7 +369,7 @@ class HarnessRuntimeStopReplayTest {
     assertNotNull(error.getMessage());
   }
 
-  /** Returns the newest STOPPED TURN_END of the thread's current path (the one Stop appended). */
+  /** 返回 thread 当前路径上最新的 STOPPED TURN_END（即 Stop 追加的那一条）。 */
   private TurnEndPayload stoppedEnd(long threadId) {
     ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));

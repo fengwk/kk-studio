@@ -16,12 +16,10 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Dedicated PostgreSQL {@code LISTEN} loop that turns Work notifications into dispatcher wake
- * hints.
+ * 把 Work notification 转为 dispatcher wake hints 的专用 PostgreSQL {@code LISTEN} 循环。
  *
- * <p>Notifications are not correctness facts: every successful connection performs a startup wake,
- * and the dispatcher retains its independent periodic poll. The listener owns only its daemon
- * thread and dedicated JDBC connection; it does not own the dispatcher or any injected executor.
+ * <p>Notification 不是正确性事实：每次成功连接都会执行一次 startup wake，dispatcher 保留其独立的 periodic poll。 listener
+ * 只拥有自己的 daemon thread 与专用 JDBC connection，不拥有 dispatcher 或任何注入的 executor。
  */
 public final class PostgresqlWorkListener implements AutoCloseable {
 
@@ -57,7 +55,7 @@ public final class PostgresqlWorkListener implements AutoCloseable {
     this.reconnectBackoffMillis = requirePositiveWholeMillis(reconnectBackoff, "reconnectBackoff");
   }
 
-  /** Starts the one-shot listener lifecycle; repeated calls while running are no-ops. */
+  /** 启动一次性 listener 生命周期；运行中重复调用为 no-op。 */
   public void start() {
     synchronized (lifecycleLock) {
       if (stopped) {
@@ -80,7 +78,7 @@ public final class PostgresqlWorkListener implements AutoCloseable {
     }
   }
 
-  /** Stops reconnecting and interrupts the daemon loop to shorten a blocking poll/backoff. */
+  /** 停止重连并 interrupt daemon loop，以缩短阻塞中的 poll/backoff。 */
   public void stop() {
     synchronized (lifecycleLock) {
       if (stopped) {

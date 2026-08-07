@@ -6,7 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 
-/** Loads static MIT goal/skill tool prompt assets packaged with the runtime. */
+/** 加载随 runtime 打包的静态 MIT goal/skill tool prompt 资源。 */
 public final class GoalToolPrompts {
 
   private GoalToolPrompts() {}

@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 
 import java.util.stream.Collectors;
 
-/** Web-layer mapper from Canvas domain objects to share DTOs. */
+/** 从 Canvas domain 对象映射到 share DTO 的 Web 层 mapper。 */
 public final class StudioWebMapper {
 
   private StudioWebMapper() {}

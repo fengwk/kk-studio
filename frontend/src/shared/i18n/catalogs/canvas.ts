@@ -359,7 +359,7 @@ export const canvasCatalog = {
   },
   'canvas.generation.promptLabel': {
     'en-US': 'Prompt',
-    'zh-CN': 'Prompt',
+    'zh-CN': '提示词',
   },
   'canvas.generation.placeholder.text': {
     'en-US': 'Describe the text to generate…',

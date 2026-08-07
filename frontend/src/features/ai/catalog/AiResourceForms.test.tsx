@@ -159,7 +159,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
     expect(screen.getByLabelText('Default Model')).toHaveValue('minimax/MiniMax-M2.7')
-    // empty override = use model.defaultVariant at runtime
+    // 空覆盖 = 运行时使用 model.defaultVariant
     expect(screen.getByLabelText('Default Variant Override')).toHaveValue('')
 
     await selectFormOption(user, 'Default Model', 'anthropic/Claude-Sonnet-4.5')

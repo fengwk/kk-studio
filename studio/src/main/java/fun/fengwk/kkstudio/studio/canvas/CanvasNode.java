@@ -3,15 +3,15 @@ package fun.fengwk.kkstudio.studio.canvas;
 import java.util.Objects;
 
 /**
- * Canvas node. {@code canvasId} lives outside this record because it is the parent aggregate handle
- * managed outside the value object. {@code dataJson} carries the FUNCTION/RESOURCE subtype payload.
+ * Canvas node。{@code canvasId} 位于本 record 之外，因为它是父 aggregate 的句柄，由 value object 外部管理。{@code
+ * dataJson} 承载 FUNCTION/RESOURCE 子类型的负载。
  *
- * <p>Invariants enforced by the canonical constructor:
+ * <p>由规范构造函数强制的不变量：
  *
  * <ul>
  *   <li>{@code id > 0}
- *   <li>{@code kind} is non-null; {@code nodeType}, {@code name}, {@code dataJson} are non-blank
- *   <li>{@code transform} is non-null (its own fields are validated separately)
+ *   <li>{@code kind} 非 null；{@code nodeType}、{@code name}、{@code dataJson} 非空白
+ *   <li>{@code transform} 非 null（其自身字段会被单独校验）
  * </ul>
  */
 public record CanvasNode(

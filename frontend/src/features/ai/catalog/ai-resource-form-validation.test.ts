@@ -144,7 +144,7 @@ describe('ai-resource-form-validation', () => {
       },
     )
     expect(result.ok).toBe(true)
-    // Reasoning effort must be auto-filled with the variant id; no error expected.
+    // Reasoning effort 必须用 variant id 自动补全；不应报错。
   })
 
   it('translates known backend errors into user-facing Chinese', () => {

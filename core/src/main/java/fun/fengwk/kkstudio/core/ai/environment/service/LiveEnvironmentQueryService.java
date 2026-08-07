@@ -5,13 +5,13 @@ import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 import java.util.List;
 
 /**
- * Application-facing read API for the in-memory live Environment registry.
+ * 面向应用的内存 live Environment registry 只读 API。
  *
- * <p>Maps registry domain objects (including harness tool/skill descriptors) into share DTOs so Web
- * controllers do not depend on harness types.
+ * <p>把 registry 领域对象（包括 harness tool/skill descriptor）映射为 share DTO，使 Web controller 不依赖 harness
+ * 类型。
  */
 public interface LiveEnvironmentQueryService {
 
-  /** Returns every currently registered live environment as a compact DTO snapshot. */
+  /** 返回当前注册的全部 live environment 的紧凑 DTO 快照。 */
   List<LiveEnvironmentDTO> listEnvironments();
 }

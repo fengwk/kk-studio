@@ -82,7 +82,7 @@ function StageInner() {
     return () => observer.disconnect()
   }, [publishMetrics, state.threadOpen, state.addMenuOpen, state.messages.length])
 
-  // Apply only programmatic domain viewport changes; ignore equal values to prevent RF update loops.
+  // 仅应用程序化的领域视口变更；忽略相等值以避免 RF 更新循环。
   useEffect(() => {
     if (viewportsEqual(state.viewport, lastEmittedViewportRef.current)) {
       return
@@ -146,7 +146,7 @@ function StageInner() {
     setSelection(params.nodes.map((node) => node.id))
   }, [setSelection])
 
-  // Controlled-node contract: apply RF position changes into domain coordinates during drag.
+  // 受控节点契约：在拖拽过程中将 RF 位置变更应用到领域坐标。
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     const updates = extractPositionUpdates(changes)
     if (updates.length > 0) {

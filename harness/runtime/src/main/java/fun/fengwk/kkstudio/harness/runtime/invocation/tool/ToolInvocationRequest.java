@@ -5,10 +5,9 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.util.Objects;
 
 /**
- * Frozen request of one Tool invocation: the completed ToolCall plus its binding.
+ * 一次 Tool invocation 的冻结请求：已完成的 ToolCall 及其 binding。
  *
- * <p>The arguments JSON and the Environment route are frozen at creation; retry replays the
- * original request only.
+ * <p>arguments JSON 与 Environment 路由在创建时冻结；retry 仅 replay 原始请求。
  */
 public record ToolInvocationRequest(ToolCall call, ToolBinding binding) {
 

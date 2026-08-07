@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 
 import java.util.List;
 
-/** Persistent Chat collection repository. */
+/** 持久化 Chat 集合仓库。 */
 public interface ChatRepository {
 
   List<Chat> listNewestFirst();
@@ -13,9 +13,9 @@ public interface ChatRepository {
 
   boolean create(Chat chat);
 
-  /** Atomic CAS update on (id, expectedVersion). */
+  /** 基于 (id, expectedVersion) 的原子 CAS 更新。 */
   boolean updateById(Chat chat, long expectedVersion);
 
-  /** Atomic CAS delete on (id, expectedVersion). */
+  /** 基于 (id, expectedVersion) 的原子 CAS 删除。 */
   boolean deleteById(long id, long expectedVersion);
 }

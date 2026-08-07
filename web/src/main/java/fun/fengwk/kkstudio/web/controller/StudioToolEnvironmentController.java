@@ -13,11 +13,10 @@ import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 import java.util.List;
 
 /**
- * Read-only live Environment registry API.
+ * 只读的 live Environment registry API。
  *
- * <p>Environments are server-memory only; there is no create/update/delete surface. Daemon
- * connections populate the registry through the WebSocket gateway. Mapping stays in Core so this
- * controller depends only on application DTOs.
+ * <p>Environment 仅存在于服务器内存中，没有 create/update/delete 表面。Daemon 连接通过 WebSocket gateway 填充
+ * registry。映射保持在 Core 中，因此本 controller 只依赖应用 DTO。
  */
 @AllArgsConstructor
 @RequestMapping("/api/ai/environment")

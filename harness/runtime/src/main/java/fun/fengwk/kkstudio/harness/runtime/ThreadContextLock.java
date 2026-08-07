@@ -15,16 +15,13 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Small package-private HarnessStore transaction helper shared by every control-plane entry point
- * (and the later Stop slice), not a framework or repository.
+ * 小型 package-private HarnessStore transaction 辅助工具，被所有 control-plane 入口（以及后续的 Stop slice）共用，不是框架或
+ * repository。
  *
- * <p>Starting from a Thread already locked by the caller it loads the root-to-head {@link
- * EntryPath}, finds the Model only by {@code (threadId, open TURN_START)}, locks that applicable
- * Model, loads/locks the Tool siblings only when that Model's result is exactly the current
- * Assistant head, and then runs the pure {@link ThreadContextClassifier} over the locked rows so
- * classification cannot drift between operations. Callers that also need Commands must lock queued
- * Commands first, preserving the canonical order Thread -&gt; Commands -&gt; Model -&gt; Tool
- * siblings -&gt; Work.
+ * <p>从调用方已锁定的 Thread 出发，加载 root-to-head {@link EntryPath}，仅通过 {@code (threadId, open TURN_START)}
+ * 查找 Model 并锁定该适用 Model；只有当该 Model 的 result 恰为 当前 Assistant head 时，才加载/锁定 Tool
+ * siblings；随后在已锁定的行上运行纯 {@link ThreadContextClassifier}，从而保证各操作之间的分类不发生漂移。同时需要 Commands 的调用方必须
+ * 先锁定已入队 Commands，保持规范顺序 Thread -&gt; Commands -&gt; Model -&gt; Tool siblings -&gt; Work。
  */
 final class ThreadContextLock {
 
@@ -32,12 +29,12 @@ final class ThreadContextLock {
 
   private ThreadContextLock() {}
 
-  /** Loads the current root-to-head path of the locked Thread and classifies it under lock. */
+  /** 加载已锁定 Thread 的当前 root-to-head path，并在锁内对其进行分类。 */
   static LockedThreadContext load(HarnessStore.Transaction tx, ThreadState thread) {
     return load(tx, thread, tx.loadEntryPath(thread.headEntryId()));
   }
 
-  /** Classifies under lock, reusing an already loaded path (e.g. MOVE_HEAD's head path). */
+  /** 在锁内分类，复用已加载的 path（例如 MOVE_HEAD 的 head path）。 */
   static LockedThreadContext load(HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
     ModelInvocation model = null;
     List<ToolInvocation> siblings = List.of();

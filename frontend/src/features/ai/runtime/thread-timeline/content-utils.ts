@@ -12,7 +12,7 @@ export function contentText(content: Record<string, unknown>): string {
   return ''
 }
 
-/** Canonical Tool delta: stringify object/array json values instead of dropping them. */
+/** 规范的 Tool delta：对 object/array 类型的 json 值进行序列化而非丢弃。 */
 function stringifyJsonContent(value: unknown): string {
   if (typeof value === 'string') {
     return value
@@ -31,9 +31,8 @@ function stringifyJsonContent(value: unknown): string {
 }
 
 /**
- * Canonical resource content -> attachment: `{type:'resource', uri, mediaType, name, size,
- * sha256, preview?}`. The URI is the stable display/link identity; file:/s3: URIs are never
- * treated as base64 payloads.
+ * 规范的 resource content -> attachment：`{type:'resource', uri, mediaType, name, size,
+ * sha256, preview?}`。URI 是稳定的展示/链接标识；file:/s3: URI 不会被当作 base64 负载。
  */
 export function toResourceAttachment(content: Record<string, unknown>): ToolAttachment[] {
   if (getString(content.type) !== 'resource') {

@@ -23,8 +23,7 @@ describe('tool-attachments', () => {
       mime: 'image/png',
       data: 'data:image/png;base64,aW1n',
     })).toBe(true)
-    // Untrusted remote/local Tool Resources must NOT land in media src (no automatic GET);
-    // they stay explicit links.
+    // 不可信的远程/本地 Tool 资源绝不能作为 media src（不会自动 GET），仅保留为显式链接。
     expect(
       toToolAttachmentSrc({
         type: 'image',
@@ -53,7 +52,7 @@ describe('tool-attachments', () => {
       mime: 'image/png',
       data: 'file:///tmp/cover.png',
     })).toBe(false)
-    // http(s) remain canonical LINK targets (explicit open-raw only).
+    // http(s) 仍保持为规范的 LINK 目标（只能显式打开原始内容）。
     expect(getToolAttachmentHref({
       type: 'image',
       name: 'remote',

@@ -203,7 +203,7 @@ class CodingToolsTest {
         Duration.ofSeconds(7),
         BashTool.effectiveProcessTimeout(Duration.ofSeconds(30), Duration.ofSeconds(7)));
 
-    // A short explicit timeout must terminate the command before the outer request deadline.
+    // 显式的短 timeout 必须在外部 request deadline 到来之前终止命令。
     RecordingListener timed =
         invokeAsync(
             new BashTool(config()),

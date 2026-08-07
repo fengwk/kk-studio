@@ -6,10 +6,9 @@ import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * Enforces the Daemon environment root boundary for every filesystem-facing tool.
+ * 为每个面向文件系统的 tool 强制执行 Daemon environment root 边界。
  *
- * <p>Platform permission authorizes a command; it never relaxes this local path and symlink
- * boundary.
+ * <p>Platform permission 负责授权命令；它绝不会放宽本地的路径与 symlink 边界。
  */
 public final class EnvironmentPathBoundary {
 
@@ -21,7 +20,7 @@ public final class EnvironmentPathBoundary {
     this.defaultWorkdir = config.defaultWorkdir();
   }
 
-  /** Resolves and canonicalizes an existing work directory inside the environment root. */
+  /** 解析并 canonicalize environment root 内已存在的 work directory。 */
   public Path workdir(String rawWorkdir) {
     if (rawWorkdir == null || rawWorkdir.isBlank()) {
       return defaultWorkdir;
@@ -34,7 +33,7 @@ public final class EnvironmentPathBoundary {
     return canonicalExisting(candidate, "workdir");
   }
 
-  /** Resolves an existing file or directory and rejects symlink traversal beyond the root. */
+  /** 解析已存在的文件或目录，并拒绝越出 root 的 symlink 穿越。 */
   public Path existing(String rawPath, Path workdir) {
     Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
     if (!Files.exists(candidate)) {
@@ -43,9 +42,7 @@ public final class EnvironmentPathBoundary {
     return canonicalExisting(candidate, "path");
   }
 
-  /**
-   * Resolves a write target whose existing ancestors cannot traverse outside the environment root.
-   */
+  /** 解析写目标：其已存在的祖先路径不得穿越到 environment root 之外。 */
   public Path writable(String rawPath, Path workdir) {
     Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
     Path existing = candidate;

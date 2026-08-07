@@ -4,9 +4,9 @@ import type { HarnessThreadCommandBatchDTO } from '@/shared/api/contracts/ai-run
 import { queryKeys } from '@/shared/lib/query-keys'
 
 /**
- * Atomically enqueues a typed command batch (202 accepted). The caller owns the batch identity:
- * a failed HTTP request must be replayed byte-for-byte (same command IDs/payload/order and the
- * original expected cursors); new semantics produce fresh IDs.
+ * 原子地入队一个类型化 command batch（202 已接受）。batch 身份由调用方持有：
+ * 失败的 HTTP 请求必须逐字节重放（相同的 command IDs/payload/顺序以及
+ * 原始期望 cursors）；新语义产生新 IDs。
  */
 export function useThreadCommandBatchMutation(threadId: string) {
   const queryClient = useQueryClient()
@@ -16,7 +16,7 @@ export function useThreadCommandBatchMutation(threadId: string) {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-        // The Chat-scoped Thread list (the only list consumers use) refreshes via chats.all.
+        // Chat 作用域的 Thread 列表（唯一被使用的列表消费者）通过 chats.all 刷新。
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
     },

@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 
 import java.util.List;
 
-/** PostgreSQL-backed global model repository. */
+/** 基于 PostgreSQL 的全局 model 仓库。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlAgentModelRepository implements AgentModelRepository {

@@ -20,7 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-/** Provider repository contract keyed only by the immutable global name. */
+/** Provider 仓库契约仅以不可变的全局名称为键。 */
 public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderRepository agentProviderRepository;

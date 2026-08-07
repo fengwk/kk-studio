@@ -21,12 +21,12 @@ export interface RealtimeModelStream {
   thinking: string
   createdAt: string
   /**
-   * 'streaming' = RUNNING/checkpoint/delta overlay; 'done' = durable terminal resultJson
-   * projection; 'error' = durable terminal errorJson projection (checkpoint frozen). The
-   * timeline renders status, so a terminal projection is never marked streaming.
+   * 'streaming' 表示 RUNNING/checkpoint/delta overlay；'done' 表示持久终止态 resultJson
+   * 投影；'error' 表示持久终止态 errorJson 投影（checkpoint 已冻结）。timeline
+   * 会渲染 status，因此终止态投影永远不会标记为 streaming。
    */
   status: 'streaming' | 'done' | 'error'
-  /** Error message parsed from the durable errorJson (present only for status='error'). */
+  /** 从持久 errorJson 解析出的错误消息（仅在 status='error' 时存在）。 */
   errorText?: string
 }
 
@@ -34,12 +34,12 @@ export interface RealtimeToolPartial {
   threadId: string
   invocationId: string
   attempt: number
-  /** Canonical partial ToolResult payload: {toolCallId, contents, error, details}. */
+  /** 规范的 partial ToolResult payload：{toolCallId, contents, error, details}。 */
   payload: Record<string, unknown>
   createdAt: string
 }
 
-/** Transient tool-result overlay for one invocation attempt. */
+/** 一次 invocation attempt 的瞬态 tool-result overlay。 */
 export interface RealtimeToolStream {
   threadId: string
   invocationId: string
@@ -47,25 +47,25 @@ export interface RealtimeToolStream {
   toolCallId: string
   text: string
   error: boolean
-  /** Error message projected from the durable errorJson while no result Entry exists yet. */
+  /** 在尚无 result Entry 时，从持久 errorJson 投影出的错误消息。 */
   errorText?: string
   /**
-   * Resource contents projected ONLY from the durable terminal resultJson. The runtime
-   * forbids TOOL_PARTIAL chunks from carrying Resource contents, so partial aggregation
-   * never contributes attachments.
+   * 仅从持久终止态 resultJson 投影 Resource 内容。runtime 禁止
+   * TOOL_PARTIAL 分片携带 Resource 内容，因此 partial 聚合
+   * 永远不会贡献 attachments。
    */
   attachments?: ToolAttachment[]
   createdAt: string
 }
 
-/** Canonical ToolResult JSON keys used for the partial overlay aggregation. */
+/** 用于 partial overlay 聚合的规范 ToolResult JSON 字段名。 */
 const TOOL_RESULT_CONTENTS_KEY = 'contents'
 const TOOL_RESULT_TOOL_CALL_ID_KEY = 'toolCallId'
 const TOOL_RESULT_ERROR_KEY = 'error'
 
 /**
- * Parses model text/thinking deltas and tool partial payloads from the Redis realtime overlay.
- * Other payloads still cause snapshot refreshes, but have no transient transcript representation.
+ * 从 Redis realtime overlay 中解析 model 文本/思考 delta 与 tool partial payload。
+ * 其他 payload 仍会触发 snapshot 刷新，但不在 transcript 中保留瞬态表示。
  */
 export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | null {
   if (typeof data !== 'string') {
@@ -117,7 +117,7 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
   }
 }
 
-/** Parses a TOOL_PARTIAL realtime event into its canonical payload (strict shape). */
+/** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape）。 */
 export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | null {
   if (typeof data !== 'string') {
     return null
@@ -153,8 +153,8 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
 }
 
 /**
- * Appends a delta for the newest known ModelInvocation attempt. A retry replaces all transient
- * fragments from its prior attempt so failed-attempt output never leaks into the active reply.
+ * 为最新的已知 ModelInvocation attempt 追加一条 delta。重试会替换掉它上一次
+ * attempt 中所有的瞬态片段，确保失败 attempt 的输出不会泄露到当前回复中。
  */
 export function reduceRealtimeModelStream(
   current: RealtimeModelStream | null,
@@ -201,10 +201,10 @@ export function isRealtimeModelDeltaGap(
 }
 
 /**
- * Extracts the canonical durable stream checkpoint of one ModelInvocation (if any).
- * Mirrors the Java codec + record constructor: text/thinking accept ONLY string or null
- * (numbers/objects are malformed), and at least one of them must be non-blank.
- * Valid nulls normalize to empty strings here.
+ * 提取一次 ModelInvocation 规范的持久流式 checkpoint（如果有）。
+ * 与 Java codec + record 构造函数保持一致：text/thinking 仅接受 string 或 null
+ * （数字/对象视为格式错误），且二者至少有一个必须非空。
+ * 合法的 null 在此处统一规范化为空字符串。
  */
 export function parseStreamCheckpoint(
   json: string | null,
@@ -223,13 +223,13 @@ export function parseStreamCheckpoint(
     const text = nullableString(value.text)
     const thinking = nullableString(value.thinking)
     if (text === undefined || thinking === undefined) {
-      // Malformed type: the Java codec's nullableText rejects anything but string/null.
+      // 类型不合法：Java codec 的 nullableText 仅接受 string 或 null。
       return null
     }
     const normalizedText = text ?? ''
     const normalizedThinking = thinking ?? ''
     if (!normalizedText.trim() && !normalizedThinking.trim()) {
-      // The Java record constructor forbids both-blank checkpoints.
+      // Java record 构造函数禁止两侧均为空的 checkpoint。
       return null
     }
     return {
@@ -244,15 +244,15 @@ export function parseStreamCheckpoint(
 }
 
 /**
- * Derives the transient model overlay from the active ModelInvocation's durable checkpoint.
+ * 从活动 ModelInvocation 的持久 checkpoint 中派生瞬态 model overlay。
  *
- * - A RUNNING invocation whose checkpoint has not flushed yet (checkpoint flush does not bump
- *   the revision) yields an EMPTY base with sequence 0 so the first realtime delta is not
- *   permanently dropped; its attempt always matches invocation.attempt.
- * - A stale checkpoint whose attempt differs from invocation.attempt is ignored the same way.
- * - A terminal result/error whose resultEntryId is still null must NOT be mistaken for an
- *   applied durable Entry: the safe checkpoint overlay stays visible until resultEntryId is
- *   set (or the invocation disappears).
+ * - RUNNING 状态的 invocation 若 checkpoint 尚未 flush（checkpoint flush 不会
+ *   提升 revision），会得到一个 sequence 为 0 的空 base，确保第一条
+ *   realtime delta 不会被永久丢弃；其 attempt 始终等于 invocation.attempt。
+ * - 若 checkpoint 的 attempt 与 invocation.attempt 不一致，同样视为陈旧并忽略。
+ * - 终止态的 result/error 若 resultEntryId 仍为 null，绝不能误以为是已落地的
+ *   持久 Entry：安全起见，checkpoint overlay 会一直保留，直到 resultEntryId 被
+ *   设置（或 invocation 消失）。
  */
 export function snapshotModelStream(
   threadId: string,
@@ -262,7 +262,7 @@ export function snapshotModelStream(
     return null
   }
   if (invocation.resultEntryId != null) {
-    // Durable result Entry applied: the Entry is the transcript truth.
+    // 已应用持久的 result Entry：Entry 才是 transcript 的真实来源。
     return null
   }
   const checkpoint = parseStreamCheckpoint(invocation.streamCheckpointJson)
@@ -277,9 +277,9 @@ export function snapshotModelStream(
   }
   const resultJson = invocation.resultJson
   if (resultJson != null && resultJson.trim()) {
-    // Durable terminal boundary: the canonical ProviderResponse projection unconditionally
-    // supersedes any higher-sequence Redis overlay. Text/thinking fall back to the frozen
-    // checkpoint when the result payload is malformed (never a Redis-only fragment).
+    // 持久终止态边界：规范的 ProviderResponse 投影无条件覆盖
+    // 任何更高 sequence 的 Redis overlay。当 result payload 格式不合法时，
+    // text/thinking 回退到冻结的 checkpoint（绝不是仅有 Redis 的片段）。
     const result = parseModelResultPayload(resultJson)
     return {
       ...base,
@@ -290,8 +290,8 @@ export function snapshotModelStream(
   }
   const errorJson = invocation.errorJson
   if (errorJson != null && errorJson.trim()) {
-    // Durable terminal error: freeze the checkpoint as the visible text and surface the
-    // parsed message; the stream is 'error' so the UI never renders it as streaming.
+    // 持久终止态错误：将 checkpoint 冻结为可见文本，并展示解析出的
+    // message；stream 为 'error'，因此 UI 永远不会把它当作 streaming 渲染。
     const message = parseToolErrorText(errorJson)
     return {
       ...base,
@@ -302,8 +302,8 @@ export function snapshotModelStream(
     }
   }
   if (checkpoint == null || checkpoint.attempt !== invocation.attempt) {
-    // No flush yet or stale attempt: empty streaming base keeps the first delta of the
-    // active attempt (checkpoint flush does not bump the revision).
+    // 尚未 flush 或 attempt 已陈旧：保持空的 streaming base，以确保活动
+    // attempt 的第一条 delta 不丢失（checkpoint flush 不会提升 revision）。
     return { ...base, status: 'streaming' }
   }
   return {
@@ -316,9 +316,9 @@ export function snapshotModelStream(
 }
 
 /**
- * Parses the canonical durable ProviderResponse JSON ({text, thinking, toolCalls, stopReason,
- * usage, cost}) into the complete terminal projection. Returns null only for malformed JSON;
- * empty text/thinking stay valid (the Java codec writes both keys unconditionally).
+ * 将规范的持久 ProviderResponse JSON（{text, thinking, toolCalls, stopReason,
+ * usage, cost}）解析为完整的终止态投影。仅在 JSON 格式不合法时返回 null；
+ * 空 text/thinking 视为有效（Java codec 会无条件写入这两个键）。
  */
 function parseModelResultPayload(json: string): { text: string; thinking: string } | null {
   try {
@@ -335,11 +335,12 @@ function parseModelResultPayload(json: string): { text: string; thinking: string
 }
 
 /**
- * Derives the transient tool-result overlay from the active ToolInvocation (or null when the
- * durable result Entry applied or the invocation is gone).
+ * 从活动 ToolInvocation 中派生瞬态 tool-result overlay（若持久的 result Entry
+ * 已应用或 invocation 已消失则返回 null）。
  *
- * A terminal resultJson/errorJson with resultEntryId == null is projected in full (text/json
- * contents + resource attachments; error message) until the durable Tool result Entry appears.
+ * 当终止态的 resultJson/errorJson 对应 resultEntryId == null 时，会在持久的
+ * Tool result Entry 出现之前完整投影（text/json contents + resource attachments；
+ * error message）。
  */
 export function snapshotToolStream(
   invocation: ToolInvocationDTO | null,
@@ -349,7 +350,7 @@ export function snapshotToolStream(
     return null
   }
   if (invocation.resultEntryId != null) {
-    // Durable result Entry applied: the Entry is the transcript truth.
+    // 已应用持久的 result Entry：Entry 才是 transcript 的真实来源。
     return null
   }
   const base = {
@@ -377,7 +378,7 @@ export function snapshotToolStream(
   return base
 }
 
-/** Parses the canonical ToolResult JSON into text + error flag + resource attachments. */
+/** 将规范的 ToolResult JSON 解析为 text + error 标记 + resource attachments。 */
 function parseToolResultPayload(json: string | null): {
   text: string
   error: boolean
@@ -408,7 +409,7 @@ function parseToolResultPayload(json: string | null): {
   }
 }
 
-/** Parses the canonical error JSON into a display message (null when absent). */
+/** 将规范的错误 JSON 解析为用于展示的 message（不存在时返回 null）。 */
 export function parseToolErrorText(json: string | null): string | null {
   if (json == null || !json.trim()) {
     return null
@@ -428,10 +429,10 @@ export function parseToolErrorText(json: string | null): string | null {
 }
 
 /**
- * Aggregates one TOOL_PARTIAL chunk into the overlay: only text/json chunks append to text.
- * The runtime FORBIDS TOOL_PARTIAL from carrying Resource contents, so attachments never
- * aggregate here — they are projected exclusively from the durable terminal resultJson via
- * {@link snapshotToolStream}. A retry (attempt change) replaces all prior fragments.
+ * 将一条 TOOL_PARTIAL chunk 聚合到 overlay 中：只有 text/json chunk 会追加到 text。
+ * runtime 禁止 TOOL_PARTIAL 携带 Resource 内容，因此 attachments 不会在这里聚合——
+ * 它们仅由 {@link snapshotToolStream} 从持久终止态 resultJson 投影得到。
+ * attempt 发生变化（即重试）时会替换掉之前所有的片段。
  */
 export function reduceRealtimeToolStream(
   current: RealtimeToolStream | null,
@@ -462,7 +463,7 @@ export function reduceRealtimeToolStream(
   }
 }
 
-/** True while the tool partial overlay belongs to the same invocation attempt and is not stale. */
+/** 当 tool partial overlay 属于同一 invocation attempt 且没有陈旧时返回 true。 */
 export function isRealtimeToolStreamActive(
   current: RealtimeToolStream | null,
   invocation: ToolInvocationDTO | null,
@@ -515,7 +516,7 @@ function stringifyJson(value: unknown): string {
   return String(value)
 }
 
-/** Strict Java `nullableText` semantics: only string or null are acceptable (undefined = malformed). */
+/** 严格遵循 Java `nullableText` 语义：只接受 string 或 null（undefined 视为格式错误）。 */
 function nullableString(value: unknown): string | null | undefined {
   if (typeof value === 'string' || value == null) {
     return value as string | null

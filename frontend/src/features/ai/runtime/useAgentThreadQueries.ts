@@ -23,7 +23,7 @@ export function useAgentThreadQueries(threadId: string) {
   const thread = snapshot?.thread
   const sessionId = thread?.sessionId ?? ''
 
-  // Stable identities for derived arrays so hooks depending on them do not re-run per render.
+  // 为派生数组提供稳定的身份，避免依赖它们的 hook 在每次渲染时都重跑。
   const agents = useMemo(() => agentsQuery.data?.results ?? [], [agentsQuery.data])
   const models = useMemo(
     () => toAgentModelViews(modelsQuery.data?.results ?? []),

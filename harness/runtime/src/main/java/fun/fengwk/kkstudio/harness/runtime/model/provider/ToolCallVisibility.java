@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** Visibility checks for Tool calls returned against one exact Provider request. */
+/** 针对一个精确 Provider request 返回的 Tool call 的可见性检查。 */
 public final class ToolCallVisibility {
 
   private ToolCallVisibility() {}

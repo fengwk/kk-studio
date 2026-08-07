@@ -7,18 +7,17 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.ThreadPoolExecutor;
 
-/** Web-side transport executors used by Harness SSE adapters. */
+/** Harness SSE 适配器使用的 Web 侧传输 executor。 */
 @Configuration
 public class HarnessWebConfiguration {
 
-  /** Upper bound for concurrent DB-polling SSE loops in one process. */
+  /** 单进程内并发 DB 轮询 SSE 循环的上限。 */
   static final int EVENT_STREAM_MAX_CONCURRENT = 32;
 
   @Bean(name = "harnessEventStreamTaskExecutor")
   @ConditionalOnMissingBean(name = "harnessEventStreamTaskExecutor")
   public ThreadPoolTaskExecutor harnessEventStreamTaskExecutor() {
-    // Bounded pool with no queue: overload rejects immediately instead of opening an inert SSE
-    // connection that never gets a worker thread.
+    // 有界且无队列的线程池：过载时立即拒绝，而不是打开一个永远拿不到 worker 线程的空闲 SSE 连接。
     ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
     executor.setThreadNamePrefix("harness-event-stream-");
     executor.setCorePoolSize(4);

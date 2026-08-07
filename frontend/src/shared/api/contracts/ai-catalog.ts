@@ -31,7 +31,7 @@ export interface AgentProviderUpdateDTO extends AgentProviderEditablePropertiesD
   expectedVersion: CatalogVersion
 }
 
-/** Stable enum mirroring the backend {@code AgentModelInputModality}. */
+/** 与后端 {@code AgentModelInputModality} 对应的稳定枚举。 */
 export type AgentModelInputModality =
   | 'TEXT'
   | 'IMAGE'
@@ -40,16 +40,16 @@ export type AgentModelInputModality =
   | 'DOCUMENT'
 
 interface AgentModelLimitDTO {
-  /** Positive integer count of model context window tokens. */
+  /** 模型上下文窗口的 token 数量（正整数）。 */
   context: number
-  /** Positive integer {@code <= context}. */
+  /** 正整数，且 {@code <= context}。 */
   output: number
 }
 
 interface AgentModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
-  /** Non-empty subset of {@link AgentModelInputModality}. */
+  /** {@link AgentModelInputModality} 的非空子集。 */
   inputModalities: AgentModelInputModality[]
 }
 
@@ -80,8 +80,8 @@ export interface AgentModelVariantDTO {
 }
 
 /**
- * Structured Agent model configuration. Every sub-shape is required on the wire; missing or
- * malformed configs must be rejected by the backend rather than silently repaired.
+ * 结构化的 Agent model 配置。传输时每个子结构都是必需的；缺失或格式错误的配置必须由后端拒绝，
+ * 而不是静默修复。
  */
 export interface AgentModelConfigDTO {
   limit: AgentModelLimitDTO
@@ -91,7 +91,7 @@ export interface AgentModelConfigDTO {
   variants: AgentModelVariantDTO[]
 }
 
-/** Public Agent model resource with one structured executable config. */
+/** 携带单一结构化可执行配置的公开 Agent model 资源。 */
 export interface AgentModelDTO {
   providerName: string
   name: string
@@ -103,8 +103,8 @@ export interface AgentModelDTO {
 }
 
 /**
- * Editable portion of an Agent model. The frontend sends full replacements: {@code name},
- * {@code description}, and {@code config} are all required when a request body is issued.
+ * Agent model 的可编辑部分。前端发送完整替换：发出请求体时 {@code name}、
+ * {@code description} 与 {@code config} 均为必需字段。
  */
 export interface AgentModelEditablePropertiesDTO {
   description: string | null
@@ -125,7 +125,7 @@ export interface AgentDefinitionConfigDTO {
   skills: string[]
 }
 
-/** Offline-selectable unified runtime tool catalog entry. */
+/** 可离线选择的统一运行时 tool catalog 条目。 */
 export interface ToolCatalogEntryDTO {
   name: string
   version: string | null
@@ -133,13 +133,13 @@ export interface ToolCatalogEntryDTO {
   type: 'PLATFORM' | 'ENVIRONMENT'
 }
 
-/** Public global Agent definition; model/variant + config are Thread-runtime inputs. */
+/** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */
 export interface AgentDefinitionDTO {
   name: string
   description: string | null
   systemPrompt: string | null
   model: string
-  /** Optional override; null means use the selected Model's defaultVariant. */
+  /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
   config: AgentDefinitionConfigDTO
   version: CatalogVersion
@@ -147,11 +147,11 @@ export interface AgentDefinitionDTO {
   updateTime: InstantTimestamp
 }
 
-/** Complete Agent Definition create/PUT body. */
+/** 完整的 Agent Definition 创建/PUT 请求体。 */
 export interface AgentDefinitionEditablePropertiesDTO {
   description: string | null
   systemPrompt: string | null
-  /** Optional override; null means use the selected Model's defaultVariant. */
+  /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
   config: AgentDefinitionConfigDTO
 }

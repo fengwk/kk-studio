@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
-/** Global provider CRUD API. */
+/** provider 全局 CRUD API。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog/providers")
 @RestController

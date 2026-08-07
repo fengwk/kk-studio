@@ -10,10 +10,9 @@ export interface LiveEnvironmentSkillDTO {
 }
 
 /**
- * Read-only live Environment registry entry.
+ * 只读的实时 Environment 注册表条目。
  *
- * id is the canonical durable route identity (lowercase UUID); name is a display-only label
- * that may be reused across different ids.
+ * id 是规范的持久路由标识（小写 UUID）；name 仅是展示用标签，可能在不同的 id 之间复用。
  */
 export interface LiveEnvironmentDTO {
   id: string

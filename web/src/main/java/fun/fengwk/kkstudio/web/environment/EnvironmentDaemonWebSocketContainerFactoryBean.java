@@ -5,11 +5,9 @@ import jakarta.websocket.server.ServerContainer;
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 /**
- * Tolerant variant of {@link ServletServerContainerFactoryBean} for the Daemon v2 Environment
- * gateway. Detects whether the JSR-356 {@link ServerContainer} attribute is actually present in the
- * {@link ServletContext} and only delegates to the Spring standard configuration path when it is;
- * otherwise the bean becomes a no-op so non-container Spring contexts (MockMvc, {@code
- * WebEnvironment.MOCK}) can boot without an embedded servlet container.
+ * {@link ServletServerContainerFactoryBean} 面向 Daemon v2 Environment gateway 的宽容变体。检测 JSR-356
+ * {@link ServerContainer} 属性是否真的存在于 {@link ServletContext} 中，仅在其存在时才委托给 Spring 标准配置路径；否则该 bean 变为
+ * no-op，使非容器 Spring 上下文（MockMvc、{@code WebEnvironment.MOCK}） 无需内嵌 servlet container 即可启动。
  */
 final class EnvironmentDaemonWebSocketContainerFactoryBean
     extends ServletServerContainerFactoryBean {
@@ -25,9 +23,8 @@ final class EnvironmentDaemonWebSocketContainerFactoryBean
   @Override
   public void afterPropertiesSet() {
     if (!hasServerContainer()) {
-      // Non-container context (e.g. MockMvc / WebEnvironment.MOCK): the JSR-356 ServerContainer
-      // attribute is never published. Skip the Spring standard configuration path entirely so
-      // Spring's strict "Attribute not found in ServletContext" assertion never fires.
+      // 非容器上下文（如 MockMvc / WebEnvironment.MOCK）：JSR-356 ServerContainer 属性永远不会发布。
+      // 完全跳过 Spring 标准配置路径，避免 Spring 抛出严格的 "Attribute not found in ServletContext" 断言。
       return;
     }
     super.afterPropertiesSet();

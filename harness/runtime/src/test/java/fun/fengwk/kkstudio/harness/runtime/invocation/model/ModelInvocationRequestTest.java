@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** ModelInvocationRequest freeze, ordering and provider-tool correspondence checks. */
+/** ModelInvocationRequest 的 freeze、ordering 以及 provider-tool 对应关系检查。 */
 class ModelInvocationRequestTest {
 
   @Test

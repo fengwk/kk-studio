@@ -62,8 +62,7 @@ class OpenAiProviderAdapterTest {
   }
 
   /**
-   * Non-MiniMax OpenAI-compatible hosts still emit {@code <think>} in text when reasoning is
-   * enabled; extraction must follow model.reasoning, not the host name.
+   * 非 MiniMax 的 OpenAI 兼容宿主在 reasoning 启用时仍会在文本中输出 {@code <think>}；抽取必须遵循 model.reasoning，而不是宿主名。
    */
   @Test
   void extractsThinkTagsForReasoningModelsEvenOnNonMinimaxHosts() {

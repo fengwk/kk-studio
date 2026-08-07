@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-/** A stable, name-keyed catalog of selectable tools plus internal platform tools. */
+/** 可按名称稳定检索的可选工具与内部 Platform 工具目录。 */
 public final class ToolCatalog {
 
   private final List<ToolDescriptor> descriptors;

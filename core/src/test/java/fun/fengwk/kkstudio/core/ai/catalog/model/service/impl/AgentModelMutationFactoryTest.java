@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import java.math.BigDecimal;
 import java.util.List;
 
-/** Model mutations reject configurations that cannot be executed by the Harness runtime. */
+/** 模型变更拒绝 Harness runtime 无法执行的配置。 */
 public class AgentModelMutationFactoryTest {
 
   private static AgentModelConfigDTO validConfig() {

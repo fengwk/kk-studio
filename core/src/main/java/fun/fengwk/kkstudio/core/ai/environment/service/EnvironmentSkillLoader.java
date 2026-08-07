@@ -6,20 +6,17 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Core port that requests a complete skill body from a READY live Environment by canonical {@link
- * EnvironmentId}.
+ * Core 端口：按 canonical {@link EnvironmentId} 向 READY 的 live Environment 请求完整 skill 正文。
  *
- * <p>Wrapped by the platform {@code load_skill} tool for Agents with selected skills. Display names
- * never participate in routing.
+ * <p>由平台 {@code load_skill} 工具包装，供选中 skills 的 Agent 使用。展示名绝不参与路由。
  */
 public interface EnvironmentSkillLoader {
 
   /**
-   * Requests skill {@code skillName} from the environment bound to {@code environmentId}.
+   * 向绑定 {@code environmentId} 的 environment 请求技能 {@code skillName}。
    *
-   * <p>Completes with {@link EnvironmentSkillLoadResult.Loaded} on success, or {@link
-   * EnvironmentSkillLoadResult.Failed} on daemon failure, offline environment, disconnect, or
-   * timeout. Never blocks the caller thread on the remote round-trip.
+   * <p>成功时以 {@link EnvironmentSkillLoadResult.Loaded} 完成；daemon 失败、environment 离线、断开连接 或超时时以 {@link
+   * EnvironmentSkillLoadResult.Failed} 完成。绝不在远程往返期间阻塞调用方线程。
    */
   CompletableFuture<EnvironmentSkillLoadResult> loadSkill(
       EnvironmentId environmentId, String skillName, Duration timeout);

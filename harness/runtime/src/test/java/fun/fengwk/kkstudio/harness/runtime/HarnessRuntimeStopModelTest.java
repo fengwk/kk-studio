@@ -46,9 +46,9 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * Stop on MODEL_ACTIVE: CANCELLED with attempt semantics per status, checkpoint barriers
- * (ASSISTANT_ABORTED thinking-then-text or ASSISTANT_ERROR(CANCELLED)), one STOPPED TURN_END with
- * the composite key, THREAD+MODEL Work deletion, and zero mutation for MODEL_TERMINAL_PENDING.
+ * Stop 在 MODEL_ACTIVE 上：按各状态返回 CANCELLED 并保持 attempt 语义，写入 checkpoint barrier （ASSISTANT_ABORTED
+ * thinking-then-text 或 ASSISTANT_ERROR(CANCELLED)），写入一条带复合 key 的 STOPPED TURN_END，删除 THREAD+MODEL
+ * Work，且 MODEL_TERMINAL_PENDING 保持零变更。
  */
 class HarnessRuntimeStopModelTest {
 

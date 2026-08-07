@@ -41,8 +41,8 @@ export function normalizeCreateModelDraftProvider(
 }
 
 /**
- * Edit mode owns the persisted provider identity. The provider list is only a display source and
- * may not contain the immutable identity when a provider is deleted or outside the current page.
+ * 编辑模式持有持久化的 provider 身份。provider 列表仅作为展示来源，当 provider 被删除或不在当前页面时，
+ * 其中可能不含该不可变身份。
  */
 export function normalizeEditModelDraftProvider(
   draft: ModelDraft,
@@ -62,11 +62,11 @@ export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: Age
 
   const options = variantOptionsFromModel(selectedModel)
   const currentVariant = trimValue(draft.variant)
-  // Empty override is intentional: use model.defaultVariant at runtime.
+  // 空覆盖是有意为之：runtime 使用 model.defaultVariant。
   if (!currentVariant) {
     return currentVariant === draft.variant ? draft : { ...draft, variant: '' }
   }
-  // Drop invalid overrides so the form falls back to model default.
+  // 丢弃无效覆盖，以便表单回退到 model 默认值。
   if (!options.includes(currentVariant)) {
     return draft.variant === '' ? draft : { ...draft, variant: '' }
   }
@@ -91,7 +91,7 @@ export function normalizeCreateAgentDraftSelection(
       {
         ...draft,
         model: modelRef(preferred),
-        // Switching default model clears override so the new model default applies.
+        // 切换默认 model 时清空覆盖，以便应用新 model 的默认值。
         variant: '',
       },
       models,
@@ -113,8 +113,8 @@ export function normalizeCreateAgentDraftSelection(
 }
 
 /**
- * Edit mode owns the persisted model reference. When that model is not loaded, leave variant
- * untouched because there is no trustworthy model config from which to derive options.
+ * 编辑模式持有持久化的 model 引用。当该 model 未加载时，保持 variant 不变，因为没有可信的 model config
+ * 可用于推导选项。
  */
 export function normalizeEditAgentDraftSelection(
   draft: AgentDraft,
@@ -143,7 +143,7 @@ export function applyAgentModelSelection(
   return {
     ...draft,
     model: modelRef(selectedModel),
-    // Clear override when model changes; model.defaultVariant is used unless user re-overrides.
+    // model 切换时清空覆盖；除非用户重新覆盖，否则使用 model.defaultVariant。
     variant: '',
   }
 }

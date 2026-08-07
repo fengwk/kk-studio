@@ -4,7 +4,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-/** Minimal text encoding/BOM preservation used by write and edit. */
+/** write 与 edit 使用的最小文本编码/BOM 保留实现。 */
 final class TextFileCodec {
 
   private TextFileCodec() {}

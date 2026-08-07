@@ -31,7 +31,7 @@ function formatLastSeen(value: string | number | null | undefined, locale: AppLo
   if (!raw) {
     return ''
   }
-  // numeric epoch seconds / millis as string
+  // 数字形式的 epoch 秒或毫秒字符串
   if (/^\d+(\.\d+)?$/.test(raw)) {
     const n = Number(raw)
     if (Number.isFinite(n)) {
@@ -78,7 +78,7 @@ export function EnvironmentsPage() {
     refetchInterval: 10_000,
   })
 
-  // Natural name order so live environments are easy to scan.
+  // 按名称自然序排列，便于扫描在线 Environment。
   const environments = useMemo(
     () => filterEnvironments(environmentsQuery.data ?? [], ''),
     [environmentsQuery.data],

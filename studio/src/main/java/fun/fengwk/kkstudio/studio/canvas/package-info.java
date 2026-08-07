@@ -1,6 +1,6 @@
 /**
- * Canvas domain: document, nodes and links.
+ * Canvas 领域：document、nodes 与 links。
  *
- * <p>Does not depend on Spring, MyBatis, HTTP or other Studio packages.
+ * <p>不依赖 Spring、MyBatis、HTTP 或其他 Studio 包。
  */
 package fun.fengwk.kkstudio.studio.canvas;

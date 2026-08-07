@@ -50,10 +50,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-/**
- * enqueueCommands: ordered command-set enqueue, replay semantics, CAS and SET_ENVIRONMENT
- * admission.
- */
+/** enqueueCommands：有序命令集合入队、replay 语义、CAS 与 SET_ENVIRONMENT admission。 */
 class HarnessRuntimeEnqueueTest {
 
   private InMemoryHarnessStore store;

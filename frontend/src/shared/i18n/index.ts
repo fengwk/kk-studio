@@ -89,7 +89,7 @@ function persistLocale(locale: AppLocale): void {
   try {
     globalThis.localStorage?.setItem(LOCALE_STORAGE_KEY, locale)
   } catch {
-    // Storage can be unavailable in privacy-restricted browser contexts.
+    // 在隐私受限的浏览器上下文中，Storage 可能不可用。
   }
 }
 

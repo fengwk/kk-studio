@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
-/** Resolves global model and provider references. */
+/** 解析全局 model 与 provider 引用。 */
 @AllArgsConstructor
 @Component
 final class AgentModelReferenceResolver {

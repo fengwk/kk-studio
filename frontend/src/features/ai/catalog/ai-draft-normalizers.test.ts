@@ -73,7 +73,7 @@ function provider(id: string, name: string): AgentProviderDTO {
 }
 
 describe('ai-draft-normalizers', () => {
-  /** Variant options must use config.variants[].id and preserve first-seen ordering. */
+  /** variant 选项必须使用 config.variants[].id 并保留首次出现的顺序。 */
   it('builds variant options from drafts and models', () => {
     expect(
       variantOptionsFromDraft(
@@ -108,7 +108,7 @@ describe('ai-draft-normalizers', () => {
     ).toEqual(['creative', 'precise'])
   })
 
-  /** Invalid selected variants fall back to each model config's effective default. */
+  /** 无效的已选 variant 回退到每个 model config 的有效默认值。 */
   it('normalizes model and agent default variants', () => {
     const normalizedModel = normalizeModelDraftDefaultVariant({
       ...emptyModelDraft(),
@@ -136,7 +136,7 @@ describe('ai-draft-normalizers', () => {
         }),
       ],
     )
-    // Invalid override is cleared so the model default is used.
+    // 清除无效覆盖，以便使用 model 默认值。
     expect(normalizedAgent.variant).toBe('')
 
     expect(
@@ -151,7 +151,7 @@ describe('ai-draft-normalizers', () => {
     ).toBe('')
   })
 
-  /** Changing models also changes the Agent variant to the new model's defaultVariant. */
+  /** 切换 model 时，Agent variant 也同步切换为新 model 的 defaultVariant。 */
   it('syncs agent variant when model selection changes', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
@@ -187,7 +187,7 @@ describe('ai-draft-normalizers', () => {
     })
   })
 
-  /** Create-mode provider normalization preserves the existing draft's provider when it matches. */
+  /** 新建模式下的 provider 标准化在现有草稿的 provider 匹配时予以保留。 */
   it('preserves a valid existing provider on the draft', () => {
     const draft = { ...emptyModelDraft(), providerName: 'minimax' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
@@ -195,7 +195,7 @@ describe('ai-draft-normalizers', () => {
     expect(result).toBe(draft)
   })
 
-  /** Create mode may fall back to the preferred name and then to providers[0]. */
+  /** 新建模式可回退到首选名称，再回退到 providers[0]。 */
   it('falls back to preferred provider name, then to first provider', () => {
     const draft = { ...emptyModelDraft(), providerName: '' }
     const providers = [provider('provider-1', 'minimax'), provider('provider-2', 'anthropic')]
@@ -217,7 +217,7 @@ describe('ai-draft-normalizers', () => {
     expect(result.providerName).toBe('deleted-provider')
   })
 
-  /** Create mode picks the preferred model, then fallback model[0]. */
+  /** 新建模式优先选择首选 model，再回退到 model[0]。 */
   it('picks preferred model id then first available model', () => {
     const draft: AgentDraft = { ...emptyAgentDraft(), model: 'gone', variant: '' }
     const models = [

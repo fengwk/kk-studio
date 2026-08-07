@@ -3,14 +3,14 @@ import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import { translate } from '@/shared/i18n'
 
-/** Derived working state: any status other than IDLE, or processing flag. */
+/** 基于状态派生的工作中状态：任意非 IDLE 状态，或 processing 标志为真。 */
 export function isThreadActive(thread: HarnessThreadDTO | undefined): boolean {
   return Boolean(
     thread && (thread.processing || (thread.status != null && thread.status !== 'IDLE')),
   )
 }
 
-/** Chat-scoped Thread picker row; the Thread id is the selection value and route identity. */
+/** Chat 作用域的 Thread picker 行；Thread id 同时是选中值和路由标识。 */
 export function toThreadSelectionItem(
   thread: HarnessThreadDTO,
   sort: PaneSortPreference = 'recent',

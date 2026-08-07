@@ -78,7 +78,7 @@ final class TurnPathValidator {
           requireCompleteToolResults("stopped");
         }
         case CANCELLED -> {
-          // history cut may close any open phase.
+          // history cut 可在任意 open phase 关闭。
         }
       }
       openTurnStart = null;
@@ -98,7 +98,7 @@ final class TurnPathValidator {
           throw new IllegalArgumentException(
               "tool results require an assistant message with tool calls");
         }
-        // ASSISTANT: the single assistant result of this turn. SYSTEM is impossible here.
+        // ASSISTANT：本 turn 唯一的 assistant result。SYSTEM 在此处不可能出现。
         assistantSeen = true;
         assistantResultEntry = entry;
         requireInput("an assistant result");
@@ -129,7 +129,7 @@ final class TurnPathValidator {
       inputSeen = true;
       return;
     }
-    // ASSISTANT_ERROR / ASSISTANT_ABORTED: the single assistant result of this turn.
+    // ASSISTANT_ERROR / ASSISTANT_ABORTED：本 turn 唯一的 assistant result。
     if (assistantSeen) {
       throw new IllegalArgumentException("assistant result must not repeat");
     }

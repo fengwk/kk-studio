@@ -17,12 +17,10 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * Lightweight architecture guard for the runtime module.
+ * runtime 模块的轻量级架构守卫。
  *
- * <p>Scans the entire {@code src/main/java} tree against an allowlist, and verifies the three
- * Harness modules plus their direct production dependencies. The former top-level model package has
- * been folded into {@code fun.fengwk.kkstudio.harness.runtime.model}; the old source directory must
- * not reappear.
+ * <p>基于 allowlist 扫描整个 {@code src/main/java} 目录，校验三个 Harness 模块 及其直接的生产依赖。原顶层 model 包已合并到 {@code
+ * fun.fengwk.kkstudio.harness.runtime.model}， 旧的源码目录不得再次出现。
  */
 class RuntimeModuleArchitectureTest {
 
@@ -227,10 +225,7 @@ class RuntimeModuleArchitectureTest {
     }
   }
 
-  /**
-   * Resolves {@code src/main/java} when Maven runs from the module root or the reactor root. Never
-   * resolves under {@code target/}.
-   */
+  /** 在 Maven 从模块根目录或 reactor 根目录运行时定位 {@code src/main/java}；绝不会解析到 {@code target/} 之下。 */
   private static Path locateRuntimeMainJava() {
     Path cwd = Path.of("").toAbsolutePath().normalize();
     List<Path> candidates =

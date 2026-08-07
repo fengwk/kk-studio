@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinit
 
 import java.util.List;
 
-/** PostgreSQL-backed global Agent definition repository. */
+/** 基于 PostgreSQL 的全局 Agent definition 仓库。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepository {

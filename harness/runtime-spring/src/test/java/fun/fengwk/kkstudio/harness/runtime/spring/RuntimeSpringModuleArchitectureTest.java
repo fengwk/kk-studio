@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
-/** Guards the adapter-only source root as concrete infrastructure capabilities are introduced. */
+/** 在引入具体基础设施能力时，守护仅允许 adapter 源码存在的根包。 */
 class RuntimeSpringModuleArchitectureTest {
 
   private static final String PACKAGE_PREFIX = "package fun.fengwk.kkstudio.harness.runtime.spring";
@@ -29,7 +29,7 @@ class RuntimeSpringModuleArchitectureTest {
           "org.springframework.jdbc.",
           "org.springframework.transaction.");
 
-  /** Every production source stays under the adapter package and imports no Core/Web technology. */
+  /** 所有生产源码都必须留在 adapter 包内，且禁止引入 Core/Web 技术。 */
   @Test
   void mainSourcesStayInsideTheRuntimeSpringInfrastructureBoundary() throws IOException {
     Path main = locateMainJava();

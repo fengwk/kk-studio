@@ -32,7 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-/** decideToolApproval: allow/deny, exact replay idempotency, applicability and Work targeting. */
+/** decideToolApproval：allow/deny、精确 replay 幂等性、适用性与 Work 目标。 */
 class HarnessRuntimeApprovalTest {
 
   private InMemoryHarnessStore store;

@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** ModelInvocationStatus terminal classification. */
+/** ModelInvocationStatus 终态分类。 */
 class ModelInvocationStatusTest {
 
   @Test

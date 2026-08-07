@@ -43,10 +43,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-/**
- * OpenAI Chat Completions HTTP probe: a null/blank credential must still issue the chat request and
- * must not emit an {@code Authorization} header.
- */
+/** OpenAI Chat Completions HTTP 探针：null/空白凭据仍必须发起 chat 请求，且不能发送 {@code Authorization} 请求头。 */
 class OpenAiProviderAdapterHttpProbeTest {
 
   private static final String PROBE_ERROR =
@@ -135,8 +132,8 @@ class OpenAiProviderAdapterHttpProbeTest {
           }
         });
     assertTrue(done.await(20, TimeUnit.SECONDS), "provider should produce a terminal callback");
-    // Probe server responds 400; the SDK surfaces it as INVALID_REQUEST — fine, the HTTP request
-    // we care about has already been captured by then.
+    // 探针服务器响应 400；SDK 会以 INVALID_REQUEST 形式上抛——没有关系，
+    // 我们关心的 HTTP 请求在那之前已被捕获。
     assertNotNull(error.get(), "probe server should have caused an error callback");
   }
 

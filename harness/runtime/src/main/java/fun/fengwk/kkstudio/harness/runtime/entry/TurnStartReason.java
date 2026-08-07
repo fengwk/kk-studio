@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-/** Durable reason for opening a Model response turn. */
+/** 开启 Model response turn 的 durable reason。 */
 public enum TurnStartReason {
   INPUT,
   CONTINUATION

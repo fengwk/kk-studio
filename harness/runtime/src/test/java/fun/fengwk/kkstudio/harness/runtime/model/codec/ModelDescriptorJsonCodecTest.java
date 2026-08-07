@@ -39,7 +39,7 @@ class ModelDescriptorJsonCodecTest {
   private final ModelDescriptorJsonCodec codec = new ModelDescriptorJsonCodec();
   private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
 
-  // ---------- Round-trip ----------
+  // ---------- 往返 ----------
 
   /** 完整 ModelDescriptor 走完 codec 后必须等价。 */
   @Test
@@ -71,7 +71,7 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(variant, decoded);
   }
 
-  // ---------- Deterministic / canonical ----------
+  // ---------- 确定性 / canonical ----------
 
   /** 同一 descriptor 多次 encode 必须产生 bit-identical JSON。 */
   @Test
@@ -111,7 +111,7 @@ class ModelDescriptorJsonCodecTest {
         new BigDecimal(pricing.get("inputPerMillionTokens").asText()));
   }
 
-  // ---------- Strict rejection ----------
+  // ---------- 严格拒绝 ----------
 
   /** 未知 descriptor 字段必须拒绝。 */
   @Test
@@ -219,7 +219,7 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(str));
   }
 
-  // ---------- Cross-codec consistency ----------
+  // ---------- 跨 codec 一致性 ----------
 
   /**
    * 关键交叉断言：ProviderRequest 内嵌的 model 与 variant 子节点必须与共享 codec 输出完全一致，确保未来修改 不会让两者漂移。两边都是直接 {@code
@@ -279,7 +279,7 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(request.variant(), codec.decodeVariantNode(root.get("variant")));
   }
 
-  // ---------- Fixture / helpers ----------
+  // ---------- Fixture / 辅助方法 ----------
 
   private static ModelDescriptor canonicalDescriptor() {
     return new ModelDescriptor("openai", "gpt-5-mini", true, true, canonicalPricing());

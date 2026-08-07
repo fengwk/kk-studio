@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 import java.util.List;
 
-/** Chat collection CRUD surface. */
+/** Chat 集合 CRUD 表面。 */
 public interface ChatService {
 
   List<ChatDTO> listChats();

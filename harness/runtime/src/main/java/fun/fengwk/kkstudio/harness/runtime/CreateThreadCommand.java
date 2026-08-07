@@ -5,13 +5,10 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import java.util.Objects;
 
 /**
- * Immutable create-thread request: the initial complete {@link BranchSettings} of the new Session
- * ROOT and the Thread YOLO runtime policy.
+ * 不可变的 create-thread 请求：新 Session ROOT 的初始完整 {@link BranchSettings} 与 Thread YOLO runtime policy。
  *
- * <p>{@code title} is an optional user-visible label and is validated by {@link
- * fun.fengwk.kkstudio.harness.runtime.session.Session}. There is deliberately no {@code
- * createRequestId}: the 7-table model has no create idempotency key, so {@link
- * HarnessRuntime#createThread} is non-idempotent.
+ * <p>{@code title} 为可选的用户可见标签，由 {@link fun.fengwk.kkstudio.harness.runtime.session.Session}
+ * 校验。设计上没有 {@code createRequestId}：7 表模型没有 create 幂等键，因此 {@link HarnessRuntime#createThread} 是非幂等的。
  */
 public record CreateThreadCommand(
     String title, BranchSettings branchSettings, boolean yoloEnabled) {

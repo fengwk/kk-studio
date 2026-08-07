@@ -10,7 +10,7 @@ import java.util.Objects;
 public record ToolExecutionRequest(
     ToolDescriptor descriptor, ToolCall call, Duration timeout, ToolExecutionContext context) {
 
-  /** Environment Tool request; Daemon execution does not receive durable Platform ownership. */
+  /** Environment Tool 请求；Daemon 执行不接收 durable Platform 归属。 */
   public ToolExecutionRequest(ToolDescriptor descriptor, ToolCall call, Duration timeout) {
     this(descriptor, call, timeout, null);
   }

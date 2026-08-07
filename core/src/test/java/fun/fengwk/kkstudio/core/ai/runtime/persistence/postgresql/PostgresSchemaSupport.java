@@ -13,12 +13,11 @@ import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Shared support base for the PostgreSQL final-schema tests.
+ * PostgreSQL final-schema 测试的共享基座。
  *
- * <p>Starts one process-wide {@code postgres:17-alpine} Testcontainers instance and exposes the
- * JDBC URL plus Flyway helpers for the baseline and profile seeds. Keeping one stable container
- * allows schema tests and cached Spring contexts to share the same JDBC endpoint. Docker must be
- * available, otherwise class initialization fails rather than silently skipping.
+ * <p>启动一个进程级的 {@code postgres:17-alpine} Testcontainers 实例，并暴露 JDBC URL 以及 baseline 和 profile seed
+ * 的 Flyway 工具方法。保持单一稳定容器，使 schema 测试与已缓存的 Spring context 能共享同一 JDBC endpoint。Docker
+ * 必须可用；否则类初始化失败而不是静默跳过。
  */
 public abstract class PostgresSchemaSupport {
 
@@ -33,43 +32,43 @@ public abstract class PostgresSchemaSupport {
     POSTGRES.start();
   }
 
-  /** Counter shared across fixtures so per-test ids never clash across tests. */
+  /** 跨 fixture 共享的计数器，避免每个测试的 id 互相冲突。 */
   public static final AtomicLong FIXTURE_IDS = new AtomicLong(10_000_000L);
 
-  /** Open a new JDBC connection to the running container. */
+  /** 打开到运行中容器的一条新 JDBC 连接。 */
   public static Connection newConnection() throws SQLException {
     return DriverManager.getConnection(
         POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
   }
 
-  /** Migrate the baseline schema on the caller-owned connection. */
+  /** 在调用方持有的连接上执行 baseline schema 迁移。 */
   public static void applyBaseline(Connection conn) {
     migrate(conn, "classpath:db/migration");
   }
 
-  /** Migrate the baseline schema and the dev seed on the caller-owned connection. */
+  /** 在调用方持有的连接上执行 baseline schema 与 dev seed 迁移。 */
   public static void applyDevDatabase(Connection conn) {
     migrate(conn, "classpath:db/migration", "classpath:db/seed/dev");
   }
 
-  /** Migrate the baseline schema and the e2e seed on the caller-owned connection. */
+  /** 在调用方持有的连接上执行 baseline schema 与 e2e seed 迁移。 */
   public static void applyE2eDatabase(Connection conn) {
     migrate(conn, "classpath:db/migration", "classpath:db/seed/e2e");
   }
 
   private static void migrate(Connection conn, String... locations) {
     Flyway.configure()
-        // suppressClose preserves the connection lifecycle for the caller.
+        // suppressClose 保留调用方持有的连接生命周期。
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations(locations)
-        // Profile seeds retain their V2 filenames and may be applied after a baseline-only run.
+        // Profile seed 保留其 V2 文件名，可在仅 baseline 运行后应用。
         .outOfOrder(true)
         .validateMigrationNaming(true)
         .load()
         .migrate();
   }
 
-  /** Drop every object in the public schema, leaving an empty database for the next test. */
+  /** 删除 public schema 中的全部对象，为下一次测试保留空数据库。 */
   public static void resetDatabase(Connection conn) throws SQLException {
     try (Statement st = conn.createStatement()) {
       st.execute("drop schema if exists public cascade");
@@ -77,7 +76,7 @@ public abstract class PostgresSchemaSupport {
     }
   }
 
-  /** Run one transaction and require PostgreSQL to reject it with the named constraint. */
+  /** 跑一个事务并要求 PostgreSQL 以指定约束名拒绝它。 */
   public static void assertTransactionConstraintViolation(
       Connection conn, String expectedConstraint, SqlCommand command) throws SQLException {
     boolean previousAutoCommit = conn.getAutoCommit();
@@ -133,7 +132,7 @@ public abstract class PostgresSchemaSupport {
 
   @FunctionalInterface
   interface SqlCommand {
-    /** Execute SQL inside the transaction managed by the assertion helper. */
+    /** 在断言辅助类所管理的事务中执行 SQL。 */
     void run() throws SQLException;
   }
 }

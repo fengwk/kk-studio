@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Typed command payload role, field and defensive-copy invariants. */
+/** 类型化 command payload 的 role、字段与防御性拷贝不变量。 */
 class ThreadCommandPayloadTest {
 
   private static final ModelSelection MODEL =

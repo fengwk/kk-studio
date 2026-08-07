@@ -40,8 +40,8 @@ class ProviderResponseJsonCodecTest {
   private final ProviderResponseJsonCodec codec = new ProviderResponseJsonCodec();
 
   /**
-   * The canonical fixture verifies exact field order, tool-call order, decimal strings, null
-   * metadata, and verbatim raw usage JSON in one complete response.
+   * 规范 fixture 在一次完整 response 中验证精确的字段顺序、tool-call 顺序、decimal 字符串、null metadata 以及逐字保留的 raw usage
+   * JSON。
    */
   @Test
   void roundTripsCompleteResponseAndMatchesCanonicalFixture() {
@@ -64,9 +64,7 @@ class ProviderResponseJsonCodecTest {
     assertEquals(new BigDecimal("0.000911250000"), decoded.cost().total());
   }
 
-  /**
-   * Nullable metadata also has an explicit string form, while raw usage may be an ordered array.
-   */
+  /** nullable metadata 同时支持显式 string 形态，raw usage 也可以是 ordered array。 */
   @Test
   void roundTripsStringMetadataAndRawUsageArray() {
     String rawUsageJson = " \n[ {\"cached\":true}, 2 ]\n ";
@@ -92,7 +90,7 @@ class ProviderResponseJsonCodecTest {
     assertEquals(rawUsageJson, decoded.rawUsageJson());
   }
 
-  /** String, tool-argument, and raw-usage JSON reject duplicate fields and trailing documents. */
+  /** String、tool-argument 与 raw-usage JSON 必须拒绝 duplicate field 与 trailing document。 */
   @Test
   void rejectsDuplicateAndTrailingDocumentsAtStrictJsonBoundaries() {
     ProviderResponse response = canonicalResponse();
@@ -133,7 +131,7 @@ class ProviderResponseJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(invalidUsage));
   }
 
-  /** Every response object layer independently rejects unknown, missing, and wrong-typed fields. */
+  /** 每个 response 对象层都独立拒绝未知、缺失以及类型错误的字段。 */
   @Test
   void rejectsUnknownMissingAndWrongTypedFieldsAtEveryObjectLayer() {
     assertStrictLayer(
@@ -154,7 +152,7 @@ class ProviderResponseJsonCodecTest {
         root -> cost(root).put("input", 0.1));
   }
 
-  /** Unknown stop reasons and non-text enum values are rejected instead of being downgraded. */
+  /** 未知 stop reason 与非文本 enum 值必须被拒绝，不得降级处理。 */
   @Test
   void rejectsUnknownOrWrongTypedStopReason() {
     assertRejected(root -> root.put("stopReason", "LEGACY_STOP"));
@@ -162,8 +160,8 @@ class ProviderResponseJsonCodecTest {
   }
 
   /**
-   * Malformed roots, numeric ranges, raw JSON fields, and absent nullable fields all fail the
-   * persistence boundary with IllegalArgumentException.
+   * Malformed 根节点、numeric 越界、raw JSON 字段以及缺失 nullable 字段都必须在持久化 boundary 上 抛出
+   * IllegalArgumentException。
    */
   @Test
   void rejectsMalformedRootsNumbersJsonAndNullableFields() {

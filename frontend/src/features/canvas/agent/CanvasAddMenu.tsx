@@ -3,7 +3,7 @@ import { ADD_MENU_ITEMS } from '@/features/canvas/data'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { useI18n } from '@/shared/i18n'
 
-/** Upward add menu with keyboard navigation, composed by the agent dock. */
+/** 由 agent dock 组合的上弹式 add 菜单，支持键盘导航。 */
 export function CanvasAddMenu({ menuId }: { menuId: string }) {
   const {
     state,

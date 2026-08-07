@@ -65,16 +65,14 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Strict DTO&lt;-&gt;domain mapper of the Harness Runtime HTTP boundary.
+ * Harness Runtime HTTP 边界的严格 DTO&lt;-&gt;domain mapper。
  *
- * <p>Entity ids are strict positive decimal strings ({@code [1-9][0-9]*}) of the underlying bigint
- * values; revisions are strict non-negative decimal strings. Domain JSON payloads are
- * encoded/decoded exclusively through the canonical runtime codecs. The Thread status and
- * processing flag are derived deterministically from the {@link ThreadSnapshot} via the shared
- * {@link ThreadContextClassifier}: IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; /
- * TOOL_&lt;status&gt; / APPLYING; processing is false only for IDLE.
+ * <p>Entity id 是底层 bigint 值的严格正十进制字符串（{@code [1-9][0-9]*}）；revision 是严格非负十进制字符串。 domain JSON
+ * payload 只通过规范 runtime codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 从
+ * {@link ThreadSnapshot} 确定性推导：IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; / TOOL_&lt;status&gt;
+ * / APPLYING；只有 IDLE 时 processing 为 false。
  *
- * <p>All returned DTO lists are immutable copies.
+ * <p>所有返回的 DTO 列表都是不可变副本。
  */
 public final class HarnessRuntimeWebMapper {
 
@@ -97,9 +95,9 @@ public final class HarnessRuntimeWebMapper {
 
   private HarnessRuntimeWebMapper() {}
 
-  // ---------- Strict decimal parsing ----------
+  // ---------- 严格十进制解析 ----------
 
-  /** Parses a strict positive decimal id ({@code [1-9][0-9]*}) within long range. */
+  /** 解析 long 范围内的严格正十进制 id（{@code [1-9][0-9]*}）。 */
   public static long parsePositiveId(String value, String field) {
     Objects.requireNonNull(field, "field");
     if (value == null || !POSITIVE_DECIMAL.matcher(value).matches()) {
@@ -112,7 +110,7 @@ public final class HarnessRuntimeWebMapper {
     }
   }
 
-  /** Parses a strict non-negative decimal revision cursor ({@code 0|[1-9][0-9]*}). */
+  /** 解析严格非负十进制 revision 游标（{@code 0|[1-9][0-9]*}）。 */
   public static long parseNonNegativeDecimal(String value, String field) {
     Objects.requireNonNull(field, "field");
     if (value == null || !NON_NEGATIVE_DECIMAL.matcher(value).matches()) {
@@ -126,9 +124,9 @@ public final class HarnessRuntimeWebMapper {
     }
   }
 
-  // ---------- Domain -> DTO ----------
+  // ---------- domain -> DTO ----------
 
-  /** Maps one consistent Thread snapshot; the DTO lists are immutable copies. */
+  /** 映射一个一致的 Thread 快照；DTO 列表为不可变副本。 */
   public static HarnessThreadDTO toThreadDto(ThreadSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
     HarnessThreadDTO dto = new HarnessThreadDTO();
@@ -276,7 +274,7 @@ public final class HarnessRuntimeWebMapper {
     return dto;
   }
 
-  /** Maps the initial ROOT-only snapshot returned by create-thread. */
+  /** 映射 create-thread 返回的初始仅 ROOT 快照。 */
   public static HarnessThreadDTO toCreatedThreadDto(CreatedThread created) {
     Objects.requireNonNull(created, "created");
     return toThreadDto(
@@ -288,7 +286,7 @@ public final class HarnessRuntimeWebMapper {
             List.of()));
   }
 
-  /** Maps one Stop result together with the authoritative post-stop snapshot. */
+  /** 映射一次 Stop 结果及权威的 stop 后快照。 */
   public static HarnessThreadStopResultDTO toStopResultDto(
       StopResult result, ThreadSnapshot postStopSnapshot) {
     Objects.requireNonNull(result, "result");
@@ -354,7 +352,7 @@ public final class HarnessRuntimeWebMapper {
         domain);
   }
 
-  /** Maps one typed command DTO into its domain payload under strict field rules. */
+  /** 在严格字段规则下把一个 typed command DTO 映射为 domain payload。 */
   public static NewThreadCommand toNewThreadCommand(HarnessThreadCommandCreateDTO dto) {
     requireNonNull(dto, "commandDTO");
     ThreadCommandType type = requireType(dto.getType());
@@ -398,7 +396,7 @@ public final class HarnessRuntimeWebMapper {
         dto.getReason());
   }
 
-  // ---------- Internal helpers ----------
+  // ---------- 内部辅助方法 ----------
 
   private static ThreadCommandPayload toPayload(
       ThreadCommandType type, HarnessThreadCommandCreateDTO dto) {
@@ -570,7 +568,7 @@ public final class HarnessRuntimeWebMapper {
     };
   }
 
-  /** Interactive/in-flight blocker precedence of the Tool siblings of a TOOL_ACTIVE context. */
+  /** TOOL_ACTIVE 上下文下 Tool siblings 的交互/在途阻塞状态优先级。 */
   private static String toolStatus(List<ToolInvocation> siblings) {
     for (ToolInvocation sibling : siblings) {
       if (sibling.status() == ToolInvocationStatus.WAITING_APPROVAL) {

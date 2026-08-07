@@ -38,7 +38,7 @@ import java.sql.Connection;
 import java.time.Instant;
 import java.util.List;
 
-/** PostgreSQL-backed Chat coverage for visible name configuration, yolo, stale Agents and CAS. */
+/** PostgreSQL 后端的 Chat 覆盖：可见名称配置、yolo、过时 Agent 和 CAS。 */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private ChatService chatService;

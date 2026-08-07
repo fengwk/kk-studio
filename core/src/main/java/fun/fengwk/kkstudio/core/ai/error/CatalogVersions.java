@@ -3,11 +3,9 @@ package fun.fengwk.kkstudio.core.ai.error;
 import java.util.regex.Pattern;
 
 /**
- * Decimal-string representation of optimistic-lock versions on the AI catalog.
+ * AI catalog 上乐观锁版本的十进制字符串表示。
  *
- * <p>Versions are non-negative decimal strings ("0", "1", "2", ...) exposed at the HTTP / DTO
- * boundary. Negative, blank, non-decimal, or out-of-range values are rejected as validation
- * failures so CAS never sees an unparseable token.
+ * <p>版本是非负十进制字符串（"0"、"1"、"2"、……），在 HTTP / DTO 边界暴露。负数、空白、非十进制 或越界值作为校验失败拒绝，保证 CAS 永远看不到不可解析的令牌。
  */
 public final class CatalogVersions {
 
@@ -15,7 +13,7 @@ public final class CatalogVersions {
 
   private CatalogVersions() {}
 
-  /** Parses a decimal string version. Returns the parsed long on success. */
+  /** 解析十进制字符串版本。成功时返回解析后的 long。 */
   public static long parse(String value, String field) {
     if (value == null) {
       throw new AiValidationException(
@@ -39,7 +37,7 @@ public final class CatalogVersions {
     }
   }
 
-  /** Formats a non-negative internal version as its canonical decimal string. */
+  /** 把非负内部版本格式化为其 canonical 十进制字符串。 */
   public static String format(long value) {
     if (value < 0) {
       throw new IllegalStateException("catalog version must not be negative: " + value);

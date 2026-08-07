@@ -198,7 +198,7 @@ describe('ChatWorkspacePage', () => {
     localStorage.clear()
     setLocale('zh-CN')
     vi.mocked(agentService.listAgents).mockResolvedValue(page([assistantAgent]))
-    // Resolvable catalog so the blank pane can materialize its frozen draft.
+    // 可解析的 catalog，使空面板能够 materialize 自身的 frozen draft。
     vi.mocked(agentService.listModels).mockResolvedValue(page([miniMaxModel]))
     vi.mocked(agentService.listProviders).mockResolvedValue(page([]))
     vi.mocked(environmentService.listEnvironments).mockResolvedValue(readyEnvironments)
@@ -259,13 +259,13 @@ describe('ChatWorkspacePage', () => {
     })
     const { queryClient, rerender } = renderWorkspace('chat-1')
 
-    // Type unsent text into the Chat A blank pane composer.
+    // 在 Chat A 的空面板 composer 中输入未发送文本。
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await userEvent.setup().click(composer)
     await userEvent.setup().type(composer, 'stale across chats')
 
-    // Navigate to Chat B (same pane id 'pane-1'): the pane must remount with a fresh
-    // composer and frozen draft — no cross-Chat state reuse.
+    // 跳转到 Chat B（相同的 pane id 'pane-1'）：面板必须以全新的
+    // composer 和 frozen draft 重新挂载——不能跨 Chat 复用状态。
     rerender(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={['/chats/chat-1']}>
@@ -302,7 +302,7 @@ describe('ChatWorkspacePage', () => {
     renderWorkspace()
     expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).toBeTruthy()
-    // The second split pane is blank; the heading text is the locale-default title.
+    // 第二个 split 面板是空白的；标题文本是 locale 默认标题。
     expect(screen.getByRole('heading', { name: /新对话/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '6' }))
@@ -463,8 +463,8 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await user.click(await screen.findByRole('button', { name: /^assistant$/ }))
 
-    // react-query's mutateAsync defers the mutationFn to a microtask, so the blank-pane
-    // first-send path runs (create-thread) before the deferred updateChat mutation fires.
+    // react-query 的 mutateAsync 会把 mutationFn 推迟到 microtask，因此空白面板的
+    // 首次发送路径（create-thread）会在延迟的 updateChat mutation 触发前运行。
     await waitFor(() =>
       expect(events).toEqual(['create-thread', 'update-agent', 'message']),
     )
@@ -472,8 +472,8 @@ describe('ChatWorkspacePage', () => {
       agentName: 'assistant',
       expectedVersion: '1',
     })
-    // First-send = createChatThread returning a HarnessThreadSnapshotDTO; the enqueue
-    // targets the new Thread with the USER_MESSAGE-only batch from that snapshot's CAS.
+    // 首次发送 = createChatThread 返回 HarnessThreadSnapshotDTO；enqueue
+    // 以该 snapshot 的 CAS，针对新 Thread 使用仅含 USER_MESSAGE 的 batch。
     expect(harnessService.enqueueCommands).toHaveBeenCalledWith(
       't-stale-agent',
       expect.objectContaining({
@@ -589,8 +589,8 @@ describe('ChatWorkspacePage', () => {
   it('does not call the global thread list endpoint (chat-scoped list only)', async () => {
     renderWorkspace()
     await screen.findByRole('heading', { name: 'Workspace' })
-    // The harnessService global list methods are no longer used; Chat-scoped listChatThreads
-    // is the only picker source.
+    // harnessService 的全局列表方法已不再使用；Chat 作用域的 listChatThreads
+    // 是唯一的 picker 数据源。
     expect(harnessService.listThreads).toBeUndefined()
     expect(harnessService.listSessions).toBeUndefined()
     expect(harnessService.listSessionEntries).toBeUndefined()

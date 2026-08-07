@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-/** Durable terminal status of one ToolResult message. */
+/** 一条 ToolResult 消息的 durable terminal 状态。 */
 public enum ToolResultStatus {
   SUCCEEDED,
   FAILED,

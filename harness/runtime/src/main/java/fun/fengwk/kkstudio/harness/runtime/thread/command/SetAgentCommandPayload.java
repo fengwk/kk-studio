@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-/** Typed SET_AGENT payload. */
+/** SET_AGENT 的 typed payload。 */
 public record SetAgentCommandPayload(String agentName) implements ThreadCommandPayload {
 
   public SetAgentCommandPayload {

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
-/** Durable business status of one Tool invocation. */
+/** 一次 Tool invocation 的 durable 业务状态。 */
 public enum ToolInvocationStatus {
   WAITING_APPROVAL,
   READY,
@@ -11,7 +11,7 @@ public enum ToolInvocationStatus {
   CANCELLED,
   UNKNOWN;
 
-  /** Whether the status is a terminal state. */
+  /** 该状态是否为 terminal 状态。 */
   public boolean isTerminal() {
     return this == SUCCEEDED || this == FAILED || this == CANCELLED || this == UNKNOWN;
   }

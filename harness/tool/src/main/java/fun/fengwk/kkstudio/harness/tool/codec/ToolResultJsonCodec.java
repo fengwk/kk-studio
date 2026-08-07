@@ -25,7 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Strict persistence codec for final and partial Tool results. */
+/** 最终与部分 ToolResult 的严格持久化 codec。 */
 public final class ToolResultJsonCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -36,7 +36,7 @@ public final class ToolResultJsonCodec {
 
   private ToolResultJsonCodec() {}
 
-  /** Canonical object tree used by durable ToolInvocation result persistence. */
+  /** durable ToolInvocation 结果持久化使用的 canonical 对象树。 */
   public static JsonNode encodeNode(ToolResult result) {
     Objects.requireNonNull(result, "result");
     ObjectNode node = OBJECT_MAPPER.createObjectNode();

@@ -1,14 +1,12 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
 /**
- * Write port for Canvas commands.
+ * Canvas commands 的写端口。
  *
- * <p>Persistence, revision CAS and idempotency are owned by adapters. This interface is the domain
- * boundary used by web/core.
+ * <p>持久化、revision CAS 与幂等性由 adapter 负责。本接口是 web/core 使用的领域边界。
  *
- * <p>The idempotency key is the {@code commandId} (UUID/ULID-style); the request payload hash is
- * computed server-side from the canonical {@code commandsJson} so clients cannot accidentally or
- * intentionally collide on it.
+ * <p>幂等键为 {@code commandId}（UUID/ULID 风格）；请求负载哈希由服务端根据规范的 {@code commandsJson}
+ * 计算，客户端无法有意或无意地造成哈希冲突。
  */
 public interface CanvasCommandService {
 

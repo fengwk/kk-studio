@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 
-/** Converts Chat domain rows to public DTOs. */
+/** 将 Chat 领域行转换为公开 DTO。 */
 @Component
 public class ChatConverter {
 

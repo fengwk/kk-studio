@@ -16,18 +16,15 @@ import fun.fengwk.kkstudio.core.CoreTestApplication;
 import java.sql.Connection;
 
 /**
- * Shared Spring PostgreSQL Testcontainers support for non-Harness business integration tests.
+ * 非 Harness 业务集成测试的共享 Spring PostgreSQL Testcontainers 支持。
  *
- * <p>Reuses the single {@code postgres:17-alpine} container declared on {@link
- * fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport}. Wires the
- * authoritative multi-datasource configuration to the running container so {@code
- * CoreTestApplication} binds {@code spring.datasource.multi.primary} to PostgreSQL rather than H2.
+ * <p>复用 {@link fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport}
+ * 上声明的单一 {@code postgres:17-alpine} 容器，并将权威的多数据源配置连接到该容器，使 {@code CoreTestApplication} 把 {@code
+ * spring.datasource.multi.primary} 绑定到 PostgreSQL 而不是 H2。
  *
- * <p>Disables automatic Flyway so each test can reset public and explicitly migrate its baseline
- * after the cached context is ready.
+ * <p>禁用自动 Flyway，使每个测试都能重置 public，并在已缓存 context 就绪后显式执行 baseline 迁移。
  *
- * <p>Docker must be available — when it is not, container start fails and the test fails rather
- * than silently skipping.
+ * <p>Docker 必须可用——不可用时容器启动失败，本测试也失败而非静默跳过。
  */
 @SpringBootTest(classes = CoreTestApplication.class)
 public abstract class PostgresSpringTestSupport {
@@ -53,7 +50,7 @@ public abstract class PostgresSpringTestSupport {
     }
   }
 
-  /** Override to select one of the explicit Flyway profile migration locations. */
+  /** 重写以选择某个明确的 Flyway profile migration 位置。 */
   protected void migrateDatabase(Connection conn) {
     applyBaseline(conn);
   }

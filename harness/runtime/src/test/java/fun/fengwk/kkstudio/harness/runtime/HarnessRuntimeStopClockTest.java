@@ -21,9 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 /**
- * Stop reads its Clock only after the whole Work pre-lock: a store proxy that advances the mutable
- * clock the moment any Work row is locked must be reflected in every timestamp the transaction
- * writes (Thread, Model, Command and Entries).
+ * Stop 仅在整个 Work 预锁之后才读取其 Clock：store 代理会在任意 Work 行被锁定那一刻推进可变
+ * clock，这一推进必须反映到事务写入的每一个时间戳（Thread、Model、Command 与 Entries）。
  */
 class HarnessRuntimeStopClockTest {
 

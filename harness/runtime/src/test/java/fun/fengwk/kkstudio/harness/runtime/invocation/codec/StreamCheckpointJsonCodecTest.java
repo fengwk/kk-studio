@@ -8,12 +8,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 
-/** Strict stream-checkpoint persistence boundary for attempt/sequence and nullable content. */
+/** attempt/sequence 与 nullable content 的严格 stream-checkpoint 持久化边界。 */
 class StreamCheckpointJsonCodecTest {
 
   private final StreamCheckpointJsonCodec codec = new StreamCheckpointJsonCodec();
 
-  /** All legal nullable text/thinking shapes use one deterministic four-field object. */
+  /** 所有合法的 nullable text/thinking 形态都使用同一个 deterministic 四字段对象。 */
   @Test
   void roundTripsEveryLegalContentShapeWithExactJson() {
     StreamCheckpoint both = new StreamCheckpoint(2, 7, "text", "thinking");
@@ -36,7 +36,7 @@ class StreamCheckpointJsonCodecTest {
     assertNull(codec.decode(codec.encode(thinkingOnly)).text());
   }
 
-  /** Strict parser settings reject duplicate, trailing, null and non-object input. */
+  /** 严格 parser 设置拒绝 duplicate、trailing、null 以及非 object 的输入。 */
   @Test
   void rejectsMalformedDocumentBoundaries() {
     String json = codec.encode(new StreamCheckpoint(1, 0, "text", null));
@@ -51,7 +51,7 @@ class StreamCheckpointJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** Numeric bounds, exact fields and domain content requirements are checked on every decode. */
+  /** 数值边界、精确字段以及领域内容要求在每次 decode 时都会被校验。 */
   @Test
   void rejectsUnknownMissingWrongTypeAndInvalidCheckpointFacts() {
     assertInvalid("{\"attempt\":1,\"sequence\":0,\"text\":\"x\",\"thinking\":null,\"extra\":1}");

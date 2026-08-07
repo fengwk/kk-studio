@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Path;
 
-/** Searches workspace symbols through the optional local LSP bridge. */
+/** 通过可选的本机 LSP bridge 搜索 workspace symbols。 */
 public final class LspWorkspaceSymbolsTool extends AbstractCodingTool {
 
   private static final int DEFAULT_LIMIT = 50;

@@ -12,7 +12,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Performs deterministic exact text replacements while preserving file representation. */
+/** 在保留文件表示形式的前提下执行确定性的精确文本替换。 */
 public final class EditTool extends AbstractCodingTool {
 
   public EditTool(CodingToolsConfig config) {

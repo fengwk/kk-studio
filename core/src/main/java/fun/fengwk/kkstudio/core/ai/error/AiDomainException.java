@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
 /**
- * HTTP-independent typed domain error for the AI catalog (Agent / Model / Provider / Chat).
+ * 与 HTTP 无关的 AI catalog（Agent / Model / Provider / Chat）类型化领域错误。
  *
- * <p>Each subclass maps to exactly one {@link DomainErrorCode} and carries a stable message.
- * Carries a single {@code resource} tag so web translation can return it to the caller.
+ * <p>每个子类都映射到恰好一个 {@link DomainErrorCode} 并携带稳定消息。携带单个 {@code resource} 标签，便于 web 翻译层返回给调用方。
  */
 public abstract class AiDomainException extends RuntimeException {
 

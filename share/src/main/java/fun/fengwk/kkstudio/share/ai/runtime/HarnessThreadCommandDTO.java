@@ -6,26 +6,48 @@ import lombok.Data;
 import java.time.Instant;
 
 /**
- * Durable Thread mailbox command projection.
+ * durable Thread mailbox 命令投影。
  *
- * <p>{@code state} is derived from durable terminal markers (QUEUED/APPLIED/CANCELLED); {@code
- * payloadJson} is the canonical JSON of the typed command payload.
+ * <p>{@code state} 由 durable 终态标记派生（QUEUED/APPLIED/CANCELLED）；{@code payloadJson} 是类型化命令 载荷的
+ * canonical JSON。
  */
 @Data
 public class HarnessThreadCommandDTO {
+  /** 命令主键：strict positive decimal string（底层 bigint）。 */
   private String commandId;
+
+  /** 所属 Thread 主键：strict positive decimal string。 */
   private String threadId;
+
+  /** Thread 内单调递增的命令序号：strict positive decimal string（从 1 开始）。 */
   private String sequence;
+
+  /**
+   * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL /
+   * SET_THINKING_LEVEL / SET_ACTIVE_TOOLS / SET_YOLO / SET_ENVIRONMENT。
+   */
   private String type;
+
+  /** 派生生命周期状态，取 {@code ThreadCommandState} 枚举名：QUEUED / APPLIED / CANCELLED。 */
   private String state;
+
+  /** 稳定客户端幂等键（创建时提供）。 */
   private String clientCommandId;
+
+  /** 命令载荷的 canonical JSON（ThreadCommandPayloadJsonCodec 编码），内容形态随 type 变化。 */
   private String payloadJson;
 
+  /**
+   * 消费该命令的 TURN_START Entry 主键：strict positive decimal string；QUEUED/CANCELLED 时为
+   * null（{@code @JsonInclude(ALWAYS)}）。
+   */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String consumedTurnStartEntryId;
 
+  /** 取消时间（UTC Instant）：仅 CANCELLED 状态非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private Instant cancelledAt;
 
+  /** 命令入队时间（UTC Instant）。 */
   private Instant createTime;
 }

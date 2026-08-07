@@ -70,8 +70,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * Package-private fixture builders for HarnessRuntime control-plane tests: atomic Session/Entry/
- * Thread/Invocation/Work seeds over {@link InMemoryHarnessStore} plus small value builders.
+ * HarnessRuntime 控制面测试用的包内 fixture 构建器：基于 {@link InMemoryHarnessStore} 提供原子的
+ * Session/Entry/Thread/Invocation/Work 种子，以及小型 value 构建器。
  */
 final class HarnessRuntimeTestSupport {
 
@@ -86,7 +86,7 @@ final class HarnessRuntimeTestSupport {
 
   private HarnessRuntimeTestSupport() {}
 
-  /** Fixed-UTC test clock whose instant can be advanced for replay/races. */
+  /** 固定 UTC 的测试时钟，可推进 instant 用于 replay/竞态测试。 */
   static final class TestClock extends Clock {
     private Instant instant;
 
@@ -142,7 +142,7 @@ final class HarnessRuntimeTestSupport {
   record ContinuationBaseline(
       long sessionId, long rootEntryId, long turnEndEntryId, long threadId) {}
 
-  /** Session + ROOT + Thread(head ROOT); the quiescent IDLE_OR_HISTORICAL baseline. */
+  /** Session + ROOT + Thread(head 指向 ROOT)；静默的 IDLE_OR_HISTORICAL baseline。 */
   static Baseline seedBaseline(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -156,7 +156,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Session + ROOT + open TURN_START(INPUT) + Thread(head TURN_START). */
+  /** Session + ROOT + 打开的 TURN_START(INPUT) + Thread(head 指向 TURN_START)。 */
   static TurnBaseline seedOpenTurn(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -172,9 +172,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /**
-   * MODEL_ACTIVE compatibility baseline: open turn with a RUNNING model at its TURN_START basis.
-   */
+  /** MODEL_ACTIVE 兼容性 baseline：打开的 turn，在 TURN_START basis 上挂一个 RUNNING 的 Model。 */
   static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -197,8 +195,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * MODEL_ACTIVE baseline at the given live status (READY / DISPATCHING / RUNNING): ROOT -&gt;
-   * TURN_START(INPUT) -&gt; USER, thread head at the USER entry, model basis = the USER entry.
+   * MODEL_ACTIVE baseline，按指定的活动状态（READY / DISPATCHING / RUNNING）： ROOT -&gt; TURN_START(INPUT)
+   * -&gt; USER，thread head 指向 USER entry，model basis = USER entry。
    */
   static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
@@ -229,8 +227,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * MODEL_ACTIVE on a CONTINUATION turn: bare TURN_START(CONTINUATION) head (the real plan shape
-   * has no input entries) with a RUNNING model at that TURN_START basis.
+   * CONTINUATION turn 上的 MODEL_ACTIVE：裸的 TURN_START(CONTINUATION) head（真实 plan 形态 没有 input
+   * entry），并在该 TURN_START basis 上挂一个 RUNNING 的 Model。
    */
   static ModelBaseline seedRunningContinuationModel(InMemoryHarnessStore store) {
     return store.transaction(
@@ -260,7 +258,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** MODEL_TERMINAL_PENDING baseline: open turn with a terminal model not yet applied. */
+  /** MODEL_TERMINAL_PENDING baseline：打开的 turn，挂一个尚未 apply 的 terminal Model。 */
   static ModelBaseline seedTerminalModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -282,8 +280,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * Full TOOL baseline: ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT(call-1), SUCCEEDED
-   * model attached to the assistant, one READY tool invocation, thread head at the assistant entry.
+   * 完整 TOOL baseline：ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT(call-1)， 在 assistant
+   * 上挂一个 SUCCEEDED 的 Model 与一个 READY 的 ToolInvocation， thread head 指向 assistant entry。
    */
   static ToolBaseline seedToolBaseline(InMemoryHarnessStore store) {
     MultiToolBaseline multi = seedToolBaseline(store, 1);
@@ -298,8 +296,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * Multi-sibling TOOL baseline: the assistant carries {@code toolCount} calls ("call-0" ...) and
-   * one READY invocation per call, so Stop can converge a full sibling status matrix in one path.
+   * 多 sibling 的 TOOL baseline：assistant 上携带 {@code toolCount} 个 tool call（"call-0" …）， 每个 call 对应一个
+   * READY invocation，因此 Stop 可以在一条路径上收敛完整的 sibling 状态矩阵。
    */
   static MultiToolBaseline seedToolBaseline(InMemoryHarnessStore store, int toolCount) {
     if (toolCount <= 0) {
@@ -355,7 +353,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Moves the tool invocation of a TOOL baseline into WAITING_APPROVAL (TOOL_ACTIVE context). */
+  /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
   static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
     return store.transaction(
         tx -> {
@@ -366,12 +364,12 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Marks the tool invocation terminal without an applied result (TOOL_TERMINAL_PENDING). */
+  /** 将 ToolInvocation 标记为 terminal 但未应用结果（TOOL_TERMINAL_PENDING）。 */
   static ToolInvocation cancelTool(InMemoryHarnessStore store, ToolBaseline baseline) {
     return cancelTool(store, baseline.toolId());
   }
 
-  /** Marks the tool invocation of the given id terminal CANCELLED without an applied result. */
+  /** 将指定 id 的 ToolInvocation 标记为 terminal CANCELLED 但未应用结果。 */
   static ToolInvocation cancelTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
@@ -382,7 +380,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** READY -&gt; DISPATCHING of the given tool (approval preflight completed, attempt stays 0). */
+  /** 将指定 tool 从 READY 推进到 DISPATCHING（approval preflight 已完成，attempt 保持为 0）。 */
   static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
@@ -395,7 +393,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** DISPATCHING -&gt; RUNNING of the given tool (attempt advances to 1). */
+  /** 将指定 tool 从 DISPATCHING 推进到 RUNNING（attempt 推进到 1）。 */
   static ToolInvocation markRunningTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
@@ -406,7 +404,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** RUNNING -&gt; READY after a retryable attempt; the confirmed attempt remains positive. */
+  /** 在一次可重试尝试后将 RUNNING 转回 READY；已确认的 attempt 保持为正值。 */
   static ToolInvocation retryReadyTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
@@ -417,7 +415,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** RUNNING -&gt; SUCCEEDED of the given tool with a real result, result not yet attached. */
+  /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
   static ToolInvocation succeedTool(InMemoryHarnessStore store, long toolId) {
     return store.transaction(
         tx -> {
@@ -436,7 +434,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Marks the tool approval as not required (READY with a decided-neutral approval). */
+  /** 将 tool approval 标记为不需要（READY 配已决定的 neutral approval）。 */
   static ToolInvocation markApprovalNotRequired(InMemoryHarnessStore store, ToolBaseline baseline) {
     return store.transaction(
         tx -> {
@@ -447,7 +445,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT -&gt; TURN_END(continueModel=true). */
+  /** ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT -&gt; TURN_END(continueModel=true)。 */
   static ContinuationBaseline seedContinuationChain(
       InMemoryHarnessStore store, boolean headAtTurnEnd) {
     return store.transaction(
@@ -476,7 +474,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Second Session with its own ROOT (cross-session MOVE_HEAD target source). */
+  /** 另一个 Session，自带 ROOT（跨 session 的 MOVE_HEAD 目标来源）。 */
   static long seedForeignRoot(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
@@ -488,7 +486,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Extra Thread in the same Session pointing at an existing head Entry. */
+  /** 在同一 Session 内增加一条 Thread，指向现有 head Entry。 */
   static long seedThreadAt(InMemoryHarnessStore store, long headEntryId) {
     return store.transaction(
         tx -> {
@@ -498,7 +496,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Extra Thread with YOLO enabled pointing at an existing head Entry. */
+  /** 在同一 Session 内增加一条启用 YOLO 的 Thread，指向现有 head Entry。 */
   static long seedYoloThreadAt(InMemoryHarnessStore store, long headEntryId) {
     return store.transaction(
         tx -> {
@@ -508,7 +506,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Inserts a TURN_START child under {@code parentEntryId} and returns its id. */
+  /** 在 {@code parentEntryId} 下插入一个 TURN_START 子节点，并返回其 id。 */
   static long seedChildTurnStart(InMemoryHarnessStore store, long sessionId, long parentEntryId) {
     return store.transaction(
         tx -> {
@@ -519,9 +517,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * Test-only delegating store whose transactions advance the mutable {@code clock} the moment the
-   * Thread row is locked, so tests prove the control plane captures its timestamp after the lock
-   * wait (an old pre-lock instant would regress the row's updatedAt).
+   * 仅测试用的委托 store：其事务在 Thread 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明控制面在锁等待后才读取时间戳（如果使用锁前的旧 instant
+   * 会让行的 updatedAt 倒退）。
    */
   static HarnessStore storeAdvancingClockOnThreadLock(
       InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
@@ -555,9 +552,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * Test-only delegating store whose transactions advance the mutable {@code clock} the moment any
-   * Work row is locked, so tests prove Stop reads its timestamp only after the whole Work pre-lock
-   * (a pre-lock instant would regress the updatedAt written by the Stop transaction).
+   * 仅测试用的委托 store：其事务在任意 Work 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明 Stop 仅在整个 Work 预锁之后才读取时间戳（若使用锁前
+   * instant 会让 Stop 事务写入的 updatedAt 倒退）。
    */
   static HarnessStore storeAdvancingClockOnWorkLock(
       InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
@@ -590,7 +586,7 @@ final class HarnessRuntimeTestSupport {
             });
   }
 
-  /** Inserts one QUEUED command on the thread (must be a fresh thread without commands). */
+  /** 在 thread 上插入一条 QUEUED command（必须是尚无 command 的全新 thread）。 */
   static void seedQueuedCommand(
       InMemoryHarnessStore store,
       long threadId,
@@ -609,7 +605,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Requests an unleased THREAD Work row (speculative Resolver mailbox fence). */
+  /** 请求一条无 lease 的 THREAD Work 行（Resolver 邮箱的推测式围栏）。 */
   static void seedThreadWork(InMemoryHarnessStore store, long threadId) {
     store.transaction(
         tx -> {
@@ -619,7 +615,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Requests an unleased MODEL Work row (fenced while a Model is live). */
+  /** 请求一条无 lease 的 MODEL Work 行（在 Model 活跃期间被围栏）。 */
   static void seedModelWork(InMemoryHarnessStore store, long modelId) {
     store.transaction(
         tx -> {
@@ -630,7 +626,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Requests an unleased TOOL Work row for the given invocation. */
+  /** 为指定 invocation 请求一条无 lease 的 TOOL Work 行。 */
   static void seedToolWork(InMemoryHarnessStore store, long toolId) {
     store.transaction(
         tx -> {
@@ -642,7 +638,7 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Claims the THREAD Work row so it exists with an active lease. */
+  /** Claim THREAD Work 行，使其带有 active lease 而存在。 */
   static void seedClaimedThreadWork(InMemoryHarnessStore store, long threadId) {
     seedThreadWork(store, threadId);
     store.transaction(
@@ -736,7 +732,7 @@ final class HarnessRuntimeTestSupport {
         command.createdAt());
   }
 
-  /** New USER_MESSAGE command with the given stable client id and text. */
+  /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
   static NewThreadCommand userMessageCommand(String clientCommandId, String text) {
     return new NewThreadCommand(userMessagePayload(text), clientCommandId);
   }
@@ -882,7 +878,7 @@ final class HarnessRuntimeTestSupport {
         Duration.ofSeconds(30));
   }
 
-  /** Helper for a void transaction body over the in-memory store. */
+  /** 在 in-memory store 上运行 void 事务体的辅助方法。 */
   static void inTransaction(InMemoryHarnessStore store, Consumer<HarnessStore.Transaction> body) {
     store.transaction(
         tx -> {

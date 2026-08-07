@@ -6,8 +6,8 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 
 /**
- * Thread picker is strictly Chat-scoped: no global Thread list, no pagination/cursor. The Chat
- * returns the full Thread array and the client applies the stable sort preference.
+ * Thread picker 严格在 Chat 范围内：不使用全局 Thread 列表，也不分页/无 cursor。
+ * Chat 直接返回完整 Thread 数组，由客户端按稳定排序偏好排序。
  */
 export function useChatThreadPicker(
   chatId: string,
@@ -33,7 +33,7 @@ export function sortThreads(
   threads: HarnessThreadDTO[],
   sort: PaneSortPreference,
 ): HarnessThreadDTO[] {
-  // Both client sorts stay newest-first for a stable picker presentation.
+  // 两种 client sort 都保持按最新优先，以便 picker 展示稳定。
   const sorted = [...threads]
   if (sort === 'created') {
     sorted.sort((left, right) => compareTimes(right.createTime, left.createTime))

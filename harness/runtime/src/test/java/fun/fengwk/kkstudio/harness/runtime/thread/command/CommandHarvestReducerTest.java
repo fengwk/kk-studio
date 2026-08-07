@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import java.time.Instant;
 import java.util.List;
 
-/** Ordered command harvest reduction and branch-vs-Thread policy separation. */
+/** 有序 command harvest 归并，以及 branch 与 Thread 之间的 policy 隔离。 */
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");

@@ -3,7 +3,7 @@ import { CanvasAgentMessage } from '@/features/canvas/agent/messages/CanvasAgent
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { useI18n } from '@/shared/i18n'
 
-/** Thread container: context switcher + scrollable message list. */
+/** Thread 容器：上下文切换器 + 可滚动的消息列表。 */
 export function CanvasAgentThread() {
   const {
     state,

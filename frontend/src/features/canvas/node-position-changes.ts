@@ -1,6 +1,6 @@
 /**
- * Extract domain position updates from React Flow node change payloads
- * without importing RF Node types into the domain/reducer layer.
+ * 从 React Flow node change payload 中提取领域位置更新，
+ * 避免在领域/reducer 层引入 RF Node 类型。
  */
 export interface PositionChangeLike {
   type: string

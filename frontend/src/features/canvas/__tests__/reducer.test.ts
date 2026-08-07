@@ -66,7 +66,7 @@ describe('canvasReducer', () => {
     const generated = getActiveGenerator(state)
     expect(generated?.generationMode).toBe('image')
     expect(generated?.status).toBe('generated')
-    // Generation must not force-open Thread.
+    // Generation 不能强制打开 Thread。
     expect(state.threadOpen).toBe(false)
   })
 

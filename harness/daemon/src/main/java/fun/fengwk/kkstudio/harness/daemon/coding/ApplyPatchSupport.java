@@ -16,10 +16,9 @@ import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Independent OpenCode-style {@code *** Begin Patch} parser and preflight/commit engine.
+ * 独立的 OpenCode 风格 {@code *** Begin Patch} 解析器与 preflight/commit 引擎。
  *
- * <p>Protocol surface is aligned with pi-base/OpenCode docs; matching is exact-context only and
- * every mutation is planned before the first commit.
+ * <p>协议面与 pi-base/OpenCode 文档对齐；匹配只支持精确上下文，且所有变更在首次提交前完成规划。
  */
 final class ApplyPatchSupport {
 
@@ -533,7 +532,7 @@ final class ApplyPatchSupport {
         } else {
           Files.write(destination, update.outputBytes());
         }
-        // Keep the source until the destination write has completed successfully.
+        // 目标写入成功完成前保留源文件。
         try {
           Files.delete(update.absolutePath());
         } catch (Exception error) {

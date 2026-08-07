@@ -110,8 +110,7 @@ public class S3PresignServiceImpl implements S3PresignService {
   private S3PresignedResponseDTO toResponse(
       PresignedRequest presigned, String method, String normalizedKey) {
     Map<String, List<String>> signedHeaders = presigned.signedHeaders();
-    // Fall back to the signed HTTP request headers for SDK implementations that do not expose a
-    // separate signedHeaders map.
+    // 对不暴露独立 signedHeaders map 的 SDK 实现，回退到已签名的 HTTP 请求头。
     if (signedHeaders == null || signedHeaders.isEmpty()) {
       signedHeaders = presigned.httpRequest().headers();
     }

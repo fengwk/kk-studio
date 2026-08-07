@@ -12,10 +12,7 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonEndpoint
 import java.io.IOException;
 import java.util.Objects;
 
-/**
- * Spring WebSocket adapter; durable protocol semantics remain behind {@link
- * EnvironmentDaemonEndpoint}.
- */
+/** Spring WebSocket 适配器；持久协议语义仍封装在 {@link EnvironmentDaemonEndpoint} 中。 */
 @Component
 public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandler {
 

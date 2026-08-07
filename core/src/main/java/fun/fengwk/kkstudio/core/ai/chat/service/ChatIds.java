@@ -6,10 +6,10 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Strict parser for Chat / ChatSession bigint ids exposed at the web / DTO boundary.
+ * 在 web / DTO 边界暴露的 Chat / ChatSession bigint id 的严格解析器。
  *
- * <p>Accepts only a non-empty positive decimal text matching {@code ^[1-9][0-9]*$}. Rejection
- * raises {@link AiValidationException} so the global handler maps it to HTTP 400.
+ * <p>只接受匹配 {@code ^[1-9][0-9]*$} 的非空正十进制文本。拒绝时抛 {@link AiValidationException}， 由全局 handler 映射为 HTTP
+ * 400。
  */
 public final class ChatIds {
 

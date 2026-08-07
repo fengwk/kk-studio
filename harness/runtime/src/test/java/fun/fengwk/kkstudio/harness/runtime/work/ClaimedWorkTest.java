@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
-/** ClaimedWork record snapshot and constructor invariants. */
+/** ClaimedWork record snapshot 与构造器不变量。 */
 class ClaimedWorkTest {
 
   private static final WorkTarget TARGET = new WorkTarget(WorkTargetType.TOOL, 7L);

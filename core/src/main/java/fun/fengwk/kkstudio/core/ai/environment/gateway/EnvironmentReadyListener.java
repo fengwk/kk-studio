@@ -3,17 +3,13 @@ package fun.fengwk.kkstudio.core.ai.environment.gateway;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 /**
- * Immutable READY bridge for Environment daemon connections.
+ * Environment daemon 连接的不可变 READY 桥。
  *
- * <p>Invoked after protocol locks are released when a daemon becomes READY. Implementations own any
- * off-stack scheduling.
+ * <p>daemon 变为 READY 后、协议锁释放时被调用。任何栈外调度由实现自行负责。
  */
 @FunctionalInterface
 public interface EnvironmentReadyListener {
 
-  /**
-   * Notifies that the environment bound to {@code environmentId} is READY for ENVIRONMENT tool
-   * dispatch.
-   */
+  /** 通知绑定到 {@code environmentId} 的 environment 已 READY，可以进行 ENVIRONMENT tool 派发。 */
   void onEnvironmentReady(EnvironmentId environmentId);
 }

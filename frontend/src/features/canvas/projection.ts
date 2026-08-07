@@ -8,7 +8,7 @@ export type CanvasFlowNodeData = {
 export type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
 export type CanvasFlowEdge = Edge
 
-/** Project domain nodes into React Flow view models without leaking RF types into persistence. */
+/** 将领域节点投影到 React Flow 视图模型，避免 RF 类型泄漏到持久化层。 */
 export function projectNodes(nodes: CanvasNode[], selectedIds: string[]): CanvasFlowNode[] {
   const selected = new Set(selectedIds)
   return nodes.map((node) => ({

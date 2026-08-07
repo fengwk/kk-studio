@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.util.List;
 
-/** ToolInvocation per-status durable field invariants. */
+/** ToolInvocation 各 status 下持久化字段的不变式。 */
 class ToolInvocationTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");

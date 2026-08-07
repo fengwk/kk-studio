@@ -250,7 +250,7 @@ public final class ModelDescriptorJsonCodec {
         decimal(node, "reasoningPerMillionTokens"));
   }
 
-  // ---------- Shared helpers ----------
+  // ---------- 共享工具方法 ----------
 
   /**
    * 暴露给同模块其他 codec（如 {@code ProviderRequestJsonCodec}）的 JsonNode 字段读工具，签名严格遵守

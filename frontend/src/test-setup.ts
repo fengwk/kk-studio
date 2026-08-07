@@ -15,7 +15,7 @@ class ResizeObserverStub {
   }
 
   observe(target: Element) {
-    // React Flow needs an immediate measurement callback in jsdom.
+    // React Flow 在 jsdom 中需要立即触发的测量回调。
     this.callback(
       [{
         target,
@@ -46,7 +46,7 @@ class ResizeObserverStub {
 
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
 
-// Thread status packing measures text through a 2D canvas context.
+// Thread 状态压缩通过 2D canvas 上下文测量文本。
 if (typeof HTMLCanvasElement !== 'undefined') {
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,
@@ -64,7 +64,7 @@ if (typeof HTMLCanvasElement !== 'undefined') {
   })
 }
 
-// React Flow measurement path constructs DOMMatrixReadOnly in jsdom.
+// React Flow 的测量路径会在 jsdom 中构造 DOMMatrixReadOnly。
 if (typeof globalThis.DOMMatrixReadOnly === 'undefined') {
   class DOMMatrixReadOnlyStub {
     a = 1
@@ -120,13 +120,13 @@ if (typeof globalThis.DOMMatrixReadOnly === 'undefined') {
     }
   }
   globalThis.DOMMatrixReadOnly = DOMMatrixReadOnlyStub as unknown as typeof DOMMatrixReadOnly
-  // Some RF code paths also touch DOMMatrix.
+  // 一些 RF 代码路径也会访问 DOMMatrix。
   if (typeof globalThis.DOMMatrix === 'undefined') {
     globalThis.DOMMatrix = DOMMatrixReadOnlyStub as unknown as typeof DOMMatrix
   }
 }
 
-// Give layout geometry to React Flow so nodes leave visibility:hidden and edges can render.
+// 为 React Flow 提供布局几何，使节点离开 visibility:hidden 且边能够渲染。
 const geometry = {
   x: 0,
   y: 0,
@@ -191,7 +191,7 @@ if (typeof Element !== 'undefined' && !('inert' in Element.prototype)) {
   })
 }
 
-// jsdom lacks SVG geometry helpers used by React Flow; patch only when SVGElement exists.
+// jsdom 缺少 React Flow 使用的 SVG 几何辅助；仅在 SVGElement 存在时打补丁。
 if (typeof SVGElement !== 'undefined') {
   const svgProto = SVGElement.prototype as SVGElement & {
     getBBox?: () => DOMRect
@@ -225,7 +225,7 @@ if (typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.scrollInt
   HTMLElement.prototype.scrollIntoView = function scrollIntoView() {}
 }
 
-// Minimal HTMLDialogElement polyfill for jsdom so Help can use real showModal()/close().
+// 为 jsdom 提供最小的 HTMLDialogElement polyfill，使 Help 可以使用真正的 showModal()/close()。
 if (typeof HTMLDialogElement !== 'undefined') {
   const proto = HTMLDialogElement.prototype as HTMLDialogElement & {
     showModal?: () => void
@@ -243,7 +243,7 @@ if (typeof HTMLDialogElement !== 'undefined') {
       this.removeAttribute('data-modal')
     }
   }
-  // open property may be read-only attribute-backed in jsdom; ensure modal open is detectable.
+  // open 属性在 jsdom 中可能是只读的属性支撑属性；确保 modal 的 open 状态可被检测。
   try {
     Object.defineProperty(HTMLDialogElement.prototype, 'open', {
       configurable: true,
@@ -259,7 +259,7 @@ if (typeof HTMLDialogElement !== 'undefined') {
       },
     })
   } catch {
-    // ignore if environment already defines open
+    // 若环境已定义 open 则忽略。
   }
 }
 

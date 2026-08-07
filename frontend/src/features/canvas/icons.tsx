@@ -1,4 +1,4 @@
-/** Exact SVG icons required by the design contract. */
+/** 设计契约所要求的精确 SVG 图标。 */
 
 export function PlusIcon() {
   return (

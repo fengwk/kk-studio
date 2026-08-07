@@ -9,14 +9,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Complete frozen request of one Model invocation.
+ * 一次 Model invocation 的完整冻结请求。
  *
- * <p>The actual Environment route ({@code environmentId}) is the single route of this request and
- * the Thread YOLO policy ({@code yoloEnabled}) is frozen here; later Environment offline, branch
- * rebinding, relocation or {@code SET_YOLO} never change an existing invocation. {@code
- * providerRequest.tools()} must map one-to-one onto the ordered {@code toolBindings} descriptors,
- * tool and skill binding names must not repeat, and every environment-bound tool or skill must
- * reference exactly this request route.
+ * <p>实际 Environment 路由（{@code environmentId}）是该请求的唯一路由，Thread YOLO policy （{@code
+ * yoloEnabled}）也在这里冻结；后续的 Environment 下线、branch rebinding、relocation 或 {@code SET_YOLO} 都不会改变已存在的
+ * invocation。{@code providerRequest.tools()} 必须与有序的 {@code toolBindings} descriptor 一一对应，tool 和
+ * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的路由。
  */
 public record ModelInvocationRequest(
     EnvironmentId environmentId,

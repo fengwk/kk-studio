@@ -36,10 +36,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Web-layer coverage for {@link StudioCanvasController}.
+ * {@link StudioCanvasController} 的 web 层覆盖。
  *
- * <p>The durable adapter is covered end-to-end by {@code DurableCanvasServiceTest}; this test
- * verifies HTTP mapping and status translation.
+ * <p>持久化适配器已由 {@code DurableCanvasServiceTest} 端到端覆盖；本测试仅验证 HTTP 映射与状态码翻译。
  */
 public class StudioCanvasControllerTest {
 

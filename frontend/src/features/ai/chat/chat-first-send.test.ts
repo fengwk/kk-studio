@@ -95,7 +95,7 @@ describe('performBlankPaneFirstSend', () => {
       branchSettings: settings(),
       yoloEnabled: true,
     })
-    // Exact body: USER_MESSAGE must NEVER carry role (the strict mapper forbids it).
+    // 精确 body：USER_MESSAGE 绝不能携带 role（strict mapper 禁止）。
     expect(enqueueCommands).toHaveBeenCalledWith('t1', {
       expectedHeadEntryId: 'root',
       expectedNextCommandSequence: '1',
@@ -118,9 +118,9 @@ describe('performBlankPaneFirstSend', () => {
   })
 
   it('rejects when the create response has no threadId and never enqueues a message', async () => {
-    // No server validation in the new contract; a blank threadId is a server invariant. We
-    // instead simulate the create-then-fail path: createChatThread throws, and we assert
-    // enqueueCommands is never called. (The prior sessionId-validation test no longer maps.)
+    // 新契约中没有服务器端校验；空 threadId 是服务器不变量。我们
+    // 改为模拟 create-then-fail 路径：createChatThread 抛错，并断言
+    // enqueueCommands 永远不会被调用。（之前的 sessionId 校验测试已不再适用。）
     const createChatThread = vi.fn(async () => {
       throw new Error('create failed')
     })
@@ -173,7 +173,7 @@ describe('performBlankPaneFirstSend', () => {
         { type: 'USER_MESSAGE', clientCommandId: expect.any(String) as string, content: 'retry me' },
       ],
     })
-    // Strict wire: no role leaks into USER_MESSAGE.
+    // 严格 wire：role 不会泄漏到 USER_MESSAGE 中。
     expect(err.plan.batch.commands[0]).not.toHaveProperty('role')
     expect(err.cause).toBeInstanceOf(Error)
     expect((err.cause as Error).message).toBe('message temporarily unavailable')
@@ -204,7 +204,7 @@ describe('performBlankPaneFirstSend', () => {
     const sent = enqueueCommands.mock.calls[0]?.[1] as { commands: Array<Record<string, unknown>> }
     expect(sent.commands[0]).not.toHaveProperty('role')
 
-    // Subsequent invocation with same clientCommandId reuses it (replay identity).
+    // 后续调用复用同一个 clientCommandId（replay identity）。
     enqueueCommands.mockResolvedValueOnce([])
     await performBlankPaneFirstSend({
       chatId: 'chat-1',

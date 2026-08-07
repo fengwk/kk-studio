@@ -20,7 +20,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** PLATFORM tool: create or replace the durable Thread goal. */
+/** PLATFORM tool：创建或替换 durable Thread goal。 */
 public final class CreateGoalTool implements Tool {
   public static final String NAME = "create_goal";
   public static final String VERSION = "1";
@@ -33,14 +33,11 @@ public final class CreateGoalTool implements Tool {
           GoalToolPrompts.load("goal-create-tool.md"),
           NAME,
           new ToolParamsSchema(
-              "Create or replace the Thread goal.",
+              "创建或替换当前 Thread 的 goal。",
               Map.of(
                   "objective",
-                      new ToolStringSchema(
-                          "Durable, evidence-checkable objective covering the outcome, verification surface, constraints, boundaries, iteration policy, and blocked stop condition."),
-                  "tokenBudget",
-                      new ToolNumberSchema(
-                          "Optional positive token budget, only when explicitly requested.")),
+                      new ToolStringSchema("持久化且可由证据核验的 objective，必须涵盖预期结果、验证面、约束、边界、迭代策略和阻塞停止条件。"),
+                  "tokenBudget", new ToolNumberSchema("仅在用户明确要求时提供的可选正数 token 预算。")),
               Set.of("objective"),
               false),
           ToolSideEffect.IDEMPOTENT,

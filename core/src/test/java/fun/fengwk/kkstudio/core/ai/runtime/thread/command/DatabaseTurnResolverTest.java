@@ -74,9 +74,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * DatabaseTurnResolver contract: exact branch references without fallback, immutable EnvironmentId
- * routing, exact ordered tool/skill capability, frozen thinking override, semantic message
- * projection, cache finalization and infrastructure exception propagation.
+ * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、冻结的 thinking
+ * 覆盖、语义化消息投影、缓存终结与基础设施异常透传。
  */
 class DatabaseTurnResolverTest {
 

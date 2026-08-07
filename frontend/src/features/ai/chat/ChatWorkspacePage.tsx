@@ -143,7 +143,7 @@ export function ChatWorkspacePage() {
       expectedVersion,
     }),
     onSuccess: (updatedChat: ChatDTO) => {
-      // The PUT response is complete and becomes authoritative before any refetch starts.
+      // PUT 响应是完整的，在任何 refetch 开始前就会成为权威数据。
       applyAuthoritativeChat(updatedChat)
       void queryClient.invalidateQueries({ queryKey: queryKeys.chats.detail(chatId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.chats.list })
@@ -174,11 +174,11 @@ export function ChatWorkspacePage() {
       })
     } catch (error) {
       if (isConflictError(error)) {
-        // Refresh before surfacing the conflict so a retry uses the current Chat version.
+        // 在显示冲突前先刷新，以便重试使用当前 Chat 版本。
         try {
           await refreshAfterConflict()
         } catch {
-          // Keep the original 409 visible when refreshing the current Chat also fails.
+          // 刷新当前 Chat 也失败时，保留原始 409 错误。
         }
       }
       throw error

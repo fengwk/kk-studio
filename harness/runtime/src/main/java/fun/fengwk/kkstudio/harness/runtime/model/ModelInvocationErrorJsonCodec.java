@@ -15,11 +15,9 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Strict, deterministic JSON codec for {@link ModelInvocationError}. Mirrors the runtime's other
- * strict codecs: it builds and reads {@link JsonNode} trees explicitly, requires an exact field
- * set, and rejects unknown, missing, or wrong-typed values with {@link IllegalArgumentException}.
- * No Jackson default typing, polymorphic annotations, reflective POJO binding or compatibility
- * aliases are used.
+ * {@link ModelInvocationError} 的严格、确定性 JSON codec。与 runtime 其他严格 codec 保持一致：显式构建与读取 {@link
+ * JsonNode} 树，要求精确字段集合，并以 {@link IllegalArgumentException} 拒绝未知、缺失或类型错误的字段。不使用 Jackson default
+ * typing、polymorphic annotation、反射 POJO 绑定或兼容别名。
  */
 public final class ModelInvocationErrorJsonCodec {
 
@@ -34,10 +32,7 @@ public final class ModelInvocationErrorJsonCodec {
 
   public ModelInvocationErrorJsonCodec() {}
 
-  /**
-   * Encodes the snapshot to a canonical JSON string. {@code kind} is emitted as the enum name;
-   * {@code message} is emitted verbatim.
-   */
+  /** 将 snapshot 编码为 canonical JSON 字符串。{@code kind} 输出为 enum name；{@code message} 原样输出。 */
   public String encode(ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
     try {
@@ -47,7 +42,7 @@ public final class ModelInvocationErrorJsonCodec {
     }
   }
 
-  /** Returns the canonical {@link JsonNode} tree used by both {@link #encode} and tests. */
+  /** 返回 {@link #encode} 与测试共用的 canonical {@link JsonNode} 树。 */
   public JsonNode encodeNode(ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
     ObjectNode node = NODES.objectNode();

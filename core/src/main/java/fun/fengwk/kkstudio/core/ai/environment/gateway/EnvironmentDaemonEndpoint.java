@@ -1,22 +1,18 @@
 package fun.fengwk.kkstudio.core.ai.environment.gateway;
 
 /**
- * Narrow Core transport endpoint for Environment daemon connections.
+ * Environment daemon 连接的窄 Core transport 端点。
  *
- * <p>WebSocket adapters depend on this interface only. Protocol ownership and durable remote tool
- * transport remain with the Gateway implementation.
+ * <p>WebSocket 适配器只依赖该接口。协议所有权与持久化 remote tool transport 仍由 Gateway 实现负责。
  */
 public interface EnvironmentDaemonEndpoint {
 
-  /** Registers a newly opened transport before its first HELLO frame arrives. */
+  /** 在首帧 HELLO 到达前注册一条新打开的 transport。 */
   void open(EnvironmentDaemonConnection connection);
 
-  /**
-   * Processes one inbound text frame. Protocol decode/sequence validation may hold connection
-   * state; ToolExecutionListener and READY dispatch always run after locks are released.
-   */
+  /** 处理一帧入站文本。协议解码/序号校验可能持有连接状态；ToolExecutionListener 与 READY 分发 总是在锁释放后执行。 */
   void receive(String connectionId, String rawMessage);
 
-  /** Drops a transport handle; active remotes are notified as outcome-uncertain. */
+  /** 丢弃 transport 句柄；活动 remote 按结果不确定（outcome-uncertain）通知。 */
   void close(String connectionId);
 }

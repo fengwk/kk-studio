@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
-/** Update/delete CAS lost the optimistic-version race; mapped to HTTP 409. */
+/** 更新/删除 CAS 在乐观版本竞争中失败；映射为 HTTP 409。 */
 public class AiVersionConflictException extends AiDomainException {
 
   private final String expectedVersion;

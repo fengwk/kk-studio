@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 
-/** Stored Agent configuration is either decoded losslessly or rejected. */
+/** 已存储的 Agent 配置要么无损解码，要么被拒绝。 */
 public class AgentDefinitionConverterTest {
 
   @Test

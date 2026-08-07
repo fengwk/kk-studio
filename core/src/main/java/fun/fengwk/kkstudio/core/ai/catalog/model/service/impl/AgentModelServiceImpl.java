@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
-/** Global model CRUD. */
+/** 全局 model CRUD。 */
 @AllArgsConstructor
 @Service
 public class AgentModelServiceImpl implements AgentModelService {

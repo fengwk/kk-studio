@@ -92,7 +92,7 @@ public final class ThreadCommandPayloadJsonCodec {
     };
   }
 
-  // ---------- Encoders ----------
+  // ---------- 编码器 ----------
 
   private static ObjectNode encodeNode(ThreadCommandPayload payload) {
     return switch (payload) {
@@ -134,7 +134,7 @@ public final class ThreadCommandPayloadJsonCodec {
     return node;
   }
 
-  // ---------- Decoders ----------
+  // ---------- 解码器 ----------
 
   private static UserMessageCommandPayload decodeUserMessage(JsonNode value) {
     ObjectNode node = requireObject(value, "USER_MESSAGE");
@@ -212,7 +212,7 @@ public final class ThreadCommandPayloadJsonCodec {
         canonicalText(node, "variant", "SET_MODEL.model"));
   }
 
-  // ---------- Generic helpers ----------
+  // ---------- 通用工具方法 ----------
 
   private static String write(ObjectNode node) {
     try {

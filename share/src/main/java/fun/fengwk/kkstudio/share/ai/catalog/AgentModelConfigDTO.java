@@ -5,10 +5,9 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * Structured Agent model configuration. This is the single source of truth exposed by the public
- * AgentModel API and persisted in the {@code agent_model.config} JSONB column.
+ * 结构化 Agent 模型配置。这是 public AgentModel API 对外暴露并持久化到 {@code agent_model.config} JSONB 列的唯一事实源。
  *
- * <p>Schema:
+ * <p>Schema 如下：
  *
  * <pre>
  * limit:        { context: positive int, output: positive int &lt;= context }
@@ -26,9 +25,18 @@ import java.util.List;
 @Data
 public class AgentModelConfigDTO {
 
+  /** 必填 Token 限制：context 与 output 均为正整数且 output ≤ context。 */
   private AgentModelLimitDTO limit;
+
+  /** 必填能力声明：tools/reasoning 必填，inputModalities 非空且去重。 */
   private AgentModelAbilitiesDTO abilities;
+
+  /** 必填定价快照，用于每次调用的确定性成本计算。 */
   private AgentModelPricingDTO pricing;
+
+  /** 必填默认变体 id：非空白、无环绕空白，且必须匹配 {@code variants[].id}。 */
   private String defaultVariant;
+
+  /** 必填非空变体列表；元素 id 必须非空白且唯一。 */
   private List<AgentModelVariantDTO> variants;
 }

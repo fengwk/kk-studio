@@ -1,25 +1,25 @@
-Run build, test, git, package-manager, move/copy, and external CLI commands.
+运行构建、测试、git、包管理器、移动/复制以及外部 CLI 命令。
 
-Environment:
-- Shell: the daemon-configured bash executable, invoked with `-lc`
-- Boundary: `workdir` must be an existing directory inside the daemon environment root. Shell command contents are not filesystem-sandboxed and must already be Platform-authorized.
+环境：
+- Shell：daemon 配置的 bash 可执行文件，使用 `-lc` 调用。
+- 边界：`workdir` 必须是 daemon environment root 内已有的目录。Shell 命令内容不受文件系统 sandbox 限制，因此必须已经获得 Platform 授权。
 
-Usage:
-- Use `bash` for commands, not as the default way to read, search, or edit repository files.
-- `workdir` defaults to the agent's current working directory. If `workdir` is provided, the command runs from that directory. Prefer `workdir` over embedding `cd ... &&` inside `command` when you need a different directory.
-- Commands run in a shell environment intended to be close to the user's terminal.
-- Long-running commands (e.g. builds, tests, large migrations, `mvn`, `gradle`, `docker build`) must explicitly pass a larger `timeout_seconds` if they may exceed the default.
-- Before a command creates repository files or directories, confirm the target parent location with the file tools.
-- Quote file paths that contain spaces.
-- When commands are independent, prefer separate parallel tool calls. When one shell step depends on a previous step, chain them with `&&`; use `;` only when failure of earlier steps does not matter.
-- Use a temporary directory outside the repository for downloads, generated artifacts, temporary clones, and other non-target side effects unless the user explicitly wants files created in the project.
+用法：
+- 使用 `bash` 执行命令；不要把它作为读取、搜索或编辑仓库文件的默认方式。
+- `workdir` 默认是 Agent 当前工作目录。提供 `workdir` 时，命令从该目录执行。需要切换目录时，优先使用 `workdir`，不要在 `command` 中嵌入 `cd ... &&`。
+- 命令运行在尽量接近用户终端的 Shell 环境中。
+- 长时间运行的命令（例如构建、测试、大规模迁移、`mvn`、`gradle`、`docker build`）必须显式传入更大的 `timeout_seconds`，否则可能超过默认值。
+- 命令创建仓库文件或目录前，必须先用文件工具确认目标父目录。
+- 包含空格的文件路径必须加引号。
+- 独立命令应优先通过多个并行工具调用执行；有依赖关系时使用 `&&` 串联，只有前置失败不影响后续时才使用 `;`。
+- 下载、临时 clone、生成中间产物等非目标副作用，应放在仓库外的临时目录中，除非用户明确要求写入项目。
 
-Parameters:
-- `command` (required)
-- `workdir` (optional, default: the agent's current working directory; if provided, run in that directory; prefer it over `cd ... &&` in `command`)
-- `timeout_seconds` (optional, defaults to 120 = 2 minutes; positive integer, maximum 3600). For long-running commands, explicitly provide a larger value. The daemon invocation deadline remains a hard upper bound.
+参数：
+- `command`（必填）
+- `workdir`（可选，默认：daemon 当前工作目录；提供后从该目录解析；需要切换目录时优先使用它，而不是在 `command` 中嵌入 `cd ... &&`）
+- `timeout_seconds`（可选，默认 120 秒；正整数，最大 3600）。长时间运行的命令必须显式传入更大的值。daemon 调用截止时间仍是硬上限。
 
-Examples:
+示例：
 - `bash({ command: "npm test", workdir: "packages/web" })`
 - `bash({ command: "mvn -q test", workdir: "services/java", timeout_seconds: 120 })`
 - `bash({ command: "git status --short" })`

@@ -6,20 +6,22 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * Agent definition execution configuration persisted in the {@code agent_definition.config} JSONB
- * column.
+ * 持久化到 {@code agent_definition.config} JSONB 列的 Agent definition 执行配置。
  *
- * <p>{@code tools} and {@code skills} are short names only (no namespace or path strings).
+ * <p>{@code tools} 与 {@code skills} 只接受短名（不允许 namespace 或路径字符串）。
  *
  * @author fengwk
  */
 @Data
 public class AgentDefinitionConfigDTO {
 
+  /** 可选工具短名列表；只允许选择离线 catalog 中的可选择工具（禁止内部平台工具），元素须为非空白短名、去重、≤128 字符。 */
   private List<String> tools;
+
+  /** Agent 技能短名列表；运行时须由选中的 live Environment 精确提供，元素须为非空白短名、去重、≤128 字符。 */
   private List<String> skills;
 
-  /** Rejects fields that are outside the compact persisted configuration contract. */
+  /** 拒绝紧凑持久化配置契约之外的字段。 */
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {
     throw new IllegalArgumentException("unknown agent definition config field: " + fieldName);

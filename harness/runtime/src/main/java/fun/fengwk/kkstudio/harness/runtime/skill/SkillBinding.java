@@ -3,10 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime.skill;
 import java.util.Objects;
 
 /**
- * Immutable skill fact frozen into one model invocation.
+ * 冻结在单次 model invocation 中的不可变 skill 事实。
  *
- * <p>The body is intentionally absent. The name, description, and source environment are the exact
- * metadata used to build the provider prompt and to route a later {@code load_skill} call.
+ * <p>body 刻意省略。name、description 与 source environment 是构建 provider prompt 与路由后续 {@code load_skill}
+ * 调用所需的精确元数据。
  */
 public record SkillBinding(String name, String description, String sourceEnvironment) {
 

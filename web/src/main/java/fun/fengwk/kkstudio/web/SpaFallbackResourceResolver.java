@@ -9,7 +9,7 @@ import org.springframework.web.servlet.resource.ResourceResolverChain;
 import java.util.List;
 
 /**
- * SPA fallback resource resolver.
+ * SPA fallback 资源解析器。
  *
  * <p>当静态资源解析失败时，对于满足以下条件的请求返回 {@code index.html}：
  *

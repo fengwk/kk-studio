@@ -1,19 +1,16 @@
 /**
- * Production adapters that bind the Runtime Model ports to PostgreSQL provider resources and an
- * injected {@link java.util.concurrent.ExecutorService}.
+ * 把 Runtime Model 端口绑定到 PostgreSQL provider 资源与注入的 {@link java.util.concurrent.ExecutorService}
+ * 的生产适配器。
  *
- * <p>{@link fun.fengwk.kkstudio.core.ai.runtime.model.CoreModelGateway} is the production adapter
- * for {@link fun.fengwk.kkstudio.harness.runtime.port.ModelGateway}: it resolves the frozen {@link
- * fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest} through {@link
- * fun.fengwk.kkstudio.core.ai.runtime.model.ProviderResolutionService}, opens one {@link
- * fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider} with its configured timeout
- * policy and bridges the SDK stream onto the Runtime listener with terminal-once semantics. The
- * gateway never reads or writes the HarnessStore and delivers no listener callback before {@code
- * start} returns.
+ * <p>{@link fun.fengwk.kkstudio.core.ai.runtime.model.CoreModelGateway} 是 {@link
+ * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway} 的生产适配器：它通过 {@link
+ * fun.fengwk.kkstudio.core.ai.runtime.model.ProviderResolutionService} 解析冻结的 {@link
+ * fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest}，按配置的 timeout 策略打开一个
+ * {@link fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider}，并以 terminal-once 语义把 SDK
+ * 流桥接到 Runtime listener。gateway 绝不读写 HarnessStore，且不会在 {@code start} 返回前投递任何 listener 回调。
  *
- * <p>{@link fun.fengwk.kkstudio.core.ai.runtime.model.ModelExecutionConfiguration} owns the shared
- * virtual-thread executor and the {@link
- * fun.fengwk.kkstudio.core.ai.runtime.model.ModelGatewayConfig} lifecycle; Provider I/O for both
- * adapters runs on that executor.
+ * <p>{@link fun.fengwk.kkstudio.core.ai.runtime.model.ModelExecutionConfiguration} 拥有共享虚拟线程
+ * executor 与 {@link fun.fengwk.kkstudio.core.ai.runtime.model.ModelGatewayConfig} 的生命周期； 两个适配器的
+ * Provider I/O 都运行在该 executor 上。
  */
 package fun.fengwk.kkstudio.core.ai.runtime.model;

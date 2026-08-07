@@ -182,7 +182,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
   }
 }
 
-/** ROOT -> USER -> ASSISTANT, so the USER row has a parent and is a valid rebind target. */
+/** ROOT -> USER -> ASSISTANT，使 USER 行有父节点，可以作为合法的 rebind 目标。 */
 function sessionEntries(): HarnessSessionEntryDTO[] {
   return [
     {
@@ -374,15 +374,15 @@ describe('ChatWorkspacePane commands', () => {
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
-    // Only READY environments appear; the CONNECTING one is filtered out by status.
+    // 仅显示 READY 的 environment；CONNECTING 状态的会按 status 被过滤掉。
     const envModal = screen.getByLabelText('选择 Environment')
     expect(within(envModal).getByRole('button', { name: /^remote/ })).toBeInTheDocument()
     expect(within(envModal).getByRole('button', { name: /^local/ })).toBeInTheDocument()
     expect(within(envModal).queryByRole('button', { name: /connecting/ })).not.toBeInTheDocument()
     await user.click(within(envModal).getByRole('button', { name: /^remote/ }))
 
-    // Bound pane updates the draft only; the footer still reflects the thread snapshot until
-    // send, and no harness call is made yet.
+    // 绑定面板仅更新 draft；发送之前 footer 仍反映 thread snapshot，
+    // 暂时不会发起 harness 调用。
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
@@ -402,7 +402,7 @@ describe('ChatWorkspacePane commands', () => {
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Edit agent (SET_AGENT) + environment (SET_ENVIRONMENT) in the draft.
+    // 在 draft 中编辑 agent（SET_AGENT）+ environment（SET_ENVIRONMENT）。
     await user.click(composer)
     await user.keyboard('/agent{Enter}')
     await user.click(await screen.findByRole('button', { name: /coder/ }))
@@ -425,7 +425,7 @@ describe('ChatWorkspacePane commands', () => {
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
     const message = batchArg.commands[batchArg.commands.length - 1]!
     expect(message.content).toBe('hello world')
-    // Strict wire: USER_MESSAGE never carries role.
+    // 严格 wire：USER_MESSAGE 绝不携带 role。
     expect(message).not.toHaveProperty('role')
     expect(message).toHaveProperty('clientCommandId')
     const setAgent = batchArg.commands.find((command) => command.type === 'SET_AGENT')!
@@ -459,8 +459,8 @@ describe('ChatWorkspacePane commands', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(composer)
-    // Typing /session opens the slash palette with the disabled session command (and the
-    // /new command whose description also contains "Session").
+    // 输入 /session 会打开 slash palette，展示被禁用的 session command
+    //（以及描述中也包含 "Session" 的 /new command）。
     await user.keyboard('/session')
     const options = await screen.findAllByRole('option')
     const sessionOption = options.find((option) => {
@@ -468,8 +468,8 @@ describe('ChatWorkspacePane commands', () => {
       return text.startsWith('session') && option.getAttribute('aria-disabled') === 'true'
     })
     expect(sessionOption).toBeDefined()
-    // Pressing Enter on the disabled command is a no-op: the Thread picker must NOT open
-    // for /session (only /thread triggers it).
+    // 在禁用的 command 上按 Enter 是 no-op：/session 不会打开 Thread picker
+    //（只有 /thread 会触发）。
     await user.keyboard('{Enter}')
     expect(screen.queryByRole('dialog', { name: /选择 Thread/ })).not.toBeInTheDocument()
     expect(chatService.listChatThreads).not.toHaveBeenCalled()
@@ -509,7 +509,7 @@ describe('ChatWorkspacePane commands', () => {
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Make the draft dirty by editing the agent.
+    // 通过编辑 agent 让 draft 变脏。
     await user.click(composer)
     await user.keyboard('/agent{Enter}')
     await user.click(await screen.findByRole('button', { name: /coder/ }))
@@ -582,7 +582,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.keyboard('/agent{Enter}')
     await user.click(await screen.findByRole('button', { name: /coder/ }))
 
-    // Footer labels follow the pane draft immediately (no service round-trip).
+    // Footer 标签立即跟随面板 draft（不需要 service 往返）。
     expect(await screen.findByRole('button', { name: /agent:coder/ })).toBeInTheDocument()
     expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
 
@@ -594,7 +594,7 @@ describe('ChatWorkspacePane commands', () => {
     expect(setAgent.agentName).toBe('coder')
     const setTools = batchArg.commands.find((command) => command.type === 'SET_ACTIVE_TOOLS')!
     expect(setTools.activeTools).toEqual(['web-search'])
-    // Freeze rule: an agent-only change never re-emits model/thinking/environment/yolo.
+    // Freeze 规则：仅 agent 变更不会重新发送 model/thinking/environment/yolo。
     expect(batchArg.commands.find((command) => command.type === 'SET_MODEL')).toBeUndefined()
     expect(batchArg.commands.find((command) => command.type === 'SET_THINKING_LEVEL')).toBeUndefined()
     expect(batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')).toBeUndefined()
@@ -676,7 +676,7 @@ describe('ChatWorkspacePane commands', () => {
     expect(confirmSpy).toHaveBeenCalled()
     expect(onThreadChange).not.toHaveBeenCalled()
 
-    // Accepting discards the draft and opens the blank pane.
+    // 确认后会丢弃 draft 并打开空面板。
     confirmSpy.mockReturnValue(true)
     await user.keyboard('/new{Enter}')
     expect(onThreadChange).toHaveBeenCalledWith(null)
@@ -712,8 +712,8 @@ describe('ChatWorkspacePane commands', () => {
     renderBoundPane()
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Open the history panel first, then type into the composer: the history panel is a
-    // plain panel (not a modal), so unsent composer text coexists with relocation.
+    // 先打开历史面板，再在 composer 中输入：历史面板是普通面板（不是 modal），
+    // 所以未发送的 composer 文本可以与 relocation 并存。
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
     expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
@@ -781,7 +781,7 @@ describe('ChatWorkspacePane commands', () => {
     await user.keyboard('/tree{Enter}')
     expect(await screen.findByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
 
-    // USER entries rewind the head to their parent and restore their editable text.
+    // USER entry 会将 head 回退到其父节点，并恢复其可编辑文本。
     await user.click(await screen.findByRole('button', { name: /用户 · s1 prompt/ }))
     await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
 
@@ -816,16 +816,16 @@ describe('ChatWorkspacePane commands', () => {
     expect(allowButton).toBeEnabled()
 
     await user.click(allowButton)
-    // The global approvalPending propagates through the whole stack: both buttons disable
-    // while the HTTP request is pending.
+    // 全局 approvalPending 会在整条链路中传递：HTTP 请求 pending 期间
+    // 两个按钮都会被禁用。
     await waitFor(() => expect(allowButton).toBeDisabled())
     expect(denyButton).toBeDisabled()
 
     await act(async () => {
       resolveApproval({})
     })
-    // The snapshot refetch after a successful decision re-renders the bar: buttons re-enable
-    // (the durable snapshot still shows undecided, so the bar remains interactive).
+    // 决策成功后会重新拉取 snapshot 并重渲染该 bar：按钮会重新启用
+    //（持久化 snapshot 仍显示 undecided，因此 bar 仍可交互）。
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '允许' })).toBeEnabled(),
     )
@@ -847,8 +847,8 @@ describe('ChatWorkspacePane commands', () => {
     await user.type(composer, 'only once')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // While pending, the composer and send button are disabled: double clicks and Enter
-    // keydowns cannot mint a second batch against the same CAS cursors.
+    // 在 pending 期间，composer 和发送按钮被禁用：双击和按 Enter
+    // 都不会基于同一组 CAS cursor 再生成一个 batch。
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled(),
     )
@@ -881,7 +881,7 @@ describe('ChatWorkspacePane commands', () => {
       expect(screen.getByText(/Thread 状态已变化/)).toBeInTheDocument(),
     )
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
-    // The draft is restored so the user can retry without retyping.
+    // draft 已被恢复，用户无需重新输入即可重试。
     expect(await screen.findByDisplayValue('will collide')).toBeInTheDocument()
   })
 })

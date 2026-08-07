@@ -31,9 +31,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Covers apply_patch registration/protocol atomicity and LSP unavailable/javap fallback contracts.
- */
+/** 覆盖 apply_patch 注册与协议原子性，以及 LSP 不可用和 javap 回退契约。 */
 class ApplyPatchAndLspToolsTest {
 
   @TempDir Path environmentRoot;
@@ -122,7 +120,7 @@ class ApplyPatchAndLspToolsTest {
     assertFalse(Files.exists(environmentRoot.resolve("gone.txt")));
     assertTrue(text(success).contains("A 1 U 1 D 1"));
 
-    // Preflight failure must not mutate any file in the same patch.
+    // preflight 失败不得修改同一 patch 内的任何文件。
     Files.writeString(environmentRoot.resolve("keep.txt"), "alpha\ngamma\n");
     ToolResult preflight =
         invoke(

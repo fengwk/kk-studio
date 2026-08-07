@@ -5,10 +5,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 
 /**
- * Web module Spring Boot test entry.
+ * web 模块的 Spring Boot 测试入口。
  *
- * <p>Postgres-backed integration suites pin durable ids through PostgreSQL sequences; Redis-backed
- * realtime adapters still receive Testcontainers when exercised.
+ * <p>基于 Postgres 的集成套件通过 PostgreSQL 序列锁定持久化 id；基于 Redis 的实时适配器在执行测试时仍使用 Testcontainers。
  */
 @SpringBootApplication
 @Import(HarnessWebTestConfiguration.class)

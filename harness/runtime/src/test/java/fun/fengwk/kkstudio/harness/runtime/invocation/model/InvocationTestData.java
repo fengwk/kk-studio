@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Shared test fixtures for the invocation.model package. */
+/** invocation.model 包共享的测试 fixture。 */
 final class InvocationTestData {
 
   static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());

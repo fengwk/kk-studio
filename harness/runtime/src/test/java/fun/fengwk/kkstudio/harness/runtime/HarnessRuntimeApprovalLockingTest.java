@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
-/** decideToolApproval locking: canonical lock order, locked-row basis and lock-drift invariants. */
+/** decideToolApproval 加锁：规范加锁顺序、锁定的行基准与锁漂移不变量。 */
 class HarnessRuntimeApprovalLockingTest {
 
   private InMemoryHarnessStore store;

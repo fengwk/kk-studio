@@ -31,10 +31,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * PLATFORM tool that loads full SKILL.md text for a skill selected by the current Thread Agent.
+ * 由当前 Thread Agent 选中、用于加载完整 SKILL.md 正文的 PLATFORM tool。
  *
- * <p>Resolves only selected skills; source Environment comes from the binding persisted with the
- * invocation (platform-first). Does not expose local paths.
+ * <p>仅解析已选中的 skill；source Environment 来自 invocation 持久化的 binding（platform-first）。 不暴露本地路径。
  */
 public final class LoadSkillTool implements Tool {
   public static final String NAME = "load_skill";
@@ -50,8 +49,8 @@ public final class LoadSkillTool implements Tool {
           GoalToolPrompts.load("load_skill.md"),
           NAME,
           new ToolParamsSchema(
-              "Load a selected skill body by exact short name.",
-              Map.of("name", new ToolStringSchema("Exact short skill name from available_skills.")),
+              "按精确短名称加载已选中的 skill 正文。",
+              Map.of("name", new ToolStringSchema("来自 available_skills 的精确短 skill 名。")),
               Set.of("name"),
               false),
           ToolSideEffect.READ_ONLY,

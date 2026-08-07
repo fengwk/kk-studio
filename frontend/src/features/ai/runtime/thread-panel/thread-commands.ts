@@ -7,15 +7,15 @@ export interface ThreadCommand {
   labelKey?: string
   descriptionKey?: string
   keywords?: string[]
-  /** Scene-disabled commands stay visible but grayed out. */
+  /** 场景禁用的命令保持可见但呈灰态。 */
   disabled?: boolean
   disabledReason?: string
   disabledReasonKey?: string
 }
 
 /**
- * Slash command table (pi-style).
- * Order is stable product order — never reorder by availability.
+ * Slash 命令表（pi 风格）。
+ * 顺序是稳定的产品顺序，切勿按可用性重新排序。
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [
   {
@@ -85,14 +85,14 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
 ]
 
 /**
- * Commands usable on an empty pane. `/thread` picks an existing Chat-scoped Thread.
- * `/session` (global Session rebind) no longer exists: the tree is current-Session only, so the
- * command stays visible but disabled in every scene.
+ * 空面板下可用的命令。`/thread` 用于选择一个已存在的 Chat-scoped Thread。
+ * `/session`（全局 Session 重绑定）已不再存在：树只属于当前 Session，因此该
+ * 命令在所有场景下都保持可见但禁用状态。
  */
 const BLANK_SCENE_ENABLED = new Set(['thread', 'agent', 'environment', 'yolo'])
 const NEVER_ENABLED = new Set(['session'])
 
-/** Project stable command list with scene availability (disabled stays listed). */
+/** 投影稳定的 command 列表并附带场景可用性（disabled 仍保留在列表中）。 */
 export function threadCommandsForScene(scene: ThreadCommandScene): ThreadCommand[] {
   return THREAD_COMMANDS.map((command) => {
     const disabled =
@@ -113,11 +113,11 @@ export function filterThreadCommands(
 ): ThreadCommand[] {
   const q = query.trim().replace(/^\//, '').toLowerCase()
   if (!q) {
-    // Empty query: full stable table (including disabled).
+    // 空查询：返回完整稳定表（包含 disabled）。
     return commands
   }
-  // Rank id/label prefix first, then keyword prefix, then fuzzy description text.
-  // Preserve relative order within each rank bucket; never drop disabled matches.
+  // 先按 id/label 前缀排序，再按 keyword 前缀，最后按模糊的 description 文本。
+  // 每个排序桶内保持相对顺序；绝不丢弃 disabled 匹配项。
   const ranked: ThreadCommand[] = []
   const seen = new Set<string>()
   const pushAll = (candidates: ThreadCommand[]) => {

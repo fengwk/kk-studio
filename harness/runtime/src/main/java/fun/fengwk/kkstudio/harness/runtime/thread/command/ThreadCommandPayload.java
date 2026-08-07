@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 /**
- * Sealed family of immutable Thread mailbox command payloads.
+ * 不可变 Thread mailbox command payload 的 sealed 类型族。
  *
- * <p>Each payload carries exactly the fields owned by its command type; no generic settings map is
- * permitted at this boundary.
+ * <p>每个 payload 仅承载其 command type 自身拥有的字段；此边界不允许出现通用 settings map。
  */
 public sealed interface ThreadCommandPayload
     permits UserMessageCommandPayload,
@@ -16,6 +15,6 @@ public sealed interface ThreadCommandPayload
         SetYoloCommandPayload,
         SetEnvironmentCommandPayload {
 
-  /** Returns the command type represented by this payload. */
+  /** 返回该 payload 所代表的 command type。 */
   ThreadCommandType type();
 }

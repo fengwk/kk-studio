@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.util.Objects;
 
-/** Google Gemini Provider adapter。 */
+/** Google Gemini Provider 适配器。 */
 public final class GoogleProviderAdapter implements ProviderAdapter {
 
   private final String apiKey;

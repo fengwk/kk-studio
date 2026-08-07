@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Applies the shared bounded-preview and complete-resource policy to tool output. */
+/** 对 tool 输出应用共享的有界预览 + 完整 resource 策略。 */
 final class OutputLimiter {
 
   private OutputLimiter() {}

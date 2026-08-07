@@ -3,10 +3,9 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.service;
 import java.util.Objects;
 
 /**
- * Strict parser for ComfyUI workflow card bigint ids exposed at the web / DTO boundary. Rejects
- * null, blank, non-decimal or non-positive values with {@link IllegalArgumentException}, which the
- * global handler maps to HTTP 400. Mirrors {@code HarnessIds} so durable positive decimal string
- * IDs share the same boundary semantics.
+ * 在 web / DTO 边界暴露的 ComfyUI workflow 卡片 bigint id 的严格解析器。null、空白、非十进制或 非正值以 {@link
+ * IllegalArgumentException} 拒绝，由全局 handler 映射为 HTTP 400。与 {@code HarnessIds} 保持一致，使持久的正十进制字符串 ID
+ * 共享相同的边界语义。
  */
 public final class ComfyuiWorkflowApiIds {
 

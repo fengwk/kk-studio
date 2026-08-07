@@ -11,10 +11,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 
-/**
- * Verifies the {@code agent_thread_goal} product table: it is a product capability (not runtime
- * execution truth), so it carries its own non-{@code harness_} prefix and constraint contract.
- */
+/** 验证 {@code agent_thread_goal} 产品表：它是产品能力（而非 runtime 执行真相），因此带有自己的非 {@code harness_} 前缀与约束契约。 */
 class PostgresqlGoalSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach

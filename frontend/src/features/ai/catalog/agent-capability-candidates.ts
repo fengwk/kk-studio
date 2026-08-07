@@ -14,7 +14,7 @@ function isReady(environment: LiveEnvironmentDTO): boolean {
   return String(environment.status).toUpperCase() === 'READY'
 }
 
-/** Build the unified offline-selectable tool catalog without exposing a source environment. */
+/** 构建统一的离线可选 tool 目录，不暴露来源环境。 */
 export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOption[] {
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
@@ -33,7 +33,7 @@ export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOpt
   return options
 }
 
-/** Merge skills from all READY live Environments by short name. */
+/** 按 short name 合并所有 READY live Environment 的 skills。 */
 export function buildSkillCandidates(environments: LiveEnvironmentDTO[]): CapabilityOption[] {
   const options: CapabilityOption[] = []
   const seen = new Set<string>()

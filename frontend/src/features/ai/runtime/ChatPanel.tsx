@@ -12,7 +12,7 @@ import type {
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
 
-/** Stable runtime/model identity surfaced in the footer; fields may be absent while a pane is blank. */
+/** 在 footer 中展示的稳定 runtime/model 标识；当面板为空时部分字段可能缺失。 */
 export interface ChatPanelLabels {
   agentName?: string
   providerName?: string
@@ -22,7 +22,7 @@ export interface ChatPanelLabels {
   contextWindow?: number
 }
 
-/** Transcript (durable timeline + live mailbox) plus loading/error state. */
+/** 时间线（持久 timeline + 实时 mailbox）以及加载/错误状态。 */
 export interface ChatPanelTranscriptInput {
   timeline: {
     messages: DialogueMessage[]
@@ -33,14 +33,14 @@ export interface ChatPanelTranscriptInput {
   loading: boolean
   error: unknown
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
-  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }
 
-/** Composer call sites and forwarded callbacks. */
+/** Composer 的调用点与转发的回调函数。 */
 export type ChatPanelComposerInput = ThreadPanelComposerInput
 
-/** Narrow footer data: runtime identity + click targets. Aggregate usage is not on the snapshot. */
+/** 精简的 footer 数据：runtime 标识 + 可点击目标。snapshot 中不包含汇总用量。 */
 export interface ChatPanelFooterInput {
   yoloEnabled?: boolean
   onAgentClick?: () => void
@@ -49,7 +49,7 @@ export interface ChatPanelFooterInput {
   onEnvironmentClick?: () => void
 }
 
-/** Work state and dismissible feedback shown above the composer. */
+/** Composer 上方展示的工作状态与可关闭的反馈信息。 */
 export interface ChatPanelActivityInput {
   working: boolean
   actionError?: string | null
@@ -57,8 +57,8 @@ export interface ChatPanelActivityInput {
 }
 
 /**
- * Pane-scoped Thread adapter over ThreadPanel. No permanent Session/Thread sidebar; runtime
- * labels come from the controller but never as backend DTOs.
+ * 面板级 Thread 适配器，基于 ThreadPanel 封装。不持有常驻的 Session/Thread 侧边栏；runtime
+ * 标签来自 controller，但绝不以后端 DTO 形式直接传递。
  */
 export function ChatPanel({
   labels,

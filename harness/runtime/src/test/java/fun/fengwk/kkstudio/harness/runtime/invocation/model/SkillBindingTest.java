@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.util.UUID;
 
-/** SkillBinding canonical metadata and nullable source environment. */
+/** SkillBinding 的 canonical 元数据以及 nullable 的来源 environment。 */
 class SkillBindingTest {
 
   private static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());

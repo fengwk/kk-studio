@@ -1,1 +1,1 @@
-Create or replace a persisted goal only when the user explicitly requests goal mode. The objective must be durable and evidence-checkable: include the outcome, verification surface, constraints, boundaries, iteration policy, and blocked stop condition. Set `tokenBudget` only when the user explicitly requests a token budget; do not infer goal mode from an ordinary task or one-off prompt.
+仅在用户明确要求进入 goal 模式时，创建或替换持久化 goal。`objective` 必须是持久化且可用证据核验的目标：包含预期结果、验证面、约束、边界、迭代策略以及阻塞时的停止条件。只有用户明确要求 token 预算时才设置 `tokenBudget`；普通任务或一次性 prompt 不得推断为 goal 模式。

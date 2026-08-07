@@ -62,7 +62,7 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * Small standalone fixture builders and baseline seeds for store tests.
+ * 面向 store 测试的小型独立 fixture builder 与 baseline 种子。
  *
  * <p>每个 builder 只构造一个独立 record；baseline 方法按事务语义原子写入最小合法组合（Session + ROOT + Thread，或再带一个 open
  * TURN_START）。测试通过 {@link #inTransaction} 复用 void 事务体，避免每个 lambda 手写 {@code return null}。
@@ -79,7 +79,7 @@ final class StoreTestSupport {
 
   private StoreTestSupport() {}
 
-  /** Runs a void transaction body, so tests can use statement lambdas. */
+  /** 运行 void transaction 体，便于测试使用 statement lambda。 */
   static void inTransaction(HarnessStore store, Consumer<HarnessStore.Transaction> body) {
     store.transaction(
         tx -> {
@@ -88,10 +88,10 @@ final class StoreTestSupport {
         });
   }
 
-  /** Minimal committed baseline: one session with ROOT and one thread pointing at the ROOT. */
+  /** 最小已提交 baseline：包含 ROOT 的一个 session，以及指向该 ROOT 的一个 thread。 */
   record Baseline(long sessionId, long rootEntryId, long threadId) {}
 
-  /** Baseline with one open TURN_START chain; the thread head points at the TURN_START. */
+  /** 包含一条开放的 TURN_START chain 的 baseline；thread head 指向该 TURN_START。 */
   record TurnBaseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
 
   static Baseline seedThreadBaseline(HarnessStore store) {
@@ -122,7 +122,7 @@ final class StoreTestSupport {
         });
   }
 
-  /** Inserts a child Entry under {@code parentEntryId} with a fresh id and returns that id. */
+  /** 在 {@code parentEntryId} 下插入一个带新 id 的子 Entry，并返回该 id。 */
   static long insertChildEntry(
       HarnessStore store, long sessionId, long parentEntryId, EntryPayload payload) {
     return store.transaction(
@@ -174,7 +174,7 @@ final class StoreTestSupport {
     return new TurnStartPayload(TurnStartReason.INPUT, branchSettings());
   }
 
-  /** ASSISTANT MESSAGE payload; {@code toolCallIds} become ordered ToolCall contents. */
+  /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
   static EntryPayload assistantPayload(String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
@@ -216,14 +216,12 @@ final class StoreTestSupport {
         null);
   }
 
-  /** TOOL MESSAGE payload whose metadata matches the given assistant entry / ordinal / call id. */
+  /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / ordinal / call id 匹配。 */
   static EntryPayload toolResultPayload(long assistantEntryId, int ordinal, String toolCallId) {
     return toolResultPayload(assistantEntryId, ordinal, toolCallId, ToolResultStatus.SUCCEEDED);
   }
 
-  /**
-   * TOOL MESSAGE payload with an explicit terminal status (must map the linking invocation status).
-   */
+  /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
   static EntryPayload toolResultPayload(
       long assistantEntryId, int ordinal, String toolCallId, ToolResultStatus status) {
     ToolResultMessageContent content =
@@ -235,7 +233,7 @@ final class StoreTestSupport {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  /** Synthetic history-normalization ToolResult entry; must never link a real ToolInvocation. */
+  /** 用于 history-normalization 的合成 ToolResult entry；禁止关联真实 ToolInvocation。 */
   static EntryPayload syntheticToolResultPayload(
       long assistantEntryId, int ordinal, String toolCallId) {
     ToolResultMessageContent content =
@@ -271,9 +269,7 @@ final class StoreTestSupport {
         T0);
   }
 
-  /**
-   * Returns the command with only the consumed marker set; the rest of the identity is unchanged.
-   */
+  /** 返回仅设置了 consumed marker 的 command；其余身份信息保持不变。 */
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, long turnStartEntryId) {
     return new ThreadCommand(
         command.id(),
@@ -286,9 +282,7 @@ final class StoreTestSupport {
         command.createdAt());
   }
 
-  /**
-   * Returns the command with only the cancelled marker set; the rest of the identity is unchanged.
-   */
+  /** 返回仅设置了 cancelled marker 的 command；其余身份信息保持不变。 */
   static ThreadCommand withCancelledAt(ThreadCommand command, Instant cancelledAt) {
     return new ThreadCommand(
         command.id(),
@@ -301,7 +295,7 @@ final class StoreTestSupport {
         command.createdAt());
   }
 
-  /** READY (non-terminal) or CANCELLED (terminal, may carry resultEntryId) model invocation. */
+  /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 model invocation。 */
   static ModelInvocation modelInvocation(
       long id,
       long threadId,
@@ -330,7 +324,7 @@ final class StoreTestSupport {
         createdAt);
   }
 
-  /** READY (non-terminal) or CANCELLED (terminal, may carry resultEntryId) tool invocation. */
+  /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 tool invocation。 */
   static ToolInvocation toolInvocation(
       long id,
       long modelInvocationId,

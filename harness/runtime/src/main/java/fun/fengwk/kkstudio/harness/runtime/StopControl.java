@@ -39,11 +39,10 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Feature-local synchronous Stop transaction.
+ * 特性本地的同步 Stop transaction。
  *
- * <p>This is deliberately not a Store use-case method or generic workflow. It owns the one atomic
- * branch closure required by Stop: exact thread-scoped replay, Command cancellation, Model/Tool
- * convergence, Entry append, one Thread revision bump and final Work fencing.
+ * <p>这并非 Store use-case 方法，也不是通用 workflow。它承担 Stop 所需的唯一一次原子分支收尾： thread-scoped 精确 replay、Command
+ * 取消、Model/Tool 收敛、Entry append、Thread revision 一次递增 以及最终的 Work fencing。
  */
 final class StopControl {
 
@@ -191,10 +190,9 @@ final class StopControl {
   }
 
   /**
-   * One non-regressing timestamp for every Stop mutation.
+   * 为每次 Stop mutation 提供一个不回退的时间戳。
    *
-   * <p>Reading the local Clock after all locks prevents lock-wait staleness, while taking the max
-   * of the locked durable facts also tolerates cross-node clock skew and wall-clock rollback.
+   * <p>在所有锁之后读取本地 Clock 可避免 lock-wait 引发的过期；而对已锁定的 durable fact 取 max 又能容忍跨节点时钟偏差与 wall-clock 回滚。
    */
   private static Instant effectiveNow(
       Instant clockNow,
@@ -379,7 +377,7 @@ final class StopControl {
     return new HarnessRuntimeConflictException(reason, message);
   }
 
-  /** Durable Stop result plus process-local executions to cancel after the transaction commits. */
+  /** Durable Stop 结果，加上 transaction 提交后需取消的 process-local execution。 */
   record Commit(StopResult result, Long modelExecutionId, List<Long> toolExecutionIds) {
 
     Commit {

@@ -6,9 +6,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import java.util.Objects;
 
 /**
- * Package-private result of {@link ThreadContextLock}: the root-to-head {@link EntryPath} plus the
- * pure {@link ThreadContext} classification computed over rows locked in the same transaction, so
- * enqueue admission, MOVE_HEAD, Tool approval and snapshot never drift from each other.
+ * {@link ThreadContextLock} 的 package-private 结果：在同一 transaction 中锁定的行上计算得到的 root-to-head {@link
+ * EntryPath} 与纯 {@link ThreadContext} 分类，使 enqueue admission、MOVE_HEAD、 Tool approval 与 snapshot
+ * 之间永不发生漂移。
  */
 record LockedThreadContext(EntryPath path, ThreadContext context) {
 

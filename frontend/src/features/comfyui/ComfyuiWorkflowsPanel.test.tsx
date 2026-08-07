@@ -43,7 +43,7 @@ describe('ComfyuiWorkflowsPanel', () => {
     expect(screen.getByRole('button', { name: '运行 Beta' })).toBeDisabled()
     const betaCard = screen.getByRole('button', { name: '运行 Beta' }).closest('article')!
     expect(within(betaCard).getByRole('button', { name: '删除 Beta' })).toBeDisabled()
-    // deletePending applies to every card, even enabled ones.
+    // deletePending 作用于每张卡片，包括已启用的卡片。
     const alphaCard = screen.getByRole('button', { name: '运行 Alpha' }).closest('article')!
     expect(within(alphaCard).getByRole('button', { name: '删除 Alpha' })).toBeDisabled()
   })

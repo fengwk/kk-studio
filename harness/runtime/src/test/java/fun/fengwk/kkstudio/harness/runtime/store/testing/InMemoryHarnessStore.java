@@ -92,10 +92,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     this.committed = new State();
   }
 
-  /**
-   * Test-only constructor that seeds the global id sequence; the next allocated id is {@code
-   * initialNextId + 1}.
-   */
+  /** 仅用于测试的构造函数，用于播种全局 id 序列；下一个分配的 id 为 {@code initialNextId + 1}。 */
   InMemoryHarnessStore(long initialNextId) {
     if (initialNextId < 0) {
       throw new IllegalArgumentException("initialNextId must not be negative");
@@ -133,7 +130,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
   }
 
-  /** Committed working state; every transaction works on a shallow copy. */
+  /** 已提交的 working state；每个 transaction 都基于 shallow copy 工作。 */
   private static final class State {
     final Map<Long, Session> sessions = new HashMap<>();
     final Map<Long, Entry> entries = new HashMap<>();
@@ -158,7 +155,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
   }
 
-  /** Row lock key used for per-transaction update tracking. */
+  /** 行锁 key，用于每个 transaction 的 update tracking。 */
   private enum LockRank {
     THREAD,
     COMMAND,
@@ -642,7 +639,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       boolean consumed = command.consumedTurnStartEntryId() != null;
       boolean cancelled = command.cancelledAt() != null;
       if (consumed == cancelled) {
-        // both absent: QUEUED -> QUEUED; both present is already rejected by the record contract.
+        // 两者都缺失：QUEUED -> QUEUED；两者都存在时已被 record contract 直接拒绝。
         throw new IllegalArgumentException(
             "queued commands may only transition to APPLIED or CANCELLED");
       }

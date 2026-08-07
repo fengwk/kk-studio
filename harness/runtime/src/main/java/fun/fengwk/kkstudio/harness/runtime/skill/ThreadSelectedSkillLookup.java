@@ -4,14 +4,13 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Resolves the current Thread Agent's selected skill metadata for PLATFORM tools.
+ * 为 PLATFORM tool 解析当前 Thread Agent 已选中的 skill 元数据。
  *
- * <p>Implemented in Core to avoid circular Spring wiring between platform Tool beans and
- * Host-backed Environment gateway components.
+ * <p>实现位于 Core，以避免 platform Tool bean 与 Host 端 Environment gateway 组件之间的 Spring 循环装配。
  */
 public interface ThreadSelectedSkillLookup {
 
-  /** Skill bindings persisted with the claimed Model invocation. */
+  /** 随已 claim 的 Model invocation 持久化的 skill binding。 */
   List<SkillBinding> selectedSkills(long invocationId, long threadId);
 
   default Optional<SkillBinding> findSelected(long invocationId, long threadId, String skillName) {

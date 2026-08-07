@@ -68,7 +68,7 @@ describe('harnessService', () => {
     expect(service.decideApproval).toBeTypeOf('function')
     expect(service.createThreadRealtimeStream).toBeTypeOf('function')
 
-    // Old endpoints are gone from the contract entirely.
+    // 旧端点已从契约中完全移除。
     expect(service).not.toHaveProperty('listThreads')
     expect(service).not.toHaveProperty('listSessions')
     expect(service).not.toHaveProperty('listSessionEntries')

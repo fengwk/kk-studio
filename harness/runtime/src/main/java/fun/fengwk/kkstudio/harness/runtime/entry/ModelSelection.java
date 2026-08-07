@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import java.util.Objects;
 
-/** Immutable provider/model/variant reference frozen into a branch settings snapshot. */
+/** 冻结到 branch settings snapshot 中的不可变 provider/model/variant 引用。 */
 public record ModelSelection(String providerName, String modelName, String variant) {
 
   public ModelSelection {

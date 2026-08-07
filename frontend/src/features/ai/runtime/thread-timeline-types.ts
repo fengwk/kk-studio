@@ -15,16 +15,16 @@ export interface ToolAttachment {
   type: ToolAttachmentType
   name: string
   mime: string
-  /** Stable URI (data:/http:/https:/file:/s3:/...); never a base64 payload on its own. */
+  /** 稳定 URI（data:/http:/https:/file:/s3:/...）；自身始终不是 base64 负载。 */
   data: string
-  /** Optional canonical preview text embedded in the resource content. */
+  /** 可选的、规范化的预览文本，嵌入在资源内容中。 */
   preview?: string
   size?: number | null
   sha256?: string | null
 }
 
-/** Undecided/decided Tool approval state projected from the ToolInvocation approvalJson. */
-/** Projected approval state; the persisted enum is ALLOWED/DENIED (not the input ALLOW/DENY). */
+/** 由 ToolInvocation approvalJson 投影得到的、未决/已决的 Tool 审批状态。 */
+/** 投影得到的审批状态；持久化的枚举是 ALLOWED/DENIED（而非输入的 ALLOW/DENY）。 */
 export interface ToolApprovalState {
   required: boolean
   decision: 'ALLOWED' | 'DENIED' | null
@@ -43,15 +43,13 @@ interface BaseDialogueMessage {
 export interface TextDialogueMessage extends BaseDialogueMessage {
   role: 'user' | 'assistant' | 'system'
   text: string
-  // Optional assistant thinking text. Only present when the assistant actually
-  // emitted thinking during this attempt; absent for plain text responses and
-  // for non-assistant roles.
+  // 可选的 assistant 思考文本。仅在本次 attempt 中 assistant 确实产生过思考时存在；
+  // 纯文本响应及非 assistant 角色不会出现该字段。
   thinking?: string
   /**
-   * True for assistant turns that the user explicitly stopped via /stop; their
-   * text/thinking reflect the snapshot at stop time and remain visible after a
-   * refresh, but the UI should render an "已停止" affordance and suppress the
-   * realtime overlay.
+   * 表示该 assistant 回合被用户通过 /stop 显式中断：其 text/thinking 反映的是
+   * 停止那一刻的 snapshot，刷新后仍可见，但 UI 应当展示 "已停止" 标识，
+   * 并抑制 realtime overlay。
    */
   aborted?: boolean
   metadata?: Record<string, unknown>
@@ -66,15 +64,15 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   arguments: string
   attachments: ToolAttachment[]
   errorMessage?: string
-  /** ToolInvocation id carrying this call's durable state (approval/partial). */
+  /** 持有此次调用持久状态（approval/partial）的 ToolInvocation id。 */
   invocationId?: string
-  /** Transient TOOL_PARTIAL / terminal-result overlay attachments for the active call. */
+  /** 活动调用的瞬态 TOOL_PARTIAL / 终止态 result overlay attachments。 */
   partialAttachments?: ToolAttachment[]
-  /** Transient error message projected from errorJson while no durable result Entry exists. */
+  /** 在尚无持久 result Entry 时，从 errorJson 投影得到的瞬态错误消息。 */
   partialErrorText?: string
-  /** Transient TOOL_PARTIAL overlay aggregated for the active invocation attempt. */
+  /** 为活动 invocation attempt 聚合出的瞬态 TOOL_PARTIAL overlay。 */
   partial?: string
-  /** Projected approval state (null when the tool invocation carries no approval). */
+  /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
 }
 
@@ -87,10 +85,9 @@ export interface MetaDialogueMessage extends BaseDialogueMessage {
 }
 
 /**
- * A standalone projection of a durable Entry whose semantics are not a dialogue turn.
+ * 持久 Entry 的独立投影，其语义并非对话回合。
  *
- * Keeping this shape independent of Harness DTOs makes the transcript reusable by any caller that
- * can provide the stable timeline contract.
+ * 让该形态独立于 Harness DTO，可被任何能提供稳定 timeline 契约的调用方复用 transcript。
  */
 export interface EntryEventDialogueMessage extends BaseDialogueMessage {
   role: 'entry'
@@ -106,7 +103,7 @@ export type DialogueMessage =
   | MetaDialogueMessage
   | EntryEventDialogueMessage
 
-/** QUEUED mailbox command shown outside the durable transcript; sequence stays a decimal string. */
+/** 在持久 transcript 之外展示的 QUEUED mailbox 命令；sequence 保持十进制字符串。 */
 export interface QueuedThreadMessage {
   commandId: string
   role: 'user' | 'system'
@@ -116,8 +113,8 @@ export interface QueuedThreadMessage {
 
 export interface ThreadTimeline {
   messages: DialogueMessage[]
-  /** QUEUED USER_MESSAGE / CUSTOM_MESSAGE commands shown outside the durable transcript. */
+  /** 在持久 transcript 之外展示的 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令。 */
   queuedMessages: QueuedThreadMessage[]
-  /** True when the mailbox contains a queued user-visible command. */
+  /** 当 mailbox 中仍有用户可见的排队命令时为 true。 */
   hasPendingInputs: boolean
 }

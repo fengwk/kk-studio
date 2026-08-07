@@ -30,10 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Command mailbox constraints: unique keys, queued ordering, terminal markers and immutable
- * identity.
- */
+/** Command mailbox 约束：唯一 key、queued 顺序、terminal marker 与不可变身份。 */
 public abstract class HarnessStoreCommandContract {
 
   private HarnessStore store;
@@ -427,18 +424,18 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
         });
-    // load without the thread lock is rejected (lock order Thread -> commands)
+    // 未持有 thread lock 的 load 会被拒绝，锁序 Thread -> commands
     assertThrows(
         IllegalStateException.class,
         () -> store.transaction(tx -> tx.loadQueuedCommands(baseline.threadId())));
-    // insert without the thread lock is rejected
+    // 未持有 thread lock 的 insert 会被拒绝
     assertThrows(
         IllegalStateException.class,
         () ->
             inTransaction(
                 store,
                 tx -> tx.insertCommands(List.of(command(9, baseline.threadId(), 9, "client-z")))));
-    // the locked path works
+    // 已锁定路径可正常工作
     assertTrue(
         store.<Boolean>transaction(
             tx -> {
@@ -462,7 +459,7 @@ public abstract class HarnessStoreCommandContract {
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
-    // QUEUED -> QUEUED is not a lifecycle transition
+    // QUEUED -> QUEUED 不是生命周期转换
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -473,7 +470,7 @@ public abstract class HarnessStoreCommandContract {
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(queued));
                 }));
-    // QUEUED -> APPLIED then terminal transitions are fenced in the same transaction
+    // 同事务内的 QUEUED -> APPLIED 之后的 terminal 转换会被拦下
     long otherTurnStartEntryId =
         store.transaction(
             tx -> {
@@ -488,21 +485,21 @@ public abstract class HarnessStoreCommandContract {
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
           ThreadCommand applied = withConsumedTurnStart(queued, turnStartEntryId);
           tx.updateCommands(List.of(applied));
-          // APPLIED -> QUEUED
+          // APPLIED -> QUEUED（回退）
           assertThrows(IllegalArgumentException.class, () -> tx.updateCommands(List.of(queued)));
-          // APPLIED -> CANCELLED
+          // APPLIED -> CANCELLED（跨到 CANCELLED）
           assertThrows(
               IllegalArgumentException.class,
               () -> tx.updateCommands(List.of(withCancelledAt(applied, T2))));
-          // APPLIED -> APPLIED with a different consumed marker (a valid same-session TURN_START)
+          // APPLIED 改为带不同 consumed marker 的同 session TURN_START
           assertThrows(
               IllegalArgumentException.class,
               () ->
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, otherTurnStartEntryId))));
-          // APPLIED -> APPLIED exact idempotent replay is accepted
+          // APPLIED 的精确 idempotent replay 可接受
           tx.updateCommands(List.of(applied));
         });
-    // CANCELLED -> CANCELLED exact idempotent replay is accepted
+    // CANCELLED 的精确 idempotent replay 可接受
     inTransaction(
         store,
         tx -> {
@@ -544,7 +541,7 @@ public abstract class HarnessStoreCommandContract {
           try {
             tx.insertCommands(List.of(valid, invalid));
           } catch (IllegalArgumentException ignored) {
-            // The batch method must validate every item before its first mutation.
+            // 批量方法必须先完成所有 item 的校验，再进行第一次 mutation
           }
           return null;
         });
@@ -581,7 +578,7 @@ public abstract class HarnessStoreCommandContract {
             tx.updateCommands(
                 List.of(withConsumedTurnStart(queued.get(0), turnStartEntryId), queued.get(1)));
           } catch (IllegalArgumentException ignored) {
-            // QUEUED -> QUEUED on the second item must not leave the first item applied.
+            // 第二个 item 仍为 QUEUED -> QUEUED 时，第一个 item 不应被 applied
           }
           return null;
         });
@@ -605,7 +602,7 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
         });
-    // a USER MESSAGE (under a TURN_START) is not a TURN_START entry
+    // 位于 TURN_START 之下的 USER MESSAGE 不是 TURN_START Entry
     long userEntryId =
         store.transaction(
             tx -> {
@@ -627,7 +624,7 @@ public abstract class HarnessStoreCommandContract {
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, userEntryId)));
                 }));
-    // a TURN_START in another session does not match the thread head session
+    // 其他 session 中的 TURN_START 不匹配 thread 当前 head session
     Baseline other = seedThreadBaseline(store);
     long otherTurnStart =
         store.transaction(
@@ -646,7 +643,7 @@ public abstract class HarnessStoreCommandContract {
                   ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, otherTurnStart)));
                 }));
-    // a TURN_START in the thread head session is accepted
+    // thread 当前 head session 中的 TURN_START 可接受
     long turnStartEntryId =
         store.transaction(
             tx -> {

@@ -21,10 +21,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Thread realtime SSE tail backed by the runtime-spring {@link RealtimeEventTail}. Snapshot-first
- * clients load PostgreSQL state first. Revision events carry the durable revision as SSE id while
- * lossy Redis delta events intentionally carry no id, so Last-Event-ID cannot be corrupted by
- * Redis.
+ * 由 runtime-spring {@link RealtimeEventTail} 支撑的 Thread realtime SSE tail。Snapshot-first 客户端 先加载
+ * PostgreSQL 状态。revision 事件以持久 revision 作为 SSE id，而有损的 Redis delta 事件故意不携带 id， 因此 Last-Event-ID 不会被
+ * Redis 污染。
  */
 @Slf4j
 final class StudioHarnessThreadSseEmitter {
@@ -113,7 +112,7 @@ final class StudioHarnessThreadSseEmitter {
               try {
                 emitter.completeWithError(error);
               } catch (IllegalStateException ignored) {
-                // already completed
+                // 已完成
               }
             }
           }
@@ -125,12 +124,12 @@ final class StudioHarnessThreadSseEmitter {
         close.run();
       }
     } catch (RejectedExecutionException rejected) {
-      // Bounded overload: fail the emitter immediately instead of leaving an inert SSE open.
+      // 有界过载：立即让 emitter 失败，而不是保持一个空闲的 SSE 连接。
       close.run();
       try {
         emitter.completeWithError(rejected);
       } catch (IllegalStateException ignored) {
-        // already completed
+        // 已完成
       }
     }
     return emitter;

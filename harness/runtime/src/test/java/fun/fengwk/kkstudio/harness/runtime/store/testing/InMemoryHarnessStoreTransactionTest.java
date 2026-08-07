@@ -17,8 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * In-memory transaction semantics: commit visibility, RuntimeException / Error rollback, nextId
- * restore on rollback, and rejection of escaped / nested transaction handles.
+ * 内存版 transaction 语义：commit 可见性、RuntimeException / Error 回滚、nextId 回滚后恢复，以及对逃逸 / 嵌套 transaction
+ * 句柄的拒绝。
  */
 class InMemoryHarnessStoreTransactionTest {
 

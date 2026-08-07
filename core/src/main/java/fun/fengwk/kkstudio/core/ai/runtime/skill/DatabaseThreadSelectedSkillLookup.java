@@ -11,13 +11,12 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Resolves selected skills from the immutable request persisted with the claimed Model invocation.
+ * 从与已 claim 的 Model invocation 一起持久化的不可变请求中解析选中的 skills。
  *
- * <p>Decodes the frozen request with the new {@link ModelInvocationRequestJsonCodec} and maps the
- * durable {@link fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding} (canonical
- * {@code EnvironmentId} route, nullable for platform skills) back to the legacy {@link
- * SkillBinding} surface consumed by {@code LoadSkillTool}; a platform skill without a source
- * environment has no loadable body and fails closed.
+ * <p>用新的 {@link ModelInvocationRequestJsonCodec} 解码冻结的请求，并把持久的 {@link
+ * fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding}（canonical {@code
+ * EnvironmentId} 路由，平台技能可为 null）映射回 {@code LoadSkillTool} 消费的旧 {@link SkillBinding} 表面；没有源
+ * environment 的平台技能没有可加载正文，按 fail-closed 处理。
  */
 @Component
 public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSkillLookup {

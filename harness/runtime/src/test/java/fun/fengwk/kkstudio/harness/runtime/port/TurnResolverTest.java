@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationReque
 
 import java.util.List;
 
-/** TurnResolver public contract: sealed result surface and strict value validation. */
+/** TurnResolver public contract：sealed result surface 与严格 value validation。 */
 class TurnResolverTest {
 
   @Test
@@ -39,7 +39,7 @@ class TurnResolverTest {
 
   @Test
   void resolveIsASynchronousNoSideEffectContractMethod() {
-    // the port is a single-method functional contract; an anonymous implementation must be possible
+    // 该 port 是单方法函数式契约，必须支持匿名实现
     TurnResolver resolver =
         (threadId, path, yoloEnabled) ->
             new TurnResolver.Rejected(new AssistantError("PLANNING_FAILED", "rejected"));

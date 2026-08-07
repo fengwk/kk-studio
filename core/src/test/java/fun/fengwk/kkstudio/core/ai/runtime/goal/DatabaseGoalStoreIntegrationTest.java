@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.goal.ThreadGoal;
 
 import java.time.Instant;
 
-/** Integration coverage for durable Thread goal create/replace/update. */
+/** 针对持久化 Thread goal 创建/替换/更新的集成覆盖。 */
 class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
   private static final long THREAD_ID = 9_820_001L;
   private static final Instant NOW = Instant.parse("2026-07-20T12:00:00Z");
@@ -28,7 +28,7 @@ class DatabaseGoalStoreIntegrationTest extends PostgresSpringTestSupport {
 
   @BeforeEach
   void clean() {
-    // Session, ROOT Entry and Thread insert in dependency order inside one transaction.
+    // Session、ROOT Entry 与 Thread 在同一事务内按依赖顺序插入。
     transactionTemplate.executeWithoutResult(
         status -> {
           jdbc.update("delete from agent_thread_goal");

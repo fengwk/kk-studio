@@ -53,11 +53,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
- * Validates the production {@link CoreModelGateway} admission contract: no callback before {@code
- * start} returns (two-phase activation: the admission gate opens only via {@code handle.activate()}
- * and cancel-before-activate wakes the waiting task), deterministic pre-submission classification
- * (Rejected / Busy / Indeterminate / throw), terminal-once callback bridging, error-kind
- * classification and best-effort cancellation across the pre-task, pre-bind and post-bind windows.
+ * 验证生产 {@link CoreModelGateway} admission 契约：在 {@code start} 返回之前不应有回调（两阶段激活：admission gate 仅通过
+ * {@code handle.activate()} 打开，且 cancel-before-activate 会唤醒等待任务），提交前分类具有确定性（Rejected / Busy /
+ * Indeterminate / throw）、terminal-once 回调桥接、错误类型分类，以及在 pre-task、pre-bind 和 post-bind 窗口中尽力取消。
  */
 class CoreModelGatewayTest {
 
@@ -151,8 +149,7 @@ class CoreModelGatewayTest {
       fixture.startAndActivate();
       provider.awaitStarted();
 
-      // The transport task is blocked inside stream() past the admission gate; the synchronous
-      // onComplete must not have been delivered yet, and start() has already returned.
+      // transport task 在越过 admission gate 后阻塞于 stream() 内；同步 onComplete 尚未投递，且 start() 已返回。
       assertEquals(0, fixture.listener.terminalCount());
 
       provider.blockBeforeStreamBody.countDown();
@@ -213,7 +210,7 @@ class CoreModelGatewayTest {
       IllegalStateException failure = assertThrows(IllegalStateException.class, fixture::start);
 
       assertEquals("provider database down", failure.getMessage());
-      // Only the construction probe reached the executor; the transport task was never submitted.
+      // 只有构造探针到达 executor；transport task 从未提交。
       assertEquals(1, ((CountingExecutor) fixture.executor).executeCount.get());
       assertEquals(0, fixture.listener.terminalCount());
     }
@@ -235,7 +232,7 @@ class CoreModelGatewayTest {
       assertTrue(fixture.listener.failed.get().message().contains("cannot create client"));
     }
 
-    // A null provider from the opener surfaces through the setup-failure path as INVALID_REQUEST.
+    // opener 返回的 null provider 通过 setup-failure 路径体现为 INVALID_REQUEST。
     try (Fixture fixture = new Fixture(new Resolution(ignored -> null))) {
       fixture.startAndActivate();
       fixture.listener.awaitTerminal();
@@ -1063,7 +1060,7 @@ class CoreModelGatewayTest {
     }
   }
 
-  /** Fake {@link ProviderResolutionService} with a configurable opener and failure injection. */
+  /** 假的 {@link ProviderResolutionService}，opener 与失败注入均可配置。 */
   private static final class Resolution implements ProviderResolutionService {
 
     private final AtomicInteger resolveCount = new AtomicInteger();
@@ -1102,7 +1099,7 @@ class CoreModelGatewayTest {
     }
   }
 
-  /** Fake {@link ModelProvider} that can block, fail or deliver synchronously inside stream(). */
+  /** 假的 {@link ModelProvider}：可在 stream() 内阻塞、失败或同步交付。 */
   private static final class ControlledProvider implements ModelProvider {
 
     private final TestStream stream;
@@ -1371,7 +1368,7 @@ class CoreModelGatewayTest {
     }
   }
 
-  /** Runs tasks on fresh threads and records any exception that escapes the task. */
+  /** 在新线程上运行任务，并记录任何逃逸出的异常。 */
   private static final class CapturingExecutor extends StubExecutorService {
 
     private final List<Throwable> failures = new CopyOnWriteArrayList<>();

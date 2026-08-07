@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Strict codec for the skills-only payload carried by the simplified daemon READY message. */
+/** 简化 daemon READY 消息中仅含 skills 的 payload 的严格 codec。 */
 public final class DaemonSkillsCodec {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();

@@ -13,10 +13,10 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Lightweight architecture guard for the tool module.
+ * Tool 模块的轻量级架构守卫。
  *
- * <p>Tool main sources may depend on JDK, Jackson and {@code fun.fengwk.kkstudio.harness.tool}
- * only. Runtime/daemon/core/web, Spring/MyBatis/servlet/Redis and Provider SDKs are forbidden.
+ * <p>Tool 主源码只能依赖 JDK、Jackson 和 {@code fun.fengwk.kkstudio.harness.tool}。 禁止依赖
+ * Runtime/daemon/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
  */
 class ToolModuleArchitectureTest {
 
@@ -116,10 +116,7 @@ class ToolModuleArchitectureTest {
     }
   }
 
-  /**
-   * Resolves {@code src/main/java} when Maven runs from the module root or the reactor root. Never
-   * resolves under {@code target/}.
-   */
+  /** Maven 从模块根目录或 reactor 根目录运行时解析 {@code src/main/java}，绝不解析到 {@code target/} 下。 */
   private static Path locateToolMainJava() {
     Path cwd = Path.of("").toAbsolutePath().normalize();
     List<Path> candidates =

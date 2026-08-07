@@ -13,11 +13,10 @@ import java.util.Objects;
 import java.util.function.Function;
 
 /**
- * PostgreSQL implementation of the seven-table {@link HarnessStore} protocol.
+ * 七表 {@link HarnessStore} protocol 的 PostgreSQL 实现。
  *
- * <p>Each store callback owns one independent READ_COMMITTED database transaction. A REQUIRES_NEW
- * boundary guarantees that a successful return means the durable commit has completed, even when
- * the caller already has an unrelated Spring transaction.
+ * <p>每个 store callback 独占一个独立的 READ_COMMITTED 数据库事务。REQUIRES_NEW 边界保证成功返回即表示 durable commit
+ * 已完成，即使调用方已持有无关的 Spring transaction。
  */
 public final class PostgresqlHarnessStore implements HarnessStore {
 

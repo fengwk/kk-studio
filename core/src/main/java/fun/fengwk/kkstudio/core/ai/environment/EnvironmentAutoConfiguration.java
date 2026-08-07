@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.Clock;
 
-/** Enables Environment gateway components. */
+/** 启用 Environment gateway 组件。 */
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentAutoConfiguration {
 

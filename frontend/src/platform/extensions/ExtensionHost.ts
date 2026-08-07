@@ -24,9 +24,8 @@ interface ExtensionRegistration {
 }
 
 /**
- * Keeps all candidates for a contribution id. The active candidate is selected
- * by descending priority and then first registration, allowing a lower-priority
- * contribution to become the fallback when an override is unloaded.
+ * 为一个 contribution id 保留全部候选。活动候选按优先级降序、先注册优先
+ * 选取，使低优先级 contribution 能在 override 卸载时成为回退。
  */
 export class ContributionRegistry<T extends { id: string; priority?: number }> {
   private readonly candidatesById = new Map<string, RegisteredContribution<T>[]>()

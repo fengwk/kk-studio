@@ -1,15 +1,15 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
 /**
- * Canvas aggregate: id, title, revision and the default viewport.
+ * Canvas aggregate：id、title、revision 与默认 viewport。
  *
- * <p>Invariants enforced by the canonical constructor:
+ * <p>由规范构造函数强制的不变量：
  *
  * <ul>
  *   <li>{@code id > 0}
- *   <li>{@code title} is non-blank
+ *   <li>{@code title} 非空白
  *   <li>{@code revision >= 0}
- *   <li>{@code homeViewportJson} is non-blank
+ *   <li>{@code homeViewportJson} 非空白
  * </ul>
  */
 public record CanvasDocument(long id, String title, long revision, String homeViewportJson) {

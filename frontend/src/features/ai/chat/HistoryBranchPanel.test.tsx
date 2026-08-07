@@ -23,7 +23,7 @@ describe('HistoryBranchPanel', () => {
 
     expect(screen.getByRole('dialog', { name: '历史分支' })).toBeInTheDocument()
     expect(screen.queryByText('选择历史位置后开启新的 Thread，当前 Thread 不会改变。')).not.toBeInTheDocument()
-    // Confirming relocates the *current* Thread; no new-Thread wording remains.
+    // 确认会重定位*当前* Thread；不再保留创建新 Thread 的文案。
     expect(screen.queryByRole('button', { name: /开启新 Thread/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/当前分支 head/)).not.toBeInTheDocument()
     expect(within(screen.getByLabelText('显示记录')).getAllByRole('option').map((option) => option.textContent)).toEqual([
@@ -50,7 +50,7 @@ describe('HistoryBranchPanel', () => {
     await user.click(screen.getByRole('button', { name: /工具 · tool result/ }))
     expect(screen.getByRole('button', { name: '从这里继续当前 Thread' })).toBeEnabled()
 
-    // The conversation view hides tools. The selected tool's closest visible raw ancestor is assistant.
+    // 对话视图会隐藏 tool。选中 tool 最近的可见原始祖先是 assistant。
     await user.selectOptions(screen.getByLabelText('显示记录'), 'conversation')
     expect(screen.queryByText('tool result')).not.toBeInTheDocument()
     const confirm = screen.getByRole('button', { name: '从这里继续当前 Thread' })
@@ -86,7 +86,7 @@ describe('HistoryBranchPanel', () => {
   it('shows connector glyphs only when branches exist', () => {
     renderPanel({ currentHeadEntryId: 'follow-up-2' })
     const userPrompt = screen.getByRole('button', { name: /user prompt/ })
-    // user has a single visible child (assistant), so it starts flush with no visual gutter.
+    // user 只有一个可见子节点（assistant），因此起始位置贴齐，不显示视觉缩进。
     expect(userPrompt.querySelector('.history-branch-entry-glyphs')).toBeNull()
     const firstBranch = screen.getByRole('button', { name: '助手 · follow up' })
     const lastBranch = screen.getByRole('button', { name: '助手 · follow up two · 当前路径 · 当前线程位置' })
@@ -128,7 +128,7 @@ describe('HistoryBranchPanel', () => {
     rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={null} pending={false} rebindError={null} onClose={vi.fn()} onRebind={vi.fn()} />)
     expect(screen.getByText('没有可显示的记录')).toBeInTheDocument()
 
-    // The rebind failure text is produced by the caller (409 included) and rendered verbatim.
+    // rebind 失败文本由调用方生成（包含 409），并原样渲染。
     rerender(<HistoryBranchPanel entries={[]} currentHeadEntryId={null} loading={false} queryError={new Error('failed')} pending={false} rebindError="无法重定位 Thread：状态已变化（thread is not idle），请刷新后重试" onClose={vi.fn()} onRebind={vi.fn()} />)
     expect(screen.getByText('历史分支加载失败')).toBeInTheDocument()
     expect(screen.getByText('无法重定位 Thread：状态已变化（thread is not idle），请刷新后重试')).toBeInTheDocument()

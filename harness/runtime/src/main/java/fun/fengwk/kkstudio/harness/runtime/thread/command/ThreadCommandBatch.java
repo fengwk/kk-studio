@@ -6,9 +6,9 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Immutable atomic enqueue request with exact head/sequence CAS expectations.
+ * 不可变的原子入队请求，包含精确的 head/sequence CAS 期望。
  *
- * <p>There is deliberately no batch identity or batch lifecycle state.
+ * <p>刻意不引入 batch identity 或 batch 生命周期 state。
  */
 public record ThreadCommandBatch(
     long threadId,

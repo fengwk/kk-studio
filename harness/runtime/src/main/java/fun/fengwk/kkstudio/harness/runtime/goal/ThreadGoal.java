@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.goal;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Durable Thread-scoped goal state. */
+/** durable Thread 作用域 goal 状态。 */
 public record ThreadGoal(
     long threadId,
     String objective,

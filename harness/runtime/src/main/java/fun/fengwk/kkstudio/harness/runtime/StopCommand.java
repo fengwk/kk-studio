@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 /**
- * Immutable Stop request.
+ * 不可变的 Stop 请求。
  *
- * <p>{@code stopRequestId} is the client-generated idempotency key. The Runtime scopes it by
- * operation and Thread before persisting it in a TURN_END, so the same external id on two Threads
- * never aliases.
+ * <p>{@code stopRequestId} 是客户端生成的幂等键。Runtime 在将其持久化到 TURN_END 之前会按 operation 与 Thread
+ * 限定其作用域，因此同一外部 id 在两个 Thread 上不会发生别名冲突。
  */
 public record StopCommand(long threadId, String stopRequestId, long expectedRevision) {
 

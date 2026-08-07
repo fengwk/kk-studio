@@ -27,7 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.List;
 
-/** Session / Entry tree / Thread schema constraints and root-to-head path loading. */
+/** Session / Entry tree / Thread schema 约束，以及 root-to-head path 的加载。 */
 public abstract class HarnessStoreEntryTreeContract {
 
   private HarnessStore store;
@@ -127,13 +127,13 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void nonRootEntryRequiresExistingSameSessionParent() {
     Baseline baseline = seedThreadBaseline(store);
-    // missing parent
+    // parent 不存在
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store, tx -> tx.insertEntry(turnStartEntry(10, baseline.sessionId(), 999, T1))));
-    // parent in another session
+    // parent 属于其他 session
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -182,7 +182,7 @@ public abstract class HarnessStoreEntryTreeContract {
           assertEquals(turnStartEntryId, path.head().id());
           return null;
         });
-    // a single ROOT is also a valid truncated path
+    // 单个 ROOT 也是一个合法的截断 path
     store.transaction(
         tx -> {
           EntryPath path = tx.loadEntryPath(baseline.rootEntryId());
@@ -305,7 +305,7 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void insertEntryValidatesTheFullEntryPathBeforeWriting() {
     Baseline baseline = seedThreadBaseline(store);
-    // non-ROOT entry must be inside an open TURN_START
+    // 非 ROOT entry 必须位于开放的 TURN_START 内
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -321,7 +321,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           userMessagePayload(),
                           T1));
                 }));
-    // INPUT turns require a USER/CUSTOM message before an assistant result
+    // INPUT turn 必须在 assistant result 之前有 USER/CUSTOM message
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -337,7 +337,7 @@ public abstract class HarnessStoreEntryTreeContract {
                       new Entry(
                           assistantId, baseline.sessionId(), turnStartId, assistantPayload(), T1));
                 }));
-    // the valid TURN_START -> USER -> ASSISTANT chain is accepted and loads as a path
+    // 合法的 TURN_START -> USER -> ASSISTANT 链会被接受并以 path 形式读出
     long[] ids =
         store.transaction(
             tx -> {
@@ -365,7 +365,7 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void updateThreadRequiresExistingHeadEntry() {
     Baseline baseline = seedThreadBaseline(store);
-    // unknown head
+    // head 未知
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -375,7 +375,7 @@ public abstract class HarnessStoreEntryTreeContract {
                   tx.lockThread(baseline.threadId());
                   tx.updateThread(new ThreadState(baseline.threadId(), 999, false, 1, 1, T0, T2));
                 }));
-    // relocating the head to an existing entry is allowed
+    // 将 head 迁移到一个已存在 entry 是允许的
     long turnStartEntryId =
         store.transaction(
             tx -> {

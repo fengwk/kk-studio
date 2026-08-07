@@ -12,11 +12,11 @@ export interface ProviderDraft {
 }
 
 /**
- * One Agent model variant. Form inputs are string-typed so empty fields map cleanly to
- * {@code null}/{@code undefined} on the wire {@link AgentModelVariantDTO}.
+ * 一个 Agent model 变体。表单输入使用字符串类型，以便空字段能干净地映射到 wire {@link AgentModelVariantDTO}
+ * 上的 {@code null}/{@code undefined}。
  */
 export interface VariantDraft {
-  /** Client-only React key. */
+  /** 仅客户端使用的 React key。 */
   draftId: string
   id: string
   reasoningEffort: string
@@ -26,13 +26,13 @@ export interface VariantDraft {
   topK: string
   frequencyPenalty: string
   presencePenalty: string
-  /** Comma-separated in the form; persisted as a string array. */
+  /** 表单中以逗号分隔；持久化为字符串数组。 */
   stopSequences: string
 }
 
 /**
- * Per-million-token prices carried through the form. The shared {@code config.pricing} subshape
- * owns currency / tier metadata at the wire boundary; the form only edits the per-unit prices.
+ * 表单传递的每百万 token 价格。共享的 {@code config.pricing} 子结构在 wire 边界承载币种 / 档位元数据；
+ * 表单仅编辑每个单位的价格。
  */
 export interface ModelPricingDraft {
   currency: string
@@ -48,7 +48,7 @@ export interface ModelPricingDraft {
   reasoningPerMillionTokens: string
 }
 
-/** Form draft for a model resource. Inputs stay string-typed for predictable editing UX. */
+/** model 资源的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
 export interface ModelDraft {
   providerName: string
   name: string
@@ -58,8 +58,7 @@ export interface ModelDraft {
   tools: boolean
   reasoning: boolean
   /**
-   * Non-empty on submit. {@code TEXT} is always present for newly created models; toggling
-   * adds/removes items via immutable arrays (no in-place mutation).
+   * 提交时非空。新建 model 默认始终包含 {@code TEXT}；切换时通过不可变数组新增/移除项（不进行原地变更）。
    */
   inputModalities: AgentModelInputModality[]
   defaultVariant: string

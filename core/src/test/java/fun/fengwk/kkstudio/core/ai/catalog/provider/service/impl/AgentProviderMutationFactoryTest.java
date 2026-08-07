@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 import java.time.Duration;
 
-/** Provider mutation validation and credential patch behavior. */
+/** Provider 变更校验与凭据补丁行为。 */
 public class AgentProviderMutationFactoryTest {
 
   @Test

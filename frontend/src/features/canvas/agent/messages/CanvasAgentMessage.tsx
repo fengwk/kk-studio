@@ -5,8 +5,8 @@ import { RunThreadMessage } from '@/features/canvas/agent/messages/RunThreadMess
 import { UserThreadMessage } from '@/features/canvas/agent/messages/UserThreadMessage'
 
 /**
- * Message-kind dispatcher, analogous to MessageList and pi's per-type components.
- * Keeps thread rendering open for new message kinds without growing the dock shell.
+ * 按消息 kind 分发的派发器，对应 MessageList 与 pi 的按类型组件。
+ * 让 thread 渲染对新消息 kind 保持开放，而不必扩张 dock 外壳。
  */
 export function CanvasAgentMessage({
   message,

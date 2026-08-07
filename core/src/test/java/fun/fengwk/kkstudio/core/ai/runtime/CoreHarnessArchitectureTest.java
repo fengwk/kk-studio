@@ -15,15 +15,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
-/** Guards the Core composition/application boundary around framework-free Harness runtime APIs. */
+/** 守护 Core 与 framework-free Harness runtime API 的组合/应用边界。 */
 class CoreHarnessArchitectureTest {
 
   private static final String HARNESS_RUNTIME_SPRING =
       "fun.fengwk.kkstudio.harness.runtime.spring.";
 
-  /**
-   * Core is not the composition root: main sources and the pom must not depend on runtime-spring.
-   */
+  /** Core 不是组合根：main 源码和 pom 不得依赖 runtime-spring。 */
   @Test
   void coreNeverDependsOnRuntimeSpring() throws IOException {
     Path main = locateCoreMainJava();
@@ -52,10 +50,9 @@ class CoreHarnessArchitectureTest {
   }
 
   /**
-   * Core V1 migration embeds the runtime-spring schema source file byte-identically: the contiguous
-   * block from {@code create sequence harness_runtime_id_seq} through the {@code harness_work}
-   * {@code lease_until} index must equal the runtime-spring file exactly, so the two schema sources
-   * can never drift.
+   * Core V1 迁移以字节级相同的方式嵌入 runtime-spring schema 源文件：连续的代码块从 {@code create sequence
+   * harness_runtime_id_seq} 一直到 {@code harness_work} {@code lease_until} 索引必须与 runtime-spring
+   * 文件完全相等，因此两个 schema 源文件绝不能发生漂移。
    */
   @Test
   void coreV1SchemaEmbedsRuntimeSpringSchemaByteIdentically() throws IOException {

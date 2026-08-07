@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-/** Typed SET_ACTIVE_TOOLS payload with ordered, canonical, duplicate-free tool names. */
+/** 携带有序、canonical、去重 tool name 的 typed SET_ACTIVE_TOOLS payload。 */
 public record SetActiveToolsCommandPayload(List<String> activeTools)
     implements ThreadCommandPayload {
 

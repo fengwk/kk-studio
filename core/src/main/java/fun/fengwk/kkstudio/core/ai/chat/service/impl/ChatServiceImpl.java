@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** Chat CRUD service. */
+/** Chat CRUD 服务。 */
 @Service
 public class ChatServiceImpl implements ChatService {
 

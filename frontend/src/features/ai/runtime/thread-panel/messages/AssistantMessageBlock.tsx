@@ -43,7 +43,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
           />
           <div className="thread-block-body thread-assistant-text">
             {message.status === 'error' ? (
-              // Provider failures must stay raw (JSON/HTML bodies). Markdown would escape or reformat them.
+              // Provider 失败必须保持原始内容（JSON/HTML 响应体）。Markdown 会转义或重排它们。
               <pre className="thread-error-raw">{text}</pre>
             ) : (
               <MarkdownRenderer content={text} />

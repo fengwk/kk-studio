@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.UUID;
 
-/** ToolBinding type/descriptor/environment route invariants. */
+/** ToolBinding 的 type/descriptor/environment route 不变式。 */
 class ToolBindingTest {
 
   private static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());

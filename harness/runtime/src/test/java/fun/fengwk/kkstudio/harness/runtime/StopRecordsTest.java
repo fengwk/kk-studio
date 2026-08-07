@@ -25,9 +25,8 @@ import java.util.List;
 import java.util.function.LongConsumer;
 
 /**
- * StopCommand / StopResult record validation: every rejected shape is exact, and the durable
- * 256-char closeRequestId ceiling of a STOPPED TURN_END is exercised through a real Stop with the
- * longest allowed external id (the composite thread-scoped key must still fit).
+ * StopCommand / StopResult record 校验：每一种被拒绝的形态都精确一致；并通过真实 Stop 使用最长的允许 external id 来验证 STOPPED
+ * TURN_END 上 256 字符的 closeRequestId 上限 （复合 thread-scope key 必须仍能容纳）。
  */
 class StopRecordsTest {
 
@@ -115,8 +114,8 @@ class StopRecordsTest {
   }
 
   /**
-   * The longest allowed external id (128 chars) must produce a durable composite key that still
-   * fits the 256-char closeRequestId ceiling end to end through a real Stop transaction.
+   * 最长的允许 external id（128 字符）必须生成一个仍能容纳在 256 字符 closeRequestId 上限 之内的 durable composite
+   * key，并端到端贯穿一次真实 Stop 事务。
    */
   @Test
   void longestExternalIdStillFitsTheTurnEndCloseRequestIdCeiling() {

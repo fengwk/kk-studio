@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 
 import java.util.Objects;
 
-/** Typed SET_MODEL payload; ModelRef and variant are changed as one value. */
+/** typed SET_MODEL payload；ModelRef 与 variant 作为单一值整体变更。 */
 public record SetModelCommandPayload(ModelSelection model) implements ThreadCommandPayload {
 
   public SetModelCommandPayload {

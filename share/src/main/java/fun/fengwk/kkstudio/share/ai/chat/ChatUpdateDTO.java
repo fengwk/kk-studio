@@ -4,18 +4,27 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 /**
- * Update request body for {@code /api/ai/chat/{id}}.
+ * {@code /api/ai/chat/{id}} 的更新请求体。
  *
- * <p>Partial update: omitted fields preserve the current value. Title is required when supplied; a
- * supplied {@code agentName} must be a non-blank existing Agent definition name. {@link
- * #expectedVersion} is required on every update.
+ * <p>部分更新：省略的字段保留当前值。提供 {@code title} 时必填；提供的 {@code agentName} 必须是非空白且已存在的 Agent definition
+ * 名。{@link #expectedVersion} 每次更新必填。
  */
 @Data
 public class ChatUpdateDTO {
 
+  /** 部分更新：省略（null）保留当前值；提供时必须为非空白（trim 后）且 ≤256 字符。 */
   private String title;
+
+  /** 部分更新：省略（null）保留当前值；提供时必须为已存在的 Agent definition 名（约束同创建）。 */
   private String agentName;
+
+  /** 部分更新：仅在 {@link #yoloEnabledProvided} 为 true 时生效，且显式提供时不得为 null。 */
   private Boolean yoloEnabled;
+
+  /**
+   * 内部序列化控制标记（{@code @JsonIgnore}，不参与 HTTP 契约）：由 {@link #setYoloEnabled} 自动置位，用于区分 JSON 中缺省
+   * yoloEnabled 与显式 null。
+   */
   @JsonIgnore private boolean yoloEnabledProvided;
 
   public void setYoloEnabled(Boolean yoloEnabled) {
@@ -28,6 +37,6 @@ public class ChatUpdateDTO {
     return yoloEnabledProvided;
   }
 
-  /** Required non-negative decimal string; must match the current chat version. */
+  /** 必填非负十进制字符串；必须与当前 Chat 版本一致。 */
   private String expectedVersion;
 }

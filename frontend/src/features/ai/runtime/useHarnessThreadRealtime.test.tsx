@@ -77,21 +77,21 @@ describe('useHarnessThreadRealtime', () => {
       { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
     )
 
-    // Repeated identical gap deltas arm ONE recovery loop (never per-delta refetches).
+    // 重复且相同的 gap delta 只触发一次恢复循环（永不按每条 delta 单独 refetch）。
     act(() => source.emit('realtime', realtime(3, 'missing')))
     act(() => source.emit('realtime', realtime(3, 'missing')))
     expect(result.current?.modelStream).toBeNull()
     await waitFor(() => expect(invalidate.mock.calls.length).toBe(1), { timeout: 2000 })
 
 
-    // The first refetch found the checkpoint still behind (no data change): the loop re-arms
-    // itself with backoff and refetches again instead of freezing.
+    // 首次 refetch 发现 checkpoint 仍然落后（数据未变化）：循环会按 backoff
+    // 重新挂载自己并再次 refetch，而不是停滞。
     await waitFor(
       () => expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(2),
       { timeout: 3000 },
     )
 
-    // The checkpoint catches up: the overlay appears and the loop stops.
+    // checkpoint 追平：overlay 出现，循环停止。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -104,8 +104,8 @@ describe('useHarnessThreadRealtime', () => {
     await sleep(600)
     expect(invalidate.mock.calls.length).toBe(callsAfterCatchUp)
 
-    // Terminal result WITHOUT resultEntryId: the complete durable result projection replaces
-    // the overlay (status 'done') and stays until resultEntryId is set.
+    // 终止态结果但没有 resultEntryId：完整的持久 result 投影会替换
+    // overlay（status 'done'），并一直保留到 resultEntryId 被设置。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -117,7 +117,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('recovered'),
     )
     expect(result.current?.modelStream?.status).toBe('done')
-    // resultEntryId set: the durable Entry is the transcript truth.
+    // 设置 resultEntryId 后：持久 Entry 才是 transcript 的真实来源。
     rerender({ invocation: { ...modelInvocation(), resultJson: '{}', resultEntryId: 'e-9' } })
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
   })
@@ -133,7 +133,7 @@ describe('useHarnessThreadRealtime', () => {
         sources.set(String(threadId), source)
         return source as EventSource
       })
-      // The FIRST refetch (old Thread A recovery) stays in flight until manually resolved.
+      // 首次 refetch（旧 Thread A 的恢复）会一直处于 in-flight，直到手动 resolve。
       let resolveFirstRefetch: (() => void) | null = null
       let firstRefetch = true
       invalidate.mockImplementation(async (options) => {
@@ -160,16 +160,16 @@ describe('useHarnessThreadRealtime', () => {
         },
       )
 
-      // Thread A gap delta arms recovery A; its first tick hangs on the in-flight refetch.
+      // Thread A 的 gap delta 会挂起一次恢复 A；它的首次 tick 会卡在 in-flight 的 refetch 上。
       act(() => sources.get('thread-A')?.emit('realtime', realtime(3, 'missing', 'thread-A', 'inv-A')))
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200)
       })
       expect(invalidate).toHaveBeenCalledTimes(1)
 
-      // Switch to Thread B while A's refetch is still in flight; B gets its own gap. The
-      // pending schedule is skipped because the old tick still holds the busy flag. The B
-      // subscription effect needs one extra render (subscription state round-trip).
+      // 在 A 的 refetch 仍在 in-flight 时切到 Thread B；B 自己的 gap 独立计算。
+      // 由于旧 tick 仍持有 busy flag，新挂起的调度被跳过。B 的订阅 effect
+      // 还需要再渲染一次（订阅状态的回路往返）。
       rerender({ threadId: 'thread-B', invocation: modelInvocation('inv-B', 'thread-B') })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
@@ -177,8 +177,8 @@ describe('useHarnessThreadRealtime', () => {
       expect(sources.has('thread-B')).toBe(true)
       act(() => sources.get('thread-B')?.emit('realtime', realtime(3, 'missing', 'thread-B', 'inv-B')))
 
-      // A's stale refetch resolves: it must NOT delete B's recovery, and the re-arm must
-      // schedule B (the old tick's finally clears the busy flag).
+      // A 的陈旧 refetch 完成：绝不能因此清除 B 的恢复，并且重新挂起时
+      // 必须调度 B（旧 tick 的 finally 会清除 busy flag）。
       await act(async () => {
         resolveFirstRefetch?.()
         await vi.advanceTimersByTimeAsync(0)
@@ -192,7 +192,7 @@ describe('useHarnessThreadRealtime', () => {
         ),
       ).toBe(true)
 
-      // B catches up: the overlay appears and the loop stops.
+      // B 追平：overlay 出现，循环停止。
       rerender({
         threadId: 'thread-B',
         invocation: {
@@ -204,7 +204,7 @@ describe('useHarnessThreadRealtime', () => {
         await vi.advanceTimersByTimeAsync(0)
       })
       expect(result.current?.modelStream?.text).toBe('recovered')
-      // Give the loop its final caught-up check tick, then verify it stopped.
+      // 让循环再跑一次追平检测，然后验证循环已停止。
       await act(async () => {
         await vi.advanceTimersByTimeAsync(800)
       })
@@ -223,8 +223,8 @@ describe('useHarnessThreadRealtime', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const source = new FakeEventSource()
     vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(source as EventSource)
-    // First refetch rejects (network/back-end failure); later refetches succeed. The loop must
-    // never freeze with a dangling recoveryRef and no timer.
+    // 首次 refetch 失败（网络/后端故障），后续 refetch 成功。循环绝不能因
+    // 残留的 recoveryRef 又没有定时器而冻结。
     invalidate
       .mockRejectedValueOnce(new Error('refetch failed'))
       .mockResolvedValue(undefined)
@@ -236,10 +236,10 @@ describe('useHarnessThreadRealtime', () => {
 
     act(() => source.emit('realtime', realtime(3, 'missing')))
     expect(result.current?.modelStream).toBeNull()
-    // The failed first tick still re-arms: a second (successful) tick must run.
+    // 首次 tick 失败仍会重新挂起：必须接着执行第二次（成功的）tick。
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), { timeout: 4000 })
 
-    // The checkpoint catches up on a later refetch and the loop stops.
+    // 在后续一次 refetch 中 checkpoint 追平，循环随后停止。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -262,12 +262,12 @@ describe('useHarnessThreadRealtime', () => {
       { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
     )
 
-    // In-flight deltas overlay normally.
+    // 进行中的 delta 按正常方式叠加。
     act(() => source.emit('realtime', realtime(1, 'first')))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('first'))
 
-    // resultJson arrives (terminal, no Entry yet): the complete durable result projection
-    // replaces the overlay; late deltas are never appended to terminal output.
+    // resultJson 到达（终止态，尚未有 Entry）：完整的持久 result 投影会
+    // 替换 overlay；迟到的 delta 永远不会追加到终止态输出。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -284,8 +284,8 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('first'),
     )
 
-    // errorJson terminal fence as well: the checkpoint is blank here, so the parsed message
-    // becomes the frozen temporary text; status is 'error', never 'streaming'.
+    // errorJson 也是终止态栅栏：此时 checkpoint 为空，解析出的 message 被冻结
+    // 作为临时文本；status 为 'error'，绝不会是 'streaming'。
     rerender({ invocation: { ...modelInvocation(), errorJson: '{"message":"boom"}' } })
     await waitFor(() => expect(result.current?.modelStream?.status).toBe('error'))
     expect(result.current?.modelStream?.text).toBe('boom')
@@ -295,7 +295,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('boom'),
     )
 
-    // Entry lands: overlay cleared, and any further late delta stays rejected.
+    // Entry 落地：overlay 被清空，此后的迟到 delta 一律被拒绝。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -318,7 +318,7 @@ describe('useHarnessThreadRealtime', () => {
       { initialProps: { invocation: modelInvocation() }, wrapper: wrapper(client) },
     )
 
-    // Durable checkpoint at seq5; Redis streaming reaches seq8.
+    // 持久化 checkpoint 在 seq5；Redis 流式到达 seq8。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -334,8 +334,8 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.modelStream?.status).toBe('streaming')
 
-    // Terminal resultJson arrives while the checkpoint still lags at seq5: the complete
-    // durable projection must unconditionally supersede the seq8 Redis overlay.
+    // checkpoint 仍落后于 seq5 时终态 resultJson 到达：完整的
+    // 持久化投影必须无条件取代 seq8 的 Redis overlay。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -349,13 +349,13 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.modelStream?.thinking).toBe('durable plan')
     expect(result.current?.modelStream?.status).toBe('done')
-    // Late Redis deltas never append to the durable projection.
+    // 迟到的 Redis delta 绝不会追加到持久化投影上。
     act(() => source.emit('realtime', realtime(9, '-late')))
     await waitFor(() =>
       expect(result.current?.modelStream?.text).toBe('durable complete answer'),
     )
 
-    // errorJson: checkpoint frozen, status 'error', parsed message surfaced, no appends.
+    // errorJson：checkpoint 冻结，status 为 'error'，解析出的消息对外可见，不再追加。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -371,7 +371,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('frozen text'),
     )
 
-    // The durable result Entry lands: the Entry is the transcript truth; overlay gone.
+    // 持久化 result Entry 到达：Entry 才是 transcript 的事实来源；overlay 消失。
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -412,21 +412,21 @@ describe('useHarnessThreadRealtime', () => {
       { initialProps: { invocations: [active] }, wrapper: wrapper(client) },
     )
 
-    // The exact same Redis redelivery must not append twice.
+    // 完全相同的 Redis 重投递不能追加两次。
     act(() => source.emit('realtime', toolPartial('one')))
     await waitFor(() => expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'))
     act(() => source.emit('realtime', toolPartial('one')))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
-    // A distinct chunk still appends.
+    // 不同的块仍然会追加。
     act(() => source.emit('realtime', toolPartial('two')))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('onetwo'),
     )
 
-    // Attempt change resets the fingerprint scope: a redelivered old-attempt event is ignored,
-    // and a same-text event on the NEW attempt is a fresh chunk.
+    // attempt 变化会重置指纹范围：旧 attempt 事件的重投递被忽略，
+    // 而新 attempt 上相同文本的事件是新块。
     rerender({ invocations: [{ ...active, attempt: 2 }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.attempt).toBe(2),
@@ -470,7 +470,7 @@ describe('useHarnessThreadRealtime', () => {
       { wrapper: wrapper(client) },
     )
 
-    // 256 distinct chunks fill the fingerprint set exactly; the 257th evicts ONLY the oldest.
+    // 256 个不同块恰好填满指纹集合；第 257 个只淘汰最旧的一个。
     for (let i = 0; i < 257; i++) {
       act(() => source.emit('realtime', toolPartial(`chunk-${i}`)))
     }
@@ -480,15 +480,15 @@ describe('useHarnessThreadRealtime', () => {
     const textAfterFill = result.current?.toolStreams.get('inv-tool-1')?.text
     expect(textAfterFill?.length ?? 0).toBeGreaterThan(0)
 
-    // Redelivery of the most recent chunk must be deduplicated. A full clear() would forget
-    // everything and append it again; FIFO keeps the recent N fingerprints.
+    // 最近块的重新投递必须被去重。整体 clear() 会忘记
+    // 一切并再次追加；FIFO 保留最近 N 个指纹。
     act(() => source.emit('realtime', toolPartial('chunk-256')))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(textAfterFill),
     )
 
-    // The oldest chunk was evicted: its redelivery is a fresh chunk again (bounded memory,
-    // only the most recent N are protected).
+    // 最旧的块已被淘汰：它的重投递再次成为新块（有界内存，
+    // 只有最近 N 个受保护）。
     act(() => source.emit('realtime', toolPartial('chunk-0')))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(`${textAfterFill}chunk-0`),
@@ -559,8 +559,8 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-onepartial-two'),
     )
-    // Terminal resultJson with NO durable result Entry yet: the overlay is replaced by the
-    // terminal projection (text/error/attachments) instead of being deleted.
+    // 尚无持久化 result Entry 时的终态 resultJson：overlay 被终态
+    // 投影（text/error/attachments）取代，而不是被删除。
     rerender({
       invocations: [
         {
@@ -579,13 +579,13 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.toolStreams.get('inv-tool-1')?.error).toBe(false)
 
-    // The durable result Entry attaches: the Entry becomes the transcript truth.
+    // 持久化 result Entry 挂接：Entry 成为 transcript 的事实来源。
     rerender({
       invocations: [{ ...active, resultJson: '{"contents":[]}', resultEntryId: 'entry-9' }],
     })
     await waitFor(() => expect(result.current?.toolStreams.size).toBe(0))
 
-    // The invocation disappears: overlays are cleared as well.
+    // invocation 消失：overlay 也一并清除。
     rerender({ invocations: [{ ...active, resultJson: '{"contents":[]}' }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(''),
@@ -630,7 +630,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('one'),
     )
 
-    // The terminal resultJson arrives in the snapshot: its projection replaces the overlay.
+    // 终态 resultJson 到达 snapshot：其投影取代 overlay。
     rerender({
       invocations: [
         {
@@ -648,19 +648,19 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
 
-    // A late Redis partial must never append to the complete terminal projection.
+    // 迟到的 Redis partial 绝不能追加到完整的终态投影上。
     act(() => source.emit('realtime', toolPartial('-late')))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('terminal answer'),
     )
 
-    // An invocation unknown to the durable snapshot is never displayed.
+    // 持久化 snapshot 中未知的 invocation 永不展示。
     act(() => source.emit('realtime', toolPartial('ghost', 'inv-ghost')))
     await waitFor(() =>
       expect(result.current?.toolStreams.has('inv-ghost')).toBe(false),
     )
 
-    // A partial from a stale retry attempt is ignored once the snapshot moved on.
+    // snapshot 前移后，来自过期 retry attempt 的 partial 被忽略。
     rerender({ invocations: [{ ...active, attempt: 2 }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.attempt).toBe(2),
@@ -706,7 +706,7 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('partial-one'),
     )
 
-    // errorJson without a result Entry keeps an error overlay visible (never "done").
+    // 无 result Entry 的 errorJson 保持 error overlay 可见（绝不显示为 "done"）。
     rerender({ invocations: [{ ...active, errorJson: '{"message":"boom"}' }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')).toMatchObject({

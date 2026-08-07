@@ -5,13 +5,11 @@ import org.springframework.stereotype.Component;
 import java.util.Objects;
 
 /**
- * Single source of truth for application durable ids.
+ * 应用持久化 id 的唯一事实源。
  *
- * <p>Each call advances the PostgreSQL {@code kk_studio_id_seq} (declared in {@code
- * V1__schema.sql}) exactly once via {@link SequenceMapper#nextValue()}. The result is the raw
- * {@code bigint} returned by {@code nextval} and is therefore guaranteed to be positive, unique
- * across the cluster, and shared across business and Harness generators that delegate here. No
- * caching, Redis dependency or external id-service fallback participates in allocation.
+ * <p>每次调用都通过 {@link SequenceMapper#nextValue()} 恰好推进一次 PostgreSQL {@code kk_studio_id_seq}（在 {@code
+ * V1__schema.sql} 中声明）。结果是 {@code nextval} 返回的原始 {@code bigint}，因此保证为正、跨集群唯一，并在此委托的业务与 Harness
+ * 生成器间共享。分配过程中 不涉及缓存、Redis 依赖或外部 id 服务回退。
  *
  * @author fengwk
  */
@@ -25,11 +23,10 @@ public class PostgresqlSequenceIdGenerator {
   }
 
   /**
-   * Allocates the next durable id.
+   * 分配下一个持久化 id。
    *
-   * @return a strictly positive {@code long}; never zero or negative.
-   * @throws IllegalStateException if the database returns a non-positive value (should be
-   *     impossible given the {@code start with 1} clause in the schema).
+   * @return 严格正的 {@code long}；绝不为零或负。
+   * @throws IllegalStateException 数据库返回非正值时抛出（鉴于 schema 中的 {@code start with 1} 子句，这应当不可能）。
    */
   public long next() {
     long id = sequenceMapper.nextValue();

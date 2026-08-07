@@ -6,10 +6,9 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Pure reducer for a queued Thread command harvest.
+ * queued Thread command harvest 的纯 reducer。
  *
- * <p>The reducer applies only typed field changes. Environment quiescence and all persistence/CAS
- * decisions remain outside this class.
+ * <p>本 reducer 仅应用 typed 字段变更。Environment quiescence 以及所有 persistence/CAS 决策都不在本类内。
  */
 public final class CommandHarvestReducer {
 

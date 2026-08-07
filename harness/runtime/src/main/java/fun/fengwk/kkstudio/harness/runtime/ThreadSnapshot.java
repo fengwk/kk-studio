@@ -10,13 +10,11 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Immutable, consistently-locked projection of one Thread: the durable {@link ThreadState}, the
- * current root-to-head {@link EntryPath}, the queued Commands (immutable list) and only the
- * classifier-applicable {@link ModelInvocation} / Tool siblings of the current live context.
+ * 一致性加锁下的一个 Thread 的不可变投影：durable {@link ThreadState}、当前 root-to-head {@link EntryPath}、已入队
+ * Commands（不可变 list），以及仅与当前 live context 分类器匹配的 {@link ModelInvocation} / Tool siblings。
  *
- * <p>IDLE_OR_HISTORICAL and CONTINUATION_DUE snapshots expose no Model and no tools; Model contexts
- * expose the Model only; Tool contexts expose the Model plus all Tool siblings. No derived status
- * is stored or returned.
+ * <p>IDLE_OR_HISTORICAL 与 CONTINUATION_DUE snapshot 不暴露 Model 与 tools；Model context 仅暴露 Model；Tool
+ * context 暴露 Model 与全部 Tool siblings。不存储也不返回任何派生状态。
  */
 public record ThreadSnapshot(
     ThreadState thread,

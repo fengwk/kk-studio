@@ -82,7 +82,7 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
 }
 
 describe('AI domain utilities', () => {
-  /** DTO codecs must populate structured current-schema drafts and stable create defaults. */
+  /** DTO 编解码器必须填充结构化的当前 schema 草稿，并提供稳定的创建默认值。 */
   it('builds editable drafts from DTOs and default factories', () => {
     expect(emptyProviderDraft()).toMatchObject({
       providerType: 'openai',
@@ -174,7 +174,7 @@ describe('AI domain utilities', () => {
     })
   })
 
-  /** Structured drafts must serialize to the current provider/model/agent API payload contracts. */
+  /** 结构化草稿必须按当前的 provider/model/agent API payload 契约序列化。 */
   it('serializes structured drafts into backend payloads', () => {
     const providerInput = {
       name: ' minimax ',
@@ -272,7 +272,7 @@ describe('AI domain utilities', () => {
     expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
   })
 
-  /** Search and presentation helpers cover structured model defaults. */
+  /** 搜索与展示辅助函数覆盖结构化的 model 默认值。 */
   it('filters resources and formats helper values', () => {
     const agents = [
       {
@@ -328,7 +328,7 @@ describe('AI domain utilities', () => {
     expect(filterAgents(agents, 'cloud')).toHaveLength(0)
     expect(filterModels(models, 'minimax/MiniMax-M2.7').map((item) => item.name)).toEqual(['MiniMax-M2.7'])
     expect(filterModels(models, 'default')).toHaveLength(0)
-    // Sorted by full ref: minimax/... before openai/...
+    // 按完整 ref 排序：minimax/... 在 openai/... 之前
     expect(filterModels(models, '').map((item) => item.name)).toEqual(['MiniMax-M2.7', 'gpt-5.4'])
     expect(filterProviders(providers, 'minimax').map((item) => item.name)).toEqual(['minimax'])
     expect(filterProviders(providers, 'endpoint')).toHaveLength(0)
@@ -385,7 +385,7 @@ describe('AI domain utilities', () => {
     expect(formatBackendDate([Number.NaN])).toBe('-')
   })
 
-  /** Nullable optional resource fields map to complete editable drafts. */
+  /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
   it('handles nullable resource fields and serialization fields', () => {
     expect(
       toProviderDraft({

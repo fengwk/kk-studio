@@ -4,9 +4,9 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.io.IOException;
 
-/** Stores complete Environment Tool output as immutable resources outside the bounded preview. */
+/** 将有界预览之外的完整 Environment Tool 输出存储为不可变 resources。 */
 public interface ResourceSink {
 
-  /** Persists bytes and returns their stable canonical reference. */
+  /** 持久化字节并返回其稳定的 canonical 引用。 */
   ResourceRef store(byte[] bytes, String mediaType) throws IOException;
 }

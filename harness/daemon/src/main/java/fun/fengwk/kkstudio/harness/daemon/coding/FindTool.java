@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-/** Finds gitignore-respecting environment-root-relative paths through configurable fd or fdfind. */
+/** 通过可配置的 fd 或 fdfind 查找尊重 gitignore 的 environment-root 相对路径。 */
 public final class FindTool extends AbstractCodingTool {
 
   static final int MAX_TIMEOUT_SECONDS = 3600;
@@ -148,7 +148,7 @@ public final class FindTool extends AbstractCodingTool {
     try (input) {
       input.transferTo(output);
     } catch (IOException ignored) {
-      // The parent process turns process failures and timeouts into structured tool errors.
+      // 父进程会把进程失败与超时转换为结构化的 tool errors。
     }
   }
 

@@ -20,7 +20,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Covers selected-skill resolution, platform source precedence, offline failures. */
+/** 覆盖 selected-skill 解析、platform source 优先级与离线失败场景。 */
 class LoadSkillToolTest {
 
   @Test

@@ -34,21 +34,17 @@ import java.util.Optional;
 import java.util.function.LongConsumer;
 
 /**
- * Root Harness command/control/query plane: the synchronous public entry point of the durable Agent
- * Runtime.
+ * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
  *
- * <p>Every method runs exactly one {@link HarnessStore} transaction with the canonical lock order
- * Thread -&gt; Commands -&gt; ModelInvocation -&gt; ToolInvocation siblings -&gt; Work, so command
- * enqueue, head relocation, Tool approval and snapshot never observe a mixed durable state. All
- * business rejections are typed {@link HarnessRuntimeConflictException} / {@link
- * HarnessRuntimeNotFoundException}; broken persistence invariants (wrong ownership, mixed sibling
- * attachment, non-contiguous ordinals) stay {@link IllegalStateException}. Mutations of an existing
- * Thread read their timestamp after the relevant durable locks, so a lock wait never lets a stale
- * pre-lock instant regress {@code updatedAt}; Stop additionally clamps its timestamp to the newest
- * locked durable fact to tolerate local clock rollback and cross-node skew.
+ * <p>每个方法严格执行一次 {@link HarnessStore} transaction，使用规范锁序 Thread -&gt; Commands -&gt; ModelInvocation
+ * -&gt; ToolInvocation siblings -&gt; Work，从而保证 command enqueue、head relocation、Tool approval 与
+ * snapshot 永不观察到混合的 durable 状态。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
+ * HarnessRuntimeNotFoundException}；被破坏的持久化 不变量（所有权错误、sibling 混合挂接、ordinal 不连续）仍为 {@link
+ * IllegalStateException}。对已存在 Thread 的 mutation 在相关 durable 锁之后读取时间戳，因此 lock-wait 不会让过期的 pre-lock
+ * instant 让 {@code updatedAt} 回退；Stop 还额外将其时间戳钳制到最新的已锁定 durable fact，以容忍本地时钟回滚与 跨节点时钟偏差。
  *
- * <p>This slice implements {@link #createThread}, {@link #enqueueCommands}, {@link #moveHead},
- * {@link #stop}, {@link #decideToolApproval} and {@link #getThreadSnapshot}.
+ * <p>本切片实现 {@link #createThread}、{@link #enqueueCommands}、{@link #moveHead}、{@link #stop}、 {@link
+ * #decideToolApproval} 与 {@link #getThreadSnapshot}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -61,10 +57,7 @@ public final class HarnessRuntime {
   private final LongConsumer modelExecutionCanceller;
   private final LongConsumer toolExecutionCanceller;
 
-  /**
-   * Creates the complete Runtime facade, including process-local execution cancellation after a
-   * durable Stop commit.
-   */
+  /** 创建完整 Runtime facade，包含 durable Stop commit 之后的 process-local execution 取消能力。 */
   public HarnessRuntime(
       HarnessStore store, Clock clock, ModelProcessor modelProcessor, ToolProcessor toolProcessor) {
     this(
@@ -75,16 +68,15 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Creates a control-only Runtime that does not host local Model/Tool executions.
+   * 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。
    *
-   * <p>Stop remains correct through durable terminal state and Work fencing; only the optional
-   * same-process best-effort cancellation is absent.
+   * <p>Stop 通过 durable terminal state 与 Work fencing 仍然保持正确；缺失的仅是可选的同进程 best-effort 取消。
    */
   public HarnessRuntime(HarnessStore store, Clock clock) {
     this(store, clock, NO_OP_CANCELLER, NO_OP_CANCELLER);
   }
 
-  /** Internal constructor shared by concrete Processor wiring and local execution adapters. */
+  /** 由具体 Processor wiring 与 local execution adapter 共用的内部构造方法。 */
   HarnessRuntime(
       HarnessStore store,
       Clock clock,
@@ -100,12 +92,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Atomically creates Session + ROOT (initial complete {@code BranchSettings}) + Thread (head
-   * ROOT, the supplied YOLO policy, {@code nextCommandSequence=1}, {@code revision=0}, one shared
-   * timestamp) in a single transaction, allocating globally unique ids via {@code nextId()}.
+   * 在单个 transaction 中原子创建 Session + ROOT（初始完整 {@code BranchSettings}）+ Thread（head 为 ROOT、传入的 YOLO
+   * policy、{@code nextCommandSequence=1}、{@code revision=0}、一个共享时间戳）， 通过 {@code nextId()} 分配全局唯一
+   * id。
    *
-   * <p>No Work row is created. The current 7-table model has no {@code createRequestId}, so this
-   * API is deliberately non-idempotent: every call creates a brand-new Session/Thread pair.
+   * <p>不创建 Work 行。当前的 7 表模型没有 {@code createRequestId}，因此本 API 被刻意设计为非幂等： 每次调用都会创建一组全新的
+   * Session/Thread 对。
    */
   public CreatedThread createThread(CreateThreadCommand command) {
     Objects.requireNonNull(command, "command");
@@ -129,25 +121,20 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Atomically enqueues one ordered command set.
+   * 原子入队一组有序 command。
    *
-   * <p>Idempotency lookup of every {@code clientCommandId} happens before any head/sequence/live
-   * check. When every id already exists this is an <em>ordered command-set replay</em> (not an
-   * exact HTTP batch replay — there is deliberately no batch identity): the batch is accepted iff
-   * each stored payload equals the request payload and the stored sequences are contiguous in
-   * request order ({@code seq[i] == seq[0] + i}); the expected head/next sequence and the
-   * QUEUED/APPLIED/CANCELLED lifecycle are ignored and the existing rows are returned unchanged. A
-   * partially existing id set conflicts with PARTIAL_COMMAND_REPLAY, a reused id with a different
-   * payload with COMMAND_ID_REUSED, and a matching set in a non-contiguous order with
-   * COMMAND_REPLAY_ORDER_MISMATCH; missing commands are never filled in.
+   * <p>对每个 {@code clientCommandId} 的幂等性查找发生在任何 head/sequence/live 检查之前。当每个 id 都已存在时，属于 <em>ordered
+   * command-set replay</em>（并非精确的 HTTP batch replay——刻意没有 batch identity）：当且仅当每个已存储 payload 与请求
+   * payload 相等、且已存储 sequence 在请求顺序中 连续（{@code seq[i] == seq[0] + i}）时，batch 才会被接受；忽略期望的 head/next
+   * sequence 与 QUEUED/APPLIED/CANCELLED 生命周期，原样返回已存在的行。仅部分 id 存在则冲突为 PARTIAL_COMMAND_REPLAY，复用 id 但
+   * payload 不同则冲突为 COMMAND_ID_REUSED，id 完全匹配但顺序不 连续则冲突为 COMMAND_REPLAY_ORDER_MISMATCH；缺失的 command
+   * 永远不会被补齐。
    *
-   * <p>For an entirely new batch the exact expected head + next command sequence cursor is required
-   * (STALE_COMMAND_CURSOR otherwise), then N continuous sequences are reserved in one atomic step
-   * (revision +1), all commands are inserted as QUEUED, THREAD Work is requested and everything
-   * commits atomically. A new batch containing SET_ENVIRONMENT additionally requires a truly
-   * quiescent pre-state (no queued USER/CUSTOM message, the shared classifier result
-   * IDLE_OR_HISTORICAL, and no THREAD Work row at all — a present row, leased or not, fences a
-   * speculative Resolver/runnable mailbox). Exact replay bypasses that admission check.
+   * <p>对于全新 batch，要求精确的 expected head + next command sequence 游标（否则 STALE_COMMAND_CURSOR），随后一次性原子预留
+   * N 个连续 sequence（revision +1），所有 command 插入 为 QUEUED，请求 THREAD Work，并原子提交。包含 SET_ENVIRONMENT 的新
+   * batch 还额外要求真正 quiescent 的 pre-state（无已入队 USER/CUSTOM message，共享分类器结果为 IDLE_OR_HISTORICAL，且完全不存在
+   * THREAD Work 行——存在行（无论是否 leased）都会 fence 掉 speculative Resolver/runnable mailbox）。 精确 replay 跳过该
+   * admission 检查。
    */
   public List<ThreadCommand> enqueueCommands(ThreadCommandBatch batch) {
     Objects.requireNonNull(batch, "batch");
@@ -183,18 +170,15 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Synchronously relocates the Thread head cursor.
+   * 同步重定位 Thread head cursor。
    *
-   * <p>When the current head already equals the target the current Thread is returned untouched
-   * (PUT-style no-op replay) before any revision/target validation and without a revision bump.
-   * Otherwise {@code expectedRevision} must match (STALE_REVISION), the target must exist and stay
-   * in the current head session (MOVE_TARGET_CROSS_SESSION), no queued command and no live/pending
-   * Model/Tool context may exist (THREAD_NOT_QUIESCENT / TERMINAL_APPLY_PENDING; moving away from a
-   * current CONTINUATION_DUE obligation is allowed), and the target itself must not be a {@code
-   * continueModel=true} TURN_END (MOVE_TARGET_HAS_CONTINUATION_OBLIGATION). The head advances
-   * exactly once preserving YOLO and the latest next sequence (revision +1), and the THREAD Work
-   * row is force-deleted last to fence a speculative Resolver; no Work is requested. The effective
-   * Environment is derived from the target branch, never copied.
+   * <p>当当前 head 已等于 target 时，在任何 revision/target 校验之前按原样返回当前 Thread（PUT 风格 no-op replay），且不会递增
+   * revision。否则必须匹配 {@code expectedRevision}（否则 STALE_REVISION）， target 必须存在并位于当前 head session（否则
+   * MOVE_TARGET_CROSS_SESSION），且不能存在已入队 command 与 live/pending Model/Tool context（否则
+   * THREAD_NOT_QUIESCENT / TERMINAL_APPLY_PENDING； 允许移离当前的 CONTINUATION_DUE obligation），同时 target
+   * 本身不能是 {@code continueModel=true} 的 TURN_END（否则 MOVE_TARGET_HAS_CONTINUATION_OBLIGATION）。head
+   * 精确推进一次，保留 YOLO 与最新 next sequence（revision +1），最后强制删除 THREAD Work 行以 fence 掉 speculative
+   * Resolver； 不请求 Work。生效 Environment 由 target branch 派生，绝不复制。
    */
   public ThreadState moveHead(MoveHeadCommand command) {
     Objects.requireNonNull(command, "command");
@@ -277,21 +261,16 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Decides a required Tool approval in one short transaction.
+   * 在一个短 transaction 内决策一次必需的 Tool approval。
    *
-   * <p>Lock order: Thread -&gt; Model -&gt; Tool siblings -&gt; Work. Unlocked reads only discover
-   * the immutable ids/ownership and choose the stable branch — approval decisions are serialized by
-   * the Thread lock and immutable once decided. An already decided approval is validated as an
-   * exact replay after locking the owning Model and the target Tool in canonical order via {@link
-   * ToolApproval#decide} with a fresh {@code now}, and returns that locked current ToolInvocation
-   * (original {@code decidedAt} preserved, no current branch/status requirement, no revision bump,
-   * no Work request); any mismatch is APPROVAL_DECISION_MISMATCH, a vanished or identity-changed
-   * entity is an invariant ISE, and a locked row owned by another Thread stays
-   * APPROVAL_NOT_APPLICABLE. An undecided approval must be the WAITING_APPROVAL invocation inside
-   * the locked current TOOL_ACTIVE context; the transition basis is the locked sibling, never the
-   * pre-lock snapshot, and the target is not locked individually before the siblings. ALLOWED
-   * resumes it as READY and requests TOOL Work, DENIED terminates it as FAILED and requests THREAD
-   * Work, and the Thread revision is touched exactly once either way.
+   * <p>锁序：Thread -&gt; Model -&gt; Tool siblings -&gt; Work。未加锁的读仅用于发现不可变的 id/ownership
+   * 并选择稳定分支——approval 决策由 Thread 锁串行化，决策后即不可变。已决策 approval 在 按规范顺序锁定 owning Model 与 target Tool
+   * 之后，通过 {@link ToolApproval#decide} 以新的 {@code now} 验证其作为精确 replay，并返回已锁定的当前 ToolInvocation（保留原始
+   * {@code decidedAt}， 不要求当前 branch/status，不递增 revision，不请求 Work）；任何不匹配均为
+   * APPROVAL_DECISION_MISMATCH，实体消失或身份变更视为不变量 ISE，已锁定但属于其他 Thread 的行仍为 APPROVAL_NOT_APPLICABLE。未决策
+   * approval 必须是已锁定当前 TOOL_ACTIVE context 内、状态为 WAITING_APPROVAL 的 invocation；transition basis
+   * 为已锁定的 sibling，而非 pre-lock snapshot，且 target 不会在 siblings 之前单独锁定。ALLOWED 将其恢复为 READY 并请求 TOOL
+   * Work，DENIED 将其终结为 FAILED 并请求 THREAD Work，无论哪种情况 Thread revision 都恰好被触碰一次。
    */
   public ToolInvocation decideToolApproval(ToolApprovalCommand command) {
     Objects.requireNonNull(command, "command");
@@ -328,12 +307,10 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Atomically stops the current live Turn, cancels queued Commands, or replays an earlier
-   * thread-owned Stop.
+   * 原子停止当前 live Turn、取消已入队 Commands，或重放一次先前 thread-owned Stop。
    *
-   * <p>The durable transaction is owned by {@link StopControl}. Only after it commits does this
-   * method best-effort cancel matching process-local Model/Tool executions; a local cancellation
-   * failure is logged and cannot change the committed result.
+   * <p>durable transaction 由 {@link StopControl} 持有。只有在其 commit 之后，本方法才会 best-effort 取消匹配的
+   * process-local Model/Tool execution；本地取消失败仅记录日志，无法改变已 commit 的结果。
    */
   public StopResult stop(StopCommand command) {
     StopControl.Commit commit = stopControl.stop(command);
@@ -347,13 +324,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Reads one consistent Thread snapshot in a single short transaction (Thread -&gt; queued
-   * Commands -&gt; applicable Model -&gt; Tool siblings), never mixing states across transactions.
+   * 在单个短 transaction 内读取一次一致的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Model
+   * -&gt; Tool siblings），跨 transaction 永不混合状态。
    *
-   * <p>Returns the ThreadState, the current root-to-head {@link EntryPath}, the immutable queued
-   * Commands, and only the classifier-applicable ModelInvocation / Tool siblings:
-   * IDLE_OR_HISTORICAL and CONTINUATION_DUE expose neither, Model contexts expose the Model only,
-   * Tool contexts expose the Model plus all siblings. No derived status is persisted or returned.
+   * <p>返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队 Commands，以及仅与分类器 匹配的
+   * ModelInvocation / Tool siblings：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露任何东西， Model context
+   * 仅暴露 Model，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生 状态。
    */
   public ThreadSnapshot getThreadSnapshot(long threadId) {
     return store.transaction(
@@ -383,7 +359,7 @@ public final class HarnessRuntime {
         });
   }
 
-  /** Ordered command-set replay: payload equality first, then request-order sequence contiguity. */
+  /** Ordered command-set replay：先比较 payload 是否相等，再按请求顺序校验 sequence 连续性。 */
   private static List<ThreadCommand> replayExistingBatch(
       ThreadCommandBatch batch, List<Optional<ThreadCommand>> found) {
     List<ThreadCommand> ordered = new ArrayList<>(found.size());
@@ -413,9 +389,7 @@ public final class HarnessRuntime {
     return List.copyOf(ordered);
   }
 
-  /**
-   * Fresh-batch enqueue: CAS cursor, optional SET_ENVIRONMENT admission, insert + reserve + Work.
-   */
+  /** 新 batch 入队：CAS 游标、可选 SET_ENVIRONMENT admission、insert + reserve + Work。 */
   private static List<ThreadCommand> enqueueNewBatch(
       HarnessStore.Transaction tx, ThreadCommandBatch batch, ThreadState thread, Instant now) {
     if (thread.headEntryId() != batch.expectedHeadEntryId()
@@ -460,10 +434,10 @@ public final class HarnessRuntime {
   }
 
   /**
-   * SET_ENVIRONMENT admission over the pre-state: no queued USER/CUSTOM command, the shared locked
-   * classifier result must be IDLE_OR_HISTORICAL, and the THREAD Work row must be absent entirely
-   * (not merely unleased) so a speculative Resolver/runnable mailbox is fenced. Lock order: Thread
-   * -&gt; existing Commands -&gt; applicable Model -&gt; Tool siblings -&gt; Work.
+   * SET_ENVIRONMENT 在 pre-state 上的 admission：无已入队 USER/CUSTOM command，共享的已锁定分类器 结果必须为
+   * IDLE_OR_HISTORICAL，且 THREAD Work 行必须完全不存在（不仅仅是 unleased），从而 fence 掉 speculative
+   * Resolver/runnable mailbox。锁序：Thread -&gt; existing Commands -&gt; applicable Model -&gt; Tool
+   * siblings -&gt; Work。
    */
   private static void requireQuiescentForSetEnvironment(
       HarnessStore.Transaction tx, ThreadState thread) {
@@ -491,11 +465,9 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Already decided approval: lock the owning Model then the target Tool in canonical Thread -&gt;
-   * Model -&gt; Tool order and validate exact replay against the locked current approval, returning
-   * that locked current ToolInvocation (a replay after ToolProcessor status changes returns the
-   * current row). A previously found entity that vanished or whose identity changed is an invariant
-   * ISE; a locked row owned by another Thread stays APPROVAL_NOT_APPLICABLE.
+   * 已决策 approval：按规范 Thread -&gt; Model -&gt; Tool 顺序锁定 owning Model 与 target Tool， 并对照已锁定的当前
+   * approval 验证精确 replay，返回已锁定的当前 ToolInvocation（在 ToolProcessor 状态变化之后 replay
+   * 时返回当前行）。原先发现的实体消失或身份变更视为不变量 ISE；已锁定但属于其他 Thread 的行仍为 APPROVAL_NOT_APPLICABLE。
    */
   private ToolInvocation replayDecidedApproval(
       HarnessStore.Transaction tx, ToolInvocation probe, ToolApprovalCommand command) {
@@ -546,11 +518,9 @@ public final class HarnessRuntime {
   }
 
   /**
-   * Undecided approval: the target must be the WAITING_APPROVAL invocation inside the locked
-   * current TOOL_ACTIVE context; the transition basis is the ToolInvocation from the locked
-   * siblings, never the pre-lock snapshot, and the target is never locked individually before the
-   * siblings (ordinal sibling order preserved). The Thread revision is touched exactly once and the
-   * matching Work target requested.
+   * 未决策 approval：target 必须是已锁定当前 TOOL_ACTIVE context 内、状态为 WAITING_APPROVAL 的 invocation；transition
+   * basis 为已锁定 siblings 中的 ToolInvocation，而非 pre-lock snapshot，且 target 永远不会被在 siblings 之前单独锁定（保留
+   * ordinal sibling 顺序）。Thread revision 恰好被 触碰一次，并请求匹配的 Work target。
    */
   private ToolInvocation decideUndecidedApproval(
       HarnessStore.Transaction tx,

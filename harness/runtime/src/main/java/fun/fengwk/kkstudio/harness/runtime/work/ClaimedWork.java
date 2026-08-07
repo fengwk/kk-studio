@@ -4,9 +4,9 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Immutable snapshot of a claimed Work row: target, the claimed wakeVersion the worker must pass
- * back to {@link Work#complete(String, long, Instant)} / {@link Work#reschedule(String, long,
- * Instant, Instant)} together with the lease token, and the lease horizon.
+ * 已 claim Work 行的不可变快照：target、worker 必须随 lease token 一同回传到 {@link Work#complete(String, long,
+ * Instant)} / {@link Work#reschedule(String, long, Instant, Instant)} 的 claimed wakeVersion，以及
+ * lease horizon。
  */
 public record ClaimedWork(
     WorkTarget target, long claimedWakeVersion, String leaseToken, Instant leaseUntil) {

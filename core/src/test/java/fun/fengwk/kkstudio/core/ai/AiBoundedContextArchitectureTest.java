@@ -10,12 +10,12 @@ import java.nio.file.Path;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Locks the physical package roots that define the backend AI bounded contexts. */
+/** 锁定定义后端 AI 限界上下文的物理包根。 */
 class AiBoundedContextArchitectureTest {
 
   @Test
   void coreAiUsesOnlyExplicitBoundedContextRoots() throws IOException {
-    // Exact roots expose any restored legacy package or unreviewed cross-domain bucket.
+    // 精确的包根能暴露任何恢复出的遗留包或未审视的跨域桶。
     assertEquals(
         Set.of("catalog", "chat", "environment", "error", "image", "runtime"),
         directDirectoryNames(
@@ -24,7 +24,7 @@ class AiBoundedContextArchitectureTest {
 
   @Test
   void sharedContractsUseOnlyExplicitDomainRoots() throws IOException {
-    // Keeping the shared root exact prevents a generic share.model package from returning.
+    // 共享根保持精确，可防止通用 share.model 包回归。
     assertEquals(
         Set.of("ai", "comfyui", "storage", "studio"),
         directDirectoryNames(

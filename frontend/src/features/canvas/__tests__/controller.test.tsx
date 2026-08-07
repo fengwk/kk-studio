@@ -52,7 +52,7 @@ describe('useCanvasController', () => {
     })
     expect(result.current.state.messages).toEqual([])
 
-    // Saving timer settles to saved without leaking after unmount.
+    // 保存定时器在卸载后正常收敛到 saved 状态且不会泄漏。
     act(() => {
       result.current.moveNodes([{ id: 'web', x: 1, y: 2 }])
     })
@@ -97,7 +97,7 @@ describe('useCanvasController', () => {
       result.current.setTool('hand')
     })
     expect(result.current.state.tool).toBe('hand')
-    // Space is handled by React Flow panActivationKeyCode; controller must not rewrite tool.
+    // 空格由 React Flow 的 panActivationKeyCode 处理；controller 不应改写 tool。
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }))
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', key: ' ' }))

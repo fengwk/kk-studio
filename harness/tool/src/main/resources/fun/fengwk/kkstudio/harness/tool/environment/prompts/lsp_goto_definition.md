@@ -1,18 +1,18 @@
-Go to the definition of a symbol at a given position.
+跳转到指定位置处符号的定义。
 
-Usage:
-- Use `line` to identify the target line.
-- `character` is optional. Default: `0`.
-- `path` is required and should be a file path inside the target project/workspace, usually the file containing the symbol reference; it selects the relevant workspace/server.
-- Prefer this for known-symbol navigation and third-party API inspection, not for broad repository text search.
-- If definition lookup is unavailable for the selected server, the tool call returns a clear error; use `grep` or `read` to locate definitions manually.
+用法：
+- 使用 `line` 指定目标行。
+- `character` 可选，默认值为 `0`。
+- `path` 必填，应当是目标项目/workspace 内的文件路径，通常是包含符号引用的文件；它用于选择对应的 workspace/server。
+- 已知符号导航和第三方 API 检查优先使用此工具，不要用它进行大范围仓库文本搜索。
+- 如果选定 server 不支持定义查找，工具调用会返回清晰错误；此时使用 `grep` 或 `read` 手动定位定义。
 
-Parameters:
-- `path` (required)
-- `workdir` (optional, default: the agent's current working directory; if provided, resolve from that directory)
-- `line` (required, 1-based)
-- `character` (optional, 0-based, default: 0)
+参数：
+- `path`（必填）
+- `workdir`（可选，默认：daemon 当前工作目录；提供后从该目录解析相对路径）
+- `line`（必填，从 1 开始计数）
+- `character`（可选，从 0 开始计数，默认：0）
 
-Examples:
+示例：
 - `lsp_goto_definition({ path: "src/example.ts", workdir: "packages/web", line: 45, character: 15 })`
 - `lsp_goto_definition({ path: "src/example.ts", line: 45 })`

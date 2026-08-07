@@ -69,7 +69,7 @@ describe('ThreadStatusFooter', () => {
           variantName="quality"
         />,
       )
-      // Narrow footer packs 3 segments across multiple rows.
+      // 窄 footer 会将 3 段内容排成多行。
       expect(screen.getByLabelText('会话状态').querySelectorAll('.thread-status-row').length).toBeGreaterThan(1)
     } finally {
       if (descriptor) {

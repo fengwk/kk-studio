@@ -377,9 +377,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
     StringBuilder section = new StringBuilder();
     section.append("\n\n");
-    section.append("The following skills provide specialized instructions for specific tasks.\n");
-    section.append(
-        "Use a skill by its exact name from <available_skills> when the task matches its description.\n");
+    section.append("以下技能提供针对特定任务的专业指令。\n");
+    section.append("当任务与描述匹配时，从 <available_skills> 中按其准确名称使用技能。\n");
     section.append("\n<available_skills>\n");
     for (SkillBinding skill : skillBindings) {
       section.append("  <skill>\n");

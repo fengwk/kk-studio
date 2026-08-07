@@ -25,23 +25,18 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Network contract for the Daemon WebSocket adapter; no protocol state is kept in the web layer.
- */
+/** Daemon WebSocket 适配器的网络契约；web 层不保存任何协议状态。 */
 class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
 
   /**
-   * Mock the concrete Gateway (implements {@code EnvironmentDaemonEndpoint}) so other Core ports
-   * that share the same bean remain satisfied in the web slice.
+   * 用 mock 替换具体的 Gateway（实现了 {@code EnvironmentDaemonEndpoint}），使 web 切片内共享同一 bean 的其他 Core
+   * 端口仍能满足装配。
    */
   @MockitoBean private EnvironmentDaemonGateway endpoint;
 
-  /**
-   * The endpoint bridges complete text frames in both directions and notifies the durable gateway
-   * on close.
-   */
+  /** 端点在两个方向上桥接完整文本帧，并在连接关闭时通知持久化 Gateway。 */
   @Test
   void bridgesDaemonConnectionFramesAndClose() throws Exception {
     BlockingQueue<String> received = new LinkedBlockingQueue<>();

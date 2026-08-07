@@ -113,7 +113,7 @@ public final class HistoryEntryPayloadJsonCodec {
     };
   }
 
-  // ---------- Encoders ----------
+  // ---------- 编码器 ----------
 
   private static ObjectNode encodeRoot(RootPayload value) {
     ObjectNode node = NODES.objectNode();
@@ -204,7 +204,7 @@ public final class HistoryEntryPayloadJsonCodec {
     return node;
   }
 
-  // ---------- Decoders ----------
+  // ---------- 解码器 ----------
 
   private static RootPayload decodeRoot(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ROOT");
@@ -290,7 +290,7 @@ public final class HistoryEntryPayloadJsonCodec {
             ToolResultReason.class, node, "reason", "toolResultMetadata.reason"));
   }
 
-  // ---------- Generic helpers ----------
+  // ---------- 通用工具方法 ----------
 
   private static String write(ObjectNode node) {
     try {

@@ -29,14 +29,10 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
 
-/**
- * Provider projection must repair every orphan occurrence without retaining ToolCall IDs globally.
- */
+/** Provider 投影必须修复每一个 orphan 出现位置，但全局不持有 ToolCall ID。 */
 class ProviderMessageProjectorTest {
 
-  /**
-   * A resolved chain preserves every supported content type and needs no synthetic TOOL message.
-   */
+  /** 已解析的 tool chain 保留所有受支持的 content 类型，无需合成 TOOL message。 */
   @Test
   void projectsResolvedToolChainAndAllSupportedContents() {
     ProviderMessageProjector projector = new ProviderMessageProjector();
@@ -109,9 +105,7 @@ class ProviderMessageProjectorTest {
         projected.get(3).contents());
   }
 
-  /**
-   * Role boundaries and request end both repair only the currently open occurrence of a reused ID.
-   */
+  /** Role 边界与 request 末尾都只修复当前打开的、复用 ID 的那次出现位置。 */
   @Test
   void synthesizesErrorForEachSubsequentOrphanWithTheSameToolCallId() {
     ProviderMessageProjector projector = new ProviderMessageProjector();

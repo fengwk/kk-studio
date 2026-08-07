@@ -12,7 +12,7 @@ import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** Intentionally creates or replaces one text file under the environment root. */
+/** 在 environment root 下按意图创建或替换单个文本文件。 */
 public final class WriteTool extends AbstractCodingTool {
 
   public WriteTool(CodingToolsConfig config) {

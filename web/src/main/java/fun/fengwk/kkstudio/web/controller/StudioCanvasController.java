@@ -24,11 +24,10 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Canvas HTTP boundary for the durable global single-instance product. Returns convention {@link
- * Result}.
+ * 持久化全局单实例产品的 Canvas HTTP 边界，统一返回 convention {@link Result}。
  *
- * <p>The HTTP body is intentionally narrow: list / get / create (title only) / commands (revision +
- * commandId + commandsJson). {@code requestHash} is computed server-side from {@code commandsJson}.
+ * <p>HTTP body 有意保持精简：list / get / create（仅 title）/ commands（revision + commandId +
+ * commandsJson）。{@code requestHash} 由服务端根据 {@code commandsJson} 计算。
  */
 @RestController
 @RequestMapping("/api/canvases")

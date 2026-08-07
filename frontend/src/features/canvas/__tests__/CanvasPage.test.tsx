@@ -31,7 +31,7 @@ vi.mock('@xyflow/react', () => {
   return {
     ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
     ReactFlow: ({ children, nodeTypes }: { children: ReactNode; nodeTypes?: Record<string, unknown> }) => {
-      // Keep a handle so tests can assert nodeTypes identity stays stable across rerenders.
+      // 保留一个句柄，便于测试在 rerender 前后验证 nodeTypes 引用保持稳定。
       ;(globalThis as { __canvasNodeTypes?: unknown }).__canvasNodeTypes = nodeTypes
       return <div data-testid="react-flow">{children}</div>
     },
@@ -50,7 +50,7 @@ vi.mock('@xyflow/react', () => {
 
 describe('Canvas feature vertical slice', () => {
   it('registers builtin.canvas page contribution without navigation pollution', () => {
-    // Canvas must not publish into AI NavigationSlot via extension.navigation.
+    // Canvas 不能通过 extension.navigation 向 AI NavigationSlot 发布。
     expect(canvasExtension.id).toBe('builtin.canvas')
     expect(canvasExtension.pages?.[0]?.path).toBe('canvas')
     expect(canvasExtension.navigation).toBeUndefined()
@@ -251,7 +251,7 @@ describe('Canvas feature vertical slice', () => {
     await user.click(await screen.findByRole('button', { name: /竞品研究/ }))
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
 
-    // Same-route SPA brand navigation must not keep the user stuck in editor.
+    // 同路由的 SPA 品牌导航不能将用户困在编辑器中。
     await user.click(screen.getByRole('link', { name: 'KK Studio' }))
     expect(await screen.findByRole('heading', { name: /把想法、资料和结果/ })).toBeInTheDocument()
   })

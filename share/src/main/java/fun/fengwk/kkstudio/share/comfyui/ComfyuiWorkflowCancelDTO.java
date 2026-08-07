@@ -12,6 +12,9 @@ import lombok.Data;
 @Data
 public class ComfyuiWorkflowCancelDTO {
 
+  /** 被取消的 runId（回显请求入参，即 ComfyUI prompt/job id）。 */
   private String runId;
+
+  /** 上游取消操作是否成功。 */
   private boolean cancelled;
 }

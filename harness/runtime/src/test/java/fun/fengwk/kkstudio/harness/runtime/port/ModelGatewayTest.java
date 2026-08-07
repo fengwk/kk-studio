@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import java.time.Duration;
 import java.util.List;
 
-/** ModelGateway public contract: execution key, admission certainty and value validation. */
+/** ModelGateway public contract：execution key、admission certainty 与 value validation。 */
 class ModelGatewayTest {
 
   @Test
@@ -102,7 +102,7 @@ class ModelGatewayTest {
         (execution, listener) ->
             new ModelGateway.Started(
                 () -> {
-                  // best effort idempotent cancel
+                  // 尽力而为、幂等的取消
                 });
     ModelGateway.StartResult result =
         gateway.start(new ModelGateway.Execution(7L, 1, PortTestData.modelRequest()), events());

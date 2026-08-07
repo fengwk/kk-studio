@@ -8,9 +8,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Validates Agent selections against static catalogs only; live Environment state is irrelevant.
- */
+/** 只依据静态 catalog 校验 Agent 选择；在线 Environment 状态与校验无关。 */
 @Component
 final class AgentDefinitionConfigValidator {
 

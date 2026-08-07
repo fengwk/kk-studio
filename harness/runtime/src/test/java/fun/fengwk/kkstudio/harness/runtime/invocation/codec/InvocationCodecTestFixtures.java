@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Small complete values shared by strict Invocation codec tests. */
+/** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 final class InvocationCodecTestFixtures {
 
   static final EnvironmentId ENVIRONMENT_ID =

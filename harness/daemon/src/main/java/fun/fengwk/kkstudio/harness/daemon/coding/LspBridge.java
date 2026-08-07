@@ -20,12 +20,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Optional local LSP command bridge plus deterministic unavailable errors and a {@code javap}
- * fallback for resolvable Java class targets.
+ * 可选的本机 LSP 命令 bridge，附带确定性的不可用错误，以及对可解析 Java class 目标的 {@code javap} 回退。
  *
- * <p>This is intentionally not a full LSP client. When no bridge command is configured, goto and
- * workspace-symbol queries fail with an explicit unavailable message. {@code java_decompile} may
- * still succeed via {@code javap} for resolvable class names or class files.
+ * <p>这里有意不做成完整的 LSP client。未配置 bridge 命令时，goto 与 workspace-symbol 查询会以明确的不可用消息失败；{@code
+ * java_decompile} 对可解析的 class 名或 class 文件仍可通过 {@code javap} 成功。
  */
 final class LspBridge {
 
@@ -220,12 +218,12 @@ final class LspBridge {
     if (value.matches("[A-Za-z_][\\w.$]*")) {
       return new ResolvedClass(value, null);
     }
-    // "String (Class) - ..." style without jdt uri
+    // 不带 jdt uri 的 "String (Class) - ..." 风格
     int paren = value.indexOf(" (");
     if (paren > 0) {
       String candidate = value.substring(0, paren).trim();
       if (candidate.matches("[A-Za-z_][\\w.$]*")) {
-        // bare simple names without package are still attempted via javap bootstrap path
+        // 不带包名的裸简单类名仍会尝试通过 javap bootstrap 路径解析
         String fqn = candidate.contains(".") ? candidate : "java.lang." + candidate;
         return new ResolvedClass(fqn, null);
       }

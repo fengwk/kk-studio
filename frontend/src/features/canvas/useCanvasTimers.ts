@@ -3,7 +3,7 @@ import { SAVE_SETTLE_MS } from '@/features/canvas/data'
 import type { CanvasAction } from '@/features/canvas/reducer'
 import type { CanvasDocumentState, StageMetrics } from '@/features/canvas/types'
 
-/** Toast / save-settling / agent-run interval timers for the canvas controller. */
+/** canvas controller 使用的 Toast / save-settling / agent-run 间隔定时器。 */
 export function useCanvasTimers({
   state,
   dispatch,

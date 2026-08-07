@@ -34,8 +34,8 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * One failed-send replay identity: the exact command batch (same IDs/payload/order and original
- * expected cursors) plus the restored composer content.
+ * 一次失败发送的回放身份：精确的 command batch（保持相同的 ID/负载/顺序
+ * 以及原始 expected cursor），加上恢复后的 composer 内容。
  */
 export interface CommandBatchReplay {
   plan: CommandBatchPlan
@@ -43,12 +43,12 @@ export interface CommandBatchReplay {
 }
 
 /**
- * One ambiguous Stop operation. Retries must send the EXACT original body (same stopRequestId +
- * original expectedRevision); the basis identifies the snapshot the operation was minted against,
- * so an authoritative snapshot proving the basis moved (old Turn ended / head or revision
- * advanced) automatically retires the operation — the next Stop on a new Turn mints a fresh id.
- * Java StopControl replays by durable key BEFORE the revision CAS, so the original
- * expectedRevision stays valid for the exact retry.
+ * 一次含混的 Stop 操作。重试必须发送完全相同的原始 body（相同的
+ * stopRequestId + 原始 expectedRevision）；basis 标识了派生该操作的 snapshot，
+ * 因此一旦权威 snapshot 证明 basis 已变化（旧 Turn 结束 / head 或 revision
+ * 已前进），该操作会被自动失效——在新 Turn 上的下一次 Stop 派生全新的 id。
+ * Java 的 StopControl 在 revision CAS 之前按持久键回放，因此原始
+ * expectedRevision 在精确重试中仍然有效。
  */
 export interface PendingStopOperation {
   stopRequestId: string
@@ -58,12 +58,11 @@ export interface PendingStopOperation {
 }
 
 /**
- * Basis fence shared by stopThread (SYNCHRONOUS, before every reuse) and the passive
- * cleanup effect: a pending operation is retired exactly when the authoritative snapshot
- * proves its basis moved (head or revision advanced => the old Turn ended or the Thread
- * advanced). Retiring synchronously inside stopThread closes the window where a Stop is
- * invoked after the snapshot advanced but before the effect flushed — the next Stop on the
- * new Turn must mint a fresh id, never reuse the old id against a newer revision.
+ * 由 stopThread（在每次复用前同步执行）与被动清理 effect 共享的 basis 栅栏：
+ * 当且仅当权威 snapshot 证明 pending 操作的 basis 已变化（head 或 revision 已
+ * 前进 => 旧 Turn 已结束或 Thread 已前进）时，该操作会被失效。stopThread
+ * 内部的同步失效可以关闭 snapshot 已前进但 effect 尚未 flush 的窗口——
+ * 在新 Turn 上的下一次 Stop 必须派生全新 id，绝不能把旧 id 复用给更新后的 revision。
  */
 export function retireStaleStopPending(
   pending: PendingStopOperation | null,
@@ -92,16 +91,16 @@ export function useAgentThreadController(
   const [draft, setDraftState] = useState(initialDraft)
   const draftRef = useRef(initialDraft)
   const [actionError, setActionError] = useState<string | null>(null)
-  // Local in-flight count keeps pending accurate across overlapping mutateAsync calls.
+  // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
-  // An undecided exact batch (in flight or kept after an uncertain network failure) is a pane
-  // transition blocker: switching Threads must not drop a byte-for-byte replay opportunity.
+  // 未决的精确 batch（处于 in-flight 或在不确定的网络错误后被保留）会阻塞面板
+  // 切换：切换 Thread 时绝不能丢失逐字节复用的回放机会。
   const [replayPending, setReplayPending] = useState(Boolean(initialReplay))
   const replayRef = useRef<CommandBatchReplay | null>(null)
   const initializedReplayThreadRef = useRef<string | null>(null)
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
-  // True while an ambiguous Stop operation is waiting to be retried or retired: the pane must
-  // not silently drop the exact retry by switching Threads.
+  // 当含混的 Stop 操作尚待重试或失效时为 true：切换 Thread 时面板
+  // 绝不能悄悄丢弃这次精确重试。
   const [stopReplayPending, setStopReplayPending] = useState(false)
   const decisionIdByInvocation = useRef(new Map<string, string>())
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -152,7 +151,7 @@ export function useAgentThreadController(
     replayRef.current = initialReplay ?? null
     setReplayPending(initialReplay != null)
     initializedReplayThreadRef.current = threadId
-    // Rebinding to another Thread must not leak stop/decision replay identity.
+    // 重新绑定到另一个 Thread 时，绝不能泄漏 stop/decision 的回放身份。
     pendingStopRef.current = null
     setStopReplayPending(false)
     decisionIdByInvocation.current.clear()
@@ -177,16 +176,16 @@ export function useAgentThreadController(
       decisionIdByInvocation.current.delete(`${variables.invocationId}:${variables.decision}`)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-        // Approval updates the ToolInvocation projected into the Chat-scoped Thread list.
+        // 审批会更新投影到 Chat 作用域 Thread 列表中的 ToolInvocation。
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
     },
   })
 
   /**
-   * Approves/denies a pending ToolInvocation. The decision id stays stable across retries of
-   * the SAME decision; switching the decision (ALLOW -> DENY) mints a new id — the server 409s
-   * when a previous decision already landed, which the refresh surfaces.
+   * 审批/拒绝待决的 ToolInvocation。decision id 在重试「同一个」决策期间保持稳定；
+   * 切换决策（ALLOW -> DENY）会铸造新 id——当之前的决策已经落地时服务器会返回 409，
+   * 刷新后即可呈现该结果。
    */
   function decideApproval(invocationId: string, decision: 'ALLOW' | 'DENY'): Promise<void> {
     const key = `${invocationId}:${decision}`
@@ -206,8 +205,8 @@ export function useAgentThreadController(
   })
 
   /**
-   * A 409 means the local revision is stale or the Thread is not quiescent. Surface an explicit
-   * message and refetch the Thread so the next attempt carries the current revision.
+   * 409 意味着本地 revision 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
+   * Thread，使下一次尝试携带当前的 revision。
    */
   function reportMutationError(error: unknown, fallbackKey: string) {
     if (isConflictError(error)) {
@@ -224,7 +223,7 @@ export function useAgentThreadController(
   }
 
   function setDraft(next: string) {
-    // Editing restored draft to different content resets request replay identity.
+    // 把恢复的 draft 编辑为不同内容会重置请求回放身份。
     if (replayRef.current != null && next !== replayRef.current.content) {
       replayRef.current = null
       setReplayPending(false)
@@ -251,22 +250,22 @@ export function useAgentThreadController(
     if (plan == null) {
       return Promise.resolve()
     }
-    // Retry reuses the exact previous batch (same command IDs/payload/order and original
-    // expected cursors: the server ordered command-set replay bypasses moved cursors).
+    // 重试逐字节复用精确的先前 batch（相同的 command ID/payload/顺序和原始
+    // expected cursor：服务器对 command 集合的有序回放会绕过已移动的 cursor）。
     const previous = replayRef.current
     const reused = previous != null && previous.plan.identity === plan.identity
       ? previous.plan
       : plan
     replayRef.current = { plan: reused, content }
     setReplayPending(true)
-    // Capture content + id then clear draft immediately so the next message can be typed.
+    // 先捕获 content + id，随后立即清空 draft，以便输入下一条消息。
     draftRef.current = ''
     setDraftState('')
     setInFlightSubmissions((count) => count + 1)
     return batchMutation
       .mutateAsync(reused.batch)
       .then(() => {
-        // Only clear identity when it still belongs to this completing request.
+        // 仅当身份仍属于这个正在完成的请求时才清除它。
         if (replayRef.current?.plan === reused) {
           replayRef.current = null
           setReplayPending(false)
@@ -274,16 +273,16 @@ export function useAgentThreadController(
       })
       .catch((error: unknown) => {
         reportMutationError(error, 'ai.runtime.action.sendFailed')
-        // Restore only when the composer is empty so an in-progress next draft is preserved.
-        // (Ref mutations must happen OUTSIDE state updaters: React defers updater functions.)
+        // 仅在 composer 为空时恢复，以免破坏正在输入中的下一条 draft。
+        // （Ref 变更必须在 state updater 之外进行：React 会延迟执行 updater 函数。）
         if (draftRef.current.trim() === '') {
           if (isConflictError(error)) {
-            // 409 = the batch was NOT accepted: the exact replay is stale. The next send
-            // rebuilds against the refreshed head/nextSequence with NEW command ids.
+            // 409 = batch 未被接受：精确回放已过期。下一次发送会基于刷新的
+            // head/nextSequence 用全新的 command id 重新构建。
             replayRef.current = null
             setReplayPending(false)
           } else {
-            // Network/uncertain failures keep the exact batch for byte-for-byte replay.
+            // 网络/不确定的失败会保留精确 batch，用于逐字节回放。
             replayRef.current = { plan: reused, content }
             setReplayPending(true)
           }
@@ -307,7 +306,7 @@ export function useAgentThreadController(
     }
   }
 
-  /** Block mailbox actions until the durable Thread snapshot has loaded. */
+  /** 在持久的 Thread snapshot 加载完成前，拦截 mailbox 操作。 */
   function requireBoundThread(actionKey: string): boolean {
     if (bound) {
       return true
@@ -321,18 +320,18 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
-    // SYNCHRONOUS basis fence: never reuse a pending operation whose basis no longer matches
-    // the CURRENT render snapshot (head/revision moved => the old Turn ended or the Thread
-    // advanced). Retiring here — not only in the passive cleanup effect — closes the window
-    // where a Stop is invoked after the snapshot advanced but before the effect flushed.
+    // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
+    //（head/revision 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
+    // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
+    // 调用 Stop 的窗口。
     const pending = retireStaleStopPending(pendingStopRef.current, thread)
     if (pending !== pendingStopRef.current) {
       pendingStopRef.current = pending
       setStopReplayPending(false)
     }
-    // Ambiguous retry: reuse the EXACT previous operation (same stopRequestId + original
-    // expectedRevision + basis). A brand-new Stop mints a fresh operation against the current
-    // snapshot; the original expectedRevision is never re-derived from a newer snapshot.
+    // 含混重试：复用「精确」的先前操作（相同的 stopRequestId + 原始
+    // expectedRevision + basis）。全新的 Stop 会针对当前 snapshot 铸造新操作；
+    // 原始 expectedRevision 绝不会从更新的 snapshot 重新推导。
     const operation = pending ?? {
       stopRequestId: createStopRequestId(),
       expectedRevision: thread.revision,
@@ -349,8 +348,8 @@ export function useAgentThreadController(
         expectedRevision: operation.expectedRevision,
       })
       .then(async () => {
-        // Stop succeeded (or the server replayed the identical earlier Stop): the operation
-        // is settled; the next stop mints a fresh id.
+        // Stop 成功（或服务器重放了完全相同的先前 Stop）：操作已了结，
+        // 下一次 stop 会铸造全新 id。
         pendingStopRef.current = null
         setStopReplayPending(false)
         replayRef.current = null
@@ -362,29 +361,28 @@ export function useAgentThreadController(
       })
       .catch((error: unknown) => {
         if (isConflictError(error)) {
-          // Known 409: the operation was NOT accepted (stale revision / not quiescent /
-          // terminal apply pending / id reused). Clear it; the next stop mints a new
-          // operation against the refreshed snapshot.
+          // 已知 409：操作未被接受（revision 过期 / 未静默 /
+          // 终态 apply 待处理 / id 被复用）。清除它；下一次 stop 会针对
+          // 刷新的 snapshot 铸造新操作。
           pendingStopRef.current = null
           setStopReplayPending(false)
         }
-        // Network/uncertain failures keep the exact operation for byte-for-byte retry.
+        // 网络/不确定的失败会保留精确操作，用于逐字节重试。
         reportMutationError(error, 'ai.runtime.action.stopFailed')
       })
   }
 
-  // Authoritative-snapshot basis reconcile: while an ambiguous Stop operation exists, a
-  // snapshot proving its basis changed (head or revision moved => the old Turn ended or the
-  // Thread advanced) retires it, so a Stop issued on a NEW Turn always uses a fresh id. The
-  // effect only acts when an operation is actually pending — the initial hook mount never
-  // clears anything. stopThread itself runs the same fence synchronously before every reuse.
+  // 权威 snapshot 的 basis 协调：当存在含混的 Stop 操作时，一旦 snapshot 证明其 basis
+  // 已变化（head 或 revision 已移动 => 旧 Turn 已结束或 Thread 已前进），就退役该操作，
+  // 使在新 Turn 上发起的 Stop 始终使用全新 id。该 effect 只在确有操作待决时起作用——
+  // hook 初始挂载从不清理任何东西。stopThread 本身在每次复用前同步执行同一栅栏。
   useEffect(() => {
     const pending = retireStaleStopPending(pendingStopRef.current, thread ?? null)
     if (pending !== pendingStopRef.current) {
       pendingStopRef.current = pending
       setStopReplayPending(false)
     }
-    // thread is a fresh snapshot object per refetch; only its identity fields gate the check.
+    // thread 每次 refetch 都是新的 snapshot 对象；只有其身份字段参与栅栏判定。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread?.headEntryId, thread?.revision, thread?.threadId])
 
@@ -404,9 +402,9 @@ export function useAgentThreadController(
     bodyRef,
     draft,
     queuedCommands,
-    // Overlapping submits keep pending accurate via local count, not mutation observer alone.
+    // 重叠提交通过本地计数保持 pending 准确，而不是仅依赖 mutation observer。
     pending: inFlightSubmissions > 0,
-    // A Thread must be loaded before it can accept a message.
+    // Thread 必须先加载完成才能接受消息。
     disabled: !bound,
     actionError,
     dismissActionError: () => setActionError(null),
@@ -417,7 +415,7 @@ export function useAgentThreadController(
     decideApproval,
     approvalPending: approvalMutation.isPending,
     stopPending: stopMutation.isPending,
-    // An ambiguous Stop operation awaiting an exact retry blocks pane transitions.
+    // 等待精确重试的含混 Stop 操作会阻塞面板切换。
     stopReplayPending,
     replayPending,
   }
@@ -437,7 +435,7 @@ function resolveRuntimeLabels(
   return {
     agentName: settings?.agentName || translate('ai.runtime.action.blankAgent'),
     providerName: settings?.model.providerName || undefined,
-    // Canonical display identity is provider/model.
+    // 规范的展示身份是 provider/model。
     modelName: formatModelRef(settings?.model.providerName, settings?.model.modelName),
     variantName: settings?.model.variant || undefined,
     environmentDisplayName: environmentId == null

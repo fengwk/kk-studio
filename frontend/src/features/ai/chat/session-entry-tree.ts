@@ -9,42 +9,41 @@ export type SessionEntryKind = 'user' | 'assistant' | 'tool' | 'custom' | 'other
 export interface SessionTreeEntry {
   entry: HarnessSessionEntryDTO
   kind: SessionEntryKind
-  /** Visual indentation levels. Linear chains remain at the same depth. */
+  /** 视觉缩进层级。线性链保持相同深度。 */
   depth: number
   preview: string
-  /** True when this visible Entry has more than one visible child. */
+  /** 当该可见 Entry 有超过一个可见子节点时为真。 */
   isBranchPoint: boolean
-  /** True when this row is a child of a visible sibling split. */
+  /** 当该行是某个可见兄弟 split 的子节点时为真。 */
   hasBranchConnector: boolean
-  /** True when this row is the last visible sibling at its projected parent. */
+  /** 当该行是其投影父节点下的最后一个可见兄弟时为真。 */
   isLastSibling: boolean
-  /** Vertical branch gutters for each indentation level before this row's connector. */
+  /** 该行 connector 之前每一缩进层级的纵向 branch gutter。 */
   ancestorConnectors: SessionTreeConnector[]
-  /** The nearest visible ancestor after applying filter and search. */
+  /** 应用 filter 和 search 之后的最近可见祖先。 */
   parentId: string | null
 }
 
 interface SessionTreeConnector {
-  /** True when the branch line continues below this row at the indentation level. */
+  /** 当 branch 线在该缩进层级下方继续延伸时为真。 */
   continues: boolean
 }
 
 export interface BranchTarget {
-  /** Target head Entry for `PUT /threads/{id}/head`; null when the Entry is not selectable. */
+  /** `PUT /threads/{id}/head` 的目标 head Entry；当 Entry 不可选中时为 null。 */
   headEntryId: string | null
   draft: string
 }
 
-/** Upper bound for the projected preview rendered in each tree row. */
+/** 投影预览文本在每个 tree row 渲染时的最大长度。 */
 const PROJECTED_PREVIEW_LIMIT = 220
 
 /**
- * Builds the compact, filtered visual projection of the immutable Session Entry Tree.
+ * 构建不可变 Session Entry Tree 的紧凑、过滤后视觉投影。
  *
- * Visibility never changes the source tree. Instead, every displayed Entry is attached to its
- * nearest displayed ancestor. This lets filters and searches omit bookkeeping or intermediate
- * Entries without retaining their original indentation. Sibling order is inherited directly from
- * the server response; no timestamp or identifier ordering is inferred on the client.
+ * 可见性永远不会改变源 tree。每个被展示的 Entry 都会挂到最近的可见祖先下，
+ * 这样 filter 和 search 可以省略内部/中间 Entry 而不保留其原始缩进。
+ * 兄弟顺序直接继承自服务端响应；不会在客户端基于时间戳或 id 推断顺序。
  */
 export function buildSessionEntryTree(
   entries: HarnessSessionEntryDTO[],
@@ -84,8 +83,8 @@ export function buildSessionEntryTree(
     )
   }
 
-  // Malformed parent references or cycles must not make an otherwise selectable Entry disappear.
-  // Such rows become independent roots while the visited guard prevents recursive cycles.
+  // 错误的 parent 引用或环不能使原本可选中的 Entry 消失。
+  // 这些行会变成独立的根，visited 守卫防止递归循环。
   for (const entry of visibleEntries) {
     if (!walked.has(entry.entryId)) {
       visit(entry, 0, false, true, [], false)
@@ -127,8 +126,8 @@ export function buildSessionEntryTree(
       childConnectors[depth - 1] = { continues: !isLastSibling }
     }
 
-    // A branch introduces one visual level. Its first linear response also keeps one additional
-    // level so a branch's continuation reads as a subtree instead of collapsing into the sibling.
+    // branch 会引入一层视觉缩进；其首个线性响应也额外保留一层，使 branch 的延续
+    // 看起来像子树，而不是折叠为兄弟。
     const childDepth = isBranchPoint
       ? depth + 1
       : enteredBranch && depth > 0
@@ -217,12 +216,11 @@ function matchesSessionTreeFilter(kind: SessionEntryKind, filter: SessionTreeFil
 }
 
 /**
- * USER/CUSTOM entries rewind the head to their parent and restore their editable source text;
- * every other Entry becomes the head itself.
+ * USER/CUSTOM entry 会将 head 回退到其父节点，并恢复可编辑的原文；其他 Entry 自身就是 head。
  */
 export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
   if (entry.entryType === 'TURN_START' || entry.entryType === 'TURN_END') {
-    // Control boundaries are not branch targets; branching lands on their parent.
+    // 控制边界不是 branch 目标；branching 会落到其父节点。
     return { headEntryId: entry.parentEntryId ?? null, draft: '' }
   }
   const kind = sessionEntryKind(entry)
@@ -232,19 +230,19 @@ export function branchTarget(entry: HarnessSessionEntryDTO): BranchTarget {
   return { headEntryId: entry.entryId, draft: '' }
 }
 
-/** Full text body for branching drafts. This intentionally keeps thinking blocks: USER/CUSTOM
- * drafts must retain every editable text block, while previews use sessionEntryVisibleText(). */
+/** branching draft 的完整文本主体。这里有意保留 thinking block：USER/CUSTOM
+ * draft 必须保留所有可编辑文本 block，而 preview 使用 sessionEntryVisibleText()。 */
 function sessionEntryText(entry: HarnessSessionEntryDTO): string {
   return collectMessageText(messageContents(entry), true).join('\n')
 }
 
-/** Single-line preview used by the tree row. Explicit `thinking` blocks are excluded. */
+/** tree row 使用的单行 preview。显式的 `thinking` block 会被排除。 */
 function sessionEntryPreview(entry: HarnessSessionEntryDTO, limit: number = PROJECTED_PREVIEW_LIMIT): string {
   const flat = flattenVisibleText(sessionEntryVisibleText(entry))
   return flat ? truncatePreview(flat, limit) : translate('ai.chat.history.noBody')
 }
 
-/** Lower-cased visible text used for keyword matching. Preview limits never apply to search. */
+/** 用于关键词匹配的小写可见文本。search 不受 preview 长度限制。 */
 function sessionEntrySearchText(entry: HarnessSessionEntryDTO): string {
   return flattenVisibleText(sessionEntryVisibleText(entry)).toLowerCase()
 }
@@ -295,7 +293,7 @@ function truncatePreview(text: string, limit: number): string {
   return `${text.slice(0, Math.max(0, limit - 1))}…`
 }
 
-/** Returns the chain of Entry IDs from target to root using raw parent links. */
+/** 返回从目标 entry 沿原始 parent 链追溯到 root 的 Entry id 链。 */
 export function activeAncestry(
   entries: HarnessSessionEntryDTO[],
   targetEntryId: string | null,
@@ -319,8 +317,8 @@ export function isOnActivePath(ancestry: string[], entryId: string): boolean {
   return ancestry.includes(entryId)
 }
 
-/** Resolves a target selection against visible rows. Hidden targets walk to their closest visible
- * raw ancestor; if no ancestor is visible, the last visible row is used. */
+/** 根据可见 row 解析目标 selection。隐藏目标回溯到最近的可见原始祖先；
+ * 如果没有祖先可见，则使用最后一行可见 row。 */
 export function resolveSelection(
   rows: SessionTreeEntry[],
   entries: HarnessSessionEntryDTO[],
@@ -347,7 +345,7 @@ export function resolveSelection(
   return rows[rows.length - 1]!.entry
 }
 
-/** Splits the raw search query into lower-cased whitespace tokens for AND-style matching. */
+/** 将原始 search query 按空白拆分为小写 token，用于 AND 风格匹配。 */
 export function parseHistorySearchTokens(query: string): string[] {
   const normalized = query.trim().toLowerCase()
   return normalized

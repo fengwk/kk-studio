@@ -174,9 +174,8 @@ abstract class LangChainModelProvider implements ModelProvider {
                 @Override
                 public void onError(Throwable error) {
                   if (stream.terminal.compareAndSet(false, true)) {
-                    // Message is the durable user-facing text written into assistant_error /
-                    // assistant_failed. Keep the full cause-chain detail (not a generic constant)
-                    // while still attaching the original Throwable for diagnostics.
+                    // Message 是写入 assistant_error / assistant_failed 的持久化用户可见文本。
+                    // 保留完整 cause chain 细节（而非通用常量），同时附上原始 Throwable 供诊断。
                     handler.onError(
                         new ProviderException(
                             classify(error, stream), userFacingMessage(error), error),
@@ -205,9 +204,8 @@ abstract class LangChainModelProvider implements ModelProvider {
   protected abstract void validateRequest(ProviderRequest request);
 
   /**
-   * Whether plain-text {@code <think>} blocks in assistant content should be split into thinking
-   * deltas / response.thinking. Override per request when a model is known to emit tags inside text
-   * (for example OpenAI-compatible models with reasoning enabled).
+   * 是否把 assistant content 中的纯文本 {@code <think>} 块拆分为 thinking delta / response.thinking。
+   * 当已知模型会在文本内发出标签时（例如启用了 reasoning 的 OpenAI 兼容模型），可按请求覆盖。
    */
   protected boolean extractsThinkTags(ProviderRequest request) {
     Objects.requireNonNull(request, "request");
@@ -461,9 +459,9 @@ abstract class LangChainModelProvider implements ModelProvider {
     ModelUsage modelUsage = normalized.modelUsage();
     FinishReason finishReason = metadata == null ? null : metadata.finishReason();
     ProviderStopReason stopReason = toStopReason(finishReason, !calls.isEmpty());
-    // LangChain AiMessage.thinking()/text() may return null even when reasoning was streamed.
-    // Normalize before any isEmpty() checks so completion never NPE into "invalid provider
-    // response".
+    // LangChain AiMessage.thinking()/text() 即使流式输出过 reasoning 也可能返回 null。
+    // 在任何 isEmpty() 检查前先归一化，避免 completion 因 NPE 落入 "invalid provider
+    // response"。
     String text =
         response == null || response.aiMessage() == null || response.aiMessage().text() == null
             ? ""
@@ -492,8 +490,8 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   static ProviderStopReason toStopReason(FinishReason finishReason, boolean hasToolCalls) {
-    // MiniMax and some OpenAI-compatible endpoints report STOP/OTHER for turns that still carry
-    // executable tool calls. A callable response must remain executable at the common boundary.
+    // MiniMax 与部分 OpenAI 兼容端点对仍携带可执行 tool call 的回合上报 STOP/OTHER。
+    // 可调用响应在公共边界上必须保持可执行。
     if (hasToolCalls) {
       return ProviderStopReason.TOOL_CALLS;
     }
@@ -525,8 +523,8 @@ abstract class LangChainModelProvider implements ModelProvider {
         || message.contains("too large")) {
       return ProviderErrorKind.OVERFLOW;
     }
-    // Deterministic client/route errors must not enter automatic retry. 404 HTML from nginx and
-    // 405 method mismatches are permanent for the current request configuration.
+    // 确定性的 client/route 错误不得进入自动重试。nginx 的 404 HTML 与 405 方法不匹配对当前请求
+    // 配置是永久性的。
     if (message.contains("404")
         || message.contains("405")
         || message.contains("not found")
@@ -535,7 +533,7 @@ abstract class LangChainModelProvider implements ModelProvider {
         || message.contains("invalid")) {
       return ProviderErrorKind.INVALID_REQUEST;
     }
-    // 429 / 5xx / network failures intentionally fall through as TRANSIENT.
+    // 429 / 5xx / 网络失败有意作为 TRANSIENT 落入。
     return ProviderErrorKind.TRANSIENT;
   }
 
@@ -552,10 +550,9 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   /**
-   * Build the durable, user-visible Provider failure text.
+   * 构建持久化、用户可见的 Provider 失败文本。
    *
-   * <p>Walks the cause chain and joins distinct non-blank messages. Stack traces are never
-   * included. Credentials-like substrings are redacted so the text is safe for Entry/SSE/UI.
+   * <p>遍历 cause chain 并拼接去重后的非空白消息。绝不包含堆栈。类凭据子串会被脱敏， 保证文本可安全用于 Entry/SSE/UI。
    */
   static String userFacingMessage(Throwable error) {
     if (error == null) {
@@ -582,8 +579,8 @@ abstract class LangChainModelProvider implements ModelProvider {
   }
 
   private static String redactSecrets(String text) {
-    // Keep the full provider body, but never echo bearer tokens / key-like values.
-    // Order matters: handle Bearer/sk- first so a broad key=value rule cannot erase them.
+    // 保留完整 provider 正文，但绝不回显 bearer token / 类 key 值。
+    // 顺序很重要：先处理 Bearer/sk-，宽泛的 key=value 规则才不会先抹掉它们。
     return text.replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***")
         .replaceAll("(?i)\\bsk-[A-Za-z0-9]{8,}\\b", "sk-***")
         .replaceAll(

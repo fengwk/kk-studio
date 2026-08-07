@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Shared test fixtures for the invocation.tool package. */
+/** invocation.tool 包共享的测试 fixture。 */
 final class ToolInvocationTestData {
 
   static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());

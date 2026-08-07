@@ -23,10 +23,8 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
   private static final String REASONING_SPLIT = "reasoning_split";
 
   /**
-   * OpenAI-compatible adapter credential. {@code null} or blank means the adapter must call the
-   * endpoint without an {@code Authorization} header (supported by {@code DefaultOpenAiClient} when
-   * its builder {@code apiKey} is unset). Any present value is forwarded verbatim as {@code Bearer
-   * …} by the SDK.
+   * OpenAI 兼容 adapter 的凭据。{@code null} 或空白表示 adapter 必须不带 {@code Authorization} 头 调用端点（当 builder
+   * {@code apiKey} 未设置时 {@code DefaultOpenAiClient} 支持）；任何提供的值都会由 SDK 原样转发为 {@code Bearer …}。
    */
   private final String apiKey;
 
@@ -57,8 +55,8 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
                 .timeout(descriptor.modelCallTimeoutPolicy().modelCallTimeout())
                 .returnThinking(thinking)
                 .customParameters(customParameters(control, minimax, reasoningEffort));
-        // SDK DefaultOpenAiClient only emits Authorization when apiKey != null. Skip the setter
-        // entirely on null/blank so unauthenticated OpenAI-compatible endpoints work.
+        // SDK DefaultOpenAiClient 只在 apiKey != null 时发出 Authorization。null/blank 时完全不调用
+        // setter，使未认证的 OpenAI 兼容端点可用。
         if (apiKey != null) {
           builder.apiKey(apiKey);
         }
@@ -72,9 +70,9 @@ public final class OpenAiProviderAdapter implements ProviderAdapter {
 
       @Override
       protected boolean extractsThinkTags(ProviderRequest request) {
-        // OpenAI-compatible proxies often fold reasoning into plain text as <think> blocks.
-        // When the model is marked reasoning-capable, always split tags so thinking does not
-        // leak into assistant text regardless of whether the host is MiniMax.
+        // OpenAI 兼容代理常把 reasoning 折叠进纯文本的 <think> 块。
+        // 当模型被标记为 reasoning-capable 时总是拆分标签，无论宿主是否为 MiniMax，
+        // thinking 都不会泄漏进 assistant 文本。
         return request.model().reasoning();
       }
 

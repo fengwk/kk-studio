@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
-/** Fixed set of Work mailbox targets. */
+/** Work mailbox target 的固定集合。 */
 public enum WorkTargetType {
   THREAD,
   MODEL,

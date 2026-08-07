@@ -23,8 +23,8 @@ describe('ThreadComposer and commands', () => {
     ])
     const blank = threadCommandsForScene('blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
-    // A blank pane has no Thread yet, so `/session` (which rebinds the current Thread) is
-    // unavailable while `/thread` (pure pane selection) stays enabled.
+    // 空面板还没有 Thread，因此 `/session`（用于重新绑定当前 Thread）不可用，
+    // 而 `/thread`（仅切换面板）保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
       'agent',

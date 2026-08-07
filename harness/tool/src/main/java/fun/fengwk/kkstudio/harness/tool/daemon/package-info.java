@@ -7,8 +7,7 @@
  *
  * <p>v2 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec} 编解码，形状为 {@code
- * {"skills":[{"name","description"}]}。Environment tools are fixed by EnvironmentToolCatalog and
- * are not negotiated per connection.
+ * {"skills":[{"name","description"}]}。Environment 工具由 EnvironmentToolCatalog 固定，不按连接协商。
  *
  * <p>v2 Skill 加载消息：
  *

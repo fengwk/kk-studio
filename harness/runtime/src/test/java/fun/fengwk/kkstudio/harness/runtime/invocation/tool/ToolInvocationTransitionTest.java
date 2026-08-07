@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.util.List;
 
-/** ToolInvocation pure transition methods and the shared transition validation. */
+/** ToolInvocation 纯 transition 方法以及共享的 transition 校验。 */
 class ToolInvocationTransitionTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
@@ -149,24 +149,24 @@ class ToolInvocationTransitionTest {
   void decideApprovalIsExactIdempotentAndConflictsOnRewrites() {
     ToolInvocation decided =
         waiting().decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T1);
-    // exact replay of the same decision payload is idempotent
+    // 完全相同的 decision payload 重放是 idempotent 的
     ToolInvocation replay =
         decided.decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T2);
     assertEquals(decided.approval(), replay.approval());
     assertEquals(ToolInvocationStatus.READY, replay.status());
-    // same decisionId with a different payload conflicts
+    // 相同 decisionId 但不同 payload 视为冲突
     assertThrows(
         IllegalArgumentException.class,
         () ->
             decided.decideApproval(
                 ToolApprovalDecision.ALLOWED, "d-1", "other-actor", null, DECIDED, T2));
-    // a different existing decision conflicts
+    // 已存在但不同的 decision 视为冲突
     assertThrows(
         IllegalArgumentException.class,
         () ->
             decided.decideApproval(ToolApprovalDecision.DENIED, "d-9", "actor", null, DECIDED, T2));
-    // a denied terminal replay is also idempotent: every decision fact stays frozen, only the
-    // invocation updatedAt advances to the replay time
+    // DENIED 终态下的 replay 也是 idempotent 的：每个 decision 事实都保持冻结，只有
+    // invocation 的 updatedAt 前进到 replay 时间
     ToolInvocation deniedTerminal =
         waiting().decideApproval(ToolApprovalDecision.DENIED, "d-2", "actor", null, DECIDED, T1);
     ToolInvocation deniedReplay =
@@ -177,7 +177,7 @@ class ToolInvocationTransitionTest {
     assertEquals(deniedTerminal.approval(), deniedReplay.approval());
     assertEquals(deniedTerminal.error(), deniedReplay.error());
     assertEquals(T2, deniedReplay.updatedAt());
-    // decide without an approval is rejected
+    // 没有 approval 时 decide 被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -238,10 +238,10 @@ class ToolInvocationTransitionTest {
     assertEquals(0, ready(0, null).fail(error(), T1).attempt());
     assertEquals(2, running(2, allowed()).fail(error(), T1).attempt());
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).fail(error(), T1));
-    // DISPATCHING may only be failed through rejectDispatch, never fail()
+    // DISPATCHING 只能通过 rejectDispatch 失败，不能调用 fail()
     assertThrows(IllegalArgumentException.class, () -> dispatching(1, allowed()).fail(error(), T1));
-    // WAITING_APPROVAL cannot fail directly: the undecided approval must be decided (DENIED ->
-    // FAILED) or stopped as CANCELLED
+    // WAITING_APPROVAL 不能直接 fail：必须先把未决 approval decide 为（DENIED ->
+    // FAILED）或 stop 为 CANCELLED
     assertThrows(IllegalArgumentException.class, () -> waiting().fail(error(), T1));
   }
 
@@ -252,8 +252,8 @@ class ToolInvocationTransitionTest {
     assertTrue(waiting().cancel(error(), T1).approval().isUndecided());
     assertEquals(0, ready(0, null).cancel(error(), T1).attempt());
     assertEquals(2, running(2, allowed()).cancel(error(), T1).attempt());
-    // DISPATCHING is the window where the execution may already have started: UNKNOWN is the only
-    // honest termination, CANCELLED is rejected
+    // DISPATCHING 是执行可能已经启动的窗口：UNKNOWN 是唯一诚实的终态，
+    // CANCELLED 被拒绝
     assertThrows(
         IllegalArgumentException.class, () -> dispatching(1, allowed()).cancel(error(), T1));
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).cancel(error(), T1));
@@ -276,17 +276,17 @@ class ToolInvocationTransitionTest {
   @Test
   void approvalMayOnlyBeIntroducedAsNotRequiredOrUndecidedRequest() {
     ToolInvocation stored = ready(0, null);
-    // direct-record injection of a decided approval from a null stored approval is rejected
+    // 从 null 的存储 approval 直接注入已决定的 approval 被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(stored, ready(0, allowed())));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(stored, ready(0, denied())));
-    // READY -> READY with not-required and READY -> WAITING_APPROVAL with undecided are legal
+    // READY 携带 not-required 转为 READY，以及 READY 携带 undecided 转为 WAITING_APPROVAL 都是合法的
     ToolInvocation.validateTransition(stored, stored.markApprovalNotRequired(T1));
     ToolInvocation.validateTransition(stored, stored.requestApproval("why", T1));
-    // introducing an approval on any other edge is rejected
+    // 在其他任何边上引入 approval 均被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -302,7 +302,7 @@ class ToolInvocationTransitionTest {
         stored.approval().decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
     ToolApproval deniedDecision =
         stored.approval().decide(ToolApprovalDecision.DENIED, "d-2", "actor", null, DECIDED);
-    // ALLOWED must resume as READY, DENIED must terminate as FAILED
+    // ALLOWED 必须恢复为 READY，DENIED 必须以 FAILED 终止
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -315,14 +315,14 @@ class ToolInvocationTransitionTest {
             ToolInvocation.validateTransition(
                 stored,
                 invocation(ToolInvocationStatus.READY, 0, deniedDecision, null, null, null)));
-    // the matching status moves stay legal
+    // 匹配的 status 迁移保持合法
     ToolInvocation.validateTransition(
         stored, invocation(ToolInvocationStatus.READY, 0, allowedDecision, null, null, null));
     ToolInvocation.validateTransition(
         stored, invocation(ToolInvocationStatus.FAILED, 0, deniedDecision, null, error(), null));
-    // WAITING -> CANCELLED keeps the exact undecided approval (Stop)
+    // WAITING -> CANCELLED 保留完全相同的未决 approval（Stop）
     ToolInvocation.validateTransition(stored, stored.cancel(error(), T1));
-    // WAITING -> FAILED with the exact undecided approval is rejected (no direct fail path)
+    // WAITING 携带完全相同的未决 approval 直接转为 FAILED 被拒绝（无直接 fail 路径）
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -398,7 +398,7 @@ class ToolInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(succeeded(1), failed(1)));
-    // approval mutation: undecided with a different request time, decided rewrite
+    // approval 修改：未决 approval 改为不同的请求时间、已决定 approval 重写
     ToolInvocation undecidedStored = waiting();
     ToolApproval otherRequest = ToolApproval.request(REQUESTED.plusSeconds(5), null);
     assertThrows(
@@ -412,7 +412,7 @@ class ToolInvocationTransitionTest {
         () ->
             ToolInvocation.validateTransition(
                 decidedStored, withApproval(decidedStored, denied())));
-    // a decided approval rewritten with the same decision but a different reason is immutable too
+    // 已决定 approval 即使 decision 相同但 reason 不同也视为不可变
     ToolApproval otherAllowed =
         new ToolApproval(
             true, ToolApprovalDecision.ALLOWED, "d-1", "actor", "new reason", REQUESTED, DECIDED);

@@ -5,11 +5,10 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import java.util.Objects;
 
 /**
- * Immutable Stop result.
+ * 不可变 Stop 结果。
  *
- * <p>{@link Status#IDLE} means no stopped Turn was created, but {@code cancelledCommandCount} may
- * still be positive. {@link Status#REPLAYED} identifies the previously stopped TURN_END while the
- * returned Thread may already point at a newer Turn.
+ * <p>{@link Status#IDLE} 表示未创建被停止的 Turn，但 {@code cancelledCommandCount} 仍可能为正。 {@link
+ * Status#REPLAYED} 标识先前已停止的 TURN_END，而返回的 Thread 可能已指向更新的 Turn。
  */
 public record StopResult(
     Status status, ThreadState thread, Long stoppedTurnEndEntryId, int cancelledCommandCount) {
@@ -32,7 +31,7 @@ public record StopResult(
     }
   }
 
-  /** Whether this call stopped a Turn, had no live Turn, or replayed an earlier Stop. */
+  /** 本次调用是停止了一个 Turn、未存在 live Turn，还是重放了一次先前的 Stop。 */
   public enum Status {
     STOPPED,
     IDLE,

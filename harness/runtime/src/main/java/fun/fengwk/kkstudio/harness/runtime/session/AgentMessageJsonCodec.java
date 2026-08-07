@@ -102,7 +102,7 @@ public final class AgentMessageJsonCodec {
     return new AgentMessage(role, contents);
   }
 
-  // ---------- Content encoders & decoders ----------
+  // ---------- 内容编码器与解码器 ----------
 
   private static ObjectNode encodeContent(AgentMessageContent content) {
     ObjectNode node = NODES.objectNode();
@@ -243,7 +243,7 @@ public final class AgentMessageJsonCodec {
     };
   }
 
-  // ---------- Raw-JSON strict validation (shared by encode & decode) ----------
+  // ---------- 原始 JSON 严格校验（编码与解码共享） ----------
 
   private static void validateStrictJsonObject(String raw, String name) {
     JsonNode parsed = parseStrict(raw, name);
@@ -280,7 +280,7 @@ public final class AgentMessageJsonCodec {
     return parsed;
   }
 
-  // ---------- Generic helpers ----------
+  // ---------- 通用工具方法 ----------
 
   private static String write(ObjectNode node) {
     try {

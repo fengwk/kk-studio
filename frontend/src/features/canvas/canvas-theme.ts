@@ -1,6 +1,6 @@
 /**
- * JS-facing Canvas theme values that mirror CSS product tokens.
- * React Flow and canvas APIs need concrete strings, not CSS variables.
+ * 面向 JS 的 Canvas 主题值，对应 CSS 产品 token。
+ * React Flow 与 canvas API 需要具体的字符串值，而不是 CSS 变量。
  */
 export const CANVAS_THEME = {
   stageBg: '#0d0f0e',

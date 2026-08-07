@@ -47,10 +47,9 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * Stop on TOOL_ACTIVE: every sibling converges by its own status (WAITING_APPROVAL/READY to
- * CANCELLED, DISPATCHING/RUNNING to UNKNOWN, terminal kept exact), ordinal ToolResult Entries are
- * attached invocation-backed with synthetic=false, and THREAD/MODEL/all TOOL Work rows are deleted;
- * TOOL_TERMINAL_PENDING stays zero mutation.
+ * Stop 在 TOOL_ACTIVE 上：每个 sibling 按自身状态收敛（WAITING_APPROVAL/READY 转 CANCELLED， DISPATCHING/RUNNING 转
+ * UNKNOWN，terminal 保持原样），按 ordinal 的 ToolResult Entry 以 invocation-backed 方式挂载且 synthetic=false，删除
+ * THREAD/MODEL 与全部 TOOL Work 行； TOOL_TERMINAL_PENDING 保持零变更。
  */
 class HarnessRuntimeStopToolTest {
 
@@ -231,7 +230,7 @@ class HarnessRuntimeStopToolTest {
     return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
   }
 
-  /** The single text block of the invocation's appended ToolResult MESSAGE entry. */
+  /** invocation 追加的 ToolResult MESSAGE entry 中唯一的文本块。 */
   private String resultText(ToolInvocation tool) {
     long resultEntryId = tool.resultEntryId();
     Entry entry = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());

@@ -55,7 +55,7 @@ export function useCanvasController() {
     if (state.focusGenerationPromptToken <= 0) {
       return
     }
-    // Prompt mounts with the generator panel after the token update; focus after layout.
+    // Prompt 会随 token 更新在生成器面板挂载后渲染；需要在布局完成后再聚焦。
     const id = window.requestAnimationFrame(() => {
       generationPromptRef.current?.focus()
     })
@@ -109,7 +109,7 @@ export function useCanvasController() {
 
   const handleAddAction = useCallback((action: AddMenuAction) => {
     dispatch({ type: 'handle-add-action', action, stage: stageMetricsRef.current })
-    // Only restore Dock "+" for deferred file/frame actions; generators focus Prompt via token.
+    // 仅针对延后的 file/frame 动作恢复 Dock "+" 焦点；生成器通过 token 聚焦 Prompt。
     if (action === 'file' || action === 'frame') {
       window.requestAnimationFrame(() => dockAddRef.current?.focus())
     }
@@ -243,7 +243,7 @@ export function useCanvasController() {
 
   const createFromIdea = useCallback(() => {
     dispatch({ type: 'open-editor-from-idea' })
-    // Only fit when the idea is valid and the editor will open.
+    // 仅在 idea 有效且编辑器将打开时进行 fit。
     if (state.idea.trim()) {
       requestFitView()
     }

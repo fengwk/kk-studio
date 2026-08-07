@@ -15,7 +15,7 @@ import { useI18n } from '@/shared/i18n'
 
 type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
 
-/** Invisible connection anchors so React Flow can draw domain Links (error #008 fix). */
+/** 不可见的连接锚点，让 React Flow 能够在领域 Links 上绘制（修复错误 #008）。 */
 function NodeHandles() {
   return (
     <>
@@ -388,7 +388,7 @@ function ResultFlowNode(props: NodeProps<CanvasFlowNode>) {
   return <ResultNodeView data={domainOf(props) as ResultNode} />
 }
 
-/** Module-level constant — never recreate per render (React Flow error #002). */
+/** 模块级常量 —— 不要在每次 render 时重新创建（React Flow 错误 #002）。 */
 export const canvasNodeTypes = {
   frame: FrameFlowNode,
   web: WebFlowNode,

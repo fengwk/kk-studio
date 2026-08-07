@@ -23,18 +23,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Spring wiring for the production {@code ModelExecution} adapter.
+ * 生产 {@code ModelExecution} 适配器的 Spring 装配。
  *
- * <p>Provider I/O runs on Java 21 virtual threads. The executor is an infrastructure resource owned
- * by Spring and closes with the application context; it carries blocking Provider calls only, never
- * durable actor continuations.
+ * <p>Provider I/O 运行在 Java 21 虚拟线程上。executor 是 Spring 拥有的基础设施资源，随应用上下文 关闭；它只承载阻塞的 Provider
+ * 调用，绝不承载持久化 actor 续体。
  *
  * <p>每个 {@link ProviderFactory} bean 都有稳定的唯一名称，可以独立替换而不影响其余 Provider 类型。
  */
 @Configuration(proxyBeanMethods = false)
 public class ModelExecutionConfiguration {
 
-  /** Virtual-thread executor for blocking Provider I/O. */
+  /** 阻塞 Provider I/O 使用的虚拟线程 executor。 */
   @Bean(name = "modelExecutionExecutor", destroyMethod = "close")
   @ConditionalOnMissingBean(name = "modelExecutionExecutor")
   public ExecutorService modelExecutionExecutor() {

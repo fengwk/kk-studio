@@ -10,7 +10,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 
-/** Verifies that non-Harness business data is fully represented by the PostgreSQL schema. */
+/** 验证 PostgreSQL schema 是否完全表达非 Harness 的业务数据。 */
 class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach
@@ -134,13 +134,13 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       insertNode(conn, nodeId, canvasId);
     }
 
-    // Document: blank title is rejected.
+    // Document：空白标题被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn, "ck_canvas_document_title_nonblank", () -> insertCanvasRow(conn, canvasId, " "));
     }
 
-    // Node: blank name is rejected.
+    // Node：空白名称被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -148,7 +148,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "", 100, 100));
     }
 
-    // Node: zero width is rejected.
+    // Node：零宽度被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -156,7 +156,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 0, 100));
     }
 
-    // Node: zero height is rejected.
+    // Node：零高度被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -164,13 +164,13 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 100, 0));
     }
 
-    // Link: self-loop is rejected.
+    // Link：自环被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn, "ck_canvas_link_distinct", () -> insertLink(conn, canvasId, nodeId, nodeId));
     }
 
-    // Dedup: blank command_id is rejected.
+    // Dedup：空白 command_id 被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -178,7 +178,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertDedup(conn, canvasId, " ", "0".repeat(64)));
     }
 
-    // Dedup: request_hash must contain one SHA-256 hex digest.
+    // Dedup：request_hash 必须包含一个 SHA-256 十六进制摘要。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -186,7 +186,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           () -> insertDedup(conn, canvasId, "cmd-ok", " "));
     }
 
-    // Sanity: a fully well-formed dedup row inserts.
+    // 健全性检查：完全合规的 dedup 行可被插入。
     try (Connection conn = newConnection()) {
       insertDedup(conn, canvasId, "cmd-" + linkId, "f".repeat(64));
     }
@@ -204,7 +204,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       insertLink(conn, canvasId, sourceNode, targetNode);
     }
 
-    // Verify link exists.
+    // 校验 link 存在。
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(
@@ -219,7 +219,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       }
     }
 
-    // Delete the source node; ON DELETE CASCADE must remove the link.
+    // 删除源节点；ON DELETE CASCADE 必须移除该 link。
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("delete from canvas_node where id = ? and canvas_id = ?")) {

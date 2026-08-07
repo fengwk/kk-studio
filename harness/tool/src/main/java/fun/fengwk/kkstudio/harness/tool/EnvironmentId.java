@@ -4,11 +4,10 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Canonical durable identity of an Environment route binding.
+ * Environment 路由绑定的 canonical durable 身份。
  *
- * <p>Environment display names are reusable and can be re-bound to different roots, so they cannot
- * identify history. Only the canonical lowercase UUID text is a durable route identity; display
- * names never enter the durable protocol types that carry this value.
+ * <p>Environment 展示名可复用并可重新绑定到不同根目录，因此不能用于标识历史。只有 canonical 小写 UUID 文本 才是 durable 路由身份；展示名绝不进入携带该值的
+ * durable 协议类型。
  */
 public record EnvironmentId(String value) {
 

@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Focused pure mapper from Provider / invocation facts to immutable history Entry payloads.
+ * 从 Provider / invocation 事实到 immutable history Entry payload 的聚焦纯 mapper。
  *
  * <p>只做类型化映射，不做任何持久化决策：{@link ProviderResponse} 投影为 ASSISTANT {@link MessagePayload}（内容顺序为
  * thinking、text、tool calls，全部为空时回退为空 text，metadata 直接快照 usage/cost）；terminal Model 错误投影为 {@link

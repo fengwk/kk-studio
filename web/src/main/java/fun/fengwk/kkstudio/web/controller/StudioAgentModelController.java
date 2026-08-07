@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
-/** Global model CRUD API. */
+/** model 全局 CRUD API。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog/models")
 @RestController

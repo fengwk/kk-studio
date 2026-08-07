@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
-/** Global provider application service. */
+/** 全局 provider 应用服务。 */
 public interface AgentProviderService {
 
   Page<AgentProviderDTO> pageProviders(PageQuery pageQuery);
@@ -15,12 +15,11 @@ public interface AgentProviderService {
   AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO);
 
   /**
-   * Atomic CAS update on (name, {@code updateDTO.expectedVersion}). The expectedVersion token is
-   * read from the DTO only; stale values raise {@link
-   * fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException}.
+   * 基于 (name, {@code updateDTO.expectedVersion}) 的原子 CAS 更新。expectedVersion 令牌只从 DTO 读取；过期值抛 {@link
+   * fun.fengwk.kkstudio.core.ai.error.AiVersionConflictException}。
    */
   AgentProviderDTO updateProvider(String name, AgentProviderUpdateDTO updateDTO);
 
-  /** Atomic CAS delete on (name, expectedVersion). */
+  /** 基于 (name, expectedVersion) 的原子 CAS 删除。 */
   void deleteProvider(String name, String expectedVersion);
 }

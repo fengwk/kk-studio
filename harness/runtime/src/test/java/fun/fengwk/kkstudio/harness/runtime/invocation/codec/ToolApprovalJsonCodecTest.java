@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 
 import java.time.Instant;
 
-/** Durable approval wire for not-required, undecided and decided states. */
+/** 覆盖 not-required、undecided 和 decided 三种状态的 approval 持久化 wire。 */
 class ToolApprovalJsonCodecTest {
 
   private static final Instant REQUESTED_AT = Instant.parse("2026-08-04T00:00:00Z");
@@ -19,7 +19,7 @@ class ToolApprovalJsonCodecTest {
 
   private final ToolApprovalJsonCodec codec = new ToolApprovalJsonCodec();
 
-  /** Exact JSON proves every nullable fact is explicit and timestamps retain ISO precision. */
+  /** 精确 JSON 既证明每个 nullable 字段都显式，也证明时间戳保留 ISO 精度。 */
   @Test
   void roundTripsEveryApprovalStateWithExactJson() {
     ToolApproval notRequired = ToolApproval.notRequired();
@@ -51,7 +51,7 @@ class ToolApprovalJsonCodecTest {
     assertEquals(decided, codec.decodeNode(codec.encodeNode(decided)));
   }
 
-  /** Strict parser settings reject malformed documents independently of approval semantics. */
+  /** 严格 parser 设置独立于 approval 语义拒绝畸形文档。 */
   @Test
   void rejectsMalformedDocumentBoundaries() {
     String json = codec.encode(ToolApproval.notRequired());
@@ -64,7 +64,7 @@ class ToolApprovalJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** Exact fields, enum/Instant syntax and the complete approval matrix are revalidated. */
+  /** 精确字段、enum/Instant 语法以及完整的 approval 矩阵都被重新校验。 */
   @Test
   void rejectsCorruptApprovalFacts() {
     assertInvalid(

@@ -374,7 +374,7 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         case ACK, ERROR -> {
           connection.acceptInboundEnvelope(identity);
-          // Gateway protocol messages do not alter Daemon invocation facts.
+          // Gateway 协议消息不改变 Daemon invocation 事实。
         }
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -568,7 +568,7 @@ public final class DaemonRuntime implements AutoCloseable {
               TimeUnit.NANOSECONDS);
       invocation.setDeadline(deadline);
     } catch (RejectedExecutionException ignored) {
-      // close() has already recorded the cancellation and stopped the scheduler.
+      // close() 已记录取消并停止 scheduler。
     }
   }
 

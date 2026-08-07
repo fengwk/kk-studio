@@ -36,7 +36,13 @@ public class ImageData {
     register(".svg", "image/svg+xml");
   }
 
+  /**
+   * 图片 MIME 类型：构造时规范化为小写（trim 后 toLowerCase）；未知/空值回退为 {@value #DEFAULT_MIME_TYPE}，并由 {@link
+   * #resolveExtension()} 决定临时文件扩展名。
+   */
   private String mimeType;
+
+  /** 图片字节的标准 Base64 编码（{@link java.util.Base64}）；{@link #decode()} 依赖此字段非 null，不允许为 null。 */
   private String base64;
 
   public static ImageData fromFile(File file) throws IOException {

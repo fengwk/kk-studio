@@ -38,9 +38,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
 
-/**
- * moveHead: no-op replay, revision CAS, cross-session/quiescence/continuation-obligation guards.
- */
+/** moveHead：no-op replay、revision CAS、跨 session / 静默期 / continuation-obligation 守卫。 */
 class HarnessRuntimeMoveHeadTest {
 
   private InMemoryHarnessStore store;

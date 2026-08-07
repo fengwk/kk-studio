@@ -28,11 +28,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Single web translator for the AI catalog domain error model.
+ * AI catalog domain 错误模型的 Web 层统一翻译器。
  *
- * <p>Each handler returns the project {@link Result} envelope with a stable machine-readable {@code
- * code} derived from the typed error's {@link fun.fengwk.kkstudio.core.ai.error.DomainErrorCode}.
- * HTTP status follows the semantic:
+ * <p>每个 handler 都返回项目 {@link Result} 信封，其中包含由类型化错误的 {@link
+ * fun.fengwk.kkstudio.core.ai.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
  *
  * <ul>
  *   <li>{@link AiValidationException}, {@link MissingServletRequestParameterException}, {@link
@@ -42,9 +41,8 @@ import java.util.Map;
  *       → 409
  * </ul>
  *
- * <p>Database uniqueness / integrity races are intentionally NOT translated here: the four catalog
- * services wrap {@link org.springframework.dao.DuplicateKeyException} and report the typed error
- * themselves so unrelated controllers are not affected by a global advice.
+ * <p>数据库唯一性 / 完整性竞争条件有意不在此处翻译：四个 catalog 服务自行包装 {@link
+ * org.springframework.dao.DuplicateKeyException} 并上报类型化错误，因此全局 advice 不会影响无关 controller。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(

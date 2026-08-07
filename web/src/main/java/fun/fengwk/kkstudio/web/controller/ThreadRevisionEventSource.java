@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import java.util.function.Consumer;
 
-/** Minimal SSE-facing revision notification boundary. */
+/** 面向 SSE 的最小 revision 通知边界。 */
 @FunctionalInterface
 interface ThreadRevisionEventSource {
   record Event(String revision, boolean resync) {

@@ -3,9 +3,9 @@ import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadTimeline } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
- * Working status uses the derived Thread status/processing and pending QUEUED commands.
- * Any status other than IDLE means the runtime is working on the Thread.
- * Realtime SSE keeps entries/commands fresh by invalidating snapshot queries.
+ * 工作状态使用派生的 Thread status/processing 以及待处理的 QUEUED 命令。
+ * 只要 status 不是 IDLE，就表示 runtime 正在该 Thread 上工作。
+ * Realtime SSE 通过失效 snapshot 查询来保持 entries/commands 始终是新鲜的。
  */
 export function isThreadWorking(
   thread: HarnessThreadDTO | undefined,

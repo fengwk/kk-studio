@@ -1,7 +1,7 @@
 /**
- * Studio pure domain module.
+ * Studio 纯领域模块。
  *
- * <p>Owns only the Canvas aggregate. Does not depend on Spring, MyBatis, HTTP or Agent Harness.
- * Adapters live in {@code core} / {@code web}.
+ * <p>仅拥有 Canvas aggregate。不依赖 Spring、MyBatis、HTTP 或 Agent Harness。adapter 位于 {@code core} / {@code
+ * web}。
  */
 package fun.fengwk.kkstudio.studio;

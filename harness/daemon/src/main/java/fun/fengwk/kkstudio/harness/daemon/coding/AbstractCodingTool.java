@@ -19,7 +19,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Common asynchronous execution and strict JSON access for filesystem coding tools. */
+/** 文件系统 coding tools 的通用异步执行与严格 JSON 访问。 */
 abstract class AbstractCodingTool implements Tool {
 
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -140,7 +140,7 @@ abstract class AbstractCodingTool implements Tool {
     return new ToolResult(id, List.of(new TextToolContent("Error: " + detail)), true, "{}", false);
   }
 
-  /** Mutable execution state whose terminal callback is guaranteed to run exactly once. */
+  /** 可变执行状态，其终态回调保证恰好执行一次。 */
   static final class Execution implements ToolExecutionHandle {
     private final String callId;
     private final ToolExecutionListener listener;

@@ -4,17 +4,15 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Durable Tool approval state persisted on the ToolInvocation.
+ * 持久化到 ToolInvocation 上的 durable Tool approval 状态。
  *
- * <p>Exact invariants:
+ * <p>精确的不变量：
  *
  * <ul>
- *   <li>{@code required=false}: all other fields are null.
- *   <li>{@code required=true} and undecided: {@code requestedAt} present, {@code reason} optional,
- *       decision facts absent.
- *   <li>{@code required=true} and decided: decision, {@code decisionId}, {@code actor}, {@code
- *       requestedAt} and {@code decidedAt} all present, {@code decidedAt >= requestedAt}, {@code
- *       reason} optional.
+ *   <li>{@code required=false}：所有其他字段都为 null。
+ *   <li>{@code required=true} 且 undecided：{@code requestedAt} 存在，{@code reason} 可选， 决策相关事实缺失。
+ *   <li>{@code required=true} 且 decided：decision、{@code decisionId}、{@code actor}、 {@code
+ *       requestedAt} 与 {@code decidedAt} 均存在，{@code decidedAt >= requestedAt}， {@code reason} 可选。
  * </ul>
  */
 public record ToolApproval(
@@ -56,29 +54,28 @@ public record ToolApproval(
     }
   }
 
-  /** Whether this approval is required but has not been decided yet. */
+  /** 表示该 approval 必需但尚未被决定。 */
   public boolean isUndecided() {
     return required && decision == null;
   }
 
-  /** Minimal factory for an approval that is not required (all other fields are null). */
+  /** not-required approval 的最小工厂方法（所有其他字段均为 null）。 */
   public static ToolApproval notRequired() {
     return new ToolApproval(false, null, null, null, null, null, null);
   }
 
-  /** Minimal factory for a required undecided approval with the given request time and reason. */
+  /** 携带给定 request time 与 reason 的 required undecided approval 的最小工厂方法。 */
   public static ToolApproval request(Instant requestedAt, String reason) {
     return new ToolApproval(true, null, null, null, reason, requestedAt, null);
   }
 
   /**
-   * Applies a decision to this approval (the request time is preserved).
+   * 对该 approval 应用一个决策（保留 request time）。
    *
-   * <p>An undecided approval becomes decided with the given {@code decidedAt}. An already decided
-   * approval accepts an idempotent replay with the same {@code decisionId}, {@code decision},
-   * {@code actor} and {@code reason} and returns the stored approval unchanged — a client retry
-   * carries no {@code decidedAt}, so the service derives a fresh one that must be ignored. The same
-   * {@code decisionId} with a different payload or any different {@code decisionId} is a conflict.
+   * <p>undecided approval 会变为由给定 {@code decidedAt} 决定的已决状态。已决定的 approval 接受 幂等 replay：若 {@code
+   * decisionId}、{@code decision}、{@code actor} 与 {@code reason} 完全相同， 则原样返回 stored approval ——客户端
+   * retry 不携带 {@code decidedAt}，因此服务端现场生成的 {@code decidedAt} 应当被忽略。相同的 {@code decisionId} 携带不同
+   * payload，或任何不同的 {@code decisionId}，都视为冲突。
    */
   public ToolApproval decide(
       ToolApprovalDecision decision,

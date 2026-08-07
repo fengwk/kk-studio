@@ -16,11 +16,10 @@ import java.util.Objects;
 import java.util.ResourceBundle;
 
 /**
- * Web-boundary message resolver for request-scoped user-visible error text.
+ * Web 边界的消息解析器，用于按请求作用域解析用户可见的错误文案。
  *
- * <p>The convention starter exposes a single startup-locale manager. This service deliberately owns
- * one manager per supported request locale so a request can select its language without changing
- * the core error model or the process-wide convention configuration.
+ * <p>convention starter 只暴露单一启动 locale 的 manager。本服务有意为每个受支持的请求 locale 各持有一个
+ * manager，使请求可以选择自己的语言，而无需改动 core 错误模型或进程级 convention 配置。
  */
 @Component
 public class StudioMessageService {
@@ -45,7 +44,7 @@ public class StudioMessageService {
             ZH_CN, createStringManager(ZH_CN, classLoader));
   }
 
-  /** Returns the canonical supported locale for a request locale. */
+  /** 返回请求 locale 对应的规范受支持 locale。 */
   public Locale normalize(Locale locale) {
     if (locale != null) {
       if (isLocale(locale, EN_US)) {
@@ -58,12 +57,12 @@ public class StudioMessageService {
     return EN_US;
   }
 
-  /** Resolves a message using the locale bound to the current Spring web request. */
+  /** 使用绑定到当前 Spring web 请求的 locale 解析消息。 */
   public String message(String key, Map<String, ?> context) {
     return message(LocaleContextHolder.getLocale(), key, context);
   }
 
-  /** Resolves a message for an explicit locale, primarily for deterministic web-layer tests. */
+  /** 为显式 locale 解析消息，主要用于确定性的 web 层测试。 */
   public String message(Locale locale, String key, Map<String, ?> context) {
     Objects.requireNonNull(key, "key");
     Locale normalized = normalize(locale);

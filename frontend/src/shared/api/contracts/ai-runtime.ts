@@ -1,7 +1,7 @@
 import type { BackendDateTime, InstantTimestamp } from '@/shared/api/contracts/base'
 
 /**
- * Immutable provider/model/variant selection frozen into a branch settings snapshot.
+ * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
  */
 export interface HarnessModelSelectionDTO {
   providerName: string
@@ -10,10 +10,9 @@ export interface HarnessModelSelectionDTO {
 }
 
 /**
- * Complete branch settings snapshot of one Entry branch.
+ * 单个 Entry branch 的完整 branch settings 快照。
  *
- * environmentId is a nullable canonical lowercase UUID route identity; display names never
- * enter this durable snapshot.
+ * environmentId 是可空的规范小写 UUID 路由标识；展示名称永远不会进入此持久快照。
  */
 export interface HarnessBranchSettingsDTO {
   environmentId: string | null
@@ -32,7 +31,7 @@ export type EntryType =
   | 'ASSISTANT_ABORTED'
   | 'TURN_END'
 
-/** Session Entry query projection; ids are strict positive decimal strings. */
+/** Session Entry 查询投影；id 均为严格的正十进制数字字符串。 */
 export interface HarnessSessionEntryDTO {
   entryId: string
   sessionId: string
@@ -43,35 +42,34 @@ export interface HarnessSessionEntryDTO {
 }
 
 /**
- * HarnessThread query projection; ids are strict positive decimal strings, revision is the
- * durable snapshot cursor.
+ * HarnessThread 查询投影；id 均为严格的正十进制数字字符串，revision 是持久快照游标。
  *
- * status/processing are derived display fields (processing is false only for IDLE);
- * branchSettings is the complete settings snapshot of the head Entry branch.
+ * status/processing 是派生的展示字段（只有 IDLE 时 processing 才为 false）；
+ * branchSettings 是 head Entry branch 的完整 settings 快照。
  */
 export interface HarnessThreadDTO {
   threadId: string
-  /** Current Session primary key (derived from the head Entry). */
+  /** 当前 Session 主键（由 head Entry 派生）。 */
   sessionId: string
-  /** Current head Entry. */
+  /** 当前 head Entry。 */
   headEntryId: string
-  /** Current frozen YOLO runtime policy. */
+  /** 当前冻结的 YOLO 运行时策略。 */
   yoloEnabled: boolean
-  /** Allocated command sequence high-water mark + 1. */
+  /** 已分配的 command sequence 高水位标记 + 1。 */
   nextCommandSequence: string
-  /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string). */
+  /** PostgreSQL 权威持久投影游标（非负十进制 bigint 字符串）。 */
   revision: string
-  /** Display status (derived): IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING. */
+  /** 展示状态（派生）：IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING。 */
   status: string
-  /** Whether the runtime is currently processing this Thread (derived). */
+  /** 运行时当前是否正在处理此 Thread（派生字段）。 */
   processing: boolean
-  /** Complete settings snapshot of the head Entry branch. */
+  /** head Entry branch 的完整 settings 快照。 */
   branchSettings: HarnessBranchSettingsDTO
   createTime: BackendDateTime
   updateTime: BackendDateTime
 }
 
-/** Durable Thread mailbox command projection. */
+/** 持久的 Thread mailbox command 投影。 */
 export interface HarnessThreadCommandDTO {
   commandId: string
   threadId: string
@@ -86,11 +84,11 @@ export interface HarnessThreadCommandDTO {
 }
 
 /**
- * Typed Thread mailbox command request.
+ * 类型化的 Thread mailbox command 请求。
  *
- * The discriminated union mirrors the Java mapper's strict per-type field rules: USER_MESSAGE
- * must NOT carry role (the mapper forbids it — the role is always USER); CUSTOM_MESSAGE carries
- * an uppercase role (SYSTEM/USER). clientCommandId is the stable idempotency key.
+ * 该可辨识联合镜像了 Java mapper 严格的按类型字段规则：USER_MESSAGE 不得携带 role
+ * （mapper 禁止该字段——role 始终是 USER）；CUSTOM_MESSAGE 携带大写 role
+ * （SYSTEM/USER）。clientCommandId 是稳定的幂等键。
  */
 export type HarnessThreadCommandCreateDTO =
   | { type: 'USER_MESSAGE'; clientCommandId: string; content: string }
@@ -102,35 +100,35 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentId: string | null }
 
-/** Atomic Thread mailbox enqueue request; expected cursors come from the latest thread DTO. */
+/** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
 export interface HarnessThreadCommandBatchDTO {
   expectedHeadEntryId: string
   expectedNextCommandSequence: string
   commands: HarnessThreadCommandCreateDTO[]
 }
 
-/** Create a Thread atomically with a complete branch settings snapshot; title is nullable. */
+/** 以完整的 branch settings 快照原子化创建 Thread；title 可为 null。 */
 export interface HarnessThreadCreateDTO {
   title: string | null
   branchSettings: HarnessBranchSettingsDTO
   yoloEnabled: boolean
 }
 
-/** Thread head relocation request; expectedRevision is the exact revision CAS cursor. */
+/** Thread head 重定位请求；expectedRevision 是精确的 revision CAS 游标。 */
 export interface HarnessThreadHeadUpdateDTO {
   targetEntryId: string
   expectedRevision: string
 }
 
-/** Thread stop request; stopRequestId is the stable idempotency key. */
+/** Thread 停止请求；stopRequestId 是稳定的幂等键。 */
 export interface HarnessThreadStopDTO {
   stopRequestId: string
   expectedRevision: string
 }
 
 /**
- * Stop result; status is STOPPED / IDLE / REPLAYED. IDLE means no Turn was stopped but queued
- * commands may have been cancelled; stoppedTurnEndEntryId is non-null only for STOPPED/REPLAYED.
+ * 停止结果；status 为 STOPPED / IDLE / REPLAYED。IDLE 表示没有 Turn 被停止，但排队中的
+ * commands 可能已被取消；仅 STOPPED/REPLAYED 时 stoppedTurnEndEntryId 才非 null。
  */
 export interface HarnessThreadStopResultDTO {
   status: string
@@ -139,7 +137,7 @@ export interface HarnessThreadStopResultDTO {
   cancelledCommandCount: number
 }
 
-/** Tool approval decision request; decisionId is the stable client idempotency key. */
+/** Tool 审批决定请求；decisionId 是稳定的客户端幂等键。 */
 export interface HarnessToolApprovalDTO {
   decision: 'ALLOW' | 'DENY'
   decisionId: string
@@ -148,9 +146,9 @@ export interface HarnessToolApprovalDTO {
 }
 
 /**
- * ModelInvocation query projection; ids are strict positive decimal strings.
- * streamCheckpointJson / resultJson / errorJson are canonical runtime codec JSON, non-null only
- * in their corresponding phase; resultEntryId is the result Entry after TURN_END application.
+ * ModelInvocation 查询投影；id 均为严格的正十进制数字字符串。
+ * streamCheckpointJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
+ * 非 null；resultEntryId 是应用 TURN_END 后的结果 Entry。
  */
 export interface ModelInvocationDTO {
   id: string
@@ -168,9 +166,9 @@ export interface ModelInvocationDTO {
 }
 
 /**
- * ToolInvocation query projection; ids are strict positive decimal strings.
- * approvalJson / resultJson / errorJson are canonical runtime codec JSON, non-null only in
- * their corresponding phase; environmentId is a nullable canonical lowercase UUID route identity.
+ * ToolInvocation 查询投影；id 均为严格的正十进制数字字符串。
+ * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
+ * 非 null；environmentId 是可空的规范小写 UUID 路由标识。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -194,9 +192,9 @@ export interface ToolInvocationDTO {
 }
 
 /**
- * Coherent Thread snapshot projection; all fields come from the same database snapshot.
- * modelInvocation is the active model invocation of the current Turn (null when none);
- * toolInvocations are its tool siblings.
+ * 一致的 Thread 快照投影；所有字段都来自同一个数据库快照。
+ * modelInvocation 是当前 Turn 的活动 model invocation（无则为 null）；
+ * toolInvocations 是它的 tool 兄弟调用。
  */
 export interface HarnessThreadSnapshotDTO {
   revision: string

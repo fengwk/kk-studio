@@ -64,8 +64,8 @@ export interface OverlayContribution extends Contribution {
 }
 
 /**
- * Extensions are trusted, compile-time React modules. The host never downloads
- * or evaluates third-party JavaScript at runtime.
+ * Extension 是受信任的、编译期 React 模块。宿主在运行时绝不会下载
+ * 或评估第三方 JavaScript。
  */
 export interface TrustedReactExtension {
   id: string

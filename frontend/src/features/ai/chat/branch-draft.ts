@@ -10,8 +10,7 @@ import { modelRef, type AgentModelView } from '@/features/ai/catalog'
 import { parsePayload } from '@/features/ai/runtime/payload-json'
 
 /**
- * Complete branch target edited by a pane: durable branch settings plus the Thread-level YOLO
- * runtime policy. environmentId is a canonical lowercase UUID route identity.
+ * 面板编辑的完整 branch target：持久化 branch settings 加上 Thread 级别的 YOLO runtime policy。environmentId 是规范化的小写 UUID 路由标识。
  */
 export interface BranchDraft {
   environmentId: string | null
@@ -25,17 +24,16 @@ export interface BranchDraft {
 export const DEFAULT_THINKING_LEVEL = 'off'
 
 /**
- * Materializes the complete branch draft for a blank pane from the Chat defaults (agent +
- * yolo) and the catalog:
- * - agent model ref -> provider/model selection
- * - variant = agent override or the model's defaultVariant
- * - thinkingLevel = that variant's reasoningEffort or `off`
+ * 使用 Chat 默认值（agent + yolo）和 catalog，为空面板构建完整的 branch draft：
+ * - agent 的 model ref -> provider/model 选择
+ * - variant = agent override 或 model 的 defaultVariant
+ * - thinkingLevel = 该 variant 的 reasoningEffort 或 `off`
  * - activeTools = agent.config.tools
- * - environmentId starts null
+ * - environmentId 从 null 开始
  *
- * Returns null when no agent is configured or the agent's model/variant cannot be resolved:
- * creating a Thread with empty provider/model/variant would be rejected by the strict mapper,
- * so the caller must surface an explicit error or open the agent picker instead.
+ * 当未配置 agent 或无法解析 agent 的 model/variant 时返回 null：
+ * 使用空 provider/model/variant 创建 Thread 会被 strict mapper 拒绝，
+ * 因此调用方必须显示明确错误或打开 agent picker。
  */
 export function materializeBlankBranchDraft(
   agent: AgentDefinitionDTO | undefined,
@@ -69,9 +67,7 @@ export function materializeBlankBranchDraft(
 }
 
 /**
- * Materializes a full draft from an explicitly selected Agent + catalog (used when the current
- * draft has no valid model selection yet, e.g. a stale Chat agent). Reuses the durable values
- * of an existing frozen draft otherwise.
+ * 根据明确选中的 Agent + catalog 构建完整 draft（当前 draft 尚无有效 model selection 时使用，例如 Chat agent 已过期）。否则复用已有 frozen draft 的持久化值。
  */
 export function materializeAgentBranchDraft(
   agent: AgentDefinitionDTO,
@@ -79,8 +75,8 @@ export function materializeAgentBranchDraft(
   existing: BranchDraft | null,
   fallbackYoloEnabled?: boolean,
 ): BranchDraft | null {
-  // A full materialization (no valid existing draft, e.g. stale Chat agent) must keep the
-  // Chat default: `?? false` would silently drop a user's yolo=true preference.
+  // 完整 materialization（没有有效的已有 draft，例如 Chat agent 已过期）必须保留
+  // Chat 默认值：`?? false` 会悄悄丢弃用户设置的 yolo=true 偏好。
   const materialized = materializeBlankBranchDraft(
     agent,
     existing?.yoloEnabled ?? fallbackYoloEnabled ?? false,
@@ -92,8 +88,8 @@ export function materializeAgentBranchDraft(
   if (existing == null || existing.model.providerName === '' || existing.model.modelName === '') {
     return materialized
   }
-  // Freeze rule: keep the current model selection / thinking / environment / yolo; adopt the
-  // new agent name and its active tool set.
+  // Freeze 规则：保留当前 model selection / thinking / environment / yolo；采用新的
+  // agent 名称及其 active tool 集合。
   return {
     ...materialized,
     environmentId: existing.environmentId,
@@ -103,7 +99,7 @@ export function materializeAgentBranchDraft(
   }
 }
 
-/** Initializes a bound pane draft from the durable Thread snapshot (never from Chat defaults). */
+/** 从持久化的 Thread snapshot 初始化绑定面板 draft（绝不使用 Chat 默认值）。 */
 export function branchDraftFromThread(thread: HarnessThreadDTO): BranchDraft {
   return branchDraftFromBranchSettings(thread.branchSettings, thread.yoloEnabled)
 }
@@ -150,9 +146,8 @@ function sameStringList(left: string[], right: string[]): boolean {
 }
 
 /**
- * Builds the minimal settings command diff between the effective base and the draft in the
- * fixed order SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO.
- * Each command carries its own stable clientCommandId from the injected id factory.
+ * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO。
+ * 每个 command 都通过注入的 id factory 携带自己的稳定 clientCommandId。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -212,8 +207,8 @@ function sameModelSelection(left: HarnessModelSelectionDTO, right: HarnessModelS
 }
 
 /**
- * Projects the pending branch target by applying QUEUED SET_* command payloads (in sequence
- * order) over the durable base. Used to avoid resending settings that are already in flight.
+ * 通过按 sequence 顺序将 QUEUED SET_* command payload 应用到持久化 base，推算 pending branch target。
+ * 用于避免重新发送已在处理中、尚未完成的 settings。
  */
 export function projectPendingTarget(
   base: BranchDraft,
@@ -280,7 +275,7 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
   }
 }
 
-/** Decimal string comparison used for command sequence ordering. */
+/** 用于 command sequence 排序的十进制字符串比较。 */
 export function compareDecimalStrings(left: string, right: string): number {
   try {
     const l = BigInt(left)

@@ -6,11 +6,10 @@ import java.sql.SQLException;
 import java.util.Objects;
 
 /**
- * Deterministic ids for a Session + ROOT Entry + Thread bundle bound to that ROOT.
+ * Session + ROOT Entry + Thread 绑定到该 ROOT 的确定性 id 集合。
  *
- * <p>Session and Thread are independent aggregates: the Session/Entry rows are inserted first, and
- * the Thread references the ROOT through the single-column {@code head_entry_id} FK. Entry helpers
- * keep fixture construction deterministic without random ids or clock-derived values.
+ * <p>Session 与 Thread 是相互独立的聚合：先插入 Session/Entry 行，Thread 通过单列 {@code head_entry_id} FK 引用
+ * ROOT。Entry helper 保证 fixture 构建确定性，不依赖随机 id 或时间派生的值。
  */
 final class ThreadFixture {
 
@@ -24,7 +23,7 @@ final class ThreadFixture {
     this.rootEntryId = rootEntryId;
   }
 
-  /** Allocate a fresh fixture from the shared counter; root and thread are deterministic. */
+  /** 从共享计数器分配一个新的 fixture；root 与 thread 都是确定性的。 */
   static ThreadFixture fresh() {
     long s = PostgresSchemaSupport.FIXTURE_IDS.addAndGet(1_000L);
     long t = s + 100L;
@@ -32,7 +31,7 @@ final class ThreadFixture {
     return new ThreadFixture(s, t, r);
   }
 
-  /** Allocate and persist a fresh Session/ROOT/bound Thread bundle. */
+  /** 分配并持久化一个全新的 Session/ROOT/已绑定 Thread 组合。 */
   static ThreadFixture insertFresh() throws SQLException {
     ThreadFixture fixture = fresh();
     try (Connection conn = PostgresSchemaSupport.newConnection()) {
@@ -41,7 +40,7 @@ final class ThreadFixture {
     return fixture;
   }
 
-  /** Insert Session, ROOT Entry and a Thread bound to that ROOT using the supplied connection. */
+  /** 使用给定连接插入 Session、ROOT Entry 与绑定到该 ROOT 的 Thread。 */
   void insertAtomically(Connection conn) throws SQLException {
     Objects.requireNonNull(conn);
     boolean prevAutoCommit = conn.getAutoCommit();
@@ -83,12 +82,12 @@ final class ThreadFixture {
     }
   }
 
-  /** Append a non-ROOT entry under the ROOT (e.g. a MESSAGE for assistant chains). */
+  /** 在 ROOT 下追加一个非 ROOT Entry（例如用于 assistant 链的 MESSAGE）。 */
   void insertChildEntry(Connection conn, long entryId, String type) throws SQLException {
     insertChildEntry(conn, entryId, rootEntryId, type);
   }
 
-  /** Allocate and append one child Entry below the ROOT, returning its id. */
+  /** 分配并追加一个 ROOT 下的子 Entry，返回其 id。 */
   long appendChild(String type) throws SQLException {
     long entryId = PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet();
     try (Connection conn = PostgresSchemaSupport.newConnection()) {
@@ -97,7 +96,7 @@ final class ThreadFixture {
     return entryId;
   }
 
-  /** Append an Entry with an explicit parent id (e.g. an Assistant MESSAGE chain). */
+  /** 以显式 parent id 追加一个 Entry（例如 Assistant MESSAGE 链）。 */
   void insertChildEntry(Connection conn, long entryId, long parentId, String type)
       throws SQLException {
     try (PreparedStatement ps =
