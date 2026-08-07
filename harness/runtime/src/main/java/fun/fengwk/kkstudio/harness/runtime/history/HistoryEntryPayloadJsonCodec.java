@@ -18,10 +18,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 7 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
- * {@link MessagePayload} / {@link CustomMessagePayload} / {@link AssistantErrorPayload} / {@link
- * AssistantAbortedPayload} / {@link TurnEndPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload}
- * 实现显式拒绝。
+ * 最终 8 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
+ * {@link MessagePayload} / {@link CustomEntryPayload} / {@link CustomMessagePayload} / {@link
+ * AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link TurnEndPayload}。直接对应 {@link
+ * EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -41,7 +41,10 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> TURN_START_FIELDS = orderedSet("reason", "settings");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
-  private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
+  private static final Set<String> CUSTOM_FIELDS =
+      orderedSet("pluginId", "customType", "schemaVersion", "data");
+  private static final Set<String> CUSTOM_MESSAGE_FIELDS =
+      orderedSet("pluginId", "customType", "rendererKey", "message", "details");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> TURN_END_FIELDS =
@@ -59,7 +62,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   public HistoryEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 7 类 history payload，其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 8 类 history payload，其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -72,6 +75,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case RootPayload value -> encodeRoot(value);
       case TurnStartPayload value -> encodeTurnStart(value);
       case MessagePayload value -> encodeMessage(value);
+      case CustomEntryPayload value -> encodeCustomEntry(value);
       case CustomMessagePayload value -> encodeCustomMessage(value);
       case AssistantErrorPayload value -> encodeAssistantError(value);
       case AssistantAbortedPayload value -> encodeAssistantAborted(value);
@@ -106,6 +110,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case ROOT -> decodeRoot(value);
       case TURN_START -> decodeTurnStart(value);
       case MESSAGE -> decodeMessage(value);
+      case CUSTOM -> decodeCustomEntry(value);
       case CUSTOM_MESSAGE -> decodeCustomMessage(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
       case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
@@ -146,9 +151,22 @@ public final class HistoryEntryPayloadJsonCodec {
     return node;
   }
 
+  private static ObjectNode encodeCustomEntry(CustomEntryPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("pluginId", value.pluginId());
+    node.put("customType", value.customType());
+    node.put("schemaVersion", value.schemaVersion());
+    node.set("data", JsonObjects.parseObject(value.dataJson(), "data"));
+    return node;
+  }
+
   private static ObjectNode encodeCustomMessage(CustomMessagePayload value) {
     ObjectNode node = NODES.objectNode();
+    node.put("pluginId", value.pluginId());
+    node.put("customType", value.customType());
+    node.put("rendererKey", value.rendererKey());
     node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
+    node.set("details", JsonObjects.parseObject(value.detailsJson(), "details"));
     return node;
   }
 
@@ -237,10 +255,31 @@ public final class HistoryEntryPayloadJsonCodec {
     return new MessagePayload(message, metadata, toolResult);
   }
 
+  private static CustomEntryPayload decodeCustomEntry(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM");
+    HistoryValueCodecs.requireExactFields(node, CUSTOM_FIELDS, "CUSTOM");
+    return new CustomEntryPayload(
+        HistoryValueCodecs.requireCanonicalIdentifier(
+            HistoryValueCodecs.text(node, "pluginId"), "pluginId"),
+        HistoryValueCodecs.requireCanonicalIdentifier(
+            HistoryValueCodecs.text(node, "customType"), "customType"),
+        HistoryValueCodecs.requiredNonNegativeInt(node, "schemaVersion", "CUSTOM"),
+        JsonObjects.write(HistoryValueCodecs.requireObject(node.get("data"), "CUSTOM.data")));
+  }
+
   private static CustomMessagePayload decodeCustomMessage(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM_MESSAGE");
     HistoryValueCodecs.requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
-    return new CustomMessagePayload(MESSAGE_CODEC.decodeNode(node.get("message")));
+    return new CustomMessagePayload(
+        HistoryValueCodecs.requireCanonicalIdentifier(
+            HistoryValueCodecs.text(node, "pluginId"), "pluginId"),
+        HistoryValueCodecs.requireCanonicalIdentifier(
+            HistoryValueCodecs.text(node, "customType"), "customType"),
+        HistoryValueCodecs.requireCanonicalIdentifier(
+            HistoryValueCodecs.text(node, "rendererKey"), "rendererKey"),
+        MESSAGE_CODEC.decodeNode(node.get("message")),
+        JsonObjects.write(
+            HistoryValueCodecs.requireObject(node.get("details"), "CUSTOM_MESSAGE.details")));
   }
 
   private static AssistantErrorPayload decodeAssistantError(JsonNode value) {

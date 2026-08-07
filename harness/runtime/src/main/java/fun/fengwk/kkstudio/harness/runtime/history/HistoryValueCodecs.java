@@ -18,7 +18,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * history 包内部的严格 value codec：BranchSettings / ModelSelection / AssistantMessageMetadata 以及它们 需要的通用
@@ -52,6 +54,12 @@ final class HistoryValueCodecs {
           "cacheWriteLong",
           "reasoning",
           "total");
+
+  /** canonical 小写 dotted/dashed 标识符（pluginId / customType / rendererKey）的最大字符数。 */
+  static final int MAX_IDENTIFIER_CHARS = 64;
+
+  private static final Pattern CANONICAL_IDENTIFIER =
+      Pattern.compile("[a-z0-9]+(?:[.-][a-z0-9]+)*");
 
   private HistoryValueCodecs() {}
 
@@ -280,6 +288,23 @@ final class HistoryValueCodecs {
   static String nullableText(ObjectNode node, String field) {
     JsonNode value = node.get(field);
     return value.isNull() ? null : text(node, field);
+  }
+
+  /**
+   * 校验 canonical 小写 dotted/dashed 标识符（pluginId / customType / rendererKey）：非 null、小写字母数字段以 单个
+   * {@code .} 或 {@code -} 分隔、无前导/尾随/连续分隔符、长度不超过 {@link #MAX_IDENTIFIER_CHARS}。
+   */
+  static String requireCanonicalIdentifier(String value, String field) {
+    Objects.requireNonNull(value, field);
+    if (value.length() > MAX_IDENTIFIER_CHARS || !CANONICAL_IDENTIFIER.matcher(value).matches()) {
+      throw new IllegalArgumentException(
+          field
+              + " must be a lowercase dotted/dashed identifier of at most "
+              + MAX_IDENTIFIER_CHARS
+              + " chars: "
+              + value);
+    }
+    return value;
   }
 
   static long requiredPositiveId(ObjectNode node, String field, String context) {

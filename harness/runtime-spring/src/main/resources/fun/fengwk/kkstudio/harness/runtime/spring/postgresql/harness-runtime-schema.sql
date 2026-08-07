@@ -29,6 +29,7 @@ create table harness_entry (
             'ROOT',
             'TURN_START',
             'MESSAGE',
+            'CUSTOM',
             'CUSTOM_MESSAGE',
             'ASSISTANT_ERROR',
             'ASSISTANT_ABORTED',

@@ -44,7 +44,7 @@ Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch
 `harness_entry.entry_type` 只允许：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
 `harness_thread_command.command_type` 只允许：

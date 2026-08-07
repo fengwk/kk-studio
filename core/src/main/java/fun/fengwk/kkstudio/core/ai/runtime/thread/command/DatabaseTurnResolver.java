@@ -345,10 +345,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (payload instanceof MessagePayload message) {
         semanticMessages.add(message.message());
       } else if (payload instanceof CustomMessagePayload message) {
+        // CUSTOM_MESSAGE 通过冻结的 AgentMessage 保持 model-visible；details 绝不投影。
         semanticMessages.add(message.message());
       } else if (payload instanceof AssistantAbortedPayload message) {
         semanticMessages.add(message.message());
       }
+      // CUSTOM 是透明 branch state：provider 消息投影默认忽略它。
     }
     List<ProviderToolDefinition> providerTools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {

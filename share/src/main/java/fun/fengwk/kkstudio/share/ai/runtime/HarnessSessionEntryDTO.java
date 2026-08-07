@@ -23,7 +23,7 @@ public class HarnessSessionEntryDTO {
 
   /**
    * Entry 语义类型，取 {@code EntryType}
-   * 枚举名：ROOT/TURN_START/MESSAGE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/TURN_END。
+   * 枚举名：ROOT/TURN_START/MESSAGE/CUSTOM/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/TURN_END。
    */
   private String entryType;
 

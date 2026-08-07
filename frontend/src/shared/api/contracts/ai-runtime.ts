@@ -26,6 +26,7 @@ export type EntryType =
   | 'ROOT'
   | 'TURN_START'
   | 'MESSAGE'
+  | 'CUSTOM'
   | 'CUSTOM_MESSAGE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'

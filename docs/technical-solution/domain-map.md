@@ -42,7 +42,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | --- | --- |
 | Chat | 保存唯一可见发送设置 `agentName`、`yoloEnabled` 的持久对象 |
 | Session | append-only Entry Tree 的边界 |
-| Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`TURN_END` |
+| Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`TURN_END` |
 | BranchSettings | Entry 分支的完整不可变设置快照（environmentId/agentName/model/thinkingLevel/activeTools） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，八类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |

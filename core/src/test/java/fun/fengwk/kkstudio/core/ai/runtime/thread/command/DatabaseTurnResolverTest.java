@@ -645,8 +645,12 @@ class DatabaseTurnResolverTest {
                 SESSION_ID,
                 turn2Id,
                 new CustomMessagePayload(
+                    CustomMessagePayload.CORE_PLUGIN_ID,
+                    CustomMessagePayload.CORE_CUSTOM_TYPE,
+                    CustomMessagePayload.CORE_RENDERER_KEY,
                     new AgentMessage(
-                        AgentMessageRole.USER, List.of(new TextMessageContent("custom note")))),
+                        AgentMessageRole.USER, List.of(new TextMessageContent("custom note"))),
+                    CustomMessagePayload.CORE_DETAILS_JSON),
                 NOW),
             new Entry(
                 errorId,

@@ -131,12 +131,115 @@ class HistoryEntryPayloadTest {
   }
 
   @Test
-  void customMessagePayloadRestrictsRoles() {
-    assertEquals(AgentMessageRole.SYSTEM, new CustomMessagePayload(system("s")).message().role());
-    assertEquals(AgentMessageRole.USER, new CustomMessagePayload(user("u")).message().role());
-    assertThrows(IllegalArgumentException.class, () -> new CustomMessagePayload(assistant("a")));
-    assertThrows(IllegalArgumentException.class, () -> new CustomMessagePayload(toolMessage("c")));
-    assertThrows(NullPointerException.class, () -> new CustomMessagePayload(null));
+  void customMessagePayloadRestrictsRolesAndRequiresCoreMetadataShape() {
+    AgentMessage system = system("s");
+    AgentMessage user = user("u");
+    assertEquals(
+        system,
+        new CustomMessagePayload(
+                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                system,
+                CustomMessagePayload.CORE_DETAILS_JSON)
+            .message());
+    assertEquals(
+        AgentMessageRole.USER,
+        new CustomMessagePayload("com.example", "goal", "goal-renderer", user, "{\"priority\":1}")
+            .message()
+            .role());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CustomMessagePayload(
+                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                assistant("a"),
+                CustomMessagePayload.CORE_DETAILS_JSON));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CustomMessagePayload(
+                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                toolMessage("c"),
+                CustomMessagePayload.CORE_DETAILS_JSON));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new CustomMessagePayload(
+                CustomMessagePayload.CORE_PLUGIN_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                null,
+                CustomMessagePayload.CORE_DETAILS_JSON));
+  }
+
+  @Test
+  void customEntryPayloadValidatesIdentifiersSchemaVersionAndCanonicalDataJson() {
+    CustomEntryPayload valid =
+        new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}");
+    assertEquals("com.example.goal", valid.pluginId());
+    assertEquals("goal", valid.customType());
+    assertEquals(1, valid.schemaVersion());
+    assertEquals("{\"state\":\"open\"}", valid.dataJson());
+    assertEquals(EntryType.CUSTOM, valid.type());
+
+    assertThrows(NullPointerException.class, () -> new CustomEntryPayload(null, "goal", 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("Goal", "goal", 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "Goal", 1, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 0, "{}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", -1, "{}"));
+    assertThrows(NullPointerException.class, () -> new CustomEntryPayload("goal", "goal", 1, null));
+    // dataJson 必须是 bounded canonical JSON object：非 JSON / 非 object / 非 canonical / 超长都拒绝。
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "[]"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "\"x\""));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomEntryPayload("goal", "goal", 1, "{"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\":1} {\"b\":2}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\":1,\"a\":2}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomEntryPayload("goal", "goal", 1, "{\"a\": 1}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CustomEntryPayload(
+                "goal",
+                "goal",
+                1,
+                "{\"a\":\"" + "x".repeat(CustomEntryPayload.MAX_DATA_JSON_CHARS) + "\"}"));
+  }
+
+  @Test
+  void customMessagePayloadRejectsNonCanonicalDetailsJson() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomMessagePayload("core", "message", "message", system("s"), "{\"a\": 1}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomMessagePayload("core", "message", "message", system("s"), "[]"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomMessagePayload("core", "message", "message", system("s"), ""));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomMessagePayload("Core", "message", "message", system("s"), "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CustomMessagePayload("core", "message", "Message", system("s"), "{}"));
   }
 
   @Test
