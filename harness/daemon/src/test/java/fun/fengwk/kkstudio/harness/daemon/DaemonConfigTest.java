@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -119,7 +121,7 @@ class DaemonConfigTest {
             });
 
     assertEquals(URI.create("wss://gateway.example/daemon"), config.gatewayUri());
-    assertEquals("local-dev", config.environmentName());
+    assertEquals(new EnvironmentName("local-dev"), config.environmentName());
     assertEquals("daemon-a", config.daemonId());
     assertEquals("secret", config.gatewayToken());
     assertEquals(Duration.ofSeconds(2), config.heartbeatInterval());
@@ -159,6 +161,29 @@ class DaemonConfigTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> DaemonConfig.fromArgs(new String[] {"--environment-name", "env"}));
+  }
+
+  /** 非 canonical 的 {@code --environment-name} 在配置解析期立即失败（名称是路由身份，不允许歧义）。 */
+  @Test
+  void rejectsNonCanonicalEnvironmentName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--environment-name", "My Env",
+                  "--gateway-uri", "ws://gateway.example/daemon",
+                  "--gateway-token", "secret"
+                }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--environment-name", "my/env",
+                  "--gateway-uri", "ws://gateway.example/daemon",
+                  "--gateway-token", "secret"
+                }));
   }
 
   /** 未知的 CLI 参数立即失败，而不是被静默忽略。 */
@@ -205,7 +230,7 @@ class DaemonConfigTest {
       List<Path> skillDirs) {
     return new DaemonConfig(
         gatewayUri,
-        environmentName,
+        new EnvironmentName(environmentName),
         daemonId,
         heartbeatInterval,
         initialReconnectDelay,

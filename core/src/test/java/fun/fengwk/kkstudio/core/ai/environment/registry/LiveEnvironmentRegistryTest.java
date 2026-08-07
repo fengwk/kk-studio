@@ -2,83 +2,171 @@ package fun.fengwk.kkstudio.core.ai.environment.registry;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
-/** 基于 EnvironmentId 的占用、display name 复用以及 live registry 的 READY 生命周期。 */
+/** 基于 canonical EnvironmentName 的占用、断开/租约释放接管与 READY + 心跳过期可用性规则。 */
 class LiveEnvironmentRegistryTest {
 
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
-  private static final EnvironmentId DEV_ID =
-      new EnvironmentId("0f8fad5b-d9cb-469f-a165-70867728950e");
-  private static final EnvironmentId PROD_ID =
-      new EnvironmentId("1f8fad5b-d9cb-469f-a165-70867728950e");
+  private static final Duration HEARTBEAT_TIMEOUT = Duration.ofSeconds(60);
+  private static final EnvironmentName DEV = new EnvironmentName("dev");
+  private static final EnvironmentName PROD = new EnvironmentName("prod");
 
-  @Test
-  void firstIdWinsAndDisconnectRemovesEntry() {
-    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
-    FakeConnection first = new FakeConnection("c1");
-    FakeConnection second = new FakeConnection("c2");
-
-    assertTrue(registry.tryBind(DEV_ID, "dev", first, NOW));
-    assertFalse(registry.tryBind(DEV_ID, "dev", second, NOW));
-    registry.updateSkills(DEV_ID, first, List.of(), NOW);
-    registry.markReady(DEV_ID, first, NOW);
-    assertTrue(registry.isReady(DEV_ID));
-
-    registry.unregister(DEV_ID, first);
-    assertFalse(registry.find(DEV_ID).isPresent());
-    assertTrue(registry.tryBind(DEV_ID, "dev", second, NOW));
-    assertEquals(LiveEnvironmentStatus.CONNECTING, registry.find(DEV_ID).orElseThrow().status());
+  private static BindResult bind(
+      LiveEnvironmentRegistry registry,
+      EnvironmentName name,
+      EnvironmentDaemonConnection connection,
+      Instant now) {
+    return registry.tryBind(name, connection, now, HEARTBEAT_TIMEOUT);
   }
 
   @Test
-  void sameDisplayNameOnTwoIdsIsAllowedAndNamesRemainDisplayOnly() {
+  void firstNameWinsAndDisconnectRemovesEntry() {
     LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
     FakeConnection first = new FakeConnection("c1");
     FakeConnection second = new FakeConnection("c2");
 
-    assertTrue(registry.tryBind(DEV_ID, "shared-name", first, NOW));
-    assertTrue(registry.tryBind(PROD_ID, "shared-name", second, NOW));
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
+    registry.updateSkills(DEV, first, List.of(), NOW);
+    registry.markReady(DEV, first, NOW);
+    assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
+
+    registry.unregister(DEV, first);
+    assertFalse(registry.find(DEV).isPresent());
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, second, NOW));
+    assertEquals(LiveEnvironmentStatus.CONNECTING, registry.find(DEV).orElseThrow().status());
+  }
+
+  @Test
+  void distinctNamesAreIndependentEntries() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection first = new FakeConnection("c1");
+    FakeConnection second = new FakeConnection("c2");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, PROD, second, NOW));
     assertEquals(2, registry.list().size());
-    assertEquals("shared-name", registry.find(DEV_ID).orElseThrow().name());
-    assertEquals("shared-name", registry.find(PROD_ID).orElseThrow().name());
-    assertTrue(registry.find(DEV_ID).orElseThrow().id().equals(DEV_ID));
-    assertTrue(registry.find(PROD_ID).orElseThrow().id().equals(PROD_ID));
+    assertEquals(DEV, registry.find(DEV).orElseThrow().name());
+    assertEquals(PROD, registry.find(PROD).orElseThrow().name());
   }
 
   @Test
-  void sameIdReconnectWithChangedNameIsAcceptedAfterUnregister() {
+  void sameConnectionRebindIsIdempotentAccepted() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection first = new FakeConnection("c1");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    // 同连接幂等重绑：继续持有，绝不挤占自己。
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    assertEquals("c1", registry.find(DEV).orElseThrow().connection().connectionId());
+  }
+
+  @Test
+  void freshConnectingClaimIsNotStolen() {
     LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
     FakeConnection first = new FakeConnection("c1");
     FakeConnection second = new FakeConnection("c2");
 
-    assertTrue(registry.tryBind(DEV_ID, "old-name", first, NOW));
-    registry.unregister(DEV_ID, first);
-    assertTrue(registry.tryBind(DEV_ID, "new-name", second, NOW));
-    assertEquals("new-name", registry.find(DEV_ID).orElseThrow().name());
-    assertTrue(registry.find(DEV_ID).orElseThrow().id().equals(DEV_ID));
+    // CONNECTING 的新鲜声明（连接打开 + 心跳未过期）与 READY 同等受保护：不能因为未 READY 就被抢走。
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
+    assertEquals("c1", registry.find(DEV).orElseThrow().connection().connectionId());
   }
 
   @Test
-  void nameMismatchAfterBindDoesNotRekeyTheEntry() {
+  void closedHolderConnectionIsAtomicallyReplaced() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection first = new FakeConnection("c1");
+    FakeConnection second = new FakeConnection("c2");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.markReady(DEV, first, NOW);
+    first.close();
+
+    BindResult result = bind(registry, DEV, second, NOW);
+    BindResult.Replaced replaced = assertInstanceOf(BindResult.Replaced.class, result);
+    // 被替换的是旧连接；registry 条目已原子切换到新 holder。
+    assertEquals("c1", replaced.displacedConnection().connectionId());
+    assertEquals("c2", registry.find(DEV).orElseThrow().connection().connectionId());
+    // 旧连接的 unregister 不得移除新 holder。
+    registry.unregister(DEV, first);
+    assertEquals("c2", registry.find(DEV).orElseThrow().connection().connectionId());
+    // 新 holder 可正常升级 READY。
+    registry.markReady(DEV, second, NOW);
+    assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
+  }
+
+  @Test
+  void expiredHeartbeatLeaseIsAtomicallyReplacedEvenWhileOpen() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection first = new FakeConnection("c1");
+    FakeConnection second = new FakeConnection("c2");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.markReady(DEV, first, NOW);
+    Instant stale = NOW.plus(HEARTBEAT_TIMEOUT).plusSeconds(1);
+
+    // 连接仍打开但心跳租约过期：同一可用性规则判定可接管。
+    BindResult result = bind(registry, DEV, second, stale);
+    BindResult.Replaced replaced = assertInstanceOf(BindResult.Replaced.class, result);
+    assertEquals("c1", replaced.displacedConnection().connectionId());
+    assertEquals("c2", registry.find(DEV).orElseThrow().connection().connectionId());
+    assertTrue(first.isOpen(), "displaced connection ownership is handed to the caller to close");
+  }
+
+  @Test
+  void freshHeartbeatAfterTimeoutStillProtectsHolder() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection first = new FakeConnection("c1");
+    FakeConnection second = new FakeConnection("c2");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.markReady(DEV, first, NOW);
+    Instant refreshed = NOW.plus(HEARTBEAT_TIMEOUT).minusSeconds(1);
+    registry.heartbeat(DEV, first, refreshed);
+
+    // 心跳在超时窗口内刷新过：租约未过期，冲突。
+    assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, refreshed));
+    assertEquals("c1", registry.find(DEV).orElseThrow().connection().connectionId());
+  }
+
+  @Test
+  void staleHeartbeatMakesReadyEnvironmentUnavailable() {
     LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
     FakeConnection connection = new FakeConnection("c1");
 
-    assertTrue(registry.tryBind(DEV_ID, "bound-name", connection, NOW));
-    registry.markReady(DEV_ID, connection, NOW);
-    // 之后使用同一 id 但不同名称的连接不能替换已绑定项：占用判断仅依据 id。
-    assertFalse(registry.tryBind(DEV_ID, "other-name", new FakeConnection("c2"), NOW));
-    assertEquals("bound-name", registry.find(DEV_ID).orElseThrow().name());
-    assertTrue(registry.isReady(DEV_ID));
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, connection, NOW));
+    registry.markReady(DEV, connection, NOW);
+    assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
+    // 心跳超过超时未刷新：同一规则下不可用。
+    Instant stale = NOW.plus(HEARTBEAT_TIMEOUT).plusSeconds(1);
+    assertFalse(registry.isReady(DEV, stale, HEARTBEAT_TIMEOUT));
+    // 刷新心跳后重新可用。
+    registry.heartbeat(DEV, connection, stale);
+    assertTrue(registry.isReady(DEV, stale, HEARTBEAT_TIMEOUT));
+  }
+
+  @Test
+  void closedConnectionMakesReadyEnvironmentUnavailable() {
+    LiveEnvironmentRegistry registry = new LiveEnvironmentRegistry();
+    FakeConnection connection = new FakeConnection("c1");
+
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, connection, NOW));
+    registry.markReady(DEV, connection, NOW);
+    connection.close();
+    assertFalse(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
   }
 
   @Test
@@ -87,11 +175,11 @@ class LiveEnvironmentRegistryTest {
     FakeConnection owner = new FakeConnection("c1");
     FakeConnection foreign = new FakeConnection("c2");
 
-    assertTrue(registry.tryBind(DEV_ID, "dev", owner, NOW));
+    assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, owner, NOW));
     assertThrows(
-        IllegalStateException.class, () -> registry.updateSkills(DEV_ID, foreign, List.of(), NOW));
-    registry.unregister(DEV_ID, foreign);
-    assertTrue(registry.find(DEV_ID).isPresent());
+        IllegalStateException.class, () -> registry.updateSkills(DEV, foreign, List.of(), NOW));
+    registry.unregister(DEV, foreign);
+    assertTrue(registry.find(DEV).isPresent());
   }
 
   private static final class FakeConnection implements EnvironmentDaemonConnection {

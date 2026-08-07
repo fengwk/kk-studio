@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,11 +15,12 @@ import java.util.UUID;
  * Daemon 独立进程的连接与执行配置。
  *
  * <p>CLI 参数是权威来源：{@code --environment-name} 与可重复 {@code --skill-dir}。gateway 连接类参数也支持 CLI；若 CLI
- * 未给出，再回退到系统属性以便现有独立启动方式继续工作。skill 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
+ * 未给出，再回退到系统属性以便现有独立启动方式继续工作。{@code --environment-name} 是 canonical 路由身份，必须是规范的 {@link
+ * EnvironmentName}。skill 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
  */
 public record DaemonConfig(
     URI gatewayUri,
-    String environmentName,
+    EnvironmentName environmentName,
     String daemonId,
     Duration heartbeatInterval,
     Duration initialReconnectDelay,
@@ -31,7 +34,7 @@ public record DaemonConfig(
     if (!"ws".equals(gatewayUri.getScheme()) && !"wss".equals(gatewayUri.getScheme())) {
       throw new IllegalArgumentException("gatewayUri must use ws or wss");
     }
-    environmentName = requireNonBlank(environmentName, "environmentName");
+    environmentName = Objects.requireNonNull(environmentName, "environmentName");
     daemonId = requireNonBlank(daemonId, "daemonId");
     heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
     initialReconnectDelay = requireNonNegative(initialReconnectDelay, "initialReconnectDelay");
@@ -119,7 +122,8 @@ public record DaemonConfig(
 
     return new DaemonConfig(
         URI.create(requirePresent(gatewayUri, "gateway-uri / kkstudio.daemon.gateway-uri")),
-        requirePresent(environmentName, "environment-name / kkstudio.daemon.environment-name"),
+        new EnvironmentName(
+            requirePresent(environmentName, "environment-name / kkstudio.daemon.environment-name")),
         requirePresent(daemonId, "daemon-id"),
         parseDuration(heartbeat, Duration.ofSeconds(15)),
         parseDuration(reconnectInitial, Duration.ofSeconds(1)),

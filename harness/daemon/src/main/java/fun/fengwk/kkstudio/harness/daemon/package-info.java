@@ -5,9 +5,10 @@
  * Model、Agent 或 Runtime。每个连接 generation 的首个入站 sequence 建立基线；该 generation 内只接受紧邻的新 sequence 或最新
  * sequence 的重复， 重连后基线重置。
  *
- * <p>Environment 作用域使用 canonical {@code environmentId}（环境根下持久化的 UUID 身份）与实时 display {@code
- * environmentName}（CLI {@code --environment-name}）；每个 envelope 同时携带两者并做双字段校验，路由只依赖
- * environmentId。Skills 由 CLI {@code --skill-dir} 或默认 {@code ~/.agents/skills} 本地发现；READY 上报 skills
- * 摘要， 正文经 {@code LOAD_SKILL} 按需加载。
+ * <p>Environment 作用域使用 canonical {@code environmentName}（CLI {@code --environment-name}，规范 {@link
+ * fun.fengwk.kkstudio.harness.tool.EnvironmentName}）；每个 envelope 只携带该逻辑路由名称并做单字段作用域校验。HELLO 声称该
+ * 名称；若已被另一个 live daemon 持有，gateway 返回带 {@code ENVIRONMENT_NAME_CONFLICT} code 的 ERROR，daemon 停止重连并以
+ * 非零状态退出。Skills 由 CLI {@code --skill-dir} 或默认 {@code ~/.agents/skills} 本地发现；READY 上报 skills 摘要， 正文经
+ * {@code LOAD_SKILL} 按需加载。
  */
 package fun.fengwk.kkstudio.harness.daemon;

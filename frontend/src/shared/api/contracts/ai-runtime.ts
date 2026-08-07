@@ -12,10 +12,10 @@ export interface HarnessModelSelectionDTO {
 /**
  * 单个 Entry branch 的完整 branch settings 快照。
  *
- * environmentId 是可空的规范小写 UUID 路由标识；展示名称永远不会进入此持久快照。
+ * environmentName 是可空的规范小写路由名称；展示名称永远不会进入此持久快照。
  */
 export interface HarnessBranchSettingsDTO {
-  environmentId: string | null
+  environmentName: string | null
   agentName: string
   model: HarnessModelSelectionDTO
   thinkingLevel: string
@@ -99,7 +99,7 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'SET_THINKING_LEVEL'; clientCommandId: string; thinkingLevel: string }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
-  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentId: string | null }
+  | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentName: string | null }
 
 /** 原子化的 Thread mailbox 入队请求；期望游标来自最新的 thread DTO。 */
 export interface HarnessThreadCommandBatchDTO {
@@ -169,7 +169,7 @@ export interface ModelInvocationDTO {
 /**
  * ToolInvocation 查询投影；id 均为严格的正十进制数字字符串。
  * approvalJson / resultJson / errorJson 是规范的运行时 codec JSON，仅在其对应阶段
- * 非 null；environmentId 是可空的规范小写 UUID 路由标识。
+ * 非 null；environmentName 是可空的规范小写路由名称。
  */
 export interface ToolInvocationDTO {
   id: string
@@ -182,7 +182,7 @@ export interface ToolInvocationDTO {
   toolName: string
   toolVersion: string
   toolType: string
-  environmentId: string | null
+  environmentName: string | null
   argumentsJson: string
   approvalJson: string | null
   resultJson: string | null

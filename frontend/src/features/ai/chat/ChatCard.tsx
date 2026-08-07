@@ -48,6 +48,10 @@ export function ChatCard({
       </div>
       <div className="meta-block">
         <MetaRow label={t('ai.chat.agent')} value={agentLabel} />
+        <MetaRow
+          label={t('ai.chat.environment')}
+          value={chat.environmentName || t('ai.chat.noneEnvironment')}
+        />
         <MetaRow label={t('ai.chat.updated')} value={formatBackendDate(chat.updateTime)} />
       </div>
       <div className="chat-card-foot split">

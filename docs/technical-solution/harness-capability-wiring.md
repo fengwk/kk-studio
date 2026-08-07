@@ -61,7 +61,7 @@ public interface ProviderFactory {
   - `create_goal` / `get_goal` / `update_goal`（Goal 工具，`RuntimeToolsConfiguration` 以 `@ConditionalOnBean(GoalStore.class)` 条件装配为 `ToolFactory` bean；`DatabaseGoalStore` 提供 durable `agent_thread_goal` 存储）；
   - 其他 Core 提供的 Platform ToolFactory；
 - 固定的十个 `ENVIRONMENT` Tool descriptor：
-  `read, write, edit, apply_patch, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile`；
+  `read, write, edit, bash, grep, find, lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile`；
 - **`load_skill` 是唯一 internal Platform Tool**（`ToolCatalog(descriptors, Set.of(LoadSkillTool.NAME))`），从 selectable 集合移出，不出现在 Agent 可选择目录中。
 
 `GET /api/ai/catalog/tools` 只返回 Agent 可选择的 Platform/Environment 目录。Agent config 保存可选择 Tool 名称集合，不保存 Tool 实例或 Environment 连接。
@@ -74,7 +74,7 @@ public interface ProviderFactory {
 
 ```java
 public record BranchSettings(
-    EnvironmentId environmentId,   // canonical UUID route，可 null
+    EnvironmentName environmentName, // canonical 路由名称，可 null
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
     String thinkingLevel,
@@ -88,15 +88,15 @@ candidate path 最近 TURN_START 的 BranchSettings
   -> AgentDefinition（agentName）
   -> Provider / (providerName, modelName) Model / effective Variant
   -> ToolCatalog + activeTools（必须命中可选择目录）
-  -> environmentId 路由 + LiveEnvironmentRegistry（READY 才可用）
+  -> environmentName 路由 + LiveEnvironmentRegistry（READY + 心跳未过期才可用）
   -> ProviderFactory（按当前行 providerType 派生 cache policy）
   -> 冻结 ModelInvocationRequest（Agent/Model 修改下一 turn 生效）
 ```
 
 **fail closed（Environment route 规则）**：
 
-- **非 null `environmentId` 一律必须存在且 READY**（`environment not found` / `environment is not ready` 拒绝），**即使本 turn 仅 Platform Tool**——route 解析先于 tool 绑定，选中了 Environment 就必须可用；
-- **null `environmentId` 只允许 platform-only 且无 skills 的 turn**：任何 ENVIRONMENT tool（`environment tool requires a selected environment: <name>`）或 Agent skill（`agent skills require a selected environment`）都是确定性拒绝，绝不静默省略；
+- **ENVIRONMENT 工具规划不拒绝**：一律按最新 `BranchSettings.environmentName()` 绑定（null/缺失/未 READY 都放行）；实际 start 时 null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 收敛；
+- **Agent skills 规划要求最新选中 Environment live**：缺失/未 READY/分支无名称都是确定性拒绝（精确 message），绝不回看更旧 settings；
 - Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；Platform Tool 总可候选。
 
 **确定性拒绝**：所有 planning rejection 共用稳定 `AssistantError` code **`PLANNING_FAILED`**（`DatabaseTurnResolver.REJECTION_CODE`），message 携带具体原因（缺失 Agent/Provider/Model/Variant、未知 Tool、Environment 不可用等）——不存在按类别区分的独立拒绝码列表。
@@ -107,10 +107,10 @@ candidate path 最近 TURN_START 的 BranchSettings
 
 ## 5. 冻结 request 的不变量
 
-`ModelInvocationRequest(environmentId, providerRequest, toolBindings, skillBindings, yoloEnabled)`：
+`ModelInvocationRequest(environmentName, providerRequest, toolBindings, skillBindings, yoloEnabled)`：
 
 - `providerRequest.tools` 与 `toolBindings` 数量、顺序、名称一一对应；
-- `ToolBinding(descriptor, type, environmentId)`：`PLATFORM` 的 route 为 null，`ENVIRONMENT` 指向具体 route；descriptor 的 type 与 binding type 一致；
+- `ToolBinding(descriptor, type, environmentName)`：`PLATFORM` 的 route 为 null，`ENVIRONMENT` 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致；
 - tool/skill binding 名称不重复；每个 environment-bound tool/skill 引用本请求 route；
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
 - retry 重放同一 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；

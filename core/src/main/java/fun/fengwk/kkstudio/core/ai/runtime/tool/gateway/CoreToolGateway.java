@@ -57,8 +57,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * workdir/environmentRoot 评估冻结的 call/binding，YOLO 在加载 settings / evaluator 之前直接返回 Allow；绝不改写
  * binding/arguments。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
  * ToolFactories} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
- * 执行；ENVIRONMENT 只按 {@code binding.environmentId()} 经 {@link RemoteToolTransport} 发送，display name
- * 与本地同名注册完全不参与。missing capability / offline 依据可证明的 未接受分别映射 Rejected / Busy；本地 executor 拒绝映射
+ * 执行；ENVIRONMENT 只按 {@code binding.environmentName()} 经 {@link RemoteToolTransport} 发送。missing
+ * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；本地 executor 拒绝映射
  * Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
@@ -273,11 +273,21 @@ public final class CoreToolGateway implements ToolGateway {
   }
 
   /**
-   * ENVIRONMENT：只按冻结 {@code binding.environmentId()} 路由。能力缺失 / descriptor 漂移是确定性拒绝；发送前 offline 是
-   * Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
+   * ENVIRONMENT：只按冻结 {@code binding.environmentName()} 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未
+   * READY、心跳过期）都是确定性 Rejected；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(Execution execution, Listener listener) {
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
+    if (execution.request().binding().environmentName() == null) {
+      // 冻结 binding 没有 Environment route（分支最新 settings 未选中/被清空）：发送前确定性拒绝，
+      // 绝不进入 transport（否则 null route 会变成不确定结果）。
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              UNAVAILABLE_KIND,
+              "Environment tool "
+                  + bindingDescriptor.name()
+                  + " has no environment route (the branch has no selected environment)."));
+    }
     Optional<ToolDescriptor> capability =
         EnvironmentToolCatalog.find(bindingDescriptor.name(), bindingDescriptor.version());
     if (capability.isEmpty()) {
@@ -309,10 +319,13 @@ public final class CoreToolGateway implements ToolGateway {
     ToolExecutionHandle transportHandle;
     try {
       transportHandle =
-          remoteTransport.invoke(execution.request().binding().environmentId(), request, bridge);
+          remoteTransport.invoke(execution.request().binding().environmentName(), request, bridge);
     } catch (RemoteToolUnavailableException unavailable) {
-      // 发送前目标不可用：肯定未开始，稍后重试。
-      return new ToolGateway.Busy(config.busyRetryDelay());
+      // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
+      // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              UNAVAILABLE_KIND, failureMessage(unavailable, "Tool is unavailable.")));
     } catch (RemoteToolSendUncertainException uncertain) {
       // 发送不确定：可能已开始，绝不能抛。取消本地桥：迟到的 transport 回调被丢弃而不是永远缓冲。
       bridge.cancel();

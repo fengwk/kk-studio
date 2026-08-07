@@ -49,6 +49,7 @@ export function BlankComposerPane({
   onThreadSortChange,
   onAgentChange,
   onYoloChange = async () => undefined,
+  onEnvironmentChange = async () => undefined,
   onFirstSendRecovery,
 }: {
   chat: ChatDTO | undefined
@@ -61,6 +62,8 @@ export function BlankComposerPane({
   onThreadSortChange: (sort: PaneSortPreference) => void
   onAgentChange: (agentName: string) => Promise<void>
   onYoloChange?: (yoloEnabled: boolean) => Promise<void>
+  /** 空面板显式选择/清空 Environment 草稿时同步 Chat 默认值（版本化 CAS）；失败仅提示，不影响本面板草稿。 */
+  onEnvironmentChange?: (environmentName: string | null) => Promise<void>
   onFirstSendRecovery: (threadId: string, recovery: FirstSendRecovery) => void
 }) {
   const { t } = useI18n()
@@ -88,8 +91,9 @@ export function BlankComposerPane({
     () => (chat?.agentName ? agents.find((agent) => agent.name === chat.agentName) : undefined),
     [agents, chat],
   )
-  const environmentNames = useMemo(
-    () => new Map(environments.map((environment) => [environment.id, environment.name])),
+  // canonical 名称即展示身份；仅携带统一可用性标记（live 列表缺失/未知 => unavailable）。
+  const environmentReadyByName = useMemo(
+    () => new Map(environments.map((environment) => [environment.name, environment.ready])),
     [environments],
   )
 
@@ -101,7 +105,13 @@ export function BlankComposerPane({
     if (chatAgent != null && modelsQuery.isLoading) {
       return
     }
-    const materialized = materializeBlankBranchDraft(chatAgent, chat.yoloEnabled, models)
+    const materialized = materializeBlankBranchDraft(
+      chatAgent,
+      chat.yoloEnabled,
+      models,
+      // Chat 默认 Environment 名称是空面板草稿的起点；用户可在首次发送前更改或清空。
+      chat.environmentName ?? null,
+    )
     if (materialized != null) {
       setInitialFrozenDraft((current) => current ?? materialized)
       setFrozenDraft(materialized)
@@ -123,7 +133,7 @@ export function BlankComposerPane({
         // Session 拒绝空标题；Chat title 可为空——保持 null。
         title: chat.title ?? null,
         branchSettings: {
-          environmentId: effective.environmentId,
+          environmentName: effective.environmentName,
           agentName: effective.agentName,
           model: { ...effective.model },
           thinkingLevel: effective.thinkingLevel,
@@ -255,12 +265,18 @@ export function BlankComposerPane({
     }
   }
 
-  function handleEnvironmentSelected(environmentId: string | null) {
+  function handleEnvironmentSelected(environmentName: string | null) {
     if (pending) {
       return
     }
-    setFrozenDraft((current) => (current ? { ...current, environmentId } : current))
+    // 与 agent/yolo 一致的语义：立即更新本面板 frozen draft（首次发送 ROOT 使用面板本地值），
+    // 同时异步把 Chat 默认值同步为最新选择——即使更新失败/延迟，本面板草稿不受影响。
+    setFrozenDraft((current) => (current ? { ...current, environmentName } : current))
     setEnvironmentModalOpen(false)
+    setActionError(null)
+    void onEnvironmentChange(environmentName).catch((error: unknown) => {
+      setActionError(errorMessage(error, t('ai.runtime.action.updateEnvironmentFailed')))
+    })
   }
 
   async function toggleYolo() {
@@ -297,8 +313,7 @@ export function BlankComposerPane({
     || (chat?.agentName
       ? t('ai.runtime.action.agentMissing')
       : t('ai.runtime.action.blankAgent'))
-  const environmentId = frozenDraft?.environmentId ?? null
-  const environmentDisplayName = environmentId == null ? null : (environmentNames.get(environmentId) ?? environmentId)
+  const environmentName = frozenDraft?.environmentName ?? null
 
   return (
     <section className={`chat-pane ${focused ? 'focused' : ''}`} onMouseDown={onFocus}>
@@ -329,7 +344,8 @@ export function BlankComposerPane({
                 : undefined
             }
             variantName={frozenDraft?.model.variant || undefined}
-            environmentDisplayName={environmentDisplayName}
+            environmentName={environmentName}
+            environmentReady={environmentName == null ? undefined : (environmentReadyByName.get(environmentName) ?? false)}
             yoloEnabled={frozenDraft?.yoloEnabled ?? chat?.yoloEnabled}
             onAgentClick={() => {
               onFocus()
@@ -359,11 +375,11 @@ export function BlankComposerPane({
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentId={environmentId}
+        selectedEnvironmentName={environmentName}
         selectionPending={pending}
         onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(selectedId) => {
-          handleEnvironmentSelected(selectedId)
+        onSelect={(selectedName) => {
+          handleEnvironmentSelected(selectedName)
         }}
       />
       {/* /thread 仅重新绑定面板；不会修改任何 Thread。 */}

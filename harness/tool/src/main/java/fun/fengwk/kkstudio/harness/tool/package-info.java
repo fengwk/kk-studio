@@ -4,7 +4,7 @@
  * <p>Descriptor 是 route-neutral 的功能描述。本包不依赖 Agent、Session、Runtime、Spring 或持久化框架。工具执行的持久化、权限与调度由
  * Runtime Tool processor 与 gateway 负责。
  *
- * <p>{@link fun.fengwk.kkstudio.harness.tool.EnvironmentId} 是跨 Runtime/daemon/gateway 共享的
- * Environment route identity：只有 canonical 小写 UUID 文本进入 durable 协议，display name 不参与。
+ * <p>{@link fun.fengwk.kkstudio.harness.tool.EnvironmentName} 是跨 Runtime/daemon/gateway 共享的
+ * Environment 逻辑路由身份：bounded 小写路由名称（无空白、无 {@code '/'}）是进入 durable 协议的唯一身份。
  */
 package fun.fengwk.kkstudio.harness.tool;

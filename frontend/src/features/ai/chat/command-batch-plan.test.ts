@@ -11,7 +11,7 @@ import type {
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
-    environmentId: null,
+    environmentName: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     thinkingLevel: 'off',
@@ -39,7 +39,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 
 function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
-    environmentId: null,
+    environmentName: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     thinkingLevel: 'off',

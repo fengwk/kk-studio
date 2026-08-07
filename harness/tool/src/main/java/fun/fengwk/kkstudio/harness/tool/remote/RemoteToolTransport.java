@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool.remote;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
@@ -19,11 +19,13 @@ public interface RemoteToolTransport {
   /**
    * 发送远程 INVOKE 并注册 listener。
    *
-   * @param environmentId 目标 Environment 的 canonical 路由身份；display name 不得参与路由。
+   * @param environmentName 目标 Environment 的 canonical 逻辑路由名称。
    * @return 可取消句柄；CANCEL 映射为远程 CANCEL 消息
    * @throws RemoteToolUnavailableException 发送前目标不可用，INVOKE 未发出
    * @throws RemoteToolSendUncertainException 发送结果不确定（可能已投递）
    */
   ToolExecutionHandle invoke(
-      EnvironmentId environmentId, ToolExecutionRequest request, ToolExecutionListener listener);
+      EnvironmentName environmentName,
+      ToolExecutionRequest request,
+      ToolExecutionListener listener);
 }

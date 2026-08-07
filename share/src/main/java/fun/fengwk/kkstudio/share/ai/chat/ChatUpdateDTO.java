@@ -18,6 +18,28 @@ public class ChatUpdateDTO {
   /** 部分更新：省略（null）保留当前值；提供时必须为已存在的 Agent definition 名（约束同创建）。 */
   private String agentName;
 
+  /**
+   * 部分更新：仅在 {@link #environmentNameProvided} 为 true 时生效；提供时必须为 canonical Environment 逻辑路由名称， 显式
+   * null 表示清除默认环境。
+   */
+  private String environmentName;
+
+  /**
+   * 内部序列化控制标记（{@code @JsonIgnore}，不参与 HTTP 契约）：由 {@link #setEnvironmentName} 自动置位，用于区分 JSON 中缺省
+   * environmentName 与显式 null。
+   */
+  @JsonIgnore private boolean environmentNameProvided;
+
+  public void setEnvironmentName(String environmentName) {
+    this.environmentName = environmentName;
+    this.environmentNameProvided = true;
+  }
+
+  @JsonIgnore
+  public boolean isEnvironmentNameProvided() {
+    return environmentNameProvided;
+  }
+
   /** 部分更新：仅在 {@link #yoloEnabledProvided} 为 true 时生效，且显式提供时不得为 null。 */
   private Boolean yoloEnabled;
 

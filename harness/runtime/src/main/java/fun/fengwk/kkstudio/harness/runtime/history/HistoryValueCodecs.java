@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -31,7 +31,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environmentId", "agentName", "model", "thinkingLevel", "activeTools");
+      orderedSet("environmentName", "agentName", "model", "thinkingLevel", "activeTools");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -67,10 +67,10 @@ final class HistoryValueCodecs {
 
   static ObjectNode encodeBranchSettings(BranchSettings settings) {
     ObjectNode node = NODES.objectNode();
-    if (settings.environmentId() == null) {
-      node.putNull("environmentId");
+    if (settings.environmentName() == null) {
+      node.putNull("environmentName");
     } else {
-      node.put("environmentId", settings.environmentId().value());
+      node.put("environmentName", settings.environmentName().value());
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
@@ -86,7 +86,7 @@ final class HistoryValueCodecs {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
-        nullableEnvironmentId(node, "environmentId", context),
+        nullableEnvironmentName(node, "environmentName", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"),
         requiredText(node, "thinkingLevel", context),
@@ -323,7 +323,7 @@ final class HistoryValueCodecs {
     return value;
   }
 
-  static EnvironmentId nullableEnvironmentId(ObjectNode node, String field, String context) {
+  static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {
       return null;
@@ -331,7 +331,7 @@ final class HistoryValueCodecs {
     if (!value.isTextual()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    return new EnvironmentId(value.textValue());
+    return new EnvironmentName(value.textValue());
   }
 
   static void requireExactFields(ObjectNode node, Set<String> expected, String context) {

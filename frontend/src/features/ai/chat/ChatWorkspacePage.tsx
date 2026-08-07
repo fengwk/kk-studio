@@ -132,14 +132,18 @@ export function ChatWorkspacePage() {
     mutationFn: ({
       agentName,
       yoloEnabled,
+      environmentName,
       expectedVersion,
     }: {
       agentName?: string
       yoloEnabled?: boolean
+      environmentName?: string | null
       expectedVersion: string
     }) => chatService.updateChat(chatId, {
       ...(agentName === undefined ? {} : { agentName }),
       ...(yoloEnabled === undefined ? {} : { yoloEnabled }),
+      // 显式 null 表示清空默认 Environment（environmentNameProvided 由 DTO setter 置位）。
+      ...(environmentName === undefined ? {} : { environmentName }),
       expectedVersion,
     }),
     onSuccess: (updatedChat: ChatDTO) => {
@@ -161,6 +165,7 @@ export function ChatWorkspacePage() {
     patch: {
       agentName?: string
       yoloEnabled?: boolean
+      environmentName?: string | null
     },
   ) {
     const chat = currentChat()
@@ -273,6 +278,9 @@ export function ChatWorkspacePage() {
             }}
             onYoloChange={async (yoloEnabled) => {
               await updateChatSettings({ yoloEnabled })
+            }}
+            onEnvironmentChange={async (environmentName) => {
+              await updateChatSettings({ environmentName })
             }}
           />
         ))}

@@ -53,7 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -77,7 +77,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -95,7 +94,7 @@ import java.util.function.Function;
 final class ThreadProcessorTestSupport {
 
   static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
-  static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
   static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
@@ -634,7 +633,7 @@ final class ThreadProcessorTestSupport {
       definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
     }
     return new ModelInvocationRequest(
-        settings.environmentId(),
+        settings.environmentName(),
         new ProviderRequest(
             modelDescriptor(settings.model().providerName(), settings.model().modelName()),
             new ModelVariant(

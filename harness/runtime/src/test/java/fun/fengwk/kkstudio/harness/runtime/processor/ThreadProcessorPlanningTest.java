@@ -51,11 +51,10 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * ThreadProcessor continuation / input planning 与 speculative plan + CAS 提交、reschedule、lease
@@ -111,7 +110,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetEnvironmentCommandPayload(new EnvironmentId(UUID.randomUUID().toString())));
+            new SetEnvironmentCommandPayload(new EnvironmentName("env-1")));
     long yoloCommand =
         seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());

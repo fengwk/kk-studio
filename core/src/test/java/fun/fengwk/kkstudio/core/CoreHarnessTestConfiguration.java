@@ -16,6 +16,6 @@ public class CoreHarnessTestConfiguration {
 
   @Bean
   public EnvironmentReadyListener environmentReadyListener() {
-    return environmentId -> {};
+    return environmentName -> {};
   }
 }

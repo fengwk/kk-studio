@@ -86,8 +86,9 @@ export function BoundThreadPane({
   onReplayInitialized?: () => void
 }) {
   const { t } = useI18n()
-  const environmentNames = useMemo(
-    () => new Map(environments.map((environment) => [environment.id, environment.name])),
+  // canonical 名称即展示身份；仅携带统一可用性标记（live 列表缺失/未知 => unavailable）。
+  const environmentReadyByName = useMemo(
+    () => new Map(environments.map((environment) => [environment.name, environment.ready])),
     [environments],
   )
   // buildBatch 依赖 controller 的 snapshot thread；controller 在下方创建，因此
@@ -98,7 +99,7 @@ export function BoundThreadPane({
     initialDraft ?? initialReplay?.content ?? '',
     initialReplay,
     (content) => buildBatchRef.current?.(content) ?? null,
-    environmentNames,
+    environmentReadyByName,
   )
   // 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
   // 与下一条 message batch 一起原子应用。base 跟随 snapshot；queued SET_*
@@ -268,9 +269,9 @@ export function BoundThreadPane({
     setAgentModalOpen(false)
   }
 
-  function selectEnvironment(environmentId: string | null) {
+  function selectEnvironment(environmentName: string | null) {
     setRebindBlockedReason(null)
-    editDraft({ environmentId })
+    editDraft({ environmentName })
     setEnvironmentModalOpen(false)
   }
 
@@ -393,12 +394,16 @@ export function BoundThreadPane({
       ? `${draft.model.providerName}/${draft.model.modelName}`
       : controller.runtimeLabels.modelName,
     variantName: draft?.model.variant || controller.runtimeLabels.variantName,
-    environmentDisplayName:
-      draft?.environmentId != null
-        ? (environmentNames.get(draft.environmentId) ?? draft.environmentId)
-        : (draft?.environmentId == null && draft != null
+    environmentName:
+      draft?.environmentName != null
+        ? draft.environmentName
+        : (draft?.environmentName == null && draft != null
             ? null
-            : controller.runtimeLabels.environmentDisplayName),
+            : controller.runtimeLabels.environmentName),
+    environmentReady:
+      draft?.environmentName != null
+        ? (environmentReadyByName.get(draft.environmentName) ?? false)
+        : controller.runtimeLabels.environmentReady,
     contextWindow: extractContextWindow(draftModel) ?? controller.runtimeLabels.contextWindow,
   }
   const transcript: ChatPanelTranscriptInput = {
@@ -507,10 +512,10 @@ export function BoundThreadPane({
       <EnvironmentSelectionModal
         open={environmentModalOpen}
         environments={environments}
-        selectedEnvironmentId={branchState?.draft.environmentId ?? null}
+        selectedEnvironmentName={branchState?.draft.environmentName ?? null}
         onClose={() => setEnvironmentModalOpen(false)}
-        onSelect={(environmentId) => {
-          selectEnvironment(environmentId)
+        onSelect={(environmentName) => {
+          selectEnvironment(environmentName)
         }}
       />
     </section>

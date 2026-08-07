@@ -17,19 +17,18 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码冻结 skill bindings，并把
- * canonical {@code EnvironmentId} 映射回 legacy {@code SkillBinding} 表面（LoadSkillTool 契约）。
+ * canonical {@code EnvironmentName} 映射回 legacy {@code SkillBinding} 表面（LoadSkillTool 契约）。
  */
 class DatabaseThreadSelectedSkillLookupTest {
 
-  private static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  private static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
   private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
       new ModelInvocationRequestJsonCodec();
 
@@ -45,7 +44,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     var skill = skills.get(0);
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
-    // legacy 表面携带 canonical EnvironmentId 文本（EnvironmentSkillBodyLoader 严格解析）。
+    // legacy 表面携带 canonical EnvironmentName 文本（EnvironmentSkillBodyLoader 严格解析）。
     assertEquals(ENV_ID.value(), skill.sourceEnvironment());
   }
 
@@ -69,7 +68,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     assertTrue(error.getMessage().contains("review"), error.getMessage());
   }
 
-  private static String encodedRequest(EnvironmentId sourceEnvironmentId) {
+  private static String encodedRequest(EnvironmentName sourceEnvironmentName) {
     ModelInvocationRequest request =
         new ModelInvocationRequest(
             ENV_ID,
@@ -80,7 +79,7 @@ class DatabaseThreadSelectedSkillLookupTest {
                 List.of(),
                 ProviderCacheControl.none()),
             List.of(),
-            List.of(new SkillBinding("review", "Review code", sourceEnvironmentId)),
+            List.of(new SkillBinding("review", "Review code", sourceEnvironmentName)),
             false);
     return REQUEST_CODEC.encode(request);
   }

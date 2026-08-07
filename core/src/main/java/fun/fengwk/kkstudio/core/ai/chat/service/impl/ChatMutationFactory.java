@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
@@ -48,6 +49,7 @@ public class ChatMutationFactory {
     editableSupport.validateMaxLength(RESOURCE, "title", title, TITLE_MAX_LENGTH);
     chat.setTitle(title);
     chat.setAgentName(parseRequiredAgentName(createDTO.getAgentName()));
+    chat.setEnvironmentName(parseNullableEnvironmentName(createDTO.getEnvironmentName()));
     chat.setYoloEnabled(
         createDTO.getYoloEnabled() == null
             ? toolSettingsProvider.get().defaultYolo()
@@ -73,11 +75,29 @@ public class ChatMutationFactory {
     if (updateDTO.getAgentName() != null) {
       chat.setAgentName(parseRequiredAgentName(updateDTO.getAgentName()));
     }
+    if (updateDTO.isEnvironmentNameProvided()) {
+      chat.setEnvironmentName(parseNullableEnvironmentName(updateDTO.getEnvironmentName()));
+    }
     if (updateDTO.isYoloEnabledProvided()) {
       if (updateDTO.getYoloEnabled() == null) {
         throw new AiValidationException(RESOURCE, "yoloEnabled must not be null");
       }
       chat.setYoloEnabled(updateDTO.getYoloEnabled());
+    }
+  }
+
+  /**
+   * 规范化可空的 Environment 逻辑路由名称：null 表示 clear（无默认环境）；提供时必须为规范 {@link EnvironmentName}，非法文本按 Chat
+   * 资源契约翻译为 {@link AiValidationException}（HTTP 400）。
+   */
+  private String parseNullableEnvironmentName(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    try {
+      return new EnvironmentName(raw).value();
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, "invalid environmentName: " + error.getMessage());
     }
   }
 

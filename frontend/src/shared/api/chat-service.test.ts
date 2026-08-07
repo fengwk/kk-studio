@@ -57,7 +57,7 @@ describe('chatService', () => {
     await service.createChatThread('chat /1', {
       title: 'New Thread',
       branchSettings: {
-        environmentId: null,
+        environmentName: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
         thinkingLevel: 'off',
@@ -70,7 +70,7 @@ describe('chatService', () => {
     expect(client.post).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads', {
       title: 'New Thread',
       branchSettings: {
-        environmentId: null,
+        environmentName: null,
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
         thinkingLevel: 'off',

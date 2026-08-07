@@ -187,6 +187,8 @@ create table chat (
     -- agent_name 故意不加 FK：它只按名称引用 Agent。Agent 硬删除期间该引用失效
     -- （turn/attempt fail closed），同名重建后既有 Chat 引用解析到当前 AgentDefinition。
     agent_name          varchar(64)   not null,
+    -- 新空面板/线程草稿的默认分支 Environment 逻辑路由名称（可空；用户发送前可显式更改或清空）。
+    environment_name    varchar(64),
     yolo_enabled        boolean       not null default false,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
@@ -197,6 +199,13 @@ create table chat (
         and agent_name !~ '[[:space:]]$'
         and char_length(agent_name) > 0
         and position('/' in agent_name) = 0
+    ),
+    constraint ck_chat_environment_name check (
+        environment_name is null
+        or (
+            environment_name ~ '^[a-z0-9]+(-[a-z0-9]+)*$'
+            and char_length(environment_name) <= 64
+        )
     )
 );
 

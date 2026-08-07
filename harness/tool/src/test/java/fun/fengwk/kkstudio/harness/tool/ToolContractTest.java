@@ -103,15 +103,14 @@ class ToolContractTest {
   /** invocation 生命周期消息必须带 invocation ID，连接级消息则无需该字段。 */
   @Test
   void enforcesDaemonEnvelopeCorrelationAndJsonPayload() {
-    EnvironmentId environmentId = new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
+    EnvironmentName environmentName = new EnvironmentName("environment");
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
                 DaemonProtocol.VERSION_2,
                 DaemonMessageType.INVOKE,
-                environmentId,
-                "environment",
+                environmentName,
                 null,
                 1,
                 "{}"));
@@ -121,8 +120,7 @@ class ToolContractTest {
             new DaemonEnvelope(
                 DaemonProtocol.VERSION_2,
                 DaemonMessageType.LOAD_SKILL,
-                environmentId,
-                "environment",
+                environmentName,
                 null,
                 1,
                 "{}"));
@@ -132,24 +130,16 @@ class ToolContractTest {
             new DaemonEnvelope(
                 DaemonProtocol.VERSION_2,
                 DaemonMessageType.HELLO,
-                environmentId,
-                "environment",
+                environmentName,
                 null,
                 0,
                 "not-json"));
 
     DaemonEnvelope hello =
         new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
-            DaemonMessageType.HELLO,
-            environmentId,
-            "environment",
-            null,
-            0,
-            "{}");
+            DaemonProtocol.VERSION_2, DaemonMessageType.HELLO, environmentName, null, 0, "{}");
     assertEquals(DaemonMessageType.HELLO, hello.messageType());
-    assertEquals("environment", hello.environmentName());
-    assertEquals(environmentId, hello.environmentId());
+    assertEquals("environment", hello.environmentName().value());
   }
 
   private ToolDescriptor descriptor() {

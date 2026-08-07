@@ -41,7 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -148,8 +148,8 @@ public final class HarnessRuntimeWebMapper {
   public static HarnessBranchSettingsDTO toBranchSettingsDto(BranchSettings settings) {
     Objects.requireNonNull(settings, "settings");
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
-    dto.setEnvironmentId(
-        settings.environmentId() == null ? null : settings.environmentId().value());
+    dto.setEnvironmentName(
+        settings.environmentName() == null ? null : settings.environmentName().value());
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
     dto.setThinkingLevel(settings.thinkingLevel());
@@ -235,7 +235,8 @@ public final class HarnessRuntimeWebMapper {
     dto.setToolName(binding.descriptor().name());
     dto.setToolVersion(binding.descriptor().version());
     dto.setToolType(binding.type().name());
-    dto.setEnvironmentId(binding.environmentId() == null ? null : binding.environmentId().value());
+    dto.setEnvironmentName(
+        binding.environmentName() == null ? null : binding.environmentName().value());
     dto.setArgumentsJson(invocation.request().call().argumentsJson());
     dto.setApprovalJson(
         invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
@@ -319,7 +320,7 @@ public final class HarnessRuntimeWebMapper {
   public static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     return new BranchSettings(
-        toEnvironmentId(dto.getEnvironmentId()),
+        toEnvironmentName(dto.getEnvironmentName()),
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()),
         requireText(dto.getThinkingLevel(), "branchSettings.thinkingLevel"),
@@ -410,7 +411,7 @@ public final class HarnessRuntimeWebMapper {
             "thinkingLevel",
             "activeTools",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         yield new UserMessageCommandPayload(
             new AgentMessage(
                 AgentMessageRole.USER,
@@ -424,7 +425,7 @@ public final class HarnessRuntimeWebMapper {
             "thinkingLevel",
             "activeTools",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         AgentMessageRole role = requireRole(dto.getRole());
         yield new CustomMessageCommandPayload(
             new AgentMessage(
@@ -439,7 +440,7 @@ public final class HarnessRuntimeWebMapper {
             "thinkingLevel",
             "activeTools",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case SET_MODEL -> {
@@ -451,7 +452,7 @@ public final class HarnessRuntimeWebMapper {
             "thinkingLevel",
             "activeTools",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
       case SET_THINKING_LEVEL -> {
@@ -463,7 +464,7 @@ public final class HarnessRuntimeWebMapper {
             "model",
             "activeTools",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         yield new SetThinkingLevelCommandPayload(
             requireText(dto.getThinkingLevel(), "thinkingLevel"));
       }
@@ -476,7 +477,7 @@ public final class HarnessRuntimeWebMapper {
             "model",
             "thinkingLevel",
             "yoloEnabled",
-            "environmentId");
+            "environmentName");
         yield new SetActiveToolsCommandPayload(requireList(dto.getActiveTools(), "activeTools"));
       }
       case SET_YOLO -> {
@@ -488,7 +489,7 @@ public final class HarnessRuntimeWebMapper {
             "model",
             "thinkingLevel",
             "activeTools",
-            "environmentId");
+            "environmentName");
         yield new SetYoloCommandPayload(requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
       }
       case SET_ENVIRONMENT -> {
@@ -501,7 +502,7 @@ public final class HarnessRuntimeWebMapper {
             "thinkingLevel",
             "activeTools",
             "yoloEnabled");
-        yield new SetEnvironmentCommandPayload(toEnvironmentId(dto.getEnvironmentId()));
+        yield new SetEnvironmentCommandPayload(toEnvironmentName(dto.getEnvironmentName()));
       }
     };
   }
@@ -544,7 +545,7 @@ public final class HarnessRuntimeWebMapper {
             case "thinkingLevel" -> dto.getThinkingLevel();
             case "activeTools" -> dto.getActiveTools();
             case "yoloEnabled" -> dto.getYoloEnabled();
-            case "environmentId" -> dto.getEnvironmentId();
+            case "environmentName" -> dto.getEnvironmentName();
             default -> throw new IllegalArgumentException("unknown field: " + field);
           };
       if (value != null) {
@@ -594,8 +595,8 @@ public final class HarnessRuntimeWebMapper {
         "TOOL_ACTIVE context must contain at least one non-terminal tool invocation");
   }
 
-  private static EnvironmentId toEnvironmentId(String value) {
-    return value == null ? null : new EnvironmentId(value);
+  private static EnvironmentName toEnvironmentName(String value) {
+    return value == null ? null : new EnvironmentName(value);
   }
 
   private static String requireText(String value, String field) {

@@ -12,16 +12,15 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoadResult;
 import fun.fengwk.kkstudio.core.ai.environment.service.EnvironmentSkillLoader;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader.SkillBodyLoadResult;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
-/** 运行时 skill binding 引用必须是 canonical EnvironmentId 文本；display-name 引用会安全失败，而不是按名称路由。 */
+/** 运行时 skill binding 引用必须是 canonical EnvironmentName 文本；display-name 引用会安全失败，而不是按名称路由。 */
 class EnvironmentSkillBodyLoaderTest {
 
-  private static final EnvironmentId ENVIRONMENT_ID =
-      new EnvironmentId("0f8fad5b-d9cb-469f-a165-70867728950e");
+  private static final EnvironmentName ENVIRONMENT_ID = new EnvironmentName("env-1");
 
   @Test
   void parsesCanonicalIdTextAndDelegatesToEnvironmentSkillLoader() {
@@ -43,13 +42,15 @@ class EnvironmentSkillBodyLoaderTest {
   }
 
   @Test
-  void rejectsDisplayNameReferenceInsteadOfLookingItUp() {
+  void rejectsNonCanonicalEnvironmentNameReference() {
     EnvironmentSkillBodyLoader loader =
         new EnvironmentSkillBodyLoader(mock(EnvironmentSkillLoader.class));
-    // display name 不是 canonical UUID 文本；adapter 必须安全失败，而不是
-    // 通过任何 registry lookup 按名称路由。
+    // 非 canonical 名称文本不是合法路由身份；adapter 必须安全失败，而不是做任何 lookup。
     assertThrows(
         IllegalArgumentException.class,
-        () -> loader.load("display-name", "dev", Duration.ofSeconds(5)));
+        () -> loader.load("Display Name", "dev", Duration.ofSeconds(5)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> loader.load("dev/name", "dev", Duration.ofSeconds(5)));
   }
 }

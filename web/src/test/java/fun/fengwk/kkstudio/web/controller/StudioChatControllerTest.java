@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -20,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
@@ -28,6 +33,9 @@ import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
@@ -88,7 +96,7 @@ class StudioChatControllerTest {
         {
           "title": "new chat",
           "branchSettings": {
-            "environmentId": "123e4567-e89b-12d3-a456-426614174000",
+            "environmentName": "123e4567-e89b-12d3-a456-426614174000",
             "agentName": "default-assistant",
             "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
             "thinkingLevel": "low",
@@ -114,6 +122,102 @@ class StudioChatControllerTest {
     assertEquals(List.of("web_search"), captor.getValue().branchSettings().activeTools());
     assertEquals(true, captor.getValue().yoloEnabled());
     verify(chatThreadService).associateThread("7", 1L);
+  }
+
+  @Test
+  void createChatCarriesOptionalDefaultEnvironmentName() throws Exception {
+    when(chatService.createChat(any(ChatCreateDTO.class)))
+        .thenAnswer(
+            invocation -> {
+              ChatCreateDTO dto = invocation.getArgument(0);
+              ChatDTO dtoOut = new ChatDTO();
+              dtoOut.setId("1");
+              dtoOut.setTitle(dto.getTitle());
+              dtoOut.setAgentName(dto.getAgentName());
+              dtoOut.setEnvironmentName(dto.getEnvironmentName());
+              return dtoOut;
+            });
+
+    mockMvc
+        .perform(
+            post("/api/ai/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"title\":\"t\",\"agentName\":\"default-assistant\","
+                        + "\"environmentName\":\"env-dev\"}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.environmentName").value("env-dev"));
+
+    ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
+    verify(chatService).createChat(captor.capture());
+    assertEquals("env-dev", captor.getValue().getEnvironmentName());
+  }
+
+  @Test
+  void createChatOmittingEnvironmentNameLeavesItNull() throws Exception {
+    when(chatService.createChat(any(ChatCreateDTO.class))).thenReturn(new ChatDTO());
+    mockMvc
+        .perform(
+            post("/api/ai/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"t\",\"agentName\":\"default-assistant\"}"))
+        .andExpect(status().isCreated());
+    ArgumentCaptor<ChatCreateDTO> captor = ArgumentCaptor.forClass(ChatCreateDTO.class);
+    verify(chatService).createChat(captor.capture());
+    assertNull(captor.getValue().getEnvironmentName());
+  }
+
+  @Test
+  void chatWireJsonEmitsEnvironmentNameExplicitlyIncludingNull() throws Exception {
+    // @JsonInclude(ALWAYS)：null 显式序列化，前端/契约可区分缺省与显式 null。
+    ChatDTO nullEnv = new ChatDTO();
+    nullEnv.setId("7");
+    nullEnv.setTitle("t");
+    nullEnv.setAgentName("default-assistant");
+    nullEnv.setEnvironmentName(null);
+    nullEnv.setYoloEnabled(false);
+    nullEnv.setVersion("2");
+    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(nullEnv);
+
+    MvcResult result =
+        mockMvc
+            .perform(
+                put("/api/ai/chat/7")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"expectedVersion\":\"2\"}"))
+            .andExpect(status().isOk())
+            .andReturn();
+    // @JsonInclude(ALWAYS)：null 必须显式出现在 wire JSON 中（可区分缺省与显式 null）。
+    String body = result.getResponse().getContentAsString();
+    assertTrue(body.contains("\"environmentName\":null"), body);
+  }
+
+  @Test
+  void updateChatDistinguishesExplicitEnvironmentNameNullFromOmission() throws Exception {
+    when(chatService.updateChat(eq("7"), any(ChatUpdateDTO.class))).thenReturn(new ChatDTO());
+
+    // 显式 null：清空默认环境（provided 标记置位）。
+    mockMvc
+        .perform(
+            put("/api/ai/chat/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"environmentName\":null,\"expectedVersion\":\"2\"}"))
+        .andExpect(status().isOk());
+    ArgumentCaptor<ChatUpdateDTO> clearCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
+    verify(chatService).updateChat(eq("7"), clearCaptor.capture());
+    assertTrue(clearCaptor.getValue().isEnvironmentNameProvided());
+    assertNull(clearCaptor.getValue().getEnvironmentName());
+
+    // 缺省字段：provided 标记保持 false，服务端保留当前值。
+    mockMvc
+        .perform(
+            put("/api/ai/chat/7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"2\"}"))
+        .andExpect(status().isOk());
+    ArgumentCaptor<ChatUpdateDTO> omitCaptor = ArgumentCaptor.forClass(ChatUpdateDTO.class);
+    verify(chatService, times(2)).updateChat(eq("7"), omitCaptor.capture());
+    assertFalse(omitCaptor.getValue().isEnvironmentNameProvided());
   }
 
   @Test

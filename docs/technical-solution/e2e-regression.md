@@ -122,14 +122,14 @@ L1 的关键语义断言：
 
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；
 - Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；
-- Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 默认值，不包含 Environment；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
+- Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
 - `USER_MESSAGE` 只能携带 `type/clientCommandId/content`（多余字段 400）；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
-- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO` 六类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队，消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空；消费证据必须是 `ASSISTANT_ERROR` + `TURN_END(FAILED)`（environmentId=null 且 activeTools 含 read 时 resolver 稳定拒绝 `environment tool requires a selected environment`），USER MESSAGE 自身不算消费证据；
+- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO` 六类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队，消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空；消费证据 = durable TOOL MESSAGE 的 model-visible `UNAVAILABLE` 拒绝（environmentName=null 时 ENVIRONMENT 工具规划不再拒绝，实际 start 是确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）+ 最终 `TURN_END(COMPLETED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
@@ -152,8 +152,8 @@ tool.read_turn
 | `real.queued_command_batch` | `--real` | 运行中用最新 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
-| `daemon.ready` | `--with-tools` | READY Environment、UUID 路由身份与固定十个 Tool |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentId`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256） |
+| `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定九个 Tool |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256） |
 
 ## 4. API 契约与验证方式
 
@@ -202,7 +202,7 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 {
   "title": null,
   "branchSettings": {
-    "environmentId": null,
+    "environmentName": null,
     "agentName": "default-assistant",
     "model": { "providerName": "minimax", "modelName": "MiniMax-M2.7", "variant": "default" },
     "thinkingLevel": "off",
@@ -224,7 +224,7 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 }
 ```
 
-`USER_MESSAGE` 只能携带 `type/clientCommandId/content`；`CUSTOM_MESSAGE` 额外携带 `role`（仅 `SYSTEM|USER`）。六类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentId)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_THINKING_LEVEL(thinkingLevel)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 只能携带 `type/clientCommandId/content`；`CUSTOM_MESSAGE` 额外携带 `role`（仅 `SYSTEM|USER`）。六类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_THINKING_LEVEL(thinkingLevel)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
@@ -255,12 +255,12 @@ Tool approval：
 Environment 路由身份：
 
 ```text
-GET /api/ai/environment            -> LiveEnvironmentDTO[]（id = lowercase UUID 路由身份，name 仅展示）
+GET /api/ai/environment            -> LiveEnvironmentDTO[]（name = canonical 路由身份 + ready 可用性标记）
 WebSocket /api/ai/environment/daemon/v2
 ```
 
-- Thread create / `SET_ENVIRONMENT` 的 `environmentId` 只接受 canonical lowercase UUID（或 null 清除），非法 UUID 400；mapper 不查注册表，turn 执行时 resolver 才按 registry 精确查找——**非 null `environmentId` 无论 activeTools 内容都要求命中且 READY**（missing/offline 确定性拒绝），null 只允许 platform-only 且无 skills 的 turn；
-- Chat 默认值（agentName/yoloEnabled）仅作 blank pane 初始值；Thread `branchSettings` 独立持久化，Environment identity immutable；
+- Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
+- Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
 - daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB。
 
 SSE：`afterRevision` 与 `Last-Event-ID` 是 canonical decimal durable cursor；Redis realtime delta 无 SSE id。

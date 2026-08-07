@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
 
@@ -34,7 +34,7 @@ class ThreadCommandPayloadJsonCodecTest {
             new SetThinkingLevelCommandPayload("high"),
             new SetActiveToolsCommandPayload(List.of("read", "grep")),
             new SetYoloCommandPayload(true),
-            new SetEnvironmentCommandPayload(new EnvironmentId(ENV)),
+            new SetEnvironmentCommandPayload(new EnvironmentName(ENV)),
             new SetEnvironmentCommandPayload(null));
 
     for (ThreadCommandPayload payload : payloads) {
@@ -62,9 +62,10 @@ class ThreadCommandPayloadJsonCodecTest {
         codec.encode(new SetActiveToolsCommandPayload(List.of("read", "grep"))));
     assertEquals("{\"yoloEnabled\":true}", codec.encode(new SetYoloCommandPayload(true)));
     assertEquals(
-        "{\"environmentId\":\"" + ENV + "\"}",
-        codec.encode(new SetEnvironmentCommandPayload(new EnvironmentId(ENV))));
-    assertEquals("{\"environmentId\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
+        "{\"environmentName\":\"" + ENV + "\"}",
+        codec.encode(new SetEnvironmentCommandPayload(new EnvironmentName(ENV))));
+    assertEquals(
+        "{\"environmentName\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
   }
 
   @Test
@@ -120,11 +121,12 @@ class ThreadCommandPayloadJsonCodecTest {
         () -> codec.decode(ThreadCommandType.SET_ACTIVE_TOOLS, "{\"activeTools\":[\" read\"]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":5}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":5}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":\"not-a-uuid\"}"));
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"Not-A-Name\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
@@ -149,10 +151,10 @@ class ThreadCommandPayloadJsonCodecTest {
   }
 
   @Test
-  void rejectsOldEnvironmentNameAndWrongTypeDispatch() {
+  void rejectsOldEnvironmentIdFieldAndWrongTypeDispatch() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"env-1\"}"));
+        () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":\"env-1\"}"));
     String userJson = codec.encode(new UserMessageCommandPayload(user("hello")));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, userJson));
@@ -178,12 +180,13 @@ class ThreadCommandPayloadJsonCodecTest {
   void preservesEnvironmentClearSemantics() {
     SetEnvironmentCommandPayload cleared =
         (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":null}");
-    assertNull(cleared.environmentId());
+            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}");
+    assertNull(cleared.environmentName());
     SetEnvironmentCommandPayload bound =
         (SetEnvironmentCommandPayload)
-            codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentId\":\"" + ENV + "\"}");
-    assertEquals(new EnvironmentId(ENV), bound.environmentId());
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"" + ENV + "\"}");
+    assertEquals(new EnvironmentName(ENV), bound.environmentName());
   }
 
   private static AgentMessage user(String text) {

@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.Postgre
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -173,6 +174,49 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
     } finally {
       chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
       assertThrows(AiResourceNotFoundException.class, () -> chatService.getChat(chatId));
+    }
+  }
+
+  @Test
+  void environmentNameDefaultIsNullableSetAndClearable() {
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle("env-default");
+    create.setAgentName("default-assistant");
+    create.setEnvironmentName("env-dev");
+    ChatDTO created = chatService.createChat(create);
+    assertEquals("env-dev", created.getEnvironmentName());
+    String chatId = created.getId();
+    try {
+      ChatUpdateDTO clear = new ChatUpdateDTO();
+      clear.setEnvironmentName(null);
+      clear.setExpectedVersion("0");
+      ChatDTO cleared = chatService.updateChat(chatId, clear);
+      assertNull(cleared.getEnvironmentName());
+
+      ChatUpdateDTO set = new ChatUpdateDTO();
+      set.setEnvironmentName("env-2");
+      set.setExpectedVersion("1");
+      ChatDTO updated = chatService.updateChat(chatId, set);
+      assertEquals("env-2", updated.getEnvironmentName());
+
+      // 非 canonical 名称提供时确定性拒绝，绝不持久化。
+      ChatUpdateDTO invalid = new ChatUpdateDTO();
+      invalid.setEnvironmentName("Bad Name");
+      invalid.setExpectedVersion("2");
+      assertThrows(AiValidationException.class, () -> chatService.updateChat(chatId, invalid));
+      ChatCreateDTO invalidCreate = new ChatCreateDTO();
+      invalidCreate.setTitle("invalid-env");
+      invalidCreate.setAgentName("default-assistant");
+      invalidCreate.setEnvironmentName("env/name");
+      assertThrows(AiValidationException.class, () -> chatService.createChat(invalidCreate));
+
+      // 缺省（不提供 environmentName）保留当前值。
+      ChatUpdateDTO untouched = new ChatUpdateDTO();
+      untouched.setTitle("still env-2");
+      untouched.setExpectedVersion("2");
+      assertEquals("env-2", chatService.updateChat(chatId, untouched).getEnvironmentName());
+    } finally {
+      chatService.deleteChat(chatId, chatService.getChat(chatId).getVersion());
     }
   }
 

@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
 import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -39,10 +39,12 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -61,7 +63,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class DaemonRuntime implements AutoCloseable {
 
   private final DaemonConfig config;
-  private final EnvironmentId environmentId;
+  private final EnvironmentName environmentName;
   private final DaemonTransport transport;
   private final DaemonToolRegistry toolRegistry;
   private final DaemonSkillRegistry skillRegistry;
@@ -84,6 +86,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private final Object reconnectLock = new Object();
 
   private volatile DaemonRuntimeState state = DaemonRuntimeState.STOPPED;
+  private final CountDownLatch termination = new CountDownLatch(1);
+  private volatile String failureReason;
   private Duration nextReconnectDelay;
 
   /**
@@ -91,13 +95,9 @@ public final class DaemonRuntime implements AutoCloseable {
    * FAILED。
    */
   public DaemonRuntime(
-      DaemonConfig config,
-      EnvironmentId environmentId,
-      DaemonToolRegistry toolRegistry,
-      DaemonSkillRegistry skillRegistry) {
+      DaemonConfig config, DaemonToolRegistry toolRegistry, DaemonSkillRegistry skillRegistry) {
     this(
         config,
-        environmentId,
         new JdkWebSocketTransport(config.gatewayUri()),
         toolRegistry,
         skillRegistry,
@@ -116,13 +116,11 @@ public final class DaemonRuntime implements AutoCloseable {
    */
   public DaemonRuntime(
       DaemonConfig config,
-      EnvironmentId environmentId,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
       ResourceStore resourceStore) {
     this(
         config,
-        environmentId,
         new JdkWebSocketTransport(config.gatewayUri()),
         toolRegistry,
         skillRegistry,
@@ -135,49 +133,28 @@ public final class DaemonRuntime implements AutoCloseable {
   /** 使用可替换 transport 和 journal 创建运行时，便于协议集成测试或持久化替换。 */
   DaemonRuntime(
       DaemonConfig config,
-      EnvironmentId environmentId,
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler) {
-    this(
-        config,
-        environmentId,
-        transport,
-        toolRegistry,
-        skillRegistry,
-        journal,
-        scheduler,
-        null,
-        false);
+    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, null, false);
   }
 
   /** 全参数运行时；{@code resourceStore} 可为 {@code null} 以强制对所有 resource/binary 工具结果返回 FAILED。 */
   DaemonRuntime(
       DaemonConfig config,
-      EnvironmentId environmentId,
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ResourceStore resourceStore) {
-    this(
-        config,
-        environmentId,
-        transport,
-        toolRegistry,
-        skillRegistry,
-        journal,
-        scheduler,
-        resourceStore,
-        false);
+    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, resourceStore, false);
   }
 
   private DaemonRuntime(
       DaemonConfig config,
-      EnvironmentId environmentId,
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
@@ -186,7 +163,7 @@ public final class DaemonRuntime implements AutoCloseable {
       ResourceStore resourceStore,
       boolean requireFixedToolCatalog) {
     this.config = Objects.requireNonNull(config, "config");
-    this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
+    this.environmentName = Objects.requireNonNull(config.environmentName(), "environmentName");
     this.transport = Objects.requireNonNull(transport, "transport");
     this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
@@ -372,9 +349,13 @@ public final class DaemonRuntime implements AutoCloseable {
           connection.acceptInboundEnvelope(identity);
           handleWelcome(connection, envelope);
         }
-        case ACK, ERROR -> {
+        case ACK -> {
           connection.acceptInboundEnvelope(identity);
           // Gateway 协议消息不改变 Daemon invocation 事实。
+        }
+        case ERROR -> {
+          connection.acceptInboundEnvelope(identity);
+          handleError(connection, envelope);
         }
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -402,11 +383,39 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
+  /** 处理 gateway ERROR。只有终态名称冲突错误会终止 daemon（停止重连、非零退出）；其余 ERROR 不改变 invocation 事实。 */
+  private void handleError(ActiveConnection connection, DaemonEnvelope envelope) {
+    ObjectNode payload = envelopeCodec.readPayload(envelope);
+    List<String> unexpected = new ArrayList<>();
+    payload
+        .fieldNames()
+        .forEachRemaining(
+            field -> {
+              if (!"message".equals(field) && !"code".equals(field)) {
+                unexpected.add(field);
+              }
+            });
+    if (!unexpected.isEmpty()) {
+      throw new DaemonProtocolException("ERROR payload has unexpected fields: " + unexpected);
+    }
+    JsonNode code = payload.get("code");
+    if (code == null || code.isNull()) {
+      return;
+    }
+    if (!code.isTextual()
+        || !DaemonProtocol.ERROR_CODE_ENVIRONMENT_NAME_CONFLICT.equals(code.textValue())) {
+      throw new DaemonProtocolException("ERROR payload.code is unknown: " + code);
+    }
+    String message = payload.path("message").asText("");
+    failTerminal(
+        "environment name is held by another live daemon"
+            + (message.isBlank() ? "" : ": " + message));
+  }
+
   private void verifyScope(DaemonEnvelope envelope) {
-    if (!environmentId.equals(envelope.environmentId())
-        || !config.environmentName().equals(envelope.environmentName())) {
+    if (!environmentName.equals(envelope.environmentName())) {
       throw new DaemonProtocolException(
-          "envelope environmentId or environmentName does not match daemon");
+          "envelope environmentName does not match daemon: " + envelope.environmentName());
     }
   }
 
@@ -667,8 +676,7 @@ public final class DaemonRuntime implements AutoCloseable {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         messageType,
-        environmentId,
-        config.environmentName(),
+        environmentName,
         invocationId,
         outboundSequence.getAndIncrement(),
         payloadJson);
@@ -690,13 +698,37 @@ public final class DaemonRuntime implements AutoCloseable {
 
   @Override
   public void close() {
+    shutdown(DaemonRuntimeState.STOPPED, null);
+  }
+
+  /** 等待运行时进入终态（显式 {@link #close()} 或终态握手冲突失败）。返回最终 {@link DaemonRuntimeState}，供独立进程入口决定退出码。 */
+  public DaemonRuntimeState awaitTermination() throws InterruptedException {
+    termination.await();
+    return state;
+  }
+
+  /** 返回终态失败原因（仅 {@link DaemonRuntimeState#FAILED} 时非 null）。 */
+  public String failureReason() {
+    return failureReason;
+  }
+
+  /**
+   * 终态失败：停止重连、终止所有运行中 invocation 并释放终止闩。与 {@link #close()} 共享 shutdown 流程，但以 FAILED 状态结束，
+   * 使调用方可以非零退出。
+   */
+  private void failTerminal(String reason) {
+    shutdown(DaemonRuntimeState.FAILED, reason);
+  }
+
+  private void shutdown(DaemonRuntimeState terminalState, String reason) {
     ActiveConnection connection;
     synchronized (lifecycleLock) {
       if (!closed.compareAndSet(false, true)) {
         return;
       }
       started.set(false);
-      state = DaemonRuntimeState.STOPPED;
+      state = terminalState;
+      failureReason = reason;
       connection = activeConnection.getAndSet(null);
     }
     if (connection != null) {
@@ -714,6 +746,7 @@ public final class DaemonRuntime implements AutoCloseable {
     running.clear();
     scheduler.shutdownNow();
     transport.close();
+    termination.countDown();
   }
 
   private final class InvocationListener implements ToolExecutionListener {
@@ -967,8 +1000,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private record InboundEnvelopeIdentity(
       int protocolVersion,
       DaemonMessageType messageType,
-      EnvironmentId environmentId,
-      String environmentName,
+      EnvironmentName environmentName,
       String invocationId,
       long sequence,
       JsonNode payload) {
@@ -977,7 +1009,6 @@ public final class DaemonRuntime implements AutoCloseable {
       return new InboundEnvelopeIdentity(
           envelope.protocolVersion(),
           envelope.messageType(),
-          envelope.environmentId(),
           envelope.environmentName(),
           envelope.invocationId(),
           envelope.sequence(),

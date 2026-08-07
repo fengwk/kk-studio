@@ -13,7 +13,7 @@ import java.util.Objects;
  *
  * <p>Resolver 返回的 {@link ModelInvocationRequest} 中可以直接对照 candidate {@link TurnPlan#candidatePath()}
  * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、route （{@code
- * environmentId}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与
+ * environmentName}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与
  * bindings 一一对应，只需对照名称序列）。agentName / thinkingLevel 在 request 中没有直接的 canonical 字段，不做校验。
  *
  * <p>任何不一致都是 Resolver 契约 / 编程错误：抛清晰的 {@link IllegalStateException}，调用方必须保证此时尚未发生任何 durable
@@ -35,12 +35,12 @@ final class ResolvedRequestValidator {
               + " does not match candidate branch yoloEnabled="
               + plan.finalYoloEnabled());
     }
-    if (!Objects.equals(request.environmentId(), settings.environmentId())) {
+    if (!Objects.equals(request.environmentName(), settings.environmentName())) {
       throw new IllegalStateException(
-          "resolved request environmentId="
-              + request.environmentId()
-              + " does not match candidate branch environmentId="
-              + settings.environmentId());
+          "resolved request environmentName="
+              + request.environmentName()
+              + " does not match candidate branch environmentName="
+              + settings.environmentName());
     }
     if (!request.providerRequest().model().providerName().equals(settings.model().providerName())
         || !request.providerRequest().model().modelName().equals(settings.model().modelName())) {

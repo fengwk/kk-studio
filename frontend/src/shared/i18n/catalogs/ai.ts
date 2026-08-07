@@ -773,6 +773,10 @@ export const aiCatalog = {
     'en-US': '(None)',
     'zh-CN': '（无）',
   },
+  'ai.chat.environmentUnavailable': {
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
+  },
   'ai.chat.selectEnvironment': {
     'en-US': 'Select Environment',
     'zh-CN': '选择 Environment',
@@ -1205,9 +1209,13 @@ export const aiCatalog = {
     'en-US': 'unknown-variant',
     'zh-CN': 'unknown-variant',
   },
-  'ai.runtime.status.environmentFallback': {
-    'en-US': '(none)',
-    'zh-CN': '（无）',
+  'ai.runtime.status.environmentNoneText': {
+    'en-US': 'env:none',
+    'zh-CN': 'env:none',
+  },
+  'ai.runtime.status.environmentUnavailableText': {
+    'en-US': 'env:{{name}} (unavailable)',
+    'zh-CN': 'env:{{name}} (unavailable)',
   },
   'ai.runtime.status.agentSwitchTitle': {
     'en-US': 'Click to switch Agent',
@@ -1234,8 +1242,8 @@ export const aiCatalog = {
     'zh-CN': '{{model}} · {{variant}}',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'environment:{{name}}',
-    'zh-CN': '环境：{{name}}',
+    'en-US': 'env:{{name}}',
+    'zh-CN': 'env:{{name}}',
   },
   'ai.runtime.entry.rootTitle': {
     'en-US': 'Conversation started',

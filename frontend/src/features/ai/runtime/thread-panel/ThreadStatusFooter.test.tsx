@@ -10,7 +10,7 @@ describe('ThreadStatusFooter', () => {
         providerName="minimax"
         modelName="MiniMax"
         variantName="default"
-        environmentDisplayName="local"
+        environmentName="local"
         yoloEnabled
       />,
     )
@@ -35,8 +35,32 @@ describe('ThreadStatusFooter', () => {
     expect(line).toContain('agent:agent')
     expect(line).toContain('unknown-model')
     expect(line).toContain('unknown-variant')
-    expect(line).toContain('环境：')
+    expect(line).toContain('env:none')
     expect(line).not.toContain('YOLO')
+  })
+
+  it('renders env:<name> and env:<name> (unavailable) without fallback', () => {
+    const { rerender } = render(
+      <ThreadStatusFooter
+        agentName="assistant"
+        environmentName="dev"
+        environmentReady
+      />,
+    )
+    const readyLine = screen.getByLabelText('会话状态').textContent ?? ''
+    expect(readyLine).toContain('env:dev')
+    expect(readyLine).not.toContain('(unavailable)')
+
+    // 选中但不可用（统一可用性规则）=> env:<name> (unavailable)；绝不 fallback 到别的 env。
+    rerender(
+      <ThreadStatusFooter
+        agentName="assistant"
+        environmentName="dev"
+        environmentReady={false}
+      />,
+    )
+    const unavailableLine = screen.getByLabelText('会话状态').textContent ?? ''
+    expect(unavailableLine).toContain('env:dev (unavailable)')
   })
 
   it('hides YOLO when yoloEnabled is false', () => {

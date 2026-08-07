@@ -77,7 +77,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentId: null,
+    environmentName: null,
     agentName: 'assistant',
     model: modelSelection(),
     thinkingLevel: 'off',
@@ -170,7 +170,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolName: 'bash',
     toolVersion: '1',
     toolType: 'shell',
-    environmentId: null,
+    environmentName: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
     resultJson: null,
@@ -280,11 +280,11 @@ function renderBoundPane(overrides?: {
         }}
         agents={agents}
         environments={[
-          { id: 'env-local', name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
-          { id: 'env-remote', name: 'remote', status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
+          { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
           {
-            id: 'env-connecting',
-            name: 'connecting',
+            name: 'env-connecting',
+            ready: false,
             status: 'CONNECTING',
             lastSeen: null,
             tools: [],
@@ -394,7 +394,7 @@ describe('ChatWorkspacePane commands', () => {
         thread({
           branchSettings: branchSettings({
             agentName: 'assistant',
-            environmentId: null,
+            environmentName: null,
           }),
         }),
       ),
@@ -431,7 +431,7 @@ describe('ChatWorkspacePane commands', () => {
     const setAgent = batchArg.commands.find((command) => command.type === 'SET_AGENT')!
     expect(setAgent.agentName).toBe('coder')
     const setEnv = batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')!
-    expect(setEnv.environmentId).toBe('env-remote')
+    expect(setEnv.environmentName).toBe('remote')
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
   })
 
@@ -569,7 +569,7 @@ describe('ChatWorkspacePane commands', () => {
         thread({
           branchSettings: branchSettings({
             agentName: 'assistant',
-            environmentId: null,
+            environmentName: null,
             thinkingLevel: 'high',
           }),
         }),

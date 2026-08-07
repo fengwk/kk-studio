@@ -111,18 +111,6 @@ public final class EnvironmentToolCatalog {
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMinutes(1)),
         descriptor(
-            "apply_patch",
-            new ToolParamsSchema(
-                "apply_patch 工具参数。",
-                Map.of(
-                    "patchText",
-                    new ToolStringSchema(
-                        "从 *** Begin Patch 到 *** End Patch 的完整 apply_patch 协议文本。可选首条指令：*** Workdir: <path>。")),
-                Set.of("patchText"),
-                false),
-            ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMinutes(2)),
-        descriptor(
             "bash",
             new ToolParamsSchema(
                 "bash 工具参数。",

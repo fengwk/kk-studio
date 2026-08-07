@@ -35,7 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -52,7 +52,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -87,7 +86,7 @@ final class DispatcherTestSupport {
   static final Duration POLL_INTERVAL = Duration.ofMillis(20);
   static final Duration REJECTION_DELAY = Duration.ofSeconds(2);
   static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
-  static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV_NAME = new EnvironmentName("env-1");
 
   private DispatcherTestSupport() {}
 
@@ -619,12 +618,12 @@ final class DispatcherTestSupport {
 
   private static BranchSettings branchSettings() {
     return new BranchSettings(
-        ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), "low", List.of());
+        ENV_NAME, "agent", new ModelSelection("provider", "model", "v1"), "low", List.of());
   }
 
   private static ModelInvocationRequest modelRequest() {
     return new ModelInvocationRequest(
-        ENV_ID,
+        ENV_NAME,
         new ProviderRequest(
             modelDescriptor(),
             new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),

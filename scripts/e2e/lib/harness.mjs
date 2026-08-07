@@ -12,7 +12,7 @@ import { assert, envelopeData, sleep } from './http.mjs'
  * - POST /api/ai/runtime/threads/{id}/stop             {stopRequestId,expectedRevision}（同 id 幂等 replay）
  * - POST /api/ai/runtime/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - GET  /api/ai/runtime/threads/{id}/events/stream    快照优先 SSE
- * - GET  /api/ai/environment                           只读 Environment 注册表（id = 路由身份 UUID）
+ * - GET  /api/ai/environment                           只读 Environment 注册表（name = canonical 路由身份）
  */
 
 function positiveDecimal(value, field) {
@@ -43,23 +43,27 @@ export function threadIdOf(thread) {
   return threadId
 }
 
-/** 创建 Chat（name-based Agent 引用；Thread 的 branchSettings 与 Chat 默认值独立）。 */
-export async function createChat(ctx, { title, agentName, yoloEnabled = false }) {
+/** 创建 Chat（name-based Agent 引用；可选默认 Environment 名称；Thread 的 branchSettings 与 Chat 默认值独立）。 */
+export async function createChat(ctx, { title, agentName, yoloEnabled = false, environmentName = null }) {
   const { status, json } = await ctx.call('POST', '/api/ai/chat', {
     title,
     agentName,
     yoloEnabled,
+    environmentName,
   })
   assert(status === 201, `create Chat status ${status}: ${JSON.stringify(json)}`)
   const chat = envelopeData(json)
   assert(chat?.id && chat?.agentName, `invalid Chat: ${JSON.stringify(chat)}`)
-  assert(!Object.hasOwn(chat, 'environmentName'), `Chat leaked environmentName: ${JSON.stringify(chat)}`)
+  assert(
+    chat.environmentName === null || typeof chat.environmentName === 'string',
+    `Chat environmentName must be null or string: ${JSON.stringify(chat)}`,
+  )
   return chat
 }
 
 /**
  * 以完整 branchSettings 原子创建 Thread（201 返回 HarnessThreadSnapshotDTO）。
- * branchSettings: {environmentId, agentName, model:{providerName,modelName,variant}, thinkingLevel, activeTools}
+ * branchSettings: {environmentName, agentName, model:{providerName,modelName,variant}, thinkingLevel, activeTools}
  */
 export async function createChatThread(ctx, chatId, { title = null, branchSettings, yoloEnabled = false }) {
   const { status, json } = await ctx.call(
@@ -84,7 +88,7 @@ export async function createChatThread(ctx, chatId, { title = null, branchSettin
 /** 创建 Chat + Thread，返回 {chat, snapshot}（snapshot.thread 即新 Thread 投影）。 */
 export async function createConfiguredChatThread(
   ctx,
-  { agent, model, title, yoloEnabled = false, environmentId = null, thinkingLevel = 'off', activeTools = [] } = {},
+  { agent, model, title, yoloEnabled = false, environmentName = null, thinkingLevel = 'off', activeTools = [] } = {},
 ) {
   assert(agent?.name, `agent required: ${JSON.stringify(agent)}`)
   const chat = await createChat(ctx, {
@@ -96,7 +100,7 @@ export async function createConfiguredChatThread(
     title: null,
     yoloEnabled,
     branchSettings: branchSettingsOf(agent, model, {
-      environmentId,
+      environmentName,
       thinkingLevel,
       activeTools,
     }),
@@ -104,16 +108,16 @@ export async function createConfiguredChatThread(
   return { chat, snapshot }
 }
 
-/** 由 Agent + Model 引用构造完整 branchSettings（environmentId 是 Environment 路由 UUID，仅展示名可空）。 */
+/** 由 Agent + Model 引用构造完整 branchSettings（environmentName 是 canonical 路由名称，可 null）。 */
 export function branchSettingsOf(
   agent,
   model,
-  { environmentId = null, thinkingLevel = 'off', activeTools = [] } = {},
+  { environmentName = null, thinkingLevel = 'off', activeTools = [] } = {},
 ) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   return {
-    environmentId: environmentId ?? null,
+    environmentName: environmentName ?? null,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -155,17 +159,22 @@ export async function listChatThreads(ctx, chatId) {
   return threads
 }
 
-/** 只读 Environment 注册表；id 是 canonical lowercase UUID 路由身份，name 仅展示。 */
+/** 只读 Environment 注册表；name 是 canonical 路由身份（唯一键），ready 是统一可用性标记。 */
 export async function listEnvironments(ctx) {
   const { json } = await ctx.call('GET', '/api/ai/environment')
   const environments = envelopeData(json)
   assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
   for (const environment of environments) {
     assert(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(environment.id || '')),
-      `Environment id must be a lowercase UUID: ${JSON.stringify(environment)}`,
+      !Object.hasOwn(environment, 'id'),
+      `Environment must not expose id (name is the only route identity): ${JSON.stringify(environment)}`,
     )
-    assert(typeof environment.name === 'string', JSON.stringify(environment))
+    assert(
+      /^[a-z0-9]+(-[a-z0-9]+)*$/.test(String(environment.name || '')),
+      `Environment name must be a canonical bounded lowercase route name: ${JSON.stringify(environment)}`,
+    )
+    assert(typeof environment.ready === 'boolean', JSON.stringify(environment))
+    assert(typeof environment.status === 'string', JSON.stringify(environment))
   }
   return environments
 }
@@ -184,9 +193,9 @@ export function customMessageCommand(role, content, clientCommandId) {
   return { type: 'CUSTOM_MESSAGE', role, clientCommandId, content }
 }
 
-export function setEnvironmentCommand(environmentId, clientCommandId) {
+export function setEnvironmentCommand(environmentName, clientCommandId) {
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_ENVIRONMENT', clientCommandId, environmentId }
+  return { type: 'SET_ENVIRONMENT', clientCommandId, environmentName }
 }
 
 export function setAgentCommand(agentName, clientCommandId) {

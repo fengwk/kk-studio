@@ -36,7 +36,7 @@ Entry 类型固定为八种：
 ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
 ```
 
-Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentId` 是 canonical 非 nil UUID 或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider。
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider。
 
 ## 3. 命令 batch
 
@@ -65,7 +65,7 @@ SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
 - `USER_MESSAGE` 携带 `content`，**不携带 role**（role 恒为 USER，strict mapper 拒绝多余字段）；`CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
-- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_THINKING_LEVEL` 携带 `thinkingLevel`；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentId`（canonical lowercase nonnil UUID 或 null）。
+- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_THINKING_LEVEL` 携带 `thinkingLevel`；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `role`/`content` 等不相关字段。
 
 ### Ordered command-set replay
@@ -108,7 +108,7 @@ SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 
 | 情形 | HTTP |
 | --- | --- |
-| DTO 字段非法、id/revision 非 strict decimal、未知命令 type、非 canonical 名称/UUID | 400 |
+| DTO 字段非法、id/revision 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
 | 作为请求目标的 Thread/Entry 不存在（snapshot、commands、head、stop 路径） | 404 |
 | 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、Thread 非 quiescent、terminal apply pending、跨 Session move、move 到 continueModel TURN_END、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
@@ -187,7 +187,7 @@ durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入�
 
 ```java
 public record ModelInvocationRequest(
-    EnvironmentId environmentId,      // 本请求的单一 Environment route（可 null）
+    EnvironmentName environmentName,  // 本请求的单一 Environment route（可 null）
     ProviderRequest providerRequest,  // exact Provider transport payload
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
@@ -195,7 +195,7 @@ public record ModelInvocationRequest(
 ```
 
 - `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill binding 名称不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
-- `ToolBinding(descriptor, type, environmentId)`：`PLATFORM` binding 的 environmentId 为 null，`ENVIRONMENT` binding 指向具体 route；descriptor 的 type 与 binding type 一致。
+- `ToolBinding(descriptor, type, environmentName)`：`PLATFORM` binding 的 environmentName 为 null，`ENVIRONMENT` binding 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 - retry 重放同一份 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
 - JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
@@ -224,8 +224,8 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 - 同步、无副作用、事务外：调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
 - 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
 - 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
-- **Environment route 规则**：非 null `environmentId` **无论 activeTools 内容**都必须 registry 精确命中且 READY（`environment not found` / `environment is not ready` 拒绝）；null `environmentId` 只允许 platform-only 且无 skills 的 turn——任何 ENVIRONMENT tool（`environment tool requires a selected environment: <name>`）或 Agent skill（`agent skills require a selected environment`）都是确定性拒绝，绝不静默省略。
-- Agent skills 只从 Agent config 读取，必须由选中 READY Environment 精确提供，且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
+- **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environmentName()` 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 route 确定性判定——null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
+- **Environment route 规则（skills）**：Agent skills 只从 Agent config 读取，必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无名称 → `...but the branch has no environmentName`），且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
 
 ## 11. Realtime
 

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -10,11 +10,11 @@ import java.util.Set;
 /**
  * 一次 Entry branch 的完整不可变 settings 快照。
  *
- * <p>Environment 通过其 canonical {@link EnvironmentId} 路由 identity 绑定；展示名称可重复使用， 不会进入该 durable
- * 快照。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
+ * <p>Environment 通过其 canonical {@link EnvironmentName} 逻辑路由名称绑定；该名称是唯一的路由身份，不会出现旧的 UUID
+ * 身份或独立展示名。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
-    EnvironmentId environmentId,
+    EnvironmentName environmentName,
     String agentName,
     ModelSelection model,
     String thinkingLevel,
@@ -35,26 +35,26 @@ public record BranchSettings(
 
   /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
-    return new BranchSettings(environmentId, value, model, thinkingLevel, activeTools);
+    return new BranchSettings(environmentName, value, model, thinkingLevel, activeTools);
   }
 
   /** 返回整体原子替换 model selection 后的快照。 */
   public BranchSettings withModel(ModelSelection value) {
-    return new BranchSettings(environmentId, agentName, value, thinkingLevel, activeTools);
+    return new BranchSettings(environmentName, agentName, value, thinkingLevel, activeTools);
   }
 
   /** 返回仅替换 thinking level 后的快照。 */
   public BranchSettings withThinkingLevel(String value) {
-    return new BranchSettings(environmentId, agentName, model, value, activeTools);
+    return new BranchSettings(environmentName, agentName, model, value, activeTools);
   }
 
   /** 返回仅替换有序 active tool 名称后的快照。 */
   public BranchSettings withActiveTools(List<String> values) {
-    return new BranchSettings(environmentId, agentName, model, thinkingLevel, values);
+    return new BranchSettings(environmentName, agentName, model, thinkingLevel, values);
   }
 
-  /** 返回仅替换 Environment 路由 identity 后的快照。 */
-  public BranchSettings withEnvironmentId(EnvironmentId value) {
+  /** 返回仅替换 Environment 逻辑路由名称后的快照。 */
+  public BranchSettings withEnvironmentName(EnvironmentName value) {
     return new BranchSettings(value, agentName, model, thinkingLevel, activeTools);
   }
 

@@ -100,7 +100,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态与结果 |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | ThreadGoal | Core application-owned 的 per-Thread Goal：`agent_thread_goal` 表（无 `harness_` 前缀，**不是** Runtime 第 8 表），经 selectable Platform tools `create_goal`/`get_goal`/`update_goal` 读写 |
-| Live Environment | 已绑定 Daemon 的服务器内存投影，按 canonical `environmentId` 唯一，状态为 `CONNECTING`/`READY`；只有 READY 可参与 resolve/dispatch |
+| Live Environment | 已绑定 Daemon 的服务器内存投影，按 canonical `environmentName` 唯一，状态为 `CONNECTING`/`READY`；可用性 = READY + 连接打开 + 心跳未过期 |
 
 Session、Environment、status 与 branch settings 都从 head Entry 分支派生，**不**在 Thread 行上复制；Thread 行不保存 execution epoch、processor lease 或 runnable 标志。
 

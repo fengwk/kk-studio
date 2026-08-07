@@ -5,60 +5,56 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
-/** DaemonEnvelope.environmentName 的 wire 安全边界测试（display-only 但必须 canonical 且有界）。 */
+/** DaemonEnvelope.environmentName 的 canonical 路由名称边界测试。 */
 class DaemonEnvelopeTest {
-
-  private static final String ENVIRONMENT_ID = "123e4567-e89b-12d3-a456-426614174000";
 
   private static DaemonEnvelope envelope(String environmentName) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         DaemonMessageType.READY,
-        new EnvironmentId(ENVIRONMENT_ID),
-        environmentName,
+        new EnvironmentName(environmentName),
         null,
         0,
         "{}");
   }
 
-  /** 常规与多字节名称可接受；UTF-8 编码在 256 字节边界内。 */
+  /** 常规小写路由名称可接受。 */
   @Test
-  void acceptsCanonicalNamesAndBoundaryUtf8Length() {
-    assertEquals("env", envelope("env").environmentName());
-    assertEquals("我的环境", envelope("我的环境").environmentName());
-    // 256 UTF-8 字节边界：85 个三字节汉字 + 1 个 ASCII 字符。
-    assertEquals("中".repeat(85) + "x", envelope("中".repeat(85) + "x").environmentName());
+  void acceptsCanonicalNames() {
+    assertEquals("env", envelope("env").environmentName().value());
+    assertEquals("env-1", envelope("env-1").environmentName().value());
+    assertEquals("my-local-workspace", envelope("my-local-workspace").environmentName().value());
+    assertEquals(
+        "a".repeat(EnvironmentName.MAX_LENGTH),
+        envelope("a".repeat(EnvironmentName.MAX_LENGTH)).environmentName().value());
   }
 
-  /** 周边空白（含 Unicode 空白）与空白整体必须拒绝，防止展示字段污染 wire。 */
+  /** 空白、大写、斜杠、非字母数字与非法分隔必须拒绝（无大小写折叠/路径歧义）。 */
   @Test
-  void rejectsSurroundingWhitespaceAndBlank() {
+  void rejectsNonCanonicalNames() {
     assertThrows(IllegalArgumentException.class, () -> envelope(" env"));
     assertThrows(IllegalArgumentException.class, () -> envelope("env "));
-    assertThrows(IllegalArgumentException.class, () -> envelope(" env "));
-    assertThrows(IllegalArgumentException.class, () -> envelope("env\u2003"));
     assertThrows(IllegalArgumentException.class, () -> envelope(" "));
-    assertThrows(IllegalArgumentException.class, () -> envelope(null));
+    assertThrows(NullPointerException.class, () -> envelope(null));
+    assertThrows(IllegalArgumentException.class, () -> envelope(""));
+    assertThrows(IllegalArgumentException.class, () -> envelope("Env"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("ENV"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("my/env"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("my env"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("my_env"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("-env"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("env-"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("env--1"));
+    assertThrows(IllegalArgumentException.class, () -> envelope("我的环境"));
   }
 
-  /** ISO control（C0/C1）与未配对代理项必须在构造期拒绝。 */
+  /** 长度超出 {@link EnvironmentName#MAX_LENGTH} 必须拒绝。 */
   @Test
-  void rejectsIsoControlsAndUnpairedSurrogates() {
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\tb"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\u0000b"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\u007Fb"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\u009Fb"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\uD800b"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("a\uDFFFb"));
-  }
-
-  /** UTF-8 编码超过 256 字节必须拒绝。 */
-  @Test
-  void rejectsNamesExceedingUtf8Bytes() {
-    assertThrows(IllegalArgumentException.class, () -> envelope("中".repeat(85) + "xy"));
-    assertThrows(IllegalArgumentException.class, () -> envelope("中".repeat(86)));
+  void rejectsNamesExceedingMaxLength() {
+    assertThrows(
+        IllegalArgumentException.class, () -> envelope("a".repeat(EnvironmentName.MAX_LENGTH + 1)));
   }
 
   /** 其余 envelope 字段的构造期契约：版本、序号与 invocationId 规则。 */
@@ -68,21 +64,14 @@ class DaemonEnvelopeTest {
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
-                0,
-                DaemonMessageType.READY,
-                new EnvironmentId(ENVIRONMENT_ID),
-                "env",
-                null,
-                0,
-                "{}"));
+                0, DaemonMessageType.READY, new EnvironmentName("env"), null, 0, "{}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new DaemonEnvelope(
                 DaemonProtocol.VERSION_2,
                 DaemonMessageType.READY,
-                new EnvironmentId(ENVIRONMENT_ID),
-                "env",
+                new EnvironmentName("env"),
                 null,
                 -1,
                 "{}"));
@@ -93,8 +82,7 @@ class DaemonEnvelopeTest {
             new DaemonEnvelope(
                 DaemonProtocol.VERSION_2,
                 DaemonMessageType.READY,
-                new EnvironmentId(ENVIRONMENT_ID),
-                "env",
+                new EnvironmentName("env"),
                 " ",
                 0,
                 "{}"));

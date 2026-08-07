@@ -10,10 +10,10 @@ import { modelRef, type AgentModelView } from '@/features/ai/catalog'
 import { parsePayload } from '@/features/ai/runtime/payload-json'
 
 /**
- * 面板编辑的完整 branch target：持久化 branch settings 加上 Thread 级别的 YOLO runtime policy。environmentId 是规范化的小写 UUID 路由标识。
+ * 面板编辑的完整 branch target：持久化 branch settings 加上 Thread 级别的 YOLO runtime policy。environmentName 是 canonical bounded 小写路由名称。
  */
 export interface BranchDraft {
-  environmentId: string | null
+  environmentName: string | null
   agentName: string
   model: HarnessModelSelectionDTO
   thinkingLevel: string
@@ -29,7 +29,7 @@ export const DEFAULT_THINKING_LEVEL = 'off'
  * - variant = agent override 或 model 的 defaultVariant
  * - thinkingLevel = 该 variant 的 reasoningEffort 或 `off`
  * - activeTools = agent.config.tools
- * - environmentId 从 null 开始
+ * - environmentName 从调用方传入的 Chat 默认值（可 null）开始
  *
  * 当未配置 agent 或无法解析 agent 的 model/variant 时返回 null：
  * 使用空 provider/model/variant 创建 Thread 会被 strict mapper 拒绝，
@@ -39,6 +39,7 @@ export function materializeBlankBranchDraft(
   agent: AgentDefinitionDTO | undefined,
   yoloEnabled: boolean,
   models: AgentModelView[],
+  environmentName: string | null = null,
 ): BranchDraft | null {
   if (!agent || !agent.model) {
     return null
@@ -53,7 +54,7 @@ export function materializeBlankBranchDraft(
     return null
   }
   return {
-    environmentId: null,
+    environmentName,
     agentName: agent.name,
     model: {
       providerName: model.providerName,
@@ -92,7 +93,7 @@ export function materializeAgentBranchDraft(
   // agent 名称及其 active tool 集合。
   return {
     ...materialized,
-    environmentId: existing.environmentId,
+    environmentName: existing.environmentName,
     model: { ...existing.model },
     thinkingLevel: existing.thinkingLevel,
     yoloEnabled: existing.yoloEnabled,
@@ -109,7 +110,7 @@ export function branchDraftFromBranchSettings(
   yoloEnabled: boolean,
 ): BranchDraft {
   return {
-    environmentId: settings.environmentId ?? null,
+    environmentName: settings.environmentName ?? null,
     agentName: settings.agentName,
     model: {
       providerName: settings.model.providerName,
@@ -123,7 +124,7 @@ export function branchDraftFromBranchSettings(
 }
 
 export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolean {
-  return left.environmentId === right.environmentId
+  return left.environmentName === right.environmentName
     && left.agentName === right.agentName
     && left.model.providerName === right.model.providerName
     && left.model.modelName === right.model.modelName
@@ -155,11 +156,11 @@ export function buildBranchDiffCommands(
   createCommandId: () => string,
 ): HarnessThreadCommandCreateDTO[] {
   const commands: HarnessThreadCommandCreateDTO[] = []
-  if (base.environmentId !== draft.environmentId) {
+  if (base.environmentName !== draft.environmentName) {
     commands.push({
       type: 'SET_ENVIRONMENT',
       clientCommandId: createCommandId(),
-      environmentId: draft.environmentId,
+      environmentName: draft.environmentName,
     })
   }
   if (base.agentName !== draft.agentName) {
@@ -228,10 +229,10 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
   const payload = parsePayload(command.payloadJson)
   switch (command.type) {
     case 'SET_ENVIRONMENT': {
-      const environmentId = typeof payload.environmentId === 'string' && payload.environmentId
-        ? payload.environmentId
+      const environmentName = typeof payload.environmentName === 'string' && payload.environmentName
+        ? payload.environmentName
         : null
-      return { ...base, environmentId }
+      return { ...base, environmentName }
     }
     case 'SET_AGENT': {
       const agentName = typeof payload.agentName === 'string' ? payload.agentName : base.agentName

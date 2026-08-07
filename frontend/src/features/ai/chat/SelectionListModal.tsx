@@ -152,20 +152,20 @@ export function AgentSelectionModal({
 export function EnvironmentSelectionModal({
   open,
   environments,
-  selectedEnvironmentId,
+  selectedEnvironmentName,
   selectionPending = false,
   onSelect,
   onClose,
 }: {
   open: boolean
   environments: LiveEnvironmentDTO[]
-  selectedEnvironmentId?: string | null
+  selectedEnvironmentName?: string | null
   selectionPending?: boolean
-  onSelect: (environmentId: string | null) => void | Promise<void>
+  onSelect: (environmentName: string | null) => void | Promise<void>
   onClose: () => void
 }) {
   const { t } = useI18n()
-  const selected = selectedEnvironmentId?.trim() || ''
+  const selected = selectedEnvironmentName?.trim() || ''
   const items: SelectionListItem[] = [
     {
       id: '',
@@ -173,10 +173,10 @@ export function EnvironmentSelectionModal({
       badge: selected ? undefined : t('ai.chat.selected'),
     },
     ...filterReadyEnvironments(environments).map((environment) => ({
-      id: environment.id,
+      id: environment.name,
       title: environment.name,
-      subtitle: environment.status,
-      badge: environment.id === selected ? t('ai.chat.selected') : undefined,
+      subtitle: environment.ready ? environment.status : t('ai.chat.environmentUnavailable'),
+      badge: environment.name === selected ? t('ai.chat.selected') : undefined,
     })),
   ]
   return (
@@ -190,7 +190,7 @@ export function EnvironmentSelectionModal({
       selectionPending={selectionPending}
       emptyText={t('ai.chat.noEnvironments')}
       onClose={onClose}
-      onSelect={(environmentId) => onSelect(environmentId || null)}
+      onSelect={(environmentName) => onSelect(environmentName || null)}
     />
   )
 }

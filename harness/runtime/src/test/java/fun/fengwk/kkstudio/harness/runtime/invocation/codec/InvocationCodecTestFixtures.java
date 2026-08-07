@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
@@ -26,10 +26,10 @@ import java.util.Set;
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 final class InvocationCodecTestFixtures {
 
-  static final EnvironmentId ENVIRONMENT_ID =
-      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
-  static final EnvironmentId OTHER_ENVIRONMENT_ID =
-      new EnvironmentId("123e4567-e89b-12d3-a456-426614174001");
+  static final EnvironmentName ENVIRONMENT_ID =
+      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+  static final EnvironmentName OTHER_ENVIRONMENT_ID =
+      new EnvironmentName("123e4567-e89b-12d3-a456-426614174001");
 
   private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
       new ToolDescriptorJsonCodec();

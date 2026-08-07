@@ -45,5 +45,5 @@ public class HarnessThreadCommandCreateDTO {
   private Boolean yoloEnabled;
 
   /** 目标 Environment 路由：仅 SET_ENVIRONMENT 必填；可空 canonical lowercase UUID（null 表示解绑）；其余类型禁止提供。 */
-  private String environmentId;
+  private String environmentName;
 }

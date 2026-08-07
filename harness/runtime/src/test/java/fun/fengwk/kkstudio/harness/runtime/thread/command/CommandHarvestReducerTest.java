@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,10 +19,10 @@ import java.util.List;
 class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
-  private static final EnvironmentId ENV_A =
-      new EnvironmentId("123e4567-e89b-12d3-a456-426614174000");
-  private static final EnvironmentId ENV_B =
-      new EnvironmentId("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  private static final EnvironmentName ENV_A =
+      new EnvironmentName("123e4567-e89b-12d3-a456-426614174000");
+  private static final EnvironmentName ENV_B =
+      new EnvironmentName("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   private static final BranchSettings BASE =
       new BranchSettings(
           ENV_A,
@@ -83,7 +83,7 @@ class CommandHarvestReducerTest {
                 queued(2L, 2L, new SetModelCommandPayload(replacement)),
                 queued(3L, 3L, new CustomMessageCommandPayload(system("system")))));
 
-    assertEquals(ENV_A, result.branchSettings().environmentId());
+    assertEquals(ENV_A, result.branchSettings().environmentName());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
     assertEquals("medium", result.branchSettings().thinkingLevel());

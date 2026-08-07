@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayPropert
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
@@ -29,6 +29,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -40,14 +41,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code READY}（skills）帧。
  *
  * <p>若未调高缓冲区配置，内嵌 Tomcat 在收到超长帧时会立刻以 close code 1009 关闭连接，导致实时注册表永远无法进入 READY。本测试发送一个携带远超默认阈值的厚重
- * skills payload 的 {@code READY} 帧，并断言 {@link LiveEnvironmentRegistry#isReady(EnvironmentId)}
+ * skills payload 的 {@code READY} 帧，并断言 {@link LiveEnvironmentRegistry#isReady(EnvironmentName)}
  * 在截止时间内变为 {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
-  private static final EnvironmentId ENVIRONMENT_ID =
-      new EnvironmentId("2f8fad5b-d9cb-469f-a165-70867728950e");
-  private static final String ENVIRONMENT_NAME = "env-large-caps";
+  private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-large-caps");
   private static final String DAEMON_TOKEN = "test-daemon-token";
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -124,12 +123,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private boolean awaitReady() throws InterruptedException {
     long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (System.nanoTime() < deadlineNanos) {
-      if (registry.isReady(ENVIRONMENT_ID)) {
+      if (registry.isReady(ENVIRONMENT_NAME, Instant.now(), properties.requireHeartbeatTimeout())) {
         return true;
       }
       Thread.sleep(50);
     }
-    return registry.isReady(ENVIRONMENT_ID);
+    return registry.isReady(ENVIRONMENT_NAME, Instant.now(), properties.requireHeartbeatTimeout());
   }
 
   private static String readMessageType(String envelopeJson) throws Exception {
@@ -157,7 +156,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return new DaemonEnvelope(
         DaemonProtocol.VERSION_2,
         DaemonMessageType.HELLO,
-        ENVIRONMENT_ID,
         ENVIRONMENT_NAME,
         null,
         sequence,
@@ -174,13 +172,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION_2,
-        DaemonMessageType.READY,
-        ENVIRONMENT_ID,
-        ENVIRONMENT_NAME,
-        null,
-        1,
-        payloadJson);
+        DaemonProtocol.VERSION_2, DaemonMessageType.READY, ENVIRONMENT_NAME, null, 1, payloadJson);
   }
 
   private static final class FrameListener implements WebSocket.Listener {

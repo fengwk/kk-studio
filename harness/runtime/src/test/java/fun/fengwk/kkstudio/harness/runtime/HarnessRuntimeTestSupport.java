@@ -45,7 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -65,7 +65,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -81,8 +80,8 @@ final class HarnessRuntimeTestSupport {
   static final Instant T3 = Instant.ofEpochMilli(4_000);
   static final Instant T5 = Instant.ofEpochMilli(6_000);
   static final Instant T6 = Instant.ofEpochMilli(7_000);
-  static final EnvironmentId ENV = new EnvironmentId(UUID.randomUUID().toString());
-  static final EnvironmentId ENV2 = new EnvironmentId(UUID.randomUUID().toString());
+  static final EnvironmentName ENV = new EnvironmentName("env-1");
+  static final EnvironmentName ENV2 = new EnvironmentName("env-2");
 
   private HarnessRuntimeTestSupport() {}
 

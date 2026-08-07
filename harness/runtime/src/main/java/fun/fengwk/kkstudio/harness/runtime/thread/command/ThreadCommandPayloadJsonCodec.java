@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
-import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -25,7 +25,7 @@ import java.util.Set;
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}；SET_ENVIRONMENT 的 {@code environmentId} 为可空 canonical UUID 文本，null 表示 clear。
+ * ModelSelection}；SET_ENVIRONMENT 的 {@code environmentName} 为可空 canonical 逻辑路由名称，null 表示 clear。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -44,7 +44,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_THINKING_LEVEL_FIELDS = orderedSet("thinkingLevel");
   private static final Set<String> SET_ACTIVE_TOOLS_FIELDS = orderedSet("activeTools");
   private static final Set<String> SET_YOLO_FIELDS = orderedSet("yoloEnabled");
-  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentId");
+  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -120,9 +120,9 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetYoloCommandPayload value -> NODES
           .objectNode()
           .put("yoloEnabled", value.yoloEnabled());
-      case SetEnvironmentCommandPayload value -> value.environmentId() == null
-          ? NODES.objectNode().putNull("environmentId")
-          : NODES.objectNode().put("environmentId", value.environmentId().value());
+      case SetEnvironmentCommandPayload value -> value.environmentName() == null
+          ? NODES.objectNode().putNull("environmentName")
+          : NODES.objectNode().put("environmentName", value.environmentName().value());
     };
   }
 
@@ -193,14 +193,14 @@ public final class ThreadCommandPayloadJsonCodec {
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
     requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
-    JsonNode environmentId = node.get("environmentId");
-    if (environmentId.isNull()) {
+    JsonNode environmentName = node.get("environmentName");
+    if (environmentName.isNull()) {
       return new SetEnvironmentCommandPayload(null);
     }
-    if (!environmentId.isTextual()) {
-      throw new IllegalArgumentException("SET_ENVIRONMENT.environmentId must be text or null");
+    if (!environmentName.isTextual()) {
+      throw new IllegalArgumentException("SET_ENVIRONMENT.environmentName must be text or null");
     }
-    return new SetEnvironmentCommandPayload(new EnvironmentId(environmentId.textValue()));
+    return new SetEnvironmentCommandPayload(new EnvironmentName(environmentName.textValue()));
   }
 
   private static ModelSelection decodeModelSelection(JsonNode value) {

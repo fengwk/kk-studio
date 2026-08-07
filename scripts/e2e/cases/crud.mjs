@@ -384,7 +384,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled 默认值；Thread 创建携带完整 branchSettings（Environment 路由 UUID 或 null）；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled/可选默认 environmentName；Thread 创建携带完整 branchSettings（Environment 路由名称或 null）；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -398,13 +398,13 @@ registerCase({
       assert(
         chat.agentName === agent.name
           && chat.yoloEnabled === false
-          && !Object.hasOwn(chat, 'environmentName'),
+          && chat.environmentName === null,
         JSON.stringify(chat),
       )
       // 先创建 Thread，再更新 Chat 默认值，最后 reread 同一 Thread：更新 Chat 不影响既有 Thread
-      // 的 branchSettings（immutable Environment identity；Thread 快照是运行时事实）。
+      // 的 branchSettings（immutable Environment route；Thread 快照是运行时事实）。
       const requested = {
-        environmentId: null,
+        environmentName: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
         thinkingLevel: 'off',
@@ -433,7 +433,7 @@ registerCase({
       assert(
         updated.agentName === agent.name
           && updated.yoloEnabled === true
-          && !Object.hasOwn(updated, 'environmentName'),
+          && updated.environmentName === null,
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。
@@ -528,7 +528,7 @@ registerCase({
       branchSettings: branchSettingsOf(
         { name: agent.name },
         modelSelectionFor(agent),
-        { environmentId: null },
+        { environmentName: null },
       ),
     })
     const second = await createChatThread(ctx, chat.id, {
@@ -537,7 +537,7 @@ registerCase({
       branchSettings: branchSettingsOf(
         { name: agent.name },
         modelSelectionFor(agent),
-        { environmentId: null },
+        { environmentName: null },
       ),
     })
     try {
@@ -552,7 +552,7 @@ registerCase({
         branchSettings: branchSettingsOf(
           { name: agent.name },
           modelSelectionFor(agent),
-          { environmentId: null },
+          { environmentName: null },
         ),
       })
       await ctx.call(

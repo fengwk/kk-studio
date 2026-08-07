@@ -34,7 +34,7 @@ Chat 编辑器更新这两项设置时携带 `expectedVersion`，pending 期间�
 
 ```ts
 interface BranchDraft {
-  environmentId: string | null   // canonical UUID
+  environmentName: string | null   // canonical 路由名称
   agentName: string
   model: { providerName, modelName, variant }
   thinkingLevel: string

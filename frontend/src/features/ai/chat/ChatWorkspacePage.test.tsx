@@ -112,8 +112,8 @@ const miniMaxModel = {
 }
 
 const readyEnvironments = [
-  { id: 'env-local', name: 'local', status: 'READY', lastSeen: null, tools: [], skills: [] },
-  { id: 'env-remote', name: 'remote', status: 'READY', lastSeen: null, tools: [], skills: [] },
+  { name: 'local', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
+  { name: 'remote', ready: true, status: 'READY', lastSeen: null, tools: [], skills: [] },
 ]
 
 class FakeEventSource {
@@ -126,7 +126,7 @@ function branchSettings(
   overrides: Partial<HarnessBranchSettingsDTO> = {},
 ): HarnessBranchSettingsDTO {
   return {
-    environmentId: null,
+    environmentName: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     thinkingLevel: 'off',
@@ -330,26 +330,50 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('button', { name: /^assistant$/ })).toBeInTheDocument()
   })
 
-  it('keeps a blank-pane Environment draft out of Chat requests', async () => {
+  it('blank-pane Environment selection syncs the Chat default with version serialization', async () => {
     const user = userEvent.setup()
+    let updateCalls = 0
+    vi.mocked(chatService.updateChat).mockImplementation(async (_id, data) => {
+      updateCalls += 1
+      return {
+        id: 'chat-1',
+        title: 'Workspace',
+        agentName: 'assistant',
+        environmentName: data.environmentName ?? null,
+        yoloEnabled: false,
+        version: String(1 + updateCalls),
+        createTime: null,
+        updateTime: null,
+      }
+    })
     renderWorkspace()
 
     await screen.findByLabelText('给 AI 发送消息')
-    await user.click(screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\uff08\u65e0\uff09/ }))
+    await user.click(screen.getByRole('button', { name: /env:none/ }))
     const envModal = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModal).getByRole('button', { name: /^local/ }))
     expect(
-      screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ }),
+      screen.getByRole('button', { name: /env:local/ }),
     ).toBeInTheDocument()
-    expect(chatService.updateChat).not.toHaveBeenCalled()
+    // 选中的名称异步同步为 Chat 默认值（版本化 CAS）；footer 使用面板本地草稿。
+    await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))
+    expect(chatService.updateChat).toHaveBeenNthCalledWith(1, 'chat-1', {
+      environmentName: 'local',
+      expectedVersion: '1',
+    })
 
-    await user.click(screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ }))
+    // 显式清空（无）同步为 Chat 默认 null。
+    await user.click(screen.getByRole('button', { name: /env:local/ }))
     const envModalAgain = await screen.findByLabelText('选择 Environment')
     await user.click(within(envModalAgain).getByRole('button', { name: /\uff08\u65e0\uff09/ }))
     expect(
-      screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\uff08\u65e0\uff09/ }),
+      screen.getByRole('button', { name: /env:none/ }),
     ).toBeInTheDocument()
-    expect(chatService.updateChat).not.toHaveBeenCalled()
+    await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(2))
+    expect(chatService.updateChat).toHaveBeenNthCalledWith(2, 'chat-1', {
+      environmentName: null,
+      expectedVersion: '2',
+    })
   })
 
   it('keeps bound pane Environments independent of Chat and each other', async () => {
@@ -364,7 +388,7 @@ describe('ChatWorkspacePage', () => {
           sessionId: `session-${threadId}`,
           headEntryId: `head-${threadId}`,
           branchSettings: branchSettings({
-            environmentId: threadId === 't-local' ? 'env-local' : 'env-remote',
+            environmentName: threadId === 't-local' ? 'local' : 'remote',
           }),
         }),
       ),
@@ -372,9 +396,9 @@ describe('ChatWorkspacePage', () => {
 
     renderWorkspace()
     await waitFor(() => {
-      const environmentButtons = screen.getAllByRole('button', { name: /\u73af\u5883[\uff1a:]/ })
+      const environmentButtons = screen.getAllByRole('button', { name: /env:/ })
       const labels = environmentButtons.map((button) => button.textContent)
-      expect(labels).toEqual(expect.arrayContaining(['\u73af\u5883\uff1alocal', '\u73af\u5883\uff1aremote']))
+      expect(labels).toEqual(expect.arrayContaining(['env:local', 'env:remote']))
     })
     expect(chatService.updateChat).not.toHaveBeenCalled()
   })
@@ -486,6 +510,32 @@ describe('ChatWorkspacePage', () => {
     )
   })
 
+  it('first send uses the pane-local Environment even when the Chat default update fails', async () => {
+    const user = userEvent.setup()
+    vi.mocked(chatService.updateChat).mockRejectedValue(new ApiError('conflict', 409, 'CONFLICT'))
+    vi.mocked(chatService.createChatThread).mockResolvedValue(
+      snapshot(thread({ threadId: 't-env-local' })),
+    )
+    vi.mocked(harnessService.enqueueCommands).mockResolvedValue([])
+    renderWorkspace()
+
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(screen.getByRole('button', { name: /env:none/ }))
+    const envModal = await screen.findByLabelText('选择 Environment')
+    await user.click(within(envModal).getByRole('button', { name: /^local/ }))
+    expect(
+      screen.getByRole('button', { name: /env:local/ }),
+    ).toBeInTheDocument()
+
+    // Chat 默认更新失败不影响本面板草稿与首次发送：ROOT branchSettings 使用面板本地值。
+    await waitFor(() => expect(chatService.updateChat).toHaveBeenCalledTimes(1))
+    await user.type(composer, 'hello with pane-local env')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalled())
+    const createArg = vi.mocked(chatService.createChatThread).mock.calls.at(-1)![1]!
+    expect(createArg.branchSettings.environmentName).toBe('local')
+  })
+
   it('detaches a stale persisted thread when its snapshot is not found', async () => {
     const seeded = loadChatPaneState('chat-1')
     seeded.panes[0].threadId = 'missing-thread'
@@ -543,7 +593,7 @@ describe('ChatWorkspacePage', () => {
         title: 'Workspace',
         branchSettings: expect.objectContaining({
           agentName: 'assistant',
-          environmentId: null,
+          environmentName: null,
         }),
         yoloEnabled: false,
       }),

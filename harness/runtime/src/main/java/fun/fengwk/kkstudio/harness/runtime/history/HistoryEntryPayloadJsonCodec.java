@@ -26,7 +26,7 @@ import java.util.Set;
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
  * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；非 canonical 十进制 ID；非 canonical UUID 的
- * environmentId。字段顺序固定；list 顺序保留。旧协议的 {@code turnSettings} / {@code environmentName} 字段不属于任何
+ * environmentName。字段顺序固定；list 顺序保留。旧协议的 {@code turnSettings} / {@code environmentId} 字段不属于任何
  * canonical shape，由 exact-field 校验直接拒绝，不提供兼容读。
  *
  * <p>{@code message} 子树委派 {@link AgentMessageJsonCodec}；settings / model / assistant metadata 子树
