@@ -40,7 +40,7 @@ export function preferNewerChat(
   return current
 }
 
-/** Merge a server list response without allowing an older Chat version to regress the cache. */
+/** 合并服务器列表响应，同时避免旧 Chat 版本使 cache 回退。 */
 export function mergeChatList(
   current: ChatDTO[] | undefined,
   incoming: ChatDTO[],
@@ -52,7 +52,7 @@ export function mergeChatList(
   return incoming.map((chat) => preferNewerChat(currentById.get(chat.id), chat))
 }
 
-/** Apply an authoritative Chat response to an already loaded list cache. */
+/** 将权威 Chat 响应应用到已加载的列表 cache。 */
 export function mergeChatIntoList(
   current: ChatDTO[] | undefined,
   incoming: ChatDTO,

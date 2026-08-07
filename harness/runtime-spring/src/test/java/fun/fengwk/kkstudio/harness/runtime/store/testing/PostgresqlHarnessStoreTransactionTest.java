@@ -216,8 +216,7 @@ class PostgresqlHarnessStoreTransactionTest {
                       try {
                         tx.insertSession(session(1));
                       } catch (IllegalArgumentException ignored) {
-                        // PostgreSQL has already aborted this transaction; normal return is
-                        // invalid.
+                        // PostgreSQL 已中止该事务：正常返回不再合法。
                       }
                       return "must not commit";
                     }));

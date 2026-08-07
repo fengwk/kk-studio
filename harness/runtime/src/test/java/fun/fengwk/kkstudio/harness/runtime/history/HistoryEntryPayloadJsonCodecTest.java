@@ -22,9 +22,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import java.math.BigDecimal;
 import java.util.List;
 
-/**
- * history Entry payload codec: canonical shapes, strict boundary rejection and old-field rejection.
- */
+/** history Entry payload codec：标准形态、严格边界拒绝与老字段拒绝。 */
 class HistoryEntryPayloadJsonCodecTest {
 
   private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";

@@ -19,7 +19,7 @@ const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'DOCUMENT',
 ]
 
-/** User-editable per-million-token prices; currency / tier metadata is fixed by the wire contract. */
+/** 用户可编辑的每百万 token 价格；币种 / 档位元数据由 wire 契约固定。 */
 const PRICING_UNIT_FIELDS: ReadonlyArray<{
   field: keyof ModelPricingDraft
   labelKey: string

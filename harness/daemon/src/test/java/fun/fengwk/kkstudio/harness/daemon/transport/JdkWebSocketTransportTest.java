@@ -19,12 +19,10 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** JDK WebSocket adapter must retain complete-text framing and close/disconnect ownership. */
+/** JDK WebSocket 适配器必须保留完整文本成帧以及 close/disconnect 所有权。 */
 class JdkWebSocketTransportTest {
 
-  /**
-   * Connection adapter sends complete frames, rejects closed sockets, and sends one graceful close.
-   */
+  /** 连接适配器发送完整帧，拒绝已关闭 socket，并发送一次 graceful close。 */
   @Test
   void adaptsSendAndCloseLifecycle() {
     FakeWebSocket webSocket = new FakeWebSocket();
@@ -42,7 +40,7 @@ class JdkWebSocketTransportTest {
     assertTrue(connection.sendText("after-close").toCompletableFuture().isCompletedExceptionally());
   }
 
-  /** Listener joins fragmented text, requests the next frame, and delivers the joined message. */
+  /** Listener 拼接分片文本、请求下一帧，并投递拼接后的完整消息。 */
   @Test
   void joinsTextFramesAndRequestsSubsequentFrames() {
     FakeWebSocket webSocket = new FakeWebSocket();
@@ -126,7 +124,7 @@ class JdkWebSocketTransportTest {
     assertEquals(1, webSocket.closeCalls.get());
   }
 
-  /** Close and error are competing terminal notifications and must only notify the runtime once. */
+  /** close 和 error 是竞争的终态通知，对 runtime 只能通知一次。 */
   @Test
   void notifiesDisconnectOnlyOnce() {
     FakeWebSocket webSocket = new FakeWebSocket();

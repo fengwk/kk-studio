@@ -47,14 +47,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * Connection/protocol transport and capability/skill adapter for Environment daemons.
+ * Environment daemon 的连接/协议 transport 与能力/技能适配器。
  *
- * <p>Speaks the Daemon v2 wire protocol: every envelope is scoped by the canonical {@link
- * EnvironmentId} bound at HELLO; the display {@code environmentName} is metadata only and never
- * routes. Does not own durable ToolInvocation claim/lease/terminal/retry lifecycle. Durable
- * execution is owned by the Runtime {@code ToolProcessor}; this class supplies the core-side {@link
- * RemoteToolTransport} and forwards daemon callbacks to the registered Tool listener with strict
- * environment/connection/invocation ownership.
+ * <p>使用 Daemon v2 wire 协议：每个 envelope 都由 HELLO 时绑定的 canonical {@link EnvironmentId} 限定； 展示用 {@code
+ * environmentName} 只是元数据，绝不参与路由。不拥有持久的 ToolInvocation claim/lease/terminal/retry 生命周期。持久化执行由
+ * Runtime {@code ToolProcessor} 负责；本类提供 core 侧 {@link RemoteToolTransport}，并把 daemon 回调转发给注册的 Tool
+ * listener，严格校验 environment/connection/invocation 归属。
  */
 @Service
 public class EnvironmentDaemonGateway
@@ -188,14 +186,14 @@ public class EnvironmentDaemonGateway
               listener);
       activeByEnvironment.put(environmentId, active);
     }
-    // Send outside the gateway monitor to avoid this->state lock inversion with receive paths.
+    // 在 gateway monitor 之外发送，避免与 receive 路径产生 this->state 锁顺序反转。
     SendOutcome outcome =
         sendWithOutcome(
             state, DaemonMessageType.INVOKE, Long.toString(invocationId), invokePayload);
     if (outcome == SendOutcome.SENT) {
       return active;
     }
-    // Prevent connection-close notify from double-firing with the thrown uncertain path.
+    // 防止连接关闭通知与抛出的不确定（uncertain）路径双重触发。
     active.terminal = true;
     synchronized (this) {
       activeByEnvironment.remove(environmentId, active);
@@ -275,8 +273,8 @@ public class EnvironmentDaemonGateway
     if (!state.helloReceived && envelope.messageType() != DaemonMessageType.HELLO) {
       throw new DaemonProtocolException("HELLO must be the first daemon message");
     }
-    // Post-HELLO envelopes must carry the bound canonical id; a mismatch is a protocol failure that
-    // never re-routes the binding. The display name must stay stable within one connection.
+    // HELLO 之后的 envelope 必须携带绑定的 canonical id；不匹配属于协议失败，绝不重新路由绑定。
+    // 展示名在同一连接内必须保持稳定。
     if (state.environmentId != null && !state.environmentId.equals(envelope.environmentId())) {
       throw new DaemonProtocolException("envelope environmentId does not match bound connection");
     }
@@ -322,7 +320,7 @@ public class EnvironmentDaemonGateway
       throw new DaemonProtocolException("HELLO toolCatalogVersion does not match server catalog");
     }
     verifyGatewayToken(requiredText(payload, "gatewayToken", "HELLO payload"));
-    // HELLO binds the canonical envelope identity after token/version/catalog validation.
+    // HELLO 在 token/version/catalog 校验后绑定 canonical envelope 身份。
     EnvironmentId environmentId = envelope.environmentId();
     String environmentName = envelope.environmentName();
     Instant now = clock.instant();
@@ -396,7 +394,7 @@ public class EnvironmentDaemonGateway
   private void handlePartial(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveRemote active = requireActive(state, envelope);
-    // PARTIAL rejects resource content: partial results must stay text/json only.
+    // PARTIAL 拒绝 resource content：partial 结果必须只能是 text/json。
     ToolResult result =
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
@@ -412,8 +410,8 @@ public class EnvironmentDaemonGateway
   private void handleCompleted(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveRemote active = takeActive(state, envelope);
-    // COMPLETED decodes resource segments to transient in-memory BinaryToolContent; durable
-    // externalization belongs to the ToolGateway, never to the transport gateway.
+    // COMPLETED 把 resource 段解码为瞬态内存 BinaryToolContent；持久化外部化属于 ToolGateway，
+    // 绝不属于 transport gateway。
     ToolResult result =
         resultCodec.decodeResultForInvocation(
             envelope.payloadJson(),
@@ -541,8 +539,8 @@ public class EnvironmentDaemonGateway
         state.connection.sendText(envelopeCodec.encode(envelope));
         return SendOutcome.SENT;
       } catch (RuntimeException error) {
-        // Transport is unusable for further sends, but registry/connection cleanup is not done yet.
-        // Caller must invoke close() so closeConnectionState can finish exactly once.
+        // transport 无法继续发送，但 registry/connection 清理尚未完成。
+        // 调用方必须调用 close()，让 closeConnectionState 恰好完成一次。
         state.sendFailed = true;
         return SendOutcome.UNCERTAIN;
       }
@@ -558,7 +556,7 @@ public class EnvironmentDaemonGateway
     ObjectNode payload = envelopeCodec.createPayload();
     payload.put("message", message);
     if (state.environmentId == null && receivedEnvironmentId != null) {
-      // Pre-HELLO failure: echo the received envelope identity so the daemon can attribute it.
+      // HELLO 前失败：回显收到的 envelope 身份，让 daemon 可以归因。
       synchronized (state) {
         if (!state.cleaned && !state.sendFailed && state.connection.isOpen()) {
           DaemonEnvelope envelope =
@@ -592,7 +590,7 @@ public class EnvironmentDaemonGateway
       if (state.cleaned) {
         return;
       }
-      // cleaned is the completed-cleanup fence; sendFailed only means transport is unusable.
+      // cleaned 是完成清理的围栏；sendFailed 只表示 transport 不可用。
       state.cleaned = true;
       state.sendFailed = true;
       environmentId = state.environmentId;
@@ -616,7 +614,7 @@ public class EnvironmentDaemonGateway
     try {
       state.connection.close();
     } catch (RuntimeException ignored) {
-      // Transport close failures must not touch durable state.
+      // transport 关闭失败不得触碰持久状态。
     }
     if (lostRemote != null) {
       ActiveRemote remote = lostRemote;
@@ -665,7 +663,7 @@ public class EnvironmentDaemonGateway
     try {
       environmentReadyListener.onEnvironmentReady(environmentId);
     } catch (RuntimeException ignored) {
-      // Listener failures must not re-enter protocol state.
+      // listener 失败不得重新进入协议状态。
     }
   }
 
@@ -674,7 +672,7 @@ public class EnvironmentDaemonGateway
       try {
         action.run();
       } catch (RuntimeException ignored) {
-        // Listener/projection failures must not re-enter protocol state.
+        // listener/投影失败不得重新进入协议状态。
       }
     }
   }
@@ -821,9 +819,8 @@ public class EnvironmentDaemonGateway
 
     @Override
     public void cancel() {
-      // Idempotent ToolExecutionHandle.cancel: at most one CANCEL after a successful start, and
-      // never
-      // after a terminal COMPLETED/FAILED/CANCELLED callback.
+      // 幂等 ToolExecutionHandle.cancel：成功 start 后至多发送一次 CANCEL，且绝不在
+      // terminal COMPLETED/FAILED/CANCELLED 回调之后发送。
       synchronized (this) {
         if (cancelled || terminal || cancelSent) {
           cancelled = true;
@@ -872,10 +869,10 @@ public class EnvironmentDaemonGateway
     private volatile boolean helloReceived;
     private volatile boolean ready;
 
-    /** Transport is unusable for further sends (failed send or cleanup started). */
+    /** transport 无法继续发送（发送失败或已开始清理）。 */
     private volatile boolean sendFailed;
 
-    /** Registry/connection maps have been cleaned exactly once. */
+    /** registry/connection 映射已恰好清理一次。 */
     private volatile boolean cleaned;
 
     private long outboundSequence;

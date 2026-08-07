@@ -26,7 +26,7 @@ class RealtimeEventJsonCodecTest {
 
   private final RealtimeEventJsonCodec codec = new RealtimeEventJsonCodec();
 
-  // ---------- Canonical round-trip for each delta type ----------
+  // ---------- 每种 delta 类型的 canonical 往返 ----------
 
   @Test
   void textDeltaRoundTrips() {
@@ -76,7 +76,7 @@ class RealtimeEventJsonCodecTest {
   @Test
   void toolCallDeltaPreservesRawFragmentWithoutParsing() {
     Instant now = Instant.parse("2026-01-04T00:00:00Z");
-    // Not a complete JSON object; codec must not reject or repair it.
+    // 不是完整的 JSON object；codec 不得拒绝或修正它。
     String rawFragment = "  broken: not json  ";
     ProviderStreamEvent.ToolCallDelta delta =
         new ProviderStreamEvent.ToolCallDelta(2, "call-1", "read", rawFragment);
@@ -123,11 +123,11 @@ class RealtimeEventJsonCodecTest {
 
   @Test
   void toolCallDeltaWithAllFieldsNullRejectedByConstructor() {
-    // All-null construction is rejected by ProviderStreamEvent.ToolCallDelta itself.
+    // 全 null 构造由 ProviderStreamEvent.ToolCallDelta 自身拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () -> new ProviderStreamEvent.ToolCallDelta(0, null, null, null));
-    // Ensure we are still safely constructing ModelDelta with a valid delta.
+    // 确认仍然可以用合法 delta 安全地构造 ModelDelta。
     ProviderStreamEvent.ToolCallDelta valid =
         new ProviderStreamEvent.ToolCallDelta(0, "c", null, null);
     RealtimeEvent.ModelDelta event =
@@ -135,7 +135,7 @@ class RealtimeEventJsonCodecTest {
     assertEquals(event, codec.decode(codec.encode(event)));
   }
 
-  // ---------- Exact field set & wire invariant ----------
+  // ---------- 精确字段集与 wire 不变量 ----------
 
   @Test
   void rejectsUnknownTopLevelField() {
@@ -270,11 +270,11 @@ class RealtimeEventJsonCodecTest {
     payload.putNull("id");
     payload.putNull("name");
     payload.putNull("argumentsJson");
-    // Constructor invariants: must contain at least one non-null field.
+    // 构造器不变量：必须至少包含一个非 null 字段。
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
   }
 
-  // ---------- Numeric invariants ----------
+  // ---------- 数值不变量 ----------
 
   @Test
   void rejectsNonPositiveThreadId() {
@@ -318,7 +318,7 @@ class RealtimeEventJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
   }
 
-  // ---------- Strict mapper enforcement ----------
+  // ---------- 严格 mapper 强制 ----------
 
   @Test
   void rejectsTrailingTokens() {
@@ -361,7 +361,7 @@ class RealtimeEventJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
   }
 
-  // ---------- API null guarding ----------
+  // ---------- API null 防护 ----------
 
   @Test
   void guardsNullArguments() {
@@ -371,7 +371,7 @@ class RealtimeEventJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decodeNode(null));
   }
 
-  // ---------- Determinism ----------
+  // ---------- 确定性 ----------
 
   @Test
   void encodingIsDeterministic() {
@@ -382,7 +382,7 @@ class RealtimeEventJsonCodecTest {
     assertEquals(codec.encode(event), codec.encode(event));
   }
 
-  // ---------- helpers ----------
+  // ---------- 辅助方法 ----------
 
   private static ObjectNode canonicalTextDeltaNode() {
     ObjectNode node = NODES.objectNode();

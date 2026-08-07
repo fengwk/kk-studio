@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** EnvironmentId canonical lowercase UUID invariants. */
+/** EnvironmentId 的 canonical 小写 UUID 不变量。 */
 class EnvironmentIdTest {
 
   private static final String CANONICAL = "123e4567-e89b-12d3-a456-426614174000";

@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import java.time.Instant;
 import java.util.List;
 
-/** EnvironmentId-keyed occupancy, display-name reuse, and READY lifecycle of the live registry. */
+/** 基于 EnvironmentId 的占用、display name 复用以及 live registry 的 READY 生命周期。 */
 class LiveEnvironmentRegistryTest {
 
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
@@ -75,8 +75,7 @@ class LiveEnvironmentRegistryTest {
 
     assertTrue(registry.tryBind(DEV_ID, "bound-name", connection, NOW));
     registry.markReady(DEV_ID, connection, NOW);
-    // A later connection presenting the same id with a different name must not displace the
-    // bound entry: occupancy is decided by the id alone.
+    // 之后使用同一 id 但不同名称的连接不能替换已绑定项：占用判断仅依据 id。
     assertFalse(registry.tryBind(DEV_ID, "other-name", new FakeConnection("c2"), NOW));
     assertEquals("bound-name", registry.find(DEV_ID).orElseThrow().name());
     assertTrue(registry.isReady(DEV_ID));

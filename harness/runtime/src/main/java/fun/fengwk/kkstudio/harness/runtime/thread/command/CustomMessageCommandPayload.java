@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 
 import java.util.Objects;
 
-/** Typed CUSTOM_MESSAGE payload restricted to SYSTEM or USER messages. */
+/** 限定为 SYSTEM 或 USER 消息的 typed CUSTOM_MESSAGE payload。 */
 public record CustomMessageCommandPayload(AgentMessage message) implements ThreadCommandPayload {
 
   public CustomMessageCommandPayload {

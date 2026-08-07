@@ -2,13 +2,13 @@ package fun.fengwk.kkstudio.core.ai.environment.service;
 
 import java.util.Objects;
 
-/** Bounded asynchronous result of a complete skill load request. */
+/** 一次完整 skill 加载请求的有界异步结果。 */
 public sealed interface EnvironmentSkillLoadResult
     permits EnvironmentSkillLoadResult.Loaded, EnvironmentSkillLoadResult.Failed {
 
   String skillName();
 
-  /** Daemon returned the full SKILL.md body. */
+  /** Daemon 返回了完整 SKILL.md 正文。 */
   record Loaded(String skillName, String content) implements EnvironmentSkillLoadResult {
     public Loaded {
       skillName = requireNonBlank(skillName, "skillName");
@@ -16,7 +16,7 @@ public sealed interface EnvironmentSkillLoadResult
     }
   }
 
-  /** Offline, timeout, disconnect, or daemon-reported failure. */
+  /** 离线、超时、断开连接或 daemon 上报的失败。 */
   record Failed(String skillName, String message) implements EnvironmentSkillLoadResult {
     public Failed {
       skillName = requireNonBlank(skillName, "skillName");

@@ -9,11 +9,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Narrow, unadvertised pi-base argument aliases for path-bearing coding tools.
+ * 面向携带路径参数的 coding tools 的窄范围、未公开的 pi-base 参数别名。
  *
- * <p>Some provider models emit {@code filePath} even though every tool contract declares {@code
- * path}. Rewrite only the unambiguous case before strict descriptor validation; callers that send
- * both names still receive the normal unknown-property error.
+ * <p>尽管每个 tool 契约都声明 {@code path}，部分 provider model 仍会发送 {@code filePath}。仅在严格 descriptor 校验前重写
+ * 这一无歧义场景；同时发送两个名字的调用方仍会收到常规的 unknown-property 错误。
  */
 public final class CodingToolArgumentAliases {
 
@@ -31,7 +30,7 @@ public final class CodingToolArgumentAliases {
 
   private CodingToolArgumentAliases() {}
 
-  /** Rewrites a sole {@code filePath} argument to {@code path} for known path-bearing tools. */
+  /** 对已知的路径型 tools，将唯一的 {@code filePath} 参数重写为 {@code path}。 */
   public static String normalize(String toolName, String argumentsJson) {
     Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(argumentsJson, "argumentsJson");

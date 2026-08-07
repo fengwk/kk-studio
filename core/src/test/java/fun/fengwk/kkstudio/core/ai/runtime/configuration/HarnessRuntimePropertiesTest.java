@@ -35,7 +35,7 @@ class HarnessRuntimePropertiesTest {
     assertEquals(64, properties.getDispatcherWorkerQueueCapacity());
   }
 
-  /** Relative workdirs resolve under environmentRoot while traversal and absolute escapes fail. */
+  /** 相对 workdir 在 environmentRoot 下解析，越界与绝对路径逃逸必须失败。 */
   @Test
   void enforcesEnvironmentRootBoundary() {
     HarnessRuntimeProperties properties = new HarnessRuntimeProperties();

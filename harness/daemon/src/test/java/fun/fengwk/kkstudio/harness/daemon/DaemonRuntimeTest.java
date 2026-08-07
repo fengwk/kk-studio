@@ -121,7 +121,7 @@ class DaemonRuntimeTest {
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
-  /** Production constructors must not advertise the fixed catalog for a partial registry. */
+  /** 生产构造器不能为不完整的 registry 公布固定的 catalog。 */
   @Test
   void productionRuntimeRejectsRegistryThatDoesNotMatchFixedCatalog() {
     DaemonToolRegistry registry = new DaemonToolRegistry();
@@ -698,7 +698,7 @@ class DaemonRuntimeTest {
     String base64 = content.get("contentBase64").asText();
     assertEquals(Base64.getEncoder().encodeToString(data), base64);
 
-    // Receivers decode to inline binary content; durable externalization is ToolGateway ownership.
+    // 接收端解码为内联二进制内容；持久化外部存储由 ToolGateway 负责。
     DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
     ToolResult decoded = resultCodec.decodeResult(payload);
     assertEquals(1, decoded.contents().size());
@@ -774,7 +774,7 @@ class DaemonRuntimeTest {
     transport.receive(invoke("resource-fail", 1));
     transport.takeMessages(2);
 
-    // PARTIAL failure must converge to FAILED and not emit any PARTIAL or COMPLETED.
+    // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
     tool.partial(
         new ToolResult(
             "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
@@ -782,13 +782,13 @@ class DaemonRuntimeTest {
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
 
-    // A late COMPLETED after FAILED must be ignored (journal guards).
+    // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
     tool.complete(
         new ToolResult(
             "resource-fail", List.of(new ResourceToolContent(local)), false, "{}", false));
     assertFalse(transport.hasMessages());
 
-    // Now a separate invocation with COMPLETED failure must also converge to FAILED.
+    // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
     transport.receive(invoke("resource-fail-2", 2));
     transport.takeMessages(2);
     tool.complete(
@@ -1395,7 +1395,7 @@ class DaemonRuntimeTest {
                 try {
                   Files.deleteIfExists(path);
                 } catch (Exception ignored) {
-                  // best-effort cleanup for temp skill fixtures
+                  // 尽力清理 temp skill fixture
                 }
               });
     }

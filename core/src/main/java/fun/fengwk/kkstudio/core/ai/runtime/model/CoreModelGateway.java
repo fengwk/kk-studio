@@ -27,53 +27,38 @@ import java.util.concurrent.ThreadPoolExecutor.DiscardPolicy;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Production {@link ModelGateway} adapter backed by PostgreSQL provider resources.
+ * 以 PostgreSQL provider 资源为支撑的生产 {@link ModelGateway} 适配器。
  *
- * <p>{@code start} resolves the frozen {@link
- * fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest} synchronously
- * through {@link ProviderResolutionService} and submits a transport task to the shared
- * virtual-thread executor. The task opens one {@link ModelProvider} with the configured timeout
- * policy and bridges the SDK stream onto the Runtime listener; the gateway never reads or writes
- * the HarnessStore.
+ * <p>{@code start} 通过 {@link ProviderResolutionService} 同步解析冻结的 {@link
+ * fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest}，并向共享 虚拟线程 executor
+ * 提交一个 transport 任务。任务按配置的 timeout 策略打开一个 {@link ModelProvider}， 并把 SDK 流桥接到 Runtime
+ * listener；gateway 绝不读写 HarnessStore。
  *
- * <p>Admission classification: a deterministic resolution failure ({@link
- * IllegalArgumentException}) returns {@link Rejected} with {@link
- * ProviderErrorKind#INVALID_REQUEST} because the execution was provably never submitted and
- * retrying cannot help; any other resolution failure propagates so the Processor reschedules the
- * attempt. A rejected executor submission returns {@link Busy} with the configured delay; a
- * submission that fails with an unexpected exception returns {@link Indeterminate} because the
- * gateway can no longer prove whether the transport task started.
+ * <p>Admission 分类：确定性解析失败（{@link IllegalArgumentException}）返回携带 {@link
+ * ProviderErrorKind#INVALID_REQUEST} 的 {@link Rejected}，因为执行可证明从未被提交、 重试也无济于事；其他解析失败原样传播，由
+ * Processor 重新调度该次尝试。executor 拒绝提交返回携带 配置延迟的 {@link Busy}；提交抛出意外异常时返回 {@link Indeterminate}，因为
+ * gateway 无法再证明 transport 任务是否已启动。
  *
- * <p>Two-phase activation: {@code start} never opens a callback gate. The transport task first
- * waits on an admission gate that {@link ModelGateway.Handle#activate()} opens only after the
- * Processor has attached the handle and durably marked the invocation RUNNING, so even a Provider
- * SDK that invokes the handler synchronously inside {@code stream} cannot race the caller; a {@code
- * Handle#cancel()} issued before activation wakes the waiting task and aborts it without touching
- * the Provider. A task interrupted while waiting (not cancelled) defers exactly one UNKNOWN to
- * {@code activate()} — an accepted, possibly RUNNING execution never hangs until lease recovery,
- * and no callback is ever delivered before {@code start} returns. Executors that run tasks inline
- * (direct executors or {@code CallerRunsPolicy}) or discard rejected tasks silently ({@code
- * DiscardPolicy} / {@code DiscardOldestPolicy}) are rejected at construction time because the gate
- * would deadlock or the rejection would never surface.
+ * <p>两阶段激活：{@code start} 绝不打开回调 gate。transport 任务首先等待 admission gate，该 gate 只在 Processor 附加 handle
+ * 并把 invocation 持久化标记为 RUNNING 之后由 {@link ModelGateway.Handle#activate()} 打开——即使 Provider SDK 在
+ * {@code stream} 内同步调用 handler，也无法与调用方竞争；激活前发出的 {@code Handle#cancel()} 会唤醒等待中的任务并使其中止，且绝不触碰
+ * Provider。等待期间被中断（而非取消）的 任务会向 {@code activate()} 延迟恰好一次 UNKNOWN——已接受、可能 RUNNING 的执行绝不停摆到 lease 恢复，
+ * 且任何回调都不会在 {@code start} 返回前投递。内联运行任务的 executor（direct executor 或 {@code
+ * CallerRunsPolicy}）或静默丢弃被拒任务（{@code DiscardPolicy} / {@code DiscardOldestPolicy}） 在构造时被拒绝，因为 gate
+ * 会死锁或拒绝永远不会浮出水面。
  *
- * <p>Callback classification: a classified {@link ProviderException} is delivered through {@code
- * onFailed} with its kind; null provider/stream/event/response payloads and adapter setup errors
- * are deterministic {@code INVALID_REQUEST} failures; an unclassified transport failure or a
- * throwing listener is delivered through {@code onUnknown} because the durable outcome cannot be
- * confirmed. Terminal callbacks are delivered at most once and late deltas after a terminal are
- * ignored. {@link ModelGateway.Handle#cancel()} is idempotent and best-effort across the pre-task,
- * pre-bind and post-bind windows.
+ * <p>回调分类：分类过的 {@link ProviderException} 连同其 kind 通过 {@code onFailed} 投递；null 的
+ * provider/stream/event/response payload 与 adapter 装配错误是确定性 {@code INVALID_REQUEST} 失败； 未分类的
+ * transport 失败或抛异常的 listener 通过 {@code onUnknown} 投递，因为持久化结果无法确认。 terminal 回调至多投递一次，terminal
+ * 之后的迟到增量一律忽略。{@link ModelGateway.Handle#cancel()} 在 pre-task、pre-bind 与 post-bind 各窗口内幂等且
+ * best-effort。
  *
- * <p>The callback bridge is a serialized FIFO single-drainer state machine (same structure as the
- * Tool bridge): the bridge monitor only protects queue/dispatch/terminal state, and {@code
- * bindStream} (which may call {@code ProviderStream.cancel}), {@code cancel} and every Runtime
- * listener method are never invoked while holding it — Provider callbacks and internal reports
- * enqueue typed signals and exactly one drainer processes them FIFO outside the lock, so a cancel
- * that re-enters or spawns callback threads can never deadlock. The first terminal signal wins;
- * late/duplicate signals are cleared before any listener work. A non-terminal {@code onEvent}
- * listener failure may select the first UNKNOWN; a terminal listener exception is logged and never
- * yields a second terminal callback. The queue is capped ({@value #MAX_BUFFERED_SIGNALS} signals);
- * overflow deterministically selects exactly one UNKNOWN.
+ * <p>回调桥是串行 FIFO 单 drainer 状态机（与 Tool 桥同构）：桥 monitor 只保护 queue/dispatch/terminal 状态，持有它时绝不调用 {@code
+ * bindStream}（可能触发 {@code ProviderStream.cancel}）、{@code cancel} 或任何 Runtime listener 方法——Provider
+ * 回调与内部报告只入队 typed signal，恰好一个 drainer 在锁外 按 FIFO 处理它们，因此重入或派生回调线程的 cancel 绝不会死锁。第一个 terminal
+ * 信号获胜；迟到/重复信号在 任何 listener 工作前被清除。非 terminal 的 {@code onEvent} listener 失败可以选择第一个 UNKNOWN；
+ * terminal listener 异常只记录日志，绝不产生第二个 terminal 回调。队列有上限 （{@value #MAX_BUFFERED_SIGNALS}
+ * 个信号）；溢出确定性选择恰好一次 UNKNOWN。
  */
 @Slf4j
 @Component
@@ -105,7 +90,7 @@ public final class CoreModelGateway implements ModelGateway {
     try {
       resolved = providerResolution.resolve(execution.request().providerRequest());
     } catch (IllegalArgumentException setupFailure) {
-      // Deterministic pre-submission setup failure: terminate the invocation, never retry.
+      // 提交前的确定性装配失败：终止 invocation，绝不重试。
       return new Rejected(
           new ModelInvocationError(
               ProviderErrorKind.INVALID_REQUEST,
@@ -118,26 +103,24 @@ public final class CoreModelGateway implements ModelGateway {
     try {
       executor.execute(task);
     } catch (RejectedExecutionException rejected) {
-      // The task was provably never accepted: busy with the configured delay. Cancel wakes a task a
-      // broken executor may still have started so it aborts without touching the Provider.
+      // 任务可证明从未被接受：按配置的延迟返回 Busy。cancel 会唤醒 broken executor 可能已启动的任务，
+      // 使其中止且绝不触碰 Provider。
       gate.cancel();
       return new Busy(config.busyRetryDelay());
     } catch (RuntimeException ambiguous) {
-      // A broken executor may have started the task before throwing: the outcome is unknown.
+      // broken executor 可能在抛异常前已启动任务：结果未知。
       gate.cancel();
       return new Indeterminate(
           new ModelInvocationError(
               ProviderErrorKind.TRANSIENT,
               "model execution submission failed; provider outcome cannot be confirmed"));
     }
-    // Two-phase activation: the admission gate stays closed until the Processor has attached the
-    // handle and durably marked the invocation RUNNING, then calls Handle#activate().
+    // 两阶段激活：Processor 附加 handle 并把 invocation 持久化标记为 RUNNING 之前，admission gate
+    // 保持关闭，随后才调用 Handle#activate()。
     return new Started(handle);
   }
 
-  /**
-   * Rejects executor policies that run the transport task inline or drop rejected tasks silently.
-   */
+  /** 拒绝内联运行 transport 任务或静默丢弃被拒任务的 executor 策略。 */
   private static void rejectUnsafeExecutorPolicies(ExecutorService executor) {
     if (executor instanceof ThreadPoolExecutor threadPool) {
       RejectedExecutionHandler handler = threadPool.getRejectedExecutionHandler();
@@ -153,9 +136,8 @@ public final class CoreModelGateway implements ModelGateway {
   }
 
   /**
-   * Rejects direct inline executors whose task runs synchronously inside {@code execute}; such
-   * executors would deadlock the admission gate. The probe records the thread that runs the task,
-   * so asynchronous executors can never be misclassified.
+   * 拒绝任务在 {@code execute} 内同步运行的直接 inline executor；这种 executor 会使 admission gate 死锁。
+   * 探测会记录实际运行任务的线程，因此异步 executor 永远不会被误判。
    */
   private static void rejectInlineExecutor(ExecutorService executor) {
     Thread caller = Thread.currentThread();
@@ -163,7 +145,7 @@ public final class CoreModelGateway implements ModelGateway {
     try {
       executor.execute(() -> runner.set(Thread.currentThread()));
     } catch (RuntimeException ignored) {
-      // Rejecting or broken executors cannot run tasks inline; failures surface from start().
+      // 拒绝型或已损坏的 executor 不可能内联运行任务；失败由 start() 呈现。
       return;
     }
     if (runner.get() == caller) {
@@ -172,10 +154,9 @@ public final class CoreModelGateway implements ModelGateway {
   }
 
   /**
-   * Blocks the transport task until the execution is activated. {@link #open()} is called exactly
-   * by {@link ModelGateway.Handle#activate()}; {@link #cancel()} wakes and aborts a task that was
-   * cancelled before activation (the task must never touch the Provider). Either state change wakes
-   * every waiter, so a cancelled-before-activate task can never leak on a parked thread.
+   * 阻塞 transport 任务直到执行被激活。{@link #open()} 恰好由 {@link ModelGateway.Handle#activate()} 调用；{@link
+   * #cancel()} 唤醒并中止激活前被取消的任务（该任务绝不可触碰 Provider）。任一状态变更都会 唤醒所有等待者，因此 cancel-before-activate
+   * 的任务绝不会泄漏在停驻线程上。
    */
   static final class StartGate {
 
@@ -198,10 +179,8 @@ public final class CoreModelGateway implements ModelGateway {
     }
 
     /**
-     * @return true when the execution was activated; false when the task was cancelled before
-     *     activation or interrupted while waiting — a cancelled task must abort silently, an
-     *     interrupted task must defer exactly one UNKNOWN to activation (see {@link GatewayHandle})
-     *     so an accepted, possibly RUNNING execution never hangs until lease recovery.
+     * @return 执行已激活时返回 true；任务在激活前被取消或等待期间被中断时返回 false——被取消的任务必须 静默中止，被中断的任务必须向激活延迟恰好一次 UNKNOWN（见
+     *     {@link GatewayHandle}）， 使已接受、可能 RUNNING 的执行绝不停摆到 lease 恢复。
      */
     boolean awaitStartReturned() {
       synchronized (monitor) {
@@ -219,14 +198,10 @@ public final class CoreModelGateway implements ModelGateway {
   }
 
   /**
-   * Best-effort idempotent cancel control covering the pre-task, pre-bind and post-bind windows.
-   * {@link #activate()} opens the admission gate exactly once — or, when the transport task was
-   * interrupted before activation, delivers exactly one UNKNOWN without ever touching the Provider;
-   * a cancel issued before activation wakes the waiting task so it aborts without starting the
-   * Provider and drops any deferred activation failure (cancel-before-activate stays silent).
-   * activate / cancel / defer are idempotent and race-safe: once cancelled, activate never delivers
-   * or opens the gate, and the deferred activation failure is delivered at most once no matter
-   * which side of the defer-vs-activate race wins.
+   * 覆盖 pre-task、pre-bind 与 post-bind 窗口的 best-effort 幂等取消控制。 {@link #activate()} 恰好一次打开 admission
+   * gate——或者，当 transport 任务在激活前被中断时， 在不触碰 Provider 的情况下恰好投递一次 UNKNOWN；激活前发出的 cancel 会唤醒等待中的任务，使其不启动
+   * Provider 即中止，并丢弃任何延迟的激活失败（cancel-before-activate 保持静默）。 activate / cancel / defer
+   * 均幂等且竞争安全：一旦取消，activate 绝不投递或打开 gate，且无论 defer 与 activate 竞争哪一方获胜，延迟的激活失败至多投递一次。
    */
   static final class GatewayHandle implements ModelGateway.Handle {
 
@@ -338,7 +313,7 @@ public final class CoreModelGateway implements ModelGateway {
         try {
           cancelTarget.cancel();
         } catch (RuntimeException ignored) {
-          // A delayed-bind auto-cancel must never break the transport task.
+          // 延迟绑定的自动取消绝不可破坏 transport 任务。
         }
       }
     }
@@ -352,7 +327,7 @@ public final class CoreModelGateway implements ModelGateway {
     }
   }
 
-  /** Runs the Provider I/O after admission; owns classification of setup and transport failures. */
+  /** 在 admission 之后运行 Provider I/O；负责装配与 transport 失败的分类。 */
   private final class TransportTask implements Runnable {
 
     private final ProviderResolutionService.ResolvedExecution resolved;

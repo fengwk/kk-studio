@@ -15,11 +15,10 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Thread-safe server-memory Environment registry keyed by canonical {@link EnvironmentId}.
+ * 以 canonical {@link EnvironmentId} 为键的线程安全服务端内存 Environment registry。
  *
- * <p>First connected id wins: a later HELLO for an occupied id is rejected without displacing the
- * original entry. Entries are removed on disconnect. Display names are metadata only: the same name
- * may be bound to different ids, and routing never falls back to a name. Nothing is persisted.
+ * <p>先连接者优先：已被占用的 id 上到达的后续 HELLO 会被拒绝，且不会挤掉原条目。断开连接时移除条目。 展示名只是元数据：同一名字可能绑定到不同
+ * id，路由绝不回退到名字。不持久化任何内容。
  */
 @Component
 public class LiveEnvironmentRegistry {
@@ -29,10 +28,9 @@ public class LiveEnvironmentRegistry {
   public LiveEnvironmentRegistry() {}
 
   /**
-   * Attempts to bind {@code environmentId} (with display {@code environmentName}) to {@code
-   * connection} after HELLO authentication.
+   * 在 HELLO 认证后，尝试把 {@code environmentId}（连同展示名 {@code environmentName}）绑定到 {@code connection}。
    *
-   * @return true when this connection becomes the first occupant of the id
+   * @return 该连接成为该 id 的第一个占用者时返回 true
    */
   public synchronized boolean tryBind(
       EnvironmentId environmentId,
@@ -58,7 +56,7 @@ public class LiveEnvironmentRegistry {
     return true;
   }
 
-  /** Replaces the daemon's advertised skills for a bound id owned by {@code connection}. */
+  /** 为 {@code connection} 拥有的已绑定 id 替换 daemon 通告的 skills。 */
   public synchronized void updateSkills(
       EnvironmentId environmentId,
       EnvironmentDaemonConnection connection,
@@ -76,10 +74,7 @@ public class LiveEnvironmentRegistry {
             Objects.requireNonNull(now, "now")));
   }
 
-  /**
-   * Marks the bound id READY so gateway workers may dispatch against it. Callers own the
-   * skills-before-READY transition; an empty skills list remains valid.
-   */
+  /** 把已绑定 id 标记为 READY，使 gateway worker 可以对其派发。skills-before-READY 的转换由调用方负责； 空 skills 列表仍然有效。 */
   public synchronized void markReady(
       EnvironmentId environmentId, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentId, connection);
@@ -94,7 +89,7 @@ public class LiveEnvironmentRegistry {
             Objects.requireNonNull(now, "now")));
   }
 
-  /** Refreshes last-seen for a bound id owned by {@code connection}. */
+  /** 刷新 {@code connection} 拥有的已绑定 id 的 last-seen。 */
   public synchronized void heartbeat(
       EnvironmentId environmentId, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentId, connection);
@@ -109,10 +104,7 @@ public class LiveEnvironmentRegistry {
             Objects.requireNonNull(now, "now")));
   }
 
-  /**
-   * Removes the entry only when {@code connection} still owns {@code environmentId}. Safe to call
-   * on every disconnect path.
-   */
+  /** 仅当 {@code connection} 仍拥有 {@code environmentId} 时移除条目。可在任何断开路径安全调用。 */
   public synchronized void unregister(
       EnvironmentId environmentId, EnvironmentDaemonConnection connection) {
     if (environmentId == null || connection == null) {
@@ -135,7 +127,7 @@ public class LiveEnvironmentRegistry {
     return find(environmentId).map(LiveEnvironment::isReady).orElse(false);
   }
 
-  /** Compact snapshot list for read-only API, insertion order preserved. */
+  /** 供只读 API 使用的紧凑快照列表，保持插入顺序。 */
   public synchronized List<LiveEnvironment> list() {
     return List.copyOf(new ArrayList<>(byId.values()));
   }

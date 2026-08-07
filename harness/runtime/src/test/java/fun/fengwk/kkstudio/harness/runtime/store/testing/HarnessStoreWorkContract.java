@@ -33,7 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Instant;
 import java.util.Optional;
 
-/** Work mailbox protocol: target existence, lost wake, due ordering, lease fencing and rollback. */
+/** Work mailbox 协议：target 存在性、lost wake、due 排序、lease fence 与 rollback。 */
 public abstract class HarnessStoreWorkContract {
 
   private HarnessStore store;
@@ -340,22 +340,22 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T2);
-    // not available yet
+    // 尚未可用
     assertTrue(
         store
             .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", T4))
             .isEmpty());
-    // claim at availability time
+    // 在可用时刻 claim
     ClaimedWork claimed =
         store
             .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T2, "token-1", T4))
             .orElseThrow();
-    // active lease blocks another claim
+    // 活跃 lease 阻塞其他 claim
     assertTrue(
         store
             .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token-2", T4))
             .isEmpty());
-    // lease expired at now -> reclaimable with a fresh token
+    // lease 在 now 已过期，可用新 token reclaim
     ClaimedWork reclaimed =
         store
             .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T4, "token-3", T5))
@@ -370,16 +370,16 @@ public abstract class HarnessStoreWorkContract {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
-    // new wake arrives while the lease is held
+    // 在 lease 持有期间发生新的 wake
     requestWork(target, T2);
-    // stale completion keeps the row and only clears the lease
+    // 过期的 completion 仅清掉 lease，保留 row
     Optional<Work> kept = store.transaction(tx -> tx.completeWork(claim, T2));
     assertTrue(kept.isPresent());
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(2L, work.wakeVersion());
     assertNull(work.leaseToken());
     assertNull(work.leaseUntil());
-    // the newer wake remains claimable
+    // 较新的 wake 仍可被 claim
     assertEquals(2L, claimNext(WorkTargetType.THREAD, T2).claimedWakeVersion());
   }
 
@@ -400,10 +400,10 @@ public abstract class HarnessStoreWorkContract {
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
     store.transaction(tx -> tx.completeWork(claim, T2));
-    // the row is gone; ownership cannot be verified -> lost ownership, never silently accepted
+    // row 已消失，ownership 无法验证，属于 lost ownership，绝不静默接受
     assertThrows(
         IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim, T2)));
-    // a claim for a target that never had work is lost ownership too
+    // 对从未存在 work 的 target 的 claim 也是 lost ownership
     WorkTarget never = new WorkTarget(WorkTargetType.THREAD, 42);
     assertThrows(
         IllegalStateException.class,
@@ -462,7 +462,7 @@ public abstract class HarnessStoreWorkContract {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
-    // wrong token
+    // 错误的 token
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -474,11 +474,11 @@ public abstract class HarnessStoreWorkContract {
                             target, claim.claimedWakeVersion(), "wrong", claim.leaseUntil()),
                         T2,
                         T3)));
-    // must strictly extend the current lease
+    // 必须严格延长当前 lease
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.renewWork(claim, T2, claim.leaseUntil())));
-    // renew after the lease has expired
+    // lease 过期后再 renew
     Instant afterExpiry = claim.leaseUntil().plusSeconds(5);
     assertThrows(
         IllegalArgumentException.class,
@@ -508,8 +508,8 @@ public abstract class HarnessStoreWorkContract {
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
     requestWork(target, T4);
-    // stale claim reschedule: lease cleared, wakeVersion 2 kept, availableAt = min(current,
-    // requested)
+    // 过期 claim 的 reschedule：lease 清掉，保留 wakeVersion 2，availableAt = min(当前,
+    // 请求时间)
     inTransaction(store, tx -> tx.rescheduleWork(claim, T2, T3));
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(2L, work.wakeVersion());
@@ -549,11 +549,11 @@ public abstract class HarnessStoreWorkContract {
                   tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", T2.plusSeconds(60));
                   throw new IllegalStateException("boom");
                 }));
-    // the lease from the failed transaction is not visible
+    // 失败事务中的 lease 不可见
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertNull(work.leaseToken());
     assertNull(work.leaseUntil());
-    // the same row can be claimed afterwards
+    // 同一 row 之后仍可被 claim
     assertTrue(
         store
             .transaction(
@@ -587,7 +587,7 @@ public abstract class HarnessStoreWorkContract {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
-    // a claim for a target that never had work is lost ownership
+    // 对从未存在 work 的 target 的 claim 即 lost ownership
     WorkTarget never = new WorkTarget(WorkTargetType.THREAD, 42);
     assertTrue(
         store
@@ -596,7 +596,7 @@ public abstract class HarnessStoreWorkContract {
                     tx.lockClaimedWork(
                         new ClaimedWork(never, 1L, "lease-token", T2.plusSeconds(60)), T2))
             .isEmpty());
-    // wrong token is stale ownership
+    // 错误 token 是 stale ownership
     assertTrue(
         store
             .transaction(
@@ -606,12 +606,12 @@ public abstract class HarnessStoreWorkContract {
                             target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil()),
                         T2))
             .isEmpty());
-    // lease already expired at now is stale ownership
+    // lease 在 now 已过期属 stale ownership
     assertTrue(
         store
             .transaction(tx -> tx.lockClaimedWork(claim, claim.leaseUntil().plusSeconds(1)))
             .isEmpty());
-    // the row is untouched by failed ownership checks
+    // 失败的 ownership 检查不会改动 row
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(claim.leaseToken(), work.leaseToken());
     assertEquals(claim.leaseUntil(), work.leaseUntil());
@@ -623,11 +623,11 @@ public abstract class HarnessStoreWorkContract {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
-    // a newer wake arrives while the lease is held
+    // lease 持有期间发生新的 wake
     requestWork(target, T4);
     Work work = store.transaction(tx -> tx.lockClaimedWork(claim, T2)).orElseThrow();
-    // ownership is not lost: the returned row carries the newer wakeVersion while availableAt
-    // stays the earliest requested time (requestWork pulls forward to the minimum)
+    // ownership 未丢失：返回的 row 带有新的 wakeVersion，availableAt 仍是请求时间中的最早者
+    // （requestWork 会向前拉到最小值）
     assertEquals(2L, work.wakeVersion());
     assertEquals(claim.leaseToken(), work.leaseToken());
     assertEquals(T0, work.availableAt());
@@ -641,7 +641,7 @@ public abstract class HarnessStoreWorkContract {
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
     assertTrue(deleteWork(target));
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
-    // the deleted row fences the old callback: every claim-based mutation is lost ownership
+    // 被删除的 row 对旧 callback 形成 fence：所有基于 claim 的 mutation 都成为 lost ownership
     assertThrows(
         IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim, T2)));
     assertThrows(
@@ -667,7 +667,7 @@ public abstract class HarnessStoreWorkContract {
                   tx.deleteWork(target);
                   throw new IllegalStateException("boom");
                 }));
-    // the deletion from the failed transaction is not visible
+    // 失败事务中的删除不可见
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isPresent()));
   }
 }

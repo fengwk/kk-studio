@@ -22,9 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Searches environment files through configurable ripgrep while retaining its gitignore semantics.
- */
+/** 通过可配置的 ripgrep 搜索 environment 文件，同时保留其 gitignore 语义。 */
 public final class GrepTool extends AbstractCodingTool {
 
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
@@ -174,7 +172,7 @@ public final class GrepTool extends AbstractCodingTool {
         }
       }
     } catch (RuntimeException ignored) {
-      // Preserve the subprocess output when the path cannot be represented on this platform.
+      // 当路径无法在当前平台表示时，保留子进程输出。
     }
     return displayPath.replace('\\', '/') + ":" + matcher.group(2) + ":" + matcher.group(3);
   }
@@ -191,7 +189,7 @@ public final class GrepTool extends AbstractCodingTool {
     try (input) {
       input.transferTo(output);
     } catch (IOException ignored) {
-      // The parent process turns process failures and timeouts into structured tool errors.
+      // 父进程会把进程失败与超时转换为结构化的 tool errors。
     }
   }
 

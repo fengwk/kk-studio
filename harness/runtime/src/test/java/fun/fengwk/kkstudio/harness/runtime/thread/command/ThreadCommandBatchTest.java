@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Atomic enqueue batch CAS fields, ordering and client command ID invariants. */
+/** 原子入队 batch 的 CAS 字段、顺序与 client command ID 不变量。 */
 class ThreadCommandBatchTest {
 
   @Test

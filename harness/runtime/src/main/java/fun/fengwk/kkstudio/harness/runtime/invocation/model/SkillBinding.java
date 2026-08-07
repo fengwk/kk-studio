@@ -3,11 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 /**
- * Immutable skill fact frozen into one Model invocation.
+ * 冻结到一次 Model invocation 中的不可变 skill 事实。
  *
- * <p>The body is intentionally absent: only the stable canonical name and description, plus the
- * nullable source Environment route, are durable request facts. Display metadata and skill body
- * never enter the request.
+ * <p>body 被刻意排除在外：只有稳定的 canonical name、description，以及可空的 source Environment 路由， 才是 durable
+ * 请求事实。展示元数据与 skill body 不会进入请求。
  */
 public record SkillBinding(String name, String description, EnvironmentId sourceEnvironmentId) {
 

@@ -29,8 +29,8 @@ describe('Thread snapshot architecture', () => {
     expect(realtime).toContain("addEventListener('resync', invalidateSnapshot")
     expect(realtime).not.toContain("addEventListener('realtime', invalidateSnapshot")
     expect(realtime.match(/createThreadRealtimeStream\(/g)).toHaveLength(1)
-    // The bounded single-flight gap recovery may use a timer, but every timer must be
-    // cancellable and cancelled on unmount/Thread switch (no orphaned loops).
+    // 有界的 single-flight gap recovery 可以使用 timer，但每个 timer 必须可取消，
+    // 并在 unmount 或 Thread 切换时清理（避免遗留循环）。
     if (/setTimeout/.test(realtime)) {
       expect(realtime).toContain('clearTimeout')
     } else {

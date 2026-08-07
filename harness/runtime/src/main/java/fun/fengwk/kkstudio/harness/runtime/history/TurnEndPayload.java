@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import java.util.Objects;
 
 /**
- * Immutable durable boundary for the end of one Model response turn.
+ * 一次 Model response turn 结束的 immutable durable 边界。
  *
  * <p>精确规则：COMPLETED 的 continueModel 可 true/false，reason 与 closeRequestId 必须 null；FAILED 必须
  * continueModel=false、reason=TURN_FAILED、closeRequestId null；STOPPED 必须 reason=USER_STOP、

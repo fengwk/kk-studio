@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.util.Map;
 import java.util.Objects;
 
-/** Anthropic Provider adapter。 */
+/** Anthropic Provider 适配器。 */
 public final class AnthropicProviderAdapter implements ProviderAdapter {
 
   private final String apiKey;

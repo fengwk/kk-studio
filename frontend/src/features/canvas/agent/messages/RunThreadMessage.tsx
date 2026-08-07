@@ -2,7 +2,7 @@ import { RUN_STEPS } from '@/features/canvas/data'
 import type { AgentRunNode } from '@/features/canvas/types'
 import { useI18n } from '@/shared/i18n'
 
-/** Pure presentation for an Agent Run card with step progress and controls. */
+/** Agent Run 卡片（含步骤进度与控件）的纯展示组件。 */
 export function RunThreadMessage({
   run,
   onAction,

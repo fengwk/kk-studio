@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Resolves a symbol definition through the optional local LSP bridge. */
+/** 通过可选的本机 LSP bridge 解析符号定义。 */
 public final class LspGotoDefinitionTool extends AbstractCodingTool {
 
   private final LspBridge bridge;

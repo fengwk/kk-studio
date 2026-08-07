@@ -16,9 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * Verifies the bound Session/Entry/Thread schema, command mailbox integrity and recursive paths.
- */
+/** 验证已绑定的 Session/Entry/Thread schema、command mailbox 完整性以及递归路径。 */
 class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
 
   @BeforeEach
@@ -44,7 +42,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
         assertTrue(rs.next());
         assertEquals(thread.rootEntryId, rs.getLong(1));
         assertEquals("ROOT", rs.getString(2));
-        // The Thread's current Session is derived from the head Entry, never stored on the row.
+        // Thread 的当前 Session 由 head Entry 推导而来，绝不存储在该行上。
         assertEquals(thread.sessionId, rs.getLong(3));
       }
     }
@@ -500,7 +498,7 @@ class PostgresqlSessionSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  /** Referencing columns of a named FK constraint, in declaration order. */
+  /** 按声明顺序返回命名 FK 约束引用的列。 */
   private static List<String> foreignKeyColumns(String constraint) throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement ps =

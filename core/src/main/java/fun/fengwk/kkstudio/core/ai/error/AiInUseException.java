@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
-/** Resource cannot be removed because it is still referenced; mapped to HTTP 409. */
+/** 资源仍被引用而无法移除；映射为 HTTP 409。 */
 public class AiInUseException extends AiDomainException {
 
   public AiInUseException(String resource, String message) {

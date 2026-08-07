@@ -3,11 +3,10 @@ package fun.fengwk.kkstudio.harness.runtime;
 import java.util.Objects;
 
 /**
- * Typed business conflict of the synchronous Harness control plane.
+ * 同步 Harness control plane 的类型化业务冲突。
  *
- * <p>Thrown instead of a raw {@link IllegalStateException} for every user-recoverable rejection;
- * broken persistence invariants (wrong ownership, mixed sibling attachment, non-contiguous
- * ordinals, count mismatches) stay {@link IllegalStateException}.
+ * <p>对于每一个用户可恢复的拒绝，均以本异常代替裸 {@link IllegalStateException}；被破坏的持久化 不变量（所有权错误、sibling 混合挂接、ordinal
+ * 不连续、数量不匹配）仍为 {@link IllegalStateException}。
  */
 public final class HarnessRuntimeConflictException extends RuntimeException {
 
@@ -18,44 +17,36 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     this.reason = Objects.requireNonNull(reason, "reason");
   }
 
-  /** The typed conflict category, stable for HTTP mapping and client retry decisions. */
+  /** 类型化的冲突分类，对 HTTP 映射与客户端重试决策保持稳定。 */
   public Reason reason() {
     return reason;
   }
 
-  /** Closed set of conflict categories of the Harness control plane. */
+  /** Harness control plane 冲突分类的封闭集合。 */
   public enum Reason {
-    /** A revision-guarded control request does not match the current Thread revision. */
+    /** 受 revision 守护的 control 请求与当前 Thread revision 不匹配。 */
     STALE_REVISION,
-    /** New command batch expected head/next-command-sequence cursor is stale. */
+    /** 新 command batch 所期望的 head/next-command-sequence 游标已过期。 */
     STALE_COMMAND_CURSOR,
-    /** Ordered replay: an existing clientCommandId carries a different payload. */
+    /** Ordered replay：已存在的 clientCommandId 携带了不同的 payload。 */
     COMMAND_ID_REUSED,
-    /**
-     * Ordered replay: only a strict subset of the batch ids exists; missing commands are never
-     * filled.
-     */
+    /** Ordered replay：仅 batch id 的一个严格子集已存在；缺失的 command 永远不会被补齐。 */
     PARTIAL_COMMAND_REPLAY,
-    /**
-     * Ordered replay: ids exist with equal payloads but sequences are not contiguous in request
-     * order.
-     */
+    /** Ordered replay：id 存在且 payload 相等，但 sequence 在请求顺序中不连续。 */
     COMMAND_REPLAY_ORDER_MISMATCH,
-    /** Thread has live work, queued input commands or a THREAD Work row and must quiesce first. */
+    /** Thread 存在 live work、已入队输入 commands 或 THREAD Work 行，必须先 quiesce。 */
     THREAD_NOT_QUIESCENT,
-    /** Thread has a terminal Model/Tool result waiting to be applied atomically. */
+    /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */
     TERMINAL_APPLY_PENDING,
-    /** MOVE_HEAD target lives in a different Session than the current head. */
+    /** MOVE_HEAD target 与当前 head 处于不同的 Session。 */
     MOVE_TARGET_CROSS_SESSION,
-    /**
-     * MOVE_HEAD target is a continueModel=true TURN_END that would reactivate an old obligation.
-     */
+    /** MOVE_HEAD target 是 continueModel=true 的 TURN_END，会重新激活旧 obligation。 */
     MOVE_TARGET_HAS_CONTINUATION_OBLIGATION,
-    /** Stop idempotency key was already used by a non-Stop close operation. */
+    /** Stop 幂等键已被非 Stop 的关闭操作使用过。 */
     STOP_REQUEST_ID_REUSED,
-    /** Approval target is missing, not owned by the request thread or not currently applicable. */
+    /** Approval target 缺失、不属于请求 thread 或当前不适用。 */
     APPROVAL_NOT_APPLICABLE,
-    /** Approval is already decided and the request does not replay the stored decision. */
+    /** Approval 已被决策，且请求未重放已存储的决策。 */
     APPROVAL_DECISION_MISMATCH
   }
 }

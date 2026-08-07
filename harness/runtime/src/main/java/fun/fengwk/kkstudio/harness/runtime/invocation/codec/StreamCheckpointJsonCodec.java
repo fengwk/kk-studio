@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 
 import java.util.Objects;
 
-/** Strict deterministic JSON codec for a durable Model stream checkpoint. */
+/** durable Model stream checkpoint 的严格、确定性 JSON codec。 */
 public final class StreamCheckpointJsonCodec {
 
   private static final String CONTEXT = "streamCheckpoint";

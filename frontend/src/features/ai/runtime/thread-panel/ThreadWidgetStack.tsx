@@ -4,7 +4,7 @@ import type { QueuedThreadMessage } from '@/features/ai/runtime/thread-timeline-
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Component zone under the dialogue transcript.
+ * 对话 transcript 下方的小部件区域。
  *
  * 无 working / 排队 / 子组件时：不挂载，或挂载后由 CSS `:empty` 压成 0 高度
  * （子组件若全部 return null，DOM 为空，不会留下边框空隙）。

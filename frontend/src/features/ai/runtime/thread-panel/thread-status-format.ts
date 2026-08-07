@@ -35,7 +35,7 @@ export interface ThreadStatusModelInput {
   onEnvironmentClick?: () => void
 }
 
-/** Normalize blank placeholder strings; returns "" for null/undefined/'undefined'/'null'/'-'. */
+/** 规范化空白占位字符串；对 null/undefined/'undefined'/'null'/'-' 返回 ""。 */
 function clean(value?: string | null): string {
   const text = (value ?? '').trim()
   if (!text || text === '-' || text === 'undefined' || text === 'null') {
@@ -48,7 +48,7 @@ function clean(value?: string | null): string {
 
 
 
-/** Build the stable text-only status model from panel inputs. No layout, no DOM. */
+/** 由面板输入构建稳定的纯文本状态模型，不涉及布局与 DOM。 */
 export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
   const agentLabel = clean(input.agentName) || translate('ai.runtime.status.agentFallback')
   const provider = clean(input.providerName)
@@ -58,7 +58,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     clean(input.environmentDisplayName) || translate('ai.runtime.status.environmentFallback')
   const yoloOn = Boolean(input.yoloEnabled)
 
-  // modelName may already be the canonical provider/model ref from callers.
+  // 调用方传入的 modelName 可能已是规范的 provider/model 引用。
   const composedModelRef =
     provider && model && !model.startsWith(`${provider}/`) ? `${provider}/${model}` : model
   const modelText = translate('ai.runtime.status.modelText', {

@@ -27,7 +27,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/** EntryPath chain invariants: same-head settings, turn sequence, tool prefixes and outcomes. */
+/** EntryPath 链的不变量：同一 head 的 settings、turn 顺序、tool 前缀与结局。 */
 class EntryPathTest {
 
   private static final long SESSION = 1L;
@@ -289,7 +289,7 @@ class EntryPathTest {
         IllegalArgumentException.class,
         () -> new EntryPath(List.of(root, start, customMessage(3L, 2L))));
 
-    // Continuation repays the previous TURN_END.continueModel obligation without input.
+    // Continuation 无需 input 即偿还上一条 TURN_END.continueModel 的义务。
     new EntryPath(
         List.of(
             root,

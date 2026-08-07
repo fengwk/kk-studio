@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.util.Objects;
 
-/** OpenAI Responses API Provider adapter。 */
+/** OpenAI Responses API Provider 适配器。 */
 public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
 
   private final String apiKey;

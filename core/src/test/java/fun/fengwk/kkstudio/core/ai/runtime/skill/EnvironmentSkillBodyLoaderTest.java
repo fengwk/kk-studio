@@ -17,10 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * The runtime skill binding reference must be the canonical EnvironmentId text; a display-name
- * reference fails closed instead of routing by name.
- */
+/** 运行时 skill binding 引用必须是 canonical EnvironmentId 文本；display-name 引用会安全失败，而不是按名称路由。 */
 class EnvironmentSkillBodyLoaderTest {
 
   private static final EnvironmentId ENVIRONMENT_ID =
@@ -49,8 +46,8 @@ class EnvironmentSkillBodyLoaderTest {
   void rejectsDisplayNameReferenceInsteadOfLookingItUp() {
     EnvironmentSkillBodyLoader loader =
         new EnvironmentSkillBodyLoader(mock(EnvironmentSkillLoader.class));
-    // A display name is not a canonical UUID text; the adapter must fail closed rather than route
-    // by name through any registry lookup.
+    // display name 不是 canonical UUID 文本；adapter 必须安全失败，而不是
+    // 通过任何 registry lookup 按名称路由。
     assertThrows(
         IllegalArgumentException.class,
         () -> loader.load("display-name", "dev", Duration.ofSeconds(5)));

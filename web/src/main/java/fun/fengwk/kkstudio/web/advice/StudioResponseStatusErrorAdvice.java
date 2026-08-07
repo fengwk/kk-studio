@@ -28,10 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Runtime request-locale translation for controller-originated {@link ResponseStatusException}s.
+ * 对 controller 抛出的 {@link ResponseStatusException} 做请求级 locale 的运行时翻译。
  *
- * <p>The advice is restricted to Studio HTTP controllers. SSE requests are rethrown so the
- * convention handler keeps its existing stream-specific behavior.
+ * <p>本 advice 仅作用于 Studio HTTP controllers。SSE 请求会被原样重新抛出，以便 convention handler 保持其既有的流式行为。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(

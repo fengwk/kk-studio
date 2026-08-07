@@ -13,12 +13,10 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Lightweight architecture guard for the web module.
+ * web 模块的轻量架构守护。
  *
- * <p>Production sources must not reference Harness Tool/Daemon packages or selected Core
- * infrastructure implementations. The web module is the Harness composition root: it declares the
- * Runtime contract and the runtime-spring transport adapters as direct dependencies by design, and
- * {@code web/pom.xml} must keep that declaration.
+ * <p>生产源码不得引用 Harness Tool/Daemon 包或选定的 Core 基础设施实现。web 模块是 Harness 组合根：它按设计将 Runtime 契约与
+ * runtime-spring 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
  */
 class WebModuleArchitectureTest {
 
@@ -105,10 +103,7 @@ class WebModuleArchitectureTest {
     return violations;
   }
 
-  /**
-   * Only the Runtime contract (and its Spring transport package) plus the canonical tool types may
-   * be referenced directly.
-   */
+  /** 仅 Runtime 契约（及其 Spring transport 包）和规范化的 tool 类型可被直接引用。 */
   private static boolean isForbiddenHarnessImport(String imported) {
     if (imported.startsWith(HARNESS_RUNTIME_PREFIX)) {
       return false;

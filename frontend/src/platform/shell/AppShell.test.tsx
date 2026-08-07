@@ -37,7 +37,7 @@ describe('AppShell locale selector', () => {
     expect(chineseTriggers[0]).toHaveAttribute('aria-expanded', 'true')
     expect(chineseTriggers[1]).toHaveAttribute('aria-expanded', 'false')
 
-    // The selected 中文 option is focused on open; ArrowUp moves to English, Enter selects it.
+    // 选中的「中文」选项在打开时聚焦；ArrowUp 移到 English，Enter 选中它。
     await user.keyboard('{ArrowUp}')
     await user.keyboard('{Enter}')
 

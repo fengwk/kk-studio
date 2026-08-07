@@ -23,10 +23,7 @@ import java.util.List;
 
 class ToolResultJsonCodecTest {
 
-  /**
-   * Every persistable Tool content variant round-trips without retaining the in-memory terminate
-   * hint.
-   */
+  /** 每种可持久化的 Tool 内容变体都支持 round-trip，且不会保留内存中的 terminate hint。 */
   @Test
   void roundTripsTextAndJsonContents() {
     ToolResult source =
@@ -54,7 +51,7 @@ class ToolResultJsonCodecTest {
         ((ResourceToolContent) decoded.contents().get(2)).resource().uri());
   }
 
-  /** Empty successful results remain valid, including the optional default details object. */
+  /** 空的成功结果仍然有效，包括可选的默认 details 对象。 */
   @Test
   void roundTripsEmptySuccessfulResult() {
     ToolResult decoded =
@@ -66,7 +63,7 @@ class ToolResultJsonCodecTest {
     assertEquals("{}", decoded.detailsJson());
   }
 
-  /** Resource content round-trips with every optional field populated. */
+  /** Resource 内容在所有可选字段均有值时支持 round-trip。 */
   @Test
   void roundTripsResourceContentWithAllFields() {
     ResourceRef resource =
@@ -85,7 +82,7 @@ class ToolResultJsonCodecTest {
     assertEquals(resource, ((ResourceToolContent) decoded.contents().getFirst()).resource());
   }
 
-  /** Resource content encodes flat exact fields with JSON null for absent optionals. */
+  /** Resource 内容编码为扁平的精确字段，缺失的可选字段使用 JSON null。 */
   @Test
   void encodesFlatExactResourceFieldsWithJsonNulls() {
     ToolResult source =
@@ -105,7 +102,7 @@ class ToolResultJsonCodecTest {
         ToolResultJsonCodec.encode(source));
   }
 
-  /** Strict decode rejects missing, wrong-typed or extra resource fields. */
+  /** 严格 decode 拒绝缺失、类型错误或额外的 Resource 字段。 */
   @Test
   void rejectsMalformedResourceContents() {
     assertThrows(
@@ -170,7 +167,7 @@ class ToolResultJsonCodecTest {
     assertEquals("", ((TextToolContent) decoded.contents().getFirst()).text());
   }
 
-  /** Persisted result input is strict so malformed journal data cannot become a Session message. */
+  /** 持久化结果输入采用严格校验，防止格式错误的 journal 数据成为 Session 消息。 */
   @Test
   void rejectsMalformedOrUnknownContents() {
     assertThrows(IllegalArgumentException.class, () -> ToolResultJsonCodec.decode("[]"));

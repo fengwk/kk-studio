@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
 
-/** Pi-style inline error panel: message stays in thread; error is a dismissible banner. */
+/** Pi 风格的内联错误面板：消息留在 thread 中；错误展示为可关闭的横幅。 */
 export function ThreadErrorPanel({
   message,
   onDismiss,

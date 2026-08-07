@@ -295,7 +295,7 @@ export const aiCatalog = {
   },
   'ai.catalog.form.systemPrompt': {
     'en-US': 'System Prompt',
-    'zh-CN': 'System Prompt',
+    'zh-CN': '系统提示词',
   },
   'ai.catalog.form.systemPromptPlaceholder': {
     'en-US': 'System prompt',

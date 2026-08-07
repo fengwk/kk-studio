@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
-/** Unique name / provider+name conflict; mapped to HTTP 409. */
+/** 唯一 name / provider+name 冲突；映射为 HTTP 409。 */
 public class AiDuplicateException extends AiDomainException {
 
   public AiDuplicateException(String resource, String message) {

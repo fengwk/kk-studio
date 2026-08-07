@@ -104,7 +104,7 @@ final class ThreadProcessorTestSupport {
   private ThreadProcessorTestSupport() {}
 
   // -----------------------------------------------------------------------------------------------
-  // ids / fixtures
+  // ids / fixtures（标识 / 测试基座）
   // -----------------------------------------------------------------------------------------------
 
   record Baseline(long sessionId, long rootEntryId, long threadId) {}
@@ -503,7 +503,7 @@ final class ThreadProcessorTestSupport {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // transitions / reads
+  // transitions / reads（状态转换 / 读取）
   // -----------------------------------------------------------------------------------------------
 
   static void transitionModel(
@@ -570,7 +570,7 @@ final class ThreadProcessorTestSupport {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // payload builders
+  // payload builders（payload 构造器）
   // -----------------------------------------------------------------------------------------------
 
   static BranchSettings branchSettings() {
@@ -737,7 +737,7 @@ final class ThreadProcessorTestSupport {
   }
 
   // -----------------------------------------------------------------------------------------------
-  // fakes
+  // fakes（测试替身）
   // -----------------------------------------------------------------------------------------------
 
   /** Scripted fake resolver：队列结果 / 固定异常 / resolve 前 hook；记录最近一次入参。 */

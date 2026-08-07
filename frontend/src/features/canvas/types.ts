@@ -1,12 +1,12 @@
 /**
- * Canvas presentation model used by the local demo UI.
+ * 本地 demo UI 使用的 Canvas 展示模型。
  *
- * This is not the React Flow contract and not the wire DTO.
- * Durable Studio vocabulary is `StudioNodeKind` + backend `studio` module.
- * The current demo projection assigns `domainKind` at node construction sites.
+ * 它既不是 React Flow 的契约，也不是线上 DTO。
+ * 持久化的 Studio 词汇是 `StudioNodeKind` 加后端的 `studio` 模块。
+ * 当前 demo 投影在节点构造点写入 `domainKind`。
  */
 
-/** Backend CanvasNodeKind. Presentation nodes always carry this. */
+/** 后端 CanvasNodeKind；展示节点始终携带此字段。 */
 export type StudioNodeKind = 'RESOURCE' | 'FUNCTION' | 'GROUP'
 
 export type GenerationMode = 'text' | 'image' | 'video'
@@ -15,7 +15,7 @@ type GeneratorStatus = 'draft' | 'generated'
 
 type AgentRunStatus = 'running' | 'paused' | 'succeeded'
 
-/** UI renderer key — finer than StudioNodeKind. */
+/** UI 渲染器 key —— 比 StudioNodeKind 更细。 */
 export type CanvasNodeType =
   | 'frame'
   | 'web'
@@ -76,9 +76,9 @@ export interface GenerationProfile {
 
 interface CanvasNodeBase extends CanvasRect {
   id: string
-  /** UI renderer / presentation subtype. */
+  /** UI 渲染器 / 展示子类型。 */
   type: CanvasNodeType
-  /** Durable Studio kind (RESOURCE | FUNCTION | GROUP). */
+  /** 持久化的 Studio 种类（RESOURCE | FUNCTION | GROUP）。 */
   domainKind: StudioNodeKind
   title: string
 }
@@ -123,14 +123,14 @@ export interface ResultNode extends CanvasNodeBase {
 export type CanvasNode = FrameNode | ContentNode | GeneratorNode | AgentRunNode | ResultNode
 
 /**
- * Presentation visibility edge.
- * Maps to backend CanvasLink. Does NOT represent ResourceReference dependency.
+ * 展示用的可见性边。
+ * 映射到后端 CanvasLink。并不代表 ResourceReference 的依赖关系。
  */
 export interface CanvasLink {
   id: string
   source: string
   target: string
-  /** Always visibility in the demo; ResourceReference is a separate future model. */
+  /** 在 demo 中固定为 visibility；ResourceReference 仍是独立的未来模型。 */
   role: 'visibility'
 }
 

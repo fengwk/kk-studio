@@ -25,7 +25,7 @@ interface ToolRenderContext {
   approvalPending?: boolean
 }
 
-/** Tool turn as separate full-width call/result blocks. */
+/** Tool 回合以独立的全宽 call/result 块展示。 */
 export function ToolMessageBlock({
   message,
   onDecideApproval,
@@ -65,9 +65,9 @@ export function ToolMessageBlock({
             </span>
           </div>
           <div className="thread-block-body"><DefaultToolCall context={context} /></div>
-          {/* Transient result block under the active call: TOOL_PARTIAL / terminal result /
-              resource attachments / error render here until the durable Tool result Entry
-              arrives and the durable result phase takes over. */}
+          {/* 活动 call 下方的瞬态结果块：TOOL_PARTIAL / 终态结果 /
+              资源附件 / 错误都会渲染在这里，直到持久的 Tool result Entry
+              到达并由持久的 result 阶段接管。 */}
           <TransientToolResult context={context} />
           <ToolApprovalBar context={context} onDecideApproval={onDecideApproval} message={message} />
         </section>
@@ -88,7 +88,7 @@ export function ToolMessageBlock({
   )
 }
 
-/** Pending approval gate: only when the snapshot approval is required and still undecided. */
+/** 待决审批闸门：仅当 snapshot 中的审批为必需且尚未决定时展示。 */
 function ToolApprovalBar({
   context,
   message,
@@ -104,7 +104,7 @@ function ToolApprovalBar({
     return null
   }
   if (approval.decision != null) {
-    // Decided: show the persisted decision (+ optional reason) instead of buttons.
+    // 已决定：展示持久化的决策（+ 可选原因），而不是按钮。
     const decidedText =
       approval.decision === 'ALLOWED'
         ? t('ai.runtime.approval.allowed')
@@ -144,7 +144,7 @@ function ToolApprovalBar({
   )
 }
 
-/** Streaming/terminal overlay under the active call; hidden once the durable Entry exists. */
+/** 活动 call 下的 streaming/终态 overlay；持久的 Entry 存在后即隐藏。 */
 function TransientToolResult({ context }: { context: ToolRenderContext }) {
   const hasText = Boolean(context.partial?.trim())
   const hasError = Boolean(context.partialErrorText?.trim())
@@ -189,7 +189,7 @@ function DefaultToolCall({ context }: { context: ToolRenderContext }) {
 }
 
 function DefaultToolResult({ context }: { context: ToolRenderContext }) {
-  // Transient TOOL_PARTIAL overlay wins over the durable (possibly still empty) result text.
+  // 瞬态 TOOL_PARTIAL overlay 优先于持久的（可能仍为空的）结果文本。
   const hasPartial = Boolean(context.partial?.trim())
   const text = hasPartial ? (context.partial ?? '') : context.text
   const hasText = text.trim().length > 0
@@ -239,8 +239,8 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
       {!previewable ? (
         <div className="thread-tool-attachment-uri">
           {preview ? (
-            // Resource preview is TEXT (e.g. a JSON excerpt), never a URL; rendering it as an
-            // <img src> would throw an invalid resource.
+            // 资源 preview 是文本（例如 JSON 摘录），绝不是 URL；把它当作
+            // <img src> 渲染会抛出非法资源错误。
             <pre className="thread-tool-attachment-preview">{preview}</pre>
           ) : null}
           <span className="thread-tool-attachment-uri-text">{attachment.data}</span>

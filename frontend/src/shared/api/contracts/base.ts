@@ -15,10 +15,10 @@ export interface PageResult<T> {
 
 export type BackendDateTime = string | number[] | null
 
-/** Java {@code Instant} timestamp emitted by the backend's Jackson configuration. */
+/** 后端 Jackson 配置发出的 Java {@code Instant} 时间戳。 */
 export type InstantTimestamp = number | string | null
 
 export type BackendLong = number | string
 
-/** Non-negative decimal optimistic-lock token. */
+/** 非负十进制乐观锁 token。 */
 export type CatalogVersion = string

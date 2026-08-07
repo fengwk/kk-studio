@@ -1,9 +1,8 @@
 /**
- * Pure Thread command mailbox protocol and deterministic harvest reducer.
+ * 纯 Thread command mailbox 协议与确定性 harvest reducer。
  *
- * <p>This package owns typed command values, enqueue batch CAS facts, derived command state and
- * branch/Thread policy reduction. Environment commands carry the canonical {@link
- * fun.fengwk.kkstudio.harness.tool.EnvironmentId} route identity; display names are not part of the
- * durable protocol. It does not persist commands or execute a second Thread loop.
+ * <p>本包拥有 typed command 值、入队 batch CAS 事实、派生的 command state 以及 branch/Thread policy 归约。Environment
+ * command 携带 canonical 的 {@link fun.fengwk.kkstudio.harness.tool.EnvironmentId} 路由身份；display name
+ * 不属于 durable 协议。本包不负责持久化 command，也不执行第二个 Thread loop。
  */
 package fun.fengwk.kkstudio.harness.runtime.thread.command;

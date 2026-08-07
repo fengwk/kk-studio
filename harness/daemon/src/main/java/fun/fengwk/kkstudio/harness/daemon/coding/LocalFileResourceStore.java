@@ -245,7 +245,7 @@ public final class LocalFileResourceStore implements ResourceStore {
     }
   }
 
-  /** Returns the private export root (canonical real path) used by this store. */
+  /** 返回本 store 使用的私有导出根（canonical 真实路径）。 */
   public Path directory() {
     return directory;
   }

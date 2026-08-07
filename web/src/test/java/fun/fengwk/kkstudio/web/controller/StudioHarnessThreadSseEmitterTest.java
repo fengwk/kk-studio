@@ -31,7 +31,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** SSE close cancels the tail worker so block-read loops stop; overload rejects without work. */
+/** SSE 关闭会取消 tail worker 以便阻塞读取循环停止；过载拒绝时不会触发任何工作。 */
 class StudioHarnessThreadSseEmitterTest {
 
   @Test
@@ -70,10 +70,7 @@ class StudioHarnessThreadSseEmitterTest {
     }
   }
 
-  /**
-   * Bounded overload: a saturated executor fails the stream immediately without starting tail
-   * polling or leaving background work that would call the tail later.
-   */
+  /** 有界重载：当 executor 饱和时立即失败流，既不会启动 tail 轮询，也不会遗留稍后调用 tail 的后台工作。 */
   @Test
   void rejectedExecutorFailsWithoutInvokingTail() throws Exception {
     RealtimeEventTail tail = mock(RealtimeEventTail.class);
@@ -87,7 +84,7 @@ class StudioHarnessThreadSseEmitterTest {
 
     assertNotNull(emitter);
     verifyNoInteractions(tail);
-    // Failed emitters reject further sends; proves the stream completed with an error.
+    // 已失败的 emitter 拒绝后续发送；证明流以错误结束。
     assertThrows(
         IllegalStateException.class,
         () -> emitter.send(SseEmitter.event().name("probe").data("x")));
@@ -95,7 +92,7 @@ class StudioHarnessThreadSseEmitterTest {
     verifyNoInteractions(tail);
   }
 
-  /** Production AsyncTaskExecutor and plain Executor adapters both retain a cancellable Future. */
+  /** 生产环境 AsyncTaskExecutor 与普通 Executor 适配器都保留可取消的 Future。 */
   @Test
   void supportsManagedAsyncAndPlainExecutorsWithoutInlinePolling() {
     RealtimeEventTail tail = mock(RealtimeEventTail.class);
@@ -123,9 +120,7 @@ class StudioHarnessThreadSseEmitterTest {
     return (threadId, afterRevision, consumer) -> () -> {};
   }
 
-  /**
-   * Runtime-spring tail only accepts concrete {@code ms-seq} cursors; transient "$" is rejected.
-   */
+  /** runtime-spring tail 仅接受具体的 {@code ms-seq} 游标；瞬态的 "$" 会被拒绝。 */
   @Test
   void concreteCursorNormalizationRejectsTransientDollar() {
     assertEquals("0-0", RealtimeEventTail.normalizeAfterId(null));

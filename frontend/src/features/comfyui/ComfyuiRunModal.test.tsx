@@ -138,13 +138,13 @@ describe('ComfyuiRunModal', () => {
     const user = userEvent.setup()
     renderModal()
 
-    // Provide the required file.
+    // 提供必需的文件。
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
 
-    // The required steps value comes from the default, the prompt comes from the default.
+    // 必需的 steps 取自默认值，prompt 也取自默认值。
     expect(comfyuiService.uploadFile).toHaveBeenCalledTimes(1)
     const [apiNameArg, fileArg] = vi.mocked(comfyuiService.uploadFile).mock.calls[0]
     expect(apiNameArg).toBe('image-upscale')
@@ -172,7 +172,7 @@ describe('ComfyuiRunModal', () => {
   })
 
   it('blocks submit when a required file is missing and never calls run/upload', async () => {
-    // Build a workflow whose required file binding has no default in the controller.
+    // 构造一个 workflow，其必需文件 binding 在 controller 中没有默认值。
     const workflow = makeWorkflow({
       inputBindingsJson: JSON.stringify([
         { name: 'image', kind: 'file', nodeId: '9', inputName: 'image', required: true },
@@ -181,7 +181,7 @@ describe('ComfyuiRunModal', () => {
     vi.mocked(comfyuiService.runWorkflow).mockClear()
     vi.mocked(comfyuiService.uploadFile).mockClear()
     renderModal({ workflow })
-    // Submit must be guarded client-side before any upload or run happens.
+    // 提交必须在任何上传或运行发生前做客户端拦截。
     expect(screen.queryByRole('button', { name: '运行工作流' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('image *'), { target: { files: [] } })
     fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
@@ -198,7 +198,7 @@ describe('ComfyuiRunModal', () => {
       target: { files: [new File(['strict'], 'strict.png', { type: 'image/png' })] },
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
-    // Default mock for getRun returns 'completed' so the polling cycle eventually surfaces it.
+    // getRun 的默认 mock 返回 'completed'，polling 循环最终能呈现该状态。
     expect(await screen.findByText('completed', undefined, { timeout: 3000 })).toBeInTheDocument()
     expect(comfyuiService.getRun).toHaveBeenCalledWith('run-1', '$.outputs')
   })
@@ -213,7 +213,7 @@ describe('ComfyuiRunModal', () => {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
-    // Polling interval is 1500ms; wait for the terminal payload before asserting the download link.
+    // polling 间隔 1500ms；在断言下载链接前需等待终态 payload。
     const download = await screen.findByRole('link', { name: 'result.png' }, { timeout: 3000 })
     expect(download).toHaveAttribute('href', '/api/comfyui/runs/run-1/files/9/images/0')
     expect(screen.getByText('completed')).toBeInTheDocument()
@@ -231,7 +231,7 @@ describe('ComfyuiRunModal', () => {
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新结果' })).toBeEnabled())
-    // Change selector and refresh.
+    // 修改选择器并刷新。
     fireEvent.change(screen.getByLabelText('JSONPath 选择器'), { target: { value: '$.userSelection' } })
     await user.click(screen.getByRole('button', { name: '刷新结果' }))
     await waitFor(() =>
@@ -250,7 +250,7 @@ describe('ComfyuiRunModal', () => {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
-    // Two polling cycles at 1500ms each must end in a terminal status.
+    // 两次各 1500ms 的 polling 周期必须收敛到终态。
     expect(await screen.findByText('completed', undefined, { timeout: 4500 })).toBeInTheDocument()
     expect(comfyuiService.getRun).toHaveBeenCalledTimes(3)
   }, 10000)
@@ -294,7 +294,7 @@ describe('ComfyuiRunModal', () => {
     const cancel = await screen.findByRole('button', { name: '取消' })
     await user.click(cancel)
     await waitFor(() => expect(comfyuiService.cancelRun).toHaveBeenCalledWith('run-1'))
-    // cancelRun returned cancelled=false -> the modal must refetch via loadJob.
+    // cancelRun 返回 cancelled=false -> modal 必须通过 loadJob 重新拉取。
     await waitFor(() =>
       expect(comfyuiService.getRun).toHaveBeenLastCalledWith('run-1', '$.outputs'),
     )
@@ -319,7 +319,7 @@ describe('ComfyuiRunModal', () => {
     expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '刷新结果' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '再次运行' })).toBeDisabled()
-    // Submitting the form while cancel is pending must be a no-op.
+    // 在 cancel 进行中提交表单必须是 no-op。
     fireEvent.submit(screen.getByRole('button', { name: '再次运行' }).closest('form')!)
     expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(1)
     await act(async () => {
@@ -330,8 +330,8 @@ describe('ComfyuiRunModal', () => {
   })
 
   it('discards stale responses when a newer submit takes over (generation guard)', async () => {
-    // First submit resolves with a stale "running" payload; second submit bumps generation
-    // and resolves with the terminal payload. The stale running status must never paint.
+    // 首次 submit resolve 出过期的 "running" payload；第二次 submit 递增 generation
+    // 并 resolve 终态 payload，过期的 running 状态不能渲染出来。
     vi.mocked(comfyuiService.getRun).mockResolvedValueOnce(makeJob('running', { result: null }))
     vi.mocked(comfyuiService.runWorkflow)
       .mockResolvedValueOnce(makeRun({ runId: 'run-stale' }))
@@ -344,12 +344,12 @@ describe('ComfyuiRunModal', () => {
     fireEvent.change(screen.getByLabelText('image *'), {
       target: { files: [new File(['pixels'], 'input.png', { type: 'image/png' })] },
     })
-    // First submit lands but stops polling because the stale job's status (running) schedules a poll.
+    // 首次 submit 落地后停止 polling，因为过期 job 的状态（running）会安排一次 poll。
     await user.click(screen.getByRole('button', { name: '运行工作流' }))
     expect(await screen.findByRole('button', { name: '再次运行' }, { timeout: 3000 })).toBeInTheDocument()
-    // Second submit bumps generation. The prior run-state must be discarded.
+    // 第二次 submit 递增 generation，先前的 run 状态必须丢弃。
     await user.click(screen.getByRole('button', { name: '再次运行' }))
-    // The fresh submission must land as completed, never re-paint the stale running state.
+    // 新提交必须落地为 completed，绝不能重新渲染过期的 running 状态。
     expect(await screen.findByText('completed', undefined, { timeout: 3000 })).toBeInTheDocument()
     expect(comfyuiService.runWorkflow).toHaveBeenCalledTimes(2)
   })
@@ -358,7 +358,7 @@ describe('ComfyuiRunModal', () => {
     const workflow = makeWorkflow({ inputBindingsJson: '[]' })
     renderModal({ workflow })
     expect(screen.getByRole('button', { name: '运行工作流' })).toBeEnabled()
-    // No required file bindings - submit must succeed with empty parameters and empty files.
+    // 没有必需的文件 binding - submit 必须以空 parameters 和空 files 成功。
     fireEvent.submit(screen.getByRole('button', { name: '运行工作流' }).closest('form')!)
     return flushPromises().then(() => {
       expect(comfyuiService.uploadFile).not.toHaveBeenCalled()

@@ -25,8 +25,8 @@ vi.mock('@/shared/api/studio-service', () => ({
 }))
 
 /**
- * Intentionally does NOT mock @xyflow/react.
- * Catches Maximum update depth / #002 / missing handles #008.
+ * 故意不 mock @xyflow/react。
+ * 用于捕获 Maximum update depth / #002 / missing handles #008。
  */
 describe('Canvas React Flow smoke (real package)', () => {
   afterEach(() => {
@@ -59,7 +59,7 @@ describe('Canvas React Flow smoke (real package)', () => {
 
     await waitFor(() => {
       const edgePaths = stage.querySelectorAll('.react-flow__edge-path')
-      // Initial demo document has 8 links; all must project once handles exist.
+      // 初始 demo 文档有 8 条 links；handle 存在时它们必须全部投影出来。
       expect(edgePaths.length).toBe(8)
     })
 
@@ -95,7 +95,7 @@ describe('Canvas React Flow smoke (real package)', () => {
   })
 
   it('applies RF-like position changes into domain coordinates for controlled drag', () => {
-    // Smoke-level contract for Stage onNodesChange without flaky pointer simulation in jsdom.
+    // Stage onNodesChange 的 smoke 级契约，避免在 jsdom 中做不稳定的指针模拟。
     const updates = extractPositionUpdates([
       { type: 'position', id: 'web', position: { x: 150, y: 200 } },
       { type: 'position', id: 'image', position: { x: 320, y: 210 } },

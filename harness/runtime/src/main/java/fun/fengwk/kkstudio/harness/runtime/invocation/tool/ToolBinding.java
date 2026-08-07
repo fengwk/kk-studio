@@ -7,10 +7,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import java.util.Objects;
 
 /**
- * Single Tool invocation frozen binding: descriptor, product type and actual Environment route.
+ * 单次 Tool invocation 的冻结 binding：descriptor、产品类型以及实际 Environment 路由。
  *
- * <p>PLATFORM tools must not carry an {@code environmentId}; ENVIRONMENT tools must carry exactly
- * one. The YOLO policy that created the approval is deliberately not repeated here.
+ * <p>PLATFORM tool 不得携带 {@code environmentId}；ENVIRONMENT tool 必须恰好携带一个。创建 approval 的 YOLO policy
+ * 在此被刻意省略。
  */
 public record ToolBinding(ToolDescriptor descriptor, ToolType type, EnvironmentId environmentId) {
 

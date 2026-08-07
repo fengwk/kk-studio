@@ -12,7 +12,7 @@ function CanvasPageBody() {
   const location = useLocation()
   const seenLocationKeyRef = useRef<string | null>(null)
 
-  // A same-route Canvas home link emits a new location key without remounting this feature.
+  // 同路由下的 Canvas 首页链接会发出新的 location key，但不会重新挂载当前 feature。
   useEffect(() => {
     if (seenLocationKeyRef.current === null) {
       seenLocationKeyRef.current = location.key

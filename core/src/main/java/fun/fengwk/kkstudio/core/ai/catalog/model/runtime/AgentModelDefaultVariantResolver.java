@@ -9,10 +9,10 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import java.util.Objects;
 
 /**
- * Resolves the effective model variant for an Agent or Thread.
+ * 解析 Agent 或 Thread 的生效 model variant。
  *
- * <p>Blank override means "use the model's configured {@code defaultVariant}". Both the configured
- * default and a non-blank override must identify a Variant declared by the current Model config.
+ * <p>空 override 表示“使用 model 配置的 {@code defaultVariant}”。配置的默认值与非空 override 都必须指向当前 Model config
+ * 中声明的某个 Variant。
  */
 @Component
 public class AgentModelDefaultVariantResolver {

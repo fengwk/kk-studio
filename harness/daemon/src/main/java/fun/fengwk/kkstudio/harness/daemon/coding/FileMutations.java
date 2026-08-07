@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.IntStream;
 
-/** Serializes mutations through a fixed stripe set, avoiding unbounded path-key retention. */
+/** 通过固定的 stripe 集合串行化变更，避免无界保留 path key。 */
 final class FileMutations {
 
   private static final int STRIPES = 64;
@@ -24,7 +24,7 @@ final class FileMutations {
     return lock;
   }
 
-  /** Acquires every distinct stripe in ascending order so multi-path mutations cannot deadlock. */
+  /** 按升序获取每个不同的 stripe，使多路径变更不会死锁。 */
   static List<ReentrantLock> lockAll(Path... paths) {
     int[] stripes =
         Arrays.stream(paths).mapToInt(FileMutations::stripeIndex).distinct().sorted().toArray();

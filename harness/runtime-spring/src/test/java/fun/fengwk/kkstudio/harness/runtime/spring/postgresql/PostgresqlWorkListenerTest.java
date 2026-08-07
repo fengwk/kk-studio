@@ -102,7 +102,7 @@ class PostgresqlWorkListenerTest {
                   release.await();
                   released = true;
                 } catch (InterruptedException ignored) {
-                  // Simulate a DataSource call that does not abort when its caller is interrupted.
+                  // 模拟一次 DataSource 调用：调用者被中断时也不应中止。
                 }
               }
               return lateConnection.connection();

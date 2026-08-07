@@ -43,8 +43,8 @@ public record AssistantAbortedPayload(AgentMessage message) implements EntryPayl
       }
     }
     if (!hasMeaningfulContent) {
-      // An aborted entry built only from empty text/thinking blocks is semantically a no-op
-      // assistant turn; /stop paths must fall back to the cancellation barrier instead.
+      // 仅由空 text/thinking block 构造的 aborted entry 在语义上是无操作 assistant turn；/stop 路径必须回退到
+      // cancellation barrier。
       throw new IllegalArgumentException(
           "assistant aborted entry requires non-empty text or thinking");
     }

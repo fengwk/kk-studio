@@ -8,10 +8,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.nio.file.Path;
 
-/**
- * Decompiles or disassembles a Java class via LSP bridge when available, otherwise {@code javap}
- * for resolvable targets.
- */
+/** 通过 LSP bridge 反编译或反汇编 Java class（可用时），否则对可解析的目标回退到 {@code javap}。 */
 public final class LspJavaDecompileTool extends AbstractCodingTool {
 
   private final LspBridge bridge;

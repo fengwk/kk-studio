@@ -3,7 +3,7 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { PlusIcon, SendIcon } from '@/features/canvas/icons'
 import { useI18n } from '@/shared/i18n'
 
-/** Dock composer: add trigger + prompt + send. Mirrors ChatComposer boundary. */
+/** Dock 组合器：add 触发器 + prompt + send，与 ChatComposer 边界对齐。 */
 export function CanvasAgentComposer({ menuId }: { menuId: string }) {
   const {
     state,

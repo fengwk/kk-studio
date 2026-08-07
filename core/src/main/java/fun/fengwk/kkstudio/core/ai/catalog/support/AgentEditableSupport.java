@@ -45,7 +45,7 @@ public final class AgentEditableSupport {
     return null;
   }
 
-  /** Rejects values that exceed the current PostgreSQL schema column limit after normalization. */
+  /** 拒绝规范化后超出当前 PostgreSQL schema 列宽限制的值。 */
   public void validateMaxLength(String resource, String field, String value, int maxLength) {
     if (value != null && value.codePointCount(0, value.length()) > maxLength) {
       throw new AiValidationException(

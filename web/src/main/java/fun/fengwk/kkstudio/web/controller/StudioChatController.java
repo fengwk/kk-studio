@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Chat collection CRUD + Chat-scoped Thread association API.
+ * Chat 集合 CRUD 与 Chat 作用域内 Thread 关联 API。
  *
  * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence）。Chat Thread 列表、创建与 关联由本 Controller 编排
  * {@link HarnessRuntime} 与 {@link ChatThreadService}：创建先调用 {@code runtime.createThread} 再关联；关联前通过

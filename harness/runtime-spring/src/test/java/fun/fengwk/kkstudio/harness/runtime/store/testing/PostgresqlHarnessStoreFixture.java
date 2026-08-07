@@ -16,7 +16,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-/** One process-wide PostgreSQL container plus a clean seven-table schema for each contract test. */
+/** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试准备一份干净的七表 schema。 */
 final class PostgresqlHarnessStoreFixture {
 
   private static final String SCHEMA_RESOURCE =

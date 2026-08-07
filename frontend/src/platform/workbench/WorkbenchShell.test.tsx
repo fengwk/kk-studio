@@ -66,7 +66,7 @@ describe('WorkbenchShell', () => {
   })
 
   it('requires an extension host provider', () => {
-    // The explicit failure keeps contribution hooks from silently binding to hidden global state.
+    // 显式失败可以防止 contribution hook 静默绑定到隐藏的全局状态。
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
       expect(() => render(<MissingProviderProbe />)).toThrow('ExtensionHostProvider is required')

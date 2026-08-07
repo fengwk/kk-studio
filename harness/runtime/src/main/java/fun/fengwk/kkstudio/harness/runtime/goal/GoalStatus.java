@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.goal;
 
-/** Terminal and active statuses for a durable Thread goal. */
+/** durable Thread goal 的 terminal 与 active 状态。 */
 public enum GoalStatus {
   active,
   complete,

@@ -3,15 +3,20 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/**
- * Complete Agent Definition create/PUT body; nullable text fields explicitly clear their values.
- */
+/** 完整的 Agent Definition create/PUT 请求体；可空文本字段用于显式清除对应值。 */
 @Data
 public class AgentDefinitionEditablePropertiesDTO {
 
+  /** 可空描述（≤512 字符）；null/空白视为清除。 */
   private String description;
+
+  /** 可空系统提示词；null/空白视为清除。 */
   private String systemPrompt;
+
+  /** 可空模型变体 id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant。 */
   private String variant;
+
+  /** 必填结构化执行配置（tools/skills），经严格 codec 校验后持久化为 config JSONB。 */
   private AgentDefinitionConfigDTO config;
 
   @JsonAnySetter

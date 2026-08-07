@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
 import java.util.List;
 
-/** Read-only offline-selectable runtime tool catalog. */
+/** 只读、可离线选用的 runtime tool catalog。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog/tools")
 @RestController

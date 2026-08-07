@@ -14,7 +14,10 @@ public class HarnessRuntimeProperties {
   /** 是否启动本进程的 Work dispatcher / listener；关闭时控制/查询平面仍然可用。 */
   private boolean workersEnabled = true;
 
+  /** Environment 沙箱根目录：绝对路径标准化后作为工具 workdir 的边界；未配置时取进程当前目录 （user.dir）。 */
   private Path environmentRoot = Path.of(System.getProperty("user.dir", "."));
+
+  /** 默认工作目录：绝对路径直接使用，相对路径基于 environmentRoot 解析，必须位于 environmentRoot 之内。 */
   private Path workdir = Path.of(".");
 
   /** 本地 {@code ResourceStore} 的单对象字节预算（默认 16 MiB）。 */

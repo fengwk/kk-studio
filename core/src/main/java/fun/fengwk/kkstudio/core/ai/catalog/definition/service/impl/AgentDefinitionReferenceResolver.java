@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
-/** Resolves global Agent definition and model references. */
+/** 解析全局 Agent definition 与 model 引用。 */
 @AllArgsConstructor
 @Component
 final class AgentDefinitionReferenceResolver {

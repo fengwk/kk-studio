@@ -19,11 +19,11 @@ import { projectDurableEntry } from '@/features/ai/runtime/thread-timeline/entry
 import { contentText } from '@/features/ai/runtime/thread-timeline/content-utils'
 
 /**
- * Thread transcript projection:
- * durable path Entries are the sole transcript authority;
- * only QUEUED USER_MESSAGE / CUSTOM_MESSAGE commands render as decoration overlays;
- * the active ModelInvocation checkpoint/stream and ToolInvocation partials render as transient
- * overlays until their durable Entries arrive.
+ * Thread transcript 投影：
+ * 持久路径的 Entries 是 transcript 的唯一权威来源；
+ * 仅 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令会作为装饰性 overlay 渲染；
+ * 活动 ModelInvocation 的 checkpoint/stream 以及 ToolInvocation 的 partial，作为
+ * 瞬态 overlay 渲染，直到对应的持久 Entry 到达为止。
  */
 export function buildThreadTimeline(
   entries: HarnessSessionEntryDTO[],
@@ -68,7 +68,7 @@ export function buildThreadTimeline(
       text: modelStream.text,
       thinking: modelStream.thinking || undefined,
       createdAt: modelStream.createdAt,
-      // Terminal durable projections (done/error) are never rendered as streaming.
+      // 终态持久投影（done/error）绝不会以 streaming 形式渲染。
       status: modelStream.status,
     })
   }
@@ -81,8 +81,8 @@ export function buildThreadTimeline(
 }
 
 /**
- * Projects ToolInvocation state onto the durable tool-call messages: active status/approval and
- * the transient TOOL_PARTIAL overlay until the durable tool result Entry arrives.
+ * 将 ToolInvocation 状态投影到持久的 tool-call 消息上：活动状态/审批，以及
+ * 在持久的 tool result Entry 到达之前的瞬态 TOOL_PARTIAL overlay。
  */
 function projectInvocationOverlays(
   messages: DialogueMessage[],
@@ -92,9 +92,9 @@ function projectInvocationOverlays(
   if (toolInvocations.length === 0) {
     return
   }
-  // Durable identity key (assistantEntryId, ordinal): an invocation belongs to exactly one
-  // assistant Entry at one call position. A reused toolCallId on a different assistant Entry
-  // must never receive this invocation's overlay, so there is NO first-candidate fallback.
+  // 持久身份键（assistantEntryId, ordinal）：一次 invocation 只属于一个 assistant Entry 的
+  // 一个调用位置。复用的 toolCallId 出现在不同的 assistant Entry 上时，绝不能接收该
+  // invocation 的 overlay，因此不存在「第一个候选」回退。
   const byDurableIdentity = new Map<string, ToolInvocationDTO>()
   for (const invocation of toolInvocations) {
     const key = `${invocation.assistantEntryId}:${invocation.ordinal}`
@@ -124,8 +124,8 @@ function projectInvocationOverlays(
     const approval = parseApproval(invocation.approvalJson)
     const projected: ToolDialogueMessage = {
       ...message,
-      // A terminal ToolResult with error=true (projected via the overlay) must never render
-      // as done; errorJson is the durable error projection.
+      // error=true 的终态 ToolResult（经由 overlay 投影）绝不能渲染为 done；
+      // errorJson 才是持久的错误投影。
       status: terminal
         ? (invocation.errorJson != null || overlay?.error === true ? 'error' : 'done')
         : 'streaming',
@@ -143,7 +143,7 @@ function projectInvocationOverlays(
   }
 }
 
-/** Parses the canonical ToolApproval JSON into a display-safe projection. */
+/** 将规范的 ToolApproval JSON 解析为可安全展示的投影。 */
 export function parseApproval(approvalJson: string | null): ToolApprovalState | null {
   if (approvalJson == null) {
     return null
@@ -161,7 +161,7 @@ export function parseApproval(approvalJson: string | null): ToolApprovalState | 
   const decision = value.decision
   return {
     required,
-    // The durable codec persists the domain enum ALLOWED/DENIED (the input DTO used ALLOW/DENY).
+    // 持久 codec 保存的是领域枚举 ALLOWED/DENIED（输入 DTO 使用的是 ALLOW/DENY）。
     decision: decision === 'ALLOWED' || decision === 'DENIED' ? decision : null,
     decisionId: typeof value.decisionId === 'string' ? value.decisionId : null,
     reason: typeof value.reason === 'string' && value.reason.trim() ? value.reason : null,

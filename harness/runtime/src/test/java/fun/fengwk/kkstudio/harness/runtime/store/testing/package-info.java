@@ -1,5 +1,5 @@
 /**
- * Test-only in-memory reference store and fixtures。
+ * 仅用于测试的内存版参考 store 与 fixture。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore} 是 {@link
  * fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 的确定性参考实现，供后续 Processor 与契约测试 复用；{@link

@@ -9,7 +9,7 @@ import type {
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
 
-/** Dispatches each dialogue message to a dedicated block component (pi per-message-type). */
+/** 将每条对话消息分派给对应的块组件（pi 风格按消息类型分发）。 */
 export function MessageList({
   messages,
   onDecideApproval,
@@ -17,7 +17,7 @@ export function MessageList({
 }: {
   messages: DialogueMessage[]
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
-  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }) {
   return (

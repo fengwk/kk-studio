@@ -4,10 +4,9 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Immutable durable Thread mailbox command aggregate.
+ * 不可变的 durable Thread mailbox command aggregate。
  *
- * <p>Lifecycle state is derived from the two nullable terminal markers. No status or appliedAt
- * projection is stored.
+ * <p>生命周期 state 由两个 nullable terminal marker 派生；不存储 status 或 appliedAt 投影。
  */
 public record ThreadCommand(
     long id,
@@ -45,7 +44,7 @@ public record ThreadCommand(
     }
   }
 
-  /** Derives QUEUED/APPLIED/CANCELLED from durable markers. */
+  /** 从 durable marker 派生 QUEUED/APPLIED/CANCELLED。 */
   public ThreadCommandState state() {
     if (consumedTurnStartEntryId != null) {
       return ThreadCommandState.APPLIED;
@@ -56,14 +55,14 @@ public record ThreadCommand(
     return ThreadCommandState.QUEUED;
   }
 
-  /** Returns the typed command kind without storing a duplicate discriminator. */
+  /** 返回 typed command kind，不存储重复的 discriminator。 */
   public ThreadCommandType type() {
     return payload.type();
   }
 
   /**
-   * Pure QUEUED -&gt; APPLIED transition: attaches the consuming TURN_START Entry id and clears the
-   * cancel marker. Only QUEUED commands may be consumed; {@code turnStartEntryId} must be positive.
+   * 纯 QUEUED -&gt; APPLIED 迁移：附加消费该 command 的 TURN_START Entry id 并清空 cancel marker。 只有 QUEUED 状态的
+   * command 可被 consume；{@code turnStartEntryId} 必须为正。
    */
   public ThreadCommand consume(long turnStartEntryId) {
     if (state() != ThreadCommandState.QUEUED) {
@@ -77,9 +76,8 @@ public record ThreadCommand(
   }
 
   /**
-   * Pure QUEUED -&gt; CANCELLED transition: attaches the cancellation time and clears the consumed
-   * marker. Only QUEUED commands may be cancelled; {@code cancelledAt} must not precede the command
-   * creation time.
+   * 纯 QUEUED -&gt; CANCELLED 迁移：附加取消时间并清空 consumed marker。只有 QUEUED 状态的 command 可被 cancel；{@code
+   * cancelledAt} 不得早于 command 的创建时间。
    */
   public ThreadCommand cancel(Instant cancelledAt) {
     if (state() != ThreadCommandState.QUEUED) {

@@ -7,11 +7,11 @@ import { ThreadStatusSegmentRows } from '@/features/ai/runtime/thread-panel/thre
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Footer：agent | model | usage
+ * 页脚：agent | model | usage
  *
- * Composition only: builds the stable text-only status model and forwards the resulting
- * segments to the responsive row layout. Pure formatting lives in
- * {@link buildThreadStatusModel}; layout/packing lives in {@link ThreadStatusSegmentRows}.
+ * 仅负责组合：构建稳定的纯文本状态模型，并把得到的分段
+ * 转发给响应式行布局。纯格式化逻辑在
+ * {@link buildThreadStatusModel} 中；布局/排版逻辑在 {@link ThreadStatusSegmentRows} 中。
  */
 export function ThreadStatusFooter({
   agentName,

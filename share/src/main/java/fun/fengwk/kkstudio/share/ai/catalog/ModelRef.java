@@ -3,12 +3,15 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import java.util.Objects;
 
 /**
- * Canonical external identity of an Agent model.
+ * Agent 模型的 canonical 外部身份。
  *
- * <p>The serialized form is {@code providerName/modelName}. Parsing splits at the first slash so a
- * provider model name may itself contain additional slashes.
+ * <p>序列化形式为 {@code providerName/modelName}。解析时只在第一个斜杠处分隔，因此 provider 模型名本身可以包含额外的斜杠。
  */
-public record ModelRef(String providerName, String modelName) {
+public record ModelRef(
+    /** Provider 资源名：非空白、无环绕空白且不得包含 {@code '/'}。 */
+    String providerName,
+    /** 模型名：非空白且无环绕空白。 */
+    String modelName) {
 
   public ModelRef {
     providerName = requireCanonicalPart(providerName, "providerName");

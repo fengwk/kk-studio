@@ -56,14 +56,14 @@ describe('thread realtime state', () => {
     expect(
       parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"y","thinking":null}'),
     ).toEqual({ attempt: 1, sequence: 0, text: 'y', thinking: '' })
-    // Both blank (null or whitespace) is rejected exactly like the Java record constructor.
+    // 与 Java record 构造函数一致：两侧均为空（null 或空白）将被拒绝。
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":null}')).toBeNull()
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"  ","thinking":""}')).toBeNull()
-    // Non-string types are malformed (nullableText rejects numbers/objects), not defaulted.
+    // 非字符串类型视为格式错误（nullableText 拒绝数字/对象），不会取默认值。
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":5,"thinking":"x"}')).toBeNull()
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":{"a":1}}')).toBeNull()
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":[],"thinking":"x"}')).toBeNull()
-    // attempt/sequence validation stays strict.
+    // attempt/sequence 校验保持严格。
     expect(parseStreamCheckpoint('{"attempt":0,"sequence":0,"text":"x","thinking":null}')).toBeNull()
     expect(parseStreamCheckpoint('{"attempt":1,"sequence":-1,"text":"x","thinking":null}')).toBeNull()
   })
@@ -112,7 +112,7 @@ describe('thread realtime state', () => {
       createTime: '2026-07-28T10:00:00Z',
       updateTime: '2026-07-28T10:00:00Z',
     }
-    // toolCallId comes straight from the invocation, never guessed from argumentsJson.
+    // toolCallId 直接来自 invocation，绝不能从 argumentsJson 推测。
     const active = snapshotToolStream(base, '7')
     expect(active).toMatchObject({ toolCallId: 'call-1', text: '', error: false })
 
@@ -136,7 +136,7 @@ describe('thread realtime state', () => {
       expect.objectContaining({ data: 's3://bucket/a.png', mime: 'image/png', name: 'a.png' }),
     ])
 
-    // ToolResult.error=true must project (a terminal error result is not "done").
+    // ToolResult.error=true 必须投影（终止态的 error 结果不等于 "done"）。
     const failedResult = snapshotToolStream(
       {
         ...base,
@@ -157,7 +157,7 @@ describe('thread realtime state', () => {
     )
     expect(failed).toMatchObject({ error: true, errorText: 'boom' })
 
-    // resultEntryId set: the durable Tool result Entry is the transcript truth.
+    // 设置 resultEntryId 后：持久的 Tool result Entry 才是 transcript 的真实来源。
     expect(snapshotToolStream({ ...base, resultJson: '{}', resultEntryId: 'e-9' }, '7')).toBeNull()
   })
 
@@ -178,7 +178,7 @@ describe('thread realtime state', () => {
       createdAt: '2026-07-28T10:00:00Z',
     }
     const stream = reduceRealtimeToolStream(null, partial)
-    // Text/json chunks aggregate; Resource chunks are never projected from partials.
+    // text/json 分片会被聚合；resource 分片不会被从 partial 中投影出来。
     expect(stream.text).toBe('one')
     expect(stream.attachments).toBeUndefined()
   })
@@ -205,16 +205,16 @@ describe('thread realtime state', () => {
       text: 'new',
       sequence: 2,
     })
-    // Invalid checkpoint JSON is treated as absent -> RUNNING keeps an empty base so the
-    // first realtime delta is not dropped (checkpoint flush does not bump the revision).
+    // 非法的 checkpoint JSON 视为不存在 -> RUNNING 保持空 base，确保
+    // 第一条 realtime delta 不会丢失（checkpoint flush 不会提升 revision）。
     expect(snapshotModelStream('7', { ...invocation, streamCheckpointJson: 'not-json' })).toMatchObject({
       attempt: 1,
       sequence: 0,
       text: '',
       thinking: '',
     })
-    // Terminal result WITHOUT resultEntryId: the complete durable result projection
-    // replaces the overlay (status 'done') and stays until resultEntryId is set.
+    // 终止态结果但没有 resultEntryId：完整的持久 result 投影会替换
+    // overlay（status 'done'）并一直保留，直到 resultEntryId 被设置。
     expect(
       snapshotModelStream('7', {
         ...invocation,
@@ -227,7 +227,7 @@ describe('thread realtime state', () => {
       text: 'new',
       status: 'done',
     })
-    // resultEntryId set: the durable Entry is the transcript truth.
+    // 设置 resultEntryId 后：持久 Entry 才是 transcript 的真实来源。
     expect(
       snapshotModelStream('7', {
         ...invocation,

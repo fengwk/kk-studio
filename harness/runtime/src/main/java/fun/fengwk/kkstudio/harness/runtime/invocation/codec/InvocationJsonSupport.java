@@ -16,7 +16,7 @@ import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Set;
 
-/** Feature-local strict JSON primitives shared by durable Invocation value codecs. */
+/** durable Invocation value codec 共享的 feature-local 严格 JSON 原语。 */
 final class InvocationJsonSupport {
 
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;

@@ -8,7 +8,7 @@ import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
-/** MyBatis mapper for idempotent Chat↔Thread associations. */
+/** 幂等 Chat↔Thread 关联的 MyBatis mapper。 */
 @Mapper
 public interface ChatThreadMapper extends BaseMapper {
 

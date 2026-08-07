@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** PLATFORM tool: read the durable Thread goal. */
+/** PLATFORM tool：读取 durable Thread goal。 */
 public final class GetGoalTool implements Tool {
   public static final String NAME = "get_goal";
   public static final String VERSION = "1";
@@ -29,7 +29,7 @@ public final class GetGoalTool implements Tool {
           ToolType.PLATFORM,
           GoalToolPrompts.load("goal-get-tool.md"),
           NAME,
-          new ToolParamsSchema("Read the current Thread goal.", Map.of(), Set.of(), false),
+          new ToolParamsSchema("读取当前 Thread 的 goal。", Map.of(), Set.of(), false),
           ToolSideEffect.READ_ONLY,
           Duration.ZERO);
 

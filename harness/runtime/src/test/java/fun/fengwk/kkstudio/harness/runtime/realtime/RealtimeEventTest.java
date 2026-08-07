@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.util.List;
 
-/** Lossy realtime events retain enough durable identity for snapshot-first filtering. */
+/** 有损 realtime event 必须保留足够的 durable identity，以支持 snapshot-first 过滤。 */
 class RealtimeEventTest {
 
   @Test

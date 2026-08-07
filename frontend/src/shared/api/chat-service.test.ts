@@ -37,7 +37,7 @@ describe('chatService', () => {
       expectedVersion: '4',
     })
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/chat/chat%20%2F1', { params: { expectedVersion: '5' } })
-    // Chat-Session membership is gone: Chat never touches /sessions sub-resources.
+    // Chat-Session 隶属关系已移除：Chat 从不访问 /sessions 子资源。
     expect(client.get).not.toHaveBeenCalledWith(expect.stringContaining('/sessions'))
     expect(client.post).not.toHaveBeenCalledWith(expect.stringContaining('/sessions'), expect.anything())
     expect(client.delete).not.toHaveBeenCalledWith(expect.stringContaining('/sessions'))
@@ -78,7 +78,7 @@ describe('chatService', () => {
       },
       yoloEnabled: true,
     })
-    // No pagination params, no cursor: the Chat returns the full Thread array.
+    // 无分页参数、无游标：Chat 返回完整 Thread 数组。
     expect(client.get).toHaveBeenCalledWith('/ai/chat/chat%20%2F1/threads')
   })
 })

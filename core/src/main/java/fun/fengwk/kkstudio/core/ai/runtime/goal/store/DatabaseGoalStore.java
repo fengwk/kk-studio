@@ -15,7 +15,7 @@ import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Database-backed durable Thread goal store. */
+/** 数据库支撑的持久 Thread goal store。 */
 @Repository
 public class DatabaseGoalStore implements GoalStore {
   private final HarnessThreadGoalMapper mapper;

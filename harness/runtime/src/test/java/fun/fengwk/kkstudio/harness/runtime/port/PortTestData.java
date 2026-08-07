@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Minimal frozen request fixtures for the port contract tests. */
+/** port 契约测试使用的最小化 frozen request fixture。 */
 final class PortTestData {
 
   private static final EnvironmentId ENV_ID = new EnvironmentId(UUID.randomUUID().toString());

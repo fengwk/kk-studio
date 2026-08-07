@@ -22,7 +22,7 @@ type KeyboardApi = {
   createTextNode: () => void
 }
 
-/** Editor keyboard shortcuts and focus recovery, kept out of the main controller body. */
+/** 编辑器键盘快捷键与焦点恢复，与主 controller 主体分离。 */
 export function useCanvasKeyboard(api: KeyboardApi) {
   const {
     state,

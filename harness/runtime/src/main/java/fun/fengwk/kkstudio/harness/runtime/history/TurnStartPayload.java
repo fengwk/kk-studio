@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 
 import java.util.Objects;
 
-/** Immutable durable boundary for the beginning of one Model response turn. */
+/** 一次 Model response turn 开始处的不可变 durable 边界。 */
 public record TurnStartPayload(TurnStartReason reason, BranchSettings settings)
     implements EntryPayload {
 

@@ -9,7 +9,7 @@ async function copyText(text: string): Promise<boolean> {
       return true
     }
   } catch {
-    // fall through
+    // 失败则继续走兜底逻辑（fall through）
   }
   try {
     const area = document.createElement('textarea')

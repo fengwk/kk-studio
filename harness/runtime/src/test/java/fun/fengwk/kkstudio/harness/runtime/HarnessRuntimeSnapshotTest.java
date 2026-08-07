@@ -38,7 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 
-/** getThreadSnapshot: consistent single-transaction projection per classifier context. */
+/** getThreadSnapshot：每个分类器上下文中事务内一致的投影。 */
 class HarnessRuntimeSnapshotTest {
 
   private InMemoryHarnessStore store;
@@ -231,7 +231,7 @@ class HarnessRuntimeSnapshotTest {
     assertTrue(error.getMessage().contains("could not be locked"));
   }
 
-  /** Test-only delegating store whose transactions refuse to lock any Model row. */
+  /** 仅测试用的委托 store：其事务拒绝锁定任何 Model 行。 */
   private static HarnessStore sabotagedStoreLockingNoModel(InMemoryHarnessStore delegate) {
     return (HarnessStore)
         Proxy.newProxyInstance(

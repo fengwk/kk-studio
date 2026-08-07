@@ -24,7 +24,7 @@ import java.util.Map;
 /**
  * {@link S3PresignService} 单元测试.
  *
- * <p>使用 AWS SDK 提供的真实 {@code S3Presigner}（path-style + SigV4）在本地完成签名， 不与对象存储产生任何 IO，从而精准覆盖 key
+ * <p>使用 AWS SDK 提供的真实 {@code S3Presigner}（path-style + SigV4）在本地完成签名，不与对象存储产生任何 IO，从而精准覆盖 key
  * 规范化、签名时长校验与响应字段语义。
  *
  * @author fengwk
@@ -37,7 +37,7 @@ public class S3PresignServiceTest {
   private static final String REGION = "us-east-1";
 
   /**
-   * PUT 预签名：URL 落在 public endpoint、method=PUT、bucket 与 key 与请求一致， 且当指定 contentType 时该头会被签名进入响应
+   * PUT 预签名：URL 落在 public endpoint、method=PUT、bucket 与 key 与请求一致，且当指定 contentType 时该头会被签名进入响应
    * headers（浏览器必须原样回传）。
    */
   @Test
@@ -232,7 +232,7 @@ public class S3PresignServiceTest {
       S3PresignedResponseDTO resp = context.service.presignDownload("ok.bin", null);
       assertNotNull(resp);
       assertThrows(IllegalArgumentException.class, () -> context.service.presignDownload("", null));
-      // res was built before failure and stays valid; key assertion remains stable
+      // res 在失败之前已构建，并保持有效；关键断言保持稳定
       assertEquals("ok.bin", resp.getKey());
       assertNull(resp.getHeaders().get("Content-Type"), "GET presign should not sign Content-Type");
       assertFalse(resp.getUrl().isEmpty());

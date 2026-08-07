@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
-/** Global model application service. */
+/** 全局 model 应用服务。 */
 public interface AgentModelService {
 
   Page<AgentModelDTO> pageModels(PageQuery pageQuery);

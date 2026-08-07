@@ -8,18 +8,17 @@ import java.sql.SQLException;
 import java.sql.Types;
 
 /**
- * Creates valid Model/Tool Invocation rows so tests can isolate one target constraint.
+ * 创建合法的 Model/Tool Invocation 行，使测试能单独隔离目标约束。
  *
- * <p>Ids are allocated by the caller via {@code harness_runtime_id_seq} semantics (any unique
- * positive value); the schema enforces positivity itself. Every model invocation gets a fresh
- * {@code turn_start_entry_id} so the {@code uk_harness_model_invocation_turn} uniqueness never
- * interferes with fixture reuse.
+ * <p>id 由调用方按 {@code harness_runtime_id_seq} 语义分配（任意唯一正值）；正数性约束由 schema 自身强制。每次 model invocation
+ * 都获得一个全新的 {@code turn_start_entry_id}，从而不会因 {@code uk_harness_model_invocation_turn} 唯一约束而干扰
+ * fixture 复用。
  */
 final class InvocationFixture {
 
   private InvocationFixture() {}
 
-  /** Insert a READY model invocation bound to the fixture Thread's ROOT entry. */
+  /** 插入一条绑定到 fixture Thread ROOT entry 的 READY model invocation。 */
   static long insertModel(ThreadFixture thread) throws SQLException {
     long invocationId = PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet();
     try (Connection conn = PostgresSchemaSupport.newConnection()) {
@@ -41,9 +40,8 @@ final class InvocationFixture {
   }
 
   /**
-   * Insert a model invocation with explicit facts. JSONB arguments are raw JSON text or {@code
-   * null} (nullable columns); {@code status} and {@code attempt} are caller-controlled so each test
-   * can violate exactly one constraint.
+   * 以显式事实插入一条 model invocation。JSONB 参数是原始 JSON 文本或 {@code null}（可空列）； {@code status} 与 {@code
+   * attempt} 由调用方控制，以便每个测试仅违反一条约束。
    */
   static void insertModel(
       Connection conn,
@@ -85,7 +83,7 @@ final class InvocationFixture {
     }
   }
 
-  /** Insert a READY tool invocation under an existing model invocation and assistant Entry. */
+  /** 在已存在的 model invocation 与 assistant Entry 下插入 READY tool invocation。 */
   static long insertTool(
       ThreadFixture thread, long modelInvocationId, long assistantEntryId, int ordinal)
       throws SQLException {
@@ -109,9 +107,8 @@ final class InvocationFixture {
   }
 
   /**
-   * Insert a tool invocation with explicit facts. JSONB arguments are raw JSON text or {@code null}
-   * (nullable columns); {@code status} and {@code attempt} are caller-controlled so each test can
-   * violate exactly one constraint.
+   * 以显式事实插入一条 tool invocation。JSONB 参数是原始 JSON 文本或 {@code null}（可空列）； {@code status} 与 {@code
+   * attempt} 由调用方控制，以便每个测试仅违反一条约束。
    */
   static void insertTool(
       Connection conn,

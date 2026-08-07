@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.impl.model.AgentModelDO;
 
-/** Model Variant overrides must reference the current composite Model identity. */
+/** Model Variant 覆盖必须引用当前的复合 Model 标识。 */
 class AgentModelDefaultVariantResolverTest {
 
   @Test

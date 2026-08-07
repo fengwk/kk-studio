@@ -31,7 +31,7 @@ export function CanvasGenerationWorkbench() {
       return
     }
     const panel = panelRef.current
-    // Measure unconstrained content height so mobile maxHeight does not permanently clamp desktop.
+    // 测量未受约束的内容高度，避免移动端 maxHeight 永久钳制桌面端。
     const previousMaxHeight = panel.style.maxHeight
     panel.style.maxHeight = 'none'
     const measured = panel.scrollHeight || 330

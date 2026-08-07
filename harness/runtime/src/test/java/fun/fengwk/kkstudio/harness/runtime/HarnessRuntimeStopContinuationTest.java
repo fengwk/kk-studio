@@ -35,9 +35,9 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 
 /**
- * Stop on CONTINUATION_DUE: exactly three Entries (TURN_START(CONTINUATION, baseSettings),
- * ASSISTANT_ERROR(CANCELLED), STOPPED TURN_END with the composite key), no ModelInvocation, no
- * queued config application, all Commands cancelled and the frozen YOLO policy preserved.
+ * Stop 在 CONTINUATION_DUE 上：恰好三条 Entry（TURN_START(CONTINUATION, baseSettings)、
+ * ASSISTANT_ERROR(CANCELLED)、带复合 key 的 STOPPED TURN_END），无 ModelInvocation， 不应用 queued config，所有
+ * Command 被取消，且冻结的 YOLO 策略被保留。
  */
 class HarnessRuntimeStopContinuationTest {
 

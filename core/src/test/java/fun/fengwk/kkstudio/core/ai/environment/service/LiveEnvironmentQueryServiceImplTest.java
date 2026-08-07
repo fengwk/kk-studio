@@ -19,11 +19,9 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Verifies registry snapshots project into share DTOs (canonical id plus display name) without
- * harness types leaking out.
+ * 验证 registry 快照投影为 share DTO（canonical id 与 display name），且不会有 harness 类型泄漏。
  *
- * <p>Environment tools come from the static {@link EnvironmentToolCatalog}; only skills are
- * advertised by the daemon.
+ * <p>Environment 工具来自静态 {@link EnvironmentToolCatalog}；daemon 仅对外声明 skill。
  */
 class LiveEnvironmentQueryServiceImplTest {
 
@@ -51,8 +49,7 @@ class LiveEnvironmentQueryServiceImplTest {
     assertEquals("dev", dto.getName());
     assertEquals("READY", dto.getStatus());
     assertEquals(now, dto.getLastSeen());
-    // Environment tools are fixed by EnvironmentToolCatalog and are exposed regardless of the
-    // daemon's READY payload.
+    // Environment 工具由 EnvironmentToolCatalog 固定提供，无论 daemon 的 READY 载荷如何都会暴露。
     assertEquals(EnvironmentToolCatalog.descriptors().size(), dto.getTools().size());
     assertEquals(1, dto.getSkills().size());
     assertEquals("demo", dto.getSkills().get(0).getName());

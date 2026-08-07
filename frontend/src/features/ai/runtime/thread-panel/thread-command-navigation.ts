@@ -12,7 +12,7 @@ export function useFilteredThreadCommands(
   return useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
 }
 
-/** Next/previous enabled index within a filtered command list; wraps around. */
+/** 在过滤后的命令列表中获取下一个/上一个可用项的索引；支持环绕。 */
 export function stepEnabledCommandIndex(
   commands: ThreadCommand[],
   currentIndex: number,

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-/** Final set of typed commands accepted by the Thread mailbox. */
+/** Thread mailbox 接受的 typed command 的最终集合。 */
 public enum ThreadCommandType {
   USER_MESSAGE,
   CUSTOM_MESSAGE,
@@ -11,7 +11,7 @@ public enum ThreadCommandType {
   SET_YOLO,
   SET_ENVIRONMENT;
 
-  /** Whether this command contributes a conversation message. */
+  /** 该 command 是否贡献一条会话消息。 */
   public boolean isMessage() {
     return this == USER_MESSAGE || this == CUSTOM_MESSAGE;
   }

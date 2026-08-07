@@ -6,10 +6,10 @@ import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Select;
 
 /**
- * Narrow MyBatis mapper for the shared PostgreSQL sequence.
+ * 共享 PostgreSQL sequence 的窄 MyBatis mapper。
  *
- * <p>The single operation reads the next value from {@code kk_studio_id_seq} so the same physical
- * sequence backs every durable id allocation. The sequence is declared by {@code V1__schema.sql}.
+ * <p>唯一操作是从 {@code kk_studio_id_seq} 读取下一个值，因此同一个物理 sequence 支撑每次持久化 id 分配。该 sequence 由 {@code
+ * V1__schema.sql} 声明。
  *
  * @author fengwk
  */
@@ -17,8 +17,8 @@ import org.apache.ibatis.annotations.Select;
 public interface SequenceMapper extends BaseMapper {
 
   /**
-   * Returns the next positive value from {@code kk_studio_id_seq}. {@code flushCache/useCache}
-   * disables MyBatis first-level caching so each invocation executes {@code nextval}.
+   * 返回 {@code kk_studio_id_seq} 的下一个正值。{@code flushCache/useCache} 禁用 MyBatis 一级缓存， 使每次调用都执行 {@code
+   * nextval}。
    */
   @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
   @Select("select nextval('kk_studio_id_seq')")

@@ -54,7 +54,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     description: '',
     systemPrompt: '',
     model: model ? modelRef(model) : '',
-    // Empty = no override; runtime uses model.defaultVariant.
+    // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
     tools: [],
     skills: [],
@@ -83,7 +83,7 @@ export function toEditableAgent(draft: AgentDraft): AgentDefinitionCreateDTO {
   if (!model) {
     throw new Error('model must not be blank')
   }
-  // Blank override is allowed; backend resolves model.defaultVariant when needed.
+  // 允许空覆盖；后端在需要时回退到 model.defaultVariant。
   const variant = trimToNull(draft.variant)
   return {
     name,

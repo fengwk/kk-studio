@@ -11,11 +11,10 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Snapshot of one server-memory Environment entry keyed by canonical {@link EnvironmentId}.
+ * 以 canonical {@link EnvironmentId} 为键的服务端内存 Environment 条目快照。
  *
- * <p>{@code name} is display-only metadata bound at HELLO; it may be reused across different ids
- * and never participates in routing. Environment tools are fixed by {@link EnvironmentToolCatalog};
- * READY only publishes the daemon's available skills.
+ * <p>{@code name} 是 HELLO 时绑定的展示性元数据；可在不同 id 间复用，绝不参与路由。Environment 工具 由 {@link
+ * EnvironmentToolCatalog} 固定；READY 只发布 daemon 的可用 skills。
  */
 public record LiveEnvironment(
     EnvironmentId id,

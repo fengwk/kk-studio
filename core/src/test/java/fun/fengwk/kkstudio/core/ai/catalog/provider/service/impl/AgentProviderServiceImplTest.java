@@ -28,7 +28,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
-/** Atomic CAS failure must surface as the typed {@link AiVersionConflictException}. */
+/** 原子 CAS 失败必须以类型化 {@link AiVersionConflictException} 抛出。 */
 public class AgentProviderServiceImplTest {
 
   @Test

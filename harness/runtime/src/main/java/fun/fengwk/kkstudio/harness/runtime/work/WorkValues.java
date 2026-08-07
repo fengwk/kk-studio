@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
-/** Small package-private helper for canonical lease token values. */
+/** canonical lease token 值的小型 package-private 工具类。 */
 final class WorkValues {
 
   private WorkValues() {}

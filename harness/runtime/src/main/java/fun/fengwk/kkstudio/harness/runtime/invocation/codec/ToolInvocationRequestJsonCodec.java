@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
 import java.util.Objects;
 
-/** Strict deterministic JSON codec for one frozen Tool invocation request. */
+/** 一个冻结 Tool invocation request 的严格、确定性 JSON codec。 */
 public final class ToolInvocationRequestJsonCodec {
 
   private static final String CONTEXT = "toolInvocationRequest";

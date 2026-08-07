@@ -10,9 +10,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 
 /**
- * Field-mapper that converts {@link AgentModel} rows into public DTOs. All structured-config
- * parsing is delegated to {@link AgentModelRuntimeConfigParser} so we never duplicate JSON shape
- * handling here.
+ * 将 {@link AgentModel} 行映射为公开 DTO 的字段映射器。所有结构化配置解析都委托给 {@link AgentModelRuntimeConfigParser}，此处绝不重复
+ * JSON 形状处理。
  */
 @Component
 public class AgentModelConverter {

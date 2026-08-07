@@ -12,7 +12,7 @@ import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.List;
 
-/** ThreadCommand identity, derived-state and durable marker invariants. */
+/** ThreadCommand identity、derived-state 与 durable marker 不变量。 */
 class ThreadCommandTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");

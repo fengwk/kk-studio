@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
 /**
- * Visibility edge: source resources become visible to the target node.
+ * 可见性边：source 资源变为对 target node 可见。
  *
- * <p>Invariants enforced by the canonical constructor:
+ * <p>由规范构造函数强制的不变量：
  *
  * <ul>
- *   <li>{@code id > 0}, {@code sourceNodeId > 0}, {@code targetNodeId > 0}
+ *   <li>{@code id > 0}、{@code sourceNodeId > 0}、{@code targetNodeId > 0}
  *   <li>{@code sourceNodeId != targetNodeId}
  * </ul>
  */

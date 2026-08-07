@@ -3,10 +3,10 @@ import { filterComfyuiWorkflows } from '@/features/comfyui/comfyui-utils'
 import { useComfyuiController } from '@/features/comfyui/useComfyuiController'
 
 /**
- * Isolated controller for the ComfyUI workflow page.
+ * ComfyUI workflow 页面的独立 controller。
  *
- * This hook exposes only ComfyUI workflow state plus a local search box that
- * filters workflows client-side.
+ * 该 hook 只暴露 ComfyUI workflow 状态以及一个本地搜索框，
+ * 搜索框在客户端过滤 workflow。
  */
 export function useComfyuiPageController() {
   const [search, setSearch] = useState('')

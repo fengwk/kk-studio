@@ -15,7 +15,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Duration;
 import java.util.List;
 
-/** ToolGateway public contract: preflight outcomes, admission certainty and value validation. */
+/** ToolGateway public contract：preflight outcomes、admission certainty 与 value validation。 */
 class ToolGatewayTest {
 
   @Test

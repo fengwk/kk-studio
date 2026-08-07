@@ -159,7 +159,7 @@ public final class RealtimeEventJsonCodec {
     throw new IllegalArgumentException("unsupported realtimeEvent.type: " + typeName);
   }
 
-  // ---------- Encoders ----------
+  // ---------- 编码器 ----------
 
   private static ObjectNode encodeModelDelta(RealtimeEvent.ModelDelta delta) {
     ObjectNode node = NODES.objectNode();
@@ -219,7 +219,7 @@ public final class RealtimeEventJsonCodec {
     return node;
   }
 
-  // ---------- Decoders ----------
+  // ---------- 解码器 ----------
 
   private static ProviderStreamEvent decodePayload(ObjectNode node) {
     JsonNode kindNode = node.get("kind");
@@ -254,7 +254,7 @@ public final class RealtimeEventJsonCodec {
     };
   }
 
-  // ---------- Helpers ----------
+  // ---------- 工具方法 ----------
 
   private static String write(ObjectNode node) {
     try {

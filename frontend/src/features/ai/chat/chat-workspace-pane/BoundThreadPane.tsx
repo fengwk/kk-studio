@@ -45,7 +45,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
 
-/** 409 = stale revision or non-quiescent Thread; never swallow it silently. */
+/** 409 = 过期 revision 或非 quiescent 的 Thread；绝不能悄悄吞掉。 */
 function rebindErrorMessage(error: unknown): string {
   if (isConflictError(error)) {
     return translate('ai.runtime.action.rebindConflict', {
@@ -80,7 +80,7 @@ export function BoundThreadPane({
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
-  /** Restores the composer text after a failed first send; independent of replay identity. */
+  /** 在首次发送失败后恢复 composer 文本；与 replay identity 相互独立。 */
   initialDraft?: string
   initialReplay?: CommandBatchReplay
   onReplayInitialized?: () => void
@@ -90,8 +90,8 @@ export function BoundThreadPane({
     () => new Map(environments.map((environment) => [environment.id, environment.name])),
     [environments],
   )
-  // buildBatch depends on the controller's snapshot thread; the controller is created below, so
-  // the stable callback delegates through a ref that is assigned on every render before use.
+  // buildBatch 依赖 controller 的 snapshot thread；controller 在下方创建，因此
+  // 稳定的回调通过一个 ref 转发，并在每次渲染中、use 之前赋值。
   const buildBatchRef = useRef<((content: string) => CommandBatchPlan | null) | null>(null)
   const controller = useAgentThreadController(
     threadId,
@@ -100,9 +100,9 @@ export function BoundThreadPane({
     (content) => buildBatchRef.current?.(content) ?? null,
     environmentNames,
   )
-  // Pane-local branch draft: initialized from the durable Thread snapshot, edited pane-locally,
-  // applied atomically with the next message batch. base follows the snapshot; queued SET_*
-  // commands project the effective base so consecutive sends never resend in-flight settings.
+  // 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
+  // 与下一条 message batch 一起原子应用。base 跟随 snapshot；queued SET_*
+  // command 投影 effective base，避免连续发送时重复携带在途中的 settings。
   const [branchState, setBranchState] = useState<{
     base: BranchDraft
     draft: BranchDraft
@@ -116,8 +116,8 @@ export function BoundThreadPane({
   const queryClient = useQueryClient()
   const boundThreadIdRef = useRef<string | null>(null)
 
-  // Rebinding the pane to another Thread clears all pane-local state and re-initializes the
-  // draft from the new snapshot (the controller also resets its stop/decision replay state).
+  // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
+  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）。
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
       return
@@ -144,9 +144,9 @@ export function BoundThreadPane({
   const hasPendingCommands = controller.queuedCommands.length > 0
 
   useEffect(() => {
-    // A failed first-send recovery is consumed once: either form (text-only 409 recovery or
-    // text + exact-batch replay) initializes in the controller, then the pane state clears so
-    // switching away and back never re-applies a stale recovery.
+    // 首次发送失败的 recovery 只会被消费一次：无论形式（仅文本的 409 recovery 或
+    // 文本 + exact-batch replay）都在 controller 中初始化，然后清空面板状态，
+    // 避免切走再切回时再次套用过期 recovery。
     if (initialReplay || initialDraft) {
       onReplayInitialized?.()
     }
@@ -158,7 +158,7 @@ export function BoundThreadPane({
     }
   }, [controller.messagesError, onThreadChange])
 
-  // Rebind to a fresh Thread initializes the draft from its snapshot (base === draft, clean).
+  // 重新绑定到新 Thread 时，从其 snapshot 初始化 draft（base === draft，干净）。
   useEffect(() => {
     const thread = controller.thread
     if (!thread) {
@@ -172,7 +172,7 @@ export function BoundThreadPane({
       if (!current.initialized) {
         return { ...current, base: snapshotDraft, draft: snapshotDraft, initialized: true }
       }
-      // Durable base follows the snapshot; the user draft is never silently overwritten.
+      // 持久化的 base 跟随 snapshot；用户 draft 永远不会被静默覆盖。
       return { ...current, base: snapshotDraft }
     })
   }, [controller.thread])
@@ -193,7 +193,7 @@ export function BoundThreadPane({
     [branchState, controller.thread, effectiveBase],
   )
   useEffect(() => {
-    // Ref is consumed by controller submit handlers (event-driven, always after effects).
+    // Ref 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
     buildBatchRef.current = buildBatch
   })
 
@@ -218,21 +218,21 @@ export function BoundThreadPane({
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
-      // Successful relocation re-initializes the branch draft from the target Thread (yolo
-      // stays server value; branch settings come from the returned Thread).
+      // 成功重定位后，从目标 Thread 重新初始化 branch draft（yolo 保留服务器值；
+      // branch settings 取自返回的 Thread）。
       const snapshotDraft = branchDraftFromThread(updatedThread)
       setBranchState({ base: snapshotDraft, draft: snapshotDraft, initialized: true })
-      // USER/CUSTOM rewinds restore their editable source text into the composer.
+      // USER/CUSTOM 回退会将其可编辑的原文恢复到 composer。
       controller.setDraft(branchTarget(entry).draft)
     },
   })
 
-  // Pane transition gates:
-  // - paneDirty = branch draft dirty OR non-empty composer text (accepted message already
-  //   cleared the composer; a non-empty composer is new unsent input).
-  // - panePending = any in-flight mutation that makes a switch unsafe: queued commands,
-  //   command HTTP, head relocation, stop, approval, an undecided exact batch replay, or an
-  //   ambiguous Stop operation awaiting its exact retry.
+  // 面板切换门控：
+  // - paneDirty = branch draft 已变脏 或 composer 有非空文本（已接受的消息已清空
+  //   composer；非空 composer 属于新输入未发送）。
+  // - panePending = 任何使切换不安全的 in-flight mutation：queued commands、command HTTP、
+  //   head 重定位、stop、approval、未决的 exact batch replay，或等待精确重试的
+  //   不确定 Stop 操作。
   const paneDirty = dirty || controller.draft.trim() !== ''
   const panePending =
     hasPendingCommands
@@ -262,8 +262,8 @@ export function BoundThreadPane({
       setRebindBlockedReason(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))
       return
     }
-    // Draft-local edit: adopt the new agent name + its active tool set; the frozen
-    // model/thinking/environment/yolo selection is preserved.
+    // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
+    // model/thinking/environment/yolo 选中值保持不变。
     editDraft({ agentName: selectedAgentName, activeTools: [...agent.config.tools] })
     setAgentModalOpen(false)
   }
@@ -290,7 +290,7 @@ export function BoundThreadPane({
   function selectThread(selectedThreadId: string) {
     setThreadModalOpen(false)
     if (selectedThreadId === threadId) {
-      // Selecting the currently bound Thread needs no confirmation and changes nothing.
+      // 选中当前已绑定的 Thread 不需要确认，也不会产生任何变化。
       return
     }
     if (panePending) {
@@ -303,7 +303,7 @@ export function BoundThreadPane({
     onThreadChange(selectedThreadId)
   }
 
-  /** Only logically quiescent Threads accept a head rebind (mirrors the server classifier). */
+  /** 仅逻辑上 quiescent 的 Thread 才接受 head rebind（与服务端分类器一致）。 */
   function isRelocatable(): boolean {
     const thread = controller.thread
     return thread != null
@@ -311,7 +311,7 @@ export function BoundThreadPane({
       && !panePending
   }
 
-  /** /tree relocation: non-relocatable status or pending commands block it up front. */
+  /** /tree 重定位：non-relocatable 状态或 pending command 在入口处直接拦截。 */
   function openHistory() {
     if (!isRelocatable()) {
       setRebindBlockedReason(t('ai.runtime.action.threadRunning'))
@@ -339,7 +339,7 @@ export function BoundThreadPane({
     }
     switch (command.id) {
       case 'session':
-        // Global Session rebind no longer exists: stays visible but disabled.
+        // 全局 Session rebind 已不再存在：保持可见但禁用。
         return
       case 'thread':
         if (panePending) {
@@ -385,8 +385,8 @@ export function BoundThreadPane({
       )
     : undefined
   const labels: ChatPanelLabels = {
-    // Footer always reflects the pane-local draft (agent/model/variant/environment), falling
-    // back to the durable snapshot labels only while the draft is still initializing.
+    // Footer 始终反映面板本地 draft（agent/model/variant/environment），仅在
+    // draft 尚未初始化时回退到持久化 snapshot 的 label。
     agentName: draft?.agentName || controller.runtimeLabels.agentName,
     providerName: draft?.model.providerName || controller.runtimeLabels.providerName,
     modelName: draft?.model.providerName && draft.model.modelName
@@ -416,9 +416,9 @@ export function BoundThreadPane({
   }
   const composer: ChatPanelComposerInput = {
     draft: controller.draft,
-    // Pending covers the in-flight HTTP request (also disables send: canSend checks disabled),
-    // plus the branch draft and buildBatch readiness so one replayRef never serves concurrent
-    // CAS requests.
+    // Pending 覆盖 in-flight HTTP 请求（同时禁用发送：canSend 已检查 disabled），
+    // 加上 branch draft 与 buildBatch 就绪状态，确保一个 replayRef 不会服务并发的
+    // CAS 请求。
     pending: controller.pending || rebindMutation.isPending,
     disabled:
       controller.pending
@@ -483,7 +483,7 @@ export function BoundThreadPane({
           onRebind={rebindTo}
         />
       ) : null}
-      {/* /thread switches which Chat-scoped Thread this pane shows; no Thread is mutated. */}
+      {/* /thread 切换该面板展示哪个 Chat 作用域 Thread；不会修改任何 Thread。 */}
       <SelectionListModal
         open={threadModalOpen}
         title={t('ai.chat.selectThread')}

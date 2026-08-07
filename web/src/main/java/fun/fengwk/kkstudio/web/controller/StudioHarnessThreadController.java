@@ -43,12 +43,11 @@ import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
- * Thread API over the root {@link HarnessRuntime} control/query plane.
+ * 基于根 {@link HarnessRuntime} 控制/查询平面的 Thread API。
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
- * result.status} 对齐；命令入队使用 {@link Results#accepted}（202）。Typed runtime rejections are translated
- * here: not-found {@literal ->} 404, business conflict {@literal ->} 409, invalid request/DTO
- * {@literal ->} 400.
+ * result.status} 对齐；命令入队使用 {@link Results#accepted}（202）。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->}
+ * 404、业务冲突 {@literal ->} 409、非法请求/DTO {@literal ->} 400。
  */
 @RestController
 @RequestMapping("/api/ai/runtime/threads")
@@ -154,11 +153,10 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * Snapshot-first realtime SSE tail over the runtime-spring Redis overlay.
+   * 基于 runtime-spring Redis overlay 的 snapshot-first realtime SSE tail。
    *
-   * <p>{@code Last-Event-ID} overrides {@code afterRevision} after a browser reconnect. Both are
-   * canonical decimal durable cursors; Redis delta events deliberately have no SSE id. The thread
-   * existence is checked through {@link HarnessRuntime#getThreadSnapshot}.
+   * <p>浏览器重连后 {@code Last-Event-ID} 覆盖 {@code afterRevision}。两者都是规范的十进制持久游标；Redis delta 事件故意不携带 SSE
+   * id。Thread 是否存在通过 {@link HarnessRuntime#getThreadSnapshot} 校验。
    */
   @GetMapping(path = "/{threadId}/events/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter streamEvents(

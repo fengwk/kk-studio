@@ -18,11 +18,10 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The single source of truth for the fixed tools provided by every Environment Daemon.
+ * 每个 Environment Daemon 提供的固定工具的唯一事实来源。
  *
- * <p>Descriptors, schemas and prompt text are deliberately defined in the dependency-free {@code
- * harness/tool} module. Core uses this catalog for validation and planning, while Daemon
- * implementations use the same descriptors for registration and wire validation.
+ * <p>Descriptor、schema 与 prompt 文本刻意定义在无依赖的 {@code harness/tool} 模块中。Core 使用该 catalog 做校验与
+ * 规划，Daemon 实现则用同一组 descriptor 做注册与 wire 校验。
  */
 public final class EnvironmentToolCatalog {
 
@@ -75,12 +74,12 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "read",
             new ToolParamsSchema(
-                "Read parameters",
+                "read 工具参数。",
                 Map.of(
-                    "path", new ToolStringSchema("File or directory path"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "offset", new ToolIntegerSchema("One-based line offset"),
-                    "limit", new ToolIntegerSchema("Maximum number of lines")),
+                    "path", new ToolStringSchema("文件或目录路径"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
+                    "offset", new ToolIntegerSchema("从 1 开始的行偏移量"),
+                    "limit", new ToolIntegerSchema("最多读取的行数")),
                 Set.of("path"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -88,12 +87,11 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "write",
             new ToolParamsSchema(
-                "Write parameters",
+                "write 工具参数。",
                 Map.of(
-                    "path", new ToolStringSchema("File path"),
-                    "content", new ToolStringSchema("Complete replacement content"),
-                    "workdir",
-                        new ToolStringSchema("Optional environment-root-relative directory")),
+                    "path", new ToolStringSchema("文件路径"),
+                    "content", new ToolStringSchema("完整的替换内容"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录")),
                 Set.of("path", "content"),
                 false),
             ToolSideEffect.IDEMPOTENT,
@@ -101,14 +99,13 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "edit",
             new ToolParamsSchema(
-                "Edit parameters",
+                "edit 工具参数。",
                 Map.of(
-                    "path", new ToolStringSchema("File path"),
-                    "old_string", new ToolStringSchema("Exact text to replace"),
-                    "new_string", new ToolStringSchema("Replacement text"),
-                    "replace_all", new ToolBooleanSchema("Replace every exact match"),
-                    "workdir",
-                        new ToolStringSchema("Optional environment-root-relative directory")),
+                    "path", new ToolStringSchema("文件路径"),
+                    "old_string", new ToolStringSchema("要替换的精确文本"),
+                    "new_string", new ToolStringSchema("替换文本"),
+                    "replace_all", new ToolBooleanSchema("替换所有精确匹配"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录")),
                 Set.of("path", "old_string", "new_string"),
                 false),
             ToolSideEffect.NON_IDEMPOTENT,
@@ -116,11 +113,11 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "apply_patch",
             new ToolParamsSchema(
-                "ApplyPatch parameters",
+                "apply_patch 工具参数。",
                 Map.of(
                     "patchText",
                     new ToolStringSchema(
-                        "Complete apply_patch protocol text from *** Begin Patch through *** End Patch. Optional first directive: *** Workdir: <path>.")),
+                        "从 *** Begin Patch 到 *** End Patch 的完整 apply_patch 协议文本。可选首条指令：*** Workdir: <path>。")),
                 Set.of("patchText"),
                 false),
             ToolSideEffect.NON_IDEMPOTENT,
@@ -128,13 +125,11 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "bash",
             new ToolParamsSchema(
-                "Bash parameters",
+                "bash 工具参数。",
                 Map.of(
-                    "command", new ToolStringSchema("Platform-authorized shell command"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "timeout_seconds",
-                        new ToolIntegerSchema(
-                            "Optional timeout in seconds; defaults to 120 and must not exceed 3600")),
+                    "command", new ToolStringSchema("已获得 Platform 授权的 shell 命令"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
+                    "timeout_seconds", new ToolIntegerSchema("可选超时时间（秒）；默认 120，且不得超过 3600")),
                 Set.of("command"),
                 false),
             ToolSideEffect.NON_IDEMPOTENT,
@@ -142,17 +137,17 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "grep",
             new ToolParamsSchema(
-                "Grep parameters",
+                "grep 工具参数。",
                 Map.of(
-                    "pattern", new ToolStringSchema("Regular expression or literal"),
-                    "path", new ToolStringSchema("Search file or directory"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "include", new ToolStringSchema("Optional glob"),
-                    "ignore_case", new ToolBooleanSchema("Ignore case"),
-                    "literal", new ToolBooleanSchema("Treat pattern literally"),
-                    "multiline", new ToolBooleanSchema("Enable multiline pattern"),
-                    "limit", new ToolIntegerSchema("Maximum reported matches"),
-                    "timeout_seconds", new ToolIntegerSchema("Search timeout in seconds")),
+                    "pattern", new ToolStringSchema("正则表达式或字面量"),
+                    "path", new ToolStringSchema("要搜索的文件或目录"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
+                    "include", new ToolStringSchema("可选的 glob pattern"),
+                    "ignore_case", new ToolBooleanSchema("忽略大小写"),
+                    "literal", new ToolBooleanSchema("按字面量处理 pattern"),
+                    "multiline", new ToolBooleanSchema("启用跨行 pattern"),
+                    "limit", new ToolIntegerSchema("最多返回的匹配数"),
+                    "timeout_seconds", new ToolIntegerSchema("搜索超时时间（秒）")),
                 Set.of("pattern", "path"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -160,13 +155,13 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "find",
             new ToolParamsSchema(
-                "Find parameters",
+                "find 工具参数。",
                 Map.of(
-                    "pattern", new ToolStringSchema("Glob pattern"),
-                    "path", new ToolStringSchema("Search directory"),
-                    "workdir", new ToolStringSchema("Optional environment-root-relative directory"),
-                    "limit", new ToolIntegerSchema("Maximum results"),
-                    "timeout_seconds", new ToolIntegerSchema("Search timeout in seconds")),
+                    "pattern", new ToolStringSchema("glob pattern"),
+                    "path", new ToolStringSchema("要搜索的目录"),
+                    "workdir", new ToolStringSchema("可选的、相对于 environment root 的目录"),
+                    "limit", new ToolIntegerSchema("最多返回的结果数"),
+                    "timeout_seconds", new ToolIntegerSchema("搜索超时时间（秒）")),
                 Set.of("pattern", "path"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -174,19 +169,16 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "lsp_goto_definition",
             new ToolParamsSchema(
-                "LspGotoDefinition parameters",
+                "lsp_goto_definition 工具参数。",
                 Map.of(
                     "path",
-                    new ToolStringSchema(
-                        "Existing source file path supported by an LSP server. This path is also used to infer the workspace root."),
+                    new ToolStringSchema("由 LSP server 支持的已有源文件路径；同时根据此路径推断 workspace root。"),
                     "workdir",
-                    new ToolStringSchema(
-                        "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."),
+                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
                     "line",
-                    new ToolIntegerSchema("1-based line number for the target position."),
+                    new ToolIntegerSchema("目标位置的行号，从 1 开始计数。"),
                     "character",
-                    new ToolIntegerSchema(
-                        "0-based character offset at the target position. Default: 0.")),
+                    new ToolIntegerSchema("目标位置的字符偏移，从 0 开始计数；默认值为 0。")),
                 Set.of("path", "line"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -194,19 +186,16 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "lsp_workspace_symbols",
             new ToolParamsSchema(
-                "LspWorkspaceSymbols parameters",
+                "lsp_workspace_symbols 工具参数。",
                 Map.of(
                     "path",
-                    new ToolStringSchema(
-                        "Existing source file path used to resolve the workspace root."),
+                    new ToolStringSchema("用于推断 workspace root 的已有源文件路径。"),
                     "workdir",
-                    new ToolStringSchema(
-                        "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."),
+                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
                     "query",
-                    new ToolStringSchema("Symbol search query."),
+                    new ToolStringSchema("符号搜索 query。"),
                     "limit",
-                    new ToolIntegerSchema(
-                        "Maximum number of results to display locally. Default: 50.")),
+                    new ToolIntegerSchema("本地最多展示的结果数；默认值为 50。")),
                 Set.of("path", "query"),
                 false),
             ToolSideEffect.READ_ONLY,
@@ -214,17 +203,16 @@ public final class EnvironmentToolCatalog {
         descriptor(
             "lsp_java_decompile",
             new ToolParamsSchema(
-                "LspJavaDecompile parameters",
+                "lsp_java_decompile 工具参数。",
                 Map.of(
                     "path",
                     new ToolStringSchema(
-                        "Any local `.java` file in the target workspace. This path is used to infer the workspace root and locate JDTLS."),
+                        "目标 workspace 中的任意本地 `.java` 文件。根据此路径推断 workspace root 并定位 JDTLS。"),
                     "workdir",
-                    new ToolStringSchema(
-                        "Working directory for resolving relative paths. Defaults to the agent's current working directory. If provided, relative paths resolve from that directory."),
+                    new ToolStringSchema("用于解析相对路径的工作目录。默认是 Agent 当前工作目录；提供后从该目录解析相对路径。"),
                     "target",
                     new ToolStringSchema(
-                        "A raw `jdt://` URI, a workspace symbol output line, or a `file://` / `.class` path.")),
+                        "原始 `jdt://` URI、workspace symbol 输出行，或 `file://` / `.class` 路径。")),
                 Set.of("path", "target"),
                 false),
             ToolSideEffect.READ_ONLY,

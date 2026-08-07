@@ -17,9 +17,9 @@ const TEXTAREA_MAX_LINES = 10
 const TEXTAREA_MAX_HEIGHT = TEXTAREA_MIN_HEIGHT + TEXTAREA_LINE_HEIGHT * (TEXTAREA_MAX_LINES - 1)
 
 /**
- * Canvas-style dock: typing `/` opens the command table with search.
- * Composer stays enabled while Thread is working or a prior HTTP mutation is in flight.
- * ArrowUp/ArrowDown move the highlighted command; Enter confirms the active enabled item.
+ * Canvas 风格的 dock：输入 `/` 打开带搜索的命令表。
+ * Thread 工作中或上一次 HTTP 变更进行中时，Composer 保持可用。
+ * ArrowUp/ArrowDown 移动高亮命令；Enter 确认当前可用的命令。
  */
 export function ThreadComposer({
   draft,
@@ -48,7 +48,7 @@ export function ThreadComposer({
   const filteredCommands = useFilteredThreadCommands(query, commands)
   const [activeIndex, setActiveIndex] = useState(0)
 
-  // Pending HTTP mutation must not block continuous submissions.
+  // 进行中的 HTTP 变更不能阻塞连续提交。
   const canSend = useMemo(
     () => Boolean(draft.trim()) && !disabled && !draft.startsWith('/'),
     [disabled, draft],
@@ -106,7 +106,7 @@ export function ThreadComposer({
     el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
   }, [draft])
 
-  // After send completes (pending true -> false), keep typing in the composer.
+  // 发送完成后（pending true -> false），继续在 composer 中键入。
   useEffect(() => {
     if (wasPendingRef.current && !pending && !disabled) {
       focusComposer()

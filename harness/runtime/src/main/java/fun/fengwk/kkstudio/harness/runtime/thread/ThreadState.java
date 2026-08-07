@@ -4,18 +4,14 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Durable current Thread state.
+ * durable Thread 当前状态。
  *
- * <p>Only the fields the Thread itself owns durably are stored: the head Entry cursor, the Thread
- * YOLO runtime policy, the next Command sequence and the externally visible snapshot revision.
- * Session, environment, status, open turn, runnable flag, execution epoch and processor lease are
- * deliberately absent; session and environment facts are derived from the Entry branch at {@code
- * headEntryId}.
+ * <p>仅持久化 Thread 自身拥有的字段：head Entry cursor、Thread YOLO runtime policy、下一条 Command sequence 以及对外可见的
+ * snapshot revision。Session、environment、status、open turn、runnable flag、 execution epoch 与 processor
+ * lease 刻意省略；session 与 environment 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
- * <p>All state changes go through the pure transition methods below; every externally visible
- * change bumps {@code revision} by exactly one. The Store must run {@link #validateTransition}
- * before every {@code updateThread} write so direct record construction stays limited to
- * persistence decode.
+ * <p>所有状态变更都通过下方纯转换方法执行；任何对外可见的变更都会把 {@code revision} 严格 +1。Store 必须在每次 {@code updateThread} 写入前调用
+ * {@link #validateTransition}，从而把直接构造 record 的 场景限制在持久化解码。
  */
 public record ThreadState(
     long id,
@@ -47,10 +43,8 @@ public record ThreadState(
   }
 
   /**
-   * Validates that {@code next} is a legal transition of the stored {@code stored} row: identity is
-   * immutable, {@code nextCommandSequence} / {@code revision} / {@code updatedAt} never regress,
-   * and any externally visible change bumps {@code revision} by exactly one. Exact replay is always
-   * accepted.
+   * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity 不可变， {@code nextCommandSequence} / {@code
+   * revision} / {@code updatedAt} 不允许回退，任何对外可见的 变更都会把 {@code revision} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -77,8 +71,8 @@ public record ThreadState(
   }
 
   /**
-   * Reserves {@code count} Command sequences in one atomic step: {@code nextCommandSequence}
-   * advances by {@code count} and {@code revision} by exactly one; {@code count} must be positive.
+   * 在一个原子步骤中预留 {@code count} 条 Command sequence：{@code nextCommandSequence} 前进 {@code count}，{@code
+   * revision} 严格 +1；{@code count} 必须为正。
    */
   public ThreadState reserveCommandSequences(int count, Instant now) {
     if (count <= 0) {
@@ -98,8 +92,8 @@ public record ThreadState(
   }
 
   /**
-   * Advances the head Entry cursor and sets the frozen YOLO runtime policy in one atomic step
-   * (terminal apply re-sends the current policy value); {@code revision} advances by exactly one.
+   * 在一个原子步骤中推进 head Entry cursor 并设置冻结的 YOLO runtime policy（terminal apply 会重新发送当前 policy 值）；{@code
+   * revision} 严格 +1。
    */
   public ThreadState advanceHead(long headEntryId, boolean yoloEnabled, Instant now) {
     ThreadState next =
@@ -115,10 +109,7 @@ public record ThreadState(
     return next;
   }
 
-  /**
-   * Explicitly bumps the externally visible snapshot revision without changing other durable
-   * fields.
-   */
+  /** 显式把对外可见的 snapshot revision +1，不修改其他 durable 字段。 */
   public ThreadState touchRevision(Instant now) {
     ThreadState next =
         new ThreadState(

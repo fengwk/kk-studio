@@ -5,10 +5,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import java.util.Objects;
 
 /**
- * Immutable Tool approval request: the explicit Thread owning the invocation, the target Tool
- * invocation, the decision, a stable client-generated {@code decisionId} for idempotent retries,
- * the acting user and an optional reason. The server derives {@code decidedAt} from its Clock, so
- * retries never carry a client timestamp.
+ * 不可变的 Tool approval 请求：拥有该 invocation 的明确 Thread、目标 Tool invocation、决策、 用于幂等重试的客户端生成的稳定 {@code
+ * decisionId}、操作用户以及可选 reason。服务端从其 Clock 推导 {@code decidedAt}，因此重试永不携带客户端时间戳。
  */
 public record ToolApprovalCommand(
     long threadId,

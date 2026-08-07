@@ -13,16 +13,14 @@ import {
 export interface FirstSendResult {
   threadId: string
   snapshot: HarnessThreadSnapshotDTO
-  /** The exact USER_MESSAGE-only batch sent after creation (replay identity). */
+  /** 创建后发送的精确 USER_MESSAGE-only batch（replay identity）。 */
   plan: CommandBatchPlan
 }
 
 /**
- * First-send recovery handed to the bound pane:
- * - `replay` present: network/uncertain failure — restore the text AND keep the exact batch
- *   (same command ids + original expected cursors) for byte-for-byte replay;
- * - `replay` absent: known 409 — the server explicitly rejected the stale batch, so the text
- *   is restored but the NEXT submit rebuilds fresh cursors + fresh command ids.
+ * 交给绑定面板的 first-send recovery：
+ * - `replay` 存在：网络/不确定失败——恢复文本，并保留 exact batch（相同 command id + 原始 expected cursor），以便逐字节 replay；
+ * - `replay` 不存在：已知 409——服务器明确拒绝了过期 batch，因此恢复文本，但下一次提交会重新构建最新 cursor + 最新 command id。
  */
 export interface FirstSendRecovery {
   content: string
@@ -30,8 +28,7 @@ export interface FirstSendRecovery {
 }
 
 /**
- * Carries the atomically created Thread + exact message batch across a failed first-message
- * request so the bound pane can restore the draft and replay byte-for-byte.
+ * 在首次消息请求失败时，将原子创建的 Thread + 精确 message batch 传递出去，以便绑定面板恢复 draft 并逐字节 replay。
  */
 export class FirstSendMessageError extends Error {
   readonly snapshot: HarnessThreadSnapshotDTO
@@ -52,13 +49,11 @@ export class FirstSendMessageError extends Error {
 }
 
 /**
- * Blank pane first send order:
- * 1) create a Chat Thread atomically carrying the full branch draft (`branchSettings` +
- *    `yoloEnabled`) and return its snapshot;
- * 2) enqueue a USER_MESSAGE-only batch against the returned Thread's head cursors.
+ * 空面板的首次发送顺序：
+ * 1) 原子创建携带完整 branch draft（`branchSettings` + `yoloEnabled`）的 Chat Thread，并返回其 snapshot；
+ * 2) 使用返回 Thread 的 head cursor，加入仅包含 USER_MESSAGE 的 batch。
  *
- * On message failure the created Thread and the exact batch are preserved for replay; the
- * branch draft itself is already durable in the Thread creation.
+ * 消息失败时，保留已创建的 Thread 和精确 batch 以供 replay；branch draft 已在 Thread 创建时持久化。
  */
 export async function performBlankPaneFirstSend(options: {
   chatId: string

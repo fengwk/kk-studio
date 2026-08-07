@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
-/** ToolApproval exact required/undecided/decided invariants. */
+/** ToolApproval 在 required/undecided/decided 下的精确不变式。 */
 class ToolApprovalTest {
 
   private static final Instant REQUESTED = Instant.parse("2026-01-01T00:00:00Z");
@@ -223,21 +223,21 @@ class ToolApprovalTest {
     ToolApproval decided =
         ToolApproval.request(REQUESTED, null)
             .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
-    // the exact same decision payload replays idempotently
+    // 完全相同的 decision payload 以 idempotent 方式重放
     assertEquals(
         decided, decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED));
-    // same decisionId with a different payload conflicts
+    // 相同 decisionId 但不同 payload 视为冲突
     assertThrows(
         IllegalArgumentException.class,
         () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "other", null, DECIDED));
     assertThrows(
         IllegalArgumentException.class,
         () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", "new reason", DECIDED));
-    // an existing different decision conflicts even with a new decisionId
+    // 已存在但不同的 decision 即使使用新 decisionId 仍视为冲突
     assertThrows(
         IllegalArgumentException.class,
         () -> decided.decide(ToolApprovalDecision.DENIED, "d-9", "actor", null, DECIDED));
-    // a non-required approval can never be decided
+    // 非 required 的 approval 永远不能被 decide
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -250,13 +250,13 @@ class ToolApprovalTest {
     ToolApproval decided =
         ToolApproval.request(REQUESTED, null)
             .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
-    // the client does not send decidedAt, so the retried request carries a fresh service now:
-    // same decisionId + decision + actor + reason must return the stored approval unchanged
+    // 客户端不发送 decidedAt，因此重试请求携带的是新的服务端当前时间：
+    // 相同 decisionId + decision + actor + reason 必须原样返回已存储的 approval
     ToolApproval replayed =
         decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED.plusSeconds(30));
     assertEquals(decided, replayed);
     assertEquals(DECIDED, replayed.decidedAt());
-    // a retry that changes any of the identifying facts is a conflict, not a replay
+    // 任何标识事实发生变化的 retry 都是冲突，而非 replay
     assertThrows(
         IllegalArgumentException.class,
         () ->

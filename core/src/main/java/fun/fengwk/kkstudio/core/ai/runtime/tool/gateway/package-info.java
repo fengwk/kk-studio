@@ -1,6 +1,5 @@
 /**
- * Production {@code ToolGateway} adapter: frozen-request permission preflight and admission routing
- * for PLATFORM / ENVIRONMENT tools, including all-or-nothing managed Resource externalization of
- * terminal results.
+ * 生产 {@code ToolGateway} 适配器：PLATFORM / ENVIRONMENT 工具的冻结请求权限 preflight 与 admission 路由，包括 terminal
+ * 结果的 all-or-nothing managed Resource 外部化。
  */
 package fun.fengwk.kkstudio.core.ai.runtime.tool.gateway;

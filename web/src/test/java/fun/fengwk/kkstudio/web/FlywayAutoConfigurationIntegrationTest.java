@@ -20,7 +20,7 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
-/** Proves Spring Boot's Flyway auto-configuration migrates the application's multi-data-source. */
+/** 验证 Spring Boot 的 Flyway 自动配置会迁移应用的多数据源。 */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class FlywayAutoConfigurationIntegrationTest {
@@ -49,7 +49,7 @@ class FlywayAutoConfigurationIntegrationTest {
 
   @Test
   void webContextAutoMigratesBaselineAndDevSeedThroughMultiDataSource() throws Exception {
-    // Starting the real web context exercises Boot auto-configuration, not a direct Flyway harness.
+    // 启动真实 web 上下文走的是 Boot 自动配置，而不是直接操作 Flyway 测试基座。
     assertTrue(serverPort > 0);
     try (Connection conn = dataSource.getConnection();
         Statement st = conn.createStatement();

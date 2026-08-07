@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.studio.canvas;
 import java.util.List;
 import java.util.Objects;
 
-/** Read model for a Canvas document and its graph. */
+/** Canvas document 及其 graph 的读模型。 */
 public record CanvasSnapshot(
     CanvasDocument document, List<CanvasNode> nodes, List<CanvasLink> links) {
 

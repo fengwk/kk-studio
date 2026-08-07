@@ -155,8 +155,8 @@ function renderBlankPane(overrides?: {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  // Stateful wrapper: pane state advances on onThreadChange so the pane can transition
-  // blank → bound in tests (mirrors the ChatWorkspacePage saveChatPaneState behavior).
+  // 有状态包装器：面板状态在 onThreadChange 时推进，使面板在测试中可以完成
+  // blank → bound 切换（与 ChatWorkspacePage 的 saveChatPaneState 行为一致）。
   function Harness() {
     const [threadId, setThreadId] = useState<string | null>(
       overrides?.initialThreadId ?? null,
@@ -237,8 +237,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'stop',
       'new',
     ])
-    // /thread only switches the pane, so it works before any Thread exists; /session and /tree
-    // rebind the *current* Thread and therefore stay disabled on a blank pane.
+    // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/session 和 /tree
+    // 会重新绑定*当前* Thread，因此在空面板上保持禁用。
     expect(BLANK_PANE_COMMANDS.filter((command) => !command.disabled).map((command) => command.id)).toEqual([
       'thread',
       'agent',
@@ -262,7 +262,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(within(envModal).queryByRole('button', { name: /connecting/ })).not.toBeInTheDocument()
     await user.click(within(envModal).getByRole('button', { name: /^local/ }))
 
-    // The blank pane footer reflects the draft immediately.
+    // 空面板 footer 立即反映 draft。
     expect(await screen.findByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\s*local/ }))
@@ -274,15 +274,15 @@ describe('BlankComposerPane /thread and agent error handling', () => {
   it('materializes the blank pane frozen draft from the catalog (footer shows agent/model)', async () => {
     renderBlankPane()
 
-    // Footer should reflect the catalog-derived frozen draft: agent=assistant, model from
-    // minimax/MiniMax, default variant. Catalog query resolves immediately.
+    // Footer 应反映 catalog 派生的 frozen draft：agent=assistant，model 来自
+    // minimax/MiniMax，使用 default variant。Catalog 查询立即解析完成。
     expect(await screen.findByRole('button', { name: /agent:assistant/ })).toBeInTheDocument()
     expect(screen.getByText(/minimax\/MiniMax · default/)).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /\u73af\u5883[\uff1a:]\uff08\u65e0\uff09/ }),
     ).toBeInTheDocument()
     expect(agentService.listModels).toHaveBeenCalled()
-    // No draft edits triggered any service call.
+    // draft 编辑没有触发任何 service 调用。
     expect(chatService.createChatThread).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
@@ -324,14 +324,14 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(batchArg.commands).toHaveLength(1)
     expect(batchArg.commands[0]?.type).toBe('USER_MESSAGE')
     expect(batchArg.commands[0]?.content).toBe('first message')
-    // Strict wire: USER_MESSAGE never carries role.
+    // 严格 wire：USER_MESSAGE 绝不携带 role。
     expect(batchArg.commands[0]).not.toHaveProperty('role')
     expect(batchArg.commands[0]?.clientCommandId).toBeTruthy()
-    // First send has NO environment in the command batch: environment was baked into the
-    // Thread creation as branchSettings.environmentId.
+    // 首次发送的 command batch 中没有 environment：environment 已在创建 Thread 时
+    // 通过 branchSettings.environmentId 烘焙进去。
     expect(batchArg.commands[0]).not.toHaveProperty('environmentId')
 
-    // The blank-pane body disappears once the pane is bound to the created Thread.
+    // 面板绑定到已创建的 Thread 后，空面板正文随即消失。
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: /新对话/ })).not.toBeInTheDocument(),
     )
@@ -346,12 +346,12 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     vi.mocked(harnessService.enqueueCommands).mockImplementation(async () => {
       enqueueCalls += 1
       if (enqueueCalls === 1) {
-        // First send fails → the bound pane should retry the same USER_MESSAGE.
+        // 首次发送失败 → 绑定面板应重试同一 USER_MESSAGE。
         throw new ApiError('temporary failure', 503)
       }
       return [] as HarnessThreadCommandDTO[]
     })
-    // Snapshot for the recovered bound pane (must match the created Thread's revision/head).
+    // 恢复后的绑定面板的 snapshot（必须与已创建 Thread 的 revision/head 一致）。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(createdSnapshot)
 
     const onThreadChange = vi.fn()
@@ -362,7 +362,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.type(composer, 'retry me')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // First send: create + enqueue (fails). Draft is restored so the user can retry.
+    // 首次发送：create + enqueue（失败）。Draft 已被恢复以便用户重试。
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-replay'))
@@ -376,10 +376,10 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const firstBatch = calls[0]?.[1]
     const secondBatch = calls[1]?.[1]
     expect(secondBatch).toBeDefined()
-    // Stable retry identity: the retry reuses the EXACT first-send batch byte-for-byte
-    // (same command IDs/payload/order and original expected cursors). The created Thread is
-    // the effective base, so the semantic identity matches and the message command id is
-    // preserved across the blank->bound recovery.
+    // 稳定的重试 identity：重试逐字节复用 EXACT 首次发送 batch
+    //（相同的 command ID/payload/顺序和原始 expected cursor）。已创建的 Thread 作为
+    // effective base，因此语义 identity 匹配，message command id 在 blank->bound 恢复
+    // 过程中得以保留。
     expect(secondBatch).toEqual(firstBatch)
   })
 
@@ -387,11 +387,11 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const user = userEvent.setup()
     const createdThread = thread({ threadId: 't-conflict' })
     vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
-    // Known 409: the server explicitly rejected the stale batch (cursors moved).
+    // 已知 409：服务器明确拒绝了过期 batch（cursor 已移动）。
     vi.mocked(harnessService.enqueueCommands).mockRejectedValue(
       new ApiError('stale cursors', 409),
     )
-    // The recovered bound pane refetches and sees the ADVANCED snapshot (the server moved on).
+    // 恢复后的绑定面板重新拉取并看到已推进的 snapshot（服务器已前进）。
     const advanced = thread({
       threadId: 't-conflict',
       headEntryId: 'e-advanced',
@@ -408,16 +408,15 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.type(composer, 'fresh retry')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // First send: create + enqueue (409). The pane still binds the created Thread and
-    // restores the composer text, so the user can retry.
+    // 首次发送：create + enqueue（409）。面板仍会绑定已创建的 Thread
+    // 并恢复 composer 文本，以便用户重试。
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-conflict'))
     expect(await screen.findByDisplayValue('fresh retry')).toBeInTheDocument()
 
-    // Retry while the restored draft is the same text: NO exact replay is armed for a known
-    // 409 — the next submit must rebuild against the refreshed snapshot with fresh cursors
-    // and a fresh command id.
+    // 当恢复后的 draft 文本相同时重试：已知 409 不会装配 exact replay——
+    // 下一次提交必须基于刷新的 snapshot，用全新 cursor 和全新 command id 重新构建。
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled(),
     )
@@ -468,15 +467,15 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => expect(chatService.listChatThreads).toHaveBeenCalledWith('chat-1'))
 
     const items = await screen.findAllByRole('button', { name: /^t-/ })
-    // recent mode keeps the newer IDLE Thread first.
+    // recent 模式下较新的 IDLE Thread 排在前面。
     expect(items[0]).toHaveTextContent('t-idle')
 
     await user.click(screen.getByRole('button', { name: /t-running/ }))
     expect(onThreadChange).toHaveBeenCalledWith('t-running')
-    // No association API on a chat-scoped picker.
+    // chat-scoped picker 上没有 association API。
     expect(chatService.associateThread).not.toHaveBeenCalled()
     expect(events).toEqual(['bind'])
-    // Selecting a Thread never runs the first-send path.
+    // 选中 Thread 永远不会走 first-send 路径。
     expect(chatService.createChatThread).not.toHaveBeenCalled()
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
   })
@@ -495,7 +494,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
-    // Session rejects blank titles; Chat title is nullable and null stays null (no ?? '').
+    // Session 拒绝空标题；Chat title 可空，保持 null（不写 ?? ''）。
     expect(payload.title).toBeNull()
     expect(payload).toEqual(
       expect.objectContaining({
@@ -524,8 +523,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       ...assistantAgent,
       config: { tools: ['web-search'], skills: [] },
     }
-    // Stale Chat agent (no catalog match) + the Chat default yolo=true: full materialization
-    // must preserve the user's yolo preference instead of silently falling back to false.
+    // 已过期的 Chat agent（catalog 无匹配） + Chat 默认 yolo=true：完整 materialization
+    // 必须保留用户设置的 yolo 偏好，而不是悄悄回退为 false。
     renderBlankPane({ agentName: 'ghost', yoloEnabled: true, agents: [tooledAgent] })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
@@ -552,20 +551,20 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     renderBlankPane({ agentName: 'ghost', agents: [tooledAgent] })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // The Chat agent cannot be resolved from the catalog: the draft stays unfrozen and the
-    // composer surfaces the explicit agent-missing state.
+    // Chat agent 无法从 catalog 解析：draft 保持不冻结，
+    // composer 展示明确的 agent 缺失状态。
     expect(await screen.findByText(/Agent 已删除\/缺失/)).toBeInTheDocument()
 
-    // Submitting opens the agent picker INSTEAD of creating a Thread with an empty
-    // provider/model/variant that the strict mapper would reject.
+    // 提交操作会打开 agent picker，而不是用空
+    // provider/model/variant 去创建 Thread，否则会被 strict mapper 拒绝。
     await user.click(composer)
     await user.type(composer, 'hi')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(await screen.findByText('选择 Agent')).toBeInTheDocument()
     expect(chatService.createChatThread).not.toHaveBeenCalled()
 
-    // Selecting the Agent fully materializes the draft (name + activeTools + model) and the
-    // pending message is sent immediately.
+    // 选中 Agent 后，draft 被完整 materialize（name + activeTools + model），
+    // 挂起消息立即发送。
     await user.click(screen.getByRole('button', { name: /assistant/ }))
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     const payload = vi.mocked(chatService.createChatThread).mock.calls[0]![1]
@@ -596,19 +595,19 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       config: { tools: ['web-search'], skills: [] },
     }
     const onThreadChange = vi.fn()
-    // Stale Chat agent ('ghost' not in the catalog): the draft cannot be materialized from the
-    // Chat default, so the first materialization happens through the picker.
+    // 已过期的 Chat agent（'ghost' 不在 catalog 中）：无法从 Chat 默认值
+    // materialize draft，因此首次 materialization 通过 picker 完成。
     renderBlankPane({ agentName: 'ghost', agents: [tooledAgent], onThreadChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // First picker materialization: selecting the Agent must establish the immutable
-    // pane-local baseline (previously initialFrozenDraft stayed null forever, so later edits
-    // were never judged dirty).
+    // 首次 picker materialization：选中 Agent 必须建立不可变的
+    // 面板本地基线（之前 initialFrozenDraft 一直为 null，
+    // 后续编辑从未被判定为 dirty）。
     await user.click(composer)
     await user.keyboard('/agent{Enter}')
     await user.click(await screen.findByRole('button', { name: /assistant/ }))
 
-    // A later pane-local edit (environment) must count as dirty relative to that baseline.
+    // 之后的面板本地编辑（environment）相对于该基线必须被判定为 dirty。
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/environment{Enter}')
     const envModal = await screen.findByLabelText('选择 Environment')
@@ -637,8 +636,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     renderBlankPane({ onThreadChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // Pane-local edit of the frozen branch draft (environment selection) makes the pane
-    // dirty relative to its initial materialized value.
+    // 对 frozen branch draft 的面板本地编辑（environment 选择）会让面板
+    // 相对于其初始 materialize 值变为 dirty。
     await user.click(composer)
     await user.keyboard('/environment{Enter}')
     expect(await screen.findByLabelText('选择 Environment')).toBeInTheDocument()
@@ -656,7 +655,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(onThreadChange).not.toHaveBeenCalled()
 
     confirmSpy.mockReturnValue(true)
-    // Re-open the picker (the first rejection closed it) and select again.
+    // 重新打开 picker（第一次拒绝把它关掉了）并再次选择。
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('/thread{Enter}')
     const pickerAgain = await screen.findByLabelText('选择 Thread')
@@ -679,7 +678,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     renderBlankPane({ onThreadChange })
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
-    // The pane-local draft equals its initial materialized value: no confirmation needed.
+    // 面板本地 draft 等于其初始 materialize 值：无需确认。
     await user.click(composer)
     await user.keyboard('/thread{Enter}')
     expect(await screen.findByText('选择 Thread')).toBeInTheDocument()
@@ -699,8 +698,8 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const onAgentChange = vi.fn(async () => {
       throw new Error('Chat Agent update failed')
     })
-    // Make createChatThread reject too so the blank pane stays mounted and the action
-    // error becomes visible in the blank-pane footer.
+    // 让 createChatThread 也失败，使空面板保持挂载，
+    // 让 action 错误在空面板 footer 中可见。
     vi.mocked(chatService.createChatThread).mockRejectedValue(
       new Error('agent update failed upstream'),
     )
@@ -713,7 +712,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await user.click(screen.getByRole('button', { name: /assistant/ }))
 
     await waitFor(() => expect(onAgentChange).toHaveBeenCalledWith('assistant'))
-    // Allow microtasks to drain so any unhandled rejection would be observed.
+    // 等待 microtask 清空，以便观察到任何 unhandled rejection。
     await new Promise((resolve) => setTimeout(resolve, 0))
     window.removeEventListener('unhandledrejection', onUnhandled)
     expect(unhandled).toEqual([])
@@ -734,7 +733,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       expect(screen.getByText('unknown agent definition: assistant')).toBeInTheDocument(),
     )
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
-    // The pane stays blank so the user can retry after fixing the Agent.
+    // 面板保持空白，让用户在修复 Agent 后重试。
     expect(screen.getByRole('heading', { name: /新对话/ })).toBeInTheDocument()
     expect(await screen.findByDisplayValue('first message')).toBeInTheDocument()
   })

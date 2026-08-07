@@ -479,7 +479,7 @@ class LocalFileResourceStoreTest {
                 try {
                   Files.deleteIfExists(path);
                 } catch (IOException ignored) {
-                  // best-effort cleanup
+                  // 尽力清理
                 }
               });
     }

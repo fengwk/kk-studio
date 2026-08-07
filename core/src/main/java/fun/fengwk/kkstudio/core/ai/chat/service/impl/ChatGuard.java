@@ -9,10 +9,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 
-/**
- * Guard for Chat CRUD paths. All failures are typed domain errors so the centralized web translator
- * can map them to HTTP status codes.
- */
+/** Chat CRUD 路径的守卫。所有失败都是类型化领域错误，以便集中的 web 翻译器映射为 HTTP 状态码。 */
 @Component
 public class ChatGuard {
 
@@ -45,7 +42,7 @@ public class ChatGuard {
     return chat;
   }
 
-  /** Validates the visible Agent name against the current catalog. */
+  /** 对照当前 catalog 校验可见的 Agent 名。 */
   public void ensureAgentExists(String agentName) {
     if (agentName == null || agentName.isBlank()) {
       throw new AiValidationException(RESOURCE, "agentName must not be blank");

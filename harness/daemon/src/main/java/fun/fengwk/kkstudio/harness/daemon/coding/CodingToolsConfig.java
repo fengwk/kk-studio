@@ -5,7 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
 
-/** Immutable local execution configuration shared by Daemon coding tools. */
+/** Daemon coding tools 共享的不可变本地执行配置。 */
 public record CodingToolsConfig(
     Path environmentRoot,
     Path defaultWorkdir,
@@ -49,7 +49,7 @@ public record CodingToolsConfig(
             "javapExecutable");
   }
 
-  /** Convenience constructor that leaves the optional LSP bridge disabled. */
+  /** 便捷构造器：保持可选 LSP bridge 处于禁用状态。 */
   public CodingToolsConfig(
       Path environmentRoot,
       Path defaultWorkdir,
@@ -72,7 +72,7 @@ public record CodingToolsConfig(
         DEFAULT_JAVAP_EXECUTABLE);
   }
 
-  /** Builds the standalone configuration from stable Daemon system properties. */
+  /** 从稳定的 Daemon 系统属性构建独立运行配置。 */
   public static CodingToolsConfig fromSystemProperties() {
     Path root =
         Path.of(

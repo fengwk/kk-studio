@@ -66,7 +66,7 @@ function OverlaysHarness() {
     booted.current = true
     runtime.setToast('hello')
     runtime.setResearchOpen(true)
-    // Open help after research so dialog ref is mounted.
+    // 在 research 之后再打开 help，确保 dialog ref 已挂载。
     queueMicrotask(() => runtime.setHelpOpen(true))
   }, [runtime])
   return <CanvasOverlays />
@@ -108,7 +108,7 @@ describe('canvas overlays and workbench', () => {
     await user.click(screen.getByRole('button', { name: '方案基座' }))
     await user.click(screen.getByRole('button', { name: '分期计划' }))
     await user.click(screen.getByRole('button', { name: '关闭说明' }))
-    // Help is opened in harness; closing must use dialog close button.
+    // Help 由 harness 打开；关闭必须使用 dialog 的关闭按钮。
     const closeHelp = screen.getByRole('button', { name: '关闭快捷操作' })
     expect(showModal).toHaveBeenCalled()
     await user.click(closeHelp)

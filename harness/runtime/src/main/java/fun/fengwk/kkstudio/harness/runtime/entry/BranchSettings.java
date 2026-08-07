@@ -8,11 +8,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Complete immutable settings snapshot for one Entry branch.
+ * 一次 Entry branch 的完整不可变 settings 快照。
  *
- * <p>Environment is bound by its canonical {@link EnvironmentId} route identity; display names are
- * reusable and never enter this durable snapshot. YOLO is intentionally absent: it is Thread
- * runtime policy rather than branch history.
+ * <p>Environment 通过其 canonical {@link EnvironmentId} 路由 identity 绑定；展示名称可重复使用， 不会进入该 durable
+ * 快照。YOLO 被刻意省略：它属于 Thread runtime policy，而不是 branch 历史。
  */
 public record BranchSettings(
     EnvironmentId environmentId,
@@ -34,27 +33,27 @@ public record BranchSettings(
     activeTools = List.copyOf(uniqueTools);
   }
 
-  /** Returns a snapshot with only the agent reference replaced. */
+  /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
     return new BranchSettings(environmentId, value, model, thinkingLevel, activeTools);
   }
 
-  /** Returns a snapshot with the complete model selection replaced atomically. */
+  /** 返回整体原子替换 model selection 后的快照。 */
   public BranchSettings withModel(ModelSelection value) {
     return new BranchSettings(environmentId, agentName, value, thinkingLevel, activeTools);
   }
 
-  /** Returns a snapshot with only the thinking level replaced. */
+  /** 返回仅替换 thinking level 后的快照。 */
   public BranchSettings withThinkingLevel(String value) {
     return new BranchSettings(environmentId, agentName, model, value, activeTools);
   }
 
-  /** Returns a snapshot with only the ordered active tool names replaced. */
+  /** 返回仅替换有序 active tool 名称后的快照。 */
   public BranchSettings withActiveTools(List<String> values) {
     return new BranchSettings(environmentId, agentName, model, thinkingLevel, values);
   }
 
-  /** Returns a snapshot with only the Environment route identity replaced. */
+  /** 返回仅替换 Environment 路由 identity 后的快照。 */
   public BranchSettings withEnvironmentId(EnvironmentId value) {
     return new BranchSettings(value, agentName, model, thinkingLevel, activeTools);
   }

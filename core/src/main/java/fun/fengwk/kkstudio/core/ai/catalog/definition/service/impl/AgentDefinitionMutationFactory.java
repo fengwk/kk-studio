@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 
 /**
- * Normalizes editable agent fields and serializes strict structured execution configuration.
+ * 规范化可编辑的 Agent 字段，并序列化严格的结构化执行配置。
  *
  * @author fengwk
  */
@@ -76,7 +76,7 @@ final class AgentDefinitionMutationFactory {
     }
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
-    // null/blank = no override; runtime/thread apply resolves model.defaultVariant.
+    // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
     String variant = editableSupport.trimToNull(properties.getVariant());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);

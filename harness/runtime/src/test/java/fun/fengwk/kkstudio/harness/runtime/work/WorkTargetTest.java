@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/** WorkTarget identity validation. */
+/** WorkTarget identity 校验。 */
 class WorkTargetTest {
 
   @Test

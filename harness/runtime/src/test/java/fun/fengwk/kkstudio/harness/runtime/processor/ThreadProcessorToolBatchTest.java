@@ -106,7 +106,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertEquals(entries.get(4).id(), siblings.get(0).resultEntryId());
     assertEquals(entries.get(5).id(), siblings.get(1).resultEntryId());
     assertEquals(entries.get(7).id(), thread(fixture.store, chain.turn().threadId()).headEntryId());
-    // baseline(1) + seed assistant advance(2) + batch apply(3)
+    // baseline(1) + seed assistant 推进(2) + batch apply(3)
     assertEquals(3L, thread(fixture.store, chain.turn().threadId()).revision());
     ModelInvocation continuationModel =
         inTx(

@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasNode;
 import fun.fengwk.kkstudio.studio.canvas.CanvasNodeKind;
 import fun.fengwk.kkstudio.studio.canvas.NodeTransform;
 
-/** Smoke coverage for pure domain value types and their invariants. */
+/** 纯领域值类型及其不变量的冒烟覆盖。 */
 class StudioDomainSmokeTest {
 
   @Test

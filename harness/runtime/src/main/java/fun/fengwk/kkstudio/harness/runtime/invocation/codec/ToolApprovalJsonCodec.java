@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import java.time.Instant;
 import java.util.Objects;
 
-/** Strict deterministic JSON codec for durable Tool approval state. */
+/** durable Tool approval 状态的严格、确定性 JSON codec。 */
 public final class ToolApprovalJsonCodec {
 
   private static final String CONTEXT = "toolApproval";

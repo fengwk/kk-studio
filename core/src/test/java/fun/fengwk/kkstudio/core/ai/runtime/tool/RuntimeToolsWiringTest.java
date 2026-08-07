@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** Verifies runtime tools are Spring beans and resolvable through the shared catalog. */
+/** 验证 runtime 工具是 Spring bean，并可通过共享 catalog 解析。 */
 class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private List<Tool> tools;

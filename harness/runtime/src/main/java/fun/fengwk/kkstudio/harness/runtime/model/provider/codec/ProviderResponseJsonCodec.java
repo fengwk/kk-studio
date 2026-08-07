@@ -24,14 +24,13 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Strict, deterministic JSON codec for {@link ProviderResponse}. Top-level strict fields are {@code
- * text}, {@code thinking}, {@code toolCalls}, {@code stopReason}, {@code usage}, {@code cost},
- * {@code requestId}, {@code serviceTier}, {@code rawUsageJson}; every nested layer requires an
- * exact field set and rejects unknown/missing/wrong-type values with {@link
- * IllegalArgumentException}.
+ * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为 {@code text}、{@code thinking}、{@code
+ * toolCalls}、 {@code stopReason}、{@code usage}、{@code cost}、{@code requestId}、{@code
+ * serviceTier}、{@code rawUsageJson}；每个 嵌套层都要求精确字段集合，并以 {@link IllegalArgumentException}
+ * 拒绝未知/缺失/类型错误的值。
  *
- * <p>{@code rawUsageJson} is preserved verbatim; {@link BigDecimal} fields in {@link ModelCost} are
- * emitted as {@code toPlainString()} strings.
+ * <p>{@code rawUsageJson} 原样保留；{@link ModelCost} 中的 {@link BigDecimal} 字段以 {@code toPlainString()}
+ * 字符串输出。
  */
 public final class ProviderResponseJsonCodec {
 

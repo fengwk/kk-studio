@@ -17,7 +17,7 @@ export function ThreadCommandPalette({
   open: boolean
   query: string
   commands?: ThreadCommand[]
-  /** Index into the filtered list (may point at a disabled row while moving is skipped by parent). */
+  /** 过滤后列表的索引（父组件跳过禁用项时，可能指向一个已禁用的行）。 */
   activeIndex: number
   onActiveIndexChange: (index: number) => void
   onSelect: (command: ThreadCommand) => void

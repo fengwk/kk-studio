@@ -19,19 +19,19 @@ import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contrac
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 
 export interface HarnessThreadRealtimeState {
-  /** Transient model overlay for the active ModelInvocation attempt (null when none). */
+  /** 当前 ModelInvocation attempt 的瞬态 model overlay（无则 null）。 */
   modelStream: RealtimeModelStream | null
-  /** Transient tool-result overlays keyed by ToolInvocation id. */
+  /** 按 ToolInvocation id 索引的瞬态 tool 结果 overlay。 */
   toolStreams: ReadonlyMap<string, RealtimeToolStream>
 }
 
 /**
- * Snapshot-first realtime subscription.
+ * Snapshot 优先的 realtime 订阅。
  *
- * 1) Load an authoritative PostgreSQL snapshot.
- * 2) Listen after its durable revision. Redis-backed {@code realtime} MODEL_DELTA / TOOL_PARTIAL
- *    events render as transient overlays until the durable Entries arrive; PostgreSQL remains
- *    authoritative after reconnects and stream loss. Redis is never durable truth.
+ * 1) 先加载权威的 PostgreSQL snapshot。
+ * 2) 在其持久化 revision 之后监听。Redis 支撑的 {@code realtime} MODEL_DELTA / TOOL_PARTIAL
+ *    事件渲染为瞬态 overlay，直到持久化 Entries 到达；重连与流丢失后 PostgreSQL 仍是
+ *    权威来源。Redis 永远不是持久化事实。
  */
 export function useHarnessThreadRealtime(
   threadId: string,
@@ -58,8 +58,8 @@ export function useHarnessThreadRealtime(
     attempt: number
     sequence: number
   } | null>(null)
-  // Bounded exact-duplicate fingerprints for TOOL_PARTIAL (Redis may redeliver): keyed by
-  // thread:invocation:attempt so attempt changes/terminal snapshots naturally evict them.
+  // TOOL_PARTIAL 的有界精确去重指纹（Redis 可能重投递）：按
+  // thread:invocation:attempt 分组，因此 attempt 变化/终态 snapshot 会自然淘汰它们。
   const toolPartialFingerprintsRef = useRef<Map<string, Set<string>>>(new Map())
   const subscriptionReady = enabled && revision != null
 
@@ -88,10 +88,10 @@ export function useHarnessThreadRealtime(
       gapRef.current = null
       next = null
     } else if (snapshot.status !== 'streaming') {
-      // Durable terminal boundary: the resultJson/errorJson projection unconditionally
-      // supersedes any higher-sequence Redis overlay (a streaming seq8 must never beat a
-      // durable seq7 result). resultEntryId == null keeps the projection visible until the
-      // durable Entry lands; the event handler fence rejects further deltas meanwhile.
+      // 持久化终态边界：resultJson/errorJson 投影无条件
+      // 取代任何更高 sequence 的 Redis overlay（流式 seq8 绝不能压过
+      // 持久化 seq7 的结果）。resultEntryId == null 时投影保持可见，直到
+      // 持久化 Entry 到达；期间事件处理器 fence 拒绝后续 delta。
       next = snapshot
       const gap = gapRef.current
       if (
@@ -126,11 +126,10 @@ export function useHarnessThreadRealtime(
     modelStreamRef.current = next
     setModelStream(next)
 
-    // Reconcile tool overlays against the durable snapshot. A terminal invocation
-    // (resultJson/errorJson) is projected in full ONLY until its durable result Entry is
-    // attached: resultEntryId is the durable-truth cursor, so streams are deleted exactly
-    // when it arrives (or when the invocation disappears). A terminal projection replaces
-    // the partial fragments; a RUNNING invocation keeps its same-attempt partials.
+    // 用持久化 snapshot 对账 tool overlay。终态 invocation
+    // （resultJson/errorJson）仅在持久化 result Entry 到达前以完整形式投影：
+    // resultEntryId 是持久化事实游标，因此该 Entry 一到（或 invocation 消失）就删除流。
+    // 终态投影会取代部分片段；RUNNING 的 invocation 保留同 attempt 的部分内容。
     const streams = new Map(toolStreamsRef.current)
     const activeIds = new Set<string>()
     for (const invocation of toolInvocations) {
@@ -148,7 +147,7 @@ export function useHarnessThreadRealtime(
         continue
       }
       if (invocation.resultJson != null || invocation.errorJson != null) {
-        // Terminal durable projection wins over partial fragments.
+        // 持久化终态投影优先于部分片段。
         streams.set(invocation.id, seeded)
       } else if (existing == null) {
         streams.set(invocation.id, seeded)
@@ -161,8 +160,8 @@ export function useHarnessThreadRealtime(
         streams.delete(key)
       }
     }
-    // Exact-duplicate fingerprints are scoped to active same-attempt invocations: attempt
-    // changes, terminal snapshots, attached result Entries and vanished invocations evict them.
+    // 精确去重指纹只作用于活跃的同 attempt invocation：attempt
+    // 变化、终态 snapshot、已挂接的 result Entry 和消失的 invocation 都会淘汰它们。
     const fingerprints = new Map<string, Set<string>>()
     for (const invocation of toolInvocations) {
       if (
@@ -178,8 +177,8 @@ export function useHarnessThreadRealtime(
       }
     }
     toolPartialFingerprintsRef.current = fingerprints
-    // Bail out when the overlay map content is unchanged so this effect never re-triggers
-    // renders by itself (stable query-derived inputs make re-runs no-ops).
+    // overlay map 内容未变时提前返回，避免该 effect 自己反复触发
+    // 渲染（稳定的 query 派生输入让重跑成为 no-op）。
     if (!sameToolStreamMap(toolStreamsRef.current, streams)) {
       toolStreamsRef.current = streams
       setToolStreams(streams)
@@ -208,9 +207,9 @@ export function useHarnessThreadRealtime(
       const raw = (event as MessageEvent<string>).data
       const delta = parseRealtimeModelDelta(raw)
       if (delta != null && delta.threadId === threadId) {
-        // Durable terminal fence: a terminal ModelInvocation (result/error/attached result
-        // Entry) rejects every late MODEL_DELTA. The frozen checkpoint overlay stays visible
-        // until the Entry lands, but terminal output is never appended to.
+        // 持久化终态 fence：终态 ModelInvocation（result/error/已挂接 result
+        // Entry）拒绝所有迟到的 MODEL_DELTA。冻结的 checkpoint overlay 在
+        // Entry 到达前保持可见，但终态输出永远不会再追加。
         const durable = invocationRef.current
         if (
           durable == null
@@ -241,8 +240,8 @@ export function useHarnessThreadRealtime(
             attempt: delta.attempt,
             sequence: delta.sequence,
           }
-          // Single-flight recovery: one refetch at a time, re-armed with bounded backoff
-          // until the checkpoint catches up (never one-shot, never per-delta concurrent).
+          // 单飞恢复：同一时刻只做一次 refetch，带有限退避重新武装，
+          // 直到 checkpoint 追上（既不是一次性，也不会每个 delta 并发）。
           requestGapRecovery(threadId, delta.invocationId, delta.attempt, delta.sequence)
           return
         }
@@ -255,10 +254,10 @@ export function useHarnessThreadRealtime(
       if (partial == null || partial.threadId !== threadId) {
         return
       }
-      // Snapshot-first: aggregate a partial ONLY while its invocation is still active in the
-      // durable snapshot (same attempt, no terminal result, no attached result Entry). Once
-      // the terminal resultJson/errorJson (or the result Entry) is authoritative, late or
-      // duplicated Redis partials must never append to the complete terminal projection.
+      // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
+      // （同 attempt、无终态 result、无已挂接 result Entry）才聚合 partial。一旦
+      // 终态 resultJson/errorJson（或 result Entry）成为权威，迟到的或
+      // 重复的 Redis partial 绝不能追加到完整的终态投影上。
       const invocation = toolInvocationsRef.current.find(
         (item) => item.id === partial.invocationId,
       )
@@ -271,8 +270,8 @@ export function useHarnessThreadRealtime(
       ) {
         return
       }
-      // Exact-duplicate fence: Redis may redeliver the same TOOL_PARTIAL event; a stable
-      // fingerprint (canonical payload + createdAt) must not append the chunk twice.
+      // 精确去重 fence：Redis 可能重投递同一 TOOL_PARTIAL 事件；稳定
+      // 指纹（规范化 payload + createdAt）不能让同一块追加两次。
       const fingerprintKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
       let fingerprints = toolPartialFingerprintsRef.current.get(fingerprintKey)
       if (fingerprints == null) {
@@ -283,8 +282,8 @@ export function useHarnessThreadRealtime(
       if (fingerprints.has(fingerprint)) {
         return
       }
-      // Bounded FIFO: evict only the oldest fingerprint so the most recent N stay
-      // deduplicated (a full clear would let an immediately redelivered event re-append).
+      // 有界 FIFO：只淘汰最旧的指纹，保证最近 N 个保持去重
+      // （整体清空会让立即重投递的事件再次追加）。
       if (fingerprints.size >= TOOL_PARTIAL_FINGERPRINT_LIMIT) {
         const oldest = fingerprints.values().next().value
         if (oldest !== undefined) {
@@ -307,7 +306,7 @@ export function useHarnessThreadRealtime(
     eventSource.addEventListener('revision', invalidateSnapshot as EventListener)
     eventSource.addEventListener('resync', invalidateSnapshot as EventListener)
     eventSource.addEventListener('realtime', handleRealtime as EventListener)
-    // EventSource owns reconnect and keeps the same transport instance until this effect cleans up.
+    // EventSource 自己负责重连并保持同一 transport 实例，直到本 effect 清理。
     eventSource.onerror = () => {
       void invalidateSnapshot()
     }
@@ -411,13 +410,13 @@ interface GapRecovery {
 }
 
 /**
- * Single-flight sequence-gap recovery loop (KISS): one snapshot refetch at a time with bounded
- * backoff until the checkpoint catches up, the invocation terminalizes, or the attempt changes.
- * Never spawns concurrent refetches per delta and never freezes after one stale refetch; the
- * loop is cancelled on unmount/Thread switch.
+ * 单飞 sequence 缺口恢复循环（KISS）：同一时刻一次 snapshot refetch，带有限
+ * 退避，直到 checkpoint 追上、invocation 终态化或 attempt 变化。
+ * 绝不会为每个 delta 并发 refetch，也不会在一次过期 refetch 后冻结；循环在
+ * 卸载/切换 Thread 时取消。
  *
- * Stable callbacks: latest-function ref forwarding breaks the schedule -> run -> schedule
- * cycle, so the subscription effect never re-registers on re-render.
+ * 稳定回调：latest-function ref 转发打破 schedule -> run -> schedule
+ * 循环，因此订阅 effect 不会在重渲染时重新注册。
  */
 function useGapRecoveryLoop(
   queryClient: QueryClient,
@@ -465,23 +464,23 @@ function useGapRecoveryLoop(
     try {
       let refetchFailed = false
       try {
-        // Use the CAPTURED recovery thread: the hook closure threadId may have moved to
-        // another Thread while this tick was in flight.
+        // 使用 CAPTURED 的恢复 thread：本 tick 在途期间 hook 闭包的 threadId 可能
+        // 已切换到另一个 Thread。
         await queryClient.invalidateQueries({
           queryKey: queryKeys.threads.snapshot(recovery.threadId),
         })
       } catch {
-        // A failed refetch must not freeze the loop: no timer is armed when the exception
-        // escapes, so count the attempt and keep backing off below.
+        // 失败的 refetch 不能冻结循环：异常逃逸时没有定时器被武装，
+        // 因此计入 attempt 并继续按下面的退避重试。
         refetchFailed = true
       }
       if (recoveryRef.current === recovery) {
-        // Generation fence passed: only the captured recovery may be mutated/cleared. An old
-        // tick that lost the fence falls through to the shared re-arm exit, which schedules
-        // whatever recovery is CURRENT (possibly installed while this tick was busy).
+        // Generation fence 已通过：只有捕获的 recovery 可以被修改/清除。失去
+        // fence 的旧 tick 会落入共享的重新武装出口，那里会调度
+        // CURRENT 的 recovery（可能在本 tick 忙时被安装）。
         let terminal = false
         if (!refetchFailed) {
-          // Caught up: the reconcile effect refreshed the overlay past the highest gap.
+          // 已追上：reconcile effect 已把 overlay 刷新到超过最高缺口。
           const stream = modelStreamRef.current
           if (
             stream != null
@@ -492,7 +491,7 @@ function useGapRecoveryLoop(
           ) {
             terminal = true
           } else {
-            // Stale (Thread/attempt changed) or durable terminal: stop and clean up.
+            // 过期（Thread/attempt 变化）或持久化终态：停止并清理。
             const invocation = invocationRef.current
             if (
               invocation == null
@@ -511,7 +510,7 @@ function useGapRecoveryLoop(
         } else {
           recovery.attempts += 1
           if (recovery.attempts > RECOVERY_MAX_ATTEMPTS) {
-            // Give up this gap; a future delta or snapshot refresh re-arms recovery.
+            // 放弃该缺口；后续 delta 或 snapshot 刷新会重新武装恢复。
             recoveryRef.current = null
           }
         }
@@ -519,9 +518,9 @@ function useGapRecoveryLoop(
     } finally {
       recoveryBusyRef.current = false
     }
-    // Single re-arm exit. Re-arm only after the busy flag cleared (scheduleRecoveryTick would
-    // otherwise early-return); a newer recovery installed while this tick was busy is armed
-    // here too.
+    // 单一重新武装出口。只有 busy 标志清除后才重新武装（否则
+    // scheduleRecoveryTick 会提前返回）；本 tick 忙时安装的新 recovery
+    // 也会在这里被武装。
     if (recoveryRef.current != null) {
       scheduleRecoveryTickRef.current()
     }
@@ -564,8 +563,8 @@ function useGapRecoveryLoop(
     recoveryRef.current = null
   }, [])
 
-  // Latest-function forwarding (after commit): timers only fire after the layout/effect
-  // pass, so the refs always hold the current tick implementations.
+  // Latest-function 转发（commit 之后）：定时器只在 layout/effect
+  // 之后触发，所以 refs 始终持有当前 tick 实现。
   useEffect(() => {
     scheduleRecoveryTickRef.current = scheduleRecoveryTick
     runRecoveryTickRef.current = runRecoveryTick

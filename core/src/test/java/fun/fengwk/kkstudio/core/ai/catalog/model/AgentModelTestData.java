@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Shared complete model config used by CRUD tests now that incomplete models are rejected. */
+/** CRUD 测试共享的完整模型配置（不完整的模型现已被拒绝）。 */
 public final class AgentModelTestData {
 
   public static AgentModelConfigDTO executableConfig() {
@@ -75,7 +75,7 @@ public final class AgentModelTestData {
     }
   }
 
-  /** Apply the canonical executable config so CRUD/web tests can exercise a valid body. */
+  /** 应用规范化的可执行配置，使 CRUD/web 测试能使用有效载荷。 */
   public static void executable(AgentModelEditablePropertiesDTO properties) {
     properties.setConfig(executableConfig());
   }

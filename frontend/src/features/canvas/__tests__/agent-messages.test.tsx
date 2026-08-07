@@ -19,7 +19,7 @@ const baseRun: AgentRunNode = {
 }
 
 describe('CanvasAgentMessage dispatcher', () => {
-  // Ensures kind-based dispatch stays modular and does not collapse into a monolithic dock.
+  // 确保按 kind 分发的派发逻辑保持模块化，避免坍缩为单一的 dock。
   it('renders user, agent, generation, and run message kinds', async () => {
     const user = userEvent.setup()
     const onRunAction = vi.fn()

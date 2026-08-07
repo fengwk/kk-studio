@@ -7,17 +7,15 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Durable current state of one Tool invocation.
+ * 一次 Tool invocation 的 durable 当前状态。
  *
- * <p>{@code attempt} counts executions actually accepted by the execution side; BUSY/OVERLOADED or
- * pre-execution local rejections do not increase it. {@code resultEntryId} links the ToolResult
- * Entry and is only present (possibly) on terminal states. Result and error are mutually exclusive
- * on every status; non-terminal states never carry terminal facts.
+ * <p>{@code attempt} 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。 {@code resultEntryId} 链接
+ * ToolResult Entry，且仅（在某些情况下）出现于 terminal 状态。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带 terminal
+ * 事实。
  *
- * <p>{@code DISPATCHING} means the Work lease is held and Gateway admission is in flight: whether
- * the external side accepted the execution is not yet durably confirmed. All state changes go
- * through the pure transition methods below; the Store must run {@link #validateTransition} before
- * every {@code update*} write so direct record construction stays limited to persistence decode.
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行 尚未被 durable
+ * 确认。所有状态变更都通过下面的纯转换方法进行；Store 必须在每次 {@code update*} 写入 之前调用 {@link #validateTransition}，从而把直接构造
+ * record 的场景限制在持久化解码。
  */
 public record ToolInvocation(
     long id,
@@ -61,14 +59,12 @@ public record ToolInvocation(
   }
 
   /**
-   * Validates that {@code next} is a legal transition of the stored {@code stored} row: identity
-   * and request are immutable, updatedAt never regresses, attempt only advances by exactly one on a
-   * confirmed start (DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN), an approval may only be
-   * introduced as {@code not-required} on READY-&gt;READY or as a required undecided request on
-   * READY-&gt;WAITING_APPROVAL, an undecided approval may only be decided (ALLOWED -&gt; READY,
-   * DENIED -&gt; FAILED) or replayed exactly, decided / non-required approvals are immutable, and
-   * terminal facts are immutable (only {@code resultEntryId} may attach from null to positive).
-   * Exact replay is always accepted.
+   * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt
+   * 仅在已确认启动（DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN）时恰好 +1；approval 仅能以 {@code
+   * not-required} 引入到 READY-&gt;READY，或以 required undecided request 引入到
+   * READY-&gt;WAITING_APPROVAL；undecided approval 仅能被决定（ALLOWED -&gt; READY，DENIED -&gt; FAILED）
+   * 或精确 replay；已决定 / non-required approval 不可变；terminal 事实不可变（仅 {@code resultEntryId} 可从 null
+   * 附加为正数）。精确 replay 始终被接受。
    */
   public static void validateTransition(ToolInvocation stored, ToolInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -152,13 +148,11 @@ public record ToolInvocation(
   }
 
   /**
-   * An approval may only be introduced from a null stored approval as {@code not-required} on
-   * READY-&gt;READY or as a required undecided request on READY-&gt;WAITING_APPROVAL; direct-record
-   * injection of a decided approval is rejected. An undecided approval may only be decided (with
-   * the stored request time preserved) or replayed exactly, and a decision must match its status:
-   * ALLOWED resumes as READY, DENIED terminates as FAILED. Decided and non-required approvals are
-   * immutable; a WAITING_APPROVAL row cancelled while keeping the exact undecided approval stays
-   * legal (Stop).
+   * approval 仅能从 null stored approval 出发，以 {@code not-required} 引入到 READY-&gt;READY，或以 required
+   * undecided request 引入到 READY-&gt;WAITING_APPROVAL；直接通过 record 注入已决定的 approval 会被拒绝。undecided
+   * approval 仅能被决定（保留 stored request time）或精确 replay，决策 必须与状态匹配：ALLOWED 恢复为 READY，DENIED 终止为
+   * FAILED。已决定与 non-required approval 不可变； WAITING_APPROVAL 行在保留完全相同的 undecided approval
+   * 同时被取消（Stop）保持合法。
    */
   private static void requireApprovalRules(ToolInvocation stored, ToolInvocation next) {
     ToolApproval storedApproval = stored.approval();
@@ -237,8 +231,8 @@ public record ToolInvocation(
   }
 
   /**
-   * READY with no approval -&gt; READY with a {@code not-required} approval; later decisions are
-   * impossible, so dispatch needs no approval round trip.
+   * READY 且无 approval -&gt; READY，但带有 {@code not-required} approval；后续决策不可能，因此 dispatch 不需要
+   * approval 往返。
    */
   public ToolInvocation markApprovalNotRequired(Instant now) {
     if (approval != null) {
@@ -248,7 +242,7 @@ public record ToolInvocation(
         ToolInvocationStatus.READY, attempt, ToolApproval.notRequired(), null, null, null, now);
   }
 
-  /** READY with no approval -&gt; WAITING_APPROVAL with a required undecided approval. */
+  /** READY 且无 approval -&gt; WAITING_APPROVAL，并附带一个 required undecided approval。 */
   public ToolInvocation requestApproval(String reason, Instant now) {
     if (approval != null) {
       throw new IllegalArgumentException("approval already exists");
@@ -264,9 +258,8 @@ public record ToolInvocation(
   }
 
   /**
-   * Applies an approval decision: ALLOWED resumes the invocation as READY, DENIED terminates it as
-   * FAILED. The same decisionId with the exact same decision payload is idempotent; the same id
-   * with a different payload or an existing different decision is a conflict.
+   * 应用 approval 决策：ALLOWED 将 invocation 恢复为 READY，DENIED 将其终止为 FAILED。相同 decisionId 携带完全相同的决策
+   * payload 是幂等的；相同 id 携带不同 payload 或与已有不同决策冲突。
    */
   public ToolInvocation decideApproval(
       ToolApprovalDecision decision,
@@ -294,9 +287,8 @@ public record ToolInvocation(
   }
 
   /**
-   * READY -&gt; DISPATCHING: the Work lease is held and Gateway admission starts; requires the
-   * preflight approval to be completed (non-null and either not required or ALLOWED); attempt
-   * unchanged.
+   * READY -&gt; DISPATCHING：Work lease 已持有，Gateway admission 启动；要求预检 approval 已完成 （非 null 且为
+   * not-required 或 ALLOWED）；attempt 不变。
    */
   public ToolInvocation beginDispatch(Instant now) {
     if (!hasCompletedPreflightApproval()) {
@@ -306,9 +298,8 @@ public record ToolInvocation(
   }
 
   /**
-   * DISPATCHING -&gt; FAILED: the Gateway definitely rejected before any execution; attempt
-   * unchanged. Only a dispatch in flight can be rejected, and {@link #fail} refuses DISPATCHING, so
-   * this is the only path that fails a dispatch.
+   * DISPATCHING -&gt; FAILED：Gateway 在任何执行之前明确拒绝了该调用；attempt 不变。仅进行中的 dispatch 能被拒绝，且 {@link #fail}
+   * 拒绝 DISPATCHING，所以这是失败 dispatch 的唯一路径。
    */
   public ToolInvocation rejectDispatch(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -318,10 +309,7 @@ public record ToolInvocation(
     return withState(ToolInvocationStatus.FAILED, attempt, approval, null, error, null, now);
   }
 
-  /**
-   * DISPATCHING -&gt; READY: BUSY/OVERLOADED admission; attempt unchanged. Only a dispatch in
-   * flight can bounce back to READY.
-   */
+  /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
   public ToolInvocation dispatchBusy(Instant now) {
     if (status != ToolInvocationStatus.DISPATCHING) {
       throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
@@ -329,18 +317,13 @@ public record ToolInvocation(
     return withState(ToolInvocationStatus.READY, attempt, approval, null, null, null, now);
   }
 
-  /**
-   * DISPATCHING -&gt; RUNNING: the Gateway confirmed the start; attempt advances by exactly one.
-   */
+  /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
   public ToolInvocation markRunning(Instant now) {
     return withState(
         ToolInvocationStatus.RUNNING, Math.addExact(attempt, 1), approval, null, null, null, now);
   }
 
-  /**
-   * RUNNING -&gt; READY: the execution side reported a retryable failure, so the same attempt is
-   * re-scheduled from scratch; attempt and the completed preflight approval stay confirmed.
-   */
+  /** RUNNING -&gt; READY：执行端报告了可重试的失败，因此同一个 attempt 被从头重新调度；attempt 与 已完成的预检 approval 保持已确认。 */
   public ToolInvocation retryReady(Instant now) {
     if (status != ToolInvocationStatus.RUNNING) {
       throw new IllegalArgumentException("retryReady requires RUNNING status");
@@ -348,17 +331,16 @@ public record ToolInvocation(
     return withState(ToolInvocationStatus.READY, attempt, approval, null, null, null, now);
   }
 
-  /** RUNNING -&gt; SUCCEEDED with the complete ToolResult; attempt must be positive. */
+  /** RUNNING -&gt; SUCCEEDED，并附带完整的 ToolResult；attempt 必须为正数。 */
   public ToolInvocation succeed(ToolResult result, Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(ToolInvocationStatus.SUCCEEDED, attempt, approval, result, null, null, now);
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED with a terminal error; attempt unchanged. WAITING_APPROVAL and
-   * DISPATCHING are refused: an undecided approval may only be denied through a decided DENIED
-   * decision or stopped as CANCELLED, and a dispatch in flight may only be failed through {@link
-   * #rejectDispatch}.
+   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 与 DISPATCHING
+   * 被拒绝：undecided approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止；进行中的 dispatch 只能通过 {@link
+   * #rejectDispatch} 失败。
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -371,9 +353,8 @@ public record ToolInvocation(
   }
 
   /**
-   * WAITING_APPROVAL / READY / RUNNING -&gt; CANCELLED with a terminal error; attempt unchanged.
-   * DISPATCHING is deliberately rejected: in that window the execution may already have started, so
-   * the only honest termination is UNKNOWN.
+   * WAITING_APPROVAL / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt 不变。 DISPATCHING
+   * 被刻意拒绝：在该窗口内执行可能已经启动，因此唯一诚实的终止是 UNKNOWN。
    */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -385,9 +366,8 @@ public record ToolInvocation(
   }
 
   /**
-   * DISPATCHING / RUNNING -&gt; UNKNOWN with a terminal error: indeterminate admission or recovered
-   * lease may have executed the call, so DISPATCHING advances attempt by exactly one while RUNNING
-   * keeps its already-confirmed attempt.
+   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的 admission 或恢复的 lease
+   * 可能已经执行了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
    */
   public ToolInvocation unknown(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
@@ -396,18 +376,12 @@ public record ToolInvocation(
     return withState(ToolInvocationStatus.UNKNOWN, nextAttempt, approval, null, error, null, now);
   }
 
-  /**
-   * Terminal -&gt; same terminal linking the ToolResult Entry; every other terminal fact stays
-   * immutable.
-   */
+  /** Terminal -&gt; 同一 terminal 状态，并链接 ToolResult Entry；其他 terminal 事实保持不变。 */
   public ToolInvocation attachResultEntry(long resultEntryId, Instant now) {
     return withState(status, attempt, approval, result, error, resultEntryId, now);
   }
 
-  /**
-   * Copies this row with only the given current-state fields replaced and validates the transition
-   * in one place; identity, frozen request and createdAt are preserved by construction.
-   */
+  /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen request 与 createdAt 通过构造得以保留。 */
   private ToolInvocation withState(
       ToolInvocationStatus status,
       int attempt,

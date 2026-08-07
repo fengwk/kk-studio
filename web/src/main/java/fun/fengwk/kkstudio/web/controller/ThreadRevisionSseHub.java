@@ -21,11 +21,10 @@ import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
- * Process-local fan-out for PostgreSQL Thread revision invalidations.
+ * PostgreSQL Thread revision 失效通知的进程内 fan-out。
  *
- * <p>LISTEN/NOTIFY is intentionally only a wake-up. On notification this hub reads the current
- * durable revision before notifying SSE subscribers; a successful LISTEN startup/reconnect emits a
- * resync signal because notifications during a disconnected gap are irrecoverable.
+ * <p>LISTEN/NOTIFY 故意只作为唤醒信号。收到通知后，本 hub 先读取当前持久 revision 再通知 SSE 订阅者； LISTEN 启动/重连成功时会发出 resync
+ * 信号，因为断连期间的通知不可恢复。
  */
 @Slf4j
 @Component

@@ -15,9 +15,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentId;
 
 import java.util.List;
 
-/**
- * Thread command payload codec: strict canonical shapes, type-free JSON and old-field rejection.
- */
+/** Thread command payload codec：严格 canonical 形态、无类型 JSON 与旧字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
 
   private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";

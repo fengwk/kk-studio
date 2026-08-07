@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 
-/** Normalizes mutable model configuration through the shared typed config codec. */
+/** 通过共享的类型化 config codec 规范化可变的 model 配置。 */
 @Component
 final class AgentModelMutationFactory {
 

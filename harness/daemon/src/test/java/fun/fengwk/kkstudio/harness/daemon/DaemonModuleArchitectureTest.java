@@ -13,10 +13,10 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Lightweight architecture guard for the daemon module.
+ * daemon 模块的轻量架构守卫。
  *
- * <p>Daemon main sources may depend on JDK, Jackson, {@code harness.tool} and its own packages.
- * Runtime/core/web, Spring/MyBatis/servlet/Redis and Provider SDKs are forbidden.
+ * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、{@code harness.tool} 以及本模块自身包。 禁止引入
+ * runtime/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
  */
 class DaemonModuleArchitectureTest {
 
@@ -116,10 +116,7 @@ class DaemonModuleArchitectureTest {
     }
   }
 
-  /**
-   * Resolves {@code src/main/java} when Maven runs from the module root or the reactor root. Never
-   * resolves under {@code target/}.
-   */
+  /** 当 Maven 在模块根或 reactor 根运行时解析 {@code src/main/java}；不会解析到 {@code target/} 下。 */
   private static Path locateDaemonMainJava() {
     Path cwd = Path.of("").toAbsolutePath().normalize();
     List<Path> candidates =

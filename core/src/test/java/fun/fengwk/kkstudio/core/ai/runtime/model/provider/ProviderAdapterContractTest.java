@@ -54,7 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-/** Verifies the external HTTP request contract of all four Provider adapters. */
+/** 验证四种 Provider adapter 各自的外部 HTTP 请求契约。 */
 class ProviderAdapterContractTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -476,7 +476,7 @@ class ProviderAdapterContractTest {
     assertTrue(
         error.get().getMessage() != null && error.get().getMessage().contains(containsMessage),
         () -> "message=" + error.get().getMessage());
-    // ensure cause chain surfaces IllegalArgumentException
+    // 确保 cause 链能上抛 IllegalArgumentException
     Throwable cause = error.get().getCause();
     assertTrue(
         cause == null || cause instanceof IllegalArgumentException,

@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionReposi
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
-/** Missing global Agent / model references fail before persistence changes. */
+/** 缺失的全局 Agent / model 引用在持久化变更前必须失败。 */
 public class AgentDefinitionReferenceResolverTest {
 
   @Test

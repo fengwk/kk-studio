@@ -17,7 +17,10 @@ import java.util.Map;
 @Builder
 public class S3PresignedResponseDTO {
 
+  /** 目标 bucket：始终来自服务端配置。 */
   private String bucket;
+
+  /** 规范化后的 S3 对象键（回显请求 key）。 */
   private String key;
 
   /** HTTP 方法（PUT 用于上传、GET 用于下载）。 */

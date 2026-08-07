@@ -75,7 +75,7 @@ class InvocationRetryPolicyTest {
         IllegalArgumentException.class, () -> InvocationRetryPolicy.DEFAULT.delayBeforeRetry(0));
   }
 
-  /** Persisted strategy parsing is case-insensitive and independent from the process locale. */
+  /** 持久化 strategy 解析大小写无关，且与进程 locale 独立。 */
   @Test
   void parsesBackoffStrategyDeterministically() {
     Locale previous = Locale.getDefault();

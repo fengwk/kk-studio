@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
-/** Preserves incomplete UTF-8 suffix bytes between streamed process output chunks. */
+/** 在流式进程输出分块之间保留不完整的 UTF-8 后缀字节。 */
 final class Utf8StreamDecoder {
 
   private byte[] pending = new byte[0];

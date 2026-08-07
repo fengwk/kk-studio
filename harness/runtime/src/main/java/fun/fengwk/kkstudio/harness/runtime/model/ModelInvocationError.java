@@ -5,16 +5,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import java.util.Objects;
 
 /**
- * Minimum terminal error snapshot persisted as the {@code error} JSONB column on {@code
- * harness_model_invocation} for {@code FAILED} / {@code UNKNOWN} statuses.
+ * 持久化为 {@code harness_model_invocation} 上 {@code error} JSONB 列的最小 terminal error snapshot，对应
+ * {@code FAILED} / {@code UNKNOWN} 状态。
  *
- * <p>The snapshot is intentionally narrow: a non-null {@link ProviderErrorKind} plus a non-blank
- * human-readable {@code message}. The terminal-state adapter constructs it from the original {@link
- * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException} classification. It is
- * persisted only for terminal {@code FAILED}/{@code UNKNOWN}; {@code RETRY_WAIT} carries no
- * terminal payload.
+ * <p>snapshot 刻意保持最小：非空的 {@link ProviderErrorKind} 加上一条非空的可读 {@code message}。terminal-state adapter
+ * 从原始 {@link fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException} 分类构造它。它只为
+ * terminal {@code FAILED}/{@code UNKNOWN} 持久化；{@code RETRY_WAIT} 不携带 terminal payload。
  *
- * <p>Strict JSON encoding/decoding lives in {@link ModelInvocationErrorJsonCodec}.
+ * <p>严格 JSON 编码/解码位于 {@link ModelInvocationErrorJsonCodec}。
  */
 public record ModelInvocationError(ProviderErrorKind kind, String message) {
 

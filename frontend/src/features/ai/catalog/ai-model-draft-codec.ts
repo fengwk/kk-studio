@@ -25,8 +25,8 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
 
 /**
- * Default pricing metadata for freshly created models. The form does not surface these fields;
- * existing models keep whatever metadata was persisted.
+ * 新建 model 的默认 pricing 元数据。表单不展示这些字段；
+ * 已有 model 保留其之前持久化的元数据。
  */
 function defaultPricingDraft(): ModelPricingDraft {
   return {

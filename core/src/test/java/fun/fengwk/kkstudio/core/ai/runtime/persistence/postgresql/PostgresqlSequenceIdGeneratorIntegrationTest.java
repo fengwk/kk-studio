@@ -23,21 +23,15 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * End-to-end coverage for the PostgreSQL {@code kk_studio_id_seq} sequence wired through {@link
- * PostgresqlSequenceIdGenerator}.
+ * 端到端覆盖：通过 {@link PostgresqlSequenceIdGenerator} 串联起来的 PostgreSQL {@code kk_studio_id_seq} 序列。
  *
- * <p>Extends {@link PostgresSchemaSupport} so a real {@code postgres:17-alpine} Testcontainers
- * instance is spun up and {@link #newConnection()} gives a direct JDBC handle to it. Docker must be
- * available; the test fails rather than skipping when it is not. The {@link SequenceMapper} used
- * here is a JDK lambda backed by JDBC rather than a MyBatis proxy, so the test exercises the exact
- * SQL the production mapper issues and not a fake.
+ * <p>继承 {@link PostgresSchemaSupport}，因此会启动一个真实的 {@code postgres:17-alpine} Testcontainers 实例，并可通过
+ * {@link #newConnection()} 直接拿到 JDBC 句柄。Docker 必须可用；不可用时本测试失败而不是跳过。这里使用的 {@link SequenceMapper} 是基于
+ * JDBC 的 JDK lambda，而非 MyBatis 代理；因此测试执行的是生产 mapper 实际发出的同一条 SQL，而不是某个假实现。
  */
 class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport {
 
-  /**
-   * Constant copied verbatim from {@link SequenceMapper#nextValue()} so any drift between the
-   * annotation and the JDBC call is caught explicitly.
-   */
+  /** 常量直接照搬自 {@link SequenceMapper#nextValue()}，以便任何 annotation 与 JDBC 调用之间的漂移都能被显式捕获。 */
   private static final String EXPECTED_SELECTION_SQL = "select nextval('kk_studio_id_seq')";
 
   private PostgresqlSequenceIdGenerator generator;
@@ -63,7 +57,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     generator = new PostgresqlSequenceIdGenerator(jdbcMapper);
   }
 
-  /** Lock in the production MyBatis SQL: any drift fails this test. */
+  /** 锁定生产 MyBatis SQL：任何漂移都会使本测试失败。 */
   @Test
   void sequenceMapperSelectAnnotationMatchesProductionSql() throws NoSuchMethodException {
     Method nextValue = SequenceMapper.class.getMethod("nextValue");
@@ -73,7 +67,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     assertEquals(EXPECTED_SELECTION_SQL, select.value()[0]);
   }
 
-  /** Every allocation must be strictly positive. */
+  /** 每次分配都必须严格为正。 */
   @Test
   void allocationsAreStrictlyPositive() {
     for (int i = 0; i < 20; i++) {
@@ -82,11 +76,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     }
   }
 
-  /**
-   * Strict monotonic ordering, no duplicates, shared across distinct call sites. The generated
-   * durable business and Harness entities all delegate to the same physical sequence; catalog
-   * identities are names and therefore do not consume it.
-   */
+  /** 严格的单调递增、无重复，且在不同调用方之间共享。生成的持久化业务实体与 Harness 实体都委托给同一个物理序列；catalog 标识就是名称，因此不会消耗该序列。 */
   @Test
   void allocationsAreStrictlyMonotonicAndSharedAcrossCallSites() {
     int totalCalls = 64;
@@ -100,9 +90,8 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     long previous = 0L;
     for (int i = 0; i < totalCalls; i++) {
       String site = sites[i % sites.length];
-      // Round-trip the generator every iteration so the lambda-backed monotonicity is
-      // observable; the per-site bookkeeping below mirrors the production wiring where each
-      // business generator advances the same physical sequence.
+      // 每次迭代都对生成器进行往返调用，使 lambda 驱动的单调性可见；
+      // 下面的 per-site 簿记与生产接线方式一致：每个业务生成器推进同一个物理序列。
       long fromGenerator = generator.next();
       assertTrue(seen.add(fromGenerator), "duplicate id allocated: " + fromGenerator);
       assertTrue(
@@ -119,9 +108,8 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
   }
 
   /**
-   * The harness runtime sequence is a separate physical sequence: it allocates positive monotonic
-   * ids independently of the business sequence, and it is never aligned by any seed (the runtime
-   * policy tables that used to own deterministic singleton ids are gone).
+   * Harness runtime 序列是另一个独立的物理序列：它独立于业务序列分配正数单调 id，且不会与任何 seed 对齐（曾经持有确定性 singleton id 的 runtime
+   * policy 表已移除）。
    */
   @Test
   void harnessRuntimeSequenceAllocatesPositiveMonotonicIds() throws Exception {
@@ -141,7 +129,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
       previous = id;
     }
 
-    // The two sequences are independent physical objects.
+    // 两个序列是相互独立的物理对象。
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement(

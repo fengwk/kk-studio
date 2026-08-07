@@ -16,10 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Configuration contracts keep a production Daemon from attaching without identity or gateway
- * credential.
- */
+/** 配置契约用于阻止生产 Daemon 在缺少身份或 gateway 凭证时接入。 */
 class DaemonConfigTest {
 
   private static final String[] PROPERTY_NAMES = {
@@ -43,9 +40,7 @@ class DaemonConfigTest {
     }
   }
 
-  /**
-   * All explicit connection inputs, including the shared gateway token, are mandatory and bounded.
-   */
+  /** 所有显式连接输入，包括共享的 gateway token，都是必填且有界的。 */
   @Test
   void validatesExplicitConnectionConfiguration() {
     assertThrows(
@@ -102,10 +97,7 @@ class DaemonConfigTest {
                 List.of()));
   }
 
-  /**
-   * CLI is authoritative for environment name and skill dirs; connectivity may fall back to
-   * properties.
-   */
+  /** CLI 对 environment name 和 skill dirs 是权威的；连接配置可以回退到 properties。 */
   @Test
   void readsCliArgumentsWithPropertyFallback(@TempDir Path skillDir) {
     set("kkstudio.daemon.gateway-uri", "wss://gateway.example/daemon");
@@ -137,7 +129,7 @@ class DaemonConfigTest {
     assertEquals(List.of(skillDir.toAbsolutePath().normalize()), config.skillDirs());
   }
 
-  /** Explicit skill dirs replace the default discovery root. */
+  /** 显式 skill dirs 会替换默认的发现根目录。 */
   @Test
   void acceptsRepeatableSkillDirs(@TempDir Path first, @TempDir Path second) {
     set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
@@ -159,7 +151,7 @@ class DaemonConfigTest {
         config.skillDirs());
   }
 
-  /** Startup fails closed when the deployment omits the secret required by the gateway. */
+  /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
   @Test
   void rejectsMissingGatewayToken() {
     set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
@@ -169,7 +161,7 @@ class DaemonConfigTest {
         () -> DaemonConfig.fromArgs(new String[] {"--environment-name", "env"}));
   }
 
-  /** Unknown CLI flags fail fast instead of being silently ignored. */
+  /** 未知的 CLI 参数立即失败，而不是被静默忽略。 */
   @Test
   void rejectsUnknownCliArgument() {
     assertThrows(

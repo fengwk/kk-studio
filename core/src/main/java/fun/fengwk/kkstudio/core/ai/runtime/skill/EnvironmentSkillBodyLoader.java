@@ -13,11 +13,10 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Adapts {@link EnvironmentSkillLoader} for platform tools.
+ * 为平台工具适配 {@link EnvironmentSkillLoader}。
  *
- * <p>The runtime {@link SkillBodyLoader} binding reference is the canonical {@link EnvironmentId}
- * text (never a display name); it is parsed strictly so a display-name reference fails closed
- * instead of routing by name.
+ * <p>Runtime {@link SkillBodyLoader} 的绑定引用是 canonical {@link EnvironmentId} 文本
+ * （绝不是展示名）；它被严格解析，因此展示名引用会 fail-closed，而不是按名路由。
  */
 @Component
 public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {

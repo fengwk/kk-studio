@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.Optional;
 
-/** Work initial/request/claim/renew/complete/reschedule protocol and lost-wake fencing. */
+/** Work initial/request/claim/renew/complete/reschedule 协议与 lost-wake fencing。 */
 class WorkTest {
 
   private static final WorkTarget TARGET = new WorkTarget(WorkTargetType.THREAD, 1L);

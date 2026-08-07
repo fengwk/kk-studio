@@ -2,14 +2,12 @@ package fun.fengwk.kkstudio.core.ai.chat.repo;
 
 import java.util.List;
 
-/** Idempotent persistence boundary for Chat↔Thread historical associations. */
+/** Chat↔Thread 历史关联的幂等持久化边界。 */
 public interface ChatThreadRepository {
 
-  /**
-   * Returns {@code true} for a newly inserted association and {@code false} for an existing one.
-   */
+  /** 新插入关联时返回 {@code true}，已存在时返回 {@code false}。 */
   boolean associate(long chatId, long threadId);
 
-  /** Returns the associated Thread ids ordered newest association first (immutable list). */
+  /** 返回关联的 Thread id 列表，最新关联在前（不可变列表）。 */
   List<Long> listThreadIds(long chatId);
 }

@@ -187,8 +187,7 @@ public final class DaemonToolResultCodec {
   }
 
   /**
-   * Decodes a result for one expected daemon invocation. Resources stay inline as {@link
-   * BinaryToolContent}; no durable store is touched.
+   * 解码某次期望 daemon invocation 的结果。Resource 保持内联 {@link BinaryToolContent}；不触碰任何 durable store。
    *
    * <p>保留给尚未迁移的 Core 调用方；新代码请使用 {@link #decodePartialForInvocation} / {@link
    * #decodeCompletedForInvocation}。

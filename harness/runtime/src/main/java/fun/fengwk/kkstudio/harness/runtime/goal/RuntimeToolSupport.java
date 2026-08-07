@@ -20,7 +20,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-/** Shared argument parsing and immediate completion helpers for runtime tools. */
+/** runtime tools 共享的参数解析与立即完成（immediate completion）工具方法。 */
 final class RuntimeToolSupport {
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 

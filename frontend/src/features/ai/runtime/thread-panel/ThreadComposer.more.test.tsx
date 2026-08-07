@@ -48,7 +48,7 @@ describe('ThreadComposer interactions', () => {
     const textarea = screen.getByLabelText('给 AI 发送消息')
     await user.type(textarea, '/')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    // first enabled is session; ArrowDown -> thread, agent, model...
+    // 第一个启用项是 session；ArrowDown -> thread、agent、model...
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
   })

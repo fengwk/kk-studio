@@ -279,7 +279,7 @@ describe('useAgentThreadController', () => {
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
     const userMessage = batchArg.commands[batchArg.commands.length - 1]!
     expect(userMessage.content).toBe('hello world')
-    // Strict wire: USER_MESSAGE never carries role.
+    // 严格的协议载荷：USER_MESSAGE 永远不会携带 role 字段。
     expect(userMessage).not.toHaveProperty('role')
     expect(result.current.draft).toBe('')
   })
@@ -315,13 +315,13 @@ describe('useAgentThreadController', () => {
       expect(result.current.actionError).toContain('Thread \u72b6\u6001\u5df2\u53d8\u5316'),
     )
     expect(result.current.actionError).toContain('expected revision mismatch')
-    // Snapshot query is invalidated to refetch the current revision.
+    // 失效 snapshot 查询，以重新拉取当前 revision。
     await waitFor(() =>
       expect(harnessService.getThreadSnapshot.mock.calls.length).toBeGreaterThan(
         snapshotCallsBefore,
       ),
     )
-    // Failed draft is restored so the user can retry without retyping.
+    // 失败的 draft 会被恢复，用户无需重新输入即可重试。
     expect(result.current.draft).toBe('stale message')
   })
 
@@ -360,22 +360,22 @@ describe('useAgentThreadController', () => {
     })
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(2))
     const secondBatch = vi.mocked(harnessService.enqueueCommands).mock.calls[1]?.[1]
-    // Identity match reuses the previous batch object byte-for-byte.
+    // 身份匹配：完全复用上一次提交的 batch 对象（逐字节相同）。
     expect(secondBatch).toBe(firstBatch)
   })
 
   it('replays the exact batch even when the queued SET_* projection mutates the effective base', async () => {
-    // Scenario: base=A, draft=B failed with an uncertain network error; the next snapshot's
-    // queued SET_* commands project base -> B. The user did NOT edit, so the retry must reuse
-    // the original batch (same command ids) instead of minting a USER_MESSAGE-only batch.
+    // 场景：base=A，draft=B 因不确定的网络错误失败；下一次 snapshot 中
+    // 排队的 SET_* 命令将 base 投影为 B。期间用户并未改动，因此重试必须
+    // 复用原始 batch（保持相同 command id），而不是新建一个仅含 USER_MESSAGE 的 batch。
     const currentThread = threadFixture()
     const baseA = branchDraftFromThread(currentThread)
     const draftB = { ...baseA, agentName: 'coder' }
     let projectionApplied = false
     const buildBatch = (content: string) =>
       buildMessageBatchPlan({
-        // After the projection, effectiveBase equals the draft: a naive {content,base,draft}
-        // identity would fail to match; the immutable-intent identity must still hit.
+        // 投影之后 effectiveBase 等于 draft：粗略的 {content,base,draft}
+        // 身份判定无法匹配；不可变意图层面的身份仍需命中。
         thread: currentThread,
         effectiveBase: projectionApplied ? draftB : baseA,
         draft: draftB,
@@ -414,7 +414,7 @@ describe('useAgentThreadController', () => {
     })
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(2))
     const secondBatch = vi.mocked(harnessService.enqueueCommands).mock.calls[1]?.[1]
-    // Exact replay: same batch object (SET_AGENT + USER_MESSAGE), never a message-only batch.
+    // 精确回放：必须复用同一个 batch 对象（SET_AGENT + USER_MESSAGE），不能退化为只含消息的 batch。
     expect(secondBatch).toBe(firstBatch)
     expect(secondBatch?.commands).toHaveLength(2)
   })
@@ -447,7 +447,7 @@ describe('useAgentThreadController', () => {
     const firstId = vi.mocked(harnessService.enqueueCommands).mock.calls[0]?.[1]
       .commands[0]?.clientCommandId
 
-    // Editing the composer to different content resets the replay identity.
+    // 将 composer 编辑成不同内容时，会重置回放身份。
     act(() => result.current.setDraft('changed content'))
     await act(async () => {
       await result.current.submitMessage()
@@ -538,18 +538,18 @@ describe('useAgentThreadController', () => {
     })
     expect(harnessService.stopThread).toHaveBeenCalledTimes(2)
     const secondStopArg = vi.mocked(harnessService.stopThread).mock.calls[1]?.[1]
-    // Stable idempotency key survives a transient failure.
+    // 稳定的幂等键在瞬态失败后仍然保留。
     expect(secondStopArg?.stopRequestId).toBe(firstStopArg?.stopRequestId)
     expect(secondStopArg?.expectedRevision).toBe('0')
   })
 
   it('retires an ambiguous stop when the snapshot proves the old Turn ended and mints a fresh id', async () => {
-    // The first Stop actually landed server-side but its response was lost.
+    // 第一次 Stop 实际上已经在服务端生效，只是响应丢失了。
     vi.mocked(harnessService.stopThread).mockRejectedValue(new Error('response lost'))
     const turn1 = threadFixture()
     const turn2 = threadFixture({ headEntryId: 'e-turn1-end', revision: '2' })
-    // Mount fetch reads Turn 1; the invalidate triggered by the failed Stop reads the
-    // advanced Turn 2 snapshot (the ambiguous Stop actually landed server-side).
+    // 挂载时的拉取读取的是 Turn 1；由失败 Stop 触发的失效拉取会读取
+    // 已前进的 Turn 2 snapshot（说明那次含糊的 Stop 实际上已经在服务端落地）。
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshotOf(turn1))
       .mockResolvedValue(snapshotOf(turn2))
@@ -564,14 +564,14 @@ describe('useAgentThreadController', () => {
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     expect(firstStopArg?.expectedRevision).toBe('0')
 
-    // The authoritative snapshot advances to Turn 2 (head + revision moved): the ambiguous
-    // operation auto-retires. A realtime revision signal drives the refetch.
+    // 权威 snapshot 推进到 Turn 2（head + revision 均已变化）：含糊的
+    // 操作自动失效；realtime revision 信号触发一次 refetch。
     act(() => realtimeSource.emit('revision'))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
 
-    // A Stop on the NEW Turn must use a fresh id + the current revision — never the old id
-    // stitched to a newer revision.
+    // 在新 Turn 上发起的 Stop 必须使用全新的 id + 当前 revision，绝不能把
+    // 旧 id 拼接到更新的 revision 上。
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'IDLE',
       thread: threadFixture({ headEntryId: 'e-turn1-end', revision: '2' }),
@@ -604,8 +604,8 @@ describe('useAgentThreadController', () => {
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     expect(result.current.stopReplayPending).toBe(true)
 
-    // Snapshot refetch returns the SAME basis (head/revision unchanged): the retry must send
-    // the exact original body, not a body re-derived from a newer snapshot.
+    // snapshot refetch 返回完全相同的 basis（head/revision 未变）：重试必须
+    // 发送与原始完全一致的请求体，而不是基于更新后的 snapshot 重新推导请求体。
     await act(async () => {
       await result.current.stopThread()
     })
@@ -648,26 +648,26 @@ describe('useAgentThreadController', () => {
       basisHeadEntryId: 'h1',
       basisRevision: '0',
     }
-    // Matching basis: the exact retry stays alive.
+    // basis 匹配时：精确重试继续生效。
     expect(
       retireStaleStopPending(pending, { headEntryId: 'h1', revision: '0' }),
     ).toBe(pending)
-    // Head moved (old Turn ended): retired.
+    // head 已移动（旧 Turn 已结束）：操作被失效。
     expect(
       retireStaleStopPending(pending, { headEntryId: 'h2', revision: '0' }),
     ).toBeNull()
-    // Revision moved (Thread advanced): retired.
+    // revision 已移动（Thread 已前进）：操作被失效。
     expect(
       retireStaleStopPending(pending, { headEntryId: 'h1', revision: '1' }),
     ).toBeNull()
-    // No pending operation or no loaded Thread: no-op.
+    // 无 pending 操作或无已加载的 Thread：no-op。
     expect(retireStaleStopPending(null, { headEntryId: 'h1', revision: '0' })).toBeNull()
     expect(retireStaleStopPending(pending, null)).toBe(pending)
   })
 
   it('re-mints immediately when stopThread runs after the snapshot basis moved (synchronous fence)', async () => {
-    // The first Stop landed server-side but its response was lost: ambiguous operation with
-    // the Turn-1 basis stays pending.
+    // 第一次 Stop 实际上已经在服务端生效，但响应丢失：含混的操作携带
+    // Turn-1 basis 保持 pending。
     vi.mocked(harnessService.stopThread).mockRejectedValue(new Error('response lost'))
     const turn1 = threadFixture()
     const turn2 = threadFixture({ headEntryId: 'e-turn1-end', revision: '2' })
@@ -684,11 +684,10 @@ describe('useAgentThreadController', () => {
     const firstStopArg = vi.mocked(harnessService.stopThread).mock.calls[0]?.[1]
     expect(firstStopArg?.expectedRevision).toBe('0')
 
-    // The Query snapshot advances to Turn 2 (head + revision moved) and renders. stopThread
-    // must NOT depend on the passive cleanup effect having flushed: its own synchronous fence
-    // retires the stale basis and mints a fresh id + the CURRENT revision. (Under RTL the
-    // effect flushes with the commit, so the fence contract itself is pinned by the
-    // retireStaleStopPending unit test above.)
+    // Query snapshot 推进到 Turn 2（head + revision 均已变化）并完成渲染。stopThread
+    // 不得依赖被动清理 effect 的 flush：它自身的同步栅栏会失效陈旧 basis，
+    // 并基于当前 revision 派生一个新的 id。（在 RTL 下 effect 会随 commit 一同 flush，
+    // 因此上述栅栏契约由前面的 retireStaleStopPending 单元测试固化。）
     act(() => realtimeSource.emit('revision'))
     await waitFor(() => expect(result.current.thread?.revision).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
@@ -772,7 +771,7 @@ describe('useAgentThreadController', () => {
     expect(harnessService.decideApproval).toHaveBeenCalledTimes(2)
     const secondDecisionId = vi.mocked(harnessService.decideApproval).mock.calls[1]?.[2]
       ?.decisionId
-    // Same invocation across retries → same idempotency key.
+    // 同一 invocation 跨重试 → 同一幂等键。
     expect(secondDecisionId).toBe(firstDecisionId)
   })
 
@@ -873,12 +872,12 @@ describe('useAgentThreadController', () => {
       expectedNextCommandSequence: string
       commands: Array<{ clientCommandId: string }>
     }
-    // 409 = the batch was NOT accepted: the retry uses the refreshed head/nextSequence with
-    // NEW command ids instead of replaying the stale batch.
+    // 409 = 该 batch 未被接受：重试使用刷新后的 head/nextSequence
+    // 以及全新的 command id，而不是回放陈旧的 batch。
     expect(second.expectedHeadEntryId).toBe('h1')
     expect(second.expectedNextCommandSequence).toBe('3')
     expect(second.commands[0]?.clientCommandId).not.toBe(first.commands[0]?.clientCommandId)
-    // Network/uncertain failures would keep the exact batch; 409 must not.
+    // 网络/不确定失败会保留精确 batch；409 不能这样做。
     void first
     void second
   })
@@ -895,7 +894,7 @@ describe('useAgentThreadController', () => {
     })
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    // First ALLOW fails: the retry reuses the SAME decision id.
+    // 第一次 ALLOW 失败：重试复用同一个 decision id。
     vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(new Error('network'))
     await act(async () => {
       await result.current.decideApproval('inv-1', 'ALLOW')
@@ -905,7 +904,7 @@ describe('useAgentThreadController', () => {
     expect(allowCalls[0]?.[2].decisionId).toBe(allowCalls[1]?.[2].decisionId)
 
     vi.mocked(harnessService.decideApproval).mockClear()
-    // A successful decision refreshes both the snapshot and the Chat-scoped list.
+    // 决策成功后会同时刷新 snapshot 与 Chat-scoped 列表。
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     await act(async () => {
       await result.current.decideApproval('inv-1', 'DENY')

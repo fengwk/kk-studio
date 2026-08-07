@@ -86,10 +86,10 @@ describe('ToolMessageBlock', () => {
       'src',
       'data:image/png;base64,aGVsbG8=',
     )
-    // file: URI is shown as text (not as an inline media element)
+    // file: URI 仅以文本形式展示（不作为内联媒体元素）
     expect(screen.getByText('file:///tmp/result.json')).toBeInTheDocument()
     expect(screen.getByText('[audio] audio/mpeg')).toBeInTheDocument()
-    // Two open-raw links: file: (URI is shown as text + link) and audio (no previewable src, has fallback link)
+    // 两个"打开原始内容"链接：file:（URI 以文本+链接形式展示）和 audio（无可预览 src，提供后备链接）
     expect(screen.getAllByRole('link', { name: '打开原始内容' })).toHaveLength(2)
   })
 
@@ -103,7 +103,7 @@ describe('ToolMessageBlock', () => {
               name: 'manifest.json',
               mime: 'application/json',
               data: 'file:///tmp/manifest.json',
-              // ResourceMessageContent.preview is a TEXT excerpt, not a URL.
+              // ResourceMessageContent.preview 是文本摘录，而非 URL。
               preview: '{"version":1,"tools":["web-search"]}',
             },
           ],
@@ -112,7 +112,7 @@ describe('ToolMessageBlock', () => {
     )
 
     expect(screen.getByText('file:///tmp/manifest.json')).toBeInTheDocument()
-    // The preview must render as plain text, never as an image with src=<preview text>.
+    // preview 必须以纯文本形式渲染，绝不能作为 src=<preview text> 的图片。
     expect(screen.getByText('{"version":1,"tools":["web-search"]}')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
@@ -134,7 +134,7 @@ describe('ToolMessageBlock', () => {
     expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
 
-    // Re-enabled once the request settles.
+    // 请求结束后再次启用。
     rerender(
       <ToolMessageBlock
         message={message({
@@ -172,7 +172,7 @@ describe('ToolMessageBlock', () => {
     await user.click(screen.getByRole('button', { name: '拒绝' }))
     expect(onDecideApproval).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'tool-1' }), 'DENY')
 
-    // Hidden when approval already decided.
+    // 审批已决定时隐藏。
     rerender(
       <ToolMessageBlock
         message={message({
@@ -186,7 +186,7 @@ describe('ToolMessageBlock', () => {
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
 
-    // Hidden when approval not required.
+    // 无需审批时隐藏。
     rerender(
       <ToolMessageBlock
         message={message({
@@ -199,7 +199,7 @@ describe('ToolMessageBlock', () => {
     )
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
 
-    // Hidden when no decision handler.
+    // 没有决策处理器时隐藏。
     rerender(
       <ToolMessageBlock
         message={message({
@@ -267,8 +267,8 @@ describe('ToolMessageBlock', () => {
     )
     expect(screen.getByText('boom')).toBeInTheDocument()
 
-    // Terminal data: resource contents render under the call until the durable result Entry
-    // arrives (auto-preview); a remote http(s) resource renders as stable URI + link instead.
+    // 终止态数据：资源内容会渲染在调用下，直到持久的 result Entry 到达（自动预览）；
+    // 远程 http(s) 资源则只渲染为稳定 URI + 链接。
     rerender(
       <ToolMessageBlock
         message={message({
@@ -304,7 +304,7 @@ describe('ToolMessageBlock', () => {
         })}
       />,
     )
-    // Remote resources are never inlined: stable URI text + explicit link only.
+    // 远程资源绝不内联：只展示稳定 URI 文本 + 显式链接。
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getByText('https://example.com/remote.png')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '打开原始内容' })).toHaveAttribute(
@@ -312,7 +312,7 @@ describe('ToolMessageBlock', () => {
       'noopener noreferrer',
     )
 
-    // No transient block when the durable result phase already took over.
+    // 持久 result 阶段已接管时，不显示瞬态块。
     rerender(
       <ToolMessageBlock
         message={message({

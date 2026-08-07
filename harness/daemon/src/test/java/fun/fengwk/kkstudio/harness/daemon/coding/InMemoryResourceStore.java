@@ -13,7 +13,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Test-friendly resource store retaining immutable copies in memory with canonical file URIs. */
+/** 测试友好的 resource store：以规范 file URI 在内存中保留不可变副本。 */
 public final class InMemoryResourceStore implements ResourceStore {
 
   private final Map<String, byte[]> resources = new ConcurrentHashMap<>();
@@ -44,7 +44,7 @@ public final class InMemoryResourceStore implements ResourceStore {
     return Arrays.copyOf(bytes, bytes.length);
   }
 
-  /** Returns an immutable-copy equivalent of previously stored bytes, or {@code null}. */
+  /** 返回先前存储字节的不可变副本（等价内容），不存在时返回 {@code null}。 */
   public byte[] get(String digest) {
     byte[] bytes = resources.get(digest);
     return bytes == null ? null : Arrays.copyOf(bytes, bytes.length);

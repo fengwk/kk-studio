@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
-/** Durable reason for closing a Model response turn. */
+/** 关闭 Model response turn 的 durable reason。 */
 public enum TurnEndReason {
   /** 用户显式 Stop。 */
   USER_STOP,

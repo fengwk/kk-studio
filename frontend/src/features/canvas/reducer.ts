@@ -534,7 +534,7 @@ export function canvasReducer(state: CanvasDocumentState, action: CanvasAction):
         copy: generatorSummary(prompt),
         meta: getParameterSummary({ ...node, prompt }),
       }
-      // Generation updates the node in place and records a message without forcing Thread open.
+      // Generation 原地更新节点并记录一条消息，但不会强制打开 Thread。
       return markSaving(withToast({
         ...state,
         nodes: state.nodes.map((item) => (item.id === node.id ? updated : item)),

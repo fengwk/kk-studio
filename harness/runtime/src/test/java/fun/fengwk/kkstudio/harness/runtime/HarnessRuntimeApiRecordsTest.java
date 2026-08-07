@@ -19,7 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.util.List;
 
-/** Value-record validation branches and typed exceptions of the root control-plane API. */
+/** 根控制面 API 的 Value-record 校验分支与类型化异常。 */
 class HarnessRuntimeApiRecordsTest {
 
   @Test

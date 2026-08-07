@@ -47,8 +47,8 @@ describe('Session Entry Tree', () => {
     expect(byEntryId.get('user')?.hasBranchConnector).toBe(true)
     expect(byEntryId.get('user')?.isBranchPoint).toBe(false)
     expect(byEntryId.get('user')?.ancestorConnectors).toEqual([{ continues: false }])
-    // The first linear response after a split stays one level deeper, so it reads as part of
-    // the first branch rather than as a third sibling of the root.
+    // 拆分后的首个线性响应保持更深一层，因此它被视为第一条 branch 的一部分，
+    // 而不是 root 的第三个兄弟。
     expect(byEntryId.get('assistant')?.depth).toBe(2)
     expect(byEntryId.get('assistant')?.hasBranchConnector).toBe(false)
     expect(byEntryId.get('assistant')?.isBranchPoint).toBe(true)
@@ -79,7 +79,7 @@ describe('Session Entry Tree', () => {
     ]
     const rows = buildSessionEntryTree(tree, 'conversation')
     expect(rows.map((row) => row.entry.entryId)).toEqual(['user', 'assistant'])
-    // `root` and `tool` are hidden; `assistant` re-attaches to `user` without indentation.
+    // `root` 和 `tool` 被隐藏；`assistant` 不带缩进地重新挂到 `user` 下。
     expect(rows[1]?.parentId).toBe('user')
     expect(rows[1]?.depth).toBe(0)
     expect(rows[1]?.ancestorConnectors).toEqual([])
@@ -98,7 +98,7 @@ describe('Session Entry Tree', () => {
     const rows = buildSessionEntryTree(tree, 'conversation')
     const byEntryId = new Map(rows.map((row) => [row.entry.entryId, row]))
     expect(rows.map((row) => row.entry.entryId)).toEqual(['user1', 'assistant', 'custom', 'user2', 'response'])
-    // With `tool` hidden, `assistant` and `custom` re-attach as immediate children of `user1`.
+    // 隐藏 `tool` 后，`assistant` 和 `custom` 作为 `user1` 的直接子节点重新挂载。
     expect(byEntryId.get('user1')?.depth).toBe(1)
     expect(byEntryId.get('user1')?.isBranchPoint).toBe(true)
     expect(byEntryId.get('assistant')?.depth).toBe(2)
@@ -175,7 +175,7 @@ describe('Session Entry Tree', () => {
     const rows = buildSessionEntryTree(entries, 'conversation')
     const resolved = resolveSelection(rows, entries, 'tool')
     expect(resolved?.entryId).toBe('assistant')
-    // Root entry with no ancestors resolves to the last visible row.
+    // 没有祖先的 root entry 会回退到最后一行可见 row。
     expect(resolveSelection(rows, entries, 'root')?.entryId).toBe('custom')
     expect(resolveSelection(rows, entries, 'missing')?.entryId).toBe('custom')
     expect(resolveSelection([], entries, 'assistant')).toBeNull()

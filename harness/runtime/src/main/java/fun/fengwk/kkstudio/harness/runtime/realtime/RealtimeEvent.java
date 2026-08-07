@@ -83,7 +83,7 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
     }
   }
 
-  /** One best-effort partial result emitted by a ToolInvocation attempt. */
+  /** ToolInvocation attempt 发出的 best-effort partial result。 */
   record ToolPartial(
       long threadId, long toolInvocationId, int attempt, ToolResult partial, Instant createdAt)
       implements RealtimeEvent {

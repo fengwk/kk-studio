@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-/** Typed SET_THINKING_LEVEL payload. */
+/** SET_THINKING_LEVEL 的 typed payload。 */
 public record SetThinkingLevelCommandPayload(String thinkingLevel) implements ThreadCommandPayload {
 
   public SetThinkingLevelCommandPayload {

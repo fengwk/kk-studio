@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
-/** Stable enum for the supported input modalities carried by an Agent model config. */
+/** Agent 模型配置携带的受支持输入模态的稳定枚举。 */
 public enum AgentModelInputModality {
   TEXT,
   IMAGE,

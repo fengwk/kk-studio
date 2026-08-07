@@ -1,10 +1,8 @@
 /**
- * Spring/PostgreSQL/Redis infrastructure adapters for the pure Java Harness Runtime.
+ * 纯 Java Harness Runtime 的 Spring / PostgreSQL / Redis 基础设施适配层。
  *
- * <p>This module implements {@link HarnessStore} and process wiring without owning Thread next-step
- * selection, Turn protocol, retry, Tool sibling aggregation or any other Agent Loop business rule.
- * Technology dependencies are introduced only by the concrete adapter slice that directly uses
- * them.
+ * <p>本模块实现 {@link HarnessStore} 与进程 wiring，但不拥有 Thread next-step 选择、Turn protocol、retry、Tool
+ * sibling aggregation 或任何其他 Agent Loop business rule；技术依赖只由直接使用它们的具体 adapter slice 引入。
  */
 package fun.fengwk.kkstudio.harness.runtime.spring;
 

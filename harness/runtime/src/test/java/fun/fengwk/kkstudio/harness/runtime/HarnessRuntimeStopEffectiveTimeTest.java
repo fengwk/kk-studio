@@ -25,8 +25,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * Stop clamps one effective timestamp to all locked durable facts, so local clock rollback or
- * cross-node skew cannot regress Command, Entry, Thread, Model or Tool time.
+ * Stop 将一个有效时间戳钳制到所有已锁定的 durable 事实，本地时钟回滚或跨节点时钟偏差 都不能让 Command、Entry、Thread、Model 或 Tool 的时间倒退。
  */
 class HarnessRuntimeStopEffectiveTimeTest {
 

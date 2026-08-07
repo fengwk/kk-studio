@@ -28,13 +28,11 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Single typed codec/parser for Agent model configurations.
+ * Agent model 配置的唯一类型化 codec/parser。
  *
- * <p>This class owns every read/write against the persisted {@code config} JSONB column. Mutations
- * and reads must go through {@link #decode(String)} / {@link #encode(AgentModelConfigDTO)}; any
- * other path that performs its own ObjectMapper mapping will drift out of sync. Validation runs
- * against the typed DTOs; persisted JSON is treated as an opaque carrier. Validation messages use
- * the public {@code config.*} terminology.
+ * <p>本类独占对持久化 {@code config} JSONB 列的所有读写。变更与读取都必须经过 {@link #decode(String)} / {@link
+ * #encode(AgentModelConfigDTO)}；任何自行执行 ObjectMapper 映射的其他路径都会与规范漂移。 校验针对类型化 DTO 进行；持久化 JSON
+ * 只作为不透明载体。校验消息使用公开的 {@code config.*} 术语。
  */
 @Component
 public final class AgentModelRuntimeConfigParser {
@@ -69,10 +67,9 @@ public final class AgentModelRuntimeConfigParser {
   }
 
   /**
-   * Decode persisted JSON into the typed config DTO.
+   * 将持久化 JSON 解码为类型化 config DTO。
    *
-   * @throws IllegalArgumentException when JSON is null/blank/malformed or the typed DTO fails
-   *     validation
+   * @throws IllegalArgumentException JSON 为 null/空白/格式错误，或类型化 DTO 校验失败时抛出
    */
   public AgentModelConfigDTO decode(String configJson) {
     if (configJson == null || configJson.isBlank()) {
@@ -89,7 +86,7 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  /** Encode a typed DTO into canonical JSON after revalidation. */
+  /** 重新校验后把类型化 DTO 编码为 canonical JSON。 */
   public String encode(AgentModelConfigDTO config) {
     validate(config);
     try {
@@ -99,12 +96,12 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  /** Build the runtime descriptor view from persisted JSON. */
+  /** 从持久化 JSON 构建 runtime descriptor 视图。 */
   public ParsedAgentModelConfig parse(String configJson) {
     return toParsedConfig(decode(configJson));
   }
 
-  /** Build the runtime descriptor view from a typed config DTO. */
+  /** 从类型化 config DTO 构建 runtime descriptor 视图。 */
   public ParsedAgentModelConfig parse(AgentModelConfigDTO config) {
     validate(config);
     return toParsedConfig(config);
@@ -370,7 +367,7 @@ public final class AgentModelRuntimeConfigParser {
     return new IllegalArgumentException("invalid agent model: " + message, cause);
   }
 
-  /** Verified runtime model configuration independent of Provider credentials and resource IDs. */
+  /** 已校验的 runtime model 配置，与 Provider 凭据和资源 ID 无关。 */
   public record ParsedAgentModelConfig(
       long contextWindow,
       long maxOutputTokens,

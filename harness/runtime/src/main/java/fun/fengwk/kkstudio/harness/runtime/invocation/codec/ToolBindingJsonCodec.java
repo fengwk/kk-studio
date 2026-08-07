@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
 import java.util.Objects;
 
-/** Strict deterministic JSON codec for one durable Tool binding. */
+/** 一个 durable Tool binding 的严格、确定性 JSON codec。 */
 public final class ToolBindingJsonCodec {
 
   private static final String CONTEXT = "toolBinding";

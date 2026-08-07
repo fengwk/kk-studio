@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-/** Projects the server-memory live Environment registry into share DTOs. */
+/** 把服务端内存 live Environment registry 投影为 share DTO。 */
 @Service
 public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryService {
 

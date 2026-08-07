@@ -27,8 +27,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Static Agent config validation: tool names must come from local ToolFactories or the fixed {@link
- * EnvironmentToolCatalog}, and skill names must respect the bounded length rule.
+ * Agent 配置的静态校验：工具名必须来自本地 ToolFactories 或固定的 {@link EnvironmentToolCatalog}，且 skill 名必须遵守有界长度规则。
  */
 class AgentDefinitionConfigValidatorTest {
 
@@ -85,8 +84,7 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void rejectsDuplicatePlatformToolRegistration() {
-    // Two distinct factories claiming the same (name, version) is rejected at the ToolFactories
-    // construction boundary — the validator never sees ambiguous tool names.
+    // 两个不同工厂声明相同 (name, version) 会在 ToolFactories 构造边界被拒绝——校验器永远不会看到歧义的工具名。
     ToolDescriptor descriptor = platformDescriptor("dup", "1");
     IllegalArgumentException error =
         assertThrows(

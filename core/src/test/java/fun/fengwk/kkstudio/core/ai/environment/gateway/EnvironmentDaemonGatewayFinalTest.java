@@ -50,8 +50,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Gateway is connection/protocol transport only. Durable claim/lease/terminal lives in Harness
- * Runtime. Routing uses the canonical EnvironmentId bound at HELLO; the display name never routes.
+ * Gateway 仅承担连接/协议传输职责。durable 的 claim/lease/terminal 由 Harness Runtime 负责。路由使用 HELLO 时确定的
+ * canonical EnvironmentId；display name 永不参与路由。
  */
 class EnvironmentDaemonGatewayFinalTest {
   private static final EnvironmentId ENVIRONMENT_ID =
@@ -143,7 +143,7 @@ class EnvironmentDaemonGatewayFinalTest {
     BinaryToolContent binary = (BinaryToolContent) listener.completed.contents().get(0);
     assertEquals("text/plain", binary.mediaType());
     assertEquals(2, binary.content().length);
-    // No durable store is touched by the gateway; the result stays an in-memory Binary.
+    // 网关不触碰任何 durable store，结果保持为内存中的 Binary。
     assertEquals(1, listener.completed.contents().size());
   }
 
@@ -216,15 +216,15 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture =
         fixture(
             environmentId -> {
-              // Re-enter gateway monitor (loadSkill) without re-dispatching READY. Deadlocks if
-              // READY still held ConnectionState or gateway locks incorrectly.
+              // 重新进入 gateway monitor（loadSkill）但不再分派 READY。若 READY 仍持有
+              // ConnectionState 或 gateway 锁，则会发生死锁。
               try {
                 gatewayRef
                     .get()
                     .loadSkill(environmentId, "missing-skill", Duration.ofMillis(20))
                     .get();
               } catch (Exception ignored) {
-                // Offline/timeout paths still exercise locked sections.
+                // Offline/timeout 路径仍会执行加锁区段。
               }
               readySawLockFree.set(true);
             });
@@ -237,7 +237,7 @@ class EnvironmentDaemonGatewayFinalTest {
           @Override
           public void onComplete(ToolResult result) {
             super.onComplete(result);
-            // Re-enter close path while completing; must not run under ConnectionState lock.
+            // 在完成时重新进入 close 路径；不能在 ConnectionState 锁内执行。
             fixture.gateway.close(connection.connectionId());
             completeSawLockFree.set(true);
           }
@@ -308,7 +308,7 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(ENVIRONMENT_ID, registered.id());
     assertEquals(ENVIRONMENT_NAME, registered.name());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
-    // Tools come from the static EnvironmentToolCatalog; wire READY does not advertise them.
+    // 工具来自静态 EnvironmentToolCatalog；wire READY 不会对外声明它们。
     assertEquals(EnvironmentToolCatalog.descriptors(), registered.tools());
   }
 
@@ -370,7 +370,7 @@ class EnvironmentDaemonGatewayFinalTest {
   void wrongIdOnBoundConnectionIsRejectedWithoutRerouting() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-wrong-id");
-    // A bound connection must never accept envelopes scoped to another environment id.
+    // 已绑定连接绝不能接受作用域为其他环境 id 的 envelope。
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
@@ -386,8 +386,8 @@ class EnvironmentDaemonGatewayFinalTest {
   void nameMismatchWithinConnectionProtocolFailsWithoutChangingRoute() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-name-mismatch");
-    // Same canonical id with a different display name is a protocol-consistency failure: the
-    // connection is closed and the route is never re-keyed to the presented name.
+    // 同一 canonical id 携带不同 display name 属于协议一致性失败：连接被关闭，
+    // 路由也绝不会改用呈现的名称重新寻址。
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}", "renamed"));
@@ -396,7 +396,7 @@ class EnvironmentDaemonGatewayFinalTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         messageTypes(connection.envelopes()));
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_ID).isEmpty());
-    // The id is immediately re-bindable with a fresh connection.
+    // 该 id 可立即用新连接重新绑定。
     FakeConnection rebind = new FakeConnection("connection-rebind");
     fixture.gateway.open(rebind);
     fixture.gateway.receive(rebind.connectionId(), hello(0));
@@ -409,7 +409,7 @@ class EnvironmentDaemonGatewayFinalTest {
     FakeConnection connectionA = fixture.connectReady("connection-a");
     FakeConnection connectionB = new FakeConnection("connection-b");
     fixture.gateway.open(connectionB);
-    // Both environments advertise the same display name; only the canonical id routes.
+    // 两个环境使用相同的 display name；只有 canonical id 用于路由。
     fixture.gateway.receive(
         connectionB.connectionId(), hello(0, OTHER_ENVIRONMENT_ID, ENVIRONMENT_NAME));
     fixture.gateway.receive(
@@ -467,7 +467,7 @@ class EnvironmentDaemonGatewayFinalTest {
         inlineResourceStore(new byte[0]));
   }
 
-  /** Minimal daemon-side resource store: stores/reads only the in-memory test bytes. */
+  /** 端侧最小的 daemon 资源 store：仅存/读测试用内存字节。 */
   private static DaemonResourceStore inlineResourceStore(byte[] bytes) {
     return new DaemonResourceStore() {
       @Override

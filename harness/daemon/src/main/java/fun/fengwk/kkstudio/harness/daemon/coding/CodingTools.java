@@ -4,14 +4,12 @@ import fun.fengwk.kkstudio.harness.daemon.DaemonToolRegistry;
 
 import java.util.Objects;
 
-/** Registers the production Environment coding-tool set in stable capability order. */
+/** 按稳定的能力顺序注册生产环境 Environment coding-tool 集合。 */
 public final class CodingTools {
 
   private CodingTools() {}
 
-  /**
-   * Registers read, write, edit, apply_patch, bash, grep, find, and the three LSP baseline tools.
-   */
+  /** 注册 read、write、edit、apply_patch、bash、grep、find 以及三个 LSP 基线工具。 */
   public static void registerAll(DaemonToolRegistry registry, CodingToolsConfig config) {
     Objects.requireNonNull(registry, "registry");
     registry.register(new ReadTool(config));

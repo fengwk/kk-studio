@@ -23,7 +23,7 @@ class AgentModelRuntimeConfigParserTest {
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(new ObjectMapper());
 
-  /** Every executable field, including six independent prices, survives strict parsing. */
+  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());
@@ -58,7 +58,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("3.6"), parsed.pricing().reasoningPerMillionTokens());
   }
 
-  /** Typed DTO round-trip: decode -> encode -> parse yields the same runtime snapshot. */
+  /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
   @Test
   void decodeThenEncodeRoundTripsEveryTypedConfigField() {
     AgentModelConfigDTO decoded = parser.decode(validConfig());
@@ -70,7 +70,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals("high", parsed.variants().get(0).reasoningEffort());
   }
 
-  /** off reasoningEffort is normalized to null. */
+  /** off 的 reasoningEffort 规范化为 null。 */
   @Test
   void normalizesOffReasoningEffortToNull() {
     String config =
@@ -79,7 +79,7 @@ class AgentModelRuntimeConfigParserTest {
     assertNull(parsed.variants().get(0).reasoningEffort());
   }
 
-  /** Disabled reasoning surface as falsy tools/reasoning booleans on the descriptor. */
+  /** 禁用的 reasoning 在描述符上以 falsy 的 tools/reasoning 布尔形式呈现。 */
   @Test
   void exposesReasoningAndToolsAsBooleans() {
     String config = validConfig().replace("\"reasoning\":true", "\"reasoning\":false");
@@ -88,7 +88,7 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.tools());
   }
 
-  /** Missing fields, wrong JSON types, unknown enums, and invalid variants fail explicitly. */
+  /** 缺失字段、错误的 JSON 类型、未知枚举与无效 variant 都明确失败。 */
   @Test
   void rejectsIncompleteOrMistypedExecutableConfiguration() {
     assertInvalid("{}", "config.limit is required");
@@ -104,7 +104,7 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"), "inputModalities[0]");
   }
 
-  /** Structural and numeric boundaries reject every shape that could create an unusable model. */
+  /** 结构和数值边界会拒绝任何可能导致模型不可用的形态。 */
   @Test
   void rejectsInvalidVariantPricingAndJsonBoundaries() {
     assertInvalid("", "config must not be blank");
@@ -150,7 +150,7 @@ class AgentModelRuntimeConfigParserTest {
         "inputPerMillionTokens must not be negative");
   }
 
-  /** Persisted JSON must never be silently repaired: null/blank/malformed shapes throw loudly. */
+  /** 已持久化的 JSON 永远不能被静默修复：null/空白/畸形结构应大声抛出。 */
   @Test
   void rejectsInvalidPersistedJsonShapes() {
     assertInvalid("", "config must not be blank");
@@ -171,7 +171,7 @@ class AgentModelRuntimeConfigParserTest {
         "config.variants must not be empty");
   }
 
-  /** Persisted config decoding rejects unknown fields, scalar coercion, and trailing documents. */
+  /** 持久化配置解码拒绝未知字段、标量强转与尾随文档。 */
   @Test
   void rejectsUnknownFieldsCoercionAndTrailingJson() {
     assertInvalid(
@@ -184,10 +184,7 @@ class AgentModelRuntimeConfigParserTest {
         "surrounding whitespace");
   }
 
-  /**
-   * Provider-specific penalty ranges may include negatives; the generic contract only requires
-   * finiteness.
-   */
+  /** Provider 特定的 penalty 区间可能包含负值；通用契约仅要求有穷性。 */
   @Test
   void acceptsFiniteNegativePenalties() {
     var parsed =
@@ -200,7 +197,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(-1.0, parsed.variants().get(0).presencePenalty());
   }
 
-  /** The typed DTO form rejects null and broken sub-shapes; partial sub-shapes fail loudly. */
+  /** 类型化 DTO 形式拒绝 null 和损坏的子结构；部分子结构会以明确方式失败。 */
   @Test
   void rejectsInvalidTypedConfigDirectly() {
     AgentModelConfigDTO base = parser.decode(validConfig());

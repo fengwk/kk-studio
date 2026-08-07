@@ -51,9 +51,9 @@ function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
 
 describe('command batch replay identity (immutable user intent)', () => {
   it('keeps the identity stable when only the effective base changes (queued SET_* projection)', () => {
-    // Scenario: base=A, draft=B was submitted; the queued SET_* projection then makes the
-    // next snapshot's effectiveBase=B. The user made NO edit: the retry must still hit the
-    // original identity and replay the exact batch, not mint a USER_MESSAGE-only batch.
+    // 场景：base=A、draft=B 已提交；queued SET_* 投影让下一次 snapshot 的
+    // effectiveBase=B。用户没有做任何编辑：重试仍需命中原始 identity 并逐字节
+    // replay 同一个 batch，而不是生成一个仅含 USER_MESSAGE 的 batch。
     const threadA = thread()
     const baseA = draftOf({ agentName: 'assistant' })
     const draftB = draftOf({ agentName: 'coder' })
@@ -70,8 +70,8 @@ describe('command batch replay identity (immutable user intent)', () => {
       content: 'same intent',
     })
     expect(before.identity).toBe(afterProjection.identity)
-    // Different bases yield different batches (settings diff), but the replay decision uses
-    // the identity, so the ORIGINAL batch wins for the retry.
+    // 不同的 base 会生成不同的 batch（settings diff），但 replay 决策依据的是
+    // identity，因此重试时仍由 ORIGINAL batch 胜出。
     expect(before.batch).not.toEqual(afterProjection.batch)
   })
 
@@ -109,8 +109,8 @@ describe('command batch replay identity (immutable user intent)', () => {
   })
 
   it('shares the identity structure between the first-send and the bound-pane batch', () => {
-    // A failed first send replayed through a bound pane (same thread, same content, target
-    // draft = thread branch draft) must reuse the exact batch byte-for-byte.
+    // 首次发送失败后通过绑定面板 replay（同一 thread、同一 content、target
+    // draft = thread branch draft）必须逐字节复用同一 batch。
     const created = thread({ threadId: 't-created', nextCommandSequence: '2' })
     const firstSend = buildFirstSendMessagePlan({
       thread: created,
@@ -124,8 +124,8 @@ describe('command batch replay identity (immutable user intent)', () => {
       content: 'retry me',
       createCommandId: () => 'unused-fresh-id',
     })
-    // Identity matches: the controller replay then reuses the ORIGINAL plan (cid-stable)
-    // instead of the freshly built batch (unused-fresh-id).
+    // Identity 匹配：controller 的 replay 复用 ORIGINAL plan（cid-stable），
+    // 而不是新构建的 batch（unused-fresh-id）。
     expect(boundPane.identity).toBe(firstSend.identity)
     expect(boundPane.batch.commands[0]?.clientCommandId).not.toBe(firstSend.batch.commands[0]?.clientCommandId)
   })

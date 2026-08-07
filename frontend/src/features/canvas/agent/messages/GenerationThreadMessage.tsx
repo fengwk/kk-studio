@@ -2,7 +2,7 @@ import { GENERATION_PROFILES } from '@/features/canvas/data'
 import type { GenerationMode } from '@/features/canvas/types'
 import { useI18n } from '@/shared/i18n'
 
-/** Pure presentation for a completed generator result summary in the thread. */
+/** Thread 中已完成生成器结果摘要的纯展示组件。 */
 export function GenerationThreadMessage({
   mode,
   parameters,

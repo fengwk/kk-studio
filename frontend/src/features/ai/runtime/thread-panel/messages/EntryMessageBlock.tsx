@@ -3,8 +3,8 @@ import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-tim
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Portable durable-Entry audit block. It receives the stable timeline contract rather than
- * Harness DTOs, controllers, or query state.
+ * 可复用的持久 Entry 审计块。它接收的是稳定的 timeline 契约，
+ * 而不是 Harness DTO、controller 或 query state。
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
   const { t } = useI18n()

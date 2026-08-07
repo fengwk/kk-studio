@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import java.util.Objects;
 
-/** Small command-package helper for stable names and client command IDs. */
+/** 用于稳定名称与 client command ID 的小型 command 包工具类。 */
 final class CommandValueValidation {
 
   private CommandValueValidation() {}

@@ -5,9 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/**
- * Configuration bounds keep daemon attachment fail-closed and text payload limits representable.
- */
+/** 配置边界让 daemon 接入安全失败且文本载荷上限可表达。 */
 class EnvironmentGatewayPropertiesTest {
 
   @Test

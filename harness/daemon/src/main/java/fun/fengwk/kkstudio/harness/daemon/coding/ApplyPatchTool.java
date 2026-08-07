@@ -12,7 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Applies OpenCode-style multi-file patches inside the environment root. */
+/** 在 environment root 内应用 OpenCode 风格的多文件 patch。 */
 public final class ApplyPatchTool extends AbstractCodingTool {
 
   public ApplyPatchTool(CodingToolsConfig config) {

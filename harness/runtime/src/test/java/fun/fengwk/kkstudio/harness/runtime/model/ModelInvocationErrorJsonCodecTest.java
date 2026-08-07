@@ -26,9 +26,7 @@ class ModelInvocationErrorJsonCodecTest {
 
   private final ModelInvocationErrorJsonCodec codec = new ModelInvocationErrorJsonCodec();
 
-  /**
-   * The canonical error snapshot has exactly two deterministic fields and round-trips unchanged.
-   */
+  /** 规范的 error snapshot 仅含两个 deterministic 字段,且 round-trip 完全不变。 */
   @Test
   void roundTripsCanonicalErrorSnapshot() {
     ModelInvocationError error =
@@ -40,7 +38,7 @@ class ModelInvocationErrorJsonCodecTest {
     assertEquals(error, codec.decodeNode(codec.encodeNode(error)));
   }
 
-  /** Every Provider error classification remains explicit at the durable JSON boundary. */
+  /** 所有 Provider error 分类在持久化 JSON boundary 上都必须保持显式。 */
   @Test
   void roundTripsEveryProviderErrorKind() {
     for (ProviderErrorKind kind : ProviderErrorKind.values()) {
@@ -49,7 +47,7 @@ class ModelInvocationErrorJsonCodecTest {
     }
   }
 
-  /** String decoding rejects duplicate fields and trailing documents before tree projection. */
+  /** String 解码在进入 tree projection 之前必须拒绝 duplicate field 与 trailing document。 */
   @Test
   void rejectsDuplicateFieldsAndTrailingDocuments() {
     String canonical = canonicalNode().toString();
@@ -59,7 +57,7 @@ class ModelInvocationErrorJsonCodecTest {
         () -> codec.decode("{\"kind\":\"TRANSIENT\",\"kind\":\"AUTH\",\"message\":\"x\"}"));
   }
 
-  /** Unknown, missing, and wrong-typed fields are rejected rather than ignored or defaulted. */
+  /** 未知、缺失以及类型错误的字段必须被拒绝，不得忽略或取默认值。 */
   @Test
   void rejectsUnknownMissingAndWrongTypedFields() {
     ObjectNode unknown = canonicalNode().put("extra", true);
@@ -77,7 +75,7 @@ class ModelInvocationErrorJsonCodecTest {
         () -> codec.decodeNode(canonicalNode().put("kind", "NETWORK")));
   }
 
-  /** Malformed roots, blank semantic values, and null API arguments fail at the boundary. */
+  /** Malformed 根节点、空白语义值以及 null API 参数必须在 boundary 失败。 */
   @Test
   void rejectsMalformedBlankAndNullInputs() {
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{"));

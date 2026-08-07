@@ -88,7 +88,7 @@ describe('AI resource cards', () => {
     )
 
     expect(screen.getByText('minimax/MiniMax')).toBeInTheDocument()
-    // Card shows tools and skills truncated; remaining tools (3 of 2) roll up to +1.
+    // 卡片对 tools 和 skills 做截断展示；超出部分（3 个中的 2 个）折叠为 +1。
     expect(screen.getByText('+1')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
     await user.click(screen.getByRole('button', { name: '删除 assistant' }))
@@ -165,7 +165,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    // provider deleted: still keep unique providerName/model ref
+    // provider 已删除：仍保留唯一的 providerName/model ref
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3)
   })

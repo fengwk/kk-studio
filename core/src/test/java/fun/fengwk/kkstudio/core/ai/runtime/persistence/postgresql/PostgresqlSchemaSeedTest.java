@@ -20,10 +20,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Objects;
 
-/**
- * Verifies that the dev and e2e seeds are idempotent and the e2e seed never stores a real
- * credential. Re-application must not mutate row content for deterministic columns.
- */
+/** 验证 dev 与 e2e seed 都具备幂等性，并且 e2e seed 永不存储真实凭据。重新执行不能改变确定性列的行内容。 */
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -39,11 +36,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   @Test
   void devSeedIsIdempotentAndStable() throws Exception {
     applyAndAssertDevSeed();
-    // Snapshot deterministic columns.
+    // 快照确定性列。
     String devFingerprintBefore = devSeedFingerprint();
     long maxVersionBefore = maxVersionAcrossAgentTables();
     long sequenceBeforeReapply = nextSequenceValue();
-    // Re-apply: rows must remain identical (no version bumps, no mutated timestamps).
+    // 重新执行：行内容必须保持一致（无版本变化、无时间戳变化）。
     applyAndAssertDevSeed();
     assertEquals(devFingerprintBefore, devSeedFingerprint(), "dev seed must be idempotent");
     assertEquals(maxVersionBefore, maxVersionAcrossAgentTables(), "version must stay 0");
@@ -58,7 +55,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       applyE2eDatabase(conn);
       assertE2eSeedContent(conn);
       assertProfileMigrationRecorded(conn, "e2e seed");
-      // Re-run the profile migration and assert that deterministic columns do not change.
+      // 重新运行 profile migration，并断言确定性列不发生变化。
       String before = e2eFingerprint();
       long sequenceBeforeReapply = nextSequenceValue();
       applyE2eDatabase(conn);
@@ -69,8 +66,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           nextSequenceValue() > sequenceBeforeReapply,
           "re-applying a seed must preserve sequence progress");
     }
-    // Catalog identities are names; no seed row consumes the business sequence.
-    // Subsequent inserts must not collide with deterministic seed ids.
+    // Catalog 标识就是名称；任何 seed 行都不会消耗业务序列。
+    // 后续插入必须不会与确定性 seed id 冲突。
     assertDoesNotThrow(
         () -> {
           try (Connection conn = newConnection();
@@ -216,7 +213,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   }
 
   private static String devSeedFingerprint() throws Exception {
-    // Concatenate deterministic column values across the rows the dev seed owns.
+    // 把 dev seed 拥有的所有行的确定性列值拼接在一起。
     StringBuilder sb = new StringBuilder();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement()) {

@@ -15,10 +15,10 @@ export function createChatService(client: HttpClient = apiClient) {
       client.put(`/ai/chat/${encodeURIComponent(chatId)}`, data),
     deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
       client.delete(`/ai/chat/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
-    /** All Threads associated with this Chat (association order newest first); client sorts. */
+    /** 与此 Chat 关联的全部 Thread（关联顺序为最新在前）；由客户端排序。 */
     listChatThreads: (chatId: string): Promise<HarnessThreadDTO[]> =>
       client.get(`/ai/chat/${encodeURIComponent(chatId)}/threads`),
-    /** Create a Thread atomically with the complete branch draft and return its snapshot. */
+    /** 以完整的 branch 草稿原子化创建 Thread 并返回其快照。 */
     createChatThread: (chatId: string, data: HarnessThreadCreateDTO): Promise<HarnessThreadSnapshotDTO> =>
       client.post(`/ai/chat/${encodeURIComponent(chatId)}/threads`, data),
     associateThread: (chatId: string, threadId: string): Promise<void> =>

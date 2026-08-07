@@ -4,7 +4,7 @@ import { canvasReducer, createInitialCanvasState } from '@/features/canvas/reduc
 
 describe('controlled node position contract', () => {
   it('extracts multi-node position updates without RF domain types', () => {
-    // Stage integration: RF onNodesChange -> extractPositionUpdates -> move-nodes.
+    // Stage 集成：RF onNodesChange -> extractPositionUpdates -> move-nodes。
     const updates = extractPositionUpdates([
       { type: 'select', id: 'web' },
       { type: 'position', id: 'web', position: { x: 120, y: 180 } },

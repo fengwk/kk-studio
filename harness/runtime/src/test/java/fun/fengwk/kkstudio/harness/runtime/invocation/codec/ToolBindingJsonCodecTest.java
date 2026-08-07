@@ -13,15 +13,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
-/** Strict ToolBinding wire coverage for both platform and Environment routes. */
+/** 同时覆盖 platform 与 Environment route 的严格 ToolBinding wire。 */
 class ToolBindingJsonCodecTest {
 
   private final ToolBindingJsonCodec codec = new ToolBindingJsonCodec();
   private final ToolDescriptorJsonCodec descriptorCodec = new ToolDescriptorJsonCodec();
 
-  /**
-   * Exact JSON proves deterministic field order while round-trip re-runs domain route validation.
-   */
+  /** 精确 JSON 既证明字段顺序 deterministic，又在 round-trip 时重新执行领域 route 校验。 */
   @Test
   void roundTripsBothBindingKindsWithCanonicalJson() {
     ToolBinding environment = binding(ToolType.ENVIRONMENT);
@@ -45,7 +43,7 @@ class ToolBindingJsonCodecTest {
     assertNull(codec.decode(platformJson).environmentId());
   }
 
-  /** String boundaries reject malformed documents before any domain value can be constructed. */
+  /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
   @Test
   void rejectsNullDuplicateTrailingAndNonObjectDocuments() {
     String json = codec.encode(binding(ToolType.PLATFORM));
@@ -61,9 +59,7 @@ class ToolBindingJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /**
-   * Exact field/type checks and the ToolBinding constructor jointly reject corrupt durable rows.
-   */
+  /** 精确字段/类型检查与 ToolBinding 构造函数共同拒绝被破坏的持久化行。 */
   @Test
   void rejectsUnknownMissingWrongTypeAndInconsistentBindingFacts() {
     String descriptor = descriptorCodec.encode(descriptor(ToolType.ENVIRONMENT));

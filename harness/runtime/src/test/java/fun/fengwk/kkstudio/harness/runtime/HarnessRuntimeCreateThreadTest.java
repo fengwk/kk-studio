@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.ZoneOffset;
 
-/** createThread: atomic Session + ROOT + Thread creation, rollback, no Work, non-idempotency. */
+/** createThread：原子的 Session + ROOT + Thread 创建、回滚、无 Work、非幂等性。 */
 class HarnessRuntimeCreateThreadTest {
 
   private final InMemoryHarnessStore store = new InMemoryHarnessStore();

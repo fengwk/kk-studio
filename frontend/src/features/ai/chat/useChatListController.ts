@@ -101,7 +101,7 @@ export function useChatListController(
   return {
     chatsQuery,
     chats: chatsQuery.data ?? [],
-    // Keep API mutation errors out of page banner while modal is open; modal owns validation UX.
+    // modal 打开时不把 API mutation 错误暴露到页面 banner；由 modal 自行负责校验 UX。
     chatMutationError: modalOpen ? null : createChatMutation.error,
     openCreateChat,
     createChatModal: {

@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 
-/** Frozen Tool invocation request wire, including verbatim raw arguments JSON. */
+/** 完整 frozen 的 Tool 调用请求 wire，包含逐字的原始参数 JSON。 */
 class ToolInvocationRequestJsonCodecTest {
 
   private static final String ARGUMENTS_JSON = "{\n}";
@@ -19,9 +19,7 @@ class ToolInvocationRequestJsonCodecTest {
   private final ToolInvocationRequestJsonCodec codec = new ToolInvocationRequestJsonCodec();
   private final ToolBindingJsonCodec bindingCodec = new ToolBindingJsonCodec();
 
-  /**
-   * Exact output and round-trip prove raw arguments remain a string rather than being normalized.
-   */
+  /** 精确输出与 round-trip 共同证明原始参数保持字符串形式而未被规范化。 */
   @Test
   void roundTripsCanonicalRequestWithoutNormalizingArgumentsJson() {
     ToolBinding binding = binding(ToolType.ENVIRONMENT);
@@ -39,7 +37,7 @@ class ToolInvocationRequestJsonCodecTest {
     assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
   }
 
-  /** Duplicate/trailing/non-object documents cannot enter the durable request column. */
+  /** duplicate/trailing/非 object 的文档无法进入持久化的 request 字段。 */
   @Test
   void rejectsMalformedDocumentBoundaries() {
     ToolInvocationRequest request =
@@ -54,7 +52,7 @@ class ToolInvocationRequestJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** Nested exact fields, JSON-object syntax and descriptor matching are all revalidated. */
+  /** 嵌套精确字段、JSON-object 语法以及 descriptor 匹配都被重新校验。 */
   @Test
   void rejectsCorruptCallOrBindingFacts() {
     String json =
@@ -100,7 +98,7 @@ class ToolInvocationRequestJsonCodecTest {
         () -> codec.decode(json.replace("\"call\":{", "\"call\":{\"unknown\":true,")));
   }
 
-  /** Encode rechecks raw JSON so in-memory values cannot bypass the strict persistence boundary. */
+  /** encode 重新校验原始 JSON，使内存值无法绕过严格持久化边界。 */
   @Test
   void encodeRejectsArgumentsWithTrailingJsonDocuments() {
     ToolInvocationRequest request =

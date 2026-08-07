@@ -11,11 +11,10 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 /**
- * Normalizes Chat mutable fields and allocates Chat ids.
+ * 规范化 Chat 可变字段并分配 Chat id。
  *
- * <p>Update semantics: {@code null} fields preserve the current value. Chat title is required when
- * supplied; a supplied {@code agentName} must be non-blank. Catalog existence is validated by
- * {@link ChatGuard}.
+ * <p>更新语义：{@code null} 字段保留当前值。提供时 Chat title 必填；提供的 {@code agentName} 必须非空白。 catalog 存在性由 {@link
+ * ChatGuard} 校验。
  */
 @Component
 public class ChatMutationFactory {
@@ -82,7 +81,7 @@ public class ChatMutationFactory {
     }
   }
 
-  /** Normalizes the required Agent name text. */
+  /** 规范化必填的 Agent 名文本。 */
   private String parseRequiredAgentName(String raw) {
     if (raw == null) {
       throw new AiValidationException(RESOURCE, "agentName must not be blank");

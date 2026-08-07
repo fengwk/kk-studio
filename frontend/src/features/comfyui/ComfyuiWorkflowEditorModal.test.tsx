@@ -88,10 +88,10 @@ describe('ComfyuiWorkflowEditorModal', () => {
     expect(onDraftChange.mock.calls.some(([next]) => next.defaultSelector === '$.out')).toBe(true)
     expect(onDraftChange.mock.calls.some(([next]) => next.enabled === false)).toBe(true)
 
-    // Submit fires onSubmit through the form.
+    // Submit 通过表单触发 onSubmit。
     fireEvent.submit(screen.getByRole('button', { name: '确认创建' }).closest('form')!)
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    // Reference userEvent to keep the variable used when the import is inspected.
+    // 引用 userEvent 变量，确保 import 在被检查时仍被使用。
     void user
   })
 
@@ -149,7 +149,7 @@ describe('ComfyuiWorkflowEditorModal', () => {
     )
 
     expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled()
-    // Click the disabled backdrop - no closure call should happen.
+    // 点击被禁用的 backdrop - 不应触发关闭回调。
     await user.click(screen.getByText('关闭'))
     expect(onClose).not.toHaveBeenCalled()
   })

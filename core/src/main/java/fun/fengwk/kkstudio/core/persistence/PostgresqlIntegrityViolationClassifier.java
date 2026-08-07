@@ -2,16 +2,14 @@ package fun.fengwk.kkstudio.core.persistence;
 
 import java.sql.SQLException;
 
-/**
- * Classifies PostgreSQL integrity failures by SQLSTATE without depending on driver-specific types.
- */
+/** 按 SQLSTATE 分类 PostgreSQL 完整性失败，不依赖驱动特有类型。 */
 public final class PostgresqlIntegrityViolationClassifier {
 
   private static final String FOREIGN_KEY_VIOLATION = "23503";
 
   private PostgresqlIntegrityViolationClassifier() {}
 
-  /** Returns whether the throwable's cause chain contains a PostgreSQL foreign-key violation. */
+  /** 返回 throwable 的 cause chain 中是否包含 PostgreSQL 外键违例。 */
   public static boolean isForeignKeyViolation(Throwable error) {
     for (Throwable current = error; current != null; current = current.getCause()) {
       if (current instanceof SQLException sqlException

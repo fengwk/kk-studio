@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
-/** Global Agent definition CRUD. */
+/** 全局 Agent definition CRUD。 */
 @AllArgsConstructor
 @Service
 public class AgentDefinitionServiceImpl implements AgentDefinitionService {

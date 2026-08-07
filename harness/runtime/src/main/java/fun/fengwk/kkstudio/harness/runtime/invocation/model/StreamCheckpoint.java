@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 /**
- * Safely recoverable streaming text/thinking checkpoint of the current attempt.
+ * 当前 attempt 的安全可恢复 streaming text/thinking checkpoint。
  *
- * <p>{@code attempt} and {@code sequence} prevent partial content of different retry attempts from
- * mixing; {@code text}/{@code thinking} are nullable but at least one must carry content. ToolCall
- * fragments never enter this type; a new attempt starts with an empty checkpoint.
+ * <p>{@code attempt} 与 {@code sequence} 防止不同 retry attempt 的部分内容相互混杂；{@code text}/ {@code thinking}
+ * 可空，但至少其中之一必须携带内容。ToolCall 片段永远不进入此类型；新 attempt 从一个空 checkpoint 开始。
  */
 public record StreamCheckpoint(int attempt, long sequence, String text, String thinking) {
 

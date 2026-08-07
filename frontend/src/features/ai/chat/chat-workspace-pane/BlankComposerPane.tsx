@@ -64,8 +64,8 @@ export function BlankComposerPane({
   onFirstSendRecovery: (threadId: string, recovery: FirstSendRecovery) => void
 }) {
   const { t } = useI18n()
-  // Blank draft: first-resolvable value copy of the Chat defaults materialized through the
-  // catalog, then frozen. Later Chat/Catalog refetches never silently rewrite it.
+  // 空面板 draft：通过 catalog 将 Chat 默认值 materialize 后，复制第一个可解析值，
+  // 再冻结。后续 Chat/Catalog refetch 不会悄悄重写它。
   const [frozenDraft, setFrozenDraft] = useState<BranchDraft | null>(null)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
@@ -74,8 +74,8 @@ export function BlankComposerPane({
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
-  // First-resolvable materialized draft: later pane-local edits (agent/env/yolo) mark the
-  // pane dirty relative to this immutable initial value (state mirror, never a render-ref).
+  // 首个可解析 materialized draft：后续 pane-local 编辑（agent/env/yolo）相对于这个
+  // 不可变的初始值会标记面板为 dirty（state 镜像，绝不是 render-ref）。
   const [initialFrozenDraft, setInitialFrozenDraft] = useState<BranchDraft | null>(null)
   const queryClient = useQueryClient()
   const threadPicker = useChatThreadPicker(chat?.id ?? '', threadModalOpen, threadSort)
@@ -97,7 +97,7 @@ export function BlankComposerPane({
     if (frozenDraft != null || !chat) {
       return
     }
-    // Materialize as soon as the first parse is possible (catalog may still be loading).
+    // 首次可解析就立即 materialize（catalog 仍在加载中时也可以）。
     if (chatAgent != null && modelsQuery.isLoading) {
       return
     }
@@ -106,8 +106,8 @@ export function BlankComposerPane({
       setInitialFrozenDraft((current) => current ?? materialized)
       setFrozenDraft(materialized)
     }
-    // Missing/stale agent or unresolved model/variant: stay unfrozen; the composer surfaces an
-    // explicit error and the agent picker completes the draft before any Thread is created.
+    // 缺少/过期 agent，或 model/variant 无法解析：保持不冻结；composer 显示
+    // 明确错误，并通过 agent picker 在创建 Thread 之前补全 draft。
   }, [chat, chatAgent, frozenDraft, models, modelsQuery.isLoading])
 
   async function runFirstSend(content: string, effective: BranchDraft | null = frozenDraft) {
@@ -120,7 +120,7 @@ export function BlankComposerPane({
       const result = await performBlankPaneFirstSend({
         chatId: chat.id,
         content,
-        // Session rejects blank titles; Chat title is nullable — null stays null.
+        // Session 拒绝空标题；Chat title 可为空——保持 null。
         title: chat.title ?? null,
         branchSettings: {
           environmentId: effective.environmentId,
@@ -141,10 +141,9 @@ export function BlankComposerPane({
     } catch (error) {
       if (error instanceof FirstSendMessageError) {
         if (isConflictError(error.cause)) {
-          // Known 409: the server explicitly rejected the stale batch (cursors moved). Still
-          // bind the created Thread and restore the composer text, but NEVER hand the stale
-          // plan to the controller replayRef: the next submit rebuilds fresh cursors + fresh
-          // command ids against the refreshed snapshot.
+          // 已知 409：服务器明确拒绝了过期 batch（cursor 已移动）。仍需绑定已创建的
+          // Thread 并恢复 composer 文本，但绝不能把过期的 plan 交给 controller replayRef：
+          // 下一次提交会基于刷新的 snapshot 重新构建 cursor + command id。
           await Promise.all([
             queryClient.invalidateQueries({
               queryKey: queryKeys.threads.snapshot(error.snapshot.thread.threadId),
@@ -154,8 +153,7 @@ export function BlankComposerPane({
           onFirstSendRecovery(error.snapshot.thread.threadId, { content })
           return
         }
-        // Network/uncertain failure: preserve the exact batch (same command id + full replay)
-        // for the bound pane.
+        // 网络/不确定失败：为绑定面板保留精确 batch（相同 command id + 完整 replay）。
         onFirstSendRecovery(error.snapshot.thread.threadId, {
           content,
           replay: { plan: error.plan, content },
@@ -176,9 +174,9 @@ export function BlankComposerPane({
     }
     onFocus()
     if (!frozenDraft) {
-      // Either the catalog is still loading or the Chat agent/model could not be resolved;
-      // opening the agent picker completes the draft (never create a Thread with an empty
-      // provider/model/variant that the strict mapper would reject).
+      // 要么 catalog 仍在加载，要么 Chat agent/model 无法解析；打开 agent picker
+      // 补全 draft（绝不创建 provider/model/variant 为空的 Thread，否则会被
+      // strict mapper 拒绝）。
       setPendingContent(content)
       setAgentModalOpen(true)
       return
@@ -217,7 +215,7 @@ export function BlankComposerPane({
   }
 
   function selectThread(selectedThreadId: string) {
-    // Chat-scoped picker: switching panes is pane-local; no Thread mutation happens.
+    // Chat 作用域 picker：切换面板仅作用于面板本地；不会触发任何 Thread mutation。
     setThreadModalOpen(false)
     if (panePending) {
       setActionError(t('ai.runtime.action.threadRunning'))
@@ -239,17 +237,15 @@ export function BlankComposerPane({
       setActionError(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))
       return
     }
-    // Freeze rule: when the draft already has a valid model selection, keep
-    // model/thinking/environment/yolo and only adopt the agent name + activeTools; otherwise
-    // the draft is fully materialized from the selected Agent + catalog.
+    // Freeze 规则：当 draft 已有有效 model selection 时，保留 model/thinking/environment/yolo，
+    // 仅采用 agent name + activeTools；否则 draft 由选中的 Agent + catalog 完整 materialize。
     setFrozenDraft(next)
-    // Picker materialization is also a pane-local baseline: only the first successful
-    // materialization establishes the immutable initial draft, so later agent/env/yolo
-    // edits compare against it (never against null).
+    // Picker materialization 同样是面板本地基线：只有首次成功的 materialization 才会建立
+    // 不可变的初始 draft；后续的 agent/env/yolo 编辑以此为基准（永远不与 null 比较）。
     setInitialFrozenDraft((current) => current ?? next)
     setAgentModalOpen(false)
     setActionError(null)
-    // Sync the Chat default for future blank panes; the frozen draft keeps this pane's value.
+    // 同步 Chat 默认值以影响后续空面板；当前 frozen draft 保留本面板的值。
     void onAgentChange(selectedAgentName).catch((error: unknown) => {
       setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
     })
@@ -284,8 +280,8 @@ export function BlankComposerPane({
     setActionError(null)
   }
 
-  // Pane transition gates: first-send HTTP pending blocks /thread; a non-empty composer,
-  // a pending first-send payload, or pane-local draft edits require confirmation to discard.
+  // 面板切换门控：first-send HTTP pending 阻塞 /thread；非空 composer、pending first-send
+  // payload 或面板本地 draft 编辑都需要确认后才能丢弃。
   const panePending = pending
   const paneDirty =
     draft.trim() !== ''
@@ -370,7 +366,7 @@ export function BlankComposerPane({
           handleEnvironmentSelected(selectedId)
         }}
       />
-      {/* /thread only rebinds the pane; no Thread is mutated. */}
+      {/* /thread 仅重新绑定面板；不会修改任何 Thread。 */}
       <SelectionListModal
         open={threadModalOpen}
         title={t('ai.chat.selectThread')}

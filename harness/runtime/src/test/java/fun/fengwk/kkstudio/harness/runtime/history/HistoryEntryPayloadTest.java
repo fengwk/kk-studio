@@ -26,7 +26,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-/** history payload record invariants: role/metadata matrix, synthetic tool results and turn end. */
+/** history payload record 的不变量：role/metadata 矩阵、synthetic tool result 与 turn end。 */
 class HistoryEntryPayloadTest {
 
   private static final ToolResultMetadata TOOL_METADATA =

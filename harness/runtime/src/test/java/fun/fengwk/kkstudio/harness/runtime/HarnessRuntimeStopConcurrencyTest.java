@@ -27,8 +27,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Stop control races: Thread locking and revision CAS permit only one linearization across Approval
- * and MOVE_HEAD, while deterministic winner-order tests preserve Approval replay semantics.
+ * Stop 控制面竞态：Thread 加锁与 revision CAS 在 Approval 和 MOVE_HEAD 之间只允许一种线性化， 而确定性的赢家顺序测试保留 Approval 的
+ * replay 语义。
  */
 class HarnessRuntimeStopConcurrencyTest {
 

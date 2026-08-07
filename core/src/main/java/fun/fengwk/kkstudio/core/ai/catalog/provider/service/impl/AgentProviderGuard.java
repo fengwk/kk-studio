@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 
-/** Provider lookup and deletion checks. */
+/** Provider 查找与删除检查。 */
 @AllArgsConstructor
 @Component
 final class AgentProviderGuard {

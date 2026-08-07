@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
 
-/** Shared strict AgentMessage/content codec: canonical order, round trip and boundary rejection. */
+/** Shared 严格 AgentMessage/content codec：canonical 顺序、round-trip 与 boundary 拒绝。 */
 class AgentMessageJsonCodecTest {
 
   private final AgentMessageJsonCodec codec = new AgentMessageJsonCodec();

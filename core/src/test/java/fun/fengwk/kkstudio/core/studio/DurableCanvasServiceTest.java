@@ -20,11 +20,10 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.NodeTransform;
 
 /**
- * Minimal durable canvas create/list/command path against the authoritative PostgreSQL schema.
+ * 在权威 PostgreSQL schema 上覆盖最小化的 durable canvas 创建/列表/命令路径。
  *
- * <p>Each test runs in a freshly reset schema, so previous canvas rows do not leak across tests.
- * The {@code request_hash} sentinels below were removed — the service computes the hash server-side
- * from the canonicalized {@code commandsJson}.
+ * <p>每个测试都运行在全新重置的 schema 中，因此先前测试的 canvas 行不会泄漏到本测试。下面的 {@code request_hash} 哨兵值已被移除——服务端根据规范化后的
+ * {@code commandsJson} 计算 hash。
  */
 public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
 
@@ -76,7 +75,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
   public void geometryValidationRejectsNonFiniteAndNonPositive() {
     CanvasDocument created = canvasCommandService.createCanvas("geometry");
 
-    // NaN x propagated by JSON token "NaN".
+    // NaN 的 x 由 JSON token "NaN" 传入。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -87,7 +86,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
                 "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":\"NaN\","
                     + "\"y\":0,\"width\":100,\"height\":100}]"));
 
-    // Zero width.
+    // 零宽度。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -98,7 +97,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
                 "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":0,"
                     + "\"y\":0,\"width\":0,\"height\":100}]"));
 
-    // move_nodes updates reject non-finite x.
+    // move_nodes 更新会拒绝非有限的 x。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -222,13 +221,13 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
         canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", commands);
     assertEquals(1L, first.document().revision());
 
-    // Same commandId + same payload: replay returns cached snapshot.
+    // 相同 commandId + 相同 payload：重放返回缓存快照。
     CanvasSnapshot replay =
         canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", commands);
     assertEquals(first.document().revision(), replay.document().revision());
     assertEquals(first.nodes().size(), replay.nodes().size());
 
-    // Same commandId + different payload: idempotency conflict (hash differs).
+    // 相同 commandId + 不同 payload：幂等性冲突（hash 不同）。
     String conflict =
         "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"y\",\"x\":0,\"y\":0,"
             + "\"width\":100,\"height\":100}]";
@@ -236,7 +235,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
         IllegalStateException.class,
         () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", conflict));
 
-    // New commandId + stale revision: revision conflict.
+    // 新 commandId + 过时 revision：revision 冲突。
     assertThrows(
         IllegalStateException.class,
         () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-2", commands));

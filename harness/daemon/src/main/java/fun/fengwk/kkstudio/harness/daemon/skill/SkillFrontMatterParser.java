@@ -51,7 +51,7 @@ public final class SkillFrontMatterParser {
       if (key.isEmpty()) {
         throw new IllegalArgumentException("SKILL.md front matter key must not be blank");
       }
-      // First occurrence wins for determinism; later duplicates are ignored.
+      // 为保证确定性，首次出现的键生效；后续重复键忽略。
       fields.putIfAbsent(key, value);
     }
 

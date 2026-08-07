@@ -3,20 +3,19 @@ package fun.fengwk.kkstudio.core.ai.chat.service;
 import java.util.List;
 
 /**
- * Chat-scoped Thread association use cases.
+ * Chat 作用域内的 Thread 关联用例。
  *
- * <p>This boundary only validates the Chat and manages Chat↔Thread associations/list ids; it has no
- * HarnessRuntime DTO/converter dependency. Thread existence and snapshot validation is orchestrated
- * by the web layer through HarnessRuntime.
+ * <p>该边界只校验 Chat 并管理 Chat↔Thread 关联/列表 id；不依赖任何 HarnessRuntime DTO/converter。 Thread 存在性与快照校验由 web
+ * 层通过 HarnessRuntime 编排。
  */
 public interface ChatThreadService {
 
-  /** Validates that the Chat exists before a non-idempotent Thread create is attempted. */
+  /** 在尝试非幂等创建 Thread 之前校验 Chat 存在。 */
   void requireChat(String chatId);
 
-  /** Validates the Chat and returns its associated Thread ids ordered newest association first. */
+  /** 校验 Chat 并返回其关联的 Thread id 列表，最新关联在前。 */
   List<Long> listThreadIds(String chatId);
 
-  /** Validates the Chat and idempotently associates an existing Thread with it. */
+  /** 校验 Chat 并幂等地将已有 Thread 与其关联。 */
   void associateThread(String chatId, long threadId);
 }

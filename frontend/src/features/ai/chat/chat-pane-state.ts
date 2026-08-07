@@ -120,7 +120,7 @@ function normalizeChatPaneState(raw: unknown): ChatPaneState {
   }
 }
 
-/** Changes only visibility capacity; all eight persisted pane bindings remain intact. */
+/** 仅修改可见容量；八个持久化的面板绑定保持不变。 */
 export function applyChatLayout(state: ChatPaneState, layout: ChatLayout): ChatPaneState {
   if (state.layout === layout) {
     return state

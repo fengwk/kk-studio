@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
-/** Normalizes mutable provider configuration while keeping credentials out of public DTOs. */
+/** 规范化可变的 provider 配置，同时保证公开 DTO 不携带凭据。 */
 @Component
 final class AgentProviderMutationFactory {
 

@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
-/** Converts global Agent definitions to public DTOs. */
+/** 将全局 Agent definition 转换为公开 DTO。 */
 @AllArgsConstructor
 @Component
 public class AgentDefinitionConverter {

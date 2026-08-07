@@ -11,7 +11,7 @@ export interface HttpClient {
 
 export const apiBaseUrl = '/api'
 
-/** Transport/envelope failure carrying the backend HTTP status for caller-specific recovery. */
+/** 携带后端 HTTP 状态的传输/信封失败，供调用方按场景恢复。 */
 export class ApiError extends Error {
   readonly status?: number
   readonly code?: string
@@ -26,12 +26,12 @@ export class ApiError extends Error {
   }
 }
 
-/** Stale revision or a non-quiescent Thread; the caller must refresh before retrying. */
+/** revision 过期或 Thread 未处于静默状态；调用方必须先刷新再重试。 */
 export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }
 
-/** The requested resource no longer exists; callers may discard stale local references. */
+/** 请求的资源已不存在；调用方可以丢弃过期的本地引用。 */
 export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404
 }

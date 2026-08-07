@@ -17,7 +17,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
 import java.util.List;
 
-/** Structured definition config must be canonical before it is persisted. */
+/** 结构化的定义配置在持久化前必须规范化。 */
 public class AgentDefinitionMutationFactoryTest {
 
   @Test

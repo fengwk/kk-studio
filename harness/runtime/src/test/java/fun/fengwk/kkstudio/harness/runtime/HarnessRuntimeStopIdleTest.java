@@ -28,9 +28,8 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * Idle Stop: no Entry is created, queued Commands are cancelled at one now, the revision is touched
- * exactly once, Work-only deletion never bumps it, and any deletion failure rolls the whole
- * transaction back.
+ * 空闲 Stop：不创建任何 Entry，queued Command 在同一 now 被取消，revision 被精确推进一次， 仅删除 Work 不会触发 revision
+ * bump，任何删除失败都会让整个事务回滚。
  */
 class HarnessRuntimeStopIdleTest {
 
@@ -139,7 +138,7 @@ class HarnessRuntimeStopIdleTest {
             .isPresent());
   }
 
-  /** Test-only delegating store whose transactions fail every deleteWork call. */
+  /** 仅测试用的委托 store：其事务使每次 deleteWork 调用都失败。 */
   private static HarnessStore storeFailingDeleteWork(InMemoryHarnessStore delegate) {
     return (HarnessStore)
         Proxy.newProxyInstance(

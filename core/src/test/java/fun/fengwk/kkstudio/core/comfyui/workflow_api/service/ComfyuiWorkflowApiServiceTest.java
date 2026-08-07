@@ -20,17 +20,16 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 import java.util.NoSuchElementException;
 
 /**
- * {@link ComfyuiWorkflowApiService} end-to-end CRUD coverage over the authoritative PostgreSQL
- * schema.
+ * {@link ComfyuiWorkflowApiService} 在权威 PostgreSQL schema 上的端到端 CRUD 覆盖。
  *
- * <p>Exercises:
+ * <p>覆盖内容：
  *
  * <ul>
- *   <li>the JSONB {@code workflow} / {@code input_bindings} cast round-trip;
- *   <li>{@code created_at} / {@code updated_at} timestamptz population via the {@code create_time}
- *       / {@code update_time} DO aliases;
- *   <li>apiName global uniqueness enforced by the {@code uk_comfyui_workflow_api_api_name} index;
- *   <li>DTO id is exposed as a positive decimal string, matching the durable id resource contract.
+ *   <li>JSONB {@code workflow} / {@code input_bindings} 的 cast 往返；
+ *   <li>通过 {@code create_time} / {@code update_time} DO 别名填充 {@code created_at} / {@code
+ *       updated_at} timestamptz；
+ *   <li>由 {@code uk_comfyui_workflow_api_api_name} 索引强制保证的 apiName 全局唯一性；
+ *   <li>DTO id 以正十进制字符串形式暴露，与 durable id 资源契约一致。
  * </ul>
  *
  * @author fengwk

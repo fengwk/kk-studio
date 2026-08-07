@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 
 import java.util.Objects;
 
-/** Extension message that explicitly starts or continues a response-producing turn. */
+/** 显式开始或继续一个产生响应的 turn 的扩展消息。 */
 public record CustomMessagePayload(AgentMessage message) implements EntryPayload {
 
   public CustomMessagePayload {

@@ -16,11 +16,10 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 
 /**
- * Shared PostgreSQL support for web module SpringBoot tests.
+ * web 模块 SpringBoot 测试的共享 PostgreSQL 支持。
  *
- * <p>Uses a process-level singleton container (not {@code @Container}) so the JDBC URL stays stable
- * for the cached Spring context across test classes. Each test resets {@code public} and migrates
- * the baseline plus the dev seed explicitly.
+ * <p>使用进程级单例容器（而非 {@code @Container}），从而跨测试类复用缓存 Spring 上下文时 JDBC URL 保持稳定。每个测试都会重置 {@code public}
+ * 并显式执行 baseline 与 dev seed 的迁移。
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 public abstract class WebPostgresTestSupport {
@@ -70,7 +69,7 @@ public abstract class WebPostgresTestSupport {
 
   private static void migrateDevDatabase(Connection conn) {
     Flyway.configure()
-        // suppressClose preserves the caller-managed JDBC connection.
+        // suppressClose 用于保留调用方管理的 JDBC 连接。
         .dataSource(new SingleConnectionDataSource(conn, true))
         .locations("classpath:db/migration", "classpath:db/seed/dev")
         .outOfOrder(true)

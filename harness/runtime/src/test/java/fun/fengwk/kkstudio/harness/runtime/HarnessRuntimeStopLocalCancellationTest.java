@@ -31,9 +31,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Stop process-local cancellation: invocation ids are emitted only after the durable transaction
- * commits, terminal siblings are excluded, every failure is isolated, and replay/idle calls never
- * cancel an execution.
+ * Stop 进程内的本地取消：invocation id 仅在 durable 事务提交后才下发，terminal sibling 被排除， 每次失败都相互隔离，replay/idle
+ * 调用绝不会取消某个执行。
  */
 class HarnessRuntimeStopLocalCancellationTest {
 

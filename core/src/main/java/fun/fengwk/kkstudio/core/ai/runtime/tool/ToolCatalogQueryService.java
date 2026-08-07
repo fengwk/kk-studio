@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
 import java.util.List;
 
-/** Core boundary for the offline-selectable runtime tool catalog. */
+/** 离线可选的 runtime tool catalog 的 Core 边界。 */
 @Service
 public class ToolCatalogQueryService {
 

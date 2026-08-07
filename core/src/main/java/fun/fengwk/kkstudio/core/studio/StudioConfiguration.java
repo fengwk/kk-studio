@@ -12,7 +12,7 @@ import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 
-/** Wires the durable Canvas command/query ports. */
+/** 装配持久的 Canvas command/query 端口。 */
 @Configuration
 public class StudioConfiguration {
 

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.work;
 
 import java.util.Objects;
 
-/** Polymorphic identity of a Work mailbox target. */
+/** Work mailbox target 的多态身份。 */
 public record WorkTarget(WorkTargetType type, long id) {
 
   public WorkTarget {

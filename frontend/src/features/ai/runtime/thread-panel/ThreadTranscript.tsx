@@ -8,7 +8,7 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
-/** Dialogue zone: full-height scroll, block transcript. */
+/** 对话区域：满高滚动，以块状方式展示 transcript。 */
 export function ThreadTranscript({
   messages,
   loading,
@@ -22,7 +22,7 @@ export function ThreadTranscript({
   error: unknown
   bodyRef: RefObject<HTMLDivElement | null>
   onDecideApproval?: (message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void
-  /** Global approval request in flight: every undecided approval bar disables its buttons. */
+  /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }) {
   const { t } = useI18n()

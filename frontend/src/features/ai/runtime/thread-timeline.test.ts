@@ -378,8 +378,8 @@ describe('thread timeline', () => {
 
     const calls = timeline.messages.filter((m) => m.role === 'tool' && m.phase === 'call')
     expect(calls).toHaveLength(2)
-    // Both durable calls share toolCallId 'call-1' at ordinal 0, but only the Entry the
-    // invocation actually belongs to may receive streaming/approval/invocationId/partial.
+    // 两个持久调用在序号 0 处共用 toolCallId 'call-1'，但只有 invocation 真实所属的
+    // Entry 才允许接收 streaming/approval/invocationId/partial。
     expect(calls[0]).toMatchObject({
       subjectEntryId: '40',
       toolCallId: 'call-1',

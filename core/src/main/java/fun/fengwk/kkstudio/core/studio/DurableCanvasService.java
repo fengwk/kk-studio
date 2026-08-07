@@ -34,17 +34,14 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Durable Canvas command/query service.
+ * Durable Canvas command/query 服务。
  *
- * <p>Supports: list snapshots, create canvas, and apply a small command set ({@code
- * create_text_node}, {@code create_generate_text_node}, {@code create_link}, {@code move_nodes},
- * {@code delete_node}). Revision CAS is enforced on the Canvas document row; idempotency is keyed
- * by {@code (canvasId, commandId)} with the {@code request_hash} computed server-side as the
- * SHA-256 of the exact UTF-8 commands JSON.
+ * <p>支持：列出快照、创建 canvas、应用一个小型命令集（{@code create_text_node}、 {@code create_generate_text_node}、{@code
+ * create_link}、{@code move_nodes}、 {@code delete_node}）。Revision CAS 在 Canvas document 行上强制实施；幂等以
+ * {@code (canvasId, commandId)} 为键，{@code request_hash} 由服务端计算为精确 UTF-8 commands JSON 的 SHA-256。
  *
- * <p>The Node Function presented today is {@code system.generate-text} v1; the {@code dataJson}
- * payload is built with the injected Jackson {@link ObjectMapper} rather than string-concatenated,
- * so embedded quotes, control characters and newlines round-trip safely.
+ * <p>当前提供的 Node Function 是 {@code system.generate-text} v1；{@code dataJson} payload 使用注入的 Jackson
+ * {@link ObjectMapper} 构建而非字符串拼接，因此内嵌引号、控制字符与换行都能安全往返。
  */
 public class DurableCanvasService implements CanvasQueryService, CanvasCommandService {
 

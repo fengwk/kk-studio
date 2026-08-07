@@ -11,7 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
-/** HTTP contract for the offline-selectable runtime tool catalog. */
+/** 离线可选的运行时 tool 目录 HTTP 契约。 */
 @AutoConfigureMockMvc
 class StudioToolCatalogControllerTest extends WebPostgresTestSupport {
 

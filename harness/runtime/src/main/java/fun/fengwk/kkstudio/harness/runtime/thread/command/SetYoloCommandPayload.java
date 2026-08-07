@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
-/** Typed SET_YOLO payload; YOLO remains Thread policy rather than branch settings. */
+/** typed SET_YOLO payload；YOLO 仍是 Thread policy 而非 branch settings。 */
 public record SetYoloCommandPayload(boolean yoloEnabled) implements ThreadCommandPayload {
 
   @Override

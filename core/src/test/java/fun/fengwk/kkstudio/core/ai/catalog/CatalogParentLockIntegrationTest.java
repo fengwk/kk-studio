@@ -34,7 +34,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Parent row locks serialize child creation with parent deletion. */
+/** 父行锁串行化子行创建与父行删除。 */
 class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService providerService;

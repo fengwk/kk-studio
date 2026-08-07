@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
-/** Global provider CRUD. */
+/** 全局 provider CRUD。 */
 @AllArgsConstructor
 @Service
 public class AgentProviderServiceImpl implements AgentProviderService {

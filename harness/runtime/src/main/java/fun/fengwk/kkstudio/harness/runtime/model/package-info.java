@@ -1,46 +1,40 @@
 /**
- * Runtime Model boundary: stateless Model/Provider contracts and typed invocation errors.
+ * Runtime Model 边界：无状态 Model/Provider 契约与 typed invocation error。
  *
- * <p>Top-level value objects describe a model and its accounting without depending on Tool,
- * Session, Runtime orchestration, Spring or persistence; sub-packages split codec, Provider
- * protocol and cache policy responsibilities.
+ * <p>顶层 value object 在不依赖 Tool、Session、Runtime 编排、Spring 与持久化的前提下描述一个 model 与其 accounting；子包按
+ * codec、Provider 协议与 cache policy 拆分职责。
  *
- * <p>Public surface and responsibility boundary:
+ * <p>Public 边界与职责划分：
  *
  * <ul>
- *   <li>Top-level value objects: {@link fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor},
- *       {@link fun.fengwk.kkstudio.harness.runtime.model.ModelVariant}, {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.ModelCost}, {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.ModelPricing}, {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.ModelUsage} and {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality} describe a model, its
- *       modalities, its usage/cost accounting and its variants.
+ *   <li>顶层 value object：{@link fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor}、 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.ModelVariant}、 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.ModelCost}、 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.ModelPricing}、 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.ModelUsage} 与 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality} 描述一个 model、其 modality、其
+ *       usage/cost accounting 与 variant。
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.cache}: prompt-cache 的 policy、capability、
  *       mode、retention 与 provider control 值对象。Policy/capability 由调用方显式传入且永不持久化； 只有最终派生的 {@code
  *       ProviderCacheControl} 随请求保存。
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.provider}: Provider-facing request,
- *       response, message, content-block, stream and exception contracts that all SDK adapters must
- *       speak. Specific Provider SDK adapter implementations live in the {@code core} module under
- *       {@code fun.fengwk.kkstudio.core.ai.runtime.model.provider} and must never leak SDK types
- *       back into this boundary.
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.codec} and {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.provider.codec}: strict deterministic JSON codecs
- *       used at the Model/Provider wire boundary. {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec} is the single
- *       authoritative codec for {@code ModelDescriptor}/{@code ModelVariant}; the provider-side
- *       codecs must delegate to it instead of re-implementing the same fields.
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} carries the minimum
- *       terminal error snapshot (kind + non-blank message) so Runtime callers can render
- *       transient/permanent classifications without re-reading the original exception.
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec} is the
- *       strict, deterministic JSON boundary for {@link
- *       fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} used by the persistence
- *       adapter.
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.provider}：所有 SDK adapter 必须使用的 Provider
+ *       request、response、message、content-block、stream 与 exception 契约。具体 Provider SDK adapter 实现位于
+ *       {@code core} 模块下的 {@code fun.fengwk.kkstudio.core.ai.runtime.model.provider}，绝不能把 SDK
+ *       类型泄漏回本边界。
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.codec} 与 {@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.provider.codec}：在 Model/Provider wire 边界使用的严格
+ *       deterministic JSON codec。{@link
+ *       fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec} 是 {@code
+ *       ModelDescriptor}/{@code ModelVariant} 的唯一权威 codec；provider 侧 codec 必须把对应子树委派给它，不得重复实现同一组字段。
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} 承载最小 terminal error
+ *       snapshot（kind + 非空 message），使 Runtime 调用方可以在不重读原始 exception 的前提下渲染 transient/permanent 分类。
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec} 是持久化
+ *       adapter 使用的 {@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} 严格、确定性
+ *       JSON 边界。
  * </ul>
  *
- * <p>The durable {@code ModelInvocation} aggregate and its codecs live in {@code
- * harness.runtime.invocation}; state transitions are executed by {@code harness.runtime.processor}.
- * Dependency direction: this package depends only on Jackson {@code JsonNode}; Spring, JDBC, Redis,
- * HTTP and SDK types must not leak into this package or any of its sub-packages.
+ * <p>durable 的 {@code ModelInvocation} aggregate 与其 codec 位于 {@code
+ * harness.runtime.invocation}；状态转换由 {@code harness.runtime.processor} 执行。依赖方向：本包只依赖 Jackson {@code
+ * JsonNode}；Spring、JDBC、Redis、HTTP 与 SDK 类型不得泄漏到本包或其任何子包。
  */
 package fun.fengwk.kkstudio.harness.runtime.model;

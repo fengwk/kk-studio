@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 
-/** ThreadState durable field and invariant checks. */
+/** ThreadState durable 字段与不变量校验。 */
 class ThreadStateTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
@@ -57,7 +57,7 @@ class ThreadStateTest {
     assertEquals(CREATED.plusSeconds(1), next.updatedAt());
     assertEquals(stored.headEntryId(), next.headEntryId());
     assertEquals(stored.yoloEnabled(), next.yoloEnabled());
-    // a single sequence is just count=1
+    // 单个 sequence 等价于 count=1
     ThreadState single = stored.reserveCommandSequences(1, CREATED.plusSeconds(1));
     assertEquals(4L, single.nextCommandSequence());
     assertEquals(6L, single.revision());
@@ -77,13 +77,13 @@ class ThreadStateTest {
   @Test
   void advanceHeadAndTouchRevisionBumpRevisionByOne() {
     ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
-    // head + yolo policy are set in one atomic step with a single revision bump
+    // head 与 yolo policy 在同一步原子地设置，仅 bump 一次 revision
     ThreadState head = stored.advanceHead(99L, true, CREATED.plusSeconds(2));
     assertEquals(99L, head.headEntryId());
     assertTrue(head.yoloEnabled());
     assertEquals(6L, head.revision());
     assertEquals(3L, head.nextCommandSequence());
-    // re-sending the current policy on terminal apply keeps the same semantics
+    // 在 terminal apply 时重新发送当前 policy，语义保持一致
     ThreadState replayPolicy = head.advanceHead(99L, true, CREATED.plusSeconds(3));
     assertEquals(7L, replayPolicy.revision());
     ThreadState touched = replayPolicy.touchRevision(CREATED.plusSeconds(3));
@@ -112,19 +112,19 @@ class ThreadStateTest {
   @Test
   void validateTransitionRejectsSequenceRevisionAndUpdatedAtRegression() {
     ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED.plusSeconds(2));
-    // nextCommandSequence regression
+    // nextCommandSequence 倒退
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ThreadState.validateTransition(
                 stored, state(7L, 42L, false, 2L, 6L, CREATED.plusSeconds(3))));
-    // revision regression
+    // revision 倒退
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ThreadState.validateTransition(
                 stored, state(7L, 42L, false, 3L, 4L, CREATED.plusSeconds(3))));
-    // updatedAt regression
+    // updatedAt 倒退
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -135,7 +135,7 @@ class ThreadStateTest {
   @Test
   void validateTransitionRequiresExactRevisionIncrementOnAnyChange() {
     ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
-    // any externally visible change must bump revision by exactly one
+    // 任何对外可见的变更都必须将 revision 恰好 bump 一次
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -156,7 +156,7 @@ class ThreadStateTest {
         () ->
             ThreadState.validateTransition(
                 stored, state(7L, 42L, false, 3L, 7L, CREATED.plusSeconds(1))));
-    // an updatedAt-only change still requires the revision bump
+    // 即便仅修改 updatedAt，仍必须 bump revision
     assertThrows(
         IllegalArgumentException.class,
         () ->

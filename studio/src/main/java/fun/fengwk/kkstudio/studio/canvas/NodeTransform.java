@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
 /**
- * World-space geometry for a Canvas node.
+ * Canvas node 的世界空间几何。
  *
- * <p>Invariants enforced by the canonical constructor:
+ * <p>由规范构造函数强制的不变量：
  *
  * <ul>
- *   <li>{@code x, y} are finite numbers (no NaN / ±∞)
- *   <li>{@code width, height} are finite and strictly positive
+ *   <li>{@code x, y} 为有限数值（不允许 NaN / ±∞）
+ *   <li>{@code width, height} 为有限且严格为正
  * </ul>
  */
 public record NodeTransform(double x, double y, double width, double height) {

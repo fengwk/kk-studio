@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.core.ai.environment.registry;
 
-/** Live Environment connection lifecycle as observed by the in-memory registry. */
+/** 内存 registry 观察到的 Live Environment 连接生命周期。 */
 public enum LiveEnvironmentStatus {
-  /** HELLO accepted; READY not yet complete. */
+  /** HELLO 已接受；READY 尚未完成。 */
   CONNECTING,
-  /** READY and eligible for Environment tool dispatch and skill load. */
+  /** 已 READY，可进行 Environment tool 派发与 skill 加载。 */
   READY
 }

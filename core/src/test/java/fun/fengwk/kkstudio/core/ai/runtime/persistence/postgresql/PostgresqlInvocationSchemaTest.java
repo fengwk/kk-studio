@@ -14,8 +14,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * Verifies the runtime-spring Model/Tool invocation facts (jsonb object payloads, status lists,
- * terminal exclusivity, entry identity FKs) and the {@code harness_work} target lease queue.
+ * 验证 runtime-spring Model/Tool invocation 事实（jsonb 对象载荷、状态列表、terminal 互斥、 entry 标识 FK）以及 {@code
+ * harness_work} 目标 lease 队列。
  */
 class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
 
@@ -202,7 +202,7 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
                   null));
     }
 
-    // A different turn start in the same Thread is a distinct invocation.
+    // 同一 Thread 中不同的 turn start 对应不同的 invocation。
     long turnStartId = thread.appendChild("TURN_START");
     try (Connection conn = newConnection()) {
       InvocationFixture.insertModel(

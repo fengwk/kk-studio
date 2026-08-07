@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** ToolInvocationStatus terminal classification. */
+/** ToolInvocationStatus 终态分类。 */
 class ToolInvocationStatusTest {
 
   @Test

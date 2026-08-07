@@ -28,11 +28,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Executes a Platform-authorized shell command after enforcing the explicit environment workdir.
+ * 在强制校验显式 environment workdir 后执行 Platform 授权的 shell 命令。
  *
- * <p>Static parsing cannot sandbox shell internals; command authorization belongs to Platform
- * permission. The Daemon nevertheless validates workdir and terminates the complete process tree on
- * timeout or cancellation.
+ * <p>静态解析无法沙箱化 shell 内部行为；命令授权属于 Platform permission。但 Daemon 仍会校验 workdir，并在超时或取消时终止完整 process
+ * tree。
  */
 public final class BashTool implements Tool {
 

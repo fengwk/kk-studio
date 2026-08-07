@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 
-/** Global Agent definition CRUD API. */
+/** Agent definition 全局 CRUD API。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog/agents")
 @RestController

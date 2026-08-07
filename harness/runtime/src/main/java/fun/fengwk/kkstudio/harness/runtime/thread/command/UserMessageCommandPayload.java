@@ -5,7 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 
 import java.util.Objects;
 
-/** Typed USER_MESSAGE payload carrying one standard USER AgentMessage. */
+/** 携带一条标准 USER AgentMessage 的 typed USER_MESSAGE payload。 */
 public record UserMessageCommandPayload(AgentMessage message) implements ThreadCommandPayload {
 
   public UserMessageCommandPayload {

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.error;
 
-/** Resource referenced by id does not exist; mapped to HTTP 404. */
+/** 按 id 引用的资源不存在；映射为 HTTP 404。 */
 public class AiResourceNotFoundException extends AiDomainException {
 
   public AiResourceNotFoundException(String resource, String message) {

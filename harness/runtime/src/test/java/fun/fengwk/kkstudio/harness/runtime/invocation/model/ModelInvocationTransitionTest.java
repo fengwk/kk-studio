@@ -21,7 +21,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-/** ModelInvocation pure transition methods and the shared transition validation. */
+/** ModelInvocation 纯 transition 方法以及共享的 transition 校验。 */
 class ModelInvocationTransitionTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
@@ -94,7 +94,7 @@ class ModelInvocationTransitionTest {
     assertEquals(ModelInvocationStatus.FAILED, next.status());
     assertEquals(0, next.attempt());
     assertEquals(error(), next.error());
-    // a definite pre-start rejection is also valid on a retry dispatch
+    // 在 retry dispatch 上，确切的预启动拒绝也合法
     assertEquals(2, dispatching(2).rejectDispatch(error(), T1).attempt());
     assertThrows(IllegalArgumentException.class, () -> ready(0).rejectDispatch(error(), T1));
   }
@@ -126,13 +126,13 @@ class ModelInvocationTransitionTest {
     StreamCheckpoint first = checkpoint(1);
     ModelInvocation running = running(1, null);
     assertEquals(first, running.checkpoint(first, T1).streamCheckpoint());
-    // larger sequence with strict prefix
+    // 更大但仍是严格前缀的 sequence
     StreamCheckpoint grown = new StreamCheckpoint(1, 2L, "partial-extended", null);
     ModelInvocation withCheckpoint = running.checkpoint(first, T1).checkpoint(grown, T2);
     assertEquals(grown, withCheckpoint.streamCheckpoint());
-    // same sequence requires exact idempotent
+    // 相同 sequence 要求完全 idempotent
     assertEquals(grown, withCheckpoint.checkpoint(grown, T3).streamCheckpoint());
-    // smaller sequence or fork rejected
+    // 更小 sequence 或分叉均被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 1L, "partial", null), T3));
@@ -142,11 +142,11 @@ class ModelInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 3L, "partial-other", null), T3));
-    // checkpoint stays on the same attempt
+    // checkpoint 保持在同一 attempt 上
     assertThrows(
         IllegalArgumentException.class,
         () -> withCheckpoint.checkpoint(new StreamCheckpoint(2, 0L, "other attempt", null), T3));
-    // a checkpoint may not be cleared while still running (the transition validation rejects it)
+    // 仍在 running 时不能清除 checkpoint（transition 校验会拒绝）
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(withCheckpoint, running(1, null)));
@@ -171,10 +171,10 @@ class ModelInvocationTransitionTest {
     assertEquals(ModelInvocationStatus.FAILED, ready(0).fail(error(), T1).status());
     assertEquals(0, ready(0).fail(error(), T1).attempt());
     assertEquals(2, running(2, null).fail(error(), T1).attempt());
-    // DISPATCHING may only be failed through rejectDispatch, never fail()
+    // DISPATCHING 只能通过 rejectDispatch 失败，不能调用 fail()
     assertThrows(IllegalArgumentException.class, () -> dispatching(1).fail(error(), T1));
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).fail(error(), T1));
-    // a terminal FAILED row rejects a re-fail with a different error (terminal facts immutable)
+    // 终态 FAILED 行拒绝用不同 error 重新失败（终态事实不可变）
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -186,7 +186,7 @@ class ModelInvocationTransitionTest {
   void cancelTerminatesAdvancingAttemptOnlyFromDispatching() {
     assertEquals(ModelInvocationStatus.CANCELLED, ready(0).cancel(error(), T1).status());
     assertEquals(0, ready(0).cancel(error(), T1).attempt());
-    // DISPATCHING is the Stop window where the call may already have started: attempt + 1
+    // DISPATCHING 是调用可能已经启动的 Stop 窗口：attempt + 1
     assertEquals(2, dispatching(1).cancel(error(), T1).attempt());
     assertEquals(2, running(2, null).cancel(error(), T1).attempt());
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).cancel(error(), T1));
@@ -209,7 +209,7 @@ class ModelInvocationTransitionTest {
 
   @Test
   void checkpointMayOnlyBeIntroducedOrGrownWhileRunning() {
-    // direct-record injection of a checkpoint into a terminal transition is rejected
+    // 直接向终态 transition 注入 checkpoint 被拒绝
     ModelInvocation runningNoCheckpoint = running(1, null);
     assertThrows(
         IllegalArgumentException.class,
@@ -218,7 +218,7 @@ class ModelInvocationTransitionTest {
                 runningNoCheckpoint,
                 invocation(
                     ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, null)));
-    // growing the checkpoint while entering a terminal state is rejected
+    // 进入终态时增长 checkpoint 被拒绝
     ModelInvocation runningWithCheckpoint = running(1, checkpoint(1));
     assertThrows(
         IllegalArgumentException.class,
@@ -232,7 +232,7 @@ class ModelInvocationTransitionTest {
                     response(),
                     null,
                     null)));
-    // a terminal may not introduce a checkpoint from null
+    // 终态不能从 null 引入 checkpoint
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -240,7 +240,7 @@ class ModelInvocationTransitionTest {
                 succeeded(1),
                 invocation(
                     ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, null)));
-    // a terminal may not grow or fork its stored checkpoint
+    // 终态不能增长或分叉其已存储的 checkpoint
     ModelInvocation terminalWithCheckpoint =
         invocation(ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, null);
     assertThrows(
@@ -255,14 +255,14 @@ class ModelInvocationTransitionTest {
                     response(),
                     null,
                     null)));
-    // DISPATCHING -> RUNNING is a confirmed start, not a stream: a checkpoint cannot be injected
+    // DISPATCHING -> RUNNING 是已确认启动而非流式：不能注入 checkpoint
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
                 dispatching(0),
                 invocation(ModelInvocationStatus.RUNNING, 1, checkpoint(1), null, null, null)));
-    // RUNNING -> READY (retry) drops the checkpoint, RUNNING -> RUNNING keeps growth legal
+    // RUNNING -> READY（retry）丢弃 checkpoint，RUNNING -> RUNNING 仍允许增长
     ModelInvocation.validateTransition(runningWithCheckpoint, runningWithCheckpoint.retryReady(T1));
     ModelInvocation.validateTransition(
         runningWithCheckpoint, runningWithCheckpoint.checkpoint(checkpoint(1), T1));
@@ -283,7 +283,7 @@ class ModelInvocationTransitionTest {
   void attachResultEntryLinksOnlyOnTerminalAndClearsTheCheckpoint() {
     ModelInvocation attached = succeeded(1).attachResultEntry(99L, T1);
     assertEquals(99L, attached.resultEntryId());
-    // attach from a terminal carrying a checkpoint clears it and keeps every other fact
+    // 从携带 checkpoint 的终态 attach 时会清掉它并保留其他全部事实
     ModelInvocation terminalWithCheckpoint =
         new ModelInvocation(
             1L,
@@ -313,7 +313,7 @@ class ModelInvocationTransitionTest {
   @Test
   void validateTransitionAcceptsExactReplayAndUpdatedAtTouches() {
     ModelInvocation stored = ready(0);
-    // exact replay accepted
+    // 完全一致的 replay 被接受
     ModelInvocation replay =
         new ModelInvocation(
             stored.id(),
@@ -330,7 +330,7 @@ class ModelInvocationTransitionTest {
             stored.createdAt(),
             stored.updatedAt());
     ModelInvocation.validateTransition(stored, replay);
-    // a terminal row may still touch updatedAt without changing terminal facts
+    // 终态行仍可更新 updatedAt 而不改变终态事实
     ModelInvocation terminal = succeeded(1);
     ModelInvocation touched =
         new ModelInvocation(
@@ -404,7 +404,7 @@ class ModelInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(failed(1), ready(1)));
-    // attempt must not regress and may only advance on a confirmed start
+    // attempt 不可回退，仅在已确认启动时前进
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(ready(1), ready(0)));
@@ -420,7 +420,7 @@ class ModelInvocationTransitionTest {
             ModelInvocation.validateTransition(
                 dispatching(1),
                 invocation(ModelInvocationStatus.UNKNOWN, 1, null, null, error(), null)));
-    // the DISPATCHING stop window must advance attempt by exactly one, never keep it
+    // DISPATCHING stop 窗口必须将 attempt 恰好前进 1，绝不能保持不变
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -436,13 +436,13 @@ class ModelInvocationTransitionTest {
   void validateTransitionRejectsTerminalFactMutation() {
     ModelInvocation succeeded = succeeded(1);
     ModelInvocation failed = failed(1);
-    // status rewrite with the same facts
+    // 在事实相同的情况下重写 status
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
                 succeeded, invocation(ModelInvocationStatus.FAILED, 1, null, null, error(), null)));
-    // result / error mutation
+    // result / error 修改
     ModelInvocation changedResult =
         new ModelInvocation(
             succeeded.id(),
@@ -479,13 +479,13 @@ class ModelInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(failed, changedError));
-    // attempt mutation on a terminal row
+    // 终态行的 attempt 修改
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
                 failed, invocation(ModelInvocationStatus.FAILED, 2, null, null, error(), null)));
-    // resultEntryId may only attach from null; a positive value is frozen
+    // resultEntryId 只能从 null 开始 attach；正数值冻结
     ModelInvocation attached = succeeded(1).attachResultEntry(99L, T1);
     assertThrows(
         IllegalArgumentException.class,
@@ -498,27 +498,27 @@ class ModelInvocationTransitionTest {
   @Test
   void validateTransitionRejectsInvalidCheckpointChanges() {
     ModelInvocation running = running(1, checkpoint(1));
-    // clearing while still running
+    // 仍在 running 时清除
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(running, running(1, null)));
-    // same sequence but different content
+    // 相同 sequence 但不同内容
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
                 running, running(1, new StreamCheckpoint(1, 0L, "other", null))));
-    // regressing sequence
+    // 回退 sequence
     ModelInvocation grown = running.checkpoint(new StreamCheckpoint(1, 1L, "partial+", null), T1);
     assertThrows(
         IllegalArgumentException.class, () -> ModelInvocation.validateTransition(grown, running));
-    // non-prefix growth
+    // 非前缀式增长
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
                 grown, running(1, new StreamCheckpoint(1, 2L, "other", null))));
-    // clearing at terminal is the only allowed clear
+    // 在终态清除是唯一允许的清除
     ModelInvocation.validateTransition(running, running.fail(error(), T1));
   }
 
@@ -532,7 +532,7 @@ class ModelInvocationTransitionTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, next.error().kind());
   }
 
-  /** A ProviderResponse that is visibly different from {@link InvocationTestData#response()}. */
+  /** 与 {@link InvocationTestData#response()} 明显不同的 ProviderResponse。 */
   private static ProviderResponse differentResponse() {
     return new ProviderResponse(
         "different",

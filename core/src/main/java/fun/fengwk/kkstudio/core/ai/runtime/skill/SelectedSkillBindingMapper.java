@@ -5,7 +5,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
-/** Narrow read adapter for the frozen Model request that owns a Tool invocation. */
+/** 拥有某 Tool invocation 的冻结 Model request 的窄读适配器。 */
 @Mapper
 public interface SelectedSkillBindingMapper extends BaseMapper {
 

@@ -17,9 +17,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Guards the HarnessStore contract surface: exactly one transaction root, exactly the typed
- * persistence primitives, and no Repository / Specification / generic save / business use-case
- * methods or framework classes in the store package.
+ * 守护 HarnessStore 的契约边界：只能有一个 transaction 根方法、只能暴露确定类型 的持久化 primitive，store 包下不允许出现 Repository /
+ * Specification / 通用 save / 业务用例 方法或框架类。
  */
 class HarnessStoreContractTest {
 

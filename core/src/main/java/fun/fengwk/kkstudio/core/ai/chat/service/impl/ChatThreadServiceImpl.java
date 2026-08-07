@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 
 import java.util.List;
 
-/** Application boundary for Chat↔Thread historical associations. */
+/** Chat↔Thread 历史关联的应用边界。 */
 @Service
 public class ChatThreadServiceImpl implements ChatThreadService {
 
@@ -38,7 +38,7 @@ public class ChatThreadServiceImpl implements ChatThreadService {
   @Transactional
   public void associateThread(String chatId, long threadId) {
     Chat chat = chatGuard.requireChat(chatId);
-    // ON CONFLICT DO NOTHING makes repeated association idempotent.
+    // ON CONFLICT DO NOTHING 使重复关联幂等。
     chatThreadRepository.associate(chat.getId(), threadId);
   }
 }

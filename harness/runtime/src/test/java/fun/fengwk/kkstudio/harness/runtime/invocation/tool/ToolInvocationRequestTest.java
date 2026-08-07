@@ -16,7 +16,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
 
-/** ToolInvocationRequest call/binding correspondence checks. */
+/** ToolInvocationRequest 的 call/binding 对应关系检查。 */
 class ToolInvocationRequestTest {
 
   @Test

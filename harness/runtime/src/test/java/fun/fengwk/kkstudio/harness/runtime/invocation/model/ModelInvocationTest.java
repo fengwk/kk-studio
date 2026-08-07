@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
 
-/** ModelInvocation per-status durable field invariants. */
+/** ModelInvocation 各 status 下持久化字段的不变式。 */
 class ModelInvocationTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");

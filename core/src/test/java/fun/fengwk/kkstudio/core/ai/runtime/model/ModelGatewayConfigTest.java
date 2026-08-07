@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
-/** Validates the immutable {@link ModelGatewayConfig} record and its defaults. */
+/** 验证不可变的 {@link ModelGatewayConfig} record 及其默认值。 */
 class ModelGatewayConfigTest {
 
   @Test

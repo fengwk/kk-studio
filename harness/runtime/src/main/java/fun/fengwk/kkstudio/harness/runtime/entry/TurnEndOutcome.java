@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.entry;
 
-/** Durable outcome for a closed Model response turn. */
+/** 已关闭 Model response turn 的 durable outcome。 */
 public enum TurnEndOutcome {
   COMPLETED,
   FAILED,

@@ -21,7 +21,7 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonEndpoint
 
 import java.io.IOException;
 
-/** Unit contracts for transport exceptions that cannot be deterministically induced over Tomcat. */
+/** 针对那些无法在 Tomcat 上确定性引发的传输异常的单元契约。 */
 class EnvironmentDaemonWebSocketHandlerTest {
 
   @Test
@@ -29,9 +29,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
     assertEquals("/api/ai/environment/daemon/v2", EnvironmentDaemonWebSocketHandler.PATH);
   }
 
-  /**
-   * Socket I/O failures surface as gateway-send failures and transport errors discard the handle.
-   */
+  /** Socket I/O 失败以 gateway 发送失败的形式呈现，传输错误会丢弃该句柄。 */
   @Test
   void translatesSessionIoFailuresAndForwardsTransportErrors() throws Exception {
     EnvironmentDaemonEndpoint endpoint = mock(EnvironmentDaemonEndpoint.class);

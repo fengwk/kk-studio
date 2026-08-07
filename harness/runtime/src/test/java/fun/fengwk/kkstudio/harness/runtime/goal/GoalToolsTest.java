@@ -23,7 +23,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Unit coverage for create/get/update goal PLATFORM tools and schemas. */
+/** create/get/update goal PLATFORM tool 与 schema 的单元覆盖。 */
 class GoalToolsTest {
   private static final Instant NOW = Instant.parse("2026-07-20T00:00:00Z");
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);

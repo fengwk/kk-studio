@@ -42,10 +42,10 @@ export function HistoryBranchPanel({
   loading: boolean
   queryError: unknown
   pending: boolean
-  /** Already-formatted rebind failure (409 included); rendered verbatim so it is never swallowed. */
+  /** 已格式化的 rebind 失败信息（包含 409）；原样渲染，确保不会被吞掉。 */
   rebindError: string | null
   onClose: () => void
-  /** Relocates the current Thread head onto the selected Entry via PUT /threads/{id}/head. */
+  /** 通过 PUT /threads/{id}/head 将当前 Thread head 重定位到选中的 Entry。 */
   onRebind: (entry: HarnessSessionEntryDTO) => void
 }) {
   const { t, locale } = useI18n()
@@ -67,8 +67,8 @@ export function HistoryBranchPanel({
   const selectedEntryRef = useRef<HTMLButtonElement | null>(null)
   const selectedEntryId = selectedEntry?.entryId
 
-  // Default to the current head and re-attach to the nearest visible ancestor whenever the row
-  // set changes (filter, search, or async-loaded entries).
+  // 默认选中当前 head；每当行集合发生变化（filter、search 或异步加载的 entries）时，
+  // 重新挂接到最近的可见祖先。
   useEffect(() => {
     setSelectedEntry((current) => resolveSelection(rows, entries, current?.entryId ?? currentHeadEntryId ?? null))
   }, [rows, entries, currentHeadEntryId])

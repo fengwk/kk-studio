@@ -9,13 +9,12 @@ import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankC
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
 
 /**
- * Scene dispatcher for a single chat-workspace pane.
+ * 单个 Chat 工作区面板的场景分发器。
  *
- * - Bound Thread: delegates to {@link BoundThreadPane} (snapshot draft + command-batch send).
- * - Blank pane: delegates to {@link BlankComposerPane} (frozen catalog draft + first-send path).
+ * - 绑定 Thread：委托给 {@link BoundThreadPane}（snapshot draft + command-batch send）。
+ * - 空面板：委托给 {@link BlankComposerPane}（frozen catalog draft + first-send path）。
  *
- * The dispatch is purely structural; any behavioral change belongs to the dedicated pane
- * modules so this file can stay a stable, easily-reviewable contract.
+ * 分发纯粹是结构性的；任何行为变更都应放在专用面板模块中，以便此文件保持稳定且易于审查的契约。
  */
 export function ChatWorkspacePane({
   chat,
@@ -73,8 +72,8 @@ export function ChatWorkspacePane({
         onFocus={onFocus}
         onThreadChange={handleThreadChange}
         onThreadSortChange={onThreadSortChange}
-        // Text restoration and replay identity are independent: a known 409 restores the
-        // draft WITHOUT a replay, so the next submit rebuilds fresh cursors + command ids.
+        // 文本恢复与 replay identity 相互独立：已知 409 会恢复 draft，但不会恢复 replay，
+        // 因此下一次提交会重新构建最新 cursor 和 command id。
         initialDraft={
           firstSendRecovery?.threadId === pane.threadId
             ? firstSendRecovery.content

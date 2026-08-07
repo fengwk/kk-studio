@@ -5,12 +5,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Durable current scheduling state of one Work mailbox target.
+ * 一次 Work mailbox target 的 durable 当前调度状态。
  *
- * <p>{@code wakeVersion} increases on every request and prevents an old Processor completion from
- * deleting a newer wake; {@code leaseToken}/{@code leaseUntil} fence stale workers and are always
- * both present or both absent. All transitions are pure: they return the next state or {@link
- * Optional#empty()} for deletion and never mutate the receiver.
+ * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken}/{@code
+ * leaseUntil} fence 掉过期的 worker，且两者总是同时存在或同时缺失。 所有转换都是纯函数：返回下一个状态，或返回 {@link Optional#empty()}
+ * 表示删除，绝不会修改接收者。
  */
 public record Work(
     WorkTarget target,
@@ -34,7 +33,7 @@ public record Work(
     }
   }
 
-  /** Creates the first wake of a target: wakeVersion 1, no lease. */
+  /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease。 */
   public static Work initial(WorkTarget target, Instant requestedAt) {
     Objects.requireNonNull(target, "target");
     Objects.requireNonNull(requestedAt, "requestedAt");
@@ -42,8 +41,8 @@ public record Work(
   }
 
   /**
-   * Requests another wake: increments {@code wakeVersion}, pulls {@code availableAt} forward to the
-   * minimum of the current and requested times and preserves the current lease.
+   * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 requested time 的最小值，保留当前
+   * lease。
    */
   public Work request(Instant requestedAt) {
     Objects.requireNonNull(requestedAt, "requestedAt");
@@ -53,9 +52,8 @@ public record Work(
   }
 
   /**
-   * Claims the work for {@code until} with a fresh token. Only allowed when {@code availableAt <=
-   * now} and there is no active lease (none or already expired at {@code now}); {@code until} must
-   * be strictly after {@code now}.
+   * 使用全新的 token 将 work claim 到 {@code until}。仅在 {@code availableAt <= now} 且不存在 有效 lease（无 lease 或在
+   * {@code now} 时已过期）时允许；{@code until} 必须严格晚于 {@code now}。
    */
   public Work claim(Instant now, String token, Instant until) {
     Objects.requireNonNull(now, "now");
@@ -74,9 +72,8 @@ public record Work(
   }
 
   /**
-   * Extends the current lease while it is still active at {@code now}; {@code until} must strictly
-   * extend the current {@code leaseUntil}. A stale lease (expired at or before {@code now}) is
-   * rejected.
+   * 在 lease 在 {@code now} 仍然有效时延长它；{@code until} 必须严格晚于当前的 {@code leaseUntil}。过期的 lease（在 {@code
+   * now} 或之前已过期）会被拒绝。
    */
   public Work renew(String token, Instant now, Instant until) {
     Objects.requireNonNull(token, "token");
@@ -91,9 +88,8 @@ public record Work(
   }
 
   /**
-   * Completes processing for {@code claimedWakeVersion} while the current lease is active at {@code
-   * now}: an equal claim deletes the work (returns {@link Optional#empty()}); a stale claim clears
-   * only the lease and keeps the row so a newer wake remains visible; a future claim is invalid.
+   * 在当前 lease 于 {@code now} 仍有效时完成对 {@code claimedWakeVersion} 的处理：相等的 claim 删除该 work（返回 {@link
+   * Optional#empty()}）；过期 claim 仅清除 lease，保留行以便更新的 wake 仍可见；未来的 claim 视为非法。
    */
   public Optional<Work> complete(String token, long claimedWakeVersion, Instant now) {
     Objects.requireNonNull(token, "token");
@@ -113,10 +109,8 @@ public record Work(
   }
 
   /**
-   * Reschedules processing for {@code claimedWakeVersion} while the current lease is active at
-   * {@code now}: an equal claim sets {@code availableAt} to {@code requestedAt}; a stale claim only
-   * pulls {@code availableAt} forward to the minimum; a future claim is invalid. The lease is
-   * always cleared.
+   * 在当前 lease 于 {@code now} 仍有效时对 {@code claimedWakeVersion} 重新调度：相等的 claim 将 {@code availableAt}
+   * 设为 {@code requestedAt}；过期 claim 仅将 {@code availableAt} 提前 到最小值；未来的 claim 视为非法。lease 始终被清除。
    */
   public Work reschedule(String token, long claimedWakeVersion, Instant now, Instant requestedAt) {
     Objects.requireNonNull(token, "token");

@@ -24,12 +24,10 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Asserts the final PostgreSQL schema structure: every required table and column type is present,
- * the harness execution protocol is exactly the seven runtime-spring tables, the forbidden legacy
- * harness tables are absent, and structured payloads use jsonb (never bytea).
+ * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表，被禁止的遗留 harness
+ * 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
  *
- * <p>Public schema equality is strict: the set of {@code BASE TABLE}s in {@code public} must equal
- * the expected list, so a leftover or stub table is caught immediately.
+ * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
  */
 class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
@@ -55,7 +53,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work");
 
-  /** The exact runtime-spring execution protocol; only these tables may use the harness_ prefix. */
+  /** 精确的 runtime-spring 执行协议；只有这些表能使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
       Set.of(
           "harness_session",
@@ -79,7 +77,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_environment_queue",
           "harness_thread_goal");
 
-  /** Business tables whose durable ids default from {@code kk_studio_id_seq}. */
+  /** 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供。 */
   private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
       Set.of("comfyui_workflow_api", "canvas_document", "canvas_node", "canvas_link", "chat");
 
@@ -376,18 +374,18 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "lease_token",
         "lease_until");
 
-    // lease_token and lease_until must be set or cleared together.
+    // lease_token 与 lease_until 必须同时被设置或清空。
     assertThrows(SQLException.class, () -> insertWork("THREAD", 920_001L, "token", null));
     assertThrows(
         SQLException.class, () -> insertWork("THREAD", 920_002L, null, "current_timestamp"));
-    // lease_token must be non-blank.
+    // lease_token 不得为空。
     assertThrows(
         SQLException.class, () -> insertWork("THREAD", 920_003L, "   ", "current_timestamp"));
-    // target_type and positive id/wake_version are the durable queue identity.
+    // target_type 与正数 id/wake_version 是持久化队列标识。
     assertThrows(SQLException.class, () -> insertWork("SESSION", 920_004L, null, null));
     assertThrows(SQLException.class, () -> insertWork("THREAD", 0L, null, null));
     assertThrows(SQLException.class, () -> insertWork("THREAD", 920_005L, null, null, 0L));
-    // A fully valid leased row inserts.
+    // 完全合法的 leased 行可插入。
     try (Connection conn = newConnection()) {
       insertWork(conn, "TOOL", 920_006L, "worker", "current_timestamp");
     }
@@ -450,7 +448,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void revisionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesRevision() throws SQLException {
-    // The only user trigger in the whole public schema is the hint-only revision notify.
+    // 整个 public schema 中唯一的用户 trigger 是仅起 hint 作用的 revision notify。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -478,8 +476,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         definition.contains("harness_thread_revision_notify"),
         () -> "trigger must invoke the notify function: " + definition);
 
-    // The trigger function itself is the only place allowed to notify; its body never mutates
-    // revision (it only reads NEW/OLD and emits pg_notify).
+    // notify 函数本身是唯一允许执行 notify 的地方；其函数体从不修改
+    // revision（只读取 NEW/OLD 并发出 pg_notify）。
     String functionSource =
         singleString(
             "select prosrc from pg_proc"
@@ -493,8 +491,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         !functionSource.contains("revision := ") && !functionSource.contains("revision = revision"),
         () -> "notify function must never mutate revision: " + functionSource);
 
-    // No public functions other than the notify helper: revision bump/child-bump functions are
-    // gone.
+    // 除 notify 辅助函数外不存在其它 public 函数：revision 自增/子节点自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -511,8 +508,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         functions,
         "the database must never mutate revision; only the notify helper may exist");
 
-    // Behavior: the trigger fires on INSERT and on a revision write, but never bumps the stored
-    // value; non-revision application updates leave revision untouched.
+    // 行为：trigger 在 INSERT 与 revision 写入时触发，但绝不修改存储的
+    // revision 值；非 revision 的应用层更新则完全不会动到 revision。
     ThreadFixture thread = ThreadFixture.insertFresh();
     try (Connection conn = newConnection();
         PreparedStatement ps =
@@ -543,7 +540,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     for (String table : HARNESS_TABLES) {
       if (table.equals("harness_work")) {
-        // harness_work identifies targets by (target_type, target_id), not by a generated id.
+        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
         continue;
       }
       assertColumnType("bigint", table, "id");
@@ -624,11 +621,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         sequenceBackedTables,
         "only business durable ids default from kk_studio_id_seq");
 
-    // Harness ids are allocated by HarnessRuntime from harness_runtime_id_seq and inserted
-    // explicitly; none of the execution tables may carry a column default.
+    // Harness id 由 HarnessRuntime 从 harness_runtime_id_seq 分配并显式插入；
+    // 任何执行表都不得携带列默认值。
     for (String table : HARNESS_TABLES) {
       if (table.equals("harness_work")) {
-        // harness_work identifies targets by (target_type, target_id), not by a generated id.
+        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
         continue;
       }
       try (Connection conn = newConnection();
@@ -762,8 +759,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void updatedAtIsApplicationManagedNotAuto() throws SQLException {
-    // Set explicit created_at/updated_at; later UPDATE the description and ensure updated_at does
-    // NOT change unless explicitly rewritten (no MySQL ON UPDATE emulation).
+    // 显式设置 created_at/updated_at；随后 UPDATE description，并确认 updated_at
+    // 不会自动改变（除非显式重写，无 MySQL ON UPDATE 模拟）。
     String name = "auto-update-probe-" + FIXTURE_IDS.incrementAndGet();
     Timestamp fixedTimestamp = Timestamp.from(Instant.parse("2024-01-01T00:00:00Z"));
     try (Connection conn = newConnection();

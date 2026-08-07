@@ -28,7 +28,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-/** Stop Work fencing order and the "Work deletion is the final durable mutation" contract. */
+/** Stop Work 围栏顺序以及"Work 删除是最终 durable mutation"的契约。 */
 class HarnessRuntimeStopWorkOrderTest {
 
   private static final Set<String> DURABLE_MUTATIONS =
