@@ -16,7 +16,9 @@ import java.util.stream.Stream;
  * daemon 模块的轻量架构守卫。
  *
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、{@code harness.tool} 以及本模块自身包。 禁止引入
- * runtime/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。
+ * runtime/core/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK。LangChain4j 只允许出现在技能与 MCP 适配器包中：
+ * {@code dev.langchain4j.skills.*} 仅限 {@code .../daemon/skill/}，{@code dev.langchain4j.*} 其余仅限
+ * {@code .../daemon/mcp/langchain/}。
  */
 class DaemonModuleArchitectureTest {
 
@@ -42,6 +44,9 @@ class DaemonModuleArchitectureTest {
           "com.google.genai.",
           "com.google.ai.");
 
+  private static final String SKILL_ADAPTER_PACKAGE = "/skill/";
+  private static final String MCP_LANGCHAIN_ADAPTER_PACKAGE = "/mcp/langchain/";
+
   @Test
   void daemonMainSourcesStayOnJdkJacksonToolAndOwnPackages() throws IOException {
     Path main = locateDaemonMainJava();
@@ -62,19 +67,23 @@ class DaemonModuleArchitectureTest {
               path -> {
                 try {
                   String source = Files.readString(path, StandardCharsets.UTF_8);
+                  String relativePath = relative(main, path).replace('\\', '/');
                   for (String line : source.split("\\R")) {
                     String trimmed = line.trim();
                     if (!trimmed.startsWith("import ")) {
                       continue;
                     }
                     String imported = normalizeImport(trimmed);
+                    if (isAllowedLangChain4jImport(imported, relativePath)) {
+                      continue;
+                    }
                     for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
                       if (imported.startsWith(prefix)) {
-                        violations.add(relative(main, path) + ": " + trimmed);
+                        violations.add(relativePath + ": " + trimmed);
                       }
                     }
                     if (!isAllowedImport(imported)) {
-                      violations.add(relative(main, path) + ": disallowed import " + trimmed);
+                      violations.add(relativePath + ": disallowed import " + trimmed);
                     }
                   }
                 } catch (IOException error) {
@@ -83,6 +92,17 @@ class DaemonModuleArchitectureTest {
               });
     }
     return violations;
+  }
+
+  /** LangChain4j 类型只允许出现在 daemon 技能/MCP 适配器包内。 */
+  private static boolean isAllowedLangChain4jImport(String imported, String relativePath) {
+    if (imported.startsWith("dev.langchain4j.skills.")) {
+      return relativePath.contains(SKILL_ADAPTER_PACKAGE);
+    }
+    if (imported.startsWith("dev.langchain4j.")) {
+      return relativePath.contains(MCP_LANGCHAIN_ADAPTER_PACKAGE);
+    }
+    return false;
   }
 
   private static boolean isAllowedImport(String imported) {

@@ -13,15 +13,15 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonNameConflictException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
@@ -66,7 +66,7 @@ public class EnvironmentDaemonGateway
   private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
 
   private final LiveEnvironmentRegistry environmentRegistry;
-  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
+  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
@@ -375,9 +375,9 @@ public class EnvironmentDaemonGateway
     if (state.ready) {
       throw new DaemonProtocolException("READY may only be sent once per connection");
     }
-    List<DaemonSkillDescriptor> skills = skillsCodec.decode(envelope.payloadJson());
-    environmentRegistry.updateSkills(
-        state.environmentName, state.connection, skills, clock.instant());
+    DaemonCapabilities capabilities = capabilitiesCodec.decode(envelope.payloadJson());
+    environmentRegistry.updateCapabilities(
+        state.environmentName, state.connection, capabilities, clock.instant());
     Instant now = clock.instant();
     environmentRegistry.markReady(state.environmentName, state.connection, now);
     state.ready = true;

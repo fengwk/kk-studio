@@ -97,6 +97,8 @@ class RuntimeModuleArchitectureTest {
         harnessRoot.resolve("daemon/pom.xml"),
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
+            "dev.langchain4j:langchain4j-mcp",
+            "dev.langchain4j:langchain4j-skills",
             "fun.fengwk.kk-studio:kk-studio-harness-tool"));
 
     List<String> violations = scanViolations(main);

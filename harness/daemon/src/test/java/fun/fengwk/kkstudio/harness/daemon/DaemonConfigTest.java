@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -29,7 +30,8 @@ class DaemonConfigTest {
     "kkstudio.daemon.heartbeat",
     "kkstudio.daemon.reconnect-initial",
     "kkstudio.daemon.reconnect-max",
-    "kkstudio.daemon.tool-timeout"
+    "kkstudio.daemon.tool-timeout",
+    "kkstudio.daemon.mcp-config"
   };
 
   private final Map<String, String> originalProperties = new LinkedHashMap<>();
@@ -151,6 +153,25 @@ class DaemonConfigTest {
     assertEquals(
         List.of(first.toAbsolutePath().normalize(), second.toAbsolutePath().normalize()),
         config.skillDirs());
+    assertTrue(config.mcpConfigPath() == null);
+  }
+
+  /** {@code --mcp-config} 是可选的 CLI 参数，并回退 {@code kkstudio.daemon.mcp-config}。 */
+  @Test
+  void acceptsMcpConfigCliAndPropertyFallback(@TempDir Path configDir) throws Exception {
+    Path configFile = configDir.resolve("mcp.json");
+    Files.writeString(configFile, "{\"servers\":[]}");
+    set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
+    set("kkstudio.daemon.gateway-token", "secret");
+
+    DaemonConfig cliConfig =
+        DaemonConfig.fromArgs(
+            new String[] {"--environment-name", "env", "--mcp-config", configFile.toString()});
+    assertEquals(configFile.toAbsolutePath().normalize(), cliConfig.mcpConfigPath());
+
+    set("kkstudio.daemon.mcp-config", configFile.toString());
+    DaemonConfig propertyConfig = DaemonConfig.fromArgs(new String[] {"--environment-name", "env"});
+    assertEquals(configFile.toAbsolutePath().normalize(), propertyConfig.mcpConfigPath());
   }
 
   /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
@@ -237,7 +258,8 @@ class DaemonConfigTest {
         maxReconnectDelay,
         defaultToolTimeout,
         gatewayToken,
-        skillDirs);
+        skillDirs,
+        null);
   }
 
   private void set(String name, String value) {

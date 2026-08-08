@@ -14,9 +14,9 @@ import java.util.UUID;
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>CLI 参数是权威来源：{@code --environment-name} 与可重复 {@code --skill-dir}。gateway 连接类参数也支持 CLI；若 CLI
- * 未给出，再回退到系统属性以便现有独立启动方式继续工作。{@code --environment-name} 是 canonical 路由身份，必须是规范的 {@link
- * EnvironmentName}。skill 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
+ * <p>CLI 参数是权威来源：{@code --environment-name}、可重复 {@code --skill-dir} 与可选 {@code
+ * --mcp-config}。gateway 连接类参数也支持 CLI；若 CLI 未给出，再回退到系统属性以便现有独立启动方式继续工作。{@code --environment-name} 是
+ * canonical 路由身份，必须是规范的 {@link EnvironmentName}。skill/MCP 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -27,7 +27,8 @@ public record DaemonConfig(
     Duration maxReconnectDelay,
     Duration defaultToolTimeout,
     String gatewayToken,
-    List<Path> skillDirs) {
+    List<Path> skillDirs,
+    Path mcpConfigPath) {
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
@@ -50,11 +51,12 @@ public record DaemonConfig(
                 path ->
                     Objects.requireNonNull(path, "skillDirs element").toAbsolutePath().normalize())
             .toList();
+    mcpConfigPath = mcpConfigPath == null ? null : mcpConfigPath.toAbsolutePath().normalize();
   }
 
   /**
    * 解析 CLI 参数；未给出的 gateway 连接项可回退系统属性。未给出 {@code --skill-dir} 时默认 {@code
-   * ~/.agents/skills}（仅当该目录存在时纳入）。
+   * ~/.agents/skills}（仅当该目录存在时纳入）；{@code --mcp-config} 也可回退 {@code kkstudio.daemon.mcp-config}。
    */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
@@ -66,6 +68,7 @@ public record DaemonConfig(
     String reconnectInitial = null;
     String reconnectMax = null;
     String toolTimeout = null;
+    String mcpConfig = null;
     List<Path> skillDirs = new ArrayList<>();
     boolean skillDirExplicit = false;
 
@@ -80,6 +83,7 @@ public record DaemonConfig(
         case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
+        case "--mcp-config" -> mcpConfig = requireArgValue(args, ++index, arg);
         case "--skill-dir" -> {
           skillDirExplicit = true;
           skillDirs.add(Path.of(requireArgValue(args, ++index, arg)));
@@ -112,6 +116,9 @@ public record DaemonConfig(
     if (toolTimeout == null || toolTimeout.isBlank()) {
       toolTimeout = System.getProperty("kkstudio.daemon.tool-timeout");
     }
+    if (mcpConfig == null || mcpConfig.isBlank()) {
+      mcpConfig = System.getProperty("kkstudio.daemon.mcp-config");
+    }
 
     if (!skillDirExplicit) {
       Path defaultSkillDir = defaultSkillDir();
@@ -130,7 +137,8 @@ public record DaemonConfig(
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         requirePresent(gatewayToken, "gateway-token / kkstudio.daemon.gateway-token"),
-        skillDirs);
+        skillDirs,
+        mcpConfig == null ? null : Path.of(mcpConfig));
   }
 
   /** 默认本地 skill 根目录：{@code ~/.agents/skills}。 */

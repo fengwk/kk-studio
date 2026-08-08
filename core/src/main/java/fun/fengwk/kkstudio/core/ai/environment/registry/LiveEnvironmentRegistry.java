@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -51,7 +51,11 @@ public class LiveEnvironmentRegistry {
       byName.put(
           environmentName,
           new LiveEnvironment(
-              environmentName, LiveEnvironmentStatus.CONNECTING, connection, List.of(), now));
+              environmentName,
+              LiveEnvironmentStatus.CONNECTING,
+              connection,
+              DaemonCapabilities.empty(),
+              now));
       return BindResult.accepted();
     }
     if (existing.connection().connectionId().equals(connection.connectionId())) {
@@ -67,15 +71,19 @@ public class LiveEnvironmentRegistry {
     byName.put(
         environmentName,
         new LiveEnvironment(
-            environmentName, LiveEnvironmentStatus.CONNECTING, connection, List.of(), now));
+            environmentName,
+            LiveEnvironmentStatus.CONNECTING,
+            connection,
+            DaemonCapabilities.empty(),
+            now));
     return BindResult.replaced(existing.connection());
   }
 
-  /** 为 {@code connection} 拥有的已绑定名称替换 daemon 通告的 skills。 */
-  public synchronized void updateSkills(
+  /** 为 {@code connection} 拥有的已绑定名称替换 daemon 通告的版本化能力对象（skills + MCP server 摘要）。 */
+  public synchronized void updateCapabilities(
       EnvironmentName environmentName,
       EnvironmentDaemonConnection connection,
-      List<DaemonSkillDescriptor> skills,
+      DaemonCapabilities capabilities,
       Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
     byName.put(
@@ -84,11 +92,11 @@ public class LiveEnvironmentRegistry {
             current.name(),
             current.status(),
             current.connection(),
-            List.copyOf(Objects.requireNonNull(skills, "skills")),
+            Objects.requireNonNull(capabilities, "capabilities"),
             Objects.requireNonNull(now, "now")));
   }
 
-  /** 把已绑定名称标记为 READY，使 gateway worker 可以对其派发。skills-before-READY 的转换由调用方负责； 空 skills 列表仍然有效。 */
+  /** 把已绑定名称标记为 READY，使 gateway worker 可以对其派发。capabilities-before-READY 的转换由调用方负责；空能力仍然有效。 */
   public synchronized void markReady(
       EnvironmentName environmentName, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
@@ -98,7 +106,7 @@ public class LiveEnvironmentRegistry {
             current.name(),
             LiveEnvironmentStatus.READY,
             current.connection(),
-            current.skills(),
+            current.capabilities(),
             Objects.requireNonNull(now, "now")));
   }
 
@@ -112,7 +120,7 @@ public class LiveEnvironmentRegistry {
             current.name(),
             current.status(),
             current.connection(),
-            current.skills(),
+            current.capabilities(),
             Objects.requireNonNull(now, "now")));
   }
 

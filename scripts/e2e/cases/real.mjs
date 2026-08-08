@@ -439,7 +439,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 9 个 tools（version=1）+ skills',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -454,6 +454,8 @@ registerCase({
       'lsp_goto_definition',
       'lsp_workspace_symbols',
       'lsp_java_decompile',
+      'mcp_list_tools',
+      'mcp_call_tool',
     ]
     const actualTools = match.tools || []
     const names = actualTools.map((tool) => tool.name)
@@ -464,6 +466,22 @@ registerCase({
       JSON.stringify({ expectedToolNames, actualTools }),
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
+    assert(Array.isArray(match.mcpServers), JSON.stringify(match))
+    // MCP 摘要只含 name/status/error/tools(name+description)；不暴露命令/headers/URL/完整 schema。
+    for (const server of match.mcpServers) {
+      assert(typeof server.name === 'string' && server.name.length > 0, JSON.stringify(server))
+      assert(server.status === 'READY' || server.status === 'FAILED', JSON.stringify(server))
+      if (server.status === 'READY') {
+        assert(server.error == null, JSON.stringify(server))
+        assert(Array.isArray(server.tools), JSON.stringify(server))
+        for (const tool of server.tools) {
+          assert(typeof tool.name === 'string' && tool.name.length > 0, JSON.stringify(tool))
+          assert(typeof tool.description === 'string' || tool.description == null, JSON.stringify(tool))
+        }
+      } else {
+        assert(Array.isArray(server.tools) && server.tools.length === 0, JSON.stringify(server))
+      }
+    }
     assert(match.ready === true, JSON.stringify(match))
     ctx.vars.daemonEnvironment = match
   },

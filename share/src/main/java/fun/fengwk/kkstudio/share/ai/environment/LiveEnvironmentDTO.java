@@ -29,4 +29,7 @@ public class LiveEnvironmentDTO {
 
   /** 该 Environment 的 daemon 声明的技能能力列表（仅 READY 状态发布）。 */
   private List<LiveEnvironmentSkillDTO> skills;
+
+  /** 该 Environment 的 daemon 声明的 MCP server 摘要列表（仅 READY 状态发布；稳定展示，不作为动态可选 Agent 工具）。 */
+  private List<LiveEnvironmentMcpServerDTO> mcpServers;
 }

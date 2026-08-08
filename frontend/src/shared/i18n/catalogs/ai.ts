@@ -1393,4 +1393,8 @@ export const aiCatalog = {
     'en-US': 'Skills',
     'zh-CN': 'Skills',
   },
+  'ai.environment.mcpServers': {
+    'en-US': 'MCP',
+    'zh-CN': 'MCP',
+  },
 } satisfies LocaleCatalog

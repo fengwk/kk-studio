@@ -4,6 +4,8 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnecti
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.time.Duration;
@@ -15,25 +17,35 @@ import java.util.Objects;
  * 以 canonical {@link EnvironmentName} 为键的服务端内存 Environment 条目快照。
  *
  * <p>{@code name} 是唯一逻辑路由身份：HELLO 声称、branch 持久化、查询投影与远程调用全部使用同一个名称。Environment 工具由 {@link
- * EnvironmentToolCatalog} 固定；READY 只发布 daemon 的可用 skills。
+ * EnvironmentToolCatalog} 固定；READY 只发布 daemon 的版本化能力对象（skills + MCP server 摘要）。
  */
 public record LiveEnvironment(
     EnvironmentName name,
     LiveEnvironmentStatus status,
     EnvironmentDaemonConnection connection,
-    List<DaemonSkillDescriptor> skills,
+    DaemonCapabilities capabilities,
     Instant lastSeenAt) {
 
   public LiveEnvironment {
     name = Objects.requireNonNull(name, "name");
     status = Objects.requireNonNull(status, "status");
     connection = Objects.requireNonNull(connection, "connection");
-    skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
+    capabilities = Objects.requireNonNull(capabilities, "capabilities");
     lastSeenAt = Objects.requireNonNull(lastSeenAt, "lastSeenAt");
   }
 
   public List<ToolDescriptor> tools() {
     return EnvironmentToolCatalog.descriptors();
+  }
+
+  /** READY 能力对象中的 skill 摘要。 */
+  public List<DaemonSkillDescriptor> skills() {
+    return capabilities.skills();
+  }
+
+  /** READY 能力对象中的 MCP server 摘要。 */
+  public List<DaemonMcpServerDescriptor> mcpServers() {
+    return capabilities.mcpServers();
   }
 
   /** 可用性规则：READY + 连接仍打开 + 心跳未超过 {@code heartbeatTimeout} 过期。调用方必须使用与注册表相同的时钟。 */
