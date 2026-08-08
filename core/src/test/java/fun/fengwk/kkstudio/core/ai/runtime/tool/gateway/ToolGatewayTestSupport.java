@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
@@ -72,6 +74,7 @@ final class ToolGatewayTestSupport {
   static final EnvironmentName ENV_B = new EnvironmentName("env-2");
   static final long INVOCATION_ID = 42L;
   static final long THREAD_ID = 7L;
+  static final long ASSISTANT_ENTRY_ID = 11L;
   static final int PROPOSED_ATTEMPT = 3;
 
   static final ToolGatewayConfig CONFIG =
@@ -109,7 +112,8 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
-    return new ToolGateway.Execution(INVOCATION_ID, THREAD_ID, PROPOSED_ATTEMPT, request);
+    return new ToolGateway.Execution(
+        INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
   }
 
   static ToolFactories factories(Tool... tools) {
@@ -433,7 +437,7 @@ final class ToolGatewayTestSupport {
 
       record Partial(ToolResult partial) implements Event {}
 
-      record Succeeded(ToolResult result) implements Event {}
+      record Succeeded(ToolResult result, ToolEffectBatch effects) implements Event {}
 
       record Failed(ToolGateway.Failure failure) implements Event {}
 
@@ -456,14 +460,14 @@ final class ToolGatewayTestSupport {
     }
 
     @Override
-    public void onSucceeded(ToolResult result) {
+    public void onSucceeded(ToolSuccess success) {
       terminalInvocations.incrementAndGet();
       enter();
       try {
         if (throwOnSucceeded) {
           throw new IllegalStateException("listener rejected succeeded");
         }
-        events.add(new Event.Succeeded(result));
+        events.add(new Event.Succeeded(success.result(), success.effects()));
       } finally {
         exit();
       }

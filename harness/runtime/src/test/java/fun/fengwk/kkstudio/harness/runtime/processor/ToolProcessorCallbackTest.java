@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -890,7 +891,7 @@ class ToolProcessorCallbackTest {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
-    listener.onSucceeded(null);
+    listener.onSucceeded((ToolSuccess) null);
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.FAILED, tool.status());

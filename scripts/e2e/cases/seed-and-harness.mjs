@@ -578,7 +578,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 可见；消费证据 = durable TOOL MESSAGE 的 model-visible UNAVAILABLE 拒绝 + 最终 TURN_END(COMPLETED, continueModel=false) 收敛到 IDLE（environmentName null 时 ENVIRONMENT 工具规划不再拒绝，实际 start 是确定性 Rejected）；额外字段与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -591,9 +591,10 @@ registerCase({
     const thread = snapshot.thread
     const marker = `SET-ALL-${cid()}`
     const modelSelection = modelSelectionOf(ctx)
+    const missingAgentName = `missing-agent-${cid().slice(0, 8)}`
     const commands = [
       setEnvironmentCommand(null, cid()),
-      setAgentCommand(ctx.vars.agent.name, cid()),
+      setAgentCommand(missingAgentName, cid()),
       setModelCommand(
         {
           providerName: modelSelection.providerName,
@@ -633,7 +634,7 @@ registerCase({
     const finalSnapshot = await getThreadSnapshot(ctx, thread.threadId)
     const expectedSettings = {
       environmentName: null,
-      agentName: ctx.vars.agent.name,
+      agentName: missingAgentName,
       model: {
         providerName: modelSelection.providerName,
         modelName: modelSelection.modelName,
@@ -654,28 +655,22 @@ registerCase({
       finalSnapshot.queuedCommands.length === 0,
       `SET_* batch must be consumed: ${JSON.stringify(finalSnapshot.queuedCommands)}`,
     )
-    // 输入 USER entry 可见；消费证据 = durable TOOL MESSAGE 的 model-visible UNAVAILABLE 拒绝 +
-    // 最终 TURN_END(COMPLETED, continueModel=false) 收敛到 IDLE。environmentName 为 null 时规划不再
-    // 拒绝：ENVIRONMENT 工具按 null route 绑定，实际 start 时是确定性 Rejected（durable FAILED
-    // ToolResult 对模型可见，turn 继续收敛）。不能让 USER MESSAGE 自身满足消费证据。
+    // 输入 USER entry 可见；消费证据必须包含 Resolver 在调用 Provider 前产生的 durable
+    // AssistantError(PLANNING_FAILED)，不能让 USER MESSAGE 自身满足消费证据。
     const userEntry = finalSnapshot.entries.find((entry) => {
       if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
       const message = JSON.parse(entry.payloadJson).message
       return message?.role === 'USER' && JSON.stringify(message).includes(marker)
     })
     assert(userEntry, `USER entry missing: ${JSON.stringify(finalSnapshot.entries)}`)
-    const failedToolMessage = finalSnapshot.entries.find((entry) => {
-      if (String(entry.entryType || '').toUpperCase() !== 'MESSAGE') return false
-      const message = JSON.parse(entry.payloadJson).message
-      const result = (message?.contents ?? []).find(
-        (content) => content?.type === 'tool_result' && content.error === true,
-      )
-      const text = (result?.contents ?? []).map((content) => content?.text ?? '').join('')
-      return text.includes('has no environment route')
+    const planningError = finalSnapshot.entries.find((entry) => {
+      if (String(entry.entryType || '').toUpperCase() !== 'ASSISTANT_ERROR') return false
+      const error = JSON.parse(entry.payloadJson).error
+      return error?.code === 'PLANNING_FAILED' && String(error?.message || '').includes(missingAgentName)
     })
     assert(
-      failedToolMessage,
-      `expected a durable model-visible UNAVAILABLE ToolResult: ${JSON.stringify(finalSnapshot.entries)}`,
+      planningError,
+      `expected a durable PLANNING_FAILED AssistantError: ${JSON.stringify(finalSnapshot.entries)}`,
     )
     const turnEndEntries = finalSnapshot.entries.filter(
       (entry) => String(entry.entryType || '').toUpperCase() === 'TURN_END',
@@ -683,7 +678,7 @@ registerCase({
     assert(turnEndEntries.length >= 1, `expected at least one TURN_END: ${JSON.stringify(finalSnapshot.entries)}`)
     const lastTurnEnd = JSON.parse(turnEndEntries.at(-1).payloadJson)
     assert(
-      lastTurnEnd.outcome === 'COMPLETED' && lastTurnEnd.continueModel === false,
+      lastTurnEnd.outcome === 'FAILED' && lastTurnEnd.continueModel === false,
       `expected the final TURN_END to converge: ${JSON.stringify(lastTurnEnd)}`,
     )
 

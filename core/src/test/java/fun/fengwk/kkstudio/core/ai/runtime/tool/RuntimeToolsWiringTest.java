@@ -7,11 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
-import fun.fengwk.kkstudio.harness.runtime.goal.CreateGoalTool;
-import fun.fengwk.kkstudio.harness.runtime.goal.GetGoalTool;
-import fun.fengwk.kkstudio.harness.runtime.goal.UpdateGoalTool;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
+import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 
 import java.util.List;
@@ -23,23 +22,23 @@ class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
 
   @Autowired private List<Tool> tools;
   @Autowired private ToolFactories toolFactories;
-  @Autowired private CreateGoalTool createGoalTool;
-  @Autowired private GetGoalTool getGoalTool;
-  @Autowired private UpdateGoalTool updateGoalTool;
+  @Autowired private PluginCatalog pluginCatalog;
+  @Autowired private ToolCatalog toolCatalog;
   @Autowired private LoadSkillTool loadSkillTool;
 
   @Test
   void registersPlatformTools() {
     Set<String> beanNames =
         tools.stream().map(tool -> tool.descriptor().name()).collect(Collectors.toSet());
-    assertTrue(
-        beanNames.containsAll(Set.of("create_goal", "get_goal", "update_goal", "load_skill")));
-
-    assertEquals("1", createGoalTool.descriptor().version());
-
-    assertTrue(toolFactories.find("create_goal", "1").isPresent());
-    assertTrue(toolFactories.find("get_goal", "1").isPresent());
-    assertTrue(toolFactories.find("update_goal", "1").isPresent());
+    assertEquals(Set.of("load_skill"), beanNames);
+    assertEquals("1", loadSkillTool.descriptor().version());
     assertTrue(toolFactories.find("load_skill", "1").isPresent());
+    assertTrue(toolFactories.find("create_goal", "2").isEmpty());
+    assertEquals(
+        "goal", pluginCatalog.findTool("create_goal").orElseThrow().id().pluginId().value());
+    assertEquals("2", pluginCatalog.findTool("create_goal").orElseThrow().descriptor().version());
+    assertTrue(toolCatalog.findSelectable("create_goal").isPresent());
+    assertTrue(toolCatalog.findSelectable("get_goal").isPresent());
+    assertTrue(toolCatalog.findSelectable("update_goal").isPresent());
   }
 }

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -230,6 +231,79 @@ class ToolInvocationTransitionTest {
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).succeed(result(), T1));
     assertThrows(
         IllegalArgumentException.class, () -> dispatching(0, allowed()).succeed(result(), T1));
+  }
+
+  @Test
+  void successPersistsEffectsAtomicallyAndKeepsThemTerminalImmutable() {
+    ToolEffectBatch effects =
+        new ToolEffectBatch(
+            List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}")));
+    ToolInvocation succeeded = running(1, allowed()).succeed(result(), effects, T1);
+    assertEquals(effects, succeeded.effects());
+
+    ToolInvocation attached = succeeded.attachResultEntry(99L, T2);
+    assertEquals(effects, attached.effects());
+    assertEquals(99L, attached.resultEntryId());
+
+    ToolEffectBatch changed =
+        new ToolEffectBatch(
+            List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"other\"}")));
+    ToolInvocation rewritten =
+        new ToolInvocation(
+            succeeded.id(),
+            succeeded.modelInvocationId(),
+            succeeded.assistantEntryId(),
+            succeeded.ordinal(),
+            succeeded.request(),
+            succeeded.status(),
+            succeeded.attempt(),
+            succeeded.approval(),
+            succeeded.result(),
+            changed,
+            succeeded.error(),
+            succeeded.resultEntryId(),
+            succeeded.createdAt(),
+            T2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ToolInvocation.validateTransition(succeeded, rewritten));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                2L,
+                1L,
+                1L,
+                0,
+                request("bash", "{}"),
+                ToolInvocationStatus.FAILED,
+                0,
+                null,
+                null,
+                effects,
+                error(),
+                null,
+                CREATED,
+                CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolInvocation(
+                3L,
+                1L,
+                1L,
+                0,
+                request("bash", "{}"),
+                ToolInvocationStatus.RUNNING,
+                1,
+                allowed(),
+                null,
+                effects,
+                null,
+                null,
+                CREATED,
+                CREATED));
   }
 
   @Test

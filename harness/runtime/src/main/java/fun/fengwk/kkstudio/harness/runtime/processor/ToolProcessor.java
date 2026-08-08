@@ -222,11 +222,16 @@ public final class ToolProcessor implements AutoCloseable {
     if (tool.approval() == null) {
       // yolo 策略从 source model 的冻结 request 读取：ToolInvocation 本身不携带 yolo。
       return new Prepare.Preflight(
-          thread.id(), tool.attempt(), tool.request(), model.request().yoloEnabled());
+          thread.id(),
+          tool.assistantEntryId(),
+          tool.attempt(),
+          tool.request(),
+          model.request().yoloEnabled());
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchRevision(now));
-    return new Prepare.Dispatched(thread.id(), tool.attempt(), tool.request());
+    return new Prepare.Dispatched(
+        thread.id(), tool.assistantEntryId(), tool.attempt(), tool.request());
   }
 
   /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump revision、不 request THREAD。 */
@@ -384,7 +389,11 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return dispatch(
         claim,
-        new Prepare.Dispatched(preflight.threadId(), preflight.attempt(), preflight.request()),
+        new Prepare.Dispatched(
+            preflight.threadId(),
+            preflight.assistantEntryId(),
+            preflight.attempt(),
+            preflight.request()),
         execution);
   }
 
@@ -546,6 +555,7 @@ public final class ToolProcessor implements AutoCloseable {
               new ToolGateway.Execution(
                   invocationId,
                   dispatched.threadId(),
+                  dispatched.assistantEntryId(),
                   Math.addExact(dispatched.attempt(), 1),
                   dispatched.request()),
               execution);
@@ -733,10 +743,16 @@ public final class ToolProcessor implements AutoCloseable {
 
     record Lost() implements Prepare {}
 
-    record Preflight(long threadId, int attempt, ToolInvocationRequest request, boolean yoloEnabled)
+    record Preflight(
+        long threadId,
+        long assistantEntryId,
+        int attempt,
+        ToolInvocationRequest request,
+        boolean yoloEnabled)
         implements Prepare {}
 
-    record Dispatched(long threadId, int attempt, ToolInvocationRequest request)
+    record Dispatched(
+        long threadId, long assistantEntryId, int attempt, ToolInvocationRequest request)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

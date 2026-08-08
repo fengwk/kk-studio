@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -752,7 +753,7 @@ class CoreToolGatewayCallbackTest {
           }
 
           @Override
-          public void onSucceeded(ToolResult result) {
+          public void onSucceeded(ToolSuccess success) {
             order.add("succeeded");
           }
 

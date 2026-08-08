@@ -198,6 +198,15 @@ export function agentConfigMatrix() {
       }),
     },
     {
+      id: 'valid.goal_plugin_tools',
+      ok: true,
+      title: 'Goal 插件工具已进入可选 ToolCatalog',
+      build: () => ({
+        tools: ['create_goal', 'get_goal', 'update_goal'],
+        skills: [],
+      }),
+    },
+    {
       id: 'invalid.missing_tools',
       ok: false,
       expectStatus: 400,

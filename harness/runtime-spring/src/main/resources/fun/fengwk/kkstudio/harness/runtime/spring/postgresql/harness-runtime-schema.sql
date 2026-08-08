@@ -161,6 +161,7 @@ create table harness_tool_invocation (
     attempt integer not null check (attempt >= 0),
     approval jsonb check (approval is null or jsonb_typeof(approval) = 'object'),
     result jsonb check (result is null or jsonb_typeof(result) = 'object'),
+    effects jsonb not null check (jsonb_typeof(effects) = 'object'),
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
     result_entry_id bigint,
     created_at timestamptz(3) not null,
@@ -186,6 +187,10 @@ create table harness_tool_invocation (
     ),
     constraint ck_harness_tool_invocation_terminal_facts check (
         result is null or error is null
+    ),
+    constraint ck_harness_tool_invocation_effects_status check (
+        status = 'SUCCEEDED'
+        or effects = '{"version": 1, "customEntries": []}'::jsonb
     ),
     constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
 );

@@ -44,7 +44,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_command_dedup",
           "chat",
           "chat_thread",
-          "agent_thread_goal",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -75,7 +74,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_retry_policy",
           "harness_realtime_stream_policy",
           "harness_environment_queue",
-          "harness_thread_goal");
+          "harness_thread_goal",
+          "agent_thread_goal");
 
   /** 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供。 */
   private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
@@ -201,15 +201,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
-    assertColumns(
-        "agent_thread_goal",
-        "thread_id",
-        "objective",
-        "token_budget",
-        "status",
-        "reason",
-        "created_at",
-        "updated_at");
   }
 
   @Test
@@ -269,6 +260,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "attempt",
         "approval",
         "result",
+        "effects",
         "error",
         "result_entry_id",
         "created_at",
@@ -330,6 +322,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_tool_invocation", "request");
     assertColumnType("jsonb", "harness_tool_invocation", "approval");
     assertColumnType("jsonb", "harness_tool_invocation", "result");
+    assertColumnType("jsonb", "harness_tool_invocation", "effects");
     assertColumnType("jsonb", "harness_tool_invocation", "error");
     assertColumnType("jsonb", "agent_provider", "config");
     assertColumnType("jsonb", "agent_model", "config");

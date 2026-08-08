@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 
+import java.util.List;
+
 /** ToolBinding 的 type/descriptor/environment route 不变式。 */
 class ToolBindingTest {
 
@@ -45,6 +47,33 @@ class ToolBindingTest {
     assertThrows(
         NullPointerException.class,
         () -> new ToolBinding(descriptor("bash", ToolType.PLATFORM), null, null));
+  }
+
+  @Test
+  void pluginBindingFreezesCanonicalOwnerAndUniqueStateAccesses() {
+    PluginToolBinding plugin =
+        new PluginToolBinding(
+            "goal", "create", List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)));
+    ToolBinding binding =
+        new ToolBinding(
+            descriptor("create_goal", ToolType.PLATFORM), ToolType.PLATFORM, null, plugin);
+    assertEquals(plugin, binding.plugin());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                descriptor("fs", ToolType.ENVIRONMENT), ToolType.ENVIRONMENT, ENV_ID, plugin));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PluginToolBinding(
+                "goal",
+                "create",
+                List.of(
+                    new PluginStateAccess("state", PluginStateAccessMode.READ),
+                    new PluginStateAccess("state", PluginStateAccessMode.WRITE))));
+    assertThrows(
+        IllegalArgumentException.class, () -> new PluginToolBinding("Goal", "create", List.of()));
   }
 
   private static ToolDescriptor descriptor(String name, ToolType type) {

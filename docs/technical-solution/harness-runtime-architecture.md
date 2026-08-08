@@ -17,7 +17,7 @@
 harness/
 ├── tool/                # Tool API、descriptor、ResourceRef、RemoteTool、Daemon v2 wire
 ├── runtime/             # 纯 Java：Session/Entry/Thread/Command/Invocation/Work/processor
-├── plugin/              # 纯 Java build-time 插件 API：PluginCatalog/BranchView/intents/prompt 模板
+├── plugin/              # 纯 Java trusted build-time 插件 API：Catalog/BranchView/Tool/intents/projector
 ├── runtime-spring/      # Store/Work/Redis/Resource 适配（PostgreSQL、dispatcher）
 └── daemon/              # 独立 Environment 进程，只依赖 tool
 ```
@@ -54,7 +54,7 @@ TURN_END
 - `ROOT` 是每个 Session 的唯一无 parent 根，payload 携带初始完整 `BranchSettings`。
 - `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION`）。
 - `MESSAGE` 是对话消息；`USER` / `ASSISTANT` / `TOOL` 语义由 payload 子类型决定（Tool 结果消息带 ToolResult 元数据）。
-- `CUSTOM` 是业务插件追加的透明 branch state 节点：允许 ROOT 后任意位置（含 open/closed turn），不参与 turn grammar，provider 消息投影默认忽略；payload 为 `(pluginId, customType, schemaVersion, data)`。
+- `CUSTOM` 是业务插件追加的透明 branch state 节点：允许 ROOT 后任意位置（含 open/closed turn），不参与 turn grammar，provider 消息投影默认忽略；payload 为 `(pluginId, customType, schemaVersion, data)`。Goal 插件用 `goal/state@1` 保存完整替换快照，读取时只取当前 branch 最近一条。
 - `CUSTOM_MESSAGE` 是业务扩展注入的对话消息：冻结 `AgentMessage`（SYSTEM/USER）保持 model-visible，`details` 绝不投影；非插件命令消息使用稳定 core 元数据（`pluginId=core`、`customType=message`、`rendererKey=message`、`details={}`）。
 - `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：stable `code` + 非空 `message`（≤2048 字符），不投影到 Provider Context。
 - `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
@@ -110,7 +110,7 @@ SET_YOLO
 | 事实 | durable 字段（要点） |
 | --- | --- |
 | `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
-| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding）、status、attempt、`approval` JSON、`result`/`error`/`result_entry_id`、时间 |
+| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding + plugin provenance/access）、status、attempt、`approval` JSON、`result`/`effects`/`error`/`result_entry_id`、时间 |
 
 冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 
@@ -132,7 +132,7 @@ WAITING_APPROVAL -> READY -> DISPATCHING -> RUNNING -> SUCCEEDED
                                                        \-> UNKNOWN
 ```
 
-terminal 事实约束：`result` 与 `error` 互斥；`result_entry_id` 在**各自表内**唯一（每张 Invocation 表各自的 partial unique index），terminal 且挂 result Entry 的 Invocation 不再被 apply。
+terminal 事实约束：`result` 与 `error` 互斥；`result_entry_id` 在**各自表内**唯一（每张 Invocation 表各自的 partial unique index），terminal 且挂 result Entry 的 Invocation 不再被 apply。Tool 的 `effects` 非 null：只有 `SUCCEEDED` 可非空，且 result/effects/status 在同一次 Store update 中原子持久化；terminal 后 effects 不可变。
 
 ### Work
 
@@ -157,7 +157,7 @@ ContinuationDue         # head 为 continueModel=true 的 TURN_END，应立即�
 ModelActive             # open Turn 的 Model 非 terminal 且 head == basis：Work-only 挂起
 ModelTerminalPending    # Model terminal 且 head == basis、结果未 apply：立即 apply
 ToolActive              # open Turn 的 Tool siblings 非全部 terminal：Work-only 挂起
-ToolTerminalPending     # siblings 全部 terminal 且全部未挂结果：按 ordinal 原子 apply
+ToolTerminalPending     # siblings 全部 terminal 且全部未挂结果：按 ordinal 经唯一 appender 原子 apply
 ```
 
 IDLE_OR_HISTORICAL / CONTINUATION_DUE 快照不暴露 Model 与 tools；Model 上下文只暴露 Model；Tool 上下文暴露 Model + 全部 Tool siblings。分类器对破坏的不变量以 `IllegalStateException` 拒绝，绝不降级为业务 kind。
@@ -169,15 +169,18 @@ ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，每步短事务按
 ```text
 1. MODEL_TERMINAL_PENDING  -> 原子 apply Model terminal：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId；
                               无 ToolCall 时追加 TURN_END(COMPLETED, continueModel=false)；
-                              有 ToolCall 时按 response ordinal 创建全部 READY ToolInvocation（非终态，等 TOOL Work）
+                              有 ToolCall 时按 response ordinal materialize ToolInvocation：通常为 READY；
+                              plugin sibling WRITE 后再 READ/WRITE 则直接为 unattached FAILED(SIBLING_STATE_CONFLICT)；
+                              仅 READY 等待 TOOL Work
                               FAILED/错误追加 ASSISTANT_ERROR + FAILED TURN_END
-2. TOOL_TERMINAL_PENDING   -> 按 ordinal 原子 apply 全部 terminal Tool siblings（Tool Result MESSAGE Entry），
+2. TOOL_TERMINAL_PENDING   -> 按 ordinal 经唯一 ToolOutcomeAppender 原子 apply 全部 terminal Tool siblings：
+                              SUCCEEDED 先按 effects 顺序追加 CUSTOM，再追加 Tool Result MESSAGE Entry，
                               并固定追加 TURN_END(COMPLETED, continueModel=true)，随后 classifier 进入
                               CONTINUATION_DUE 启动 continuation（不是普通结束）
 3. MODEL_ACTIVE / TOOL_ACTIVE -> 完成 claim 返回 SUSPENDED（等 Model/Tool Work）
 4. CONTINUATION_DUE        -> 启动 continuation：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/YOLO），
                               保留 SET_ENVIRONMENT（留给后续 INPUT 完整收割进入 BranchSettings），不产生 Message Entry
-5. 有 queued USER/CUSTOM   -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）
+5. 有 queued USER_MESSAGE/CUSTOM_MESSAGE -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）
 6. 否则                    -> 完成 claim 返回 QUIESCENT
 ```
 
@@ -185,6 +188,8 @@ Turn 启动采用 speculative plan 两段式：
 
 1. **短事务**：锁 Thread、读取 queued Command 快照与 cutoff、分配 candidate Entry ID、构造完整合法 candidate EntryPath（TURN_START + Message），**不写任何 durable 状态**；事务外调用 `TurnResolver`（期间 `WorkHeartbeat` 维持 lease）。
 2. **第二短事务**：以 source head / YOLO / cutoff 内 Command 精确快照 / claim ownership 做 CAS，一次性原子提交 normalization + TURN_START + Message + Command markers + Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。
+
+Model terminal materialize Tool siblings 时，Runtime 按 ordinal 扫描 frozen plugin state accesses。对同一 `(pluginId, customType)`，`READ+READ` 与 `READ -> WRITE` 允许；已有 `WRITE` 后的 `READ` 或 `WRITE` 机械创建为 unattached `FAILED(kind=SIBLING_STATE_CONFLICT, attempt=0)`，不 dispatch、不请求 TOOL Work，也不把冲突调用登记为后续访问。不同 customType 或不同 pluginId 不冲突。
 
 任何 CAS / claim 损失一律完整 no-op 返回 `LOST_OWNERSHIP`；Resolver 异常/null/heartbeat 失败按单一固定失败延迟（`resolveFailureDelay`）reschedule，绝不静默丢弃 Work。历史/非 applicable open Turn 只做 unlocked 读，绝不先锁 Model/Tool 再落 INPUT normalization。
 
@@ -203,10 +208,10 @@ ToolProcessor 消费 TOOL Work：
 
 1. claim 校验（lost/stale → 完整 no-op）；
 2. `ToolGateway.start` 两阶段激活与 Model 同构；`ToolGateway` 先做 preflight（未取消/未过期、冻结 `name@version` 命中固定目录、arguments 是 JSON object），admission 不确定收敛 `UNKNOWN`；
-3. **ToolProcessor 接收已外部化的 terminal ToolResult**，先做领域校验（toolCallId、禁止 inline Binary、canonical size 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），不做任何存储外部化；
+3. **ToolProcessor 接收已验证、已外部化的 `ToolSuccess(result, effects)`**，先做领域校验（toolCallId、禁止 inline Binary、canonical size、effects 上限与 payload 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），以一次 Store update 同时落 `SUCCEEDED + result + effects`，不做任何存储外部化；
 4. terminal 后请求 THREAD Work 做 sibling apply。本地执行取消（Stop 后）通过 process-local `modelExecutionCanceller` / `toolExecutionCanceller` best-effort 回调。
 
-**durable Resource 外部化发生在 CoreToolGateway 的 callback bridge**（`ToolResultExternalizer`，core 侧）：terminal success 回调在桥内 all-or-nothing 地做 managed externalization（先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 必须与计划精确相等），随后才把已外部化的 ToolResult 交给 ToolProcessor 落库；partial 拒绝 Binary/Resource 且零存储 I/O。
+**durable Resource 外部化发生在 CoreToolGateway 的 callback bridge**（`ToolResultExternalizer`，core 侧）：插件 Tool 先把声明式 intents 映射并校验为 `ToolEffectBatch`；只有 effects 合法后，terminal success 才在桥内 all-or-nothing 地做 managed externalization（先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 必须与计划精确相等），随后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 落库；partial 拒绝 Binary/Resource 且零存储 I/O。
 
 ## 8. Command 控制面（HarnessRuntime）
 
@@ -218,9 +223,9 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 
 实现 `createThread`、`enqueueCommands`、`moveHead`、`stop`、`decideToolApproval` 与 `getThreadSnapshot`。
 
-- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在且 payload 相同、sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/不同 payload/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER/CUSTOM、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
+- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在且 payload 相同、sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/不同 payload/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER_MESSAGE/CUSTOM_MESSAGE、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
 - `moveHead`：revision CAS；同 target no-op；**只允许同 Session**；无 queued command；无 live/terminal-pending context；不能指向 `continueModel=true` 的 TURN_END。
-- `stop`：先 `findReplay`（同 thread + stopRequestId 的 durable TURN_END，在 revision CAS **之前**）→ `REPLAYED`；否则 revision CAS。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 revision +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。所有 STOPPED 路径同时取消 queued 并 fence 后续 callback。
+- `stop`：先 `findReplay`（同 thread + stopRequestId 的 durable TURN_END，在 revision CAS **之前**）→ `REPLAYED`；否则 revision CAS。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 revision +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。Tool terminal winner 在 Stop 路径也共用 `ToolOutcomeAppender`，成功 sibling 的 effects 不会丢失；所有 STOPPED 路径同时取消 queued 并 fence 后续 callback。
 - `decideToolApproval`：`decisionId` 幂等；已决定请求精确 replay（保留原 `decidedAt`，无 revision bump，不请求 Work）；未决定请求必须位于锁定的 TOOL_ACTIVE 上下文，`ALLOWED` → `READY` + TOOL Work，`DENIED` → `FAILED` + THREAD Work，revision 恰好 touch 一次。
 
 ## 9. Dispatcher 与 Work 协议

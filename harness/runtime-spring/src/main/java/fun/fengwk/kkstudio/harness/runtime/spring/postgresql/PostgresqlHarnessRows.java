@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolEffectBatchJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -43,6 +44,7 @@ final class PostgresqlHarnessRows {
   static final ModelInvocationErrorJsonCodec MODEL_ERRORS = new ModelInvocationErrorJsonCodec();
   static final ToolInvocationRequestJsonCodec TOOL_REQUESTS = new ToolInvocationRequestJsonCodec();
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
+  static final ToolEffectBatchJsonCodec TOOL_EFFECTS = new ToolEffectBatchJsonCodec();
   static final ToolInvocationErrorJsonCodec TOOL_ERRORS = new ToolInvocationErrorJsonCodec();
 
   static final RowMapper<Session> SESSION =
@@ -117,6 +119,7 @@ final class PostgresqlHarnessRows {
               resultSet.getInt("attempt"),
               decodeNullable(resultSet.getString("approval"), TOOL_APPROVALS::decode),
               decodeNullable(resultSet.getString("result"), ToolResultJsonCodec::decode),
+              TOOL_EFFECTS.decode(resultSet.getString("effects")),
               decodeNullable(resultSet.getString("error"), TOOL_ERRORS::decode),
               nullableLong(resultSet, "result_entry_id"),
               instant(resultSet, "created_at"),

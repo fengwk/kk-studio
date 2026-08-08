@@ -4,6 +4,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.harness.plugin.AppendCustomEntry;
+import fun.fengwk.kkstudio.harness.plugin.ContributionId;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.PluginId;
+import fun.fengwk.kkstudio.harness.plugin.PluginIntent;
+import fun.fengwk.kkstudio.harness.plugin.PluginStateMode;
+import fun.fengwk.kkstudio.harness.plugin.PluginToolContext;
+import fun.fengwk.kkstudio.harness.plugin.PluginToolResult;
+import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluationContext;
@@ -12,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPromptPreview;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
@@ -36,8 +51,11 @@ import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -91,6 +109,8 @@ public final class CoreToolGateway implements ToolGateway {
   static final String INVALID_REQUEST_KIND = "INVALID_REQUEST";
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
+  static final String PLUGIN_BINDING_MISMATCH_KIND = "PLUGIN_BINDING_MISMATCH";
+  static final String PLUGIN_CONTRACT_VIOLATION_KIND = "PLUGIN_CONTRACT_VIOLATION";
 
   /** Ask reason 的字符上限（ToolGateway.Ask 契约）。 */
   private static final int ASK_REASON_MAX_CHARACTERS = 1024;
@@ -101,6 +121,8 @@ public final class CoreToolGateway implements ToolGateway {
   private static final String PERMISSION_DENIED_MESSAGE = "Tool permission was denied.";
 
   private final ToolFactories toolFactories;
+  private final PluginCatalog pluginCatalog;
+  private final PluginBranchViewLoader pluginBranchViewLoader;
   private final RemoteToolTransport remoteTransport;
   private final PermissionEvaluator permissionEvaluator;
   private final ToolSettingsProvider toolSettingsProvider;
@@ -109,18 +131,24 @@ public final class CoreToolGateway implements ToolGateway {
   private final Path environmentRoot;
   private final ExecutorService executor;
   private final ToolGatewayConfig config;
+  private final Clock clock;
 
   public CoreToolGateway(
       ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      PluginBranchViewLoader pluginBranchViewLoader,
       RemoteToolTransport remoteTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
       HarnessRuntimeProperties runtimeProperties,
       @Qualifier("toolGatewayExecutor") ExecutorService executor,
-      ToolGatewayConfig config) {
+      ToolGatewayConfig config,
+      Clock clock) {
     this(
         toolFactories,
+        pluginCatalog,
+        pluginBranchViewLoader,
         remoteTransport,
         permissionEvaluator,
         toolSettingsProvider,
@@ -129,7 +157,33 @@ public final class CoreToolGateway implements ToolGateway {
         runtimeProperties.resolvedEnvironmentRoot(),
         runtimeProperties.getResourceMaxBytes(),
         executor,
-        config);
+        config,
+        clock);
+  }
+
+  CoreToolGateway(
+      ToolFactories toolFactories,
+      RemoteToolTransport remoteTransport,
+      PermissionEvaluator permissionEvaluator,
+      ToolSettingsProvider toolSettingsProvider,
+      ResourceStore resourceStore,
+      HarnessRuntimeProperties runtimeProperties,
+      ExecutorService executor,
+      ToolGatewayConfig config) {
+    this(
+        toolFactories,
+        PluginCatalog.from(List.of()),
+        assistantEntryId -> {
+          throw new IllegalStateException("no plugin branch loader is configured");
+        },
+        remoteTransport,
+        permissionEvaluator,
+        toolSettingsProvider,
+        resourceStore,
+        runtimeProperties,
+        executor,
+        config,
+        Clock.systemUTC());
   }
 
   CoreToolGateway(
@@ -143,7 +197,42 @@ public final class CoreToolGateway implements ToolGateway {
       int resourceMaxBytes,
       ExecutorService executor,
       ToolGatewayConfig config) {
+    this(
+        toolFactories,
+        PluginCatalog.from(List.of()),
+        assistantEntryId -> {
+          throw new IllegalStateException("no plugin branch loader is configured");
+        },
+        remoteTransport,
+        permissionEvaluator,
+        toolSettingsProvider,
+        resourceStore,
+        workdir,
+        environmentRoot,
+        resourceMaxBytes,
+        executor,
+        config,
+        Clock.systemUTC());
+  }
+
+  CoreToolGateway(
+      ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      PluginBranchViewLoader pluginBranchViewLoader,
+      RemoteToolTransport remoteTransport,
+      PermissionEvaluator permissionEvaluator,
+      ToolSettingsProvider toolSettingsProvider,
+      ResourceStore resourceStore,
+      Path workdir,
+      Path environmentRoot,
+      int resourceMaxBytes,
+      ExecutorService executor,
+      ToolGatewayConfig config,
+      Clock clock) {
     this.toolFactories = Objects.requireNonNull(toolFactories, "toolFactories");
+    this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
+    this.pluginBranchViewLoader =
+        Objects.requireNonNull(pluginBranchViewLoader, "pluginBranchViewLoader");
     this.remoteTransport = Objects.requireNonNull(remoteTransport, "remoteTransport");
     this.permissionEvaluator = Objects.requireNonNull(permissionEvaluator, "permissionEvaluator");
     this.toolSettingsProvider =
@@ -156,6 +245,7 @@ public final class CoreToolGateway implements ToolGateway {
         Objects.requireNonNull(environmentRoot, "environmentRoot").toAbsolutePath().normalize();
     this.executor = Objects.requireNonNull(executor, "executor");
     this.config = Objects.requireNonNull(config, "config");
+    this.clock = Objects.requireNonNull(clock, "clock");
     rejectUnsafeExecutorPolicies(executor);
     rejectInlineExecutor(executor);
   }
@@ -197,6 +287,9 @@ public final class CoreToolGateway implements ToolGateway {
 
   /** PLATFORM：ToolFactories 精确查找 + descriptor equality，然后提交 executor 执行（拒绝即 Overloaded）。 */
   private StartResult startPlatform(Execution execution, Listener listener) {
+    if (execution.request().binding().plugin() != null) {
+      return startPlugin(execution, listener);
+    }
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
     Optional<Tool> found;
     try {
@@ -234,6 +327,15 @@ public final class CoreToolGateway implements ToolGateway {
             listener, externalizer, tool.descriptor().name(), request.call().id());
     // 两阶段激活：executor 任务在 activate() 前只等待 release，绝不提前打开 gate / 触碰 Tool。
     GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel);
+    return submitLocalExecution(
+        execution, bridge, handle, () -> runTool(tool, request, bridge, handle));
+  }
+
+  private StartResult submitLocalExecution(
+      Execution execution,
+      GatedToolExecutionListener bridge,
+      GatewayHandle handle,
+      Runnable runner) {
     try {
       executor.execute(
           () -> {
@@ -247,7 +349,7 @@ public final class CoreToolGateway implements ToolGateway {
               }
               return;
             }
-            runTool(tool, request, bridge, handle);
+            runner.run();
           });
     } catch (RejectedExecutionException rejected) {
       // 肯定未接受：cancel 唤醒 broken executor 可能已启动的等待任务（它绝不触碰 Tool），Overloaded。
@@ -270,6 +372,124 @@ public final class CoreToolGateway implements ToolGateway {
                   ambiguous, "Tool execution submission failed; outcome cannot be confirmed.")));
     }
     return new ToolGateway.Started(handle);
+  }
+
+  /** 插件 PLATFORM Tool：按冻结 contribution owner 精确恢复，并在 externalize 前校验全部声明式 intents。 */
+  private StartResult startPlugin(Execution execution, Listener listener) {
+    PluginToolBinding binding = execution.request().binding().plugin();
+    ContributionId id =
+        new ContributionId(new PluginId(binding.pluginId()), binding.contributionLocalName());
+    ToolContribution contribution = pluginCatalog.findTool(id).orElse(null);
+    if (contribution == null) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_NOT_FOUND_KIND,
+              "Frozen plugin tool contribution " + id + " is not registered."));
+    }
+    ToolDescriptor descriptor = execution.request().binding().descriptor();
+    if (!descriptor.equals(contribution.descriptor())) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              TOOL_DESCRIPTOR_MISMATCH_KIND,
+              "Plugin tool " + id + " no longer matches its frozen descriptor."));
+    }
+    if (!pluginBindingMatches(binding, contribution)) {
+      return new ToolGateway.Rejected(
+          new ToolInvocationError(
+              PLUGIN_BINDING_MISMATCH_KIND,
+              "Plugin tool " + id + " no longer matches its frozen state access declaration."));
+    }
+    GatedToolExecutionListener bridge =
+        new GatedToolExecutionListener(
+            listener, externalizer, descriptor.name(), execution.request().call().id());
+    GatewayHandle handle = new GatewayHandle(bridge::activate, bridge::cancel);
+    return submitLocalExecution(
+        execution, bridge, handle, () -> runPlugin(execution, contribution, bridge));
+  }
+
+  private void runPlugin(
+      Execution execution, ToolContribution contribution, GatedToolExecutionListener bridge) {
+    PluginToolResult outcome;
+    try {
+      PluginToolContext context =
+          new PluginToolContext(
+              pluginBranchViewLoader.load(execution.assistantEntryId()), clock.instant());
+      outcome = contribution.tool().execute(context, execution.request().call());
+    } catch (RuntimeException failure) {
+      bridge.onError(failure);
+      return;
+    }
+    if (outcome == null) {
+      bridge.onPluginFailure(
+          new ToolInvocationError(
+              PLUGIN_CONTRACT_VIOLATION_KIND, "Plugin tool returned a null outcome."));
+      return;
+    }
+    ToolEffectBatch effects;
+    try {
+      effects = mapPluginEffects(contribution, outcome);
+    } catch (RuntimeException invalid) {
+      bridge.onPluginFailure(
+          new ToolInvocationError(
+              PLUGIN_CONTRACT_VIOLATION_KIND,
+              failureMessage(invalid, "Plugin tool returned invalid intents.")));
+      return;
+    }
+    bridge.onPluginComplete(outcome.result(), effects);
+  }
+
+  private ToolEffectBatch mapPluginEffects(
+      ToolContribution contribution, PluginToolResult outcome) {
+    List<CustomEntryPayload> payloads = new ArrayList<>();
+    for (PluginIntent intent : outcome.intents()) {
+      if (!(intent instanceof AppendCustomEntry append)) {
+        throw new IllegalArgumentException(
+            "plugin Tool intents may only append CUSTOM state entries");
+      }
+      CustomEntryPayload payload = append.payload();
+      if (!payload.pluginId().equals(contribution.id().pluginId().value())) {
+        throw new IllegalArgumentException(
+            "plugin Tool intent owner does not match its contribution");
+      }
+      if (pluginCatalog
+          .findCustomEntryType(contribution.id().pluginId(), payload.customType())
+          .isEmpty()) {
+        throw new IllegalArgumentException(
+            "plugin Tool intent targets an unregistered custom entry type: "
+                + payload.customType());
+      }
+      boolean declaredWrite = false;
+      for (var access : contribution.stateAccesses()) {
+        if (access.customType().equals(payload.customType())
+            && access.mode() == PluginStateMode.WRITE) {
+          declaredWrite = true;
+          break;
+        }
+      }
+      if (!declaredWrite) {
+        throw new IllegalArgumentException(
+            "plugin Tool intent targets state without a declared WRITE access: "
+                + payload.customType());
+      }
+      payloads.add(payload);
+    }
+    return new ToolEffectBatch(payloads);
+  }
+
+  private static boolean pluginBindingMatches(
+      PluginToolBinding binding, ToolContribution contribution) {
+    if (binding.stateAccesses().size() != contribution.stateAccesses().size()) {
+      return false;
+    }
+    for (int i = 0; i < binding.stateAccesses().size(); i++) {
+      PluginStateAccess frozen = binding.stateAccesses().get(i);
+      var current = contribution.stateAccesses().get(i);
+      if (!frozen.customType().equals(current.customType())
+          || !frozen.mode().name().equals(current.mode().name())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
@@ -610,17 +830,39 @@ public final class CoreToolGateway implements ToolGateway {
 
     @Override
     public void onPartial(ToolResult partial) {
-      deliver(new Signal(SignalKind.PARTIAL, partial, null, null));
+      deliver(new Signal(SignalKind.PARTIAL, partial, null, ToolEffectBatch.EMPTY, null, null));
     }
 
     @Override
     public void onComplete(ToolResult result) {
-      deliver(new Signal(SignalKind.COMPLETE, null, result, null));
+      deliver(new Signal(SignalKind.COMPLETE, null, result, ToolEffectBatch.EMPTY, null, null));
+    }
+
+    void onPluginComplete(ToolResult result, ToolEffectBatch effects) {
+      deliver(
+          new Signal(
+              SignalKind.COMPLETE,
+              null,
+              result,
+              Objects.requireNonNull(effects, "effects"),
+              null,
+              null));
+    }
+
+    void onPluginFailure(ToolInvocationError error) {
+      deliver(
+          new Signal(
+              SignalKind.PLUGIN_FAILURE,
+              null,
+              null,
+              ToolEffectBatch.EMPTY,
+              null,
+              Objects.requireNonNull(error, "error")));
     }
 
     @Override
     public void onError(Throwable error) {
-      deliver(new Signal(SignalKind.ERROR, null, null, error));
+      deliver(new Signal(SignalKind.ERROR, null, null, ToolEffectBatch.EMPTY, error, null));
     }
 
     private void deliver(Signal signal) {
@@ -701,8 +943,9 @@ public final class CoreToolGateway implements ToolGateway {
     private boolean process(Signal signal) {
       return switch (signal.kind) {
         case PARTIAL -> processPartial(signal.partial);
-        case COMPLETE -> processComplete(signal.result);
+        case COMPLETE -> processComplete(signal.result, signal.effects);
         case ERROR -> processError(signal.error);
+        case PLUGIN_FAILURE -> fail(signal.pluginFailure);
       };
     }
 
@@ -741,7 +984,7 @@ public final class CoreToolGateway implements ToolGateway {
       return deliverPartialOrUnknown(() -> listener.onPartial(partial));
     }
 
-    private boolean processComplete(ToolResult result) {
+    private boolean processComplete(ToolResult result, ToolEffectBatch effects) {
       if (result == null) {
         return fail(
             new ToolInvocationError(
@@ -764,7 +1007,7 @@ public final class CoreToolGateway implements ToolGateway {
       switch (outcome) {
         case ToolResultExternalizer.Outcome.Success success -> {
           // terminal 选择已经发生：listener 拒绝只记录，绝不发出第二个 terminal 回调。
-          deliverTerminal(() -> listener.onSucceeded(success.result()));
+          deliverTerminal(() -> listener.onSucceeded(new ToolSuccess(success.result(), effects)));
           return true;
         }
         case ToolResultExternalizer.Outcome.Invalid invalid -> {
@@ -890,8 +1133,15 @@ public final class CoreToolGateway implements ToolGateway {
   private enum SignalKind {
     PARTIAL,
     COMPLETE,
-    ERROR
+    ERROR,
+    PLUGIN_FAILURE
   }
 
-  private record Signal(SignalKind kind, ToolResult partial, ToolResult result, Throwable error) {}
+  private record Signal(
+      SignalKind kind,
+      ToolResult partial,
+      ToolResult result,
+      ToolEffectBatch effects,
+      Throwable error,
+      ToolInvocationError pluginFailure) {}
 }

@@ -386,6 +386,7 @@ create table harness_tool_invocation (
     attempt integer not null check (attempt >= 0),
     approval jsonb check (approval is null or jsonb_typeof(approval) = 'object'),
     result jsonb check (result is null or jsonb_typeof(result) = 'object'),
+    effects jsonb not null check (jsonb_typeof(effects) = 'object'),
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
     result_entry_id bigint,
     created_at timestamptz(3) not null,
@@ -411,6 +412,10 @@ create table harness_tool_invocation (
     ),
     constraint ck_harness_tool_invocation_terminal_facts check (
         result is null or error is null
+    ),
+    constraint ck_harness_tool_invocation_effects_status check (
+        status = 'SUCCEEDED'
+        or effects = '{"version": 1, "customEntries": []}'::jsonb
     ),
     constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
 );
@@ -463,38 +468,6 @@ create table chat_thread (
 
 create index idx_chat_thread_thread
     on chat_thread (thread_id, chat_id);
-
--- Product goal is a product capability (Core Goal), not runtime execution
--- truth; it intentionally does not use the `harness_` prefix.
-create table agent_thread_goal (
-    thread_id       bigint        primary key,
-    objective       text          not null,
-    token_budget    bigint,
-    status          varchar(16)   not null,
-    reason          text,
-    created_at      timestamptz(3) not null default current_timestamp,
-    updated_at      timestamptz(3) not null default current_timestamp,
-    constraint fk_agent_thread_goal_thread foreign key (thread_id)
-        references harness_thread (id),
-    constraint ck_agent_thread_goal_status check (
-        status in ('active','complete','blocked')
-    ),
-    constraint ck_agent_thread_goal_objective check (
-        char_length(btrim(objective)) > 0
-    ),
-    constraint ck_agent_thread_goal_token_budget_pos check (
-        token_budget is null or token_budget > 0
-    ),
-    constraint ck_agent_thread_goal_reason check (
-        (status = 'active' and reason is null)
-        or (status in ('complete','blocked')
-            and reason is not null
-            and char_length(btrim(reason)) > 0)
-    ),
-    constraint ck_agent_thread_goal_time_order check (
-        updated_at >= created_at
-    )
-);
 
 ------------------------------------------------------------------------------
 -- 4. Thread revision NOTIFY hint

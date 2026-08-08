@@ -10,18 +10,18 @@ import fun.fengwk.kkstudio.harness.plugin.HarnessPlugin;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.harness.plugin.PluginId;
+import fun.fengwk.kkstudio.harness.plugin.PluginTool;
+import fun.fengwk.kkstudio.harness.plugin.PluginToolContext;
+import fun.fengwk.kkstudio.harness.plugin.PluginToolResult;
 import fun.fengwk.kkstudio.harness.plugin.ToolVisibility;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,7 +41,7 @@ class PluginCatalogWiringTest {
                   registrar ->
                       registrar.registerTool(
                           "goal-tool",
-                          ToolFactory.singleton(tool(descriptor("goal", "1"))),
+                          tool(descriptor("extra_tool", "1")),
                           ToolVisibility.SELECTABLE)));
       context.registerBean(
           "secondPlugin",
@@ -53,25 +53,26 @@ class PluginCatalogWiringTest {
       context.refresh();
 
       PluginCatalog catalog = context.getBean(PluginCatalog.class);
-      assertEquals(2, catalog.descriptors().size());
-      assertEquals(1, catalog.tools().size());
-      assertEquals("first", catalog.tools().get(0).id().pluginId().value());
-      assertEquals(1, catalog.customEntryTypes().size());
-      assertEquals("second", catalog.customEntryTypes().get(0).id().pluginId().value());
+      assertEquals(3, catalog.descriptors().size());
+      assertEquals("first", catalog.findTool("extra_tool").orElseThrow().id().pluginId().value());
+      assertEquals("goal", catalog.findTool("create_goal").orElseThrow().id().pluginId().value());
+      assertTrue(catalog.findCustomEntryType(new PluginId("second"), "goal").isPresent());
+      assertTrue(catalog.findCustomEntryType(new PluginId("goal"), "state").isPresent());
     }
   }
 
   @Test
-  void permitsEmptyPluginRegistry() {
+  void registersTheBuiltInGoalPluginWithoutExtensions() {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       context.register(PluginCatalogConfiguration.class);
       context.refresh();
 
       PluginCatalog catalog = context.getBean(PluginCatalog.class);
-      assertTrue(catalog.descriptors().isEmpty());
-      assertTrue(catalog.tools().isEmpty());
-      assertTrue(catalog.customEntryTypes().isEmpty());
-      assertTrue(catalog.contextProjectors().isEmpty());
+      assertEquals(
+          List.of("goal"), catalog.descriptors().stream().map(d -> d.id().value()).toList());
+      assertEquals(3, catalog.tools().size());
+      assertEquals(1, catalog.customEntryTypes().size());
+      assertEquals(1, catalog.contextProjectors().size());
     }
   }
 
@@ -87,16 +88,15 @@ class PluginCatalogWiringTest {
         Duration.ofSeconds(5));
   }
 
-  private static Tool tool(ToolDescriptor descriptor) {
-    return new Tool() {
+  private static PluginTool tool(ToolDescriptor descriptor) {
+    return new PluginTool() {
       @Override
       public ToolDescriptor descriptor() {
         return descriptor;
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
+      public PluginToolResult execute(PluginToolContext context, ToolCall call) {
         throw new UnsupportedOperationException();
       }
     };

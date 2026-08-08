@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -317,16 +318,10 @@ final class StopControl {
             case DISPATCHING, RUNNING -> sibling.unknown(TOOL_UNKNOWN_ERROR, now);
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };
-      long resultEntryId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              resultEntryId,
-              path.root().sessionId(),
-              parentId,
-              payloadMapper.toolResultPayload(terminal),
-              now));
-      updated.add(terminal.attachResultEntry(resultEntryId, now));
-      parentId = resultEntryId;
+      ToolOutcomeAppender.Applied applied =
+          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
+      updated.add(applied.invocation());
+      parentId = applied.headEntryId();
     }
     tx.updateToolInvocations(updated);
     long turnEndId = tx.nextId();

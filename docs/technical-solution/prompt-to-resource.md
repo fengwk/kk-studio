@@ -14,6 +14,7 @@ flowchart LR
     Assistant[ASSISTANT Message Entry<br/>+ usage/cost metadata]
     Tool[ToolInvocation<br/>frozen binding]
     Result[Tool Result]
+    Effects[Plugin intents<br/>validated ToolEffectBatch]
     Ext[ToolResultExternalizer]
     Inline[Text/Json <= 8KB inline ToolContent]
     Resource[ResourceRef<br/>超出阈值 / Binary -> file URI]
@@ -27,11 +28,13 @@ flowchart LR
     Model --> Assistant
     Assistant --> Tool
     Tool --> Result
+    Tool --> Effects
     Result --> Ext
     Ext --> Inline
     Ext --> Resource
     Inline --> Entry
     Resource --> Entry
+    Effects --> Entry
     Entry --> UI
     Assistant --> UI
 ```
@@ -74,7 +77,7 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/
 ```text
 environmentName    # 本请求的单一 Environment route（可 null）
 providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
-toolBindings       # (descriptor, type, environmentName) 与 providerRequest.tools 一一对应
+toolBindings       # (descriptor, type, environmentName, plugin provenance/access) 与 providerRequest.tools 一一对应
 skillBindings      # 选中 skill（必须显式选中 load_skill，非隐式追加）
 yoloEnabled        # 冻结运行时策略
 ```
@@ -103,15 +106,19 @@ Provider Tool Call 按名称找到冻结 binding，按 ordinal 写入 ToolInvoca
 
 ```text
 ToolBinding.type == PLATFORM
-  -> CoreToolGateway -> local Platform Tool
+  + ToolBinding.plugin == null
+    -> CoreToolGateway -> local Platform Tool
+  + ToolBinding.plugin != null
+    -> CoreToolGateway -> frozen PluginContribution -> PluginTool(BranchView)
 
 ToolBinding.type == ENVIRONMENT
   -> CoreToolGateway -> RemoteToolTransport -> EnvironmentDaemonGateway -> Daemon v2 -> Tool
 ```
 
-- 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
+- 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
 - Tool partial 写 Redis realtime（`TOOL_PARTIAL` 永不携带 Resource）。
-- **durable 外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：terminal success 回调 all-or-nothing 处理：
+- plugin Tool 是同步纯函数，只读取 Assistant Entry 对应的冻结 `BranchView` 并返回声明式 intents。Core 只接受 owner 匹配、customType 已注册且 binding 声明 WRITE 的 `AppendCustomEntry`，映射为有序 `ToolEffectBatch`；intent 校验失败在任何 Resource 写入与 durable `SUCCEEDED` 之前终结为 `PLUGIN_CONTRACT_VIOLATION`。
+- **durable 外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
 
 ```text
 Text/Json 内容 UTF-8 <= 8KB（INLINE_RESULT_UTF8_BYTES） -> 保持 inline ToolContent 编码进 ToolResult JSON
@@ -132,8 +139,9 @@ sha256      # 可选，64 位小写 hex
 ```
 
 - `LocalFileResourceStore` 生成 canonical `file:///` URI（空 authority、无 dot/空 segment、非空 size/sha256）；**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON 与可选文本 preview。daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容先产生 Resource（daemon 侧 store），core 对 Text/Json >8KB 及 Binary 统一再次外部化/透传。
-- ToolProcessor 接收已外部化的 terminal ToolResult 并在短事务内做严格 terminal CAS（fire-once、claim ownership 校验），不做存储外部化。
-- 全部 Tool siblings terminal 后，`ThreadProcessor` 按 ordinal 追加 TOOL `MESSAGE` Entry（Tool Result 内容 + ResourceRef 列表 + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**，随后 classifier 进入 CONTINUATION_DUE 启动下一轮 Model continuation（不是普通结束）。
+- ToolProcessor 接收 `ToolSuccess(已外部化 ToolResult, effects)` 并在短事务内做严格 terminal CAS（fire-once、claim ownership 校验），以一次 Store update 原子持久化 `SUCCEEDED + result + effects`，不做存储外部化。
+- Model terminal materialize siblings 时按 ordinal 静态检查 plugin state accesses；同一 `(pluginId, customType)` 的 WRITE 后再 READ/WRITE 直接写成 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch。
+- 全部 Tool siblings terminal 后，`ThreadProcessor` 通过唯一 `ToolOutcomeAppender` 按 ordinal apply：每个成功调用先按 effects 顺序追加 `CUSTOM`，再追加 TOOL `MESSAGE` Entry（Tool Result 内容 + ResourceRef 列表 + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**。`resultEntryId` 仍指向 Tool Result；Stop 的 terminal winner 使用同一 appender。
 
 ## 6. 前端呈现与恢复
 

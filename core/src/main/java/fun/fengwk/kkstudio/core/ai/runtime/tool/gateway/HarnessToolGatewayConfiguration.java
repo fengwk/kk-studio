@@ -8,12 +8,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.ai.runtime.plugin.PluginBranchViewLoader;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 
+import java.time.Clock;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -43,21 +46,27 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnMissingBean(CoreToolGateway.class)
   public CoreToolGateway coreToolGateway(
       ToolFactories toolFactories,
+      PluginCatalog pluginCatalog,
+      PluginBranchViewLoader pluginBranchViewLoader,
       RemoteToolTransport remoteTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
       HarnessRuntimeProperties runtimeProperties,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
-      ToolGatewayConfig config) {
+      ToolGatewayConfig config,
+      Clock clock) {
     return new CoreToolGateway(
         toolFactories,
+        pluginCatalog,
+        pluginBranchViewLoader,
         remoteTransport,
         permissionEvaluator,
         toolSettingsProvider,
         resourceStore,
         runtimeProperties,
         toolGatewayExecutor,
-        config);
+        config,
+        clock);
   }
 }

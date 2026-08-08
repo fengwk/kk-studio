@@ -19,6 +19,8 @@ flowchart LR
     Web[web]
     Core[core]
     Runtime[harness-runtime]
+    Plugin[harness-plugin]
+    Goal[plugins/goal]
     RuntimeSpring[harness-runtime-spring]
     Tool[harness-tool]
     Daemon[harness-daemon]
@@ -35,6 +37,9 @@ flowchart LR
     Web --> RuntimeSpring
     Web --> Runtime
     RuntimeSpring --> Runtime
+    Core --> Plugin
+    Goal --> Plugin
+    Plugin --> Runtime
     Runtime --> Tool
     Core --> Runtime
     Core --> Tool
@@ -52,9 +57,11 @@ flowchart LR
 | --- | --- |
 | `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v2 wire |
 | `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库、Redis、HTTP 或 Provider SDK |
+| `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 intent、context projector 与提示词模板 |
+| `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
 | `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、Redis realtime overlay、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
-| `core` | Catalog、`DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、Environment registry/daemon gateway、Goal 与 Chat 应用服务；**不写 `harness_*` 表** |
+| `core` | Catalog、`DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、Environment registry/daemon gateway 与 Chat 应用服务；装配并执行受信任插件，**不写 `harness_*` 表** |
 | `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher/listener 生命周期，并提供 HTTP、SSE、WebSocket v2 与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |
@@ -67,6 +74,8 @@ web -> core
 web -> harness-runtime-spring -> harness-runtime -> harness-tool
 web -> harness-runtime
 core -> harness-runtime -> harness-tool
+core -> harness-plugin -> harness-runtime
+plugins/* -> harness-plugin
 core -> harness-tool
 web -> share
 harness-daemon -> harness-tool
@@ -97,9 +106,9 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许八类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
 | ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）及其状态、attempt 与 terminal 事实 |
-| ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态与结果 |
+| ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
-| ThreadGoal | Core application-owned 的 per-Thread Goal：`agent_thread_goal` 表（无 `harness_` 前缀，**不是** Runtime 第 8 表），经 selectable Platform tools `create_goal`/`get_goal`/`update_goal` 读写 |
+| Goal state | `goal` 插件拥有的 branch-scoped 完整快照：`CUSTOM(pluginId=goal, customType=state, schemaVersion=1)`；只取当前分支最近快照，无独立 Goal 表 |
 | Live Environment | 已绑定 Daemon 的服务器内存投影，按 canonical `environmentName` 唯一，状态为 `CONNECTING`/`READY`；可用性 = READY + 连接打开 + 心跳未过期 |
 
 Session、Environment、status 与 branch settings 都从 head Entry 分支派生，**不**在 Thread 行上复制；Thread 行不保存 execution epoch、processor lease 或 runnable 标志。
@@ -126,7 +135,7 @@ Blank first send:
   -> TURN_END(COMPLETED, continueModel=true) -> continuation，直到 Model 无 ToolCall
 ```
 
-`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 create/move/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread revision、维护 Work，并发布 realtime overlay；Tool terminal success 先由 `CoreToolGateway` 回调桥外部化，再交给 `ToolProcessor` 落库。
+`ThreadProcessor` 是执行阶段 Entry/head 的唯一写者；控制面 `HarnessRuntime` 只在 create/move/stop 等同步事务写 Entry/head。`ModelProcessor`/`ToolProcessor` 不写 Entry/head，但会更新各自 Invocation、为可见状态变化 touch Thread revision、维护 Work，并发布 realtime overlay；插件 Tool terminal success 先由 `CoreToolGateway` 校验 provenance/access 与 intents，再外部化结果，由 `ToolProcessor` 将 `ToolResult + effects` 原子写为 `SUCCEEDED`。正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`，按 effects 中 CUSTOM 的声明顺序追加后再追加 Tool Result。
 
 ## 6. Canvas
 

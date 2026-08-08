@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.goal.GoalToolPrompts;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -46,7 +45,7 @@ public final class LoadSkillTool implements Tool {
           NAME,
           VERSION,
           ToolType.PLATFORM,
-          GoalToolPrompts.load("load_skill.md"),
+          SkillToolPrompts.load("load_skill.md"),
           NAME,
           new ToolParamsSchema(
               "按精确短名称加载已选中的 skill 正文。",

@@ -14,7 +14,7 @@ Redis Streams
 
 PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 overlay 缺口；客户端重新读取 Thread snapshot 即可恢复权威状态。
 
-权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含 `harness_runtime_id_seq` 与七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。所有 durable runtime ID 由 sequence 分配，在 API 中编码为十进制字符串。
+权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含 `harness_runtime_id_seq` 与七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable runtime ID 由 sequence 分配，在 API 中编码为十进制字符串。
 
 ## 2. `harness_session` / `harness_entry`
 
@@ -78,9 +78,10 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | 列 | 语义 |
 | --- | --- |
 | `model_invocation_id` / `assistant_entry_id` / `ordinal` | `(assistant_entry_id, ordinal)` 唯一；siblings 按 ordinal 连续 |
-| `request` | 冻结 binding（descriptor/type/route）+ arguments |
+| `request` | 冻结 binding（descriptor/type/route/plugin provenance/state accesses）+ arguments |
 | `status` | WAITING_APPROVAL/READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `approval` | durable `{decision: ALLOWED|DENIED, decisionId, decidedAt, ...}` |
+| `effects` | 非空 JSON object；有序 `ToolEffectBatch`，仅 `SUCCEEDED` 可非空，terminal immutable |
 | `result` / `error` / `result_entry_id` | 同 Model 表约束 |
 
 ## 6. `harness_work` 与调度协议
@@ -140,6 +141,8 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ```
 
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
+- Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
+- Tool terminal apply 只经 `ToolOutcomeAppender`：按 effects 顺序追加 CUSTOM，再追加 Tool Result、推进 head 并把 `result_entry_id` 指向 Tool Result；正常 apply 与 Stop 共用该实现。
 - Stop 额外把时间戳 clamp 到最新锁定 durable fact，容忍本地时钟回拨与节点间 skew。
 - 丢失/过期 lease 的 callback 通过 token/attempt/terminal CAS 拒绝，绝不产生带 durable mutation 的 LOST 提交。
 
@@ -151,13 +154,14 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 | Redis Stream 丢失 | 客户端重新获取 snapshot |
 | Runtime 进程退出 | 已提交 Entry/Command/Invocation/Work 保留；lease 到期后重新 claim |
 | Provider/Tool 结果不确定 | Invocation 收敛 `UNKNOWN`，不重放不确定副作用 |
-| terminal callback 重复 | invocation token/attempt/terminal CAS |
+| terminal callback 重复 | invocation token/attempt/terminal CAS；terminal result/effects 不可变 |
+| 插件 sibling stale snapshot | materialize 时按 `(pluginId, customType)` 的 frozen READ/WRITE 声明机械写入 `SIBLING_STATE_CONFLICT` FAILED，不 dispatch |
 | Stop/head 与 terminal 并发 | revision CAS 与 claim ownership fencing |
 
 ## 10. Resource store
 
 - `harness-runtime-spring` 提供 `LocalFileResourceStore`（`ResourceStore.reference` 无副作用地计划精确 `ResourceRef`；canonical `file:///` URI、非空 size/sha256）；`harness-daemon` 的 coding 工具使用同构实现（daemon 侧 `store` 直接落盘并返回 ref）。
-- `ToolResultExternalizer`（core，位于 `CoreToolGateway` callback bridge）在持久化前把 ToolResult all-or-nothing 外部化：Text/Json 内容 UTF-8 ≤ `INLINE_RESULT_UTF8_BYTES`（8KB）保持 inline ToolContent 直接编码；超过阈值或二进制内容先经 `ResourceStore.reference` **无副作用计划**精确 `ResourceRef`，再逐项 `put` 写入，**每次 put 返回的 ref 必须与计划 ref 精确相等**（不等即存储契约违反）；随后才把已外部化的 ToolResult 交给 ToolProcessor 落库。**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON（uri/mediaType/name/size/sha256）与可选文本 preview。
+- `ToolResultExternalizer`（core，位于 `CoreToolGateway` callback bridge）在持久化前把 ToolResult all-or-nothing 外部化：插件 intents 必须先完整校验为 effects；Text/Json 内容 UTF-8 ≤ `INLINE_RESULT_UTF8_BYTES`（8KB）保持 inline ToolContent 直接编码；超过阈值或二进制内容先经 `ResourceStore.reference` **无副作用计划**精确 `ResourceRef`，再逐项 `put` 写入，**每次 put 返回的 ref 必须与计划 ref 精确相等**（不等即存储契约违反）；随后才把 `ToolSuccess(result, effects)` 交给 ToolProcessor 落库。**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON（uri/mediaType/name/size/sha256）与可选文本 preview。
 
 ## 11. 验证入口
 
