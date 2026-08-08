@@ -469,6 +469,15 @@ export const aiCatalog = {
     'en-US': 'No candidate Skills',
     'zh-CN': '暂无候选 Skills',
   },
+  'ai.catalog.form.skillCatalogSource': {
+    'en-US': 'Skill Catalog Environment',
+    'zh-CN': 'Skill 目录 Environment',
+  },
+  'ai.catalog.form.skillCatalogSourceHint': {
+    'en-US':
+      'Only browses the selected Environment\u2019s current skill names for editing; the selection is transient and is never saved or bound to the Agent.',
+    'zh-CN': '仅用于浏览所选 Environment 的当前技能名称以便编辑；选择是临时的，不会保存或绑定到 Agent。',
+  },
   'ai.catalog.form.needModel': {
     'en-US': 'Create a Model first to configure an Agent.',
     'zh-CN': '需要先创建 Model 才能配置 Agent。',

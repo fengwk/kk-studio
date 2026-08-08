@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import {
   buildSkillCandidates,
@@ -41,6 +42,13 @@ export function AgentForm({
   onChange: (draft: AgentDraft) => void
 }) {
   const { t } = useI18n()
+  // 瞬态 Skill 目录浏览选择：只用于挑选展示哪个 live Environment 的 skill 名称，
+  // 绝不进入 AgentDraft/提交 DTO；切换 Agent 或重新打开创建编辑器时重置。
+  const [skillCatalogEnvironmentName, setSkillCatalogEnvironmentName] = useState('')
+  const editorSessionKey = mode === 'edit' ? `edit:${draft.name}` : 'create'
+  useEffect(() => {
+    setSkillCatalogEnvironmentName('')
+  }, [editorSessionKey])
   const selectedModel = models.find((model) => modelRef(model) === draft.model)
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
@@ -73,8 +81,33 @@ export function AgentForm({
     buildToolCandidates(toolCatalog),
     draft.tools,
   )
+  // Skill 候选只来自用户显式选中的一个 live Environment（ready===true）；未选择/来源失效时没有 live 候选，
+  // 已勾选的名称仍作为可移除 orphan 保留。
+  const readyEnvironments = environments.filter((environment) => environment.ready === true)
+  const selectedSkillSource = readyEnvironments.find(
+    (environment) => environment.name === skillCatalogEnvironmentName,
+  )
+  const skillSourceUnavailable =
+    skillCatalogEnvironmentName !== '' && selectedSkillSource === undefined
+  const skillSourceOptions = [
+    // 显式可选的空/无选项：用户选择来源后可随时回到「无来源」（只清组件本地浏览状态）。
+    { value: '', label: t('ai.catalog.form.none') },
+    ...(skillSourceUnavailable
+      ? [
+          {
+            value: skillCatalogEnvironmentName,
+            label: `${skillCatalogEnvironmentName} (${t('ai.catalog.form.unavailable')})`,
+            disabled: true,
+          },
+        ]
+      : []),
+    ...readyEnvironments.map((environment) => ({
+      value: environment.name,
+      label: environment.name,
+    })),
+  ]
   const skillCandidates = withSelectedOrphans(
-    buildSkillCandidates(environments),
+    buildSkillCandidates(selectedSkillSource),
     draft.skills,
   )
 
@@ -155,6 +188,17 @@ export function AgentForm({
         />
         {fieldErrors.tools ? <span className="field-error">{fieldErrors.tools}</span> : null}
       </fieldset>
+
+      <label className="form-group">
+        <FieldLabel>{t('ai.catalog.form.skillCatalogSource')}</FieldLabel>
+        <FormSelect
+          aria-label={t('ai.catalog.form.skillCatalogSource')}
+          value={skillCatalogEnvironmentName}
+          options={skillSourceOptions}
+          onChange={(name) => setSkillCatalogEnvironmentName(name)}
+        />
+        <span className="inline-hint">{t('ai.catalog.form.skillCatalogSourceHint')}</span>
+      </label>
 
       <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.card.skills')}</legend>

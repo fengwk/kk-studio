@@ -66,7 +66,7 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/
 
 `TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
 
-1. 从 candidate path 前缀的最近 TURN_START `BranchSettings` 读取 `environmentName`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
+1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environmentName`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
 3. 按 `activeTools` 与 `environmentName` 构造 tool set：ENVIRONMENT 工具一律按最新名称绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
 4. 生成 `ModelInvocationRequest`：

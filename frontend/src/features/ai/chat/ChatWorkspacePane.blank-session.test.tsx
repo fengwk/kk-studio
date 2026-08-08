@@ -324,7 +324,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn(async () => undefined)
     renderBlankPane({ onEnvironmentChange })
-    const composer = await screen.findByLabelText('给 AI 发送消息')
 
     await user.click(screen.getByRole('button', { name: /env:none/ }))
     let envModal = await screen.findByLabelText('选择 Environment')

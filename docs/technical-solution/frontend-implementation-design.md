@@ -125,7 +125,16 @@ Tool Result 的 Resource（`ResourceRef {uri, mediaType, name, size, sha256}` + 
 - 允许的 scheme 集合仍是 data/file/s3/http/https；未知 scheme 不渲染链接。
 - preview 保持 `<pre>` 文本块，不执行富内容。
 
-## 11. 前端目录
+## 11. Agent 能力表单
+
+Agent 表单的 Tools/Skills 只保存**名称集合**，不保存 Environment、Tool 实例或 MCP 摘要：
+
+- **Tools 候选**只来自固定 `GET /api/ai/catalog/tools` 的 `ToolCatalogEntryDTO[]`；Environment live `tools` 与 MCP server 摘要只是展示数据，绝不动态并入可选目录，零 live Environment 时 Tools 仍可编辑；
+- **Skills 候选**来自表单内**瞬态**的「Skill 目录 Environment」选择器：只允许从当前 `ready===true` 的 live Environment 中**显式选中一个**作为浏览来源（初始为无，不自动选择），仅用于浏览该 Environment 当前发布的 skill 名称；
+- 该选择是组件本地瞬态状态：**不进入 AgentDraft、不随提交 DTO 持久化、不绑定 Agent**；切换 Agent / 重新打开创建编辑器时重置；
+- 切换来源保留已选 skill 名称（同一 short name 在不同 Environment 中是同一个持久化名称）；来源失效（消失或 `ready===false`）后保留为禁用「不可用」选项、不显示 live 候选，已选名称作为可移除 orphan 保留。
+
+## 12. 前端目录
 
 ```text
 frontend/src
@@ -147,7 +156,7 @@ frontend/src
 └── styles.css
 ```
 
-## 12. 验证
+## 13. 验证
 
 ```bash
 cd frontend
