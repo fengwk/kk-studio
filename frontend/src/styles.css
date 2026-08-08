@@ -4061,6 +4061,29 @@ div.is-error {
   font-size: 12px;
 }
 
+.environment-card .env-mcp-row {
+  align-items: center;
+}
+
+.environment-card .env-mcp-server {
+  max-height: none;
+  gap: 6px 8px;
+}
+
+.environment-card .env-mcp-server .status-pill {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+.environment-card .env-mcp-server .val-muted {
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
 .capability-picker .capability-options {
   display: flex;
   flex-direction: column;

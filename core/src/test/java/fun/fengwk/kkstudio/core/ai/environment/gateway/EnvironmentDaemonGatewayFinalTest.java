@@ -21,13 +21,17 @@ import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -66,9 +70,21 @@ class EnvironmentDaemonGatewayFinalTest {
       List.of(
           new DaemonSkillDescriptor("dev", "Developer rules"),
           new DaemonSkillDescriptor("ops", "Operations rules"));
+  private static final DaemonCapabilities ADVERTISED_CAPABILITIES =
+      new DaemonCapabilities(
+          DaemonCapabilities.VERSION,
+          ADVERTISED_SKILLS,
+          List.of(
+              new DaemonMcpServerDescriptor(
+                  "fs",
+                  DaemonMcpServerStatus.READY,
+                  null,
+                  List.of(new DaemonMcpToolDescriptor("read_file", "Read a file"))),
+              new DaemonMcpServerDescriptor(
+                  "broken", DaemonMcpServerStatus.FAILED, "cannot connect", List.of())));
 
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
-  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
+  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
 
   @Test
@@ -313,6 +329,16 @@ class EnvironmentDaemonGatewayFinalTest {
     assertEquals(ENVIRONMENT_NAME, registered.name());
     assertEquals(ENVIRONMENT_NAME, registered.name());
     assertEquals(ADVERTISED_SKILLS, registered.skills());
+    // READY 只发布 MCP server 摘要（无 headers/命令/URL/完整 schema）。
+    assertEquals(
+        List.of("fs", "broken"), registered.mcpServers().stream().map(s -> s.name()).toList());
+    assertEquals(DaemonMcpServerStatus.READY, registered.mcpServers().get(0).status());
+    assertEquals(
+        List.of("read_file"),
+        registered.mcpServers().get(0).tools().stream().map(t -> t.name()).toList());
+    assertEquals(DaemonMcpServerStatus.FAILED, registered.mcpServers().get(1).status());
+    assertEquals("cannot connect", registered.mcpServers().get(1).error());
+    assertTrue(registered.mcpServers().get(1).tools().isEmpty());
     // 工具来自静态 EnvironmentToolCatalog；wire READY 不会对外声明它们。
     assertEquals(EnvironmentToolCatalog.descriptors(), registered.tools());
   }
@@ -333,7 +359,7 @@ class EnvironmentDaemonGatewayFinalTest {
     Fixture fixture = fixture();
     FakeConnection connection = new FakeConnection("connection-catalog-mismatch");
     fixture.gateway.open(connection);
-    fixture.gateway.receive(connection.connectionId(), helloWithCatalogVersion("2", 0));
+    fixture.gateway.receive(connection.connectionId(), helloWithCatalogVersion("999", 0));
     assertTrue(connection.closed);
     assertEquals(List.of(DaemonMessageType.ERROR), messageTypes(connection.envelopes()));
     assertTrue(fixture.environmentRegistry.find(ENVIRONMENT_NAME).isEmpty());
@@ -676,7 +702,7 @@ class EnvironmentDaemonGatewayFinalTest {
         DaemonMessageType.READY,
         null,
         sequence,
-        skillsCodec.encode(ADVERTISED_SKILLS));
+        capabilitiesCodec.encode(ADVERTISED_CAPABILITIES));
   }
 
   private String heartbeat(long sequence) {

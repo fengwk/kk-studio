@@ -6,8 +6,12 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayPropert
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
+import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
+import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpToolDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentSkillDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentToolDTO;
 
@@ -65,6 +69,23 @@ public class LiveEnvironmentQueryServiceImpl implements LiveEnvironmentQueryServ
       skills.add(skillDto);
     }
     dto.setSkills(List.copyOf(skills));
+    List<LiveEnvironmentMcpServerDTO> mcpServers = new ArrayList<>();
+    for (DaemonMcpServerDescriptor server : environment.mcpServers()) {
+      LiveEnvironmentMcpServerDTO serverDto = new LiveEnvironmentMcpServerDTO();
+      serverDto.setName(server.name());
+      serverDto.setStatus(server.status().name());
+      serverDto.setError(server.error());
+      List<LiveEnvironmentMcpToolDTO> serverTools = new ArrayList<>();
+      for (DaemonMcpToolDescriptor tool : server.tools()) {
+        LiveEnvironmentMcpToolDTO toolDto = new LiveEnvironmentMcpToolDTO();
+        toolDto.setName(tool.name());
+        toolDto.setDescription(tool.description());
+        serverTools.add(toolDto);
+      }
+      serverDto.setTools(List.copyOf(serverTools));
+      mcpServers.add(serverDto);
+    }
+    dto.setMcpServers(List.copyOf(mcpServers));
     return dto;
   }
 }

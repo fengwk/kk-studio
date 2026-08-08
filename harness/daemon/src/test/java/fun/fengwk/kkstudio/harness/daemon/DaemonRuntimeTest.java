@@ -10,7 +10,6 @@ import static fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +21,15 @@ import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpCallOutcome;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpConfig;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerClient;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerClientFactory;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerConfig;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolRequest;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpToolSpec;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpTransportType;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
@@ -37,13 +45,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -175,7 +185,8 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
-            List.of());
+            List.of(),
+            null);
 
     assertThrows(
         IllegalStateException.class,
@@ -183,21 +194,30 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 codec 解码回完整 {@link DaemonSkillDescriptor} 列表，避免
+   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 capabilities codec 解码回完整能力对象（skills + MCP server 摘要），避免
    * Cloud/Daemon 协议漂移。
    */
   @Test
-  void readySkillsPayloadIsFullyDecodableBySharedCodec() throws Exception {
+  void readyCapabilitiesPayloadIsFullyDecodableBySharedCodec() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills-codec");
     Path skillDir = skillRoot.resolve("demo");
     Files.createDirectories(skillDir);
     Files.writeString(
         skillDir.resolve("SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n");
     try {
-      DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
+      DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
       FakeTransport transport = new FakeTransport();
+      DaemonSkillRegistry skillRegistry = DaemonSkillRegistry.discover(List.of(skillRoot));
+      McpServerRegistry mcpRegistry = readyRegistryWithOneServer();
       runtime =
-          runtime(transport, new TestTool(), DaemonSkillRegistry.discover(List.of(skillRoot)));
+          runtime(
+              transport,
+              new TestTool(),
+              skillRegistry,
+              mcpRegistry,
+              Duration.ofMinutes(1),
+              Duration.ofSeconds(10),
+              null);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -205,12 +225,18 @@ class DaemonRuntimeTest {
       List<DaemonEnvelope> handshake = transport.takeMessages(2);
       assertMessageTypes(handshake, HELLO, READY);
 
-      List<DaemonSkillDescriptor> skills = skillsCodec.decode(handshake.get(1).payloadJson());
+      DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
-      assertEquals(1, skills.size());
-      assertEquals("demo", skills.get(0).name());
-      assertEquals("Demo skill", skills.get(0).description());
-      assertNotNull(skills.get(0).description());
+      assertEquals(1, capabilities.skills().size());
+      assertEquals("demo", capabilities.skills().get(0).name());
+      assertEquals("Demo skill", capabilities.skills().get(0).description());
+      assertEquals(
+          List.of("fs", "broken"),
+          capabilities.mcpServers().stream().map(server -> server.name()).toList());
+      assertEquals(DaemonMcpServerStatus.READY, capabilities.mcpServers().get(0).status());
+      assertEquals(List.of("read_file"), toolNames(capabilities.mcpServers().get(0)));
+      assertEquals(DaemonMcpServerStatus.FAILED, capabilities.mcpServers().get(1).status());
+      assertTrue(capabilities.mcpServers().get(1).error() != null);
     } finally {
       deleteRecursively(skillRoot);
     }
@@ -916,9 +942,9 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** READY 只携带 skills 摘要，且 skills 不含本地路径。 */
+  /** READY 能力对象只携带 skills/MCP server 摘要，且不含本地路径/正文/工具 schema。 */
   @Test
-  void announcesSkillsAlongsideToolsInCapabilities() throws Exception {
+  void announcesSkillsAlongsideMcpServersInCapabilities() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills");
     Path skillDir = skillRoot.resolve("demo");
     Files.createDirectories(skillDir);
@@ -927,7 +953,16 @@ class DaemonRuntimeTest {
     try {
       FakeTransport transport = new FakeTransport();
       DaemonSkillRegistry skills = DaemonSkillRegistry.discover(List.of(skillRoot));
-      runtime = runtime(transport, new TestTool(), skills);
+      McpServerRegistry mcpRegistry = readyRegistryWithOneServer();
+      runtime =
+          runtime(
+              transport,
+              new TestTool(),
+              skills,
+              mcpRegistry,
+              Duration.ofMinutes(1),
+              Duration.ofSeconds(10),
+              null);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -937,17 +972,28 @@ class DaemonRuntimeTest {
 
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
+      assertEquals(1, payload.path("version").asInt());
       assertEquals(1, payload.path("skills").size());
       assertEquals("demo", payload.path("skills").get(0).path("name").asText());
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
       assertTrue(payload.path("skills").get(0).path("path").isMissingNode());
       assertTrue(payload.path("skills").get(0).path("content").isMissingNode());
+      assertEquals(2, payload.path("mcpServers").size());
+      assertEquals("READY", payload.path("mcpServers").get(0).path("status").asText());
+      assertEquals(
+          "read_file",
+          payload.path("mcpServers").get(0).path("tools").get(0).path("name").asText());
+      // READY 摘要不携带完整 schema；MCP 工具 schema 只经 mcp_list_tools 返回。
+      assertTrue(
+          payload.path("mcpServers").get(0).path("tools").get(0).path("schema").isMissingNode());
+      assertEquals("FAILED", payload.path("mcpServers").get(1).path("status").asText());
+      assertTrue(payload.path("mcpServers").get(1).path("error").isTextual());
     } finally {
       deleteRecursively(skillRoot);
     }
   }
 
-  /** LOAD_SKILL 通过 invocationId 关联，成功返回完整 SKILL.md 正文。 */
+  /** LOAD_SKILL 通过 invocationId 关联，成功返回 skill 指令正文（SKILL.md 去除 front matter）。 */
   @Test
   void loadsSkillBodyByName() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills-load");
@@ -980,7 +1026,7 @@ class DaemonRuntimeTest {
       DaemonSkillLoadCodec.SkillLoaded loaded =
           skillCodec.decodeLoaded(messages.get(1).payloadJson());
       assertEquals("demo", loaded.name());
-      assertEquals(body, loaded.content());
+      assertEquals("# Demo\nfull body", loaded.content());
     } finally {
       deleteRecursively(skillRoot);
     }
@@ -1245,6 +1291,44 @@ class DaemonRuntimeTest {
     assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
   }
 
+  /** transport close 抛错不得悬挂 shutdown：终止闩释放，MCP client 仍被关闭，且 close 幂等。 */
+  @Test
+  void shutdownConvergesWhenTransportCloseThrows() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    transport.closeThrows.set(true);
+    FakeMcpServerClient mcpClient =
+        new FakeMcpServerClient(
+            "fs", new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
+    McpServerRegistry mcpRegistry =
+        new McpServerRegistry(
+            new McpConfig(List.of(serverConfig("fs"))),
+            (config, timeout) -> mcpClient,
+            Duration.ofSeconds(10));
+    mcpRegistry.start();
+    runtime =
+        runtime(
+            transport,
+            new TestTool(),
+            DaemonSkillRegistry.empty(),
+            mcpRegistry,
+            Duration.ofMinutes(1),
+            Duration.ofSeconds(10),
+            null);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake(0);
+    transport.takeMessages(2);
+
+    runtime.close();
+    runtime.close();
+
+    // transport close 抛错被吸收：termination 闩仍释放，shutdown 不悬挂。
+    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+    assertTrue(transport.closed.get());
+    assertTrue(mcpClient.closed.get(), "MCP client must still be closed after transport failure");
+  }
+
   /** shutdown 与 Tool 启动交错时，迟到的 execution handle 也必须收到取消且 journal 不得遗留 RUNNING。 */
   @Test
   void closesInvocationThatCompletesToolStartupAfterShutdown() throws Exception {
@@ -1303,7 +1387,8 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
-            List.of()),
+            List.of(),
+            null),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1326,7 +1411,8 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
-            List.of()),
+            List.of(),
+            null),
         transport,
         registry,
         DaemonSkillRegistry.empty(),
@@ -1367,6 +1453,24 @@ class DaemonRuntimeTest {
       Duration heartbeatInterval,
       Duration defaultToolTimeout,
       ResourceStore resourceStore) {
+    return runtime(
+        transport,
+        tool,
+        skillRegistry,
+        McpServerRegistry.empty(),
+        heartbeatInterval,
+        defaultToolTimeout,
+        resourceStore);
+  }
+
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      Tool tool,
+      DaemonSkillRegistry skillRegistry,
+      McpServerRegistry mcpRegistry,
+      Duration heartbeatInterval,
+      Duration defaultToolTimeout,
+      ResourceStore resourceStore) {
     handshakeTransport = transport;
     DaemonToolRegistry registry = new DaemonToolRegistry();
     registry.register(tool);
@@ -1380,13 +1484,78 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             defaultToolTimeout,
             "test-gateway-token",
-            List.of()),
+            List.of(),
+            null),
         transport,
         registry,
         skillRegistry,
+        mcpRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         resourceStore);
+  }
+
+  /** fake factory：{@code fs} 初始化为 READY（一个工具），{@code broken} 初始化失败为 FAILED。 */
+  private static McpServerRegistry readyRegistryWithOneServer() {
+    McpServerConfig ready = serverConfig("fs");
+    McpServerConfig failed = serverConfig("broken");
+    McpServerRegistry registry =
+        new McpServerRegistry(
+            new McpConfig(List.of(ready, failed)),
+            new McpServerClientFactory() {
+              @Override
+              public McpServerClient create(McpServerConfig config, Duration defaultTimeout) {
+                if (config.name().equals("broken")) {
+                  throw new IllegalStateException("cannot start broken server");
+                }
+                return new FakeMcpServerClient(
+                    config.name(),
+                    new McpToolSpec("read_file", "Read a file", "{\"name\":\"read_file\"}"));
+              }
+            },
+            Duration.ofSeconds(10));
+    registry.start();
+    return registry;
+  }
+
+  private static McpServerConfig serverConfig(String name) {
+    return new McpServerConfig(
+        name, McpTransportType.STDIO, null, List.of("echo"), null, null, null);
+  }
+
+  private static List<String> toolNames(DaemonMcpServerDescriptor server) {
+    return server.tools().stream().map(tool -> tool.name()).toList();
+  }
+
+  private static final class FakeMcpServerClient implements McpServerClient {
+    private final String name;
+    private final McpToolSpec spec;
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    private FakeMcpServerClient(String name, McpToolSpec spec) {
+      this.name = name;
+      this.spec = spec;
+    }
+
+    @Override
+    public String name() {
+      return name;
+    }
+
+    @Override
+    public List<McpToolSpec> listTools() {
+      return List.of(spec);
+    }
+
+    @Override
+    public McpCallOutcome call(McpToolRequest request) {
+      return new McpCallOutcome(false, "ok");
+    }
+
+    @Override
+    public void close() {
+      closed.set(true);
+    }
   }
 
   private void deleteRecursively(Path root) throws Exception {
@@ -1490,6 +1659,7 @@ class DaemonRuntimeTest {
     private final AtomicBoolean returnNullNextConnection = new AtomicBoolean();
     private final AtomicBoolean delayNextConnection = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean closeThrows = new AtomicBoolean();
     private final List<DaemonTransportListener> listeners = new CopyOnWriteArrayList<>();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
@@ -1614,6 +1784,9 @@ class DaemonRuntimeTest {
     @Override
     public void close() {
       closed.set(true);
+      if (closeThrows.compareAndSet(true, false)) {
+        throw new IllegalStateException("transport close failed");
+      }
     }
 
     private final class FakeConnection implements DaemonConnection {

@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.mcp.McpServerRegistry;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkill;
 import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
@@ -23,6 +24,8 @@ import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
@@ -30,7 +33,6 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillLoadCodec;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
@@ -67,11 +69,12 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonTransport transport;
   private final DaemonToolRegistry toolRegistry;
   private final DaemonSkillRegistry skillRegistry;
+  private final McpServerRegistry mcpRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ResourceStore resourceStore;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
-  private final DaemonSkillsCodec skillsCodec = new DaemonSkillsCodec();
+  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
   private final DaemonSkillLoadCodec skillLoadCodec = new DaemonSkillLoadCodec();
   private final AtomicLong outboundSequence = new AtomicLong();
@@ -101,6 +104,7 @@ public final class DaemonRuntime implements AutoCloseable {
         new JdkWebSocketTransport(config.gatewayUri()),
         toolRegistry,
         skillRegistry,
+        McpServerRegistry.empty(),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         null,
@@ -124,6 +128,26 @@ public final class DaemonRuntime implements AutoCloseable {
         new JdkWebSocketTransport(config.gatewayUri()),
         toolRegistry,
         skillRegistry,
+        McpServerRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        resourceStore,
+        true);
+  }
+
+  /** 生产装配：额外持有 daemon 本地 MCP registry，shutdown 时恰好关闭一次。 */
+  public DaemonRuntime(
+      DaemonConfig config,
+      DaemonToolRegistry toolRegistry,
+      DaemonSkillRegistry skillRegistry,
+      ResourceStore resourceStore,
+      McpServerRegistry mcpRegistry) {
+    this(
+        config,
+        new JdkWebSocketTransport(config.gatewayUri()),
+        toolRegistry,
+        skillRegistry,
+        Objects.requireNonNull(mcpRegistry, "mcpRegistry"),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         resourceStore,
@@ -138,7 +162,16 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler) {
-    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, null, false);
+    this(
+        config,
+        transport,
+        toolRegistry,
+        skillRegistry,
+        McpServerRegistry.empty(),
+        journal,
+        scheduler,
+        null,
+        false);
   }
 
   /** 全参数运行时；{@code resourceStore} 可为 {@code null} 以强制对所有 resource/binary 工具结果返回 FAILED。 */
@@ -150,7 +183,38 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ResourceStore resourceStore) {
-    this(config, transport, toolRegistry, skillRegistry, journal, scheduler, resourceStore, false);
+    this(
+        config,
+        transport,
+        toolRegistry,
+        skillRegistry,
+        McpServerRegistry.empty(),
+        journal,
+        scheduler,
+        resourceStore,
+        false);
+  }
+
+  /** 全参数运行时（含 MCP registry），供集成测试注入 registry 生命周期。 */
+  DaemonRuntime(
+      DaemonConfig config,
+      DaemonTransport transport,
+      DaemonToolRegistry toolRegistry,
+      DaemonSkillRegistry skillRegistry,
+      McpServerRegistry mcpRegistry,
+      DaemonInvocationJournal journal,
+      ScheduledExecutorService scheduler,
+      ResourceStore resourceStore) {
+    this(
+        config,
+        transport,
+        toolRegistry,
+        skillRegistry,
+        mcpRegistry,
+        journal,
+        scheduler,
+        resourceStore,
+        false);
   }
 
   private DaemonRuntime(
@@ -158,6 +222,7 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonTransport transport,
       DaemonToolRegistry toolRegistry,
       DaemonSkillRegistry skillRegistry,
+      McpServerRegistry mcpRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ResourceStore resourceStore,
@@ -167,6 +232,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.toolRegistry = Objects.requireNonNull(toolRegistry, "toolRegistry");
     this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
+    this.mcpRegistry = Objects.requireNonNull(mcpRegistry, "mcpRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.resourceStore = resourceStore;
@@ -305,11 +371,13 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private boolean sendReady(ActiveConnection connection) {
+    DaemonCapabilities capabilities =
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            List.copyOf(skillRegistry.descriptors()),
+            mcpRegistry.snapshot());
     return sendOn(
-        connection,
-        DaemonMessageType.READY,
-        null,
-        skillsCodec.encode(List.copyOf(skillRegistry.descriptors())));
+        connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }
 
   private void sendHeartbeat() {
@@ -731,22 +799,48 @@ public final class DaemonRuntime implements AutoCloseable {
       failureReason = reason;
       connection = activeConnection.getAndSet(null);
     }
-    if (connection != null) {
-      connection.connection().close();
+    // shutdown 必须收敛：终止闩在 finally 中释放，每一步清理独立 try/catch，单个 close 失败不得跳过后续清理或悬挂 shutdown。
+    try {
+      if (connection != null) {
+        try {
+          connection.connection().close();
+        } catch (RuntimeException ignored) {
+          // 连接关闭失败不影响其余清理。
+        }
+      }
+      running
+          .values()
+          .forEach(
+              invocation -> {
+                try {
+                  terminal(
+                      invocation.invocationId(),
+                      new DaemonTerminalMessage(
+                          DaemonMessageType.CANCELLED, "{\"reason\":\"daemon stopped\"}"),
+                      true);
+                } catch (RuntimeException ignored) {
+                  // 单个终态通知失败不得阻断其余 invocation 的清理。
+                }
+              });
+      running.clear();
+      try {
+        scheduler.shutdownNow();
+      } catch (RuntimeException ignored) {
+        // scheduler 清理失败不影响 transport/MCP 清理。
+      }
+      try {
+        transport.close();
+      } catch (RuntimeException ignored) {
+        // transport 关闭失败仍必须继续关闭 MCP client。
+      }
+      try {
+        mcpRegistry.close();
+      } catch (RuntimeException ignored) {
+        // MCP 关闭失败仍必须释放终止闩，shutdown 永不悬挂。
+      }
+    } finally {
+      termination.countDown();
     }
-    running
-        .values()
-        .forEach(
-            invocation ->
-                terminal(
-                    invocation.invocationId(),
-                    new DaemonTerminalMessage(
-                        DaemonMessageType.CANCELLED, "{\"reason\":\"daemon stopped\"}"),
-                    true));
-    running.clear();
-    scheduler.shutdownNow();
-    transport.close();
-    termination.countDown();
   }
 
   private final class InvocationListener implements ToolExecutionListener {

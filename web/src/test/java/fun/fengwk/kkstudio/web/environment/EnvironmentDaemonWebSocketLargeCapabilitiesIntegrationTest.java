@@ -17,12 +17,13 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillsCodec;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
@@ -51,7 +52,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
-  private static final DaemonSkillsCodec SKILLS_CODEC = new DaemonSkillsCodec();
+  private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
 
   @LocalServerPort private int port;
 
@@ -149,7 +150,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       description.append("pad-");
     }
     DaemonSkillDescriptor fat = new DaemonSkillDescriptor("fat-skill", description.toString());
-    return SKILLS_CODEC.encode(List.of(fat));
+    return CAPABILITIES_CODEC.encode(
+        new DaemonCapabilities(DaemonCapabilities.VERSION, List.of(fat), List.of()));
   }
 
   private static DaemonEnvelope helloEnvelope(long sequence) {

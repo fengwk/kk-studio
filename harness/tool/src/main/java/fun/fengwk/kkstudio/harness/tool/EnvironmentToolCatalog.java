@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.tool;
 
 import fun.fengwk.kkstudio.harness.tool.schema.ToolBooleanSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolIntegerSchema;
+import fun.fengwk.kkstudio.harness.tool.schema.ToolObjectSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
@@ -25,7 +26,7 @@ import java.util.Set;
  */
 public final class EnvironmentToolCatalog {
 
-  public static final String VERSION = "1";
+  public static final String VERSION = "2";
 
   private static final String PROMPT_RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/tool/environment/prompts/";
@@ -204,7 +205,31 @@ public final class EnvironmentToolCatalog {
                 Set.of("path", "target"),
                 false),
             ToolSideEffect.READ_ONLY,
-            Duration.ofMinutes(2)));
+            Duration.ofMinutes(2)),
+        descriptor(
+            "mcp_list_tools",
+            new ToolParamsSchema(
+                "mcp_list_tools 工具参数。",
+                Map.of("server", new ToolStringSchema("可选的 MCP server 名称；缺省列出全部 server 的状态与工具")),
+                Set.of(),
+                false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofSeconds(30)),
+        descriptor(
+            "mcp_call_tool",
+            new ToolParamsSchema(
+                "mcp_call_tool 工具参数。",
+                Map.of(
+                    "server",
+                    new ToolStringSchema("MCP server 名称"),
+                    "tool",
+                    new ToolStringSchema("MCP 工具名称"),
+                    "arguments",
+                    new ToolObjectSchema("任意 JSON 对象参数，原样传递给 MCP 工具", Map.of(), Set.of(), true)),
+                Set.of("server", "tool", "arguments"),
+                false),
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ofMinutes(5)));
   }
 
   private static ToolDescriptor descriptor(

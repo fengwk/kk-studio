@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.util.Objects;
 
-/** 本地已发现的 skill：capabilities 摘要 + 完整 SKILL.md 正文。 */
+/** 本地已发现的 skill：capabilities 摘要 + skill 指令正文（SKILL.md 去除 front matter）。 */
 public record DaemonSkill(String name, String description, String body) {
 
   public DaemonSkill {

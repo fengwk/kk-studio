@@ -14,13 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Skill 目录发现：front matter、同名冲突与正文加载。 */
+/** Skill 目录发现：LangChain4j front matter 解析、同名冲突与指令正文加载。 */
 class DaemonSkillRegistryTest {
 
   @TempDir Path tempDir;
 
   @Test
-  void discoversChildSkillsAndLoadsFullBody() throws IOException {
+  void discoversChildSkillsAndLoadsInstructionContent() throws IOException {
     Path skillA = tempDir.resolve("alpha");
     Files.createDirectories(skillA);
     String body = "---\nname: alpha\ndescription: Alpha skill\n---\n# Alpha\n\nbody line\n";
@@ -32,18 +32,19 @@ class DaemonSkillRegistryTest {
     DaemonSkillDescriptor descriptor = registry.descriptors().iterator().next();
     assertEquals("alpha", descriptor.name());
     assertEquals("Alpha skill", descriptor.description());
-    assertEquals(body, registry.loadBody("alpha").orElseThrow());
+    // 指令正文 = SKILL.md 去除 front matter。
+    assertEquals("# Alpha\n\nbody line", registry.loadBody("alpha").orElseThrow());
   }
 
   @Test
   void discoversRootSkillMdInConfiguredDir() throws IOException {
-    String body = "---\nname: root-skill\ndescription: Root\n---\n";
+    String body = "---\nname: root-skill\ndescription: Root\n---\n# Root\n";
     Files.writeString(tempDir.resolve("SKILL.md"), body);
 
     DaemonSkillRegistry registry = DaemonSkillRegistry.discover(List.of(tempDir));
 
     assertEquals("root-skill", registry.descriptors().iterator().next().name());
-    assertEquals(body, registry.loadBody("root-skill").orElseThrow());
+    assertEquals("# Root", registry.loadBody("root-skill").orElseThrow());
   }
 
   @Test

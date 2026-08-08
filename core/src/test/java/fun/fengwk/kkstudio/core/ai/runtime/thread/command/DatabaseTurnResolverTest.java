@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -913,7 +914,11 @@ class DatabaseTurnResolverTest {
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
       environmentRegistry.tryBind(environmentName, connection, NOW, Duration.ofSeconds(60));
-      environmentRegistry.updateSkills(environmentName, connection, skills, NOW);
+      environmentRegistry.updateCapabilities(
+          environmentName,
+          connection,
+          new DaemonCapabilities(DaemonCapabilities.VERSION, skills, List.of()),
+          NOW);
       environmentRegistry.markReady(environmentName, connection, NOW);
     }
   }

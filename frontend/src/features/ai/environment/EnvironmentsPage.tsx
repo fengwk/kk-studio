@@ -6,6 +6,7 @@ import { environmentService } from '@/shared/api/environment-service'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
+import type { LiveEnvironmentMcpServerDTO } from '@/shared/api/contracts/ai-environment'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -70,6 +71,37 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
   )
 }
 
+/** MCP server 摘要行：状态 + 限长错误 + 工具名摘要；只读展示，不作为可选 Agent 工具。 */
+function McpServerRow({
+  server,
+  t,
+}: {
+  server: LiveEnvironmentMcpServerDTO
+  t: (key: string) => string
+}) {
+  const ready = server.status === 'READY'
+  const toolNames = (server.tools ?? []).map((tool) => tool.name).filter(Boolean)
+  return (
+    <div className="meta-row env-tag-row env-mcp-row">
+      <span className="lbl">{t('ai.environment.mcpServers')}</span>
+      <div className="meta-chips env-mcp-server">
+        <span className="meta-chip">{server.name}</span>
+        <span className={`status-pill is-mcp${ready ? ' is-ready' : ' is-offline'}`}>{server.status}</span>
+        {server.error ? (
+          <span className="val val-muted" title={server.error}>
+            {server.error}
+          </span>
+        ) : null}
+        {toolNames.length > 0 ? (
+          <span className="val" title={toolNames.join(', ')}>
+            {toolNames.join(', ')}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function EnvironmentsPage() {
   const { t, locale } = useI18n()
   const environmentsQuery = useQuery({
@@ -108,7 +140,9 @@ export function EnvironmentsPage() {
             ) : (
               environments.map((environment) => {
                 const status = String(environment.status).toUpperCase()
-                const ready = status === 'READY'
+                // 可用性以统一 ready 标记为准：READY 但 ready=false 的过期条目必须显式显示不可用。
+                const ready = environment.ready === true
+                const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
                 const toolNames = (environment.tools ?? []).map((tool) => tool.name).filter(Boolean)
                 const skillNames = (environment.skills ?? []).map((skill) => skill.name).filter(Boolean)
                 const lastSeen = formatLastSeen(environment.lastSeen, locale)
@@ -124,12 +158,15 @@ export function EnvironmentsPage() {
                               : t('ai.environment.lastSeen')}
                           </p>
                         </div>
-                        <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>{status}</span>
+                        <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>{displayStatus}</span>
                       </div>
                     </div>
                     <div className="meta-block">
                       <TagRow label={t('ai.environment.tools')} names={toolNames} />
                       <TagRow label={t('ai.environment.skills')} names={skillNames} />
+                      {(environment.mcpServers ?? []).map((server) => (
+                        <McpServerRow key={server.name} server={server} t={t} />
+                      ))}
                     </div>
                   </article>
                 )

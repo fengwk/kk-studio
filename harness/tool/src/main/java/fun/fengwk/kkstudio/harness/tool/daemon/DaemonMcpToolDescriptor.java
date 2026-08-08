@@ -1,13 +1,13 @@
-package fun.fengwk.kkstudio.harness.daemon.skill;
+package fun.fengwk.kkstudio.harness.tool.daemon;
 
 /**
- * SKILL.md YAML front matter 中用于发现的最小字段。
+ * Daemon READY 中暴露的 MCP 工具摘要。
  *
- * <p>只解析 {@code name} 与 {@code description}；其它键（如 allowed-tools）忽略。
+ * <p>仅包含可安全上报的 name/description；完整输入 schema 只通过固定的 {@code mcp_list_tools} 桥接工具返回。
  */
-public record SkillFrontMatter(String name, String description) {
+public record DaemonMcpToolDescriptor(String name, String description) {
 
-  public SkillFrontMatter {
+  public DaemonMcpToolDescriptor {
     name = requireNonBlank(name, "name");
     description = requireNonBlank(description, "description");
   }

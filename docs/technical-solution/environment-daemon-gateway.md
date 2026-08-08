@@ -4,7 +4,7 @@
 
 ## 职责与边界
 
-产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，READY 后补齐 skills 并转为 `READY`；可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
+产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，READY 后补齐版本化能力对象（skills + MCP server 摘要）并转为 `READY`；可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
 
 | 层 | 职责 |
 | --- | --- |
@@ -42,10 +42,11 @@ java ... DaemonMain \
   --gateway-uri ws://studio.example/api/ai/environment/daemon/v2 \
   --gateway-token ${KK_STUDIO_DAEMON_TOKEN} \
   --skill-dir ~/.agents/skills \
+  --mcp-config /etc/kk-studio/daemon-mcp.json \
   --daemon-id optional-stable-daemon-name
 ```
 
-`environment-name` 与 `gateway-token` 必填；`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
+`environment-name` 与 `gateway-token` 必填；`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选（属性回退 `kkstudio.daemon.mcp-config`），指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
 
 ## 认证、绑定与目录
 
@@ -58,10 +59,10 @@ Daemon 连接后的首帧必须是 HELLO。canonical `environmentName` 位于 **
 握手顺序：
 
 ```text
-HELLO -> WELCOME {} -> READY {"skills":[...]}
+HELLO -> WELCOME {} -> READY {"version":1,"skills":[...],"mcpServers":[...]}
 ```
 
-READY 后 `HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
+READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities` v1）：`skills` 为 name/description 摘要，`mcpServers` 为 name/status/error/tools(name+description) 摘要。**摘要绝不包含 headers/environment 值、命令、URL、本地路径或完整工具 schema**；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。READY 每个连接恰好一次；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
 **并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用，已存在 active 时新 INVOKE 确定性失败（`environmentName already has an active remote tool invocation`）。发送 CANCEL 只做幂等取消请求；active 槽位在 terminal callback 或连接 cleanup 时释放。
 
@@ -71,7 +72,37 @@ READY 后 `HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。�
 GET /api/ai/environment
 ```
 
-返回 `name`（canonical 路由身份，唯一键）/ `status` / `ready`（统一可用性标记）/ `tools` / `skills` / `lastSeen`。无 create/update/delete API。
+返回 `name`（canonical 路由身份，唯一键）/ `status` / `ready`（统一可用性标记）/ `tools` / `skills` / `mcpServers`（server 状态与工具摘要）/ `lastSeen`。无 create/update/delete API。
+
+## 本地 MCP server
+
+Daemon 可选的 `--mcp-config` 指向严格 UTF-8 JSON（`{"servers":[...]}`；拒绝未知字段、重复键、重复 server 名与 transport 不适用字段）：
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "timeoutSeconds": 30,
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem"],
+      "environment": {"LANG": "C"}
+    },
+    {
+      "name": "remote",
+      "transport": "streamable-http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer ..."}
+    }
+  ]
+}
+```
+
+- server 名必须是 canonical 小写连字符命名（`[a-z][a-z0-9-]{1,64}`，上限 64 字符）；`transport` 为 `stdio` / `streamable-http` / `websocket`；`timeoutSeconds` 可选且必须为正整数；stdio 要求非空 `command`（可选 `environment`），HTTP/WS 要求合法 scheme 的 `url`（可选 `headers`）；environment/headers 的键必须非空白。
+- 每个配置的 server **独立初始化**（LangChain4j `DefaultMcpClient` + 对应 transport）：单个失败只记录为 `FAILED`（错误摘要单行有界且剔除 headers/environment 值、命令与 URL），不阻断 coding tools、skills 或其它 server；启动失败的 server 保持 `FAILED` 直到 daemon 重启。退出时对每个成功创建的 client 恰好关闭一次。
+- MCP 工具**从不**动态进入 `EnvironmentToolCatalog` 或 Agent 可选目录；只有两个固定桥接工具始终注册（即使未配置 `--mcp-config`）：
+  - `mcp_list_tools`（READ_ONLY）：确定性 JSON 报告全部/单个 server 的状态与 READY server 的工具（name/description/完整输入 schema）；
+  - `mcp_call_tool`（NON_IDEMPOTENT）：按精确 `server`/`tool`/JSON 对象 `arguments` 调用，保留上游 isError 与文本/结构化 JSON 结果；未知/未 READY server 或未知工具是确定性错误。
 
 Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool，不出现在 Agent 可选择目录中，必须由 Agent 的 `activeTools` 显式选择（Resolver 不做隐式追加）。
 
@@ -104,9 +135,9 @@ sequenceDiagram
     G->>R: tryBind(name, connection)
     G-->>W: WELCOME {}
     W-->>D: WELCOME {}
-    D->>W: READY(skills)
-    W->>G: READY(skills)
-    G->>R: mark READY, skills, lastSeen
+    D->>W: READY(capabilities)
+    W->>G: READY(capabilities)
+    G->>R: mark READY, capabilities, lastSeen
     R-->>G: READY hint
     G-->>WD: wake hint
     WD->>DB: claim due TOOL Work
@@ -162,5 +193,7 @@ Daemon 仅依赖 `harness-tool`，不反向依赖 runtime/model。
 read, write, edit, bash, grep, find,
 lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 ```
+
+另由 `McpBridgeTools.registerAll` 注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」），Environment 固定目录共 11 个工具。动态 MCP 工具绝不进入该目录。
 
 静态 MIT prompt 资源位于 `harness/daemon/src/main/resources/.../coding/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`CodingToolsConfig` 的默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。

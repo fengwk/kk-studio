@@ -10,10 +10,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 
 /** 基于 canonical EnvironmentName 的占用、断开/租约释放接管与 READY + 心跳过期可用性规则。 */
 class LiveEnvironmentRegistryTest {
@@ -39,7 +39,7 @@ class LiveEnvironmentRegistryTest {
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
     assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
-    registry.updateSkills(DEV, first, List.of(), NOW);
+    registry.updateCapabilities(DEV, first, DaemonCapabilities.empty(), NOW);
     registry.markReady(DEV, first, NOW);
     assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
 
@@ -177,7 +177,8 @@ class LiveEnvironmentRegistryTest {
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, owner, NOW));
     assertThrows(
-        IllegalStateException.class, () -> registry.updateSkills(DEV, foreign, List.of(), NOW));
+        IllegalStateException.class,
+        () -> registry.updateCapabilities(DEV, foreign, DaemonCapabilities.empty(), NOW));
     registry.unregister(DEV, foreign);
     assertTrue(registry.find(DEV).isPresent());
   }

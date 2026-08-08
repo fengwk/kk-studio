@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
+import dev.langchain4j.skills.FileSystemSkill;
+import dev.langchain4j.skills.FileSystemSkillLoader;
+
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,10 +18,10 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * 从 CLI 配置的 skill 目录发现并登记本地 Skills。
+ * 从 CLI 配置的 skill 目录发现并登记本地 Skills（使用 LangChain4j {@link FileSystemSkillLoader}）。
  *
- * <p>每个 skill 目录的直接子目录若含 {@code SKILL.md} 则登记；skill 目录本身含 {@code SKILL.md} 也登记。同名 skill
- * 在启动时拒绝。capabilities 仅暴露 name/description；{@link #loadBody(String)} 返回完整正文。
+ * <p>配置目录本身含 {@code SKILL.md} 时登记为一个 skill；否则发现直接子目录中的 skill。同名 skill 在启动时拒绝。 capabilities 仅暴露
+ * name/description；{@link #loadBody(String)} 只返回 skill 指令正文（front matter 之外的 instruction content）。
  */
 public final class DaemonSkillRegistry {
 
@@ -44,16 +46,15 @@ public final class DaemonSkillRegistry {
       if (!Files.isDirectory(absolute)) {
         throw new IllegalArgumentException("skill-dir must be an existing directory: " + absolute);
       }
-      Path rootSkill = absolute.resolve("SKILL.md");
-      if (Files.isRegularFile(rootSkill)) {
-        register(discovered, loadSkill(rootSkill));
+      if (Files.isRegularFile(absolute.resolve("SKILL.md"))) {
+        register(discovered, loadSkill(absolute, "configured root"));
+        continue;
       }
       try (Stream<Path> children = Files.list(absolute)) {
         List<Path> ordered = children.filter(Files::isDirectory).sorted().toList();
         for (Path child : ordered) {
-          Path skillMd = child.resolve("SKILL.md");
-          if (Files.isRegularFile(skillMd)) {
-            register(discovered, loadSkill(skillMd));
+          if (Files.isRegularFile(child.resolve("SKILL.md"))) {
+            register(discovered, loadSkill(child, "child directory"));
           }
         }
       } catch (IOException error) {
@@ -78,7 +79,7 @@ public final class DaemonSkillRegistry {
     return Optional.ofNullable(skills.get(name));
   }
 
-  /** 返回完整 SKILL.md 正文；未知 name 时 empty。 */
+  /** 返回 skill 指令正文（完整 SKILL.md 去除 front matter）；未知 name 时 empty。 */
   public Optional<String> loadBody(String name) {
     return find(name).map(DaemonSkill::body);
   }
@@ -90,19 +91,35 @@ public final class DaemonSkillRegistry {
     }
   }
 
-  private static DaemonSkill loadSkill(Path skillMd) {
-    String body;
+  private static DaemonSkill loadSkill(Path skillDir, String source) {
+    FileSystemSkill skill;
     try {
-      body = Files.readString(skillMd, StandardCharsets.UTF_8);
-    } catch (IOException error) {
-      throw new IllegalArgumentException("cannot read SKILL.md: " + skillMd, error);
-    }
-    try {
-      SkillFrontMatter matter = SkillFrontMatterParser.parse(body);
-      return new DaemonSkill(matter.name(), matter.description(), body);
-    } catch (IllegalArgumentException error) {
+      skill = FileSystemSkillLoader.loadSkill(skillDir);
+    } catch (RuntimeException error) {
+      String cause = error.getMessage();
       throw new IllegalArgumentException(
-          "invalid SKILL.md metadata at " + skillMd + ": " + error.getMessage(), error);
+          "cannot load SKILL.md from "
+              + skillDir
+              + " ("
+              + source
+              + ")"
+              + (cause == null ? "" : ": " + cause),
+          error);
     }
+    String name = skill.name();
+    String description = skill.description();
+    if (name == null || name.isBlank()) {
+      throw new IllegalArgumentException(
+          "invalid SKILL.md metadata at " + skillDir + " (" + source + "): missing non-blank name");
+    }
+    if (description == null || description.isBlank()) {
+      throw new IllegalArgumentException(
+          "invalid SKILL.md metadata at "
+              + skillDir
+              + " ("
+              + source
+              + "): missing non-blank description");
+    }
+    return new DaemonSkill(name, description, skill.content());
   }
 }
