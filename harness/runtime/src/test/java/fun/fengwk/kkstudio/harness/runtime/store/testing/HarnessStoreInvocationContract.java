@@ -30,10 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -43,10 +45,13 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 /**
  * ModelInvocation / ToolInvocation FK、唯一 key、result-entry 类型 与 branch 约束。
@@ -949,6 +954,16 @@ public abstract class HarnessStoreInvocationContract {
         });
   }
 
+  private ToolInvocation updateTool(long invocationId, UnaryOperator<ToolInvocation> transition) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation current = tx.lockToolInvocation(invocationId).orElseThrow();
+          ToolInvocation updated = transition.apply(current);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
   /** 合法 turn 链 TURN_START -> USER -> ASSISTANT(call-1..call-3)，并附带一个 terminal model result。 */
   private long seedAssistantAndModel() {
     long userEntryId =
@@ -1072,6 +1087,31 @@ public abstract class HarnessStoreInvocationContract {
 
     ToolInvocation stored = store.transaction(tx -> tx.findToolInvocation(10)).orElseThrow();
     assertEquals(argumentsJson, stored.request().call().argumentsJson());
+  }
+
+  @Test
+  void successfulToolEffectsRoundTripAsOneTerminalFact() {
+    long assistantEntryId = seedAssistantAndModel();
+    ToolInvocation ready =
+        toolInvocation(10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
+    updateTool(10, tool -> tool.markApprovalNotRequired(T2));
+    updateTool(10, tool -> tool.beginDispatch(T2));
+    updateTool(10, tool -> tool.markRunning(T2));
+    ToolEffectBatch effects =
+        new ToolEffectBatch(
+            List.of(
+                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}"),
+                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"verify\"}")));
+    ToolResult result =
+        new ToolResult(
+            "call-1", List.of(new TextToolContent("ok")), false, "{\"done\":true}", false);
+    updateTool(10, tool -> tool.succeed(result, effects, T3));
+
+    ToolInvocation stored = store.transaction(tx -> tx.findToolInvocation(10)).orElseThrow();
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
+    assertEquals(result, stored.result());
+    assertEquals(effects, stored.effects());
   }
 
   @Test

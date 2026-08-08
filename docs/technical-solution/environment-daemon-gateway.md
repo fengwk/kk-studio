@@ -108,7 +108,7 @@ Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；
 
 ## Invocation 分发
 
-`harness_tool_invocation.request` 冻结 binding（descriptor/type/environmentName）。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
+`harness_tool_invocation.request` 冻结 binding（descriptor/type/environmentName/plugin）；ENVIRONMENT binding 的 plugin 恒为 null。统一 `ToolProcessor` 只消费 dispatcher 已 claim 的 TOOL Work：
 
 ```text
 claim TOOL Work（Work-only 短事务）
@@ -117,7 +117,7 @@ claim TOOL Work（Work-only 短事务）
   -> RemoteToolTransport.send -> Gateway -> Daemon INVOKE
   -> 回调（serialized FIFO）：STARTED / PARTIAL / COMPLETED / FAILED / CANCELLED
   -> CoreToolGateway 回调桥内 ToolResultExternalizer（durable 外部化）
-  -> ToolProcessor 接收已外部化 terminal ToolResult -> terminal CAS -> 请求 THREAD Work 做 sibling apply
+  -> ToolProcessor 接收 ToolSuccess(result, empty effects) -> terminal CAS -> 请求 THREAD Work 做 sibling apply
 ```
 
 ```mermaid

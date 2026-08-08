@@ -41,21 +41,25 @@ class ToolGatewayTest {
   @Test
   void executionFreezesTheKeyAndTheRequest() {
     ToolGateway.Execution execution =
-        new ToolGateway.Execution(9L, 7L, 2, PortTestData.toolRequest());
+        new ToolGateway.Execution(9L, 7L, 11L, 2, PortTestData.toolRequest());
     assertEquals(9L, execution.invocationId());
     assertEquals(7L, execution.threadId());
+    assertEquals(11L, execution.assistantEntryId());
     assertEquals(2, execution.proposedAttempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(0L, 1L, 1, PortTestData.toolRequest()));
+        () -> new ToolGateway.Execution(0L, 1L, 1L, 1, PortTestData.toolRequest()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 0L, 1, PortTestData.toolRequest()));
+        () -> new ToolGateway.Execution(1L, 0L, 1L, 1, PortTestData.toolRequest()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 1L, 0, PortTestData.toolRequest()));
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Execution(1L, 1L, 1, null));
+        () -> new ToolGateway.Execution(1L, 1L, 0L, 1, PortTestData.toolRequest()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolGateway.Execution(1L, 1L, 1L, 0, PortTestData.toolRequest()));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Execution(1L, 1L, 1L, 1, null));
   }
 
   @Test
@@ -109,7 +113,7 @@ class ToolGatewayTest {
           public void onPartial(ToolResult partial) {}
 
           @Override
-          public void onSucceeded(ToolResult result) {}
+          public void onSucceeded(ToolSuccess success) {}
 
           @Override
           public void onFailed(ToolGateway.Failure failure) {}
@@ -121,7 +125,7 @@ class ToolGatewayTest {
           public void onUnknown(ToolInvocationError error) {}
         };
     listener.onPartial(new ToolResult("call-1", List.of(), false, "{}", false));
-    listener.onSucceeded(null);
+    listener.onSucceeded((ToolSuccess) null);
     listener.onFailed(null);
     listener.onCancelled(null);
     listener.onUnknown(null);
@@ -155,7 +159,7 @@ class ToolGatewayTest {
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest(), true));
     ToolGateway.StartResult result =
         gateway.start(
-            new ToolGateway.Execution(5L, 3L, 1, PortTestData.toolRequest()), noopListener());
+            new ToolGateway.Execution(5L, 3L, 7L, 1, PortTestData.toolRequest()), noopListener());
     assertTrue(result instanceof ToolGateway.Started);
   }
 
@@ -165,7 +169,7 @@ class ToolGatewayTest {
       public void onPartial(ToolResult partial) {}
 
       @Override
-      public void onSucceeded(ToolResult result) {}
+      public void onSucceeded(ToolSuccess success) {}
 
       @Override
       public void onFailed(ToolGateway.Failure failure) {}

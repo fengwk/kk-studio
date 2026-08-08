@@ -641,11 +641,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       if (findToolInvocation(invocation.id()).isPresent()) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }
-      if (invocation.status() != ToolInvocationStatus.READY
+      if ((invocation.status() != ToolInvocationStatus.READY
+              && invocation.status() != ToolInvocationStatus.FAILED)
           || invocation.attempt() != 0
-          || invocation.approval() != null) {
+          || invocation.approval() != null
+          || invocation.resultEntryId() != null) {
         throw new IllegalArgumentException(
-            "new tool invocations must be READY with attempt 0 and no approval");
+            "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
       }
       requireUniqueToolOrdinal(invocation);
       requireValidToolReferences(invocation);
@@ -656,10 +658,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_tool_invocation (
               id, model_invocation_id, assistant_entry_id, ordinal, request, status, attempt,
-              approval, result, error, result_entry_id, created_at, updated_at
+              approval, result, effects, error, result_entry_id, created_at, updated_at
           ) values (
               ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-              cast(? as jsonb), ?, ?, ?
+              cast(? as jsonb), cast(? as jsonb), ?, ?, ?
           )
           """,
           invocation.id(),
@@ -671,6 +673,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           invocation.attempt(),
           encodeToolApproval(invocation),
           encodeToolResult(invocation),
+          encodeToolEffects(invocation),
           encodeToolError(invocation),
           invocation.resultEntryId(),
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
@@ -715,6 +718,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                   attempt = ?,
                   approval = cast(? as jsonb),
                   result = cast(? as jsonb),
+                  effects = cast(? as jsonb),
                   error = cast(? as jsonb),
                   result_entry_id = ?,
                   updated_at = ?
@@ -724,6 +728,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               invocation.attempt(),
               encodeToolApproval(invocation),
               encodeToolResult(invocation),
+              encodeToolEffects(invocation),
               encodeToolError(invocation),
               invocation.resultEntryId(),
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
@@ -1343,6 +1348,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   private static String encodeToolResult(ToolInvocation invocation) {
     return invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result());
+  }
+
+  private static String encodeToolEffects(ToolInvocation invocation) {
+    return PostgresqlHarnessRows.TOOL_EFFECTS.encode(invocation.effects());
   }
 
   private static String encodeToolError(ToolInvocation invocation) {

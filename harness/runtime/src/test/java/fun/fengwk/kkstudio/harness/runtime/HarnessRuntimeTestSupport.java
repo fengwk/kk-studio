@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -416,6 +417,12 @@ final class HarnessRuntimeTestSupport {
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
   static ToolInvocation succeedTool(InMemoryHarnessStore store, long toolId) {
+    return succeedTool(store, toolId, ToolEffectBatch.EMPTY);
+  }
+
+  /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED，并原子携带真实 result 与 branch effects。 */
+  static ToolInvocation succeedTool(
+      InMemoryHarnessStore store, long toolId, ToolEffectBatch effects) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -427,6 +434,7 @@ final class HarnessRuntimeTestSupport {
                       false,
                       "{}",
                       false),
+                  effects,
                   T3);
           tx.updateToolInvocations(List.of(updated));
           return updated;

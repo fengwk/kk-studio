@@ -14,6 +14,10 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.harness.plugin.BranchView;
+import fun.fengwk.kkstudio.harness.plugin.ContextProjectorContribution;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -27,6 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -84,6 +91,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
   private final ToolCatalog toolCatalog;
+  private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final EnvironmentGatewayProperties environmentGatewayProperties;
   private final Clock clock;
@@ -99,6 +107,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
       ToolCatalog toolCatalog,
+      PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
       EnvironmentGatewayProperties environmentGatewayProperties,
       Clock clock) {
@@ -110,6 +119,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+    this.pluginCatalog = Objects.requireNonNull(pluginCatalog, "pluginCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentGatewayProperties =
         Objects.requireNonNull(environmentGatewayProperties, "environmentGatewayProperties");
@@ -237,12 +247,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
     for (String name : settings.activeTools()) {
       Optional<ToolDescriptor> selectable = toolCatalog.findSelectable(name);
       if (selectable.isPresent() && selectable.get().type() == ToolType.PLATFORM) {
-        bindings.add(new ToolBinding(selectable.get(), ToolType.PLATFORM, null));
+        bindings.add(platformBinding(selectable.get()));
         continue;
       }
       Optional<ToolDescriptor> internal = toolCatalog.findInternal(name);
       if (internal.isPresent()) {
-        bindings.add(new ToolBinding(internal.get(), ToolType.PLATFORM, null));
+        bindings.add(platformBinding(internal.get()));
         continue;
       }
       // selectable catalog 合并了 Environment 工具；ENVIRONMENT 工具由固定 catalog 精确提供。
@@ -253,12 +263,29 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (environmentTool.isPresent()) {
         bindings.add(
             new ToolBinding(
-                environmentTool.get(), ToolType.ENVIRONMENT, settings.environmentName()));
+                environmentTool.get(), ToolType.ENVIRONMENT, settings.environmentName(), null));
         continue;
       }
       throw rejection("tool not found: " + name);
     }
     return List.copyOf(bindings);
+  }
+
+  private ToolBinding platformBinding(ToolDescriptor descriptor) {
+    ToolContribution contribution = pluginCatalog.findTool(descriptor.name()).orElse(null);
+    if (contribution == null) {
+      return new ToolBinding(descriptor, ToolType.PLATFORM, null, null);
+    }
+    List<PluginStateAccess> stateAccesses = new ArrayList<>(contribution.stateAccesses().size());
+    for (var access : contribution.stateAccesses()) {
+      stateAccesses.add(
+          new PluginStateAccess(
+              access.customType(), PluginStateAccessMode.valueOf(access.mode().name())));
+    }
+    PluginToolBinding plugin =
+        new PluginToolBinding(
+            contribution.id().pluginId().value(), contribution.id().localName(), stateAccesses);
+    return new ToolBinding(descriptor, ToolType.PLATFORM, null, plugin);
   }
 
   /**
@@ -353,6 +380,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
     String composedPrompt = composeSystemPrompt(systemPrompt, skillBindings);
     if (!composedPrompt.isBlank()) {
       semanticMessages.add(AgentMessage.system(composedPrompt));
+    }
+    BranchView branch = new BranchView(path);
+    for (ContextProjectorContribution contribution : pluginCatalog.contextProjectors()) {
+      List<AgentMessage> projected =
+          Objects.requireNonNull(
+              contribution.projector().project(branch),
+              "plugin context projector returned null: " + contribution.id());
+      for (AgentMessage message : projected) {
+        semanticMessages.add(
+            Objects.requireNonNull(
+                message, "plugin context projector returned a null message: " + contribution.id()));
+      }
     }
     for (Entry entry : path.entries()) {
       EntryPayload payload = entry.payload();

@@ -6,7 +6,7 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **57** 个 API case；标准入口默认执行免费的 **L1 51** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 57 个 Node API case。
+当前注册 **58** 个 API case；标准入口默认执行免费的 **L1 52** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 58 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -62,7 +62,7 @@ npm --prefix frontend run e2e:docs
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（51）
+### L1（52）
 
 ```text
 seed.structured_model_config
@@ -110,6 +110,7 @@ config.model.invalid.negative_temperature
 matrix.model.teardown_provider
 matrix.agent.setup_model
 config.agent.valid.empty_lists
+config.agent.valid.goal_plugin_tools
 config.agent.invalid.missing_tools
 config.agent.invalid.missing_skills
 config.agent.invalid.unknown_tool
@@ -121,7 +122,7 @@ matrix.agent.teardown_model
 L1 的关键语义断言：
 
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；
-- Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；
+- Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
@@ -129,7 +130,7 @@ L1 的关键语义断言：
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
 - `USER_MESSAGE` 只能携带 `type/clientCommandId/content`（多余字段 400）；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
-- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO` 六类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队，消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空；消费证据 = durable TOOL MESSAGE 的 model-visible `UNAVAILABLE` 拒绝（environmentName=null 时 ENVIRONMENT 工具规划不再拒绝，实际 start 是确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）+ 最终 `TURN_END(COMPLETED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
+- `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO` 六类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；

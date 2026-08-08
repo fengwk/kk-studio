@@ -6,7 +6,7 @@
 
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
-| Harness / AI | `harness-tool`、`harness-runtime`、`harness-runtime-spring`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、Work |
+| Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin`、`plugins/*`、`harness-runtime-spring`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
 | Studio / Canvas | `studio`、`core.studio`、`features/canvas` | Canvas document、node、link、command dedup |
 
 ```text
@@ -16,6 +16,8 @@ frontend
     -> harness-runtime-spring -> harness-runtime -> harness-tool
     -> harness-runtime
 core -> harness-runtime -> harness-tool
+core -> harness-plugin -> harness-runtime
+plugins/* -> harness-plugin
 core -> harness-tool
   -> share
 harness-daemon -> harness-tool
@@ -32,7 +34,7 @@ harness-daemon -> harness-tool
 | Agent | 以 immutable `name` 标识的系统提示、Model/Variant 与 tools/skills 配置 |
 | Model ref | `providerName/modelName`；解析只切第一个 `/` |
 | Variant | Model config 中的 variant `id`；Agent 可指定覆盖值 |
-| ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；selectable 含 Goal 工具（`create_goal`/`get_goal`/`update_goal`，GoalStore 条件装配）；内部 Platform Tool 与可选择目录分离，`load_skill` 是唯一 internal name |
+| ToolCatalog | 只有 `PLATFORM` / `ENVIRONMENT` 两类产品级 Tool 的目录；`RuntimeToolsConfiguration` 合并本地 `ToolFactory` 与冻结 `PluginCatalog` 的贡献，selectable 含 Goal v2 工具；内部 Platform Tool 与可选择目录分离，`load_skill` 是唯一 internal name |
 
 Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token 以十进制字符串暴露。Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除：记录存续期间名称不可修改，删除后同名立即可重建（重建行 version 从 0 重新开始）；既有名称引用在删除到重建之间 fail closed，重建后解析到当前同名资源。
 
@@ -47,14 +49,14 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，八类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
 | ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）的 Provider 调用 |
-| ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result）；partial 只进入 Redis realtime projection |
+| ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，非空 effects 只允许属于 terminal `SUCCEEDED` |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
-| ThreadGoal | Core application-owned 的 per-Thread Goal（`agent_thread_goal` 表，无 `harness_` 前缀，**不是** Runtime 第 8 表）；经 selectable Platform tools `create_goal`/`get_goal`/`update_goal` 读写 |
+| Goal state | `goal` 插件拥有的 branch-scoped 完整快照；以 `CUSTOM(goal/state@schemaVersion=1)` 追加，当前分支最近快照生效；状态仅 `active` / `complete` / `blocked` |
 | Resource | Tool Result 中 Text/Json ≤8KB 保持 inline ToolContent；超过阈值或 Binary 转为 canonical 引用 `{uri, mediaType, name, size, sha256}`（外部 `file:` URI） |
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
-Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝（实际 start 不可用 → 确定性 Rejected，模型可见的 durable FAILED ToolResult）；Agent skills 必须由最新选中且 live 的 Environment 精确提供且 `activeTools` 显式包含 `load_skill`（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）。所有确定性拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
+Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTurnResolver` 从 `BranchSettings` 读取最新 Agent、Provider、Model、ToolCatalog 与 Environment route，并把插件 `ContextProjector` 基于当前 candidate branch 产生的消息注入 Provider context（Agent/Model 修改下一 turn 生效）。每次 Model attempt 由 Core 按 `providerName` 重新读取当前 `agent_provider` 行（providerType/baseUrl/credential/config），以当前 `ProviderFactory` 构造短生命周期 attempt-local Provider；当前行缺失时 fail closed，同名重建后解析到新行。ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝（实际 start 不可用 → 确定性 Rejected，模型可见的 durable FAILED ToolResult）；Agent skills 必须由最新选中且 live 的 Environment 精确提供且 `activeTools` 显式包含 `load_skill`（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）。所有确定性 planning 拒绝共用 `PLANNING_FAILED` code，写成 `ASSISTANT_ERROR` barrier。
 
 ## 4. Chat、Thread 与前端映射
 
@@ -107,4 +109,4 @@ Agent 的 tools/skills 决定本次运行能力；每次 turn 通过 `DatabaseTu
 
 ## 7. 一句话实现
 
-Harness 以 Session Entry Tree 记录语义事实（TURN_START/MESSAGE/TOOL/TURN_END），以 head 非空的 Thread 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮 Catalog/Environment 解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；Studio 独立承载 Canvas。
+Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮 Catalog/Environment/插件上下文解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；Studio 独立承载 Canvas。

@@ -127,10 +127,11 @@ final class InvocationFixture {
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into harness_tool_invocation (id, model_invocation_id, assistant_entry_id,"
-                + " ordinal, request, status, attempt, approval, result, error, result_entry_id,"
-                + " created_at, updated_at) values (?, ?, ?, ?, cast(? as jsonb), ?, ?,"
-                + " cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, current_timestamp,"
-                + " current_timestamp)")) {
+                + " ordinal, request, status, attempt, approval, result, effects, error,"
+                + " result_entry_id, created_at, updated_at) values (?, ?, ?, ?, cast(? as jsonb),"
+                + " ?, ?, cast(? as jsonb), cast(? as jsonb),"
+                + " '{\"version\":1,\"customEntries\":[]}'::jsonb, cast(? as jsonb), ?,"
+                + " current_timestamp, current_timestamp)")) {
       ps.setLong(1, invocationId);
       ps.setLong(2, modelInvocationId);
       ps.setLong(3, assistantEntryId);

@@ -85,6 +85,7 @@ class PostgresqlHarnessSchemaTest {
             "harness_model_invocation.stream_checkpoint",
             "harness_thread_command.payload",
             "harness_tool_invocation.approval",
+            "harness_tool_invocation.effects",
             "harness_tool_invocation.error",
             "harness_tool_invocation.request",
             "harness_tool_invocation.result"),

@@ -173,23 +173,24 @@ public interface HarnessStore {
     List<ToolInvocation> lockToolInvocationsByAssistantEntryId(long assistantEntryId);
 
     /**
-     * 批量插入新 ToolInvocation（初始状态不变量：只能 READY / attempt=0 / approval=null / 无 terminal facts）； 逐条校验
-     * id、{@code (assistantEntryId, ordinal)} 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于
-     * assistantEntryId；assistantEntryId 指向 Assistant MESSAGE Entry 且 request.call 与其中按 ordinal 提取的
-     * ToolCall（id / toolName / argumentsJson）精确一致；resultEntryId 全局唯一、是指向匹配 toolCallId /
-     * assistantEntryId / ordinal 的 ToolResult MESSAGE Entry（非 synthetic，metadata.status 必须精确映射
-     * invocation terminal status）且其 path 包含 assistantEntryId（同 branch descendant）。完整预校验后按 {@code
-     * (assistantEntryId, ordinal, id)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
-     * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
+     * 批量插入新 ToolInvocation（初始状态只能是 READY，或用于 sibling 静态拒绝的 unattached FAILED；两者均
+     * attempt=0、approval=null、resultEntryId=null，effects 为空）；逐条校验 id、{@code (assistantEntryId,
+     * ordinal)} 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向
+     * Assistant MESSAGE Entry 且 request.call 与其中按 ordinal 提取的 ToolCall（id / toolName /
+     * argumentsJson）精确一致；resultEntryId 全局唯一、是指向匹配 toolCallId / assistantEntryId / ordinal 的
+     * ToolResult MESSAGE Entry（非 synthetic，metadata.status 必须精确映射 invocation terminal status）且其
+     * path 包含 assistantEntryId（同 branch descendant）。完整预校验后按 {@code (assistantEntryId, ordinal, id)}
+     * 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertToolInvocations(List<ToolInvocation> invocations);
 
     /**
      * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
      * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / ordinal /
-     * request / createdAt 不得 改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
-     * facts 不可变（resultEntryId 仅允许 null-&gt;positive）；resultEntryId 按插入规则校验。未锁定抛 {@link
-     * IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link IllegalArgumentException}。
+     * request / createdAt 不得改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
+     * facts（result/effects/error）不可变（resultEntryId 仅允许 null-&gt;positive）；resultEntryId
+     * 按插入规则校验。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
+     * IllegalArgumentException}。
      */
     void updateToolInvocations(List<ToolInvocation> invocations);
 

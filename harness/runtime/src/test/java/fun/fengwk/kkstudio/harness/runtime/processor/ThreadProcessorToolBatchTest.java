@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
@@ -59,6 +61,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
+import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
@@ -115,6 +118,71 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             .orElseThrow();
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+  }
+
+  @Test
+  void successfulEffectsAreAppendedBeforeTheirToolResultAndResultEntryIdSkipsCustomEntries() {
+    Fixture fixture = fixture();
+    var chain =
+        seedToolChain(
+            fixture.store,
+            List.of("call-1", "call-2"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY, ToolInvocationStatus.READY));
+    ToolEffectBatch effects =
+        new ToolEffectBatch(
+            List.of(
+                new CustomEntryPayload("goal", "state", 1, "{\"step\":1}"),
+                new CustomEntryPayload("goal", "state", 1, "{\"step\":2}")));
+    succeedToolWith(
+        fixture.store,
+        chain.toolInvocationIds().get(0),
+        new ToolResult("call-1", List.of(new TextToolContent("first")), false, "{}", false),
+        effects);
+    succeedToolWith(
+        fixture.store,
+        chain.toolInvocationIds().get(1),
+        new ToolResult("call-2", List.of(new TextToolContent("second")), false, "{}", false));
+    requestThreadWork(fixture.store, chain.turn().threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, chain.turn().threadId())));
+
+    List<Entry> entries = path(fixture.store, chain.turn().threadId()).entries();
+    assertEquals(10, entries.size());
+    assertEquals(
+        new CustomEntryPayload("goal", "state", 1, "{\"step\":1}"), entries.get(4).payload());
+    assertEquals(
+        new CustomEntryPayload("goal", "state", 1, "{\"step\":2}"), entries.get(5).payload());
+    assertTrue(entries.get(6).payload() instanceof MessagePayload);
+    assertTrue(entries.get(7).payload() instanceof MessagePayload);
+    List<ToolInvocation> siblings = toolsByAssistant(fixture.store, chain.assistantEntryId());
+    assertEquals(entries.get(6).id(), siblings.get(0).resultEntryId());
+    assertEquals(entries.get(7).id(), siblings.get(1).resultEntryId());
+  }
+
+  @Test
+  void outcomeAppenderRejectsANonterminalInvocationBeforeWritingEntries() {
+    Fixture fixture = fixture();
+    var chain =
+        seedToolChain(
+            fixture.store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    ToolInvocation ready = tool(fixture.store, chain.toolInvocationIds().getFirst());
+    EntryPath before = path(fixture.store, chain.turn().threadId());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            fixture.store.transaction(
+                tx ->
+                    ToolOutcomeAppender.append(
+                        tx, before.root().sessionId(), chain.assistantEntryId(), ready, NOW)));
+    assertEquals(before, path(fixture.store, chain.turn().threadId()));
   }
 
   @Test

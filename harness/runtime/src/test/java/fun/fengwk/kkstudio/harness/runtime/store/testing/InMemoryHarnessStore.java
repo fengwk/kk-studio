@@ -874,13 +874,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   + invocation.assistantEntryId());
         }
         requireAbsent(state.toolInvocations, invocation.id(), "tool invocation");
-        // 新 durable invocation 初始状态不变量：READY / attempt=0 / approval=null / 无 terminal facts（record
-        // 配合）。
-        if (invocation.status() != ToolInvocationStatus.READY
+        // 新 durable invocation 通常为 READY；sibling 静态拒绝允许 unattached FAILED。两者均为 attempt=0、
+        // approval=null、resultEntryId=null，effects 由 record 不变量保证为空。
+        if ((invocation.status() != ToolInvocationStatus.READY
+                && invocation.status() != ToolInvocationStatus.FAILED)
             || invocation.attempt() != 0
-            || invocation.approval() != null) {
+            || invocation.approval() != null
+            || invocation.resultEntryId() != null) {
           throw new IllegalArgumentException(
-              "new tool invocations must be READY with attempt 0 and no approval");
+              "new tool invocations must be READY or unattached FAILED with attempt 0 and no approval");
         }
         requireUniqueToolOrdinal(invocation);
         requireValidToolReferences(invocation);

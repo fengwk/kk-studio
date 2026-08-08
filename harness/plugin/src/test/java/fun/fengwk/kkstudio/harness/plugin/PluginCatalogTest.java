@@ -7,14 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
-import fun.fengwk.kkstudio.harness.tool.execution.Tool;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
@@ -39,13 +35,13 @@ class PluginCatalogTest {
 
   @Test
   void collectsContributionsWithScopedIdsInRegistrationOrder() {
-    ToolFactory factory = ToolFactory.singleton(tool(toolDescriptor("goal", "1")));
+    PluginTool pluginTool = pluginTool(toolDescriptor("goal", "1"));
     ContextProjector projector = view -> List.of();
     HarnessPlugin first =
         HarnessPlugin.of(
             FIRST,
             registrar -> {
-              registrar.registerTool("goal-tool", factory, ToolVisibility.SELECTABLE);
+              registrar.registerTool("goal-tool", pluginTool, ToolVisibility.SELECTABLE);
               registrar.registerCustomEntryType("goal-type", "goal");
             });
     HarnessPlugin second =
@@ -58,7 +54,8 @@ class PluginCatalogTest {
     assertEquals(1, catalog.tools().size());
     ToolContribution tool = catalog.tools().get(0);
     assertEquals(new ContributionId(new PluginId("first"), "goal-tool"), tool.id());
-    assertSame(factory, tool.factory());
+    assertSame(pluginTool, tool.tool());
+    assertEquals(pluginTool.descriptor(), tool.descriptor());
     assertEquals(ToolVisibility.SELECTABLE, tool.visibility());
     assertEquals(
         new CustomEntryTypeContribution(
@@ -114,8 +111,9 @@ class PluginCatalogTest {
   }
 
   @Test
-  void rejectsDuplicateToolNameVersionAcrossPlugins() {
-    ToolFactory factory = ToolFactory.singleton(tool(toolDescriptor("goal", "1")));
+  void rejectsDuplicateToolNameAcrossVersionsAndPlugins() {
+    PluginTool firstTool = pluginTool(toolDescriptor("goal", "1"));
+    PluginTool secondTool = pluginTool(toolDescriptor("goal", "2"));
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
@@ -125,13 +123,95 @@ class PluginCatalogTest {
                         HarnessPlugin.of(
                             FIRST,
                             registrar ->
-                                registrar.registerTool("a", factory, ToolVisibility.SELECTABLE)),
+                                registrar.registerTool("a", firstTool, ToolVisibility.SELECTABLE)),
                         HarnessPlugin.of(
                             SECOND,
                             registrar ->
-                                registrar.registerTool("b", factory, ToolVisibility.INTERNAL)))));
-    assertTrue(error.getMessage().contains("duplicate tool (name, version)"));
-    assertTrue(error.getMessage().contains("goal@1"));
+                                registrar.registerTool(
+                                    "b", secondTool, ToolVisibility.INTERNAL)))));
+    assertTrue(error.getMessage().contains("duplicate tool name"));
+    assertTrue(error.getMessage().contains("goal"));
+  }
+
+  @Test
+  void freezesStateDeclarationsAndRejectsInvalidToolDeclarations() {
+    PluginTool writer =
+        pluginTool(
+            toolDescriptor("goal", "1"),
+            List.of(new PluginStateDeclaration("state", PluginStateMode.WRITE)));
+    PluginCatalog catalog =
+        PluginCatalog.from(
+            List.of(
+                HarnessPlugin.of(
+                    FIRST,
+                    registrar -> {
+                      registrar.registerCustomEntryType("state-type", "state");
+                      registrar.registerTool("writer", writer, ToolVisibility.SELECTABLE);
+                    })));
+    assertEquals(
+        List.of(new PluginStateDeclaration("state", PluginStateMode.WRITE)),
+        catalog.findTool("goal").orElseThrow().stateAccesses());
+    assertEquals(Optional.empty(), catalog.findTool("missing"));
+
+    PluginTool undeclaredOwner =
+        pluginTool(
+            toolDescriptor("other", "1"),
+            List.of(new PluginStateDeclaration("missing", PluginStateMode.READ)));
+    IllegalArgumentException unregistered =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                PluginCatalog.from(
+                    List.of(
+                        HarnessPlugin.of(
+                            FIRST,
+                            registrar ->
+                                registrar.registerTool(
+                                    "reader", undeclaredOwner, ToolVisibility.SELECTABLE)))));
+    assertTrue(unregistered.getMessage().contains("unregistered custom entry type"));
+
+    PluginTool duplicateAccess =
+        pluginTool(
+            toolDescriptor("duplicate", "1"),
+            List.of(
+                new PluginStateDeclaration("state", PluginStateMode.READ),
+                new PluginStateDeclaration("state", PluginStateMode.WRITE)));
+    IllegalArgumentException duplicate =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                PluginCatalog.from(
+                    List.of(
+                        HarnessPlugin.of(
+                            FIRST,
+                            registrar ->
+                                registrar.registerTool(
+                                    "duplicate", duplicateAccess, ToolVisibility.SELECTABLE)))));
+    assertTrue(duplicate.getMessage().contains("duplicate state access"));
+
+    PluginTool environment =
+        pluginTool(
+            new ToolDescriptor(
+                "environment",
+                "1",
+                ToolType.ENVIRONMENT,
+                "environment",
+                "environment",
+                new ToolParamsSchema("", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(5)));
+    IllegalArgumentException nonPlatform =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                PluginCatalog.from(
+                    List.of(
+                        HarnessPlugin.of(
+                            FIRST,
+                            registrar ->
+                                registrar.registerTool(
+                                    "environment", environment, ToolVisibility.SELECTABLE)))));
+    assertTrue(nonPlatform.getMessage().contains("must be PLATFORM"));
   }
 
   @Test
@@ -191,7 +271,7 @@ class PluginCatalogTest {
   }
 
   @Test
-  void rejectsNonCanonicalIdsAndNullFactory() {
+  void rejectsNonCanonicalIdsAndNullTool() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -224,9 +304,7 @@ class PluginCatalogTest {
                         FIRST,
                         registrar ->
                             registrar.registerTool(
-                                "a",
-                                ToolFactory.singleton(tool(toolDescriptor("goal", "1"))),
-                                null)))));
+                                "a", pluginTool(toolDescriptor("goal", "1")), null)))));
   }
 
   @Test
@@ -258,16 +336,25 @@ class PluginCatalogTest {
         Duration.ofSeconds(5));
   }
 
-  private static Tool tool(ToolDescriptor descriptor) {
-    return new Tool() {
+  private static PluginTool pluginTool(ToolDescriptor descriptor) {
+    return pluginTool(descriptor, List.of());
+  }
+
+  private static PluginTool pluginTool(
+      ToolDescriptor descriptor, List<PluginStateDeclaration> stateAccesses) {
+    return new PluginTool() {
       @Override
       public ToolDescriptor descriptor() {
         return descriptor;
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
+      public List<PluginStateDeclaration> stateAccesses() {
+        return stateAccesses;
+      }
+
+      @Override
+      public PluginToolResult execute(PluginToolContext context, ToolCall call) {
         throw new UnsupportedOperationException();
       }
     };

@@ -9,9 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
+
+import java.util.List;
 
 /** 同时覆盖 platform 与 Environment route 的严格 ToolBinding wire。 */
 class ToolBindingJsonCodecTest {
@@ -28,7 +33,7 @@ class ToolBindingJsonCodecTest {
             + descriptorCodec.encode(environment.descriptor())
             + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
             + ENVIRONMENT_ID
-            + "\"}";
+            + "\",\"plugin\":null}";
     assertEquals(environmentJson, codec.encode(environment));
     assertEquals(environment, codec.decode(environmentJson));
     assertEquals(environment, codec.decodeNode(codec.encodeNode(environment)));
@@ -37,10 +42,24 @@ class ToolBindingJsonCodecTest {
     String platformJson =
         "{\"descriptor\":"
             + descriptorCodec.encode(platform.descriptor())
-            + ",\"type\":\"PLATFORM\",\"environmentName\":null}";
+            + ",\"type\":\"PLATFORM\",\"environmentName\":null,\"plugin\":null}";
     assertEquals(platformJson, codec.encode(platform));
     assertEquals(platform, codec.decode(platformJson));
     assertNull(codec.decode(platformJson).environmentName());
+
+    PluginToolBinding plugin =
+        new PluginToolBinding(
+            "goal", "create", List.of(new PluginStateAccess("state", PluginStateAccessMode.WRITE)));
+    ToolBinding pluginTool =
+        new ToolBinding(platform.descriptor(), ToolType.PLATFORM, null, plugin);
+    String pluginJson =
+        "{\"descriptor\":"
+            + descriptorCodec.encode(platform.descriptor())
+            + ",\"type\":\"PLATFORM\",\"environmentName\":null,\"plugin\":"
+            + "{\"pluginId\":\"goal\",\"contributionLocalName\":\"create\","
+            + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}}";
+    assertEquals(pluginJson, codec.encode(pluginTool));
+    assertEquals(pluginTool, codec.decode(pluginJson));
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -68,7 +87,7 @@ class ToolBindingJsonCodecTest {
             + descriptor
             + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
             + ENVIRONMENT_ID
-            + "\"}";
+            + "\",\"plugin\":null}";
 
     assertThrows(
         IllegalArgumentException.class,
@@ -109,13 +128,13 @@ class ToolBindingJsonCodecTest {
                     + descriptorCodec.encode(descriptor(ToolType.PLATFORM))
                     + ",\"type\":\"ENVIRONMENT\",\"environmentName\":\""
                     + ENVIRONMENT_ID
-                    + "\"}"));
+                    + "\",\"plugin\":null}"));
     // ENVIRONMENT binding 的 route 可为 null（最新 branch 未选中/已清空时冻结为 null）。
     ToolBinding nullRoute =
         codec.decode(
             "{\"descriptor\":"
                 + descriptor
-                + ",\"type\":\"ENVIRONMENT\",\"environmentName\":null}");
+                + ",\"type\":\"ENVIRONMENT\",\"environmentName\":null,\"plugin\":null}");
     assertNull(nullRoute.environmentName());
   }
 }

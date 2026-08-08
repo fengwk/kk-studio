@@ -6,47 +6,28 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.runtime.goal.CreateGoalTool;
-import fun.fengwk.kkstudio.harness.runtime.goal.GetGoalTool;
-import fun.fengwk.kkstudio.harness.runtime.goal.GoalStore;
-import fun.fengwk.kkstudio.harness.runtime.goal.UpdateGoalTool;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
+import fun.fengwk.kkstudio.harness.plugin.ToolVisibility;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.skill.SkillBodyLoader;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactories;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
-import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
- * 把 runtime 工具（{@code load_skill}、goal 工具）装配为 Spring {@code Tool} bean，并为 {@code ToolFactories} 暴露为
- * {@link ToolFactory} bean。
+ * 把普通 runtime 工具（当前为 {@code load_skill}）装配为 Spring {@code Tool} bean，并为 {@code ToolFactories} 暴露为
+ * {@link ToolFactory} bean；插件 Tool 由冻结 {@link PluginCatalog} 独立贡献。
  */
 @Configuration(proxyBeanMethods = false)
 public class RuntimeToolsConfiguration {
-
-  @Bean
-  @ConditionalOnBean(GoalStore.class)
-  @ConditionalOnMissingBean
-  public CreateGoalTool createGoalTool(GoalStore goalStore, Clock clock) {
-    return new CreateGoalTool(goalStore, clock);
-  }
-
-  @Bean
-  @ConditionalOnBean(GoalStore.class)
-  @ConditionalOnMissingBean
-  public GetGoalTool getGoalTool(GoalStore goalStore) {
-    return new GetGoalTool(goalStore);
-  }
-
-  @Bean
-  @ConditionalOnBean(GoalStore.class)
-  @ConditionalOnMissingBean
-  public UpdateGoalTool updateGoalTool(GoalStore goalStore, Clock clock) {
-    return new UpdateGoalTool(goalStore, clock);
-  }
 
   @Bean
   @ConditionalOnBean({ThreadSelectedSkillLookup.class, SkillBodyLoader.class})
@@ -54,27 +35,6 @@ public class RuntimeToolsConfiguration {
   public LoadSkillTool loadSkillTool(
       ThreadSelectedSkillLookup skillLookup, SkillBodyLoader skillBodyLoader) {
     return new LoadSkillTool(skillLookup, skillBodyLoader);
-  }
-
-  @Bean
-  @ConditionalOnBean(CreateGoalTool.class)
-  @ConditionalOnMissingBean(name = "createGoalToolFactory")
-  public ToolFactory createGoalToolFactory(CreateGoalTool createGoalTool) {
-    return ToolFactory.singleton(createGoalTool);
-  }
-
-  @Bean
-  @ConditionalOnBean(GetGoalTool.class)
-  @ConditionalOnMissingBean(name = "getGoalToolFactory")
-  public ToolFactory getGoalToolFactory(GetGoalTool getGoalTool) {
-    return ToolFactory.singleton(getGoalTool);
-  }
-
-  @Bean
-  @ConditionalOnBean(UpdateGoalTool.class)
-  @ConditionalOnMissingBean(name = "updateGoalToolFactory")
-  public ToolFactory updateGoalToolFactory(UpdateGoalTool updateGoalTool) {
-    return ToolFactory.singleton(updateGoalTool);
   }
 
   @Bean
@@ -90,7 +50,15 @@ public class RuntimeToolsConfiguration {
   }
 
   @Bean
-  public ToolCatalog toolCatalog(ToolFactories toolFactories) {
-    return new ToolCatalog(toolFactories.descriptors(), Set.of(LoadSkillTool.NAME));
+  public ToolCatalog toolCatalog(ToolFactories toolFactories, PluginCatalog pluginCatalog) {
+    List<ToolDescriptor> descriptors = new ArrayList<>(toolFactories.descriptors());
+    Set<String> internalNames = new HashSet<>(Set.of(LoadSkillTool.NAME));
+    for (ToolContribution contribution : pluginCatalog.tools()) {
+      descriptors.add(contribution.descriptor());
+      if (contribution.visibility() == ToolVisibility.INTERNAL) {
+        internalNames.add(contribution.descriptor().name());
+      }
+    }
+    return new ToolCatalog(descriptors, internalNames);
   }
 }

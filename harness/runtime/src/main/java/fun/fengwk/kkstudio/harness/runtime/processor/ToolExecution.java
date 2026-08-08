@@ -2,11 +2,13 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -239,8 +241,8 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   @Override
-  public void onSucceeded(ToolResult result) {
-    deliver(new Pending(PendingKind.SUCCEEDED, null, result, null, null));
+  public void onSucceeded(ToolSuccess success) {
+    deliver(new Pending(PendingKind.SUCCEEDED, null, success, null, null));
   }
 
   @Override
@@ -333,7 +335,7 @@ final class ToolExecution implements ToolGateway.Listener {
   private Applied processLocked(Pending signal, List<Publish> publishes) {
     return switch (signal.kind) {
       case PARTIAL -> processPartialLocked(signal.partial, publishes);
-      case SUCCEEDED -> finishSuccessLocked(signal.result, publishes);
+      case SUCCEEDED -> finishSuccessLocked(signal.success, publishes);
       case FAILED -> finishFailureLocked(signal.failure, publishes);
       case CANCELLED -> finishCancelledLocked(signal.error, publishes);
       case UNKNOWN -> finishUnknownLocked(signal.error, publishes);
@@ -376,7 +378,8 @@ final class ToolExecution implements ToolGateway.Listener {
    * ResourceToolContent ref）；terminate 归一 false 后，对「即将持久化的规范化对象」用 bounded 编码器测量 canonical JSON
    * UTF-8 字节（不物化完整 JSON），超过 1 MiB 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
    */
-  private Applied finishSuccessLocked(ToolResult result, List<Publish> publishes) {
+  private Applied finishSuccessLocked(ToolSuccess success, List<Publish> publishes) {
+    ToolResult result = success == null ? null : success.result();
     String validation = validateTerminalResult(result);
     if (validation != null) {
       return finishFailureLocked(
@@ -398,7 +401,7 @@ final class ToolExecution implements ToolGateway.Listener {
               false),
           publishes);
     }
-    boolean committed = safeTerminal(() -> commitSuccess(normalized));
+    boolean committed = safeTerminal(() -> commitSuccess(normalized, success.effects()));
     if (!committed) {
       return Applied.LOST;
     }
@@ -536,7 +539,7 @@ final class ToolExecution implements ToolGateway.Listener {
             }));
   }
 
-  private boolean commitSuccess(ToolResult result) {
+  private boolean commitSuccess(ToolResult result, ToolEffectBatch effects) {
     Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
@@ -557,7 +560,7 @@ final class ToolExecution implements ToolGateway.Listener {
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                tx.updateToolInvocations(List.of(tool.succeed(result, now)));
+                tx.updateToolInvocations(List.of(tool.succeed(result, effects, now)));
                 tx.updateThread(thread.touchRevision(now));
                 tx.completeWork(claim, now);
                 return true;
@@ -662,7 +665,7 @@ final class ToolExecution implements ToolGateway.Listener {
   private record Pending(
       PendingKind kind,
       ToolResult partial,
-      ToolResult result,
+      ToolSuccess success,
       ToolGateway.Failure failure,
       ToolInvocationError error) {}
 

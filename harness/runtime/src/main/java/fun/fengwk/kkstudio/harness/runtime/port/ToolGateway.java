@@ -34,10 +34,15 @@ public interface ToolGateway {
 
   /**
    * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, proposedAttempt)}，request 已冻结。
-   * {@code threadId} 提供平台 ToolExecutionContext 需要的持久线程所有权，Gateway 无需查询 HarnessStore。
+   * {@code assistantEntryId} 是所有 sibling 共享的冻结 branch basis；{@code threadId} 提供平台
+   * ToolExecutionContext 需要的持久线程所有权。
    */
   record Execution(
-      long invocationId, long threadId, int proposedAttempt, ToolInvocationRequest request) {
+      long invocationId,
+      long threadId,
+      long assistantEntryId,
+      int proposedAttempt,
+      ToolInvocationRequest request) {
 
     public Execution {
       if (invocationId <= 0) {
@@ -45,6 +50,9 @@ public interface ToolGateway {
       }
       if (threadId <= 0) {
         throw new IllegalArgumentException("threadId must be positive");
+      }
+      if (assistantEntryId <= 0) {
+        throw new IllegalArgumentException("assistantEntryId must be positive");
       }
       if (proposedAttempt <= 0) {
         throw new IllegalArgumentException("proposedAttempt must be positive");
@@ -133,8 +141,13 @@ public interface ToolGateway {
     /** 交付一个非 terminal partial ToolResult（不得包含 binary / resource content）。 */
     void onPartial(ToolResult partial);
 
-    /** 交付完整 ToolResult。 */
-    void onSucceeded(ToolResult result);
+    /** 交付完整 ToolResult 与同一次 durable terminal success 的 branch effects。 */
+    void onSucceeded(ToolSuccess success);
+
+    /** 普通 Tool 的便捷入口：显式构造空 effects success。 */
+    default void onSucceeded(ToolResult result) {
+      onSucceeded(ToolSuccess.withoutEffects(result));
+    }
 
     /** 交付已确认失败的 terminal 事实（含明确 retryable 标记）。 */
     void onFailed(Failure failure);

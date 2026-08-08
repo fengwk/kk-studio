@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -65,6 +67,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
+import fun.fengwk.kkstudio.plugin.goal.GoalPlugin;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
@@ -370,6 +373,45 @@ class DatabaseTurnResolverTest {
             .rejected(fixture.path(settings(null, "default", "low", List.of("missing"))))
             .error()
             .message());
+  }
+
+  @Test
+  void freezesPluginProvenanceAndProjectsBranchScopedGoalContext() {
+    PluginCatalog plugins = PluginCatalog.from(List.of(new GoalPlugin()));
+    List<ToolDescriptor> descriptors =
+        plugins.tools().stream().map(tool -> tool.descriptor()).toList();
+    Fixture fixture = new Fixture(List.of(), List.of(), descriptors, plugins);
+    BranchSettings settings = settings(null, "default", "low", List.of("create_goal"));
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                new Entry(1L, SESSION_ID, null, new RootPayload(settings), NOW),
+                new Entry(
+                    2L,
+                    SESSION_ID,
+                    1L,
+                    new CustomEntryPayload(
+                        "goal",
+                        "state",
+                        1,
+                        "{\"objective\":\"ship\",\"tokenBudget\":null,\"status\":\"active\","
+                            + "\"reason\":null,\"createdAt\":\""
+                            + NOW
+                            + "\",\"updatedAt\":\""
+                            + NOW
+                            + "\"}"),
+                    NOW)));
+
+    ModelInvocationRequest request = fixture.resolved(path);
+
+    ToolBinding binding = request.toolBindings().getFirst();
+    assertEquals("goal", binding.plugin().pluginId());
+    assertEquals("create", binding.plugin().contributionLocalName());
+    assertEquals("state", binding.plugin().stateAccesses().getFirst().customType());
+    assertTrue(
+        request.providerRequest().messages().stream()
+            .map(DatabaseTurnResolverTest::textOf)
+            .anyMatch(text -> text.contains("\"objective\":\"ship\"")));
   }
 
   @Test
@@ -793,6 +835,14 @@ class DatabaseTurnResolverTest {
 
     private Fixture(
         List<String> tools, List<String> skills, List<ToolDescriptor> platformDescriptors) {
+      this(tools, skills, platformDescriptors, PluginCatalog.from(List.of()));
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> platformDescriptors,
+        PluginCatalog pluginCatalog) {
       this(
           tools,
           skills,
@@ -801,7 +851,8 @@ class DatabaseTurnResolverTest {
           AgentProviderType.openai,
           ProviderType.OPENAI,
           PromptCacheCapability.unsupported(),
-          true);
+          true,
+          pluginCatalog);
     }
 
     private Fixture(
@@ -813,6 +864,28 @@ class DatabaseTurnResolverTest {
         ProviderType factoryType,
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory) {
+      this(
+          tools,
+          skills,
+          platformDescriptors,
+          internalPlatformToolNames,
+          persistedProviderType,
+          factoryType,
+          cacheCapability,
+          includeProviderFactory,
+          PluginCatalog.from(List.of()));
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> platformDescriptors,
+        Set<String> internalPlatformToolNames,
+        AgentProviderType persistedProviderType,
+        ProviderType factoryType,
+        PromptCacheCapability cacheCapability,
+        boolean includeProviderFactory,
+        PluginCatalog pluginCatalog) {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
@@ -850,6 +923,7 @@ class DatabaseTurnResolverTest {
               modelConfigParser,
               new ProviderFactories(factories),
               new ToolCatalog(platformDescriptors, internalPlatformToolNames),
+              pluginCatalog,
               environmentRegistry,
               new EnvironmentGatewayProperties(),
               Clock.fixed(NOW, ZoneOffset.UTC));

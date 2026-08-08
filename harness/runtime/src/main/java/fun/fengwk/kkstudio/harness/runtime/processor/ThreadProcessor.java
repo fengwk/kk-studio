@@ -13,7 +13,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -28,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -56,8 +61,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Assistant Entry、且其 Tool siblings 全部 terminal 且全部未挂结果时按 ordinal 原子 apply；(c) MODEL_ACTIVE /
  * TOOL_ACTIVE —— 当前 applicable Model/Tool invocation 非 terminal 时完成 claim 并返回 SUSPENDED；(d)
  * CONTINUATION_DUE —— 无 open Turn 且 head 为 continueModel=true 的 TURN_END 时启动 continuation；(e)
- * queued USER/CUSTOM 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim 返回 QUIESCENT。旧 / 历史 open
- * Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
+ * queued USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim 返回
+ * QUIESCENT。旧 / 历史 open Turn 只在启动 新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE
+ * 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动采用 speculative plan：短事务锁 Thread、读取 queued Command 快照与 cutoff、校验 claim（并对近过期 lease 做
  * {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver heartbeat 前不会过期）、分配 candidate Entry
@@ -78,11 +84,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * unlocked 读，绝不先锁 Model/Tool 再落到 Commands / INPUT normalization。
  *
  * <p>Model terminal apply：SUCCEEDED 追加 ASSISTANT Entry 并挂 resultEntryId，无 ToolCall 时追加 COMPLETED
- * TURN_END(continueModel=false)，有 ToolCall 时按 response ordinal 创建全部 READY ToolInvocation（call name
- * 匹配 冻结 request 的 tool binding）并请求全部 TOOL Work、 不写 TURN_END；FAILED / CANCELLED / UNKNOWN 追加
- * AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分 apply：数量 / ordinal 前缀 / ownership / 全部
- * terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread head/revision 只 +1；Model / Tool processor 不写
- * Entry/head。
+ * TURN_END(continueModel=false)；有 ToolCall 时按 response ordinal materialize ToolInvocation（通常为
+ * READY；命中 plugin sibling WRITE 后再 READ/WRITE 的调用直接为 unattached FAILED），仅为 READY 请求 TOOL Work 且不写
+ * TURN_END；FAILED / CANCELLED / UNKNOWN 追加 AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分
+ * apply：数量 / ordinal 前缀 / ownership / 全部 terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread
+ * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -322,6 +328,7 @@ public final class ThreadProcessor {
     } else if (succeeded) {
       List<ProviderToolCall> calls = response.toolCalls();
       List<ToolInvocation> materialized = new ArrayList<>(calls.size());
+      Map<PluginStateKey, PluginStateAccessMode> seenStateAccesses = new HashMap<>();
       for (int ordinal = 0; ordinal < calls.size(); ordinal++) {
         ProviderToolCall call = calls.get(ordinal);
         ToolBinding binding = bindingFor(model.request().toolBindings(), call.name());
@@ -333,6 +340,9 @@ public final class ThreadProcessor {
                   + model.id());
         }
         long toolId = tx.nextId();
+        ToolInvocationError conflict = siblingStateConflict(binding.plugin(), seenStateAccesses);
+        ToolInvocationStatus status =
+            conflict == null ? ToolInvocationStatus.READY : ToolInvocationStatus.FAILED;
         materialized.add(
             new ToolInvocation(
                 toolId,
@@ -341,11 +351,12 @@ public final class ThreadProcessor {
                 ordinal,
                 new ToolInvocationRequest(
                     new ToolCall(call.id(), call.name(), call.argumentsJson()), binding),
-                ToolInvocationStatus.READY,
+                status,
                 0,
                 null,
                 null,
-                null,
+                ToolEffectBatch.EMPTY,
+                conflict,
                 null,
                 now,
                 now));
@@ -377,15 +388,17 @@ public final class ThreadProcessor {
       List<ToolInvocation> ordered = new ArrayList<>(invocations);
       ordered.sort(Comparator.comparingLong(ToolInvocation::id));
       for (ToolInvocation invocation : ordered) {
-        tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now);
+        if (invocation.status() == ToolInvocationStatus.READY) {
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now);
+        }
       }
     }
     return new LoopStep.Continue();
   }
 
   /**
-   * Tool sibling 原子应用：全部 terminal 才执行，按 ordinal 追加全部 ToolResult + COMPLETED
-   * TURN_END(continueModel=true)。数量 / ordinal 前缀 / ownership / terminal / unattached 任一违反即抛错回滚； 低序
+   * Tool sibling 原子应用：全部 terminal 才执行，按 ordinal 通过统一 appender 追加 effects + ToolResult，再追加 COMPLETED
+   * TURN_END(continueModel=true)。数量 / ordinal 前缀 / ownership / terminal / unattached 任一违反即抛错回滚；低序
    * mutation 完成后最后执行 claimed THREAD Work fence。
    */
   private LoopStep applyToolBatch(
@@ -420,11 +433,10 @@ public final class ThreadProcessor {
     long parentId = path.head().id();
     List<ToolInvocation> updated = new ArrayList<>(siblings.size());
     for (ToolInvocation sibling : siblings) {
-      long entryId = tx.nextId();
-      tx.insertEntry(
-          new Entry(entryId, sessionId, parentId, payloadMapper.toolResultPayload(sibling), now));
-      updated.add(sibling.attachResultEntry(entryId, now));
-      parentId = entryId;
+      ToolOutcomeAppender.Applied applied =
+          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, now);
+      updated.add(applied.invocation());
+      parentId = applied.headEntryId();
     }
     long turnEndId = tx.nextId();
     tx.insertEntry(
@@ -652,6 +664,43 @@ public final class ThreadProcessor {
       }
     }
     return null;
+  }
+
+  /**
+   * 同一 Assistant 的 sibling 都读取相同冻结 branch。若某 state key 已出现 WRITE，后续 READ/WRITE 必然读取陈旧快照， 因而在
+   * dispatch 前确定性拒绝；READ 后 WRITE 与不同 key 保持并发。
+   */
+  private static ToolInvocationError siblingStateConflict(
+      PluginToolBinding plugin, Map<PluginStateKey, PluginStateAccessMode> seen) {
+    if (plugin == null || plugin.stateAccesses().isEmpty()) {
+      return null;
+    }
+    for (PluginStateAccess access : plugin.stateAccesses()) {
+      PluginStateKey key = new PluginStateKey(plugin.pluginId(), access.customType());
+      if (seen.get(key) == PluginStateAccessMode.WRITE) {
+        return new ToolInvocationError(
+            "SIBLING_STATE_CONFLICT",
+            "A previous sibling tool writes plugin state "
+                + key
+                + "; call this tool in the next model turn.");
+      }
+    }
+    for (PluginStateAccess access : plugin.stateAccesses()) {
+      PluginStateKey key = new PluginStateKey(plugin.pluginId(), access.customType());
+      if (access.mode() == PluginStateAccessMode.WRITE) {
+        seen.put(key, PluginStateAccessMode.WRITE);
+      } else {
+        seen.putIfAbsent(key, PluginStateAccessMode.READ);
+      }
+    }
+    return null;
+  }
+
+  private record PluginStateKey(String pluginId, String customType) {
+    @Override
+    public String toString() {
+      return pluginId + ":" + customType;
+    }
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */

@@ -18,7 +18,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -527,10 +530,16 @@ final class ThreadProcessorTestSupport {
 
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED 并挂载自定义结果（用于 mapper 回滚类测试）。 */
   static void succeedToolWith(InMemoryHarnessStore store, long toolId, ToolResult result) {
+    succeedToolWith(store, toolId, result, ToolEffectBatch.EMPTY);
+  }
+
+  /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED，并原子附带自定义结果与 effects。 */
+  static void succeedToolWith(
+      InMemoryHarnessStore store, long toolId, ToolResult result, ToolEffectBatch effects) {
     transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
     transitionTool(store, toolId, t -> t.beginDispatch(NOW));
     transitionTool(store, toolId, t -> t.markRunning(NOW));
-    transitionTool(store, toolId, t -> t.succeed(result, NOW));
+    transitionTool(store, toolId, t -> t.succeed(result, effects, NOW));
   }
 
   static ThreadState thread(InMemoryHarnessStore store, long threadId) {
@@ -624,6 +633,17 @@ final class ThreadProcessorTestSupport {
     return tooledRequest(List.of());
   }
 
+  static ModelInvocationRequest requestWithBindings(List<ToolBinding> bindings) {
+    List<ProviderToolDefinition> definitions = new ArrayList<>(bindings.size());
+    for (ToolBinding binding : bindings) {
+      definitions.add(
+          new ProviderToolDefinition(
+              binding.descriptor().name(), binding.descriptor().description(), "{}"));
+    }
+    return new ModelInvocationRequest(
+        ENV_ID, providerRequest(definitions), bindings, List.of(), false);
+  }
+
   /** 按 candidate BranchSettings 构造机械一致的 Resolved 请求（env / model / variant / activeTools / yolo）。 */
   static ModelInvocationRequest requestFor(BranchSettings settings, boolean yoloEnabled) {
     List<ToolBinding> bindings = new ArrayList<>();
@@ -660,6 +680,19 @@ final class ThreadProcessorTestSupport {
         callIds.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
     return new ProviderResponse(
         "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+  }
+
+  static ProviderResponse successResponse(List<ProviderToolCall> calls) {
+    return new ProviderResponse(
+        "response text",
+        "",
+        calls,
+        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        usage(),
+        cost(),
+        "req-1",
+        null,
+        "{}");
   }
 
   static ToolResult successToolResult(String callId) {
@@ -721,6 +754,18 @@ final class ThreadProcessorTestSupport {
 
   private static ToolBinding platformBinding(String name) {
     return new ToolBinding(toolDescriptor(name), ToolType.PLATFORM, null);
+  }
+
+  static ToolBinding pluginBinding(
+      String name,
+      String pluginId,
+      String contributionLocalName,
+      List<PluginStateAccess> accesses) {
+    return new ToolBinding(
+        toolDescriptor(name),
+        ToolType.PLATFORM,
+        null,
+        new PluginToolBinding(pluginId, contributionLocalName, accesses));
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

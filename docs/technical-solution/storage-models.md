@@ -38,7 +38,7 @@ Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch
 | `harness_thread` | `id`、非空 `head_entry_id`、`yolo_enabled`、`next_command_sequence`（≥1）、`revision`（≥0）、时间 |
 | `harness_thread_command` | `thread_id`、`sequence`、`command_type`、`payload`、`client_command_id`、`consumed_turn_start_entry_id`、`cancelled_at` |
 | `harness_model_invocation` | `thread_id`、`turn_start_entry_id`、`basis_head_entry_id`、`request`、status、attempt、`stream_checkpoint`、`result`/`error`/`result_entry_id` |
-| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`、`request`、status、attempt、`approval`、`result`/`error`/`result_entry_id` |
+| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`、`request`、status、attempt、`approval`、`result`/`effects`/`error`/`result_entry_id` |
 | `harness_work` | `(target_type, target_id)`、`available_at`、`wake_version`、`lease_token`、`lease_until` |
 
 `harness_entry.entry_type` 只允许：
@@ -56,24 +56,35 @@ SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 
 Chat-scoped Thread 创建事务按 Session → ROOT（完整 `BranchSettings`）→ Thread 的顺序写入，Thread head 直接指向 ROOT（`nextCommandSequence=1`、`revision=0`）。`harness_work` 是唯一调度 mailbox（见 [harness-storage-runtime.md](harness-storage-runtime.md)）。
 
-### `agent_thread_goal`（Core application-owned）
+### Goal 插件 branch state
 
-```text
-thread_id      # PK，FK -> harness_thread(id)
-objective      # 非空（btrim 后长度 > 0）
-token_budget   # 可选，> 0
-status         # active | complete | blocked
-reason         # active 时 null；complete/blocked 时非空
-created_at / updated_at
+Goal 不使用独立表。`plugins/goal` 把每次完整状态快照写成当前 Entry branch 上的 `CUSTOM` payload：
+
+```json
+{
+  "pluginId": "goal",
+  "customType": "state",
+  "schemaVersion": 1,
+  "data": {
+    "objective": "交付并验证当前任务",
+    "tokenBudget": null,
+    "status": "active",
+    "reason": null,
+    "createdAt": "2026-01-01T00:00:00Z",
+    "updatedAt": "2026-01-01T00:00:00Z"
+  }
+}
 ```
 
-这是 **Core application-owned 的 Goal 表**：没有 `harness_` 前缀，**不是 Harness Runtime 的第 8 张表**（runtime-spring schema 不含它；`harness_runtime_id_seq` 不为其分配 ID）。Goal 产品能力通过 selectable Platform tools `create_goal` / `get_goal` / `update_goal`（`DatabaseGoalStore` 实现 `GoalStore`，由 `RuntimeToolsConfiguration` 条件装配）暴露给 Agent。
+同一 `(pluginId, customType)` 的最近快照在当前 branch 生效；fork 只继承其分叉点之前的快照。`create_goal` / `get_goal` / `update_goal` v2 分别声明 WRITE / READ / WRITE，状态只允许 `active`、`complete`、`blocked`；`update_goal` 只允许从 active 进入终态。`agent_thread_goal`、`GoalStore` 与 `DatabaseGoalStore` 均不存在。
 
-**不存在的表**：没有 dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
+**不存在的表**：没有 `agent_thread_goal`、dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
 
 ## 5. Invocation 冻结事实
 
-`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route/plugin provenance/state accesses）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment 或插件贡献。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+
+`harness_tool_invocation.effects` 是 strict JSON object，保存有序 `ToolEffectBatch`；仅 `SUCCEEDED` 可非空，且与成功结果在同一次 Store update 中原子持久化。其后状态与 effects 均 terminal immutable。
 
 ## 6. Canvas
 
@@ -91,5 +102,5 @@ created_at / updated_at
 - Thread、Command、ModelInvocation、ToolInvocation siblings、Work 的锁序由 [harness-runtime-contracts.md](harness-runtime-contracts.md) 统一定义（Thread → Commands → Model → Tool siblings → Work）。
 - 每次可见 Thread 变化 `revision` 恰好 +1；`next_command_sequence` 不回退。
 - 命令 batch 的 sequence 预留、命令行写入与 THREAD Work wake 在同一事务。
-- terminal apply（Entry + head + Invocation 挂 resultEntryId）与后续 Work 请求在同一事务。
+- terminal apply（有序 CUSTOM effects + Tool Result Entry + head + Invocation 挂 `resultEntryId`）与后续 Work 请求在同一事务；正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`。
 - Stop 的 replay 查找在 revision CAS 之前；approval 的 replay 不 bump revision。

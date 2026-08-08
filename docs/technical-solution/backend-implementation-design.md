@@ -1,6 +1,6 @@
 # 后端落地设计
 
-本文描述当前 `share`、`core`、`web` 与 Harness Runtime 的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment、Goal 与 Chat 应用能力；`web` 是生产组合根并映射 HTTP/SSE/WebSocket。
+本文描述当前 `share`、`core`、`web`、Harness Runtime 与受信任插件的后端边界。`harness-runtime` 拥有纯 Java 领域状态机；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway、Environment 与 Chat 应用能力；Goal 由 `plugins/goal` 提供；`web` 是生产组合根并映射 HTTP/SSE/WebSocket。
 
 ## 1. 分层
 
@@ -28,6 +28,8 @@ flowchart LR
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
 | `core.ai.chat` | Chat CRUD、`agentName`/`yoloEnabled` 可见发送设置与 Chat↔Thread 关系 |
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
+| `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
+| `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
 | `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、`LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
 | `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v2 wire |
@@ -53,9 +55,9 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/listener/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
 | `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST/SSE 只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
-| `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + `ToolResultExternalizer` durable 外部化） |
-| `RuntimeToolsConfiguration` | 装配 `load_skill` 与 Goal 工具（`create_goal`/`get_goal`/`update_goal`，`@ConditionalOnBean(GoalStore.class)`）；`ToolCatalog(descriptors, Set.of(load_skill))`——`load_skill` 是唯一 internal name |
-| `DatabaseGoalStore` | Core application-owned 的 `agent_thread_goal` 存储（`GoalStore` 实现；不是 Runtime 第 8 表，无 `harness_` 前缀） |
+| `PluginCatalogConfiguration` | 收集 `HarnessPlugin` beans，补齐默认 `GoalPlugin`，构造并冻结 `PluginCatalog` |
+| `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
+| `RuntimeToolsConfiguration` | 装配唯一 internal Platform Tool `load_skill`；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
 | `HarnessRuntimeWebMapper` | strict decimal/JSON 校验：DTO → 领域命令 |
 
 ## 4. HTTP API
@@ -123,8 +125,8 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `HarnessRuntime` | `createThread`/`enqueueCommands`/`moveHead`/`stop`/`decideToolApproval`/`getThreadSnapshot` 单事务控制面 |
 | `ThreadProcessor` | Agent Loop：terminal apply、continuation、INPUT turn、QUIESCENT |
 | `ModelProcessor` | 两阶段激活、checkpoint/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
-| `ToolProcessor` | 两阶段激活、preflight、接收已外部化 terminal ToolResult、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
-| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝（start 时不可用即确定性 Rejected）；skills 需最新选中 Environment live + 显式 `load_skill`；确定性拒绝共用 `PLANNING_FAILED` |
+| `ToolProcessor` | 两阶段激活、preflight、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
+| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；冻结插件 contribution/state accesses，并注入插件 context projection；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝；skills 需最新选中 Environment live + 显式 `load_skill`；planning 拒绝共用 `PLANNING_FAILED` |
 | `HarnessWorkDispatcher` | Work-only claim、round-robin、bounded handoff、NOTIFY/poll 合并 |
 
 ## 7. Snapshot-first SSE

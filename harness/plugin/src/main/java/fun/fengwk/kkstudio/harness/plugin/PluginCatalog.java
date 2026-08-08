@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.plugin;
 
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolFactory;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolType;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -17,14 +17,16 @@ import java.util.Set;
 /**
  * 冻结的不可变插件目录：从一个插件集合构建，先收集全部贡献再做唯一性校验（fail-fast）。
  *
- * <p>唯一性维度：plugin id（全局）；贡献 localName（仅插件内，跨三种贡献类型）；Tool {@code (name, version)} （全局，model-visible
- * 无法按插件区分）；custom entry type ownership（结构化键 {@code (pluginId, customType)}， 不同插件可各自拥有同名
- * customType）。允许空插件列表。catalog 构建完成后不可变，插件后续变更不产生任何影响。
+ * <p>唯一性维度：plugin id（全局）；贡献 localName（仅插件内，跨三种贡献类型）；Tool name（全局，model-visible 调用只携带名称）；custom
+ * entry type ownership（结构化键 {@code (pluginId, customType)}，不同插件可各自拥有同名 customType）。允许空插件列表。catalog
+ * 构建完成后不可变，插件后续变更不产生任何影响。
  */
 public final class PluginCatalog {
 
   private final List<PluginDescriptor> descriptors;
   private final List<ToolContribution> tools;
+  private final Map<String, ToolContribution> toolsByName;
+  private final Map<ContributionId, ToolContribution> toolsById;
   private final List<CustomEntryTypeContribution> customEntryTypes;
   private final List<ContextProjectorContribution> contextProjectors;
   private final Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypesByKey;
@@ -36,6 +38,16 @@ public final class PluginCatalog {
       List<ContextProjectorContribution> contextProjectors) {
     this.descriptors = List.copyOf(descriptors);
     this.tools = List.copyOf(tools);
+    Map<String, ToolContribution> byName = new LinkedHashMap<>();
+    Map<ContributionId, ToolContribution> byId = new LinkedHashMap<>();
+    for (ToolContribution tool : tools) {
+      if (byName.putIfAbsent(tool.descriptor().name(), tool) != null) {
+        throw new IllegalStateException("duplicate frozen tool name: " + tool.descriptor().name());
+      }
+      byId.put(tool.id(), tool);
+    }
+    this.toolsByName = Map.copyOf(byName);
+    this.toolsById = Map.copyOf(byId);
     this.customEntryTypes = List.copyOf(customEntryTypes.values());
     this.customEntryTypesByKey = Map.copyOf(customEntryTypes);
     this.contextProjectors = List.copyOf(contextProjectors);
@@ -59,6 +71,17 @@ public final class PluginCatalog {
   /** 注册顺序的冻结 Tool 贡献列表。 */
   public List<ToolContribution> tools() {
     return tools;
+  }
+
+  /** 按 model-visible Tool name 查找插件贡献。 */
+  public Optional<ToolContribution> findTool(String name) {
+    Objects.requireNonNull(name, "name");
+    return Optional.ofNullable(toolsByName.get(name));
+  }
+
+  /** 按冻结 scoped contribution identity 查找插件 Tool。 */
+  public Optional<ToolContribution> findTool(ContributionId id) {
+    return Optional.ofNullable(toolsById.get(Objects.requireNonNull(id, "id")));
   }
 
   /** 注册顺序的冻结 custom entry type ownership 列表。 */
@@ -89,7 +112,7 @@ public final class PluginCatalog {
     private final List<ContextProjectorContribution> contextProjectors = new ArrayList<>();
     private final Set<PluginId> pluginIds = new HashSet<>();
     private final Set<ContributionId> contributionIds = new HashSet<>();
-    private final Map<ToolKey, ContributionId> toolOwners = new HashMap<>();
+    private final Map<String, ContributionId> toolOwners = new HashMap<>();
     private PluginId currentPluginId;
 
     void begin(HarnessPlugin plugin) {
@@ -105,26 +128,43 @@ public final class PluginCatalog {
     }
 
     PluginCatalog freeze() {
+      for (ToolContribution tool : tools) {
+        for (PluginStateDeclaration access : tool.stateAccesses()) {
+          CustomTypeKey key = new CustomTypeKey(tool.id().pluginId(), access.customType());
+          if (!customEntryTypes.containsKey(key)) {
+            throw new IllegalArgumentException(
+                "plugin tool " + tool.id() + " accesses unregistered custom entry type " + key);
+          }
+        }
+      }
       return new PluginCatalog(descriptors, tools, customEntryTypes, contextProjectors);
     }
 
     @Override
-    public void registerTool(String localName, ToolFactory factory, ToolVisibility visibility) {
-      Objects.requireNonNull(factory, "factory");
+    public void registerTool(String localName, PluginTool tool, ToolVisibility visibility) {
+      Objects.requireNonNull(tool, "tool");
       Objects.requireNonNull(visibility, "visibility");
       ContributionId id = requireNewContributionId(localName);
-      ToolDescriptor descriptor =
-          Objects.requireNonNull(factory.descriptor(), "factory.descriptor");
-      ToolKey key = new ToolKey(descriptor.name(), descriptor.version());
-      if (toolOwners.putIfAbsent(key, id) != null) {
-        throw new IllegalArgumentException(
-            "duplicate tool (name, version) "
-                + key
-                + " (already owned by "
-                + toolOwners.get(key)
-                + ")");
+      ToolDescriptor descriptor = Objects.requireNonNull(tool.descriptor(), "tool.descriptor");
+      if (descriptor.type() != ToolType.PLATFORM) {
+        throw new IllegalArgumentException("plugin tool must be PLATFORM: " + descriptor.name());
       }
-      tools.add(new ToolContribution(id, factory, visibility));
+      List<PluginStateDeclaration> stateAccesses =
+          List.copyOf(Objects.requireNonNull(tool.stateAccesses(), "tool.stateAccesses"));
+      Set<String> stateAccessTypes = new HashSet<>();
+      for (PluginStateDeclaration access : stateAccesses) {
+        Objects.requireNonNull(access, "tool.stateAccesses[]");
+        if (!stateAccessTypes.add(access.customType())) {
+          throw new IllegalArgumentException(
+              "duplicate state access " + access.customType() + " on plugin tool " + id);
+        }
+      }
+      String name = descriptor.name();
+      if (toolOwners.putIfAbsent(name, id) != null) {
+        throw new IllegalArgumentException(
+            "duplicate tool name " + name + " (already owned by " + toolOwners.get(name) + ")");
+      }
+      tools.add(new ToolContribution(id, tool, descriptor, stateAccesses, visibility));
     }
 
     @Override
@@ -156,20 +196,6 @@ public final class PluginCatalog {
             "duplicate contribution local name " + localName + " in plugin " + currentPluginId);
       }
       return id;
-    }
-  }
-
-  /** Tool {@code (name, version)} 全局主键。 */
-  private record ToolKey(String name, String version) {
-
-    private ToolKey {
-      name = Objects.requireNonNull(name, "name");
-      version = Objects.requireNonNull(version, "version");
-    }
-
-    @Override
-    public String toString() {
-      return name + "@" + version;
     }
   }
 

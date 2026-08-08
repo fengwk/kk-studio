@@ -408,6 +408,35 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
+          "harness_tool_invocation_effects_check",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "update harness_tool_invocation set status = 'SUCCEEDED',"
+                        + " result = '{}'::jsonb, effects = '[]'::jsonb where id = ?")) {
+              ps.setLong(1, invocationId);
+              ps.executeUpdate();
+            }
+          });
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_tool_invocation_effects_status",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "update harness_tool_invocation set effects ="
+                        + " '{\"version\":1,\"customEntries\":[{\"pluginId\":\"goal\"}]}'::jsonb"
+                        + " where id = ?")) {
+              ps.setLong(1, invocationId);
+              ps.executeUpdate();
+            }
+          });
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
           "harness_tool_invocation_approval_check",
           () -> {
             try (PreparedStatement ps =
@@ -433,6 +462,17 @@ class PostgresqlInvocationSchemaTest extends PostgresSchemaSupport {
               ps.executeUpdate();
             }
           });
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "update harness_tool_invocation set status = 'SUCCEEDED',"
+                    + " result = '{\"ok\":true}'::jsonb,"
+                    + " effects ="
+                    + " '{\"version\":1,\"customEntries\":[{\"pluginId\":\"goal\"}]}'::jsonb"
+                    + " where id = ?")) {
+      ps.setLong(1, invocationId);
+      assertEquals(1, ps.executeUpdate());
     }
   }
 

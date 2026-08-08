@@ -9,7 +9,9 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.plainRequest;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.pluginBinding;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestThreadWork;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.requestWithBindings;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
@@ -23,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -36,10 +39,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -147,6 +154,90 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(assistant.id(), thread(fixture.store, baseline.threadId()).headEntryId());
     assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  @Test
+  void pluginSiblingStateAccessRejectsOnlyCallsAfterAWriteToTheSameKey() {
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        ToolInvocationStatus.READY);
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        ToolInvocationStatus.READY);
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.READ),
+        ToolInvocationStatus.FAILED);
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        ToolInvocationStatus.FAILED);
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        "goal",
+        new PluginStateAccess("other", PluginStateAccessMode.WRITE),
+        ToolInvocationStatus.READY);
+    assertSiblingStateAccesses(
+        "goal",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        "memory",
+        new PluginStateAccess("state", PluginStateAccessMode.WRITE),
+        ToolInvocationStatus.READY);
+  }
+
+  private void assertSiblingStateAccesses(
+      String firstPlugin,
+      PluginStateAccess firstAccess,
+      String secondPlugin,
+      PluginStateAccess secondAccess,
+      ToolInvocationStatus expectedSecondStatus) {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    ToolBinding first = pluginBinding("first_tool", firstPlugin, "first", List.of(firstAccess));
+    ToolBinding second =
+        pluginBinding("second_tool", secondPlugin, "second", List.of(secondAccess));
+    long modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            requestWithBindings(List.of(first, second)),
+            successResponse(
+                List.of(
+                    new ProviderToolCall("call-1", "first_tool", "{}"),
+                    new ProviderToolCall("call-2", "second_tool", "{}"))),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
+
+    long assistantId = model(fixture.store, modelId).resultEntryId();
+    List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistantId);
+    assertEquals(ToolInvocationStatus.READY, tools.get(0).status());
+    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(0).id())));
+    assertEquals(expectedSecondStatus, tools.get(1).status());
+    if (expectedSecondStatus == ToolInvocationStatus.FAILED) {
+      assertEquals("SIBLING_STATE_CONFLICT", tools.get(1).error().kind());
+      assertTrue(tools.get(1).effects().isEmpty());
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(1).id())));
+    } else {
+      assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(1).id())));
+    }
   }
 
   @Test

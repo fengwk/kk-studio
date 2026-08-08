@@ -1,1 +1,0 @@
-读取当前持久化 goal，包括其 `objective`、`status`、usage 和剩余 token 预算。使用返回的 goal 推进 objective，或检查 objective 的全部要求是否已经满足。对于 active goal，当现有证据证明目标确实完成时，调用 `update_goal`，将 `status` 设为 `complete`，并提供包含支持性证据的详细 reason；当 goal 按策略处于阻塞状态时，调用 `update_goal`，将 `status` 设为 `blocked`，并提供描述阻塞原因和相关证据的详细 reason。对于 `budget_limited` goal，只有现有证据证明目标确实完成时才调用 `update_goal`；否则保持 `budget_limited`。

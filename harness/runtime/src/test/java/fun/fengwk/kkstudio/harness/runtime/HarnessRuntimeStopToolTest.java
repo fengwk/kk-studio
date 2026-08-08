@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -82,7 +84,10 @@ class HarnessRuntimeStopToolTest {
     markRunningTool(store, ids.get(3));
     beginDispatchTool(store, ids.get(4));
     markRunningTool(store, ids.get(4));
-    succeedTool(store, ids.get(4));
+    ToolEffectBatch effects =
+        new ToolEffectBatch(
+            List.of(new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}")));
+    succeedTool(store, ids.get(4), effects);
     cancelTool(store, ids.get(5));
     beginDispatchTool(store, ids.get(6));
     markRunningTool(store, ids.get(6));
@@ -100,9 +105,12 @@ class HarnessRuntimeStopToolTest {
 
     ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
-    assertEquals(12, path.entries().size());
+    assertEquals(13, path.entries().size());
+    assertEquals(
+        new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}"),
+        path.entries().get(8).payload());
     for (int ordinal = 0; ordinal < ids.size(); ordinal++) {
-      Entry entry = path.entries().get(4 + ordinal);
+      Entry entry = path.entries().get(resultEntryIndex(ordinal));
       assertTrue(entry.payload() instanceof MessagePayload);
       ToolResultMetadata metadata = ((MessagePayload) entry.payload()).toolResultMetadata();
       assertEquals(baseline.assistantEntryId(), metadata.assistantEntryId());
@@ -162,7 +170,8 @@ class HarnessRuntimeStopToolTest {
     // 每个 sibling 的 resultEntryId 精确指向自己的 ordinal ToolResult Entry。
     for (int ordinal = 0; ordinal < ids.size(); ordinal++) {
       assertEquals(
-          path.entries().get(4 + ordinal).id(), storedTool(ids.get(ordinal)).resultEntryId());
+          path.entries().get(resultEntryIndex(ordinal)).id(),
+          storedTool(ids.get(ordinal)).resultEntryId());
     }
 
     // 全部 Work 删除：THREAD、owning MODEL 与每个 sibling TOOL。
@@ -247,5 +256,9 @@ class HarnessRuntimeStopToolTest {
       case 2, 3 -> ToolResultStatus.UNKNOWN;
       default -> throw new IllegalArgumentException("unexpected ordinal " + ordinal);
     };
+  }
+
+  private static int resultEntryIndex(int ordinal) {
+    return ordinal < 4 ? 4 + ordinal : 5 + ordinal;
   }
 }
