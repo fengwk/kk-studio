@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -62,6 +65,38 @@ class EntryPathTest {
 
     assertEquals(settings("second"), path.baseSettings());
     assertEquals(secondStart, path.openTurnStart().orElseThrow());
+  }
+
+  @Test
+  void baseSettingsReturnsExactLatestSnapshotWhenEnvironmentAndAgentChanged() {
+    // 多个关闭 Turn 之间 environment/agent 都变化过，最新快照的 environment 为 null：
+    // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
+    BranchSettings rootSettings = settings(null, "root-agent");
+    BranchSettings firstTurn =
+        settings(new EnvironmentName("env-a"), "first-agent")
+            .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"))
+            .withThinkingLevel("low")
+            .withActiveTools(List.of("read", "bash"));
+    BranchSettings latestTurn = settings(null, "latest-agent");
+    Entry root = root(rootSettings);
+    Entry start1 = turnStart(2L, 1L, TurnStartReason.INPUT, firstTurn);
+    Entry user1 = userMessage(3L, 2L);
+    Entry end1 = turnEnd(4L, 3L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start2 = turnStart(5L, 4L, TurnStartReason.INPUT, latestTurn);
+    Entry user2 = userMessage(6L, 5L);
+    Entry end2 = turnEnd(7L, 6L, 5L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+
+    EntryPath path = new EntryPath(List.of(root, start1, user1, end1, start2, user2, end2));
+
+    BranchSettings base = path.baseSettings();
+    assertEquals(latestTurn, base);
+    assertNull(base.environmentName());
+    assertEquals("latest-agent", base.agentName());
+    assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
+    assertEquals("high", base.thinkingLevel());
+    assertEquals(List.of("read"), base.activeTools());
+    assertNotEquals(firstTurn, base);
+    assertNotEquals(rootSettings, base);
   }
 
   @Test
@@ -788,8 +823,12 @@ class EntryPathTest {
   }
 
   private static BranchSettings settings(String agentName) {
+    return settings(null, agentName);
+  }
+
+  private static BranchSettings settings(EnvironmentName environmentName, String agentName) {
     return new BranchSettings(
-        null,
+        environmentName,
         agentName,
         new ModelSelection("anthropic", "claude-sonnet", "default"),
         "high",

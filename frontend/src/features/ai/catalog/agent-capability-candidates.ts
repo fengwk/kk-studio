@@ -10,10 +10,6 @@ export interface CapabilityOption {
   missing?: boolean
 }
 
-function isReady(environment: LiveEnvironmentDTO): boolean {
-  return String(environment.status).toUpperCase() === 'READY'
-}
-
 /** 构建统一的离线可选 tool 目录，不暴露来源环境。 */
 export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOption[] {
   const options: CapabilityOption[] = []
@@ -33,25 +29,30 @@ export function buildToolCandidates(tools: ToolCatalogEntryDTO[]): CapabilityOpt
   return options
 }
 
-/** 按 short name 合并所有 READY live Environment 的 skills。 */
-export function buildSkillCandidates(environments: LiveEnvironmentDTO[]): CapabilityOption[] {
+/**
+ * 构建单个选中 live Environment 的 skill 候选。
+ *
+ * 只接受至多一个 Environment（API 形状上不可能合并多个来源）；未选择或 {@code ready !== true} 一律返回空列表。
+ * ready 是服务端统一可用性标记（READY + 连接打开 + 心跳未过期），status 文本只用于展示，不作为可用性判断。
+ */
+export function buildSkillCandidates(
+  environment: LiveEnvironmentDTO | undefined,
+): CapabilityOption[] {
+  if (!environment || environment.ready !== true) {
+    return []
+  }
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
-  for (const environment of environments) {
-    if (!isReady(environment)) {
+  for (const skill of environment.skills ?? []) {
+    const name = skill.name?.trim()
+    if (!name || seen.has(name)) {
       continue
     }
-    for (const skill of environment.skills ?? []) {
-      const name = skill.name?.trim()
-      if (!name || seen.has(name)) {
-        continue
-      }
-      seen.add(name)
-      options.push({
-        name,
-        description: skill.description ?? null,
-      })
-    }
+    seen.add(name)
+    options.push({
+      name,
+      description: skill.description ?? null,
+    })
   }
   return options
 }

@@ -243,6 +243,62 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
+  void latestSnapshotAgentReferenceWinsOverOlderValidAgent() {
+    // 历史 turn 引用有效 agent（assistant 已注册），最新 turn 引用缺失 agent：
+    // 只按最新快照的精确名称解析并拒绝，绝不回看更旧 turn 的有效 agent（无历史 repository 查询）。
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings firstTurn = settings(null, "default", "low").withAgentName("assistant");
+    BranchSettings latestTurn = settings(null, "default", "low").withAgentName("ghost");
+
+    TurnResolver.Rejected rejected = fixture.rejected(multiTurnPath(firstTurn, latestTurn));
+
+    assertEquals("agent not found: ghost", rejected.error().message());
+  }
+
+  @Test
+  void latestSnapshotEnvironmentWinsOverOlderLiveEnvironment() {
+    // 历史 turn 绑定 live Environment，最新 turn 为 null/缺失名称：
+    // 请求只冻结最新快照的 route（null/名称），绝不选中更旧的 live Environment。
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.readyEnvironment(ENV_A);
+    BranchSettings firstTurn = settings(ENV_A, "default", "low", List.of("read"));
+    BranchSettings latestTurn = settings(null, "default", "low", List.of("read"));
+
+    ModelInvocationRequest request = fixture.resolved(multiTurnPath(firstTurn, latestTurn));
+
+    assertNull(request.environmentName());
+    assertEquals(
+        List.of("read"),
+        request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    assertEquals(ToolType.ENVIRONMENT, request.toolBindings().getFirst().type());
+    assertNull(request.toolBindings().getFirst().environmentName());
+
+    // 最新为缺失名称：同样只冻结最新名称，绝不回看更旧 live Environment。
+    fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.readyEnvironment(ENV_A);
+    request =
+        fixture.resolved(
+            multiTurnPath(
+                settings(ENV_A, "default", "low", List.of("read")),
+                settings(ENV_MISSING, "default", "low", List.of("read"))));
+    assertEquals(ENV_MISSING, request.environmentName());
+    assertEquals(ENV_MISSING, request.toolBindings().getFirst().environmentName());
+
+    // Agent skills 同样只认最新快照：历史 turn 有 live Environment + skill，最新 null 时按最新精确拒绝。
+    fixture = new Fixture(List.of(), List.of("dev"), List.of(platformDescriptor("load_skill")));
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    assertEquals(
+        "agent skills require the latest selected environment but the branch has no environmentName",
+        fixture
+            .rejected(
+                multiTurnPath(
+                    settings(ENV_A, "default", "low", List.of("load_skill")),
+                    settings(null, "default", "low", List.of("load_skill"))))
+            .error()
+            .message());
+  }
+
+  @Test
   void skillsRequireTheLatestSelectedEnvironmentPrecisely() {
     // skills 需要 live descriptors：latest 环境缺失时精确拒绝，绝不回看更旧的 branch settings。
     Fixture fixture =
@@ -609,8 +665,14 @@ class DatabaseTurnResolverTest {
     return new EntryPath(List.of(new Entry(1L, SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
-  /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。 */
+  /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。两个 Turn 使用同一 settings。 */
   private static EntryPath multiTurnPath(BranchSettings settings) {
+    return multiTurnPath(settings, settings);
+  }
+
+  /** 两个关闭 Turn，各自携带独立的 BranchSettings 快照（验证 latest-snapshot-wins）。 */
+  private static EntryPath multiTurnPath(
+      BranchSettings firstTurnSettings, BranchSettings latestTurnSettings) {
     long rootId = 1L;
     long turn1Id = 2L;
     long user1Id = 3L;
@@ -622,12 +684,12 @@ class DatabaseTurnResolverTest {
     long end2Id = 9L;
     return new EntryPath(
         List.of(
-            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(rootId, SESSION_ID, null, new RootPayload(firstTurnSettings), NOW),
             new Entry(
                 turn1Id,
                 SESSION_ID,
                 rootId,
-                new TurnStartPayload(TurnStartReason.INPUT, settings),
+                new TurnStartPayload(TurnStartReason.INPUT, firstTurnSettings),
                 NOW),
             new Entry(
                 user1Id,
@@ -659,7 +721,7 @@ class DatabaseTurnResolverTest {
                 turn2Id,
                 SESSION_ID,
                 end1Id,
-                new TurnStartPayload(TurnStartReason.INPUT, settings),
+                new TurnStartPayload(TurnStartReason.INPUT, latestTurnSettings),
                 NOW),
             new Entry(
                 customId,

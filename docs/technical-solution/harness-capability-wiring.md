@@ -95,6 +95,7 @@ candidate path 最近 TURN_START 的 BranchSettings
 
 **fail closed（Environment route 规则）**：
 
+- **latest-snapshot-wins**：解析只使用 candidate path 最近一个 ROOT/TURN_START 的**完整** `BranchSettings` 快照（`EntryPath.baseSettings()` 逐项取最新）；快照中的 null/缺失/不可用值（如 `environmentName` 为 null、agent/Environment 已不存在）**绝不触发向更旧 ROOT/TURN_START 快照回退**——更旧快照中的非 null environment 或仍有效的 agent 不再参与解析；
 - **ENVIRONMENT 工具规划不拒绝**：一律按最新 `BranchSettings.environmentName()` 绑定（null/缺失/未 READY 都放行）；实际 start 时 null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 收敛；
 - **Agent skills 规划要求最新选中 Environment live**：缺失/未 READY/分支无名称都是确定性拒绝（精确 message），绝不回看更旧 settings；
 - Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；Platform Tool 总可候选。
