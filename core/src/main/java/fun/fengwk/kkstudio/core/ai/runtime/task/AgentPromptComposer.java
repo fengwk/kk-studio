@@ -21,8 +21,6 @@ public final class AgentPromptComposer {
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
   private static final DateTimeFormatter DATE_FORMAT =
       DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
-  private static final DateTimeFormatter TIME_FORMAT =
-      DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT);
 
   private final SubagentConfig subagentConfig;
 
@@ -64,22 +62,16 @@ public final class AgentPromptComposer {
   private static String currentEnvironment(CurrentEnvironmentContext context) {
     String name = context.name() == null ? "none" : context.name().value();
     String operatingSystem =
-        context.environment() == null
-            ? "none"
-            : context.environment().operatingSystem().wireValue();
-    String workingDirectory =
-        context.environment() == null ? "none" : context.environment().workingDirectory();
+        context.operatingSystem() == null ? "none" : context.operatingSystem().wireValue();
+    String note = context.note() == null ? "none" : context.note();
     return LOADER
         .load(ROOT + "agent-current-environment.md")
         .render(
             Map.of(
                 "name", escapeXml(name),
-                "status", escapeXml(context.status().promptValue()),
-                "operatingSystem", escapeXml(operatingSystem),
-                "workingDirectory", escapeXml(workingDirectory),
-                "currentDate", escapeXml(DATE_FORMAT.format(context.currentDateTime())),
-                "currentTime", escapeXml(TIME_FORMAT.format(context.currentDateTime())),
-                "timeZone", escapeXml(context.currentDateTime().getZone().getId())))
+                "system", escapeXml(operatingSystem),
+                "date", escapeXml(DATE_FORMAT.format(context.currentDate())),
+                "note", escapeXml(note)))
         .stripTrailing();
   }
 

@@ -4,7 +4,7 @@
 
 ## 职责与边界
 
-产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，此时 capabilities 为 null；READY 先补齐严格 v2 能力对象（environment metadata + skills + MCP server 摘要），再转为 `READY`。可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
+产品级 Tool 只有 `PLATFORM` / `ENVIRONMENT` 两类。Environment 是**服务器内存**中的实时资源，以 canonical `EnvironmentName`（bounded 小写路由名称）为 route 身份唯一。HELLO 后 registry 即保存绑定连接并标为 `CONNECTING`，此时 capabilities 为 null；READY 先补齐严格 v3 能力对象（environment metadata + skills + MCP server 摘要），再转为 `READY`。可用性 = READY + 连接打开 + 心跳未过期（单一配置超时）。ToolInvocation 仍是 PostgreSQL durable 执行事实；WebSocket 连接、Daemon 进程和 Gateway 内存句柄都是可丢弃传输状态。
 
 | 层 | 职责 |
 | --- | --- |
@@ -41,13 +41,14 @@ java ... DaemonMain \
   --environment-name local-dev \
   --gateway-uri ws://studio.example/api/ai/environment/daemon/v2 \
   --gateway-token ${KK_STUDIO_DAEMON_TOKEN} \
+  --note "Local development environment." \
   --workdir /home/dev/project \
   --skill-dir ~/.agents/skills \
   --mcp-config /etc/kk-studio/daemon-mcp.json \
   --daemon-id optional-stable-daemon-name
 ```
 
-`environment-name`、`gateway-uri` 与 `gateway-token` 必填；连接、身份、workdir、skill 与 MCP 配置只来自 CLI。唯一工作目录参数是 `--workdir`：显式值必须是已存在目录并 canonical/绝对化，未提供时使用启动用户 canonical HOME。`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选，指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
+`environment-name`、`gateway-uri` 与 `gateway-token` 必填；连接、身份、note、workdir、skill 与 MCP 配置只来自 CLI。`--note` 可选且只能出现一次，显式值必须非空、单行、无 ISO control、无首尾空白且不超过 512 字符；它是会进入受信任 SYSTEM Prompt 的模型可见配置，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。下游 XML escape 只保证模板结构安全，不能把不可信内容转化为可信指令。省略 `--note` 时按 Daemon 实测 OS 生成固定说明：Windows=`Windows environment.`、WSL=`WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.`、Linux=`Linux environment.`、macOS=`macOS environment.`。唯一工作目录参数是 `--workdir`：显式值必须是已存在目录并 canonical/绝对化，未提供时使用启动用户 canonical HOME；该目录只约束 CodingTools 本地边界，不进入 READY 或模型 Prompt。`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选，指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
 
 ## 认证、绑定与目录
 
@@ -60,12 +61,12 @@ Daemon 连接后的首帧必须是 HELLO。canonical `environmentName` 位于 **
 握手顺序：
 
 ```text
-HELLO -> WELCOME {} -> READY {"version":2,"environment":{...},"skills":[...],"mcpServers":[...]}
+HELLO -> WELCOME {} -> READY {"version":3,"environment":{...},"skills":[...],"mcpServers":[...]}
 ```
 
-READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities` v2），固定字段顺序为 `version/environment/skills/mcpServers`。`environment={operatingSystem,workingDirectory,timeZone}` 必填：OS wire 值只允许 `windows|wsl|linux|macos`，workingDirectory 是 Daemon CLI 冻结的 canonical 绝对目录，timeZone 是系统 `ZoneId` ID；三项在运行时构造时冻结，重连重复发送同一 metadata。OS 检测覆盖 Windows、macOS/Darwin、Linux 与 WSL（Linux 下环境变量优先、`/proc/version` Microsoft 标记兜底），未知平台 fail closed。`skills` 为 name/description 摘要，`mcpServers` 为 name/status/error/tools(name+description) 摘要。
+READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities` v3），固定字段顺序为 `version/environment/skills/mcpServers`。`environment={operatingSystem,timeZone,note}` 必填且只允许这三个字段：OS wire 值只允许 `windows|wsl|linux|macos`，timeZone 是系统 `ZoneId` ID，note 是显式 `--note` 或对应 OS 的固定默认说明；三项在 `DaemonRuntime` 构造时冻结，重连重复发送同一 metadata。OS 只能由 Daemon 检测：Windows、macOS/Darwin、Linux 保持直接分类；Linux 下先检查 `WSL_DISTRO_NAME` / `WSL_INTEROP`，再以 `/proc/version` 与 `/proc/sys/kernel/osrelease` 的 Microsoft 标记兜底，未知平台 fail closed。codec 拒绝 v2、缺失/未知/重复字段、尾随内容、非法 OS/timeZone/note。`skills` 为 name/description 摘要，`mcpServers` 为 name/status/error/tools(name+description) 摘要。
 
-canonical workdir 是**唯一有意进入 READY 的本地路径**，且只供 Core 构造冻结的模型 `<current_environment>` system prompt；公共 `GET /api/ai/environment` 不投影 operatingSystem/workingDirectory/timeZone。READY 仍禁止 SKILL.md 正文、headers/environment 值、命令、URL、其它本地路径与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
+READY 不上报 workdir 或其它本地路径，并禁止 SKILL.md 正文、headers/environment 值、命令、URL 与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。公共 `GET /api/ai/environment` 也不投影 operatingSystem/timeZone/note。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
 **并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用，已存在 active 时新 INVOKE 确定性失败（`environmentName already has an active remote tool invocation`）。发送 CANCEL 只做幂等取消请求；active 槽位在 terminal callback 或连接 cleanup 时释放。
 

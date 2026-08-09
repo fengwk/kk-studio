@@ -76,7 +76,7 @@ class EnvironmentDaemonGatewayFinalTest {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "/workspace/project", "Asia/Shanghai"),
+              DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Linux environment."),
           ADVERTISED_SKILLS,
           List.of(
               new DaemonMcpServerDescriptor(

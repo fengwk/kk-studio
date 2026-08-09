@@ -8,8 +8,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -19,7 +21,9 @@ import java.util.List;
 class LiveEnvironmentMcpServerDtoSerializationTest {
 
   private static final ObjectMapper STRICT_NON_NULL_MAPPER =
-      new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+      new ObjectMapper()
+          .findAndRegisterModules()
+          .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
   @Test
   void readyServerSerializesExplicitNullErrorEvenUnderGlobalNonNull() throws Exception {
@@ -48,5 +52,29 @@ class LiveEnvironmentMcpServerDtoSerializationTest {
     JsonNode json = STRICT_NON_NULL_MAPPER.readTree(STRICT_NON_NULL_MAPPER.writeValueAsString(dto));
     assertEquals("cannot connect", json.path("error").asText());
     assertTrue(json.path("error").isTextual());
+  }
+
+  /** 公共 Environment 查询 DTO 不得泄漏只供模型上下文使用的 READY metadata。 */
+  @Test
+  void publicEnvironmentDtoDoesNotExposeInternalMetadata() throws Exception {
+    LiveEnvironmentDTO dto = new LiveEnvironmentDTO();
+    dto.setName("local");
+    dto.setStatus("READY");
+    dto.setReady(true);
+    dto.setLastSeen(Instant.parse("2026-08-10T00:00:00Z"));
+    dto.setTools(List.of());
+    dto.setSkills(List.of());
+    dto.setMcpServers(List.of());
+
+    JsonNode json = STRICT_NON_NULL_MAPPER.readTree(STRICT_NON_NULL_MAPPER.writeValueAsString(dto));
+
+    assertTrue(json.path("name").isTextual());
+    assertTrue(json.path("tools").isArray());
+    assertTrue(json.path("skills").isArray());
+    assertTrue(json.path("mcpServers").isArray());
+    assertTrue(json.path("operatingSystem").isMissingNode());
+    assertTrue(json.path("workingDirectory").isMissingNode());
+    assertTrue(json.path("timeZone").isMissingNode());
+    assertTrue(json.path("note").isMissingNode());
   }
 }

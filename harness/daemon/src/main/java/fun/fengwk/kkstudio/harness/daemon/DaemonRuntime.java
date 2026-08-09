@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
@@ -238,11 +239,10 @@ public final class DaemonRuntime implements AutoCloseable {
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.resourceStore = resourceStore;
+    DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystemDetector.detectCurrent(),
-            config.workdir().toString(),
-            ZoneId.systemDefault().getId());
+            operatingSystem, ZoneId.systemDefault().getId(), config.effectiveNote(operatingSystem));
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedToolCatalog
         && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {

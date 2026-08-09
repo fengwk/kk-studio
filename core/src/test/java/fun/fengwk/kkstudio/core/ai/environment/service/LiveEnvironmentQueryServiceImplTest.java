@@ -44,7 +44,7 @@ class LiveEnvironmentQueryServiceImplTest {
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
   private static final DaemonEnvironmentInfo ENVIRONMENT_INFO =
       new DaemonEnvironmentInfo(
-          DaemonOperatingSystem.LINUX, "/internal/workspace", "Asia/Shanghai");
+          DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Internal Linux environment.");
   private static final Clock CLOCK =
       new Clock() {
         @Override

@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
 import java.net.URI;
@@ -15,10 +17,10 @@ import java.util.UUID;
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>连接、身份、workdir、skill 与 MCP 的唯一配置来源是 CLI：{@code --environment-name}、gateway 连接参数、唯一 {@code
- * --workdir}、可重复 {@code --skill-dir} 与可选 {@code --mcp-config}。{@code --environment-name} 是
- * canonical 路由身份，必须是规范的 {@link EnvironmentName}。workdir 默认启动用户 canonical HOME；skill/MCP
- * 路径不使用服务端托管配置。
+ * <p>连接、身份、说明、workdir、skill 与 MCP 的唯一配置来源是 CLI：{@code --environment-name}、gateway 连接参数、可选且唯一 {@code
+ * --note}、唯一 {@code --workdir}、可重复 {@code --skill-dir} 与可选 {@code --mcp-config}。{@code
+ * --environment-name} 是 canonical 路由身份，必须是规范的 {@link EnvironmentName}。workdir 默认启动用户 canonical
+ * HOME；skill/MCP 路径不使用服务端托管配置。{@code --note} 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -29,6 +31,7 @@ public record DaemonConfig(
     Duration maxReconnectDelay,
     Duration defaultToolTimeout,
     String gatewayToken,
+    String note,
     Path workdir,
     List<Path> skillDirs,
     Path mcpConfigPath) {
@@ -48,6 +51,7 @@ public record DaemonConfig(
     }
     defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
     gatewayToken = requireNonBlank(gatewayToken, "gatewayToken");
+    note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     workdir = canonicalDirectory(workdir, "workdir");
     skillDirs =
         List.copyOf(Objects.requireNonNull(skillDirs, "skillDirs")).stream()
@@ -71,6 +75,7 @@ public record DaemonConfig(
     String toolTimeout = null;
     String mcpConfig = null;
     String workdir = null;
+    String note = null;
     List<Path> skillDirs = new ArrayList<>();
     boolean skillDirExplicit = false;
 
@@ -86,6 +91,12 @@ public record DaemonConfig(
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
         case "--mcp-config" -> mcpConfig = requireArgValue(args, ++index, arg);
+        case "--note" -> {
+          if (note != null) {
+            throw new IllegalArgumentException("--note may only be specified once");
+          }
+          note = requireArgValue(args, ++index, arg);
+        }
         case "--workdir" -> {
           if (workdir != null) {
             throw new IllegalArgumentException("--workdir may only be specified once");
@@ -120,6 +131,7 @@ public record DaemonConfig(
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         requirePresent(gatewayToken, "gateway-token"),
+        note,
         workdir == null ? defaultWorkdir() : Path.of(workdir),
         skillDirs,
         mcpConfig == null ? null : Path.of(mcpConfig));
@@ -133,6 +145,21 @@ public record DaemonConfig(
   /** 默认执行目录：启动用户 HOME 的 canonical 目录。 */
   public static Path defaultWorkdir() {
     return canonicalDirectory(Path.of(System.getProperty("user.home")), "user.home");
+  }
+
+  /** 可信操作者设置的显式 note 优先；省略时按 Daemon 实测 OS 生成稳定默认说明。 */
+  public String effectiveNote(DaemonOperatingSystem operatingSystem) {
+    Objects.requireNonNull(operatingSystem, "operatingSystem");
+    if (note != null) {
+      return note;
+    }
+    return switch (operatingSystem) {
+      case WINDOWS -> "Windows environment.";
+      case WSL -> "WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows"
+          + " commands may be invocable from WSL.";
+      case LINUX -> "Linux environment.";
+      case MACOS -> "macOS environment.";
+    };
   }
 
   private static String requireArgValue(String[] args, int index, String flag) {

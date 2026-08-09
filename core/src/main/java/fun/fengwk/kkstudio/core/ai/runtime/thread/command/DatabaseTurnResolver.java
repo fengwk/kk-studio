@@ -81,7 +81,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -535,10 +534,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       EnvironmentName environmentName, Instant now) {
     if (environmentName == null) {
       return new CurrentEnvironmentContext(
-          null,
-          CurrentEnvironmentContext.Status.NONE,
-          null,
-          ZonedDateTime.ofInstant(now, clock.getZone()));
+          null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
     LiveEnvironment liveEnvironment = environmentRegistry.find(environmentName).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
@@ -546,14 +542,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
             ? null
             : liveEnvironment.capabilities().environment();
     ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
-    CurrentEnvironmentContext.Status status =
-        liveEnvironment != null
-                && liveEnvironment.isReady(
-                    now, environmentGatewayProperties.requireHeartbeatTimeout())
-            ? CurrentEnvironmentContext.Status.READY
-            : CurrentEnvironmentContext.Status.UNAVAILABLE;
     return new CurrentEnvironmentContext(
-        environmentName, status, environmentInfo, ZonedDateTime.ofInstant(now, zone));
+        environmentName,
+        environmentInfo == null ? null : environmentInfo.operatingSystem(),
+        now.atZone(zone).toLocalDate(),
+        environmentInfo == null ? null : environmentInfo.note());
   }
 
   /**

@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -14,8 +16,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 
 import java.time.Duration;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.LocalDate;
 import java.util.List;
 
 /** Agent 正文 + current environment + skills + subagents 唯一 system prompt 边界的组合语义。 */
@@ -32,21 +33,20 @@ class AgentPromptComposerTest {
     return new SkillBinding(name, description, null);
   }
 
-  /** 空正文 + 空 capability 仍输出严格的 current environment 块。 */
+  /** 空正文 + 无 Environment 仍输出严格、稳定且只有四个字段的 current environment 块。 */
   @Test
-  void alwaysComposesCurrentEnvironmentBlock() {
+  void alwaysComposesExactCurrentEnvironmentBlock() {
     String expected =
         "<current_environment>\n"
-            + "  <name>none</name>\n"
-            + "  <status>none</status>\n"
-            + "  <operating_system>none</operating_system>\n"
-            + "  <working_directory>none</working_directory>\n"
-            + "  <current_date>2026-08-09</current_date>\n"
-            + "  <current_time>04:05:06</current_time>\n"
-            + "  <time_zone>UTC</time_zone>\n"
+            + "- name: none\n"
+            + "- system: none\n"
+            + "- date: 2026-08-09\n"
+            + "- note: none\n"
             + "</current_environment>";
+
     assertEquals(expected, composer.compose(null, none(), List.of(), List.of()));
     assertEquals(expected, composer.compose("   ", none(), List.of(), List.of()));
+    assertNoLegacyFields(expected);
   }
 
   /** 正文、current environment、skills、subagents 严格按固定顺序拼接，并来自真实 classpath 模板。 */
@@ -71,6 +71,39 @@ class AgentPromptComposerTest {
     assertFalse(result.contains("${subagents}"), result);
   }
 
+  /** Environment、skill 与 subagent 动态值在进入 XML 模板前全部转义。 */
+  @Test
+  void escapesXmlInDynamicValues() {
+    EnvironmentName name = mock(EnvironmentName.class);
+    when(name.value()).thenReturn("env<&\"'");
+    CurrentEnvironmentContext environment =
+        new CurrentEnvironmentContext(
+            name,
+            DaemonOperatingSystem.WSL,
+            LocalDate.of(2026, 8, 9),
+            "Use <mount> & \"commands\" from 'Windows'.");
+
+    String result =
+        composer.compose(
+            null,
+            environment,
+            List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
+            List.of(new SubagentBinding("x<y>", "desc & more")));
+
+    assertTrue(result.contains("- name: env&lt;&amp;&quot;&apos;"), result);
+    assertTrue(
+        result.contains(
+            "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
+        result);
+    assertTrue(result.contains("<name>a&amp;b</name>"), result);
+    assertTrue(
+        result.contains(
+            "<description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>"),
+        result);
+    assertTrue(result.contains("<name>x&lt;y&gt;</name>"), result);
+    assertTrue(result.contains("<description>desc &amp; more</description>"), result);
+  }
+
   /** 空白正文不产生空段落；skills/subagents 各自由 classpath 模板渲染。 */
   @Test
   void skipsBlankBodyButRendersCapabilities() {
@@ -84,28 +117,6 @@ class AgentPromptComposerTest {
     assertFalse(result.startsWith("   "), result);
     assertTrue(result.contains("  <skill>\n    <name>math</name>"), result);
     assertTrue(result.contains("  <subagent>\n    <name>researcher</name>"), result);
-  }
-
-  /** skill 与 subagent 的 name/description 都做 XML 转义，避免破坏 available 列表结构。 */
-  @Test
-  void escapesXmlInEntries() {
-    String result =
-        composer.compose(
-            null,
-            ready(),
-            List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
-            List.of(new SubagentBinding("x<y>", "desc & more")));
-
-    assertTrue(result.contains("<name>a&amp;b</name>"), result);
-    assertTrue(
-        result.contains(
-            "<description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>"),
-        result);
-    assertTrue(result.contains("<name>x&lt;y&gt;</name>"), result);
-    assertTrue(result.contains("<description>desc &amp; more</description>"), result);
-    assertTrue(
-        result.contains("<working_directory>/workspace/a&amp;b&lt;c&gt;</working_directory>"),
-        result);
   }
 
   /** 空 subagent description 回退为占位文案。 */
@@ -139,64 +150,76 @@ class AgentPromptComposerTest {
         NullPointerException.class, () -> composer.compose("body", none(), List.of(), null));
   }
 
-  /** 冻结上下文拒绝状态、名称、metadata 与时间区域不一致，避免渲染自相矛盾的受信任块。 */
+  /** 冻结上下文只允许无选择、选中但无 metadata、或 OS/note 成对存在三种形态，且日期必填。 */
   @Test
   void validatesCurrentEnvironmentContextInvariants() {
-    ZonedDateTime utc = ZonedDateTime.of(2026, 8, 9, 4, 5, 6, 0, ZoneId.of("UTC"));
-    DaemonEnvironmentInfo environment =
-        new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace", "Asia/Shanghai");
+    LocalDate date = LocalDate.of(2026, 8, 9);
+    EnvironmentName name = new EnvironmentName("env");
+
+    assertEquals(new CurrentEnvironmentContext(null, null, date, null), none());
+    CurrentEnvironmentContext selectedWithoutMetadata =
+        new CurrentEnvironmentContext(name, null, date, null);
+    assertEquals(name, selectedWithoutMetadata.name());
+    assertEquals(null, selectedWithoutMetadata.operatingSystem());
+    assertEquals(null, selectedWithoutMetadata.note());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new CurrentEnvironmentContext(
-                new EnvironmentName("env"), CurrentEnvironmentContext.Status.NONE, null, utc));
+        () -> new CurrentEnvironmentContext(null, DaemonOperatingSystem.LINUX, date, "note"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new CurrentEnvironmentContext(
-                null, CurrentEnvironmentContext.Status.NONE, environment, utc));
+        () -> new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, null));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new CurrentEnvironmentContext(
-                null, CurrentEnvironmentContext.Status.UNAVAILABLE, null, utc));
+        () -> new CurrentEnvironmentContext(name, null, date, "note"));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CurrentEnvironmentContext(
-                new EnvironmentName("env"), CurrentEnvironmentContext.Status.READY, null, utc));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CurrentEnvironmentContext(
-                new EnvironmentName("env"),
-                CurrentEnvironmentContext.Status.UNAVAILABLE,
-                environment,
-                utc));
-    assertThrows(
-        NullPointerException.class, () -> new CurrentEnvironmentContext(null, null, null, utc));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new CurrentEnvironmentContext(null, CurrentEnvironmentContext.Status.NONE, null, null));
+        NullPointerException.class, () -> new CurrentEnvironmentContext(null, null, null, null));
+  }
+
+  /** 模型可见 note 在冻结上下文边界再次严格校验，任何调用方都不能绕过 READY/CLI 的约束。 */
+  @Test
+  void validatesCurrentEnvironmentContextNote() {
+    LocalDate date = LocalDate.of(2026, 8, 9);
+    EnvironmentName name = new EnvironmentName("env");
+
+    assertInvalidContextNote(name, date, "", "note must not be blank");
+    assertInvalidContextNote(name, date, " ", "note must not be blank");
+    assertInvalidContextNote(name, date, " leading", "note must not have surrounding whitespace");
+    assertInvalidContextNote(name, date, "trailing ", "note must not have surrounding whitespace");
+    assertInvalidContextNote(
+        name, date, "first\nsecond", "note must not contain ISO control characters");
+    assertInvalidContextNote(name, date, "first\u2028second", "note must be a single line");
+    assertInvalidContextNote(
+        name, date, "control\u0007value", "note must not contain ISO control characters");
+    assertInvalidContextNote(
+        name,
+        date,
+        "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1),
+        "note exceeds " + DaemonEnvironmentInfo.MAX_NOTE_CHARS + " characters");
+
+    String maximumLength = "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS);
+    assertEquals(
+        maximumLength,
+        new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, maximumLength)
+            .note());
   }
 
   private static CurrentEnvironmentContext none() {
-    return new CurrentEnvironmentContext(
-        null,
-        CurrentEnvironmentContext.Status.NONE,
-        null,
-        ZonedDateTime.of(2026, 8, 9, 4, 5, 6, 987_000_000, ZoneId.of("UTC")));
+    return new CurrentEnvironmentContext(null, null, LocalDate.of(2026, 8, 9), null);
   }
 
-  private static CurrentEnvironmentContext ready() {
-    DaemonEnvironmentInfo environment =
-        new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.LINUX, "/workspace/a&b<c>", "Asia/Shanghai");
-    return new CurrentEnvironmentContext(
-        new EnvironmentName("env"),
-        CurrentEnvironmentContext.Status.READY,
-        environment,
-        ZonedDateTime.of(2026, 8, 9, 12, 34, 56, 999_000_000, ZoneId.of("Asia/Shanghai")));
+  private static void assertInvalidContextNote(
+      EnvironmentName name, LocalDate date, String note, String expectedMessage) {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new CurrentEnvironmentContext(name, DaemonOperatingSystem.LINUX, date, note));
+    assertEquals(expectedMessage, error.getMessage());
+  }
+
+  private static void assertNoLegacyFields(String prompt) {
+    assertFalse(prompt.contains("status"), prompt);
+    assertFalse(prompt.contains("working_directory"), prompt);
+    assertFalse(prompt.contains("current_time"), prompt);
+    assertFalse(prompt.contains("time_zone"), prompt);
   }
 }

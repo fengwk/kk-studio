@@ -8,7 +8,8 @@
  * <p>Environment 作用域使用 canonical {@code environmentName}（CLI {@code --environment-name}，规范 {@link
  * fun.fengwk.kkstudio.harness.tool.EnvironmentName}）；每个 envelope 只携带该逻辑路由名称并做单字段作用域校验。HELLO 声称该
  * 名称；若已被另一个 live daemon 持有，gateway 返回带 {@code ENVIRONMENT_NAME_CONFLICT} code 的 ERROR，daemon 停止重连并以
- * 非零状态退出。Skills 由 CLI {@code --skill-dir} 或默认 {@code ~/.agents/skills} 本地发现；READY 上报版本化能力对象 （skills
- * + MCP server 摘要），skill 正文经 {@code LOAD_SKILL} 按需加载，MCP 工具经固定桥接工具调用。
+ * 非零状态退出。可选 CLI {@code --note} 覆盖按实测 OS 生成的稳定默认说明；Skills 由 CLI {@code --skill-dir} 或默认 {@code
+ * ~/.agents/skills} 本地发现；READY 上报版本化能力对象（OS/timeZone/note + skills + MCP server 摘要），skill 正文经
+ * {@code LOAD_SKILL} 按需加载，MCP 工具经固定桥接工具调用。
  */
 package fun.fengwk.kkstudio.harness.daemon;

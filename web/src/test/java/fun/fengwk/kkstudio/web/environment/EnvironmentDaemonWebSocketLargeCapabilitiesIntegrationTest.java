@@ -155,7 +155,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return CAPABILITIES_CODEC.encode(
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
-            new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace", "UTC"),
+            new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
             List.of(fat),
             List.of()));
   }

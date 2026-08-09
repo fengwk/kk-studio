@@ -4,13 +4,13 @@
  * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
  * environmentName}（Environment 的唯一路由身份：bounded 小写名称，无空白/无 {@code '/'}）；不存在展示名或 UUID。
  *
- * <p>v2 {@code READY} payload 由 {@link
+ * <p>v3 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":2,"environment":{"operatingSystem","workingDirectory","timeZone"},
+ * {"version":3,"environment":{"operatingSystem","timeZone","note"},
  * "skills":[{"name","description"}],"mcpServers":[{"name","status","error",
- * "tools":[{"name","description"}]}]}}。environment 只含 prompt 所需的 OS family、canonical workdir 与
- * ZoneId；skills 与 MCP server 摘要只含可安全上报的短字段。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools}
- * 桥接工具返回。Environment 工具由 EnvironmentToolCatalog 固定，不按连接协商。
+ * "tools":[{"name","description"}]}]}}。environment 只含 prompt 所需的 OS family、ZoneId 与稳定说明；skills 与
+ * MCP server 摘要只含可安全上报的短字段。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools} 桥接工具返回。Environment 工具由
+ * EnvironmentToolCatalog 固定，不按连接协商。
  *
  * <p>v2 Skill 加载消息：
  *

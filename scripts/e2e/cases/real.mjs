@@ -615,7 +615,8 @@ registerCase({
     assert(
       !Object.hasOwn(match, 'operatingSystem')
         && !Object.hasOwn(match, 'workingDirectory')
-        && !Object.hasOwn(match, 'timeZone'),
+        && !Object.hasOwn(match, 'timeZone')
+        && !Object.hasOwn(match, 'note'),
       JSON.stringify(match),
     )
     // MCP 摘要只含 name/status/error/tools(name+description)；不暴露命令/headers/URL/完整 schema。

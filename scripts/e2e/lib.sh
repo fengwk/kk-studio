@@ -25,6 +25,7 @@ DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
 DAEMON_ID=${DAEMON_ID:-tool-e2e-daemon}
 DAEMON_TOKEN=${DAEMON_TOKEN:-e2e-daemon-token}
 DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-/tmp/kk-studio-e2e-env}
+DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 SKILL_DIR=${SKILL_DIR:-"$HOME/.agents/skills"}
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
@@ -187,6 +188,7 @@ start_daemon() {
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
     --gateway-token "$DAEMON_TOKEN" \
     --daemon-id "$DAEMON_ID" \
+    --note "$DAEMON_NOTE" \
     --workdir "$DAEMON_ENV_ROOT" \
     --skill-dir "$SKILL_DIR" \
     >"$WORK_DIR/daemon.log" 2>&1 &

@@ -28,7 +28,7 @@ class LiveEnvironmentRegistryTest {
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace", "UTC"),
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
           List.of(),
           List.of());
 

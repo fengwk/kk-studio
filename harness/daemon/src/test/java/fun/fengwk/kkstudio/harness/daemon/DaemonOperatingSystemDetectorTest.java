@@ -16,37 +16,42 @@ class DaemonOperatingSystemDetectorTest {
   void classifiesWindowsMacosAndLinux() {
     assertEquals(
         DaemonOperatingSystem.WINDOWS,
-        DaemonOperatingSystemDetector.classify("Windows 11", Map.of(), ""));
+        DaemonOperatingSystemDetector.classify("Windows 11", Map.of(), "", ""));
     assertEquals(
         DaemonOperatingSystem.MACOS,
-        DaemonOperatingSystemDetector.classify("Mac OS X", Map.of(), ""));
+        DaemonOperatingSystemDetector.classify("Mac OS X", Map.of(), "", ""));
     assertEquals(
         DaemonOperatingSystem.MACOS,
-        DaemonOperatingSystemDetector.classify("Darwin", Map.of(), ""));
+        DaemonOperatingSystemDetector.classify("Darwin", Map.of(), "", ""));
     assertEquals(
         DaemonOperatingSystem.LINUX,
-        DaemonOperatingSystemDetector.classify("Linux", Map.of(), "Linux version 6.8"));
+        DaemonOperatingSystemDetector.classify("Linux", Map.of(), "Linux version 6.8", "6.8"));
   }
 
   @Test
   void classifiesWslBeforeGenericLinux() {
     assertEquals(
         DaemonOperatingSystem.WSL,
-        DaemonOperatingSystemDetector.classify("Linux", Map.of("WSL_DISTRO_NAME", "Ubuntu"), ""));
+        DaemonOperatingSystemDetector.classify(
+            "Linux", Map.of("WSL_DISTRO_NAME", "Ubuntu"), "", ""));
     assertEquals(
         DaemonOperatingSystem.WSL,
         DaemonOperatingSystemDetector.classify(
-            "Linux", Map.of("WSL_INTEROP", "/run/WSL/1_interop"), ""));
+            "Linux", Map.of("WSL_INTEROP", "/run/WSL/1_interop"), "", ""));
     assertEquals(
         DaemonOperatingSystem.WSL,
         DaemonOperatingSystemDetector.classify(
-            "Linux", Map.of(), "Linux version 5.15.90.1-microsoft-standard-WSL2"));
+            "Linux", Map.of(), "Linux version 5.15.90.1-microsoft-standard-WSL2", "5.15.90.1"));
+    assertEquals(
+        DaemonOperatingSystem.WSL,
+        DaemonOperatingSystemDetector.classify(
+            "Linux", Map.of(), "Linux version 6.8", "5.15.90.1-microsoft-standard-WSL2"));
   }
 
   @Test
   void rejectsUnknownOperatingSystem() {
     assertThrows(
         IllegalStateException.class,
-        () -> DaemonOperatingSystemDetector.classify("Plan 9", Map.of(), ""));
+        () -> DaemonOperatingSystemDetector.classify("Plan 9", Map.of(), "", ""));
   }
 }

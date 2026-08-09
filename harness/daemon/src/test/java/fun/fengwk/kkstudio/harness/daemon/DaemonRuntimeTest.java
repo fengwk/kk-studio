@@ -151,7 +151,7 @@ class DaemonRuntimeTest {
   @Test
   void reconnectsAfterDisconnectAndReannouncesReadiness() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestTool());
+    runtime = runtime(transport, new TestTool(), "Custom & stable environment.");
 
     runtime.start();
     transport.awaitConnections(1);
@@ -166,6 +166,7 @@ class DaemonRuntimeTest {
     DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
+    assertEquals("Custom & stable environment.", firstEnvironment.note());
     assertTrue(codec.readPayload(handshake.get(1)).path("skills").isArray());
 
     transport.disconnect();
@@ -193,6 +194,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            null,
             WORKDIR,
             List.of(),
             null);
@@ -236,11 +238,26 @@ class DaemonRuntimeTest {
 
       DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
-      assertEquals(WORKDIR.toRealPath().toString(), capabilities.environment().workingDirectory());
       assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
       assertEquals(
           DaemonOperatingSystemDetector.detectCurrent(),
           capabilities.environment().operatingSystem());
+      assertEquals(
+          new DaemonConfig(
+                  URI.create("ws://localhost/gateway"),
+                  new EnvironmentName("environment"),
+                  "daemon",
+                  Duration.ofMinutes(1),
+                  Duration.ZERO,
+                  Duration.ofSeconds(1),
+                  Duration.ofSeconds(10),
+                  "test-gateway-token",
+                  null,
+                  WORKDIR,
+                  List.of(),
+                  null)
+              .effectiveNote(capabilities.environment().operatingSystem()),
+          capabilities.environment().note());
       assertEquals(1, capabilities.skills().size());
       assertEquals("demo", capabilities.skills().get(0).name());
       assertEquals("Demo skill", capabilities.skills().get(0).description());
@@ -954,10 +971,9 @@ class DaemonRuntimeTest {
 
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
-      assertEquals(2, payload.path("version").asInt());
-      assertEquals(
-          WORKDIR.toRealPath().toString(),
-          payload.path("environment").path("workingDirectory").asText());
+      assertEquals(3, payload.path("version").asInt());
+      assertTrue(payload.path("environment").path("workingDirectory").isMissingNode());
+      assertTrue(payload.path("environment").path("note").isTextual());
       assertEquals(1, payload.path("skills").size());
       assertEquals("demo", payload.path("skills").get(0).path("name").asText());
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
@@ -1353,6 +1369,31 @@ class DaemonRuntimeTest {
     return runtime(transport, tool, heartbeatInterval, Duration.ofSeconds(10));
   }
 
+  private DaemonRuntime runtime(FakeTransport transport, Tool tool, String note) {
+    handshakeTransport = transport;
+    DaemonToolRegistry registry = new DaemonToolRegistry();
+    registry.register(tool);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            new EnvironmentName("environment"),
+            "daemon",
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(10),
+            "test-gateway-token",
+            note,
+            WORKDIR,
+            List.of(),
+            null),
+        transport,
+        registry,
+        DaemonSkillRegistry.empty(),
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor());
+  }
+
   private DaemonRuntime runtime(FakeTransport transport, Tool tool, ResourceStore resourceStore) {
     return runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(10), resourceStore);
   }
@@ -1372,6 +1413,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            null,
             WORKDIR,
             List.of(),
             null),
@@ -1397,6 +1439,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            null,
             WORKDIR,
             List.of(),
             null),
@@ -1471,6 +1514,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             defaultToolTimeout,
             "test-gateway-token",
+            null,
             WORKDIR,
             List.of(),
             null),
