@@ -49,6 +49,9 @@ done
 command -v docker >/dev/null 2>&1 || die "docker is required"
 docker info >/dev/null 2>&1 || die "Docker daemon is not available"
 docker compose version >/dev/null 2>&1 || die "docker compose is required"
+if [[ "$WITH_APP" == "true" ]]; then
+  command -v python3 >/dev/null 2>&1 || die "python3 is required for the Canvas API smoke"
+fi
 
 cleanup() {
   local status=$?
@@ -106,5 +109,72 @@ with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as respon
     assert response.status == 200
     assert json.load(response) == {"status": "ok"}
 '
+
+if [[ "$WITH_APP" == "true" ]]; then
+  step "Checking Canvas Resource reserve, direct PUT, finalize, and preview GET"
+  CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
+  CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../core/src/test/resources/fun/fengwk/kkstudio/core/studio/resource/tiny.png" \
+    python3 - <<'PY'
+import json
+import os
+import urllib.request
+from pathlib import Path
+
+base_url = os.environ["CANVAS_TEST_APP_URL"]
+image = Path(os.environ["CANVAS_TEST_IMAGE_FIXTURE"]).read_bytes()
+
+
+def json_call(method: str, path: str, body: dict | None = None) -> dict:
+    data = None if body is None else json.dumps(body).encode()
+    headers = {} if data is None else {"Content-Type": "application/json"}
+    request = urllib.request.Request(
+        base_url + path, data=data, headers=headers, method=method
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        assert 200 <= response.status < 300
+        return json.load(response)["data"]
+
+
+canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
+reservation = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/uploads",
+    {
+        "kind": "IMAGE",
+        "filename": "tiny.png",
+        "mediaType": "image/png",
+        "size": str(len(image)),
+    },
+)
+assert "bucket" not in reservation and "key" not in reservation
+put = urllib.request.Request(
+    reservation["url"],
+    data=image,
+    headers=reservation.get("headers") or {},
+    method=reservation["method"],
+)
+with urllib.request.urlopen(put, timeout=30) as response:
+    assert response.status == 200
+
+resource = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/uploads/{reservation['uploadId']}/complete",
+)
+assert resource["id"] == reservation["uploadId"]
+assert resource["mediaType"] == "image/png"
+metadata = json.loads(resource["metadataJson"])
+assert metadata["width"] > 0 and metadata["height"] > 0
+
+preview = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/resources/{resource['id']}/preview-url",
+)
+assert "bucket" not in preview and "key" not in preview
+with urllib.request.urlopen(preview["url"], timeout=30) as response:
+    body = response.read()
+    assert response.status == 200
+    assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
+PY
+fi
 
 step "All isolated container checks passed"

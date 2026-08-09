@@ -30,6 +30,18 @@ public interface CanvasResourceMapper extends BaseMapper {
       """)
   int insert(CanvasResourceDO resource);
 
+  @Insert(
+      """
+      insert into canvas_resource (
+          id, canvas_id, kind, media_type, name, size, text_content, metadata_json, created_at
+      ) values (
+          #{id}, #{canvasId}, #{kind}, #{mediaType}, #{name}, #{size}, #{textContent},
+          cast(#{metadataJson} as jsonb), #{createdAt}
+      )
+      on conflict (id) do nothing
+      """)
+  int insertIfAbsent(CanvasResourceDO resource);
+
   @Select(
       "select " + COLUMNS + " from canvas_resource where canvas_id = #{canvasId} and id = #{id}")
   @Results(
@@ -46,6 +58,10 @@ public interface CanvasResourceMapper extends BaseMapper {
         @Result(column = "created_at", property = "createdAt")
       })
   CanvasResourceDO getById(@Param("canvasId") long canvasId, @Param("id") long id);
+
+  @Select("select " + COLUMNS + " from canvas_resource where id = #{id}")
+  @ResultMap("canvasResourceMap")
+  CanvasResourceDO getByResourceId(@Param("id") long id);
 
   @Select(
       """

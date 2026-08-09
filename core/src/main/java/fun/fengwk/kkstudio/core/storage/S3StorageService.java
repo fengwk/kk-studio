@@ -16,6 +16,12 @@ public interface S3StorageService {
 
   boolean exists(String key);
 
+  S3ObjectMetadata headObject(String key);
+
+  S3ObjectStream readObject(String key);
+
+  void deleteObject(String key);
+
   String getPublicUrl(String key);
 
   byte[] download(String key);

@@ -8,7 +8,11 @@ public interface CanvasResourceRepository {
 
   void add(CanvasResource resource);
 
+  boolean addIfAbsent(CanvasResource resource);
+
   Optional<CanvasResource> findById(long canvasId, long resourceId);
+
+  Optional<CanvasResource> findById(long resourceId);
 
   List<CanvasResource> findByIds(long canvasId, List<Long> resourceIds);
 }

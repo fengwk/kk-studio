@@ -233,7 +233,7 @@ create table canvas_upload (
     created_at           timestamptz(3) not null default current_timestamp,
     constraint ck_canvas_upload_id_pos check (id > 0),
     constraint ck_canvas_upload_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_upload_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO', 'TEXT')),
+    constraint ck_canvas_upload_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO')),
     constraint ck_canvas_upload_filename_nonblank check (btrim(filename) <> ''),
     constraint ck_canvas_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
     constraint ck_canvas_upload_size_nonneg check (declared_size >= 0),

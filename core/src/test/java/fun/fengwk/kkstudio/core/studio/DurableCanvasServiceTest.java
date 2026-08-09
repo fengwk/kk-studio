@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
@@ -401,6 +402,23 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
     uploadRepository.add(upload);
 
     assertEquals(upload, uploadRepository.findById(canvas.id(), upload.id()).orElseThrow());
+    assertEquals(
+        upload, uploadRepository.findByIdForUpdate(canvas.id(), upload.id()).orElseThrow());
+    assertTrue(uploadRepository.delete(canvas.id(), upload.id()));
+    assertTrue(uploadRepository.findById(canvas.id(), upload.id()).isEmpty());
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            uploadRepository.add(
+                new CanvasUpload(
+                    PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet(),
+                    canvas.id(),
+                    CanvasResourceKind.TEXT,
+                    "note.md",
+                    "text/markdown",
+                    1,
+                    createdAt.plusSeconds(300),
+                    createdAt)));
     assertEquals(
         0L, queryService.findSnapshot(canvas.id()).orElseThrow().document().graphRevision());
   }

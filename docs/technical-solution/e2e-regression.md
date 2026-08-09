@@ -6,7 +6,10 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **64** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 64 个 Node API case。
+当前注册 **65** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。Canvas
+Resource reserve contract 需要 backend 已启用 S3，并通过 `--with-canvas-storage` 显式
+执行；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
+由 `scripts/e2e.sh --ui` 另行附加，不计入这 65 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -16,6 +19,7 @@ node scripts/e2e/run-matrix.mjs --list
 ./scripts/e2e.sh --real                  # L2 真实 MiniMax
 ./scripts/e2e.sh --real --with-branch    # L3 同 Session 分支
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
+./scripts/e2e.sh --with-canvas-storage   # Canvas Resource reserve（需 S3 配置）
 ./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
 ./scripts/e2e.sh --ui                    # Playwright UI smoke
 ./scripts/e2e.sh --list
@@ -37,6 +41,7 @@ npm --prefix frontend run e2e:docs
 --real
 --with-tools
 --with-branch
+--with-canvas-storage
 --only CASE_ID
 --level L1|L2|L3|L4
 --list
@@ -62,7 +67,7 @@ npm --prefix frontend run e2e:docs
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（57）
+### L1（注册 58，默认 57）
 
 ```text
 seed.structured_model_config
@@ -122,6 +127,7 @@ config.agent.invalid.duplicate_subagent
 config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
+canvas.storage_upload_contract
 ```
 
 L1 的关键语义断言：
@@ -141,6 +147,10 @@ L1 的关键语义断言：
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
+- `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
+  S3 配置；IMAGE reserve 返回 `uploadId + PUT + public URL + headers + expiresAt`，不暴露
+  bucket/key，TEXT 与客户端注入 key 均返回 400。完整 PUT/finalize/preview 字节链路由
+  `deploy/test` MinIO smoke 和后端定向测试覆盖。
 
 ### L2/L3/L4（7）
 

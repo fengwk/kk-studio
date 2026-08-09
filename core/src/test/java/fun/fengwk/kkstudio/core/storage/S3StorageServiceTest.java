@@ -7,7 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
@@ -17,7 +18,9 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -69,6 +72,33 @@ public class S3StorageServiceTest {
     try {
       assertTrue(context.storageService.exists("dir/demo.txt"));
       assertArrayEquals(new byte[] {1, 2, 3}, context.storageService.download("dir/demo.txt"));
+    } finally {
+      context.close();
+    }
+  }
+
+  @Test
+  public void testHeadReadAndDeleteUseStreamingApi() throws IOException {
+    AtomicBoolean closed = new AtomicBoolean();
+    TestContext context =
+        newTestContext(
+            null,
+            methodName -> {
+              if ("getObject".equals(methodName)) {
+                return responseStream(new byte[] {1, 2, 3}, "image/png", closed);
+              }
+              return null;
+            });
+    try {
+      S3ObjectMetadata metadata = context.storageService.headObject("dir/demo.png");
+      assertEquals(3L, metadata.contentLength());
+
+      try (S3ObjectStream object = context.storageService.readObject("dir/demo.png")) {
+        assertEquals(1, object.inputStream().read());
+        assertEquals("image/png", object.metadata().contentType());
+      }
+      assertTrue(closed.get());
+      context.storageService.deleteObject("dir/demo.png");
     } finally {
       context.close();
     }
@@ -233,9 +263,9 @@ public class S3StorageServiceTest {
                 case "close" -> null;
                 case "putObject" -> PutObjectResponse.builder().eTag("etag-demo").build();
                 case "headObject" -> HeadObjectResponse.builder().contentLength(3L).build();
-                case "getObjectAsBytes" -> ResponseBytes.fromByteArray(
-                    GetObjectResponse.builder().contentType("image/png").build(),
-                    new byte[] {1, 2, 3});
+                case "getObject" -> responseStream(
+                    new byte[] {1, 2, 3}, "image/png", new AtomicBoolean());
+                case "deleteObject" -> null;
                 case "serviceName" -> "s3";
                 case "toString" -> "noopS3Client";
                 case "hashCode" -> System.identityHashCode(proxy);
@@ -243,6 +273,24 @@ public class S3StorageServiceTest {
                 default -> throw new UnsupportedOperationException(method.getName());
               };
             });
+  }
+
+  private ResponseInputStream<GetObjectResponse> responseStream(
+      byte[] bytes, String contentType, AtomicBoolean closed) {
+    ByteArrayInputStream source =
+        new ByteArrayInputStream(bytes) {
+          @Override
+          public void close() throws IOException {
+            closed.set(true);
+            super.close();
+          }
+        };
+    return new ResponseInputStream<>(
+        GetObjectResponse.builder()
+            .contentLength((long) bytes.length)
+            .contentType(contentType)
+            .build(),
+        AbortableInputStream.create(source));
   }
 
   private record TestContext(S3StorageService storageService) implements AutoCloseable {

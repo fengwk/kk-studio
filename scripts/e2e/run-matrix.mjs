@@ -41,15 +41,17 @@ await import('./cases/seed-and-harness.mjs')
 await import('./cases/crud.mjs')
 await import('./cases/i18n.mjs')
 await import('./cases/config-matrix.mjs')
+await import('./cases/canvas-storage.mjs')
 await import('./cases/real.mjs')
 
 class CaseContext {
-  constructor({ baseUrl, daemonEnv, real, withTools, withBranch, reportDir }) {
+  constructor({ baseUrl, daemonEnv, real, withTools, withBranch, withCanvasStorage, reportDir }) {
     this.baseUrl = baseUrl
     this.daemonEnv = daemonEnv
     this.real = real
     this.withTools = withTools
     this.withBranch = withBranch
+    this.withCanvasStorage = withCanvasStorage
     this.reportDir = reportDir
     this.caseId = null
     this.vars = {}
@@ -132,6 +134,7 @@ function writeSummaryAndReport(runDir, runId, args, results, startedAt, finished
       real: args.real,
       withTools: args.withTools,
       withBranch: args.withBranch,
+      withCanvasStorage: args.withCanvasStorage,
       only: args.only,
       level: args.level,
     },
@@ -254,6 +257,7 @@ function parseArgs(argv) {
     real: false,
     withTools: false,
     withBranch: false,
+    withCanvasStorage: false,
     only: [],
     level: [],
     list: false,
@@ -283,6 +287,9 @@ function parseArgs(argv) {
       case '--with-branch':
         args.withBranch = true
         args.real = true
+        break
+      case '--with-canvas-storage':
+        args.withCanvasStorage = true
         break
       case '--only':
         args.only.push(next())
@@ -318,6 +325,7 @@ function caseEnabled(c, args) {
   if (c.requires.has('real') && !args.real) return false
   if (c.requires.has('tools') && !args.withTools) return false
   if (c.requires.has('branch') && !args.withBranch) return false
+  if (c.requires.has('canvas-storage') && !args.withCanvasStorage) return false
   if (args.only.length && !args.only.includes(c.id)) return false
   if (args.level.length && !args.level.includes(c.level)) return false
   return true
@@ -327,7 +335,7 @@ async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
     console.log(`Usage: node scripts/e2e/run-matrix.mjs [options]
-  --base-url --frontend-url --real --with-tools --with-branch
+  --base-url --frontend-url --real --with-tools --with-branch --with-canvas-storage
   --only <id> --level L1 --list --docs --report-root DIR`)
     return 0
   }
@@ -366,6 +374,7 @@ async function main(argv) {
     real: args.real,
     withTools: args.withTools,
     withBranch: args.withBranch,
+    withCanvasStorage: args.withCanvasStorage,
     reportDir: runDir,
   })
   if (args.frontendUrl) ctx.vars.frontendUrl = args.frontendUrl.replace(/\/$/, '')
