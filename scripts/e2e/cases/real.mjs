@@ -163,7 +163,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName: null, thinkingLevel: 'off', activeTools: ['task'] },
+          { environmentName: null, activeTools: ['task'] },
         ),
       })
       const parentThreadId = String(snapshot.thread.threadId)
@@ -691,7 +691,7 @@ registerCase({
             modelName: ctx.vars.seedModel.name,
             variant: ctx.vars.seedModel.config.defaultVariant,
           },
-          { environmentName, thinkingLevel: 'high', activeTools: ['read'] },
+          { environmentName, activeTools: ['read'] },
         ),
       })
       const tid = snapshot.thread.threadId

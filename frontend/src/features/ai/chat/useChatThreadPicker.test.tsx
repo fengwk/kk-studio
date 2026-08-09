@@ -27,7 +27,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'p', modelName: 'm', variant: 'v' },
-      thinkingLevel: 'default',
       activeTools: [],
     },
     createTime: '2026-01-01T00:00:00Z',

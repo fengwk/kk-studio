@@ -22,7 +22,6 @@ import {
   setAgentCommand,
   setEnvironmentCommand,
   setModelCommand,
-  setThinkingLevelCommand,
   setYoloCommand,
   stopThread,
   threadIdOf,
@@ -168,7 +167,6 @@ registerCase({
       title: null,
       yoloEnabled: false,
       branchSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx), {
-        thinkingLevel: 'off',
         activeTools: [],
       }),
     })
@@ -211,7 +209,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: '创建时完整 branchSettings 精确投影到 Thread 快照',
-  docs: 'environmentName/agentName/model/thinkingLevel/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
+  docs: 'environmentName/agentName/model/activeTools/yoloEnabled 原样持久化并投影；null title 保持 null',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -224,7 +222,6 @@ registerCase({
       environmentName: null,
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
-      thinkingLevel: 'high',
       activeTools: ['read', 'grep'],
     }
     const snapshot = await createChatThread(ctx, chat.id, {
@@ -596,7 +593,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 environmentName => 400',
+  docs: '前端固定顺序 SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE 一个 batch；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings/yoloEnabled 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；额外字段与非法 environmentName => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -621,7 +618,6 @@ registerCase({
         },
         cid(),
       ),
-      setThinkingLevelCommand('high', cid()),
       setActiveToolsCommand(['read'], cid()),
       setYoloCommand(true, cid()),
       userMessageCommand(`${marker} 消费 SET 后的第一条消息。`, cid()),
@@ -633,7 +629,7 @@ registerCase({
     })
     assert(
       dto.map((command) => command.type).join(',') ===
-        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_THINKING_LEVEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE',
+        'SET_ENVIRONMENT,SET_AGENT,SET_MODEL,SET_ACTIVE_TOOLS,SET_YOLO,USER_MESSAGE',
       JSON.stringify(dto),
     )
     for (let i = 1; i < dto.length; i++) {
@@ -658,7 +654,6 @@ registerCase({
         modelName: modelSelection.modelName,
         variant: modelSelection.variant,
       },
-      thinkingLevel: 'high',
       activeTools: ['read'],
     }
     assert(
@@ -700,7 +695,7 @@ registerCase({
       `expected the final TURN_END to converge: ${JSON.stringify(lastTurnEnd)}`,
     )
 
-    // 额外字段 => 400（每类命令 requireForbidden）；400 不推进 cursor，可复用 quiescent 后最新 cursor。
+    // 不相关字段与未知字段都必须 400；400 不推进 cursor，可复用 quiescent 后最新 cursor。
     const fresh = await getThreadSnapshot(ctx, thread.threadId)
     await expectHttpError(
       () =>
@@ -710,6 +705,22 @@ registerCase({
           commands: [{ type: 'SET_YOLO', clientCommandId: cid(), yoloEnabled: true, content: 'x' }],
         }),
       { status: 400, messageIncludes: /content/i },
+    )
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: fresh.thread.headEntryId,
+          expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          commands: [
+            {
+              type: 'SET_YOLO',
+              clientCommandId: cid(),
+              yoloEnabled: true,
+              unexpected: true,
+            },
+          ],
+        }),
+      { status: 400 },
     )
     // SET_ENVIRONMENT 只接受 canonical bounded 小写路由名称（mapper EnvironmentName 校验；resolver 运行时才查 registry READY）。
     await expectHttpError(

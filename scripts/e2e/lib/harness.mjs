@@ -63,7 +63,7 @@ export async function createChat(ctx, { title, agentName, yoloEnabled = false, e
 
 /**
  * 以完整 branchSettings 原子创建 Thread（201 返回 HarnessThreadSnapshotDTO）。
- * branchSettings: {environmentName, agentName, model:{providerName,modelName,variant}, thinkingLevel, activeTools}
+ * branchSettings: {environmentName, agentName, model:{providerName,modelName,variant}, activeTools}
  */
 export async function createChatThread(ctx, chatId, { title = null, branchSettings, yoloEnabled = false }) {
   const { status, json } = await ctx.call(
@@ -88,7 +88,7 @@ export async function createChatThread(ctx, chatId, { title = null, branchSettin
 /** 创建 Chat + Thread，返回 {chat, snapshot}（snapshot.thread 即新 Thread 投影）。 */
 export async function createConfiguredChatThread(
   ctx,
-  { agent, model, title, yoloEnabled = false, environmentName = null, thinkingLevel = 'off', activeTools = [] } = {},
+  { agent, model, title, yoloEnabled = false, environmentName = null, activeTools = [] } = {},
 ) {
   assert(agent?.name, `agent required: ${JSON.stringify(agent)}`)
   const chat = await createChat(ctx, {
@@ -101,7 +101,6 @@ export async function createConfiguredChatThread(
     yoloEnabled,
     branchSettings: branchSettingsOf(agent, model, {
       environmentName,
-      thinkingLevel,
       activeTools,
     }),
   })
@@ -112,7 +111,7 @@ export async function createConfiguredChatThread(
 export function branchSettingsOf(
   agent,
   model,
-  { environmentName = null, thinkingLevel = 'off', activeTools = [] } = {},
+  { environmentName = null, activeTools = [] } = {},
 ) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
@@ -124,7 +123,6 @@ export function branchSettingsOf(
       modelName: model.modelName,
       variant: model.variant,
     },
-    thinkingLevel: thinkingLevel ?? null,
     activeTools: [...(activeTools ?? [])],
   }
 }
@@ -208,12 +206,6 @@ export function setModelCommand(model, clientCommandId) {
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
   return { type: 'SET_MODEL', clientCommandId, model }
-}
-
-export function setThinkingLevelCommand(thinkingLevel, clientCommandId) {
-  assert(thinkingLevel && typeof thinkingLevel === 'string', 'thinkingLevel required')
-  assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  return { type: 'SET_THINKING_LEVEL', clientCommandId, thinkingLevel }
 }
 
 export function setActiveToolsCommand(activeTools, clientCommandId) {

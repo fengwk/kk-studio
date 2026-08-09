@@ -221,7 +221,6 @@ class CoreToolGatewayPluginTest {
                     null,
                     "assistant",
                     new ModelSelection("provider", "model", "default"),
-                    "medium",
                     List.of())),
             NOW);
     return new BranchView(new EntryPath(List.of(root)));

@@ -285,7 +285,7 @@ export function BoundThreadPane({
       return
     }
     // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
-    // model/thinking/environment/yolo 选中值保持不变。
+    // model/environment/yolo 选中值保持不变。
     editDraft({ agentName: selectedAgentName, activeTools: activeToolsFromAgent(agent) })
     setAgentModalOpen(false)
   }

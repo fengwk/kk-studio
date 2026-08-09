@@ -18,7 +18,6 @@ export interface HarnessBranchSettingsDTO {
   environmentName: string | null
   agentName: string
   model: HarnessModelSelectionDTO
-  thinkingLevel: string
   activeTools: string[]
 }
 
@@ -97,7 +96,6 @@ export type HarnessThreadCommandCreateDTO =
   | { type: 'CUSTOM_MESSAGE'; clientCommandId: string; content: string; role: 'SYSTEM' | 'USER' }
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
-  | { type: 'SET_THINKING_LEVEL'; clientCommandId: string; thinkingLevel: string }
   | { type: 'SET_ACTIVE_TOOLS'; clientCommandId: string; activeTools: string[] }
   | { type: 'SET_YOLO'; clientCommandId: string; yoloEnabled: boolean }
   | { type: 'SET_ENVIRONMENT'; clientCommandId: string; environmentName: string | null }

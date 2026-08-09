@@ -105,7 +105,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
 | Entry | 对话与运行审计事实，只允许九种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
-| ThreadCommand | 有序 mailbox，只允许八类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
+| ThreadCommand | 有序 mailbox，只允许七类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
 | ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt 与 terminal 事实 |
 | ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即十进制子 ThreadId |
@@ -127,7 +127,7 @@ Blank first send:
   POST /api/ai/runtime/threads/{threadId}/commands  -> 原子 USER_MESSAGE-only batch（202）
 
 绑定 Pane 的每次发送:
-  构造 SET_* diff batch（ENV→AGENT→MODEL→THINKING→TOOLS→YOLO）+ USER_MESSAGE
+  构造 SET_* diff batch（ENV→AGENT→MODEL→TOOLS→YOLO）+ USER_MESSAGE
   -> POST /commands（expectedHeadEntryId + expectedNextCommandSequence CAS，202）
   -> ThreadProcessor 收割 queued Commands（全量已存在 id 时是 ordered replay）
   -> TurnPlanBuilder 追加 TURN_START(INPUT) + Message Entries

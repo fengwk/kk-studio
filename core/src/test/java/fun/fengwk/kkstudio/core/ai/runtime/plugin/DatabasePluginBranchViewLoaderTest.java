@@ -56,7 +56,6 @@ class DatabasePluginBranchViewLoaderTest {
                     null,
                     "assistant",
                     new ModelSelection("provider", "model", "default"),
-                    "medium",
                     List.of())),
             Instant.parse("2026-01-01T00:00:00Z"));
     return new EntryPath(List.of(root));

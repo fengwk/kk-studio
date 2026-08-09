@@ -792,7 +792,7 @@ final class HarnessRuntimeTestSupport {
 
   static BranchSettings settings() {
     return new BranchSettings(
-        ENV, "agent", new ModelSelection("provider", "model", "v1"), "low", List.of());
+        ENV, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
   static ModelInvocationRequest modelRequest() {

@@ -27,7 +27,6 @@ class BranchSettingsTest {
             ENV,
             "coding",
             new ModelSelection("anthropic", "claude-sonnet", "default"),
-            "high",
             sourceTools);
 
     sourceTools.add("write");
@@ -40,11 +39,7 @@ class BranchSettingsTest {
   void allowsNoEnvironmentButRequiresCanonicalNames() {
     BranchSettings settings =
         new BranchSettings(
-            null,
-            "coding",
-            new ModelSelection("anthropic", "claude-sonnet", "default"),
-            "high",
-            List.of());
+            null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), List.of());
 
     assertNull(settings.environmentName());
     assertThrows(
@@ -54,14 +49,10 @@ class BranchSettingsTest {
                 new EnvironmentName("123E4567-E89B-12D3-A456-426614174000"),
                 "coding",
                 settings.model(),
-                "high",
                 List.of()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new BranchSettings(null, "coding", settings.model(), " high", List.of()));
-    assertThrows(
         NullPointerException.class,
-        () -> new BranchSettings(null, "coding", settings.model(), "high", List.of("read", null)));
+        () -> new BranchSettings(null, "coding", settings.model(), List.of("read", null)));
   }
 
   @Test
@@ -71,7 +62,6 @@ class BranchSettingsTest {
             ENV,
             "coding",
             new ModelSelection("anthropic", "claude-sonnet", "default"),
-            "high",
             List.of("read"));
 
     BranchSettings cleared = base.withEnvironmentName(null);
@@ -86,16 +76,15 @@ class BranchSettingsTest {
   @Test
   void rejectsNullCollectionsBlankToolsAndOversizedNames() {
     ModelSelection model = new ModelSelection("anthropic", "claude-sonnet", "default");
-    assertThrows(
-        NullPointerException.class, () -> new BranchSettings(null, "coding", model, "high", null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new BranchSettings(null, "coding", model, "high", List.of(" ")));
+    assertThrows(NullPointerException.class, () -> new BranchSettings(null, "coding", model, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new BranchSettings(null, "coding", model, "high", List.of("t".repeat(129))));
+        () -> new BranchSettings(null, "coding", model, List.of(" ")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new BranchSettings(null, "c".repeat(129), model, "high", List.of()));
+        () -> new BranchSettings(null, "coding", model, List.of("t".repeat(129))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BranchSettings(null, "c".repeat(129), model, List.of()));
   }
 }

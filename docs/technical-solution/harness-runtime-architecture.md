@@ -69,7 +69,6 @@ public record BranchSettings(
     EnvironmentName environmentName, // canonical 路由名称，null 表示未选择
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
-    String thinkingLevel,
     List<String> activeTools) {}
 ```
 
@@ -92,7 +91,7 @@ Session、Environment、status 与 branch settings 都由 head Entry 分支派�
 
 ### ThreadCommand
 
-有序 mailbox，只接受八类命令：
+有序 mailbox，只接受七类命令：
 
 ```text
 USER_MESSAGE
@@ -100,7 +99,6 @@ CUSTOM_MESSAGE
 SET_ENVIRONMENT
 SET_AGENT
 SET_MODEL
-SET_THINKING_LEVEL
 SET_ACTIVE_TOOLS
 SET_YOLO
 ```
@@ -180,7 +178,7 @@ ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，每步短事务按
                               并固定追加 TURN_END(COMPLETED, continueModel=true)，随后 classifier 进入
                               CONTINUATION_DUE 启动 continuation（不是普通结束）
 3. MODEL_ACTIVE / TOOL_ACTIVE -> 完成 claim 返回 SUSPENDED（等 Model/Tool Work）
-4. CONTINUATION_DUE        -> 启动 continuation：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/YOLO），
+4. CONTINUATION_DUE        -> 启动 continuation：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS/YOLO），
                               保留 SET_ENVIRONMENT（留给后续 INPUT 完整收割进入 BranchSettings），不产生 Message Entry
 5. IDLE/HISTORICAL 且压缩到期 -> 启动 COMPACTION Turn（消费零 Command，优先于 queued input）
 6. 有 queued USER_MESSAGE/CUSTOM_MESSAGE -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）

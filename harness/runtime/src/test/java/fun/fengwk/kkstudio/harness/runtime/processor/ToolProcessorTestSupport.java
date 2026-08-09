@@ -492,7 +492,7 @@ final class ToolProcessorTestSupport {
 
   private static BranchSettings branchSettings() {
     return new BranchSettings(
-        ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), "low", List.of());
+        ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), List.of());
   }
 
   private static EntryPayload userMessagePayload() {

@@ -21,7 +21,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 8 类 typed Thread command payload 的严格、确定性 JSON codec。
+ * 7 类 typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
@@ -40,7 +40,6 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
-  private static final Set<String> SET_THINKING_LEVEL_FIELDS = orderedSet("thinkingLevel");
   private static final Set<String> SET_ACTIVE_TOOLS_FIELDS = orderedSet("activeTools");
   private static final Set<String> SET_YOLO_FIELDS = orderedSet("yoloEnabled");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
@@ -84,7 +83,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
-      case SET_THINKING_LEVEL -> decodeSetThinkingLevel(root);
       case SET_ACTIVE_TOOLS -> decodeSetActiveTools(root);
       case SET_YOLO -> decodeSetYolo(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
@@ -105,9 +103,6 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetModelCommandPayload value -> NODES
           .objectNode()
           .set("model", encodeModelSelection(value.model()));
-      case SetThinkingLevelCommandPayload value -> NODES
-          .objectNode()
-          .put("thinkingLevel", value.thinkingLevel());
       case SetActiveToolsCommandPayload value -> {
         ObjectNode node = NODES.objectNode();
         ArrayNode activeTools = node.putArray("activeTools");
@@ -157,13 +152,6 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = requireObject(value, "SET_MODEL");
     requireExactFields(node, SET_MODEL_FIELDS, "SET_MODEL");
     return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
-  }
-
-  private static SetThinkingLevelCommandPayload decodeSetThinkingLevel(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_THINKING_LEVEL");
-    requireExactFields(node, SET_THINKING_LEVEL_FIELDS, "SET_THINKING_LEVEL");
-    return new SetThinkingLevelCommandPayload(
-        canonicalText(node, "thinkingLevel", "SET_THINKING_LEVEL"));
   }
 
   private static SetActiveToolsCommandPayload decodeSetActiveTools(JsonNode value) {

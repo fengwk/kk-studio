@@ -17,13 +17,11 @@ public record BranchSettings(
     EnvironmentName environmentName,
     String agentName,
     ModelSelection model,
-    String thinkingLevel,
     List<String> activeTools) {
 
   public BranchSettings {
     agentName = requireCanonicalName(agentName, "agentName");
     model = Objects.requireNonNull(model, "model");
-    thinkingLevel = requireCanonicalName(thinkingLevel, "thinkingLevel");
 
     Objects.requireNonNull(activeTools, "activeTools");
     Set<String> uniqueTools = new LinkedHashSet<>();
@@ -35,27 +33,22 @@ public record BranchSettings(
 
   /** 返回仅替换 agent 引用后的快照。 */
   public BranchSettings withAgentName(String value) {
-    return new BranchSettings(environmentName, value, model, thinkingLevel, activeTools);
+    return new BranchSettings(environmentName, value, model, activeTools);
   }
 
   /** 返回整体原子替换 model selection 后的快照。 */
   public BranchSettings withModel(ModelSelection value) {
-    return new BranchSettings(environmentName, agentName, value, thinkingLevel, activeTools);
-  }
-
-  /** 返回仅替换 thinking level 后的快照。 */
-  public BranchSettings withThinkingLevel(String value) {
-    return new BranchSettings(environmentName, agentName, model, value, activeTools);
+    return new BranchSettings(environmentName, agentName, value, activeTools);
   }
 
   /** 返回仅替换有序 active tool 名称后的快照。 */
   public BranchSettings withActiveTools(List<String> values) {
-    return new BranchSettings(environmentName, agentName, model, thinkingLevel, values);
+    return new BranchSettings(environmentName, agentName, model, values);
   }
 
   /** 返回仅替换 Environment 逻辑路由名称后的快照。 */
   public BranchSettings withEnvironmentName(EnvironmentName value) {
-    return new BranchSettings(value, agentName, model, thinkingLevel, activeTools);
+    return new BranchSettings(value, agentName, model, activeTools);
   }
 
   private static String requireCanonicalName(String value, String field) {

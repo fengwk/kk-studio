@@ -80,7 +80,6 @@ function branchSettings(
     environmentName: null,
     agentName: 'assistant',
     model: modelSelection(),
-    thinkingLevel: 'off',
     activeTools: [],
     ...overrides,
   }
@@ -569,7 +568,7 @@ describe('ChatWorkspacePane commands', () => {
   })
 
 
-  it('adopts the selected Agent name + activeTools while freezing model/thinking/environment/yolo', async () => {
+  it('adopts the selected Agent name + activeTools while freezing model/environment/yolo', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
@@ -577,7 +576,6 @@ describe('ChatWorkspacePane commands', () => {
           branchSettings: branchSettings({
             agentName: 'assistant',
             environmentName: null,
-            thinkingLevel: 'high',
           }),
         }),
       ),
@@ -601,11 +599,13 @@ describe('ChatWorkspacePane commands', () => {
     expect(setAgent.agentName).toBe('coder')
     const setTools = batchArg.commands.find((command) => command.type === 'SET_ACTIVE_TOOLS')!
     expect(setTools.activeTools).toEqual(['web-search'])
-    // Freeze 规则：仅 agent 变更不会重新发送 model/thinking/environment/yolo。
-    expect(batchArg.commands.find((command) => command.type === 'SET_MODEL')).toBeUndefined()
-    expect(batchArg.commands.find((command) => command.type === 'SET_THINKING_LEVEL')).toBeUndefined()
-    expect(batchArg.commands.find((command) => command.type === 'SET_ENVIRONMENT')).toBeUndefined()
-    expect(batchArg.commands.find((command) => command.type === 'SET_YOLO')).toBeUndefined()
+    // Freeze 规则：仅 agent 变更产生 SET_AGENT + SET_ACTIVE_TOOLS 两个 SET 命令，
+    // 不重新发送 model/environment/yolo；SET 顺序固定为 SET_AGENT -> SET_ACTIVE_TOOLS -> USER_MESSAGE。
+    expect(batchArg.commands.map((command) => command.type)).toEqual([
+      'SET_AGENT',
+      'SET_ACTIVE_TOOLS',
+      'USER_MESSAGE',
+    ])
   })
 
   it('blocks /thread while queued commands are pending and never opens the picker', async () => {

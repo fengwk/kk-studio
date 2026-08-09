@@ -88,7 +88,6 @@ function branchSettings(
     environmentName: null,
     agentName: 'assistant',
     model: modelSelection(),
-    thinkingLevel: 'off',
     activeTools: [],
     ...overrides,
   }

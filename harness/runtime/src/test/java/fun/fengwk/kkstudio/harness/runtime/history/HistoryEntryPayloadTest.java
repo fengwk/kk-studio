@@ -500,7 +500,6 @@ class HistoryEntryPayloadTest {
           null,
           "coding",
           new ModelSelection("anthropic", "claude-sonnet", "default"),
-          "high",
           List.of("read"));
   private static final Instant TIME = Instant.ofEpochSecond(1000L);
 

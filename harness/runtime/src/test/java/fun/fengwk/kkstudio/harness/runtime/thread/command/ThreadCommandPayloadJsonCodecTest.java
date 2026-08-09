@@ -24,14 +24,13 @@ class ThreadCommandPayloadJsonCodecTest {
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test
-  void roundTripsAllEightCommandTypes() {
+  void roundTripsAllSevenCommandTypes() {
     List<ThreadCommandPayload> payloads =
         List.of(
             new UserMessageCommandPayload(user("hello")),
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
             new SetModelCommandPayload(MODEL),
-            new SetThinkingLevelCommandPayload("high"),
             new SetActiveToolsCommandPayload(List.of("read", "grep")),
             new SetYoloCommandPayload(true),
             new SetEnvironmentCommandPayload(new EnvironmentName(ENV)),
@@ -55,8 +54,6 @@ class ThreadCommandPayloadJsonCodecTest {
             + "\"variant\":\"default\"}}",
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
-    assertEquals(
-        "{\"thinkingLevel\":\"high\"}", codec.encode(new SetThinkingLevelCommandPayload("high")));
     assertEquals(
         "{\"activeTools\":[\"read\",\"grep\"]}",
         codec.encode(new SetActiveToolsCommandPayload(List.of("read", "grep"))));
@@ -104,9 +101,6 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_AGENT, "{\"agentName\":\" a\"}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_THINKING_LEVEL, "{\"thinkingLevel\":\" \"}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_YOLO, "{\"yoloEnabled\":\"true\"}"));

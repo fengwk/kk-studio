@@ -51,7 +51,7 @@ flowchart TD
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；Redis/NOTIFY 永非 correctness truth。
 - 所有 Runtime id/sequence/revision 在 HTTP wire 上是 strict decimal strings：id 为 `[1-9][0-9]*`，revision 为 `0|[1-9][0-9]*`。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
-- 8 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO`；前端 diff 顺序固定为 ENV → AGENT → MODEL → THINKING → TOOLS → YOLO，再追加 `USER_MESSAGE`。
+- 7 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO`；前端 diff 顺序固定为 ENV → AGENT → MODEL → TOOLS → YOLO，再追加 `USER_MESSAGE`。
 - MOVE_HEAD 只允许**同 Session** 历史 Entry，revision CAS、要求 quiescent 且无 queued command；不能指向 `continueModel=true` 的 TURN_END。
 - Stop 先按 `(threadId, stopRequestId)` durable key 精确 replay，再做 revision CAS；`STOPPED` / `IDLE`（no-op）/ `REPLAYED` 三态。
 - Tool approval 输入 `ALLOW` / `DENY`，durable 值为 `ALLOWED` / `DENIED`；`ALLOWED` 恢复执行，`DENIED` 终结失败；YOLO 在加载权限 settings/evaluator 之前直接短路 Allow。

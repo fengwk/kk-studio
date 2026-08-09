@@ -136,7 +136,6 @@ export function BlankComposerPane({
           environmentName: effective.environmentName,
           agentName: effective.agentName,
           model: { ...effective.model },
-          thinkingLevel: effective.thinkingLevel,
           activeTools: [...effective.activeTools],
         },
         yoloEnabled: effective.yoloEnabled,
@@ -247,7 +246,7 @@ export function BlankComposerPane({
       setActionError(t('ai.runtime.action.agentUnresolvable', { agent: selectedAgentName }))
       return
     }
-    // Freeze 规则：当 draft 已有有效 model selection 时，保留 model/thinking/environment/yolo，
+    // Freeze 规则：当 draft 已有有效 model selection 时，保留 model/environment/yolo，
     // 仅采用 agent name + activeTools；否则 draft 由选中的 Agent + catalog 完整 materialize。
     setFrozenDraft(next)
     // Picker materialization 同样是面板本地基线：只有首次成功的 materialization 才会建立

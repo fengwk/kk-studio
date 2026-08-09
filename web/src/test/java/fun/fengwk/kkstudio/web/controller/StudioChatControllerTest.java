@@ -99,7 +99,6 @@ class StudioChatControllerTest {
             "environmentName": "123e4567-e89b-12d3-a456-426614174000",
             "agentName": "default-assistant",
             "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
-            "thinkingLevel": "low",
             "activeTools": ["web_search"]
           },
           "yoloEnabled": true
@@ -247,6 +246,30 @@ class StudioChatControllerTest {
             post("/api/ai/chat/7/threads")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"broken\",\"yoloEnabled\":true}"))
+        .andExpect(status().isBadRequest());
+    verify(runtime, never()).createThread(any(CreateThreadCommand.class));
+  }
+
+  @Test
+  void createChatThreadRejectsUnknownBranchSettingsField() throws Exception {
+    String body =
+        """
+        {
+          "title": "broken",
+          "branchSettings": {
+            "environmentName": null,
+            "agentName": "default-assistant",
+            "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
+            "activeTools": [],
+            "unexpected": true
+          },
+          "yoloEnabled": false
+        }
+        """;
+
+    mockMvc
+        .perform(
+            post("/api/ai/chat/7/threads").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest());
     verify(runtime, never()).createThread(any(CreateThreadCommand.class));
   }

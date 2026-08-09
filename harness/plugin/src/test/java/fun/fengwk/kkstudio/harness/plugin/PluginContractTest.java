@@ -101,7 +101,6 @@ class PluginContractTest {
                     null,
                     "assistant",
                     new ModelSelection("provider", "model", "default"),
-                    "medium",
                     List.of())),
             createdAt);
     return new BranchView(new EntryPath(List.of(root)));

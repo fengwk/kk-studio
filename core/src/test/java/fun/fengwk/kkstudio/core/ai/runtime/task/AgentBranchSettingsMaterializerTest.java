@@ -80,7 +80,6 @@ class AgentBranchSettingsMaterializerTest {
     assertEquals(ENV, settings.environmentName());
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
-    assertEquals("high", settings.thinkingLevel());
     assertEquals(List.of("get_goal", "load_skill", "task"), settings.activeTools());
   }
 
@@ -109,16 +108,6 @@ class AgentBranchSettingsMaterializerTest {
     BranchSettings settings = materializer.materialize("alpha", ENV, 1, config);
 
     assertEquals(new ModelSelection("openai", "gpt-x", "fast"), settings.model());
-  }
-
-  /** reasoningEffort 为 off/null 时物化为 "off" thinking level。 */
-  @Test
-  void mapsMissingReasoningEffortToOff() {
-    stub("alpha", "fast", "{\"tools\":[],\"skills\":[],\"subagents\":[]}", validModelConfig());
-
-    BranchSettings settings = materializer.materialize("alpha", ENV, 1, config);
-
-    assertEquals("off", settings.thinkingLevel());
   }
 
   /** Agent 缺失、model 缺失、variant 缺失与非法配置都以稳定 IllegalArgumentException 失败。 */

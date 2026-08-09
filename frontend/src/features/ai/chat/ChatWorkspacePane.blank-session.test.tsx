@@ -77,7 +77,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      thinkingLevel: 'off',
       activeTools: [],
     },
     createTime: '2026-01-01T00:00:00Z',
@@ -586,7 +585,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
             modelName: 'MiniMax',
             variant: 'default',
           }),
-          thinkingLevel: 'off',
           activeTools: [],
         }),
       }),
@@ -650,7 +648,6 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       environmentName: null,
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      thinkingLevel: 'off',
       activeTools: ['web-search'],
     })
     expect(payload.yoloEnabled).toBe(false)

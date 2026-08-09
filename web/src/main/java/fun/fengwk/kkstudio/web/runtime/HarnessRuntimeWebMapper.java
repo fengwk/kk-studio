@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandP
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetThinkingLevelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
@@ -152,7 +151,6 @@ public final class HarnessRuntimeWebMapper {
         settings.environmentName() == null ? null : settings.environmentName().value());
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
-    dto.setThinkingLevel(settings.thinkingLevel());
     dto.setActiveTools(List.copyOf(settings.activeTools()));
     return dto;
   }
@@ -324,7 +322,6 @@ public final class HarnessRuntimeWebMapper {
         toEnvironmentName(dto.getEnvironmentName()),
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()),
-        requireText(dto.getThinkingLevel(), "branchSettings.thinkingLevel"),
         requireList(dto.getActiveTools(), "branchSettings.activeTools"));
   }
 
@@ -405,14 +402,7 @@ public final class HarnessRuntimeWebMapper {
     return switch (type) {
       case USER_MESSAGE -> {
         requireForbidden(
-            dto,
-            "role",
-            "agentName",
-            "model",
-            "thinkingLevel",
-            "activeTools",
-            "yoloEnabled",
-            "environmentName");
+            dto, "role", "agentName", "model", "activeTools", "yoloEnabled", "environmentName");
         yield new UserMessageCommandPayload(
             new AgentMessage(
                 AgentMessageRole.USER,
@@ -420,13 +410,7 @@ public final class HarnessRuntimeWebMapper {
       }
       case CUSTOM_MESSAGE -> {
         requireForbidden(
-            dto,
-            "agentName",
-            "model",
-            "thinkingLevel",
-            "activeTools",
-            "yoloEnabled",
-            "environmentName");
+            dto, "agentName", "model", "activeTools", "yoloEnabled", "environmentName");
         AgentMessageRole role = requireRole(dto.getRole());
         yield new CustomMessageCommandPayload(
             new AgentMessage(
@@ -434,75 +418,27 @@ public final class HarnessRuntimeWebMapper {
       }
       case SET_AGENT -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "model",
-            "thinkingLevel",
-            "activeTools",
-            "yoloEnabled",
-            "environmentName");
+            dto, "content", "role", "model", "activeTools", "yoloEnabled", "environmentName");
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case SET_MODEL -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "thinkingLevel",
-            "activeTools",
-            "yoloEnabled",
-            "environmentName");
+            dto, "content", "role", "agentName", "activeTools", "yoloEnabled", "environmentName");
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
-      }
-      case SET_THINKING_LEVEL -> {
-        requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "model",
-            "activeTools",
-            "yoloEnabled",
-            "environmentName");
-        yield new SetThinkingLevelCommandPayload(
-            requireText(dto.getThinkingLevel(), "thinkingLevel"));
       }
       case SET_ACTIVE_TOOLS -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "model",
-            "thinkingLevel",
-            "yoloEnabled",
-            "environmentName");
+            dto, "content", "role", "agentName", "model", "yoloEnabled", "environmentName");
         yield new SetActiveToolsCommandPayload(requireList(dto.getActiveTools(), "activeTools"));
       }
       case SET_YOLO -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "model",
-            "thinkingLevel",
-            "activeTools",
-            "environmentName");
+            dto, "content", "role", "agentName", "model", "activeTools", "environmentName");
         yield new SetYoloCommandPayload(requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
       }
       case SET_ENVIRONMENT -> {
         requireForbidden(
-            dto,
-            "content",
-            "role",
-            "agentName",
-            "model",
-            "thinkingLevel",
-            "activeTools",
-            "yoloEnabled");
+            dto, "content", "role", "agentName", "model", "activeTools", "yoloEnabled");
         yield new SetEnvironmentCommandPayload(toEnvironmentName(dto.getEnvironmentName()));
       }
     };
@@ -543,7 +479,6 @@ public final class HarnessRuntimeWebMapper {
             case "role" -> dto.getRole();
             case "agentName" -> dto.getAgentName();
             case "model" -> dto.getModel();
-            case "thinkingLevel" -> dto.getThinkingLevel();
             case "activeTools" -> dto.getActiveTools();
             case "yoloEnabled" -> dto.getYoloEnabled();
             case "environmentName" -> dto.getEnvironmentName();
