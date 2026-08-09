@@ -26,7 +26,7 @@ DatabaseTurnResolver
   -> ToolCatalog + PluginCatalog + LiveEnvironmentRegistry
   -> ContextProjector(candidate BranchView)
   -> ProviderFactory（由当前行 providerType 解析，派生 cache policy）
-  -> AgentPromptComposer（Agent 正文 -> available_skills -> available_subagents）
+  -> AgentPromptComposer（Agent 正文 -> current_environment -> available_skills -> available_subagents）
   -> 冻结 ModelInvocationRequest（Provider/Model 只按名称引用；含 subagentBindings）
 
 CoreModelGateway.start（每次 attempt）
@@ -111,10 +111,11 @@ candidate path 最近 TURN_START 的 BranchSettings
   -> Provider / (providerName, modelName) Model / effective Variant
   -> ToolCatalog + PluginCatalog + activeTools（必须命中可选择目录或内部 load_skill/task）
   -> environmentName 路由 + LiveEnvironmentRegistry（READY + 心跳未过期才可用）
+  -> CurrentEnvironmentContext（单一 instant；READY metadata 或服务端 Clock zone）
   -> skills（Agent config；最新选中 Environment 精确提供 + 显式 load_skill）
   -> subagents（Agent config allowlist；activeTools 含 task + depth < maxDepth 才绑定）
   -> 插件 ContextProjector(candidate BranchView)
-  -> AgentPromptComposer（Agent 正文 -> available_skills -> available_subagents）
+  -> AgentPromptComposer（Agent 正文 -> 始终存在的 current_environment -> available_skills -> available_subagents）
   -> ProviderFactory（按当前行 providerType 派生 cache policy）
   -> 冻结 ModelInvocationRequest（Agent/Model 修改下一 turn 生效；含 subagentBindings）
 ```
@@ -124,6 +125,7 @@ candidate path 最近 TURN_START 的 BranchSettings
 - **latest-snapshot-wins**：解析只使用 candidate path 最近一个 ROOT/TURN_START 的**完整** `BranchSettings` 快照（`EntryPath.baseSettings()` 逐项取最新）；快照中的 null/缺失/不可用值（如 `environmentName` 为 null、agent/Environment 已不存在）**绝不触发向更旧 ROOT/TURN_START 快照回退**——更旧快照中的非 null environment 或仍有效的 agent 不再参与解析；
 - **ENVIRONMENT 工具规划不拒绝**：一律按最新 `BranchSettings.environmentName()` 绑定（null/缺失/未 READY 都放行）；实际 start 时 null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 收敛；
 - **Agent skills 规划要求最新选中 Environment live**：缺失/未 READY/分支无名称都是确定性拒绝（精确 message），绝不回看更旧 settings；
+- **current_environment prompt 不改变路由语义**：无选择时 status=`none`；选择且统一 ready 规则通过时 status=`ready` 并使用 READY OS/workdir/timezone；其余为 `unavailable`，有 metadata 时保留、无 metadata 时回退服务端 Clock zone。它只冻结模型上下文，不参与 Tool start 的实时 ready 校验；
 - **task/subagent 规划规则**：`task` 只在 activeTools 显式含 task、allowlist 非空且 depth < maxDepth 时绑定；allowlist 名称必须解析到现存 Agent（名称 + 描述冻结为 `subagentBindings`），执行绝不重读父 Agent 配置扩权；
 - Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；内部 Platform Tool（load_skill/task）必须显式出现在 activeTools 才能绑定，不是隐式追加。
 
@@ -133,7 +135,7 @@ candidate path 最近 TURN_START 的 BranchSettings
 
 **Skills**：只从 Agent config 读取，必须由选中 READY Environment 精确提供，且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` **不是** Resolver 隐式追加，也不在 selectable catalog。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败，Agent Loop 写入 `ASSISTANT_ERROR` 并关闭该 Turn，不物化 ToolInvocation。
 
-Compaction resolver 不读取 Agent prompt、plugin projector、Environment live 能力或 prompt cache，也不绑定 tool/skill/subagent；它只使用 branch 引用的 provider/model/catalog Variant 与 planner 冻结事实，构造一个 summarization SYSTEM + 一个 USER request。Variant 是唯一模型请求预设，其 reasoning effort 与其余请求参数一并生效；contextWindow 沿用触发 invocation 冻结值，输出上限取有效 model/variant max output 与 phase reserve budget 的较小值。
+Compaction resolver 不读取 Agent prompt、plugin projector、Environment live 能力或 prompt cache，不调用 `AgentPromptComposer`，因此不注入 `<current_environment>`，也不绑定 tool/skill/subagent；它只使用 branch 引用的 provider/model/catalog Variant 与 planner 冻结事实，构造一个 summarization SYSTEM + 一个 USER request。Variant 是唯一模型请求预设，其 reasoning effort 与其余请求参数一并生效；contextWindow 沿用触发 invocation 冻结值，输出上限取有效 model/variant max output 与 phase reserve budget 的较小值。
 
 ## 5. 冻结 request 的不变量
 

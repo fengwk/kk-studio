@@ -584,7 +584,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要',
+  docs: 'Environment READY；name 是 canonical bounded 小写路由名称（唯一键），ready 是统一可用性标记；投影固定 11 个 tools（version=1）+ skills + mcpServers 摘要，且不公开 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -612,6 +612,12 @@ registerCase({
     )
     assert(Array.isArray(match.skills), JSON.stringify(match))
     assert(Array.isArray(match.mcpServers), JSON.stringify(match))
+    assert(
+      !Object.hasOwn(match, 'operatingSystem')
+        && !Object.hasOwn(match, 'workingDirectory')
+        && !Object.hasOwn(match, 'timeZone'),
+      JSON.stringify(match),
+    )
     // MCP 摘要只含 name/status/error/tools(name+description)；不暴露命令/headers/URL/完整 schema。
     for (const server of match.mcpServers) {
       assert(typeof server.name === 'string' && server.name.length > 0, JSON.stringify(server))

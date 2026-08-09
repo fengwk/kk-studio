@@ -25,10 +25,12 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonResourceStore;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
@@ -73,6 +75,8 @@ class EnvironmentDaemonGatewayFinalTest {
   private static final DaemonCapabilities ADVERTISED_CAPABILITIES =
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
+          new DaemonEnvironmentInfo(
+              DaemonOperatingSystem.LINUX, "/workspace/project", "Asia/Shanghai"),
           ADVERTISED_SKILLS,
           List.of(
               new DaemonMcpServerDescriptor(
@@ -316,6 +320,25 @@ class EnvironmentDaemonGatewayFinalTest {
     handle.cancel();
     assertEquals(envelopesAfterComplete, connection.envelopes().size());
     assertEquals("done", ((TextToolContent) listener.completed.contents().get(0)).text());
+  }
+
+  @Test
+  void connectingDoesNotFabricateCapabilitiesAndReadyPublishesMetadata() {
+    Fixture fixture = fixture();
+    FakeConnection connection = new FakeConnection("connection-metadata");
+    fixture.gateway.open(connection);
+    fixture.gateway.receive(connection.connectionId(), hello(0));
+
+    var connecting = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, connecting.status());
+    assertNull(connecting.capabilities());
+    assertTrue(connecting.skills().isEmpty());
+    assertTrue(connecting.mcpServers().isEmpty());
+
+    fixture.gateway.receive(connection.connectionId(), ready(1, ENVIRONMENT_NAME));
+    var ready = fixture.environmentRegistry.find(ENVIRONMENT_NAME).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(ADVERTISED_CAPABILITIES, ready.capabilities());
   }
 
   @Test

@@ -215,19 +215,21 @@ class CodingToolsEdgeTest {
       "kkstudio.daemon.fd"
     };
     String[] old = new String[names.length];
+    Path legacyRoot = Files.createDirectory(environmentRoot.resolve("legacy-root"));
     for (int index = 0; index < names.length; index++) {
       old[index] = System.getProperty(names[index]);
     }
     try {
-      System.setProperty(names[0], environmentRoot.toString());
-      System.setProperty(names[1], environmentRoot.toString());
+      System.setProperty(names[0], legacyRoot.toString());
+      System.setProperty(names[1], legacyRoot.toString());
       System.setProperty(names[2], environmentRoot.resolve("local-resources").toString());
       System.setProperty(names[3], "4");
       System.setProperty(names[4], "custom-bash");
       System.setProperty(names[5], "custom-rg");
       System.setProperty(names[6], "custom-fd");
-      CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties();
+      CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties(environmentRoot);
       assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
+      assertEquals(environmentRoot.toRealPath(), properties.defaultWorkdir());
       assertEquals("custom-bash", properties.bashExecutable());
       assertTrue(properties.resourceStore() instanceof LocalFileResourceStore);
       // 配置的 max-resource-bytes 必须落到 store：超限字节在写入前拒绝。
@@ -235,9 +237,13 @@ class CodingToolsEdgeTest {
           IllegalArgumentException.class,
           () -> properties.resourceStore().store(new byte[] {1, 2, 3, 4, 5}, "text/plain"));
       System.setProperty(names[3], "0");
-      assertThrows(IllegalArgumentException.class, CodingToolsConfig::fromSystemProperties);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
       System.setProperty(names[3], "not-a-number");
-      assertThrows(IllegalArgumentException.class, CodingToolsConfig::fromSystemProperties);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
     } finally {
       for (int index = 0; index < names.length; index++) {
         if (old[index] == null) {

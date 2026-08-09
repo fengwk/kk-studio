@@ -161,7 +161,7 @@ tool.read_turn
 | `real.queued_command_batch` | `--real` | 运行中用最新 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
-| `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状 |
+| `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY OS/workdir/timezone metadata |
 | `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256）；按内容身份请求 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载并验证返回字节数、mediaType、`X-Content-Type-Options: nosniff` 与 sha256 一致 |
 
 ## 4. API 契约与验证方式
@@ -270,6 +270,7 @@ WebSocket /api/ai/environment/daemon/v2
 ```
 
 - Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
+- daemon 由 `scripts/e2e/lib.sh` 以唯一 `--workdir "$DAEMON_ENV_ROOT"` 启动；`GET /api/ai/environment` 继续只返回既有投影，`daemon.ready` 显式断言不存在 `operatingSystem` / `workingDirectory` / `timeZone` 字段；
 - Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
 - daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB；
 - managed Resource 只按内容身份（mediaType/size/sha256/name）经 `GET /api/ai/runtime/resources/{sha256}` 同源下载：响应 `attachment` + `X-Content-Type-Options: nosniff`，字节与 sha256 一致；未知/不完整身份不产生链接。

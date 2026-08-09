@@ -27,6 +27,10 @@ public final class DaemonCapabilitiesCodec {
     Objects.requireNonNull(capabilities, "capabilities");
     ObjectNode root = MAPPER.createObjectNode();
     root.put("version", capabilities.version());
+    ObjectNode environment = root.putObject("environment");
+    environment.put("operatingSystem", capabilities.environment().operatingSystem().wireValue());
+    environment.put("workingDirectory", capabilities.environment().workingDirectory());
+    environment.put("timeZone", capabilities.environment().timeZone());
     ArrayNode skills = root.putArray("skills");
     for (DaemonSkillDescriptor skill : capabilities.skills()) {
       ObjectNode node = skills.addObject();
@@ -67,12 +71,13 @@ public final class DaemonCapabilitiesCodec {
     if (!(value instanceof ObjectNode root)) {
       throw new DaemonProtocolException("READY payload must be an object");
     }
-    rejectUnknown(root, Set.of("version", "skills", "mcpServers"));
+    rejectUnknown(root, Set.of("version", "environment", "skills", "mcpServers"));
     int version = requiredVersion(root);
+    DaemonEnvironmentInfo environment = decodeEnvironment(requiredObject(root, "environment"));
     List<DaemonSkillDescriptor> skills = decodeSkills(requiredArray(root, "skills"));
     List<DaemonMcpServerDescriptor> servers = decodeServers(requiredArray(root, "mcpServers"));
     try {
-      return new DaemonCapabilities(version, skills, servers);
+      return new DaemonCapabilities(version, environment, skills, servers);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "READY capabilities validation failed: " + error.getMessage(), error);
@@ -93,6 +98,28 @@ public final class DaemonCapabilitiesCodec {
       throw new DaemonProtocolException("READY payload." + field + " must be an array");
     }
     return node;
+  }
+
+  private static ObjectNode requiredObject(ObjectNode root, String field) {
+    JsonNode node = root.get(field);
+    if (!(node instanceof ObjectNode objectNode)) {
+      throw new DaemonProtocolException("READY payload." + field + " must be an object");
+    }
+    return objectNode;
+  }
+
+  private static DaemonEnvironmentInfo decodeEnvironment(ObjectNode node) {
+    rejectUnknown(node, Set.of("operatingSystem", "workingDirectory", "timeZone"));
+    String operatingSystemText = text(node, "operatingSystem", "READY environment");
+    String workingDirectory = text(node, "workingDirectory", "READY environment");
+    String timeZone = text(node, "timeZone", "READY environment");
+    try {
+      return new DaemonEnvironmentInfo(
+          DaemonOperatingSystem.fromWireValue(operatingSystemText), workingDirectory, timeZone);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          "READY environment validation failed: " + error.getMessage(), error);
+    }
   }
 
   private static List<DaemonSkillDescriptor> decodeSkills(JsonNode skillsNode) {

@@ -21,7 +21,9 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -151,7 +153,11 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     }
     DaemonSkillDescriptor fat = new DaemonSkillDescriptor("fat-skill", description.toString());
     return CAPABILITIES_CODEC.encode(
-        new DaemonCapabilities(DaemonCapabilities.VERSION, List.of(fat), List.of()));
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace", "UTC"),
+            List.of(fat),
+            List.of()));
   }
 
   private static DaemonEnvelope helloEnvelope(long sequence) {

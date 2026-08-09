@@ -6,9 +6,11 @@
  *
  * <p>v2 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":1,"skills":[{"name","description"}],"mcpServers":[{"name","status",
- * "error","tools":[{"name","description"}]}]}}。skills 与 MCP server 摘要只含可安全上报的短字段；MCP 工具完整 schema
- * 只通过固定的 {@code mcp_list_tools} 桥接工具返回。Environment 工具由 EnvironmentToolCatalog 固定，不按连接协商。
+ * {"version":2,"environment":{"operatingSystem","workingDirectory","timeZone"},
+ * "skills":[{"name","description"}],"mcpServers":[{"name","status","error",
+ * "tools":[{"name","description"}]}]}}。environment 只含 prompt 所需的 OS family、canonical workdir 与
+ * ZoneId；skills 与 MCP server 摘要只含可安全上报的短字段。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools}
+ * 桥接工具返回。Environment 工具由 EnvironmentToolCatalog 固定，不按连接协商。
  *
  * <p>v2 Skill 加载消息：
  *

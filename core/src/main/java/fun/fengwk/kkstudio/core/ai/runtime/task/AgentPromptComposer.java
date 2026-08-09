@@ -6,17 +6,23 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplateLoader;
 
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
-/** 组合 Agent 正文、可用 Skills 与 task/subagent 指令的唯一 system prompt 边界。 */
+/** 组合 Agent 正文、当前 Environment、可用 Skills 与 task/subagent 指令的唯一 system prompt 边界。 */
 @Component
 public final class AgentPromptComposer {
 
   private static final String ROOT = "fun/fengwk/kkstudio/core/ai/runtime/task/prompts/";
   private static final PromptTemplateLoader LOADER = new PromptTemplateLoader();
+  private static final DateTimeFormatter DATE_FORMAT =
+      DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT);
+  private static final DateTimeFormatter TIME_FORMAT =
+      DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT);
 
   private final SubagentConfig subagentConfig;
 
@@ -25,13 +31,18 @@ public final class AgentPromptComposer {
   }
 
   public String compose(
-      String systemPrompt, List<SkillBinding> skills, List<SubagentBinding> subagents) {
+      String systemPrompt,
+      CurrentEnvironmentContext currentEnvironment,
+      List<SkillBinding> skills,
+      List<SubagentBinding> subagents) {
+    Objects.requireNonNull(currentEnvironment, "currentEnvironment");
     Objects.requireNonNull(skills, "skills");
     Objects.requireNonNull(subagents, "subagents");
     List<String> sections = new ArrayList<>();
     if (systemPrompt != null && !systemPrompt.isBlank()) {
       sections.add(systemPrompt);
     }
+    sections.add(currentEnvironment(currentEnvironment));
     if (!skills.isEmpty()) {
       sections.add(
           LOADER.load(ROOT + "agent-skills.md").render(Map.of("skills", skillEntries(skills))));
@@ -48,6 +59,28 @@ public final class AgentPromptComposer {
                       subagentEntries(subagents))));
     }
     return String.join("\n\n", sections);
+  }
+
+  private static String currentEnvironment(CurrentEnvironmentContext context) {
+    String name = context.name() == null ? "none" : context.name().value();
+    String operatingSystem =
+        context.environment() == null
+            ? "none"
+            : context.environment().operatingSystem().wireValue();
+    String workingDirectory =
+        context.environment() == null ? "none" : context.environment().workingDirectory();
+    return LOADER
+        .load(ROOT + "agent-current-environment.md")
+        .render(
+            Map.of(
+                "name", escapeXml(name),
+                "status", escapeXml(context.status().promptValue()),
+                "operatingSystem", escapeXml(operatingSystem),
+                "workingDirectory", escapeXml(workingDirectory),
+                "currentDate", escapeXml(DATE_FORMAT.format(context.currentDateTime())),
+                "currentTime", escapeXml(TIME_FORMAT.format(context.currentDateTime())),
+                "timeZone", escapeXml(context.currentDateTime().getZone().getId())))
+        .stripTrailing();
   }
 
   private static String skillEntries(List<SkillBinding> skills) {

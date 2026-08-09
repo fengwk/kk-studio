@@ -29,6 +29,7 @@ SKILL_DIR=${SKILL_DIR:-"$HOME/.agents/skills"}
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
 DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-harness-daemon-1.0.0.jar"}
+DAEMON_TOOL_JAR=${DAEMON_TOOL_JAR:-"$REPO_ROOT/harness/tool/target/kk-studio-harness-tool-1.0.0.jar"}
 DAEMON_CP_FILE=${DAEMON_CP_FILE:-"$WORK_DIR/daemon.classpath"}
 
 step() { echo "==> $*"; }
@@ -176,16 +177,17 @@ start_daemon() {
   build_daemon_classpath "$java_home"
   : >"$WORK_DIR/daemon.log"
   local cp
-  cp="$DAEMON_JAR:$(cat "$DAEMON_CP_FILE")"
+  # dependency:build-classpath may resolve a previously installed local harness-tool;
+  # put the reactor-built jar first so clean-slate daemon/tool protocol changes are exercised.
+  cp="$DAEMON_JAR:$DAEMON_TOOL_JAR:$(cat "$DAEMON_CP_FILE")"
   step "Starting daemon env=$DAEMON_ENV_NAME"
   nohup env JAVA_HOME="$java_home" "$java_home/bin/java" \
-    -Dkkstudio.daemon.environment-root="$DAEMON_ENV_ROOT" \
-    -Dkkstudio.daemon.default-workdir="$DAEMON_ENV_ROOT" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --environment-name "$DAEMON_ENV_NAME" \
-     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
+    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/ai/environment/daemon/v2" \
     --gateway-token "$DAEMON_TOKEN" \
     --daemon-id "$DAEMON_ID" \
+    --workdir "$DAEMON_ENV_ROOT" \
     --skill-dir "$SKILL_DIR" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"

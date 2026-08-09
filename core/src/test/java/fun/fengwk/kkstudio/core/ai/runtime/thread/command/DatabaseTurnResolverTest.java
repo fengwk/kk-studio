@@ -82,6 +82,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 import fun.fengwk.kkstudio.plugin.goal.GoalPlugin;
@@ -92,6 +94,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -225,6 +228,120 @@ class DatabaseTurnResolverTest {
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
     assertTrue(request.yoloEnabled());
+  }
+
+  @Test
+  void alwaysProjectsNoneCurrentEnvironmentIntoProviderRequest() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(null, "default")));
+
+    assertEquals(
+        "agent system prompt\n\n"
+            + "<current_environment>\n"
+            + "  <name>none</name>\n"
+            + "  <status>none</status>\n"
+            + "  <operating_system>none</operating_system>\n"
+            + "  <working_directory>none</working_directory>\n"
+            + "  <current_date>2026-08-02</current_date>\n"
+            + "  <current_time>00:00:00</current_time>\n"
+            + "  <time_zone>Z</time_zone>\n"
+            + "</current_environment>",
+        textOf(request.providerRequest().messages().getFirst()));
+  }
+
+  @Test
+  void noLiveMetadataUsesServiceClockZoneForNoneAndMissingEnvironment() {
+    Clock serviceClock = Clock.fixed(NOW, ZoneId.of("Asia/Kathmandu"));
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
+
+    String none =
+        textOf(
+            fixture
+                .resolved(fixture.path(settings(null, "default")))
+                .providerRequest()
+                .messages()
+                .getFirst());
+    assertTrue(none.contains("<status>none</status>"), none);
+    assertTrue(none.contains("<current_time>05:45:00</current_time>"), none);
+    assertTrue(none.contains("<time_zone>Asia/Kathmandu</time_zone>"), none);
+
+    String missing =
+        textOf(
+            fixture
+                .resolved(fixture.path(settings(ENV_MISSING, "default")))
+                .providerRequest()
+                .messages()
+                .getFirst());
+    assertTrue(missing.contains("<name>env-3</name>"), missing);
+    assertTrue(missing.contains("<status>unavailable</status>"), missing);
+    assertTrue(missing.contains("<operating_system>none</operating_system>"), missing);
+    assertTrue(missing.contains("<working_directory>none</working_directory>"), missing);
+    assertTrue(missing.contains("<current_time>05:45:00</current_time>"), missing);
+    assertTrue(missing.contains("<time_zone>Asia/Kathmandu</time_zone>"), missing);
+  }
+
+  @Test
+  void readyCurrentEnvironmentUsesDaemonMetadataAndTimeZone() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.readyEnvironment(
+        ENV_A,
+        List.of(),
+        new DaemonEnvironmentInfo(
+            DaemonOperatingSystem.LINUX, "/workspace/a&b<c>", "America/Los_Angeles"));
+
+    ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
+    String prompt = textOf(request.providerRequest().messages().getFirst());
+
+    assertTrue(prompt.contains("<name>env-1</name>"), prompt);
+    assertTrue(prompt.contains("<status>ready</status>"), prompt);
+    assertTrue(prompt.contains("<operating_system>linux</operating_system>"), prompt);
+    assertTrue(
+        prompt.contains("<working_directory>/workspace/a&amp;b&lt;c&gt;</working_directory>"),
+        prompt);
+    assertTrue(prompt.contains("<current_date>2026-08-01</current_date>"), prompt);
+    assertTrue(prompt.contains("<current_time>17:00:00</current_time>"), prompt);
+    assertTrue(prompt.contains("<time_zone>America/Los_Angeles</time_zone>"), prompt);
+  }
+
+  @Test
+  void selectedUnavailableEnvironmentUsesMetadataWhenPresentAndServerZoneOtherwise() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.connectingEnvironment(ENV_A);
+
+    String withoutMetadata =
+        textOf(
+            fixture
+                .resolved(fixture.path(settings(ENV_A, "default")))
+                .providerRequest()
+                .messages()
+                .getFirst());
+    assertTrue(withoutMetadata.contains("<name>env-1</name>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<status>unavailable</status>"), withoutMetadata);
+    assertTrue(
+        withoutMetadata.contains("<operating_system>none</operating_system>"), withoutMetadata);
+    assertTrue(
+        withoutMetadata.contains("<working_directory>none</working_directory>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("<time_zone>Z</time_zone>"), withoutMetadata);
+
+    fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.staleEnvironment(
+        ENV_A,
+        new DaemonEnvironmentInfo(DaemonOperatingSystem.WSL, "/mnt/c/workspace", "Asia/Tokyo"));
+    String withMetadata =
+        textOf(
+            fixture
+                .resolved(fixture.path(settings(ENV_A, "default")))
+                .providerRequest()
+                .messages()
+                .getFirst());
+    assertTrue(withMetadata.contains("<status>unavailable</status>"), withMetadata);
+    assertTrue(withMetadata.contains("<operating_system>wsl</operating_system>"), withMetadata);
+    assertTrue(
+        withMetadata.contains("<working_directory>/mnt/c/workspace</working_directory>"),
+        withMetadata);
+    assertTrue(withMetadata.contains("<current_time>09:00:00</current_time>"), withMetadata);
+    assertTrue(withMetadata.contains("<time_zone>Asia/Tokyo</time_zone>"), withMetadata);
   }
 
   @Test
@@ -962,6 +1079,7 @@ class DatabaseTurnResolverTest {
     assertEquals(2, providerMessages.size());
     assertEquals(ProviderMessageRole.SYSTEM, providerMessages.get(0).role());
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), textOf(providerMessages.get(0)));
+    assertFalse(textOf(providerMessages.get(0)).contains("<current_environment>"));
     assertEquals(ProviderMessageRole.USER, providerMessages.get(1).role());
     assertEquals(
         CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(1)));
@@ -1332,7 +1450,24 @@ class DatabaseTurnResolverTest {
         List<String> tools,
         List<String> skills,
         List<ToolDescriptor> platformDescriptors,
+        Clock clock) {
+      this(tools, skills, platformDescriptors, PluginCatalog.from(List.of()), clock);
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> platformDescriptors,
         PluginCatalog pluginCatalog) {
+      this(tools, skills, platformDescriptors, pluginCatalog, Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> platformDescriptors,
+        PluginCatalog pluginCatalog,
+        Clock clock) {
       this(
           tools,
           skills,
@@ -1342,7 +1477,8 @@ class DatabaseTurnResolverTest {
           ProviderType.OPENAI,
           PromptCacheCapability.unsupported(),
           true,
-          pluginCatalog);
+          pluginCatalog,
+          clock);
     }
 
     private Fixture(
@@ -1376,6 +1512,30 @@ class DatabaseTurnResolverTest {
         PromptCacheCapability cacheCapability,
         boolean includeProviderFactory,
         PluginCatalog pluginCatalog) {
+      this(
+          tools,
+          skills,
+          platformDescriptors,
+          internalPlatformToolNames,
+          persistedProviderType,
+          factoryType,
+          cacheCapability,
+          includeProviderFactory,
+          pluginCatalog,
+          Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private Fixture(
+        List<String> tools,
+        List<String> skills,
+        List<ToolDescriptor> platformDescriptors,
+        Set<String> internalPlatformToolNames,
+        AgentProviderType persistedProviderType,
+        ProviderType factoryType,
+        PromptCacheCapability cacheCapability,
+        boolean includeProviderFactory,
+        PluginCatalog pluginCatalog,
+        Clock clock) {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
@@ -1421,7 +1581,7 @@ class DatabaseTurnResolverTest {
               CompactionConfig.DEFAULTS,
               subagentConfig,
               new AgentPromptComposer(subagentConfig),
-              Clock.fixed(NOW, ZoneOffset.UTC));
+              clock);
     }
 
     private void subagent(String name, String description) {
@@ -1563,25 +1723,55 @@ class DatabaseTurnResolverTest {
     }
 
     private void readyEnvironment(EnvironmentName environmentName, List<String> skills) {
+      readyEnvironment(
+          environmentName,
+          skills,
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace/project", "UTC"));
+    }
+
+    private void readyEnvironment(
+        EnvironmentName environmentName,
+        List<String> skills,
+        DaemonEnvironmentInfo environmentInfo) {
       readyEnvironmentWithSkills(
           environmentName,
           skills.stream()
               .map(name -> new DaemonSkillDescriptor(name, name + " description"))
-              .toList());
+              .toList(),
+          environmentInfo,
+          NOW);
     }
 
     private void readyEnvironmentWithSkills(
         EnvironmentName environmentName, List<DaemonSkillDescriptor> skills) {
+      readyEnvironmentWithSkills(
+          environmentName,
+          skills,
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace/project", "UTC"),
+          NOW);
+    }
+
+    private void staleEnvironment(
+        EnvironmentName environmentName, DaemonEnvironmentInfo environmentInfo) {
+      readyEnvironmentWithSkills(
+          environmentName, List.of(), environmentInfo, NOW.minus(Duration.ofSeconds(61)));
+    }
+
+    private void readyEnvironmentWithSkills(
+        EnvironmentName environmentName,
+        List<DaemonSkillDescriptor> skills,
+        DaemonEnvironmentInfo environmentInfo,
+        Instant lastSeenAt) {
       EnvironmentDaemonConnection connection = mock(EnvironmentDaemonConnection.class);
       when(connection.connectionId()).thenReturn("connection");
       when(connection.isOpen()).thenReturn(true);
-      environmentRegistry.tryBind(environmentName, connection, NOW, Duration.ofSeconds(60));
+      environmentRegistry.tryBind(environmentName, connection, lastSeenAt, Duration.ofSeconds(60));
       environmentRegistry.updateCapabilities(
           environmentName,
           connection,
-          new DaemonCapabilities(DaemonCapabilities.VERSION, skills, List.of()),
-          NOW);
-      environmentRegistry.markReady(environmentName, connection, NOW);
+          new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo, skills, List.of()),
+          lastSeenAt);
+      environmentRegistry.markReady(environmentName, connection, lastSeenAt);
     }
   }
 }
