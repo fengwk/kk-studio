@@ -111,7 +111,7 @@ candidate path 最近 TURN_START 的 BranchSettings
   -> Provider / (providerName, modelName) Model / effective Variant
   -> ToolCatalog + PluginCatalog + activeTools（必须命中可选择目录或内部 load_skill/task）
   -> environmentName 路由 + LiveEnvironmentRegistry（READY + 心跳未过期才可用）
-  -> CurrentEnvironmentContext（单一 instant；READY metadata 或服务端 Clock zone）
+  -> CurrentEnvironmentContext（单一 instant；capabilities metadata 或服务端 Clock zone）
   -> skills（Agent config；最新选中 Environment 精确提供 + 显式 load_skill）
   -> subagents（Agent config allowlist；activeTools 含 task + depth < maxDepth 才绑定）
   -> 插件 ContextProjector(candidate BranchView)
@@ -125,7 +125,7 @@ candidate path 最近 TURN_START 的 BranchSettings
 - **latest-snapshot-wins**：解析只使用 candidate path 最近一个 ROOT/TURN_START 的**完整** `BranchSettings` 快照（`EntryPath.baseSettings()` 逐项取最新）；快照中的 null/缺失/不可用值（如 `environmentName` 为 null、agent/Environment 已不存在）**绝不触发向更旧 ROOT/TURN_START 快照回退**——更旧快照中的非 null environment 或仍有效的 agent 不再参与解析；
 - **ENVIRONMENT 工具规划不拒绝**：一律按最新 `BranchSettings.environmentName()` 绑定（null/缺失/未 READY 都放行）；实际 start 时 null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 收敛；
 - **Agent skills 规划要求最新选中 Environment live**：缺失/未 READY/分支无名称都是确定性拒绝（精确 message），绝不回看更旧 settings；
-- **current_environment prompt 不改变路由语义**：无选择时 status=`none`；选择且统一 ready 规则通过时 status=`ready` 并使用 READY OS/workdir/timezone；其余为 `unavailable`，有 metadata 时保留、无 metadata 时回退服务端 Clock zone。它只冻结模型上下文，不参与 Tool start 的实时 ready 校验；
+- **current_environment prompt 不改变路由语义**：块始终只含 name/system/date/note；选中条目只要 capabilities 非 null 就使用 READY OS/note/timeZone 计算上下文，无 metadata 时 OS/note 为 `none` 并回退服务端 Clock zone。status、heartbeat、workdir、时间与 timeZone 不进入 Prompt；它只冻结模型上下文，不参与 Tool/Skill 的实时 ready 校验；
 - **task/subagent 规划规则**：`task` 只在 activeTools 显式含 task、allowlist 非空且 depth < maxDepth 时绑定；allowlist 名称必须解析到现存 Agent（名称 + 描述冻结为 `subagentBindings`），执行绝不重读父 Agent 配置扩权；
 - Agent 配置中的 Tool 名必须命中可选择目录，未知 Tool 拒绝；内部 Platform Tool（load_skill/task）必须显式出现在 activeTools 才能绑定，不是隐式追加。
 

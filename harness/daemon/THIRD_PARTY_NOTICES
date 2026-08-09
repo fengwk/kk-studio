@@ -1,11 +1,15 @@
 # Third-Party Notices
 
-## pi-base static coding-tool prompts
+## pi-base coding-tool prompts and WSL environment note
 
 The static tool prompt markdown files under
-`src/main/resources/fun/fengwk/kkstudio/harness/daemon/coding/prompts/` for
+`harness/tool/src/main/resources/fun/fengwk/kkstudio/harness/tool/environment/prompts/` for
 `lsp_goto_definition`, `lsp_workspace_symbols`, and
 `lsp_java_decompile` are adapted from pi-base (MIT).
+
+The default WSL environment note string in
+`src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java` is also
+adapted from pi-base (MIT).
 
 Source: https://github.com/fengwk/pi-base (local MIT package)
 

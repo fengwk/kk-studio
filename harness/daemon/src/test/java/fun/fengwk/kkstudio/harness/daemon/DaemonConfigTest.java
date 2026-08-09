@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 
 import java.net.URI;
 import java.nio.file.Files;
@@ -97,6 +99,8 @@ class DaemonConfigTest {
               "PT3S",
               "--tool-timeout",
               "PT4S",
+              "--note",
+              "Custom local environment.",
               "--workdir",
               skillDir.toString(),
               "--skill-dir",
@@ -111,6 +115,7 @@ class DaemonConfigTest {
     assertEquals(Duration.ZERO, config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
     assertEquals(Duration.ofSeconds(4), config.defaultToolTimeout());
+    assertEquals("Custom local environment.", config.note());
     assertEquals(skillDir.toRealPath(), config.workdir());
     assertEquals(List.of(skillDir.toAbsolutePath().normalize()), config.skillDirs());
   }
@@ -160,6 +165,70 @@ class DaemonConfigTest {
                   "--workdir", root.toString(),
                   "--workdir", root.toString()
                 }));
+  }
+
+  /** {@code --note} 可省略或显式覆盖默认值，但显式值必须唯一、单行、无控制、无首尾空白且有界。 */
+  @Test
+  void validatesOptionalNoteCli() {
+    DaemonConfig omitted =
+        DaemonConfig.fromArgs(
+            new String[] {
+              "--environment-name", "env",
+              "--gateway-uri", "ws://gateway.example/daemon",
+              "--gateway-token", "secret"
+            });
+    assertEquals(null, omitted.note());
+
+    assertInvalidNoteArgs("--note", "first", "--note", "second");
+    assertInvalidNoteArgs("--note", "");
+    assertInvalidNoteArgs("--note", " ");
+    assertInvalidNoteArgs("--note", " leading");
+    assertInvalidNoteArgs("--note", "trailing ");
+    assertInvalidNoteArgs("--note", "first\nsecond");
+    assertInvalidNoteArgs("--note", "first\u2028second");
+    assertInvalidNoteArgs("--note", "control\u0007value");
+    assertInvalidNoteArgs("--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1));
+
+    DaemonConfig maxLength =
+        DaemonConfig.fromArgs(
+            new String[] {
+              "--environment-name", "env",
+              "--gateway-uri", "ws://gateway.example/daemon",
+              "--gateway-token", "secret",
+              "--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS)
+            });
+    assertEquals(DaemonEnvironmentInfo.MAX_NOTE_CHARS, maxLength.note().length());
+  }
+
+  /** 省略 note 时按实测 OS 生成固定说明，显式值对所有 OS 都优先。 */
+  @Test
+  void resolvesExactDefaultNotesForEveryOperatingSystem() {
+    DaemonConfig defaults =
+        DaemonConfig.fromArgs(
+            new String[] {
+              "--environment-name", "env",
+              "--gateway-uri", "ws://gateway.example/daemon",
+              "--gateway-token", "secret"
+            });
+    assertEquals("Windows environment.", defaults.effectiveNote(DaemonOperatingSystem.WINDOWS));
+    assertEquals(
+        "WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows"
+            + " commands may be invocable from WSL.",
+        defaults.effectiveNote(DaemonOperatingSystem.WSL));
+    assertEquals("Linux environment.", defaults.effectiveNote(DaemonOperatingSystem.LINUX));
+    assertEquals("macOS environment.", defaults.effectiveNote(DaemonOperatingSystem.MACOS));
+
+    DaemonConfig explicit =
+        DaemonConfig.fromArgs(
+            new String[] {
+              "--environment-name", "env",
+              "--gateway-uri", "ws://gateway.example/daemon",
+              "--gateway-token", "secret",
+              "--note", "Explicit environment."
+            });
+    for (DaemonOperatingSystem operatingSystem : DaemonOperatingSystem.values()) {
+      assertEquals("Explicit environment.", explicit.effectiveNote(operatingSystem));
+    }
   }
 
   /** 显式 skill dirs 会替换默认的发现根目录。 */
@@ -282,8 +351,21 @@ class DaemonConfigTest {
         maxReconnectDelay,
         defaultToolTimeout,
         gatewayToken,
+        null,
         DaemonConfig.defaultWorkdir(),
         skillDirs,
         null);
+  }
+
+  private static void assertInvalidNoteArgs(String... noteArgs) {
+    String[] args = new String[6 + noteArgs.length];
+    args[0] = "--environment-name";
+    args[1] = "env";
+    args[2] = "--gateway-uri";
+    args[3] = "ws://gateway.example/daemon";
+    args[4] = "--gateway-token";
+    args[5] = "secret";
+    System.arraycopy(noteArgs, 0, args, 6, noteArgs.length);
+    assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromArgs(args));
   }
 }

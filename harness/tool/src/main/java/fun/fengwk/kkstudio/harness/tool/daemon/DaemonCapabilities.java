@@ -6,9 +6,8 @@ import java.util.Objects;
 /**
  * Daemon READY 上报的版本化/类型化能力摘要。
  *
- * <p>除 prompt 所需且显式允许的 canonical workdir 外，只包含可安全上报的短字段：environment metadata、skills 与 MCP server
- * 摘要；完整 SKILL.md 正文、headers、命令、URL 与完整工具 schema 不进入 READY wire。MCP 工具完整 schema 只通过固定的 {@code
- * mcp_list_tools} 桥接工具按需返回。
+ * <p>只包含可安全上报的短字段：environment metadata、skills 与 MCP server 摘要；完整 SKILL.md 正文、workdir、headers、命令、URL
+ * 与完整工具 schema 不进入 READY wire。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools} 桥接工具按需返回。
  */
 public record DaemonCapabilities(
     int version,
@@ -17,7 +16,7 @@ public record DaemonCapabilities(
     List<DaemonMcpServerDescriptor> mcpServers) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 2;
+  public static final int VERSION = 3;
 
   public DaemonCapabilities {
     if (version != VERSION) {

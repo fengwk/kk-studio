@@ -99,6 +99,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentName 路由、严格有序的工具/skill 能力、唯一的 catalog
@@ -239,20 +240,17 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent system prompt\n\n"
             + "<current_environment>\n"
-            + "  <name>none</name>\n"
-            + "  <status>none</status>\n"
-            + "  <operating_system>none</operating_system>\n"
-            + "  <working_directory>none</working_directory>\n"
-            + "  <current_date>2026-08-02</current_date>\n"
-            + "  <current_time>00:00:00</current_time>\n"
-            + "  <time_zone>Z</time_zone>\n"
+            + "- name: none\n"
+            + "- system: none\n"
+            + "- date: 2026-08-02\n"
+            + "- note: none\n"
             + "</current_environment>",
         textOf(request.providerRequest().messages().getFirst()));
   }
 
   @Test
   void noLiveMetadataUsesServiceClockZoneForNoneAndMissingEnvironment() {
-    Clock serviceClock = Clock.fixed(NOW, ZoneId.of("Asia/Kathmandu"));
+    Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
     Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
 
     String none =
@@ -262,9 +260,10 @@ class DatabaseTurnResolverTest {
                 .providerRequest()
                 .messages()
                 .getFirst());
-    assertTrue(none.contains("<status>none</status>"), none);
-    assertTrue(none.contains("<current_time>05:45:00</current_time>"), none);
-    assertTrue(none.contains("<time_zone>Asia/Kathmandu</time_zone>"), none);
+    assertTrue(none.contains("- name: none"), none);
+    assertTrue(none.contains("- system: none"), none);
+    assertTrue(none.contains("- date: 2026-08-01"), none);
+    assertTrue(none.contains("- note: none"), none);
 
     String missing =
         textOf(
@@ -273,12 +272,11 @@ class DatabaseTurnResolverTest {
                 .providerRequest()
                 .messages()
                 .getFirst());
-    assertTrue(missing.contains("<name>env-3</name>"), missing);
-    assertTrue(missing.contains("<status>unavailable</status>"), missing);
-    assertTrue(missing.contains("<operating_system>none</operating_system>"), missing);
-    assertTrue(missing.contains("<working_directory>none</working_directory>"), missing);
-    assertTrue(missing.contains("<current_time>05:45:00</current_time>"), missing);
-    assertTrue(missing.contains("<time_zone>Asia/Kathmandu</time_zone>"), missing);
+    assertTrue(missing.contains("- name: env-3"), missing);
+    assertTrue(missing.contains("- system: none"), missing);
+    assertTrue(missing.contains("- date: 2026-08-01"), missing);
+    assertTrue(missing.contains("- note: none"), missing);
+    assertNoLegacyCurrentEnvironmentFields(missing);
   }
 
   @Test
@@ -288,24 +286,20 @@ class DatabaseTurnResolverTest {
         ENV_A,
         List.of(),
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.LINUX, "/workspace/a&b<c>", "America/Los_Angeles"));
+            DaemonOperatingSystem.LINUX, "America/Los_Angeles", "Custom <Linux> & tools."));
 
     ModelInvocationRequest request = fixture.resolved(fixture.path(settings(ENV_A, "default")));
     String prompt = textOf(request.providerRequest().messages().getFirst());
 
-    assertTrue(prompt.contains("<name>env-1</name>"), prompt);
-    assertTrue(prompt.contains("<status>ready</status>"), prompt);
-    assertTrue(prompt.contains("<operating_system>linux</operating_system>"), prompt);
-    assertTrue(
-        prompt.contains("<working_directory>/workspace/a&amp;b&lt;c&gt;</working_directory>"),
-        prompt);
-    assertTrue(prompt.contains("<current_date>2026-08-01</current_date>"), prompt);
-    assertTrue(prompt.contains("<current_time>17:00:00</current_time>"), prompt);
-    assertTrue(prompt.contains("<time_zone>America/Los_Angeles</time_zone>"), prompt);
+    assertTrue(prompt.contains("- name: env-1"), prompt);
+    assertTrue(prompt.contains("- system: linux"), prompt);
+    assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
+    assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
+    assertNoLegacyCurrentEnvironmentFields(prompt);
   }
 
   @Test
-  void selectedUnavailableEnvironmentUsesMetadataWhenPresentAndServerZoneOtherwise() {
+  void selectedEnvironmentUsesMetadataRegardlessOfHeartbeatReadiness() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
 
@@ -316,32 +310,65 @@ class DatabaseTurnResolverTest {
                 .providerRequest()
                 .messages()
                 .getFirst());
-    assertTrue(withoutMetadata.contains("<name>env-1</name>"), withoutMetadata);
-    assertTrue(withoutMetadata.contains("<status>unavailable</status>"), withoutMetadata);
-    assertTrue(
-        withoutMetadata.contains("<operating_system>none</operating_system>"), withoutMetadata);
-    assertTrue(
-        withoutMetadata.contains("<working_directory>none</working_directory>"), withoutMetadata);
-    assertTrue(withoutMetadata.contains("<time_zone>Z</time_zone>"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("- name: env-1"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("- system: none"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
+    assertTrue(withoutMetadata.contains("- note: none"), withoutMetadata);
 
-    fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.staleEnvironment(
-        ENV_A,
-        new DaemonEnvironmentInfo(DaemonOperatingSystem.WSL, "/mnt/c/workspace", "Asia/Tokyo"));
-    String withMetadata =
+    DaemonEnvironmentInfo environmentInfo =
+        new DaemonEnvironmentInfo(
+            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.");
+    Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
+    readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
+    String ready =
         textOf(
-            fixture
-                .resolved(fixture.path(settings(ENV_A, "default")))
+            readyFixture
+                .resolved(readyFixture.path(settings(ENV_A, "default")))
                 .providerRequest()
                 .messages()
                 .getFirst());
-    assertTrue(withMetadata.contains("<status>unavailable</status>"), withMetadata);
-    assertTrue(withMetadata.contains("<operating_system>wsl</operating_system>"), withMetadata);
-    assertTrue(
-        withMetadata.contains("<working_directory>/mnt/c/workspace</working_directory>"),
-        withMetadata);
-    assertTrue(withMetadata.contains("<current_time>09:00:00</current_time>"), withMetadata);
-    assertTrue(withMetadata.contains("<time_zone>Asia/Tokyo</time_zone>"), withMetadata);
+    Fixture staleFixture = new Fixture(List.of(), List.of(), List.of());
+    staleFixture.staleEnvironment(ENV_A, environmentInfo);
+    String stale =
+        textOf(
+            staleFixture
+                .resolved(staleFixture.path(settings(ENV_A, "default")))
+                .providerRequest()
+                .messages()
+                .getFirst());
+    assertEquals(ready, stale);
+    assertTrue(stale.contains("- system: wsl"), stale);
+    assertTrue(stale.contains("- date: 2026-08-02"), stale);
+    assertTrue(stale.contains("- note: Stable WSL environment."), stale);
+    assertNoLegacyCurrentEnvironmentFields(stale);
+  }
+
+  @Test
+  void ordinaryResolutionReadsClockInstantExactlyOnce() {
+    AtomicInteger calls = new AtomicInteger();
+    Clock countingClock =
+        new Clock() {
+          @Override
+          public ZoneId getZone() {
+            return ZoneOffset.UTC;
+          }
+
+          @Override
+          public Clock withZone(ZoneId zone) {
+            return this;
+          }
+
+          @Override
+          public Instant instant() {
+            calls.incrementAndGet();
+            return NOW;
+          }
+        };
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), countingClock);
+
+    fixture.resolved(fixture.path(settings(null, "default")));
+
+    assertEquals(1, calls.get());
   }
 
   @Test
@@ -909,6 +936,13 @@ class DatabaseTurnResolverTest {
       text.append(((ProviderTextBlock) content).text());
     }
     return text.toString();
+  }
+
+  private static void assertNoLegacyCurrentEnvironmentFields(String prompt) {
+    assertFalse(prompt.contains("status"), prompt);
+    assertFalse(prompt.contains("working_directory"), prompt);
+    assertFalse(prompt.contains("current_time"), prompt);
+    assertFalse(prompt.contains("time_zone"), prompt);
   }
 
   private static BranchSettings settings(EnvironmentName environmentName, String variant) {
@@ -1726,7 +1760,7 @@ class DatabaseTurnResolverTest {
       readyEnvironment(
           environmentName,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace/project", "UTC"));
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."));
     }
 
     private void readyEnvironment(
@@ -1747,7 +1781,7 @@ class DatabaseTurnResolverTest {
       readyEnvironmentWithSkills(
           environmentName,
           skills,
-          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace/project", "UTC"),
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "UTC", "Linux environment."),
           NOW);
     }
 

@@ -1,9 +1,6 @@
 <current_environment>
-  <name>${name}</name>
-  <status>${status}</status>
-  <operating_system>${operatingSystem}</operating_system>
-  <working_directory>${workingDirectory}</working_directory>
-  <current_date>${currentDate}</current_date>
-  <current_time>${currentTime}</current_time>
-  <time_zone>${timeZone}</time_zone>
+- name: ${name}
+- system: ${system}
+- date: ${date}
+- note: ${note}
 </current_environment>

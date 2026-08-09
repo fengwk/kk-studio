@@ -98,7 +98,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 
 | 方法 | 路径 | 语义 |
 | --- | --- | --- |
-| GET | `/api/ai/environment` | 当前 live Environment 内存投影（name/status/ready/tools/skills/mcpServers/lastSeen，status 可为 CONNECTING/READY；不公开 READY OS/workdir/timezone metadata） |
+| GET | `/api/ai/environment` | 当前 live Environment 内存投影（name/status/ready/tools/skills/mcpServers/lastSeen，status 可为 CONNECTING/READY；不公开 READY operatingSystem/timeZone/note metadata） |
 | WebSocket | `/api/ai/environment/daemon/v2` | Daemon v2 连接（HELLO/WELCOME/READY/INVOKE/回调/心跳） |
 
 ## 5. 请求与错误
@@ -129,7 +129,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ModelProcessor` | 两阶段激活、checkpoint/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
 | `ToolProcessor` | 两阶段激活、preflight、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
 | `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`（含 `subagentBindings`）；冻结插件 contribution/state accesses，并注入插件 context projection；普通解析按单一 Clock instant 构造 `CurrentEnvironmentContext`；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝；skills 需最新选中 Environment live + 显式 `load_skill`；`task` 只在 activeTools 含 task、allowlist 非空、depth < maxDepth 时绑定；planning 拒绝共用 `PLANNING_FAILED` |
-| `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → 始终存在的 `<current_environment>` → `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；动态字段 XML escape，日期/时间严格格式化；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
+| `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → 始终存在且只含 name/system/date/note 的 `<current_environment>` → `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；动态字段 XML escape，日期严格为 yyyy-MM-dd；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
 | `TaskTool` | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：校验冻结 allowlist、以 `createThread(SubagentContext)` 创建/恢复子 Thread、物化子 Agent branch settings、入队 task prompt、轮询等待并发布 `task.status` 心跳、以 `<task id state>` envelope 结束 |
 | `AgentBranchSettingsMaterializer` | 按最新 Agent/Model catalog 物化子 Agent 完整 `BranchSettings`：`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且 depth < maxDepth 时 task` |
 | `SubagentRunRegistry` | 进程内并发 reservation（每父/每根上限、resume 单飞）；不是 durable truth，durable 子 Session 仍是 Thread/Entry |

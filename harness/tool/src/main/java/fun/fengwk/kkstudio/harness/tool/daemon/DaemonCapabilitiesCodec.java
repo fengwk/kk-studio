@@ -29,8 +29,8 @@ public final class DaemonCapabilitiesCodec {
     root.put("version", capabilities.version());
     ObjectNode environment = root.putObject("environment");
     environment.put("operatingSystem", capabilities.environment().operatingSystem().wireValue());
-    environment.put("workingDirectory", capabilities.environment().workingDirectory());
     environment.put("timeZone", capabilities.environment().timeZone());
+    environment.put("note", capabilities.environment().note());
     ArrayNode skills = root.putArray("skills");
     for (DaemonSkillDescriptor skill : capabilities.skills()) {
       ObjectNode node = skills.addObject();
@@ -109,13 +109,13 @@ public final class DaemonCapabilitiesCodec {
   }
 
   private static DaemonEnvironmentInfo decodeEnvironment(ObjectNode node) {
-    rejectUnknown(node, Set.of("operatingSystem", "workingDirectory", "timeZone"));
+    rejectUnknown(node, Set.of("operatingSystem", "timeZone", "note"));
     String operatingSystemText = text(node, "operatingSystem", "READY environment");
-    String workingDirectory = text(node, "workingDirectory", "READY environment");
     String timeZone = text(node, "timeZone", "READY environment");
+    String note = text(node, "note", "READY environment");
     try {
       return new DaemonEnvironmentInfo(
-          DaemonOperatingSystem.fromWireValue(operatingSystemText), workingDirectory, timeZone);
+          DaemonOperatingSystem.fromWireValue(operatingSystemText), timeZone, note);
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException(
           "READY environment validation failed: " + error.getMessage(), error);
