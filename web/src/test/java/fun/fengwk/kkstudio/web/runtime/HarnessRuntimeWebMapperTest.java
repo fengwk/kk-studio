@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadHeadUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
 import java.util.List;
 
@@ -64,6 +65,12 @@ class HarnessRuntimeWebMapperTest {
     dto.setExpectedHeadEntryId("3");
     dto.setExpectedNextCommandSequence("4");
     dto.setCommands(List.of(commands));
+    return dto;
+  }
+
+  private static HarnessUserMessageContentDTO content(String type) {
+    HarnessUserMessageContentDTO dto = new HarnessUserMessageContentDTO();
+    dto.setType(type);
     return dto;
   }
 
@@ -131,6 +138,119 @@ class HarnessRuntimeWebMapperTest {
         6,
         ThreadCommandType.SET_ENVIRONMENT,
         "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}");
+  }
+
+  @Test
+  void mapsTextAndExistingContentShorthandsToTheSameUserMessageShape() {
+    HarnessThreadCommandCreateDTO text = command("USER_MESSAGE", "c-text");
+    text.setText("hello");
+    HarnessThreadCommandCreateDTO content = command("USER_MESSAGE", "c-content");
+    content.setContent("hello");
+
+    ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch("1", batch(text, content));
+
+    String expected =
+        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}";
+    assertExactPayload(mapped, 0, ThreadCommandType.USER_MESSAGE, expected);
+    assertExactPayload(mapped, 1, ThreadCommandType.USER_MESSAGE, expected);
+  }
+
+  @Test
+  void mapsAllStructuredUserMessageContentsInOrder() {
+    HarnessUserMessageContentDTO text = content("TEXT");
+    text.setText("animate this");
+    HarnessUserMessageContentDTO image = content("IMAGE");
+    image.setMediaType("image/png");
+    image.setSource("https://example.test/image.png");
+    HarnessUserMessageContentDTO audio = content("AUDIO");
+    audio.setMediaType("audio/mpeg");
+    audio.setSource("https://example.test/audio.mp3");
+    HarnessUserMessageContentDTO video = content("VIDEO");
+    video.setMediaType("video/mp4");
+    video.setSource("https://example.test/video.mp4");
+    HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-structured");
+    user.setContents(List.of(text, image, audio, video));
+
+    ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch("1", batch(user));
+
+    assertExactPayload(
+        mapped,
+        0,
+        ThreadCommandType.USER_MESSAGE,
+        "{\"message\":{\"role\":\"USER\",\"contents\":["
+            + "{\"type\":\"text\",\"text\":\"animate this\"},"
+            + "{\"type\":\"image\",\"mediaType\":\"image/png\","
+            + "\"source\":\"https://example.test/image.png\"},"
+            + "{\"type\":\"audio\",\"mediaType\":\"audio/mpeg\","
+            + "\"source\":\"https://example.test/audio.mp3\"},"
+            + "{\"type\":\"video\",\"mediaType\":\"video/mp4\","
+            + "\"source\":\"https://example.test/video.mp4\"}]}}");
+  }
+
+  @Test
+  void rejectsAmbiguousEmptyOrInvalidStructuredUserMessages() {
+    HarnessThreadCommandCreateDTO ambiguous = command("USER_MESSAGE", "c-ambiguous");
+    ambiguous.setText("hello");
+    ambiguous.setContents(List.of(content("TEXT")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(ambiguous)));
+
+    HarnessThreadCommandCreateDTO explicitNull = command("USER_MESSAGE", "c-null");
+    explicitNull.setText(null);
+    explicitNull.setContents(List.of(content("TEXT")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(explicitNull)));
+
+    HarnessThreadCommandCreateDTO empty = command("USER_MESSAGE", "c-empty");
+    empty.setContents(List.of());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(empty)));
+
+    HarnessUserMessageContentDTO tool = content("TOOL");
+    HarnessThreadCommandCreateDTO hiddenType = command("USER_MESSAGE", "c-tool");
+    hiddenType.setContents(List.of(tool));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(hiddenType)));
+
+    HarnessUserMessageContentDTO invalidMedia = content("IMAGE");
+    invalidMedia.setMediaType("audio/mpeg");
+    invalidMedia.setSource("image-source");
+    HarnessThreadCommandCreateDTO wrongMedia = command("USER_MESSAGE", "c-media");
+    wrongMedia.setContents(List.of(invalidMedia));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(wrongMedia)));
+
+    HarnessUserMessageContentDTO malformedMedia = content("VIDEO");
+    malformedMedia.setMediaType("video/ ");
+    malformedMedia.setSource("video-source");
+    HarnessThreadCommandCreateDTO malformed = command("USER_MESSAGE", "c-malformed-media");
+    malformed.setContents(List.of(malformedMedia));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(malformed)));
+
+    HarnessUserMessageContentDTO blankSource = content("VIDEO");
+    blankSource.setMediaType("video/mp4");
+    blankSource.setSource(" ");
+    HarnessThreadCommandCreateDTO invalidSource = command("USER_MESSAGE", "c-source");
+    invalidSource.setContents(List.of(blankSource));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(invalidSource)));
+
+    HarnessUserMessageContentDTO textWithMedia = content("TEXT");
+    textWithMedia.setText("hello");
+    textWithMedia.setMediaType(null);
+    HarnessThreadCommandCreateDTO forbiddenField = command("USER_MESSAGE", "c-field");
+    forbiddenField.setContents(List.of(textWithMedia));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(forbiddenField)));
   }
 
   @Test

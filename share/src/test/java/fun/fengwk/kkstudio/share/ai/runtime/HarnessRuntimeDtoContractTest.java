@@ -108,11 +108,20 @@ class HarnessRuntimeDtoContractTest {
     // 命令 DTO 的可选字段保持 null 默认：mapper 以 null 区分 forbidden 与未设置。
     HarnessThreadCommandCreateDTO command = new HarnessThreadCommandCreateDTO();
     assertNull(command.getActiveTools());
+    assertTrue(!command.hasContentField());
+    assertTrue(!command.hasTextField());
+    assertTrue(!command.hasContentsField());
 
     HarnessThreadCommandCreateDTO typed = new HarnessThreadCommandCreateDTO();
     typed.setType("USER_MESSAGE");
     typed.setClientCommandId("cmd-1");
     typed.setContent("hello");
+    typed.setText("hello shorthand");
+    HarnessUserMessageContentDTO video = new HarnessUserMessageContentDTO();
+    video.setType("VIDEO");
+    video.setMediaType("video/mp4");
+    video.setSource("https://example.test/video.mp4");
+    typed.setContents(List.of(video));
     typed.setRole("USER");
     typed.setAgentName("assistant");
     typed.setModel(new HarnessModelSelectionDTO());
@@ -121,6 +130,16 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("USER_MESSAGE", typed.getType());
     assertEquals("cmd-1", typed.getClientCommandId());
     assertEquals("hello", typed.getContent());
+    assertEquals("hello shorthand", typed.getText());
+    assertEquals(List.of(video), typed.getContents());
+    assertTrue(typed.hasContentField());
+    assertTrue(typed.hasTextField());
+    assertTrue(typed.hasContentsField());
+    assertEquals("VIDEO", video.getType());
+    assertEquals("video/mp4", video.getMediaType());
+    assertEquals("https://example.test/video.mp4", video.getSource());
+    assertTrue(video.hasMediaTypeField());
+    assertTrue(video.hasSourceField());
     assertEquals("USER", typed.getRole());
     assertEquals("assistant", typed.getAgentName());
     assertEquals(Boolean.FALSE, typed.getYoloEnabled());

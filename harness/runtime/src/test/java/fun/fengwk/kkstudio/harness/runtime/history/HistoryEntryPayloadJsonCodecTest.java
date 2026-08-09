@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
@@ -35,7 +36,15 @@ class HistoryEntryPayloadJsonCodecTest {
     BranchSettings settings = settings(ENV);
     EntryPayload root = new RootPayload(settings);
     EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings);
-    EntryPayload user = new MessagePayload(user("hello"), null, null);
+    EntryPayload user =
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(
+                    new TextMessageContent("hello"),
+                    new VideoMessageContent("video/mp4", "https://example.test/reference.mp4"))),
+            null,
+            null);
     EntryPayload assistant =
         new MessagePayload(assistant("answer"), metadata(ProviderStopReason.COMPLETED), null);
     EntryPayload tool =

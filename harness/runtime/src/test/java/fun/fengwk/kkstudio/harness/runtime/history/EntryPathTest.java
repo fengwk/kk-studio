@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
@@ -52,6 +53,32 @@ class EntryPathTest {
     assertEquals(settings("turn"), path.baseSettings());
     assertEquals(start, path.openTurnStart().orElseThrow());
     assertEquals(List.of(root, start, user), path.entries());
+  }
+
+  @Test
+  void acceptsStructuredVideoUserMessageInInputTurn() {
+    Entry root = root(settings("root"));
+    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
+    Entry videoUser =
+        new Entry(
+            3L,
+            SESSION,
+            2L,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        new TextMessageContent("animate this"),
+                        new VideoMessageContent(
+                            "video/mp4", "https://example.test/reference.mp4"))),
+                null,
+                null),
+            time(3L));
+
+    EntryPath path = new EntryPath(List.of(root, start, videoUser));
+
+    assertEquals(videoUser, path.head());
+    assertEquals(start, path.openTurnStart().orElseThrow());
   }
 
   @Test

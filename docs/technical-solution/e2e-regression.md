@@ -134,7 +134,7 @@ L1 的关键语义断言：
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
-- `USER_MESSAGE` 只能携带 `type/clientCommandId/content`（多余字段 400）；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
+- `USER_MESSAGE` 支持互斥的 `text` shorthand 或非空结构化 `contents(TEXT/IMAGE/AUDIO/VIDEO)`，未知/多余字段与非法 mediaType/source 返回 400；现有 `content` shorthand 保持兼容；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO` 五类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
@@ -229,12 +229,12 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
   "expectedHeadEntryId": "1",
   "expectedNextCommandSequence": "1",
   "commands": [
-    { "type": "USER_MESSAGE", "clientCommandId": "...", "content": "..." }
+    { "type": "USER_MESSAGE", "clientCommandId": "...", "text": "..." }
   ]
 }
 ```
 
-`USER_MESSAGE` 只能携带 `type/clientCommandId/content`；`CUSTOM_MESSAGE` 额外携带 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带 `text` shorthand 或非空结构化 `contents`；结构化元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`。已有 `content` shorthand 继续兼容。`CUSTOM_MESSAGE` 额外携带 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
