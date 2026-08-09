@@ -58,7 +58,7 @@ INPUT Turn：消费 cutoff 内完整 queued 快照
   -> 可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END）
   -> TURN_START(INPUT, 完整 BranchSettings) + 按 sequence 顺序的 USER/CUSTOM Message Entries
 
-CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/YOLO）
+CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/ACTIVE_TOOLS/YOLO）
   -> 保留 SET_ENVIRONMENT（只会在后续 INPUT Turn 完整收割时进入 BranchSettings）
   -> 不产生 Message Entry
 ```
@@ -69,7 +69,7 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/
 
 `TurnResolver.resolve(threadId, candidatePath, yoloEnabled)` 在事务外同步解析，只读最新 Catalog/Environment 事实：
 
-1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environmentName`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
+1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environmentName`、`agentName`、`model`、`activeTools`；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
 3. 按 `activeTools` 与 `environmentName` 构造 tool set：ENVIRONMENT 工具一律按最新名称绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
 4. 按 Agent `subagents` allowlist 解析委派能力：`task` 只在 `activeTools` 显式含 task、allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生）；allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；

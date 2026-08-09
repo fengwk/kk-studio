@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetActiveToolsCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetThinkingLevelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -435,11 +434,6 @@ public final class TaskTool implements Tool {
     }
     if (!current.model().equals(target.model())) {
       commands.add(command(new SetModelCommandPayload(target.model()), invocationId, ordinal++));
-    }
-    if (!current.thinkingLevel().equals(target.thinkingLevel())) {
-      commands.add(
-          command(
-              new SetThinkingLevelCommandPayload(target.thinkingLevel()), invocationId, ordinal++));
     }
     if (!current.activeTools().equals(target.activeTools())) {
       commands.add(

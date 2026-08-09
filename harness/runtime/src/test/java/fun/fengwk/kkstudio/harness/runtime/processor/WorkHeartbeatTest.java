@@ -227,7 +227,6 @@ class WorkHeartbeatTest {
                                 null,
                                 "agent",
                                 new ModelSelection("provider", "model", "v1"),
-                                "low",
                                 List.of())),
                         NOW));
                 tx.insertThread(new ThreadState(threadIdValue, rootEntryId, false, 1, 0, NOW, NOW));

@@ -16,12 +16,10 @@ export interface BranchDraft {
   environmentName: string | null
   agentName: string
   model: HarnessModelSelectionDTO
-  thinkingLevel: string
   activeTools: string[]
   yoloEnabled: boolean
 }
 
-export const DEFAULT_THINKING_LEVEL = 'off'
 export const LOAD_SKILL_TOOL_NAME = 'load_skill'
 export const TASK_TOOL_NAME = 'task'
 
@@ -40,8 +38,7 @@ export function activeToolsFromAgent(agent: AgentDefinitionDTO): string[] {
 /**
  * 使用 Chat 默认值（agent + yolo）和 catalog，为空面板构建完整的 branch draft：
  * - agent 的 model ref -> provider/model 选择
- * - variant = agent override 或 model 的 defaultVariant
- * - thinkingLevel = 该 variant 的 reasoningEffort 或 `off`
+ * - variant = agent override 或 model 的 defaultVariant（模型 reasoning effort 只来自所选 catalog Variant）
  * - activeTools = agent.config.tools + skills/subagents 对应的内部工具
  * - environmentName 从调用方传入的 Chat 默认值（可 null）开始
  *
@@ -75,7 +72,6 @@ export function materializeBlankBranchDraft(
       modelName: model.name,
       variant: variantId,
     },
-    thinkingLevel: variant.reasoningEffort || DEFAULT_THINKING_LEVEL,
     activeTools: activeToolsFromAgent(agent),
     yoloEnabled,
   }
@@ -103,13 +99,12 @@ export function materializeAgentBranchDraft(
   if (existing == null || existing.model.providerName === '' || existing.model.modelName === '') {
     return materialized
   }
-  // Freeze 规则：保留当前 model selection / thinking / environment / yolo；采用新的
+  // Freeze 规则：保留当前 model selection / environment / yolo；采用新的
   // agent 名称及其 active tool 集合。
   return {
     ...materialized,
     environmentName: existing.environmentName,
     model: { ...existing.model },
-    thinkingLevel: existing.thinkingLevel,
     yoloEnabled: existing.yoloEnabled,
   }
 }
@@ -131,7 +126,6 @@ export function branchDraftFromBranchSettings(
       modelName: settings.model.modelName,
       variant: settings.model.variant,
     },
-    thinkingLevel: settings.thinkingLevel,
     activeTools: settings.activeTools ? [...settings.activeTools] : [],
     yoloEnabled,
   }
@@ -143,7 +137,6 @@ export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolea
     && left.model.providerName === right.model.providerName
     && left.model.modelName === right.model.modelName
     && left.model.variant === right.model.variant
-    && left.thinkingLevel === right.thinkingLevel
     && left.yoloEnabled === right.yoloEnabled
     && sameStringList(left.activeTools, right.activeTools)
 }
@@ -161,7 +154,7 @@ function sameStringList(left: string[], right: string[]): boolean {
 }
 
 /**
- * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO。
+ * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO。
  * 每个 command 都通过注入的 id factory 携带自己的稳定 clientCommandId。
  */
 export function buildBranchDiffCommands(
@@ -189,13 +182,6 @@ export function buildBranchDiffCommands(
       type: 'SET_MODEL',
       clientCommandId: createCommandId(),
       model: { ...draft.model },
-    })
-  }
-  if (base.thinkingLevel !== draft.thinkingLevel) {
-    commands.push({
-      type: 'SET_THINKING_LEVEL',
-      clientCommandId: createCommandId(),
-      thinkingLevel: draft.thinkingLevel,
     })
   }
   if (!sameStringList(base.activeTools, draft.activeTools)) {
@@ -266,12 +252,6 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
         }
       }
       return base
-    }
-    case 'SET_THINKING_LEVEL': {
-      const thinkingLevel = typeof payload.thinkingLevel === 'string'
-        ? payload.thinkingLevel
-        : base.thinkingLevel
-      return { ...base, thinkingLevel }
     }
     case 'SET_ACTIVE_TOOLS': {
       const activeTools = Array.isArray(payload.activeTools)

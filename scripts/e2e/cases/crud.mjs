@@ -499,7 +499,6 @@ registerCase({
         environmentName: null,
         agentName: agent.name,
         model: modelSelectionFor(agent),
-        thinkingLevel: 'off',
         activeTools: [],
       }
       const threadSnapshot = await createChatThread(ctx, chat.id, {

@@ -15,7 +15,6 @@ function settings(): HarnessBranchSettingsDTO {
     environmentName: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    thinkingLevel: 'default',
     activeTools: [],
   }
 }

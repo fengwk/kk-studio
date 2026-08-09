@@ -33,7 +33,6 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.CUSTOM_MESSAGE,
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
-            ThreadCommandType.SET_THINKING_LEVEL,
             ThreadCommandType.SET_ACTIVE_TOOLS,
             ThreadCommandType.SET_YOLO,
             ThreadCommandType.SET_ENVIRONMENT),
@@ -42,7 +41,6 @@ class ThreadCommandPayloadTest {
                 new CustomMessageCommandPayload(system("system")),
                 new SetAgentCommandPayload("coding"),
                 new SetModelCommandPayload(MODEL),
-                new SetThinkingLevelCommandPayload("high"),
                 new SetActiveToolsCommandPayload(List.of("read")),
                 new SetYoloCommandPayload(true),
                 new SetEnvironmentCommandPayload(ENV))
@@ -72,7 +70,6 @@ class ThreadCommandPayloadTest {
   void settingPayloadsEnforceCanonicalValuesAndAtomicModel() {
     assertEquals(MODEL, new SetModelCommandPayload(MODEL).model());
     assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" coding"));
-    assertThrows(IllegalArgumentException.class, () -> new SetThinkingLevelCommandPayload(" "));
     assertThrows(NullPointerException.class, () -> new SetModelCommandPayload(null));
     assertNull(new SetEnvironmentCommandPayload(null).environmentName());
     assertEquals(ENV, new SetEnvironmentCommandPayload(ENV).environmentName());

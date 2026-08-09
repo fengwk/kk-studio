@@ -10,7 +10,6 @@ public sealed interface ThreadCommandPayload
         CustomMessageCommandPayload,
         SetAgentCommandPayload,
         SetModelCommandPayload,
-        SetThinkingLevelCommandPayload,
         SetActiveToolsCommandPayload,
         SetYoloCommandPayload,
         SetEnvironmentCommandPayload {

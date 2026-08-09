@@ -55,7 +55,6 @@ class CompactionSummaryAssemblerTest {
           new EnvironmentName("env-1"),
           "agent",
           new ModelSelection("provider", "model", "v1"),
-          "low",
           List.of());
 
   @Test

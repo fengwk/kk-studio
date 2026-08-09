@@ -56,7 +56,6 @@ public final class HarnessRuntimeTestFixtures {
         new EnvironmentName("env-1"),
         "default-assistant",
         new ModelSelection("openai", "gpt-5", "default"),
-        "low",
         List.of("web_search"));
   }
 

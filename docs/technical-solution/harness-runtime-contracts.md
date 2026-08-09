@@ -37,11 +37,11 @@ ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_AB
 COMPACTION, TURN_END
 ```
 
-Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
 
 ```json
 {
-  "settings": { "environmentName": null, "agentName": "...", "model": {...}, "thinkingLevel": "off", "activeTools": [...] },
+  "settings": { "environmentName": null, "agentName": "...", "model": {...}, "activeTools": [...] },
   "subagentContext": null | { "parentThreadId": "1", "rootThreadId": "1", "taskInvocationId": "2", "depth": 2 }
 }
 ```
@@ -50,11 +50,11 @@ Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_STA
 
 ## 3. 命令 batch
 
-八类命令：
+七类命令：
 
 ```java
 USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
-SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
+SET_ACTIVE_TOOLS, SET_YOLO
 ```
 
 请求 wire（`HarnessThreadCommandBatchDTO`）：
@@ -75,7 +75,7 @@ SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
 - `USER_MESSAGE` 携带 `content`，**不携带 role**（role 恒为 USER，strict mapper 拒绝多余字段）；`CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
-- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_THINKING_LEVEL` 携带 `thinkingLevel`；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
+- `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `role`/`content` 等不相关字段。
 
 ### Ordered command-set replay

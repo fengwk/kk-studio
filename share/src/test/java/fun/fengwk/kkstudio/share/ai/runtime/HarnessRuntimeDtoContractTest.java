@@ -116,7 +116,6 @@ class HarnessRuntimeDtoContractTest {
     typed.setRole("USER");
     typed.setAgentName("assistant");
     typed.setModel(new HarnessModelSelectionDTO());
-    typed.setThinkingLevel("low");
     typed.setYoloEnabled(false);
     typed.setEnvironmentName(null);
     assertEquals("USER_MESSAGE", typed.getType());
@@ -124,7 +123,6 @@ class HarnessRuntimeDtoContractTest {
     assertEquals("hello", typed.getContent());
     assertEquals("USER", typed.getRole());
     assertEquals("assistant", typed.getAgentName());
-    assertEquals("low", typed.getThinkingLevel());
     assertEquals(Boolean.FALSE, typed.getYoloEnabled());
     assertNull(typed.getEnvironmentName());
   }

@@ -100,7 +100,6 @@ public record BranchSettings(
     EnvironmentName environmentName, // canonical 路由名称，可 null
     String agentName,
     ModelSelection model,          // providerName/modelName/variant
-    String thinkingLevel,
     List<String> activeTools) {}
 ```
 
@@ -134,7 +133,7 @@ candidate path 最近 TURN_START 的 BranchSettings
 
 **Skills**：只从 Agent config 读取，必须由选中 READY Environment 精确提供，且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` **不是** Resolver 隐式追加，也不在 selectable catalog。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败，Agent Loop 写入 `ASSISTANT_ERROR` 并关闭该 Turn，不物化 ToolInvocation。
 
-Compaction resolver 不读取 Agent prompt、plugin projector、Environment live 能力或 prompt cache，也不绑定 tool/skill/subagent；它只使用 branch 的 provider/model/variant/thinking 与 planner 冻结事实，构造一个 summarization SYSTEM + 一个 USER request。contextWindow 沿用触发 invocation 冻结值；输出上限取有效 model/variant max output 与 phase reserve budget 的较小值。
+Compaction resolver 不读取 Agent prompt、plugin projector、Environment live 能力或 prompt cache，也不绑定 tool/skill/subagent；它只使用 branch 引用的 provider/model/catalog Variant 与 planner 冻结事实，构造一个 summarization SYSTEM + 一个 USER request。Variant 是唯一模型请求预设，其 reasoning effort 与其余请求参数一并生效；contextWindow 沿用触发 invocation 冻结值，输出上限取有效 model/variant max output 与 phase reserve budget 的较小值。
 
 ## 5. 冻结 request 的不变量
 

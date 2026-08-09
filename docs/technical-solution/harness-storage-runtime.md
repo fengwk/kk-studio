@@ -50,7 +50,7 @@ Thread 行不保存 Session/Environment/status/epoch/lease/runnable；全部由 
 | 列 | 约束 |
 | --- | --- |
 | `thread_id` / `sequence` | `(thread_id, sequence)` 唯一；`sequence > 0` |
-| `command_type` | 八类 check 约束（USER_MESSAGE/CUSTOM_MESSAGE/SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_THINKING_LEVEL/SET_ACTIVE_TOOLS/SET_YOLO） |
+| `command_type` | 七类 check 约束（USER_MESSAGE/CUSTOM_MESSAGE/SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO） |
 | `payload` | JSON object |
 | `client_command_id` | `(thread_id, client_command_id)` 唯一幂等键，≤128 字符 |
 | `consumed_turn_start_entry_id` | null 或 FK 到 Entry；与 `cancelled_at` 互斥（terminal check） |

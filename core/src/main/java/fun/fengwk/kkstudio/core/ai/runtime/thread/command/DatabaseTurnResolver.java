@@ -87,10 +87,10 @@ import java.util.Optional;
  * ModelInvocationRequest}。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（environmentName / agentName / {@link
- * ModelSelection} / thinkingLevel / ordered activeTools）与调用方冻结的 YOLO 开关；实现只按这些精确引用读取最新 catalog /
- * environment 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/thinking/tools，也绝不静默丢弃缺失能力。
- * environmentName 是最新 branch 的不可变逻辑路由：ENVIRONMENT 工具一律按最新 {@code settings.environmentName()} 绑定（可为
- * null 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的
+ * ModelSelection} / ordered activeTools）与调用方冻结的 YOLO 开关；实现只按这些精确引用读取最新 catalog / environment
+ * 事实，绝不回读 Chat defaults、绝不 fallback agent/model/variant/tools，也绝不静默丢弃缺失能力。 environmentName 是最新
+ * branch 的不可变逻辑路由：ENVIRONMENT 工具一律按最新 {@code settings.environmentName()} 绑定（可为 null
+ * 或当前不可用，实际执行时失败）；Agent skills 要求最新 Environment 提供 live descriptors，缺失/未 READY 时确定性拒绝 且绝不回看更旧的
  * branch settings。配置或 Environment 不满足一律返回 {@link Result.Rejected}（稳定 error code {@value
  * #REJECTION_CODE}）；只有 repository / registry 等基础设施异常向上传播，由 ThreadProcessor reschedule。
  */
@@ -226,8 +226,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + "/"
               + selection.modelName());
     }
-    ModelVariant effectiveVariant = withReasoningEffort(variant, settings.thinkingLevel());
-    if (effectiveVariant.reasoningEffort() != null && !parsedModel.reasoning()) {
+    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
       throw rejection(
           "model does not support reasoning: "
               + selection.providerName()
@@ -245,7 +244,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     ProviderRequest providerRequest =
         providerRequest(
             descriptor,
-            effectiveVariant,
+            variant,
             agent.getSystemPrompt(),
             skillBindings,
             subagentBindings,
@@ -265,10 +264,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 压缩 resolver 路径：只使用当前 branch 的 model/provider/variant/thinking 与冻结切分事实构造请求——不查 Agent system
-   * prompt、不查 plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。
-   * 永远构建一个 SYSTEM（summarization system prompt）+ 一个 USER（conversation + summary prompt）请求；输出上限为
-   * min(有效 model/variant 输出上限, floor(0.8|0.5 * reserveTokens))。
+   * 压缩 resolver 路径：只使用当前 branch 的 model/provider/variant 与冻结切分事实构造请求——不查 Agent system prompt、不查
+   * plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。 永远构建一个
+   * SYSTEM（summarization system prompt）+ 一个 USER（conversation + summary prompt）请求；输出上限为 min(有效
+   * model/variant 输出上限, floor(0.8|0.5 * reserveTokens))。
    */
   private ModelInvocationRequest resolveCompaction(
       EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
@@ -290,8 +289,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + " variant="
               + selection.variant());
     }
-    ModelVariant baseVariant = withReasoningEffort(variant, settings.thinkingLevel());
-    if (baseVariant.reasoningEffort() != null && !parsedModel.reasoning()) {
+    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
       throw rejection(
           "model does not support reasoning: "
               + selection.providerName()
@@ -305,20 +303,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
     // 输出上限恒为 min(模型/variant 输出上限, 阶段预算)：variant 未显式设置时回退到模型全局
     // limit.output（parser 已保证 variant <= model limit，且 limit.output <= limit.context <= int）。
     int maxOutput =
-        baseVariant.maxOutputTokens() == null
+        variant.maxOutputTokens() == null
             ? (int) Math.min(parsedModel.maxOutputTokens(), budget)
-            : Math.min(baseVariant.maxOutputTokens(), budget);
+            : Math.min(variant.maxOutputTokens(), budget);
     ModelVariant compactionVariant =
         new ModelVariant(
-            baseVariant.id(),
+            variant.id(),
             maxOutput,
-            baseVariant.temperature(),
-            baseVariant.topP(),
-            baseVariant.topK(),
-            baseVariant.frequencyPenalty(),
-            baseVariant.presencePenalty(),
-            baseVariant.stopSequences(),
-            baseVariant.reasoningEffort());
+            variant.temperature(),
+            variant.topP(),
+            variant.topK(),
+            variant.frequencyPenalty(),
+            variant.presencePenalty(),
+            variant.stopSequences(),
+            variant.reasoningEffort());
     List<AgentMessage> semanticMessages = new ArrayList<>();
     semanticMessages.add(AgentMessage.system(CompactionPrompts.summarizationSystemPrompt()));
     String userPrompt =
@@ -563,20 +561,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
         .filter(variant -> variant.id().equals(name))
         .findFirst()
         .orElse(null);
-  }
-
-  /** BranchSettings.thinkingLevel 是冻结的 reasoning effort override；其余 variant 字段原样保留。 */
-  private static ModelVariant withReasoningEffort(ModelVariant variant, String thinkingLevel) {
-    return new ModelVariant(
-        variant.id(),
-        variant.maxOutputTokens(),
-        variant.temperature(),
-        variant.topP(),
-        variant.topK(),
-        variant.frequencyPenalty(),
-        variant.presencePenalty(),
-        variant.stopSequences(),
-        thinkingLevel);
   }
 
   private static PromptCachePolicy cachePolicy(ProviderFactory providerFactory) {

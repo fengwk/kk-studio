@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.core.ai.catalog.model.runtime.AgentModelRuntimeConfig
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -23,8 +22,6 @@ import java.util.Objects;
 /** 按最新 Agent/Model catalog 为新建或恢复的子 Agent 物化完整 branch settings。 */
 @Component
 public final class AgentBranchSettingsMaterializer {
-
-  private static final String DEFAULT_THINKING_LEVEL = "off";
 
   private final AgentDefinitionRepository agentRepository;
   private final AgentModelRepository modelRepository;
@@ -72,17 +69,14 @@ public final class AgentBranchSettingsMaterializer {
         agent.getVariant() == null || agent.getVariant().isBlank()
             ? parsed.defaultVariant()
             : agent.getVariant();
-    ModelVariant variant =
-        parsed.variants().stream()
-            .filter(candidate -> candidate.id().equals(variantName))
-            .findFirst()
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "subagent model variant not found: "
-                            + agentName
-                            + " variant="
-                            + variantName));
+    // 校验所选 variant 存在于 catalog；ModelVariant 字段由 Resolver 在运行时按引用读取。
+    parsed.variants().stream()
+        .filter(candidate -> candidate.id().equals(variantName))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "subagent model variant not found: " + agentName + " variant=" + variantName));
     LinkedHashSet<String> activeTools = new LinkedHashSet<>(config.getTools());
     if (!config.getSkills().isEmpty()) {
       activeTools.add(LoadSkillTool.NAME);
@@ -94,7 +88,6 @@ public final class AgentBranchSettingsMaterializer {
         environmentName,
         agent.getName(),
         new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName),
-        variant.reasoningEffort() == null ? DEFAULT_THINKING_LEVEL : variant.reasoningEffort(),
         List.copyOf(activeTools));
   }
 }

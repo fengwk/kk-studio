@@ -67,11 +67,7 @@ class BranchViewTest {
   private static EntryPath pathWithCustomEntries() {
     BranchSettings settings =
         new BranchSettings(
-            null,
-            "coding",
-            new ModelSelection("anthropic", "claude-sonnet", "default"),
-            "high",
-            List.of());
+            null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), List.of());
     return new EntryPath(
         List.of(
             new Entry(1L, 10L, null, new RootPayload(settings), NOW),

@@ -45,9 +45,9 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | Chat | 保存可见发送设置 `agentName`、可空默认 `environmentName`、`yoloEnabled` 的持久对象 |
 | Session | append-only Entry Tree 的边界 |
 | Entry | 语义持久事实：`ROOT`、`TURN_START`、`MESSAGE`、`CUSTOM`、`CUSTOM_MESSAGE`、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED`、`COMPACTION`、`TURN_END` |
-| BranchSettings | Entry 分支的完整不可变设置快照（environmentName/agentName/model/thinkingLevel/activeTools） |
+| BranchSettings | Entry 分支的完整不可变设置快照（environmentName/agentName/model/activeTools） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
-| ThreadCommand | 有序 mailbox，八类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_THINKING_LEVEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
+| ThreadCommand | 有序 mailbox，七类：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO` |
 | ModelInvocation | 一次冻结 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO）的 Provider 调用 |
 | ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，非空 effects 只允许属于 terminal `SUCCEEDED` |
 | SubagentBinding | 冻结在 ModelInvocationRequest 中的子 Agent 名称 + 描述 allowlist 快照；task 执行绝不依据后续 Agent 配置扩权 |
@@ -99,7 +99,7 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `GET /api/ai/chat/{chatId}/threads` | Chat-scoped Thread 全量列表（按关联时间从新到旧） |
 | `POST /api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT、Thread 并关联 Chat |
 | `GET /api/ai/runtime/threads/{threadId}/snapshot` | 单一 Thread 一致投影 |
-| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（八类），202 |
+| `POST /api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（七类），202 |
 | `PUT /api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |

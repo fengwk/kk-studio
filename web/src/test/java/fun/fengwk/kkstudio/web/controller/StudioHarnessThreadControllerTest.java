@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -100,12 +101,11 @@ class StudioHarnessThreadControllerTest {
             {"type": "SET_MODEL",
              "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
              "clientCommandId": "c-3"},
-            {"type": "SET_THINKING_LEVEL", "thinkingLevel": "high", "clientCommandId": "c-4"},
-            {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "c-5"},
-            {"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "c-6"},
+            {"type": "SET_ACTIVE_TOOLS", "activeTools": ["web_search"], "clientCommandId": "c-4"},
+            {"type": "SET_YOLO", "yoloEnabled": true, "clientCommandId": "c-5"},
             {"type": "SET_ENVIRONMENT",
-             "environmentName": "123e4567-e89b-12d3-a456-426614174000", "clientCommandId": "c-7"},
-            {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "c-8"}
+             "environmentName": "123e4567-e89b-12d3-a456-426614174000", "clientCommandId": "c-6"},
+            {"type": "CUSTOM_MESSAGE", "role": "SYSTEM", "content": "rules", "clientCommandId": "c-7"}
           ]
         }
         """;
@@ -127,16 +127,16 @@ class StudioHarnessThreadControllerTest {
     assertEquals(1L, batch.threadId());
     assertEquals(3L, batch.expectedHeadEntryId());
     assertEquals(4L, batch.expectedNextCommandSequence());
-    assertEquals(8, batch.commands().size());
+    assertEquals(7, batch.commands().size());
     assertEquals(ThreadCommandType.USER_MESSAGE, batch.commands().get(0).payload().type());
     assertEquals(
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}",
         COMMAND_PAYLOADS.encode(batch.commands().get(0).payload()));
-    assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(6).payload().type());
+    assertEquals(ThreadCommandType.SET_ENVIRONMENT, batch.commands().get(5).payload().type());
     assertEquals(
         "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}",
-        COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
-    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(7).payload().type());
+        COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
+    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, batch.commands().get(6).payload().type());
   }
 
   @Test
@@ -157,6 +157,27 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void enqueueCommandsRejectsUnknownCommandFieldAsBadRequest() throws Exception {
+    String body =
+        """
+        {
+          "expectedHeadEntryId": "3",
+          "expectedNextCommandSequence": 4,
+          "commands": [
+            {"type": "SET_YOLO", "yoloEnabled": true, "unexpected": true, "clientCommandId": "c-1"}
+          ]
+        }
+        """;
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/1/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isBadRequest());
+    verify(runtime, never()).enqueueCommands(any(ThreadCommandBatch.class));
   }
 
   @Test
@@ -279,9 +300,9 @@ class StudioHarnessThreadControllerTest {
   }
 
   @Test
-  void serializesEightCommandBatchJson() throws Exception {
+  void serializesSevenCommandBatchJson() throws Exception {
     when(runtime.enqueueCommands(any(ThreadCommandBatch.class))).thenReturn(List.of());
-    // 保证 mapper 对 8 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
+    // 保证 mapper 对 7 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
     String body =
         """
         {
@@ -292,10 +313,9 @@ class StudioHarnessThreadControllerTest {
             {"type": "CUSTOM_MESSAGE", "role": "USER", "content": "custom", "clientCommandId": "c-2"},
             {"type": "SET_AGENT", "agentName": "a", "clientCommandId": "c-3"},
             {"type": "SET_MODEL", "model": {"providerName": "p", "modelName": "m", "variant": "v"}, "clientCommandId": "c-4"},
-            {"type": "SET_THINKING_LEVEL", "thinkingLevel": "low", "clientCommandId": "c-5"},
-            {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "c-6"},
-            {"type": "SET_YOLO", "yoloEnabled": false, "clientCommandId": "c-7"},
-            {"type": "SET_ENVIRONMENT", "environmentName": null, "clientCommandId": "c-8"}
+            {"type": "SET_ACTIVE_TOOLS", "activeTools": [], "clientCommandId": "c-5"},
+            {"type": "SET_YOLO", "yoloEnabled": false, "clientCommandId": "c-6"},
+            {"type": "SET_ENVIRONMENT", "environmentName": null, "clientCommandId": "c-7"}
           ]
         }
         """;
@@ -309,11 +329,11 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
     verify(runtime).enqueueCommands(captor.capture());
     ThreadCommandBatch batch = captor.getValue();
-    assertEquals(8, batch.commands().size());
+    assertEquals(7, batch.commands().size());
     assertEquals(
-        "{\"environmentName\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(7).payload()));
+        "{\"environmentName\":null}", COMMAND_PAYLOADS.encode(batch.commands().get(6).payload()));
     assertEquals(
-        "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(5).payload()));
+        "{\"activeTools\":[]}", COMMAND_PAYLOADS.encode(batch.commands().get(4).payload()));
   }
 
   @Test

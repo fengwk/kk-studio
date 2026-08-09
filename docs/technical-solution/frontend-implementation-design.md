@@ -38,7 +38,6 @@ interface BranchDraft {
   environmentName: string | null   // canonical 路由名称
   agentName: string
   model: { providerName, modelName, variant }
-  thinkingLevel: string
   activeTools: string[]
   yoloEnabled: boolean
 }
@@ -72,7 +71,7 @@ POST /api/ai/runtime/threads/{threadId}/commands
 
 ```text
 SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
-           SET_THINKING_LEVEL -> SET_ACTIVE_TOOLS -> SET_YOLO）
+           SET_ACTIVE_TOOLS -> SET_YOLO）
 + USER_MESSAGE（不携带 role）
 ```
 

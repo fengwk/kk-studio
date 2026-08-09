@@ -28,7 +28,6 @@ class CommandHarvestReducerTest {
           ENV_A,
           "coding",
           new ModelSelection("anthropic", "claude-sonnet", "default"),
-          "medium",
           List.of("read"));
   private final CommandHarvestReducer reducer = new CommandHarvestReducer();
 
@@ -52,19 +51,17 @@ class CommandHarvestReducerTest {
                     5L,
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
-                queued(6L, 6L, new SetThinkingLevelCommandPayload("high")),
-                queued(7L, 7L, new SetActiveToolsCommandPayload(List.of("grep", "read", "grep"))),
-                queued(8L, 8L, new SetEnvironmentCommandPayload(ENV_B)),
-                queued(9L, 9L, new SetEnvironmentCommandPayload(null)),
-                queued(10L, 10L, new SetYoloCommandPayload(true)),
-                queued(11L, 11L, new CustomMessageCommandPayload(system("instruction")))));
+                queued(6L, 6L, new SetActiveToolsCommandPayload(List.of("grep", "read", "grep"))),
+                queued(7L, 7L, new SetEnvironmentCommandPayload(ENV_B)),
+                queued(8L, 8L, new SetEnvironmentCommandPayload(null)),
+                queued(9L, 9L, new SetYoloCommandPayload(true)),
+                queued(10L, 10L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(
         new BranchSettings(
             null,
             "agent-b",
             new ModelSelection("anthropic", "claude-opus", "thinking"),
-            "high",
             List.of("grep", "read")),
         result.branchSettings());
     assertEquals(true, result.yoloEnabled());
@@ -86,7 +83,6 @@ class CommandHarvestReducerTest {
     assertEquals(ENV_A, result.branchSettings().environmentName());
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
-    assertEquals("medium", result.branchSettings().thinkingLevel());
     assertEquals(List.of("read"), result.branchSettings().activeTools());
     assertEquals(true, result.yoloEnabled());
   }

@@ -130,7 +130,6 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                               null,
                               "default-assistant",
                               new ModelSelection("stub", "acceptance-stub", "default"),
-                              "off",
                               List.of())),
                       Instant.parse("2026-08-02T00:00:00Z"))));
       TurnResolver.Result resolution = turnResolver.resolve(1L, path, false, null);

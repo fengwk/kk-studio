@@ -311,7 +311,6 @@ class GoalPluginTest {
                     null,
                     "assistant",
                     new ModelSelection("provider", "model", "default"),
-                    "medium",
                     List.of())),
             T0);
     return new BranchView(new EntryPath(List.of(root)));

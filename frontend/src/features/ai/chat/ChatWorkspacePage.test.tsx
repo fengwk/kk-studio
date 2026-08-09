@@ -129,7 +129,6 @@ function branchSettings(
     environmentName: null,
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    thinkingLevel: 'off',
     activeTools: [],
     ...overrides,
   }

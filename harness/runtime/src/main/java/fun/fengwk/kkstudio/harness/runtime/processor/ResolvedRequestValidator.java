@@ -16,7 +16,7 @@ import java.util.Objects;
  * <p>Resolver 返回的 {@link ModelInvocationRequest} 中可以直接对照 candidate {@link TurnPlan#candidatePath()}
  * 最新 {@link BranchSettings} 的字段只有：{@code yoloEnabled}、route （{@code
  * environmentName}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与
- * bindings 一一对应，只需对照名称序列）。agentName / thinkingLevel 在 request 中没有直接的 canonical 字段，不做校验。
+ * bindings 一一对应，只需对照名称序列）。agentName 在 request 中没有直接的 canonical 字段，不做校验。
  *
  * <p>压缩 turn（{@code plan.preparation()} 非空）必须携带与 preparation 逐字段一致的 {@link CompactionRequest}
  * 元数据与相同 {@code contextWindow}，且 tool/skill binding 必须为空（正常 turn 的 tool 名称序列校验不适用于压缩请求）； 正常 turn

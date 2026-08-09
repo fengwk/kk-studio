@@ -52,7 +52,7 @@ COMPACTION, TURN_END
 
 ```text
 USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
-SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO
+SET_ACTIVE_TOOLS, SET_YOLO
 ```
 
 Chat-scoped Thread 创建事务按 Session → ROOT（完整 `BranchSettings`）→ Thread 的顺序写入，Thread head 直接指向 ROOT（`nextCommandSequence=1`、`revision=0`）。`harness_work` 是唯一调度 mailbox（见 [harness-storage-runtime.md](harness-storage-runtime.md)）。

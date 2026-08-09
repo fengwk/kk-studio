@@ -31,7 +31,7 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("environmentName", "agentName", "model", "thinkingLevel", "activeTools");
+      orderedSet("environmentName", "agentName", "model", "activeTools");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -74,7 +74,6 @@ final class HistoryValueCodecs {
     }
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
-    node.put("thinkingLevel", settings.thinkingLevel());
     ArrayNode activeTools = node.putArray("activeTools");
     for (String activeTool : settings.activeTools()) {
       activeTools.add(activeTool);
@@ -89,7 +88,6 @@ final class HistoryValueCodecs {
         nullableEnvironmentName(node, "environmentName", context),
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"),
-        requiredText(node, "thinkingLevel", context),
         decodeActiveTools(node.get("activeTools"), context));
   }
 

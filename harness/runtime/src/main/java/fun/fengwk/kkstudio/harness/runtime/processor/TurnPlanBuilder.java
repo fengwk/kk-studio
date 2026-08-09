@@ -33,13 +33,12 @@ import java.util.function.LongSupplier;
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath、queued Command 快照与 YOLO 开关构造完整合法
  * candidate EntryPath，不接触 Store、不写任何 durable 状态。
  *
- * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_THINKING_LEVEL / SET_ACTIVE_TOOLS /
- * SET_YOLO）与 SYSTEM CUSTOM_MESSAGE（用于 task soft steering），保留 USER_MESSAGE、USER CUSTOM_MESSAGE 与
- * SET_ENVIRONMENT；INPUT 消费 cutoff 内完整 queued 快照并先做可选 history normalization（synthetic
- * UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的
- * USER/CUSTOM Message；COMPACTION 只追加 TURN_START(COMPACTION)（settings 快照为当前 branch），消费零
- * Command，切分事实由调用方传入的 {@link CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt
- * 使用调用方时钟。
+ * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ACTIVE_TOOLS / SET_YOLO）与 SYSTEM
+ * CUSTOM_MESSAGE（用于 task soft steering），保留 USER_MESSAGE、USER CUSTOM_MESSAGE 与 SET_ENVIRONMENT；INPUT
+ * 消费 cutoff 内完整 queued 快照并先做可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult +
+ * CANCELLED TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；COMPACTION 只追加
+ * TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的 {@link
+ * CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
 final class TurnPlanBuilder {
 
@@ -163,7 +162,7 @@ final class TurnPlanBuilder {
       return false;
     }
     return switch (command.type()) {
-      case SET_AGENT, SET_MODEL, SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO -> true;
+      case SET_AGENT, SET_MODEL, SET_ACTIVE_TOOLS, SET_YOLO -> true;
       case CUSTOM_MESSAGE -> ((CustomMessageCommandPayload) command.payload()).message().role()
           == AgentMessageRole.SYSTEM;
       case USER_MESSAGE, SET_ENVIRONMENT -> false;

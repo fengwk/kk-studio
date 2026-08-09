@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
@@ -23,9 +24,11 @@ public class HarnessBranchSettingsDTO {
   /** 必填 provider/model/variant 选择（三项均非空白）。 */
   private HarnessModelSelectionDTO model;
 
-  /** 必填 thinking level（canonical 名）：冻结的 reasoning effort 覆盖，运行时覆盖到所选 variant 的 reasoningEffort。 */
-  private String thinkingLevel;
-
   /** 激活工具短名列表（顺序敏感，元素 ≤128 字符、去重）；默认不可变空列表。 */
   private List<String> activeTools = List.of();
+
+  @JsonAnySetter
+  public void rejectUnknownField(String name, Object value) {
+    throw new IllegalArgumentException("unknown branch settings field: " + name);
+  }
 }

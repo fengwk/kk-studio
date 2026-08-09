@@ -927,7 +927,6 @@ class ThreadContextClassifierTest {
         new EnvironmentName("env-2"),
         "agent",
         new ModelSelection("provider", "model", "v1"),
-        "low",
         List.of());
   }
 

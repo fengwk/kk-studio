@@ -39,7 +39,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import java.util.List;
 
 /**
- * 映射测试：8 类 command 的严格字段规则与 canonical payload JSON、严格 decimal 解析、全部快照状态派生
+ * 映射测试：7 类 command 的严格字段规则与 canonical payload JSON、严格 decimal 解析、全部快照状态派生
  * （IDLE/CONTINUATION_DUE/MODEL_&lt;status&gt;/TOOL_&lt;status&gt;/APPLYING）与
  * create/head/stop/approval 幂等请求字段。
  */
@@ -68,7 +68,7 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
-  void mapsAllEightCommandTypesToCanonicalPayloadJson() {
+  void mapsAllSevenCommandTypesToCanonicalPayloadJson() {
     HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-user");
     user.setContent("hello");
 
@@ -86,9 +86,6 @@ class HarnessRuntimeWebMapperTest {
     selection.setVariant("default");
     model.setModel(selection);
 
-    HarnessThreadCommandCreateDTO thinking = command("SET_THINKING_LEVEL", "c-thinking");
-    thinking.setThinkingLevel("high");
-
     HarnessThreadCommandCreateDTO tools = command("SET_ACTIVE_TOOLS", "c-tools");
     tools.setActiveTools(List.of("web_search", "code_interpreter"));
 
@@ -100,9 +97,9 @@ class HarnessRuntimeWebMapperTest {
 
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(
-            "1", batch(user, custom, agent, model, thinking, tools, yolo, environment));
+            "1", batch(user, custom, agent, model, tools, yolo, environment));
 
-    assertEquals(8, batch.commands().size());
+    assertEquals(7, batch.commands().size());
     assertEquals(1L, batch.threadId());
     assertEquals(3L, batch.expectedHeadEntryId());
     assertEquals(4L, batch.expectedNextCommandSequence());
@@ -124,16 +121,14 @@ class HarnessRuntimeWebMapperTest {
         ThreadCommandType.SET_MODEL,
         "{\"model\":{\"providerName\":\"openai\",\"modelName\":\"gpt-5\",\"variant\":\"default\"}}");
     assertExactPayload(
-        batch, 4, ThreadCommandType.SET_THINKING_LEVEL, "{\"thinkingLevel\":\"high\"}");
-    assertExactPayload(
         batch,
-        5,
+        4,
         ThreadCommandType.SET_ACTIVE_TOOLS,
         "{\"activeTools\":[\"web_search\",\"code_interpreter\"]}");
-    assertExactPayload(batch, 6, ThreadCommandType.SET_YOLO, "{\"yoloEnabled\":true}");
+    assertExactPayload(batch, 5, ThreadCommandType.SET_YOLO, "{\"yoloEnabled\":true}");
     assertExactPayload(
         batch,
-        7,
+        6,
         ThreadCommandType.SET_ENVIRONMENT,
         "{\"environmentName\":\"123e4567-e89b-12d3-a456-426614174000\"}");
   }
@@ -325,7 +320,6 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("env-1", thread.path("branchSettings").path("environmentName").asText());
     assertEquals("default-assistant", thread.path("branchSettings").path("agentName").asText());
     assertEquals("gpt-5", thread.path("branchSettings").path("model").path("modelName").asText());
-    assertEquals("low", thread.path("branchSettings").path("thinkingLevel").asText());
     assertEquals("web_search", thread.path("branchSettings").path("activeTools").get(0).asText());
 
     assertEquals(4, json.path("entries").size());
@@ -404,7 +398,6 @@ class HarnessRuntimeWebMapperTest {
     selection.setModelName("gpt-5");
     selection.setVariant("default");
     settings.setModel(selection);
-    settings.setThinkingLevel("low");
     settings.setActiveTools(List.of("web_search"));
     create.setBranchSettings(settings);
     create.setYoloEnabled(false);

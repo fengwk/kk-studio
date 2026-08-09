@@ -313,7 +313,6 @@ create table harness_thread_command (
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_MODEL',
-            'SET_THINKING_LEVEL',
             'SET_ACTIVE_TOOLS',
             'SET_YOLO',
             'SET_ENVIRONMENT'
