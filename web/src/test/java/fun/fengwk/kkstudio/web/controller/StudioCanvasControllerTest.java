@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,104 +23,76 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.share.studio.ApplyCanvasCommandsRequestDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.studio.CreateCanvasRequestDTO;
+import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
+import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNode;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNodeKind;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.NodeTransform;
+import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
-/**
- * {@link StudioCanvasController} 的 web 层覆盖。
- *
- * <p>持久化适配器已由 {@code DurableCanvasServiceTest} 端到端覆盖；本测试仅验证 HTTP 映射与状态码翻译。
- */
-public class StudioCanvasControllerTest {
+/** Canvas HTTP typed DTO、严格字符串和状态码映射。 */
+class StudioCanvasControllerTest {
+
+  private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
 
   private MockMvc mockMvc;
   private ObjectMapper objectMapper;
-  private CanvasQueryService canvasQueryService;
-  private CanvasCommandService canvasCommandService;
+  private CanvasQueryService queryService;
+  private CanvasCommandService commandService;
 
   @BeforeEach
-  public void setUp() {
-    objectMapper = new ObjectMapper();
-    canvasQueryService = Mockito.mock(CanvasQueryService.class);
-    canvasCommandService = Mockito.mock(CanvasCommandService.class);
-    MappingJackson2HttpMessageConverter converter =
-        new MappingJackson2HttpMessageConverter(objectMapper);
+  void setUp() {
+    objectMapper = new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    queryService = Mockito.mock(CanvasQueryService.class);
+    commandService = Mockito.mock(CanvasCommandService.class);
     mockMvc =
-        standaloneSetup(new StudioCanvasController(canvasQueryService, canvasCommandService))
-            .setMessageConverters(converter)
+        standaloneSetup(new StudioCanvasController(queryService, commandService))
+            .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
   }
 
-  private CanvasDocument sampleDocument() {
-    return new CanvasDocument(42L, "demo", 0L, "{\"x\":80,\"y\":20,\"scale\":0.6}");
-  }
-
-  private CanvasSnapshot sampleSnapshot() {
-    return new CanvasSnapshot(
-        sampleDocument(),
-        List.of(
-            new CanvasNode(
-                101L,
-                CanvasNodeKind.RESOURCE,
-                "text",
-                "hello",
-                new NodeTransform(0d, 0d, 100d, 100d),
-                "{\"text\":\"hi\"}")),
-        List.of());
-  }
-
   @Test
-  public void listReturnsCanvasDocumentDtosWithoutRemovedFields() throws Exception {
-    when(canvasQueryService.listDocuments()).thenReturn(List.of(sampleDocument()));
+  void listAndSnapshotExposeResourceFunctionGroupAndIdentityContracts() throws Exception {
+    when(queryService.listDocuments()).thenReturn(List.of(document()));
+    when(queryService.findSnapshot(42L)).thenReturn(Optional.of(snapshot()));
 
     mockMvc
         .perform(get("/api/canvases"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value("OK"))
         .andExpect(jsonPath("$.data[0].id").value("42"))
-        .andExpect(jsonPath("$.data[0].title").value("demo"))
-        .andExpect(jsonPath("$.data[0].revision").value("0"))
-        .andExpect(
-            jsonPath("$.data[0].homeViewportJson").value("{\"x\":80,\"y\":20,\"scale\":0.6}"));
+        .andExpect(jsonPath("$.data[0].graphRevision").value("3"))
+        .andExpect(jsonPath("$.data[0].homeViewportJson").doesNotExist());
+
+    mockMvc
+        .perform(get("/api/canvases/42"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].id").value("201"))
+        .andExpect(jsonPath("$.data.nodes[1].function.modelKey").value("model"))
+        .andExpect(jsonPath("$.data.groups[0].id").value("301"))
+        .andExpect(jsonPath("$.data.links[0].canvasId").value("42"))
+        .andExpect(jsonPath("$.data.links[0].id").doesNotExist());
   }
 
   @Test
-  public void getReturnsSnapshotAndMaps404WhenCanvasMissing() throws Exception {
-    when(canvasQueryService.findSnapshot(99L)).thenReturn(Optional.of(sampleSnapshot()));
-
-    mockMvc
-        .perform(get("/api/canvases/99"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.document.id").value("42"))
-        .andExpect(jsonPath("$.data.nodes[0].id").value("101"))
-        .andExpect(jsonPath("$.data.nodes[0].kind").value("RESOURCE"));
-
-    when(canvasQueryService.findSnapshot(404L)).thenReturn(Optional.empty());
-    mockMvc.perform(get("/api/canvases/404")).andExpect(status().isNotFound());
-  }
-
-  @Test
-  public void createMapsMissingAndExplicitBodies() throws Exception {
-    when(canvasCommandService.createCanvas(any())).thenReturn(sampleDocument());
-
-    mockMvc
-        .perform(post("/api/canvases"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.code").value("CREATED"));
-
+  void createKeepsExistingRouteWithNewDocumentContract() throws Exception {
+    when(commandService.createCanvas(any())).thenReturn(document());
     CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
     body.setTitle("board");
+
     mockMvc
         .perform(
             post("/api/canvases")
@@ -126,138 +100,150 @@ public class StudioCanvasControllerTest {
                 .content(objectMapper.writeValueAsBytes(body)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value("CREATED"))
-        .andExpect(jsonPath("$.data.id").value("42"));
-    verify(canvasCommandService).createCanvas("board");
+        .andExpect(jsonPath("$.data.graphRevision").value("3"));
+    verify(commandService).createCanvas("board");
   }
 
   @Test
-  public void createMapsIllegalArgumentTo400() throws Exception {
-    when(canvasCommandService.createCanvas(any()))
-        .thenThrow(new IllegalArgumentException("title must not be blank"));
-
-    CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
-    body.setTitle(" ");
-
-    mockMvc
-        .perform(
-            post("/api/canvases")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  public void applyCommandsReturnsSnapshotOnSuccess() throws Exception {
-    when(canvasCommandService.applyCommands(anyLong(), anyLong(), any(), any()))
-        .thenReturn(sampleSnapshot());
-
-    ApplyCanvasCommandsRequestDTO body = new ApplyCanvasCommandsRequestDTO();
-    body.setBaseRevision("0");
-    body.setCommandId("cmd-1");
-    body.setCommandsJson(
-        "[{\"type\":\"create_text_node\",\"name\":\"hi\",\"text\":\"hello\",\"x\":0,\"y\":0,"
-            + "\"width\":120,\"height\":80}]");
+  void typedCommandBodyMapsToDomainRecords() throws Exception {
+    when(commandService.applyCommands(anyLong(), anyLong(), any(), anyList()))
+        .thenReturn(snapshot());
+    ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
+    request.setExpectedRevision("3");
+    request.setCommandId("cmd-1");
+    request.setCommands(
+        List.of(
+            new CanvasCommandDTO.CreateTextNode(
+                "note", "hello", new CanvasTransformDTO(1, 2, 100, 80))));
 
     mockMvc
         .perform(
             post("/api/canvases/42/commands")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.document.id").value("42"))
-        .andExpect(jsonPath("$.data.nodes[0].kind").value("RESOURCE"));
+                .content(objectMapper.writeValueAsBytes(request)))
+        .andExpect(status().isOk());
 
-    verify(canvasCommandService)
-        .applyCommands(eq(42L), eq(0L), eq("cmd-1"), eq(body.getCommandsJson()));
+    verify(commandService)
+        .applyCommands(
+            eq(42L),
+            eq(3L),
+            eq("cmd-1"),
+            eq(
+                List.of(
+                    new CanvasCommand.CreateTextNode(
+                        "note", "hello", new CanvasTransform(1, 2, 100, 80)))));
   }
 
   @Test
-  public void applyCommandsMapsBadRevisionTo400() throws Exception {
-    Map<String, String> body =
-        Map.of("baseRevision", "not-a-number", "commandId", "c", "commandsJson", "[]");
-    mockMvc
-        .perform(
-            post("/api/canvases/42/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isBadRequest());
-    verify(canvasCommandService, never()).applyCommands(anyLong(), anyLong(), any(), any());
-  }
-
-  @Test
-  public void applyCommandsMapsBadCommandsJsonTo400() throws Exception {
-    when(canvasCommandService.applyCommands(anyLong(), anyLong(), any(), any()))
-        .thenThrow(new IllegalArgumentException("commandsJson must be a JSON array"));
-    ApplyCanvasCommandsRequestDTO body = new ApplyCanvasCommandsRequestDTO();
-    body.setBaseRevision("0");
-    body.setCommandId("c");
-    body.setCommandsJson("{}");
+  void revisionAndIdempotencyConflictsMapTo409() throws Exception {
+    when(commandService.applyCommands(anyLong(), anyLong(), any(), anyList()))
+        .thenThrow(new CanvasConflictException(CanvasConflictException.Reason.REVISION_CONFLICT));
 
     mockMvc
         .perform(
             post("/api/canvases/42/commands")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isBadRequest());
-  }
-
-  @Test
-  public void applyCommandsMapsRevisionConflictTo409() throws Exception {
-    when(canvasCommandService.applyCommands(anyLong(), anyLong(), any(), any()))
-        .thenThrow(new IllegalStateException("REVISION_CONFLICT"));
-    ApplyCanvasCommandsRequestDTO body = new ApplyCanvasCommandsRequestDTO();
-    body.setBaseRevision("0");
-    body.setCommandId("c");
-    body.setCommandsJson("[]");
-
-    mockMvc
-        .perform(
-            post("/api/canvases/42/commands")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
+                .content(validCommandJson()))
         .andExpect(status().isConflict());
   }
 
   @Test
-  public void applyCommandsMapsIdempotencyConflictTo409() throws Exception {
-    when(canvasCommandService.applyCommands(anyLong(), anyLong(), any(), any()))
-        .thenThrow(new IllegalStateException("IDEMPOTENCY_CONFLICT"));
-    ApplyCanvasCommandsRequestDTO body = new ApplyCanvasCommandsRequestDTO();
-    body.setBaseRevision("0");
-    body.setCommandId("c");
-    body.setCommandsJson("[]");
-
+  void idsAndRevisionRequireCanonicalDecimalStrings() throws Exception {
+    mockMvc.perform(get("/api/canvases/0")).andExpect(status().isBadRequest());
+    mockMvc.perform(get("/api/canvases/01")).andExpect(status().isBadRequest());
     mockMvc
         .perform(
             post("/api/canvases/42/commands")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
-        .andExpect(status().isConflict());
+                .content(validCommandJson().replace("\"3\"", "\"03\"")))
+        .andExpect(status().isBadRequest());
+    verify(commandService, never()).applyCommands(anyLong(), anyLong(), any(), anyList());
   }
 
   @Test
-  public void applyCommandsMissingBaseRevisionReturns400() throws Exception {
-    Map<String, String> body = Map.of("commandId", "c", "commandsJson", "[]");
+  void unknownFieldsAndUnknownCommandTypesAreRejectedByJackson() throws Exception {
     mockMvc
         .perform(
             post("/api/canvases/42/commands")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(body)))
+                .content(
+                    """
+                    {"expectedRevision":"3","commandId":"c","extra":true,
+                     "commands":[{"type":"DELETE_NODE","nodeId":"1"}]}
+                    """))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            post("/api/canvases/42/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedRevision":"3","commandId":"c",
+                     "commands":[{"type":"OLD_COMMAND"}]}
+                    """))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            post("/api/canvases/42/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedRevision":"3","commandId":"c",
+                     "commands":[{"type":"DELETE_NODE","nodeId":"1","legacy":true}]}
+                    """))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            post("/api/canvases/42/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"expectedRevision":"3","commandId":"c",
+                     "commands":[{"type":"CREATE_TEXT_NODE","name":"n","markdown":"x",
+                       "transform":{"x":0,"y":0,"width":1,"height":1,"legacy":true}}]}
+                    """))
         .andExpect(status().isBadRequest());
   }
 
-  @Test
-  public void getMapsLinks() throws Exception {
-    CanvasSnapshot withLink =
-        new CanvasSnapshot(
-            sampleDocument(), sampleSnapshot().nodes(), List.of(new CanvasLink(900L, 101L, 102L)));
-    when(canvasQueryService.findSnapshot(42L)).thenReturn(Optional.of(withLink));
+  private String validCommandJson() {
+    return """
+        {"expectedRevision":"3","commandId":"c",
+         "commands":[{"type":"DELETE_NODE","nodeId":"101"}]}
+        """;
+  }
 
-    mockMvc
-        .perform(get("/api/canvases/42"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.links[0].id").value("900"))
-        .andExpect(jsonPath("$.data.links[0].sourceNodeId").value("101"))
-        .andExpect(jsonPath("$.data.links[0].targetNodeId").value("102"));
+  private CanvasDocument document() {
+    return new CanvasDocument(42, "demo", 3, NOW, NOW);
+  }
+
+  private CanvasSnapshot snapshot() {
+    CanvasResource resource =
+        new CanvasResource(
+            201, 42, CanvasResourceKind.TEXT, "text/markdown", "note", 5, "hello", "{}", NOW);
+    CanvasResourceNode ordinary =
+        new CanvasResourceNode(
+            101,
+            42,
+            "note",
+            new CanvasTransform(1, 2, 100, 80),
+            301L,
+            List.of(resource),
+            null,
+            null);
+    CanvasResourceNode function =
+        new CanvasResourceNode(
+            102,
+            42,
+            "fn",
+            new CanvasTransform(200, 2, 100, 80),
+            null,
+            List.of(),
+            new CanvasFunction("model", "{}"),
+            null);
+    return new CanvasSnapshot(
+        document(),
+        List.of(ordinary, function),
+        List.of(new CanvasGroup(301, 42, "group", new CanvasTransform(0, 0, 400, 200))),
+        List.of(new CanvasLink(42, 101, 102)));
   }
 }

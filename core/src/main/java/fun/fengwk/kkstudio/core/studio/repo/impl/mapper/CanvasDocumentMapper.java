@@ -17,15 +17,14 @@ import java.util.List;
 @Mapper
 public interface CanvasDocumentMapper extends BaseMapper {
 
-  String COLUMNS = "id, title, revision, home_viewport, updated_at as update_time";
+  String COLUMNS = "id, title, graph_revision, created_at, updated_at";
 
   @Insert(
       """
       insert into canvas_document (
-          id, title, revision, home_viewport, updated_at
+          id, title, graph_revision, created_at, updated_at
       ) values (
-          #{id}, #{title}, #{revision},
-          cast(#{homeViewportJson} as jsonb), current_timestamp
+          #{id}, #{title}, #{graphRevision}, current_timestamp, current_timestamp
       )
       """)
   int insert(CanvasDocumentDO document);
@@ -36,9 +35,9 @@ public interface CanvasDocumentMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "revision", property = "revision"),
-        @Result(column = "home_viewport", property = "homeViewportJson"),
-        @Result(column = "update_time", property = "updateTime")
+        @Result(column = "graph_revision", property = "graphRevision"),
+        @Result(column = "created_at", property = "createdAt"),
+        @Result(column = "updated_at", property = "updatedAt")
       })
   CanvasDocumentDO getById(@Param("id") long id);
 
@@ -49,15 +48,11 @@ public interface CanvasDocumentMapper extends BaseMapper {
   @Update(
       """
       update canvas_document
-      set title = #{title}, revision = #{revision},
-          home_viewport = cast(#{homeViewportJson} as jsonb),
-          updated_at = current_timestamp
-      where id = #{id} and revision = #{expectedRevision}
+      set graph_revision = #{graphRevision}, updated_at = current_timestamp
+      where id = #{id} and graph_revision = #{expectedRevision}
       """)
-  int updateRevisionAndTitle(
+  int compareAndSetRevision(
       @Param("id") long id,
       @Param("expectedRevision") long expectedRevision,
-      @Param("revision") long revision,
-      @Param("title") String title,
-      @Param("homeViewportJson") String homeViewportJson);
+      @Param("graphRevision") long graphRevision);
 }

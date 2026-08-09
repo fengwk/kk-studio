@@ -122,6 +122,17 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           "fk_canvas_link_target",
           () -> insertLink(conn, firstCanvasId, firstNodeId, secondNodeId));
     }
+
+    long resourceId = FIXTURE_IDS.incrementAndGet();
+    try (Connection conn = newConnection()) {
+      insertResource(conn, resourceId, secondCanvasId);
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_canvas_node_resource_resource",
+          () -> insertNodeResource(conn, firstCanvasId, firstNodeId, resourceId));
+    }
   }
 
   @Test
@@ -145,23 +156,23 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       assertTransactionConstraintViolation(
           conn,
           "ck_canvas_node_name_nonblank",
-          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "", 100, 100));
+          () -> insertNodeRow(conn, nodeId, canvasId, "", "", 100, 100));
     }
 
     // Node：零宽度被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_canvas_node_width_pos",
-          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 0, 100));
+          "ck_canvas_node_geometry",
+          () -> insertNodeRow(conn, nodeId, canvasId, "n", "n", 0, 100));
     }
 
     // Node：零高度被拒绝。
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_canvas_node_height_pos",
-          () -> insertNodeRow(conn, nodeId, canvasId, "RESOURCE", "n", 100, 0));
+          "ck_canvas_node_geometry",
+          () -> insertNodeRow(conn, nodeId, canvasId, "n", "n", 100, 0));
     }
 
     // Link：自环被拒绝。
@@ -182,7 +193,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_canvas_command_dedup_request_hash_length",
+          "ck_canvas_command_dedup_request_hash",
           () -> insertDedup(conn, canvasId, "cmd-ok", " "));
     }
 
@@ -197,10 +208,13 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     long canvasId = FIXTURE_IDS.incrementAndGet();
     long sourceNode = FIXTURE_IDS.incrementAndGet();
     long targetNode = FIXTURE_IDS.incrementAndGet();
+    long resourceId = FIXTURE_IDS.incrementAndGet();
     try (Connection conn = newConnection()) {
       insertCanvas(conn, canvasId);
       insertNode(conn, sourceNode, canvasId);
       insertNode(conn, targetNode, canvasId);
+      insertResource(conn, resourceId, canvasId);
+      insertNodeResource(conn, canvasId, sourceNode, resourceId);
       insertLink(conn, canvasId, sourceNode, targetNode);
     }
 
@@ -239,6 +253,17 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
         rs.next();
         assertEquals(0L, rs.getLong(1), "ON DELETE CASCADE must remove the link");
       }
+    }
+    try (Connection conn = newConnection()) {
+      assertEquals(
+          1L,
+          queryLong(conn, "select count(*) from canvas_resource where id = ?", resourceId),
+          "node deletion must retain immutable resources");
+      assertEquals(
+          0L,
+          queryLong(
+              conn, "select count(*) from canvas_node_resource where resource_id = ?", resourceId),
+          "node deletion must remove only its resource relation");
     }
   }
 
@@ -330,8 +355,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   private void insertCanvasRow(Connection conn, long id, String title) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_document (id, title, revision, home_viewport)"
-                + " values (?, ?, 0, '{}'::jsonb)")) {
+            "insert into canvas_document (id, title, graph_revision) values (?, ?, 0)")) {
       ps.setLong(1, id);
       ps.setString(2, title);
       assertEquals(1, ps.executeUpdate());
@@ -339,26 +363,27 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   private void insertNode(Connection conn, long id, long canvasId) throws SQLException {
-    insertNodeRow(conn, id, canvasId, "RESOURCE", "node", 100, 100);
+    String name = "node-" + id;
+    insertNodeRow(conn, id, canvasId, name, name, 100, 100);
   }
 
   private void insertNodeRow(
       Connection conn,
       long id,
       long canvasId,
-      String kind,
       String name,
+      String nameNormalized,
       double width,
       double height)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_node (id, canvas_id, kind, node_type, name, x, y, width, height,"
-                + " data) values (?, ?, ?, 'schema-test', ?, 0, 0, ?, ?, '{}'::jsonb)")) {
+            "insert into canvas_node (id, canvas_id, name, name_normalized, x, y, width, height)"
+                + " values (?, ?, ?, ?, 0, 0, ?, ?)")) {
       ps.setLong(1, id);
       ps.setLong(2, canvasId);
-      ps.setString(3, kind);
-      ps.setString(4, name);
+      ps.setString(3, name);
+      ps.setString(4, nameNormalized);
       ps.setDouble(5, width);
       ps.setDouble(6, height);
       assertEquals(1, ps.executeUpdate());
@@ -369,8 +394,9 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into canvas_command_dedup (canvas_id, command_id, request_hash)"
-                + " values (?, ?, ?)")) {
+            "insert into canvas_command_dedup"
+                + " (canvas_id, command_id, request_hash, applied_revision)"
+                + " values (?, ?, ?, 0)")) {
       ps.setLong(1, canvasId);
       ps.setString(2, commandId);
       ps.setString(3, requestHash);
@@ -387,6 +413,31 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
       ps.setLong(1, canvasId);
       ps.setLong(2, sourceNodeId);
       ps.setLong(3, targetNodeId);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertResource(Connection conn, long id, long canvasId) throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into canvas_resource"
+                + " (id, canvas_id, kind, media_type, name, size, metadata_json)"
+                + " values (?, ?, 'IMAGE', 'image/png', 'image', 1, '{}'::jsonb)")) {
+      ps.setLong(1, id);
+      ps.setLong(2, canvasId);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertNodeResource(Connection conn, long canvasId, long nodeId, long resourceId)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into canvas_node_resource"
+                + " (canvas_id, node_id, resource_index, resource_id) values (?, ?, 0, ?)")) {
+      ps.setLong(1, canvasId);
+      ps.setLong(2, nodeId);
+      ps.setLong(3, resourceId);
       assertEquals(1, ps.executeUpdate());
     }
   }

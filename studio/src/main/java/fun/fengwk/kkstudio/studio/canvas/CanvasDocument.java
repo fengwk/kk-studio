@@ -1,33 +1,22 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
-/**
- * Canvas aggregate：id、title、revision 与默认 viewport。
- *
- * <p>由规范构造函数强制的不变量：
- *
- * <ul>
- *   <li>{@code id > 0}
- *   <li>{@code title} 非空白
- *   <li>{@code revision >= 0}
- *   <li>{@code homeViewportJson} 非空白
- * </ul>
- */
-public record CanvasDocument(long id, String title, long revision, String homeViewportJson) {
+import java.time.Instant;
+import java.util.Objects;
+
+/** Canvas aggregate 的持久化头。 */
+public record CanvasDocument(
+    long id, String title, long graphRevision, Instant createdAt, Instant updatedAt) {
 
   public CanvasDocument {
-    if (id <= 0L) {
-      throw new IllegalArgumentException("id must be > 0");
+    CanvasValidation.requirePositive(id, "id");
+    CanvasValidation.requireNonBlank(title, "title");
+    if (graphRevision < 0L) {
+      throw new IllegalArgumentException("graphRevision must be >= 0");
     }
-    requireNonBlank(title, "title");
-    if (revision < 0L) {
-      throw new IllegalArgumentException("revision must be >= 0");
-    }
-    requireNonBlank(homeViewportJson, "homeViewportJson");
-  }
-
-  private static void requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
+    Objects.requireNonNull(createdAt, "createdAt");
+    Objects.requireNonNull(updatedAt, "updatedAt");
+    if (updatedAt.isBefore(createdAt)) {
+      throw new IllegalArgumentException("updatedAt must not be before createdAt");
     }
   }
 }

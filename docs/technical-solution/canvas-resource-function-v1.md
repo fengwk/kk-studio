@@ -203,8 +203,8 @@ canvas_group
   id, canvas_id, title, x, y, width, height
 
 canvas_node
-  id, canvas_id, name, x, y, width, height, group_id,
-  model_key, function_config
+  id, canvas_id, name, name_normalized, x, y, width, height, group_id,
+  model_key, function_config_json
 
 canvas_node_resource
   canvas_id, node_id, resource_index, resource_id
@@ -250,7 +250,7 @@ POST   /api/canvases/{canvasId}/resources/{resourceId}/download-url
 POST   /api/canvases/{canvasId}/resources/{resourceId}/preview-url
 ```
 
-Graph Commands 使用 JSON discriminator，不再使用嵌套 `commandsJson` 字符串：
+Graph Commands 直接使用 JSON discriminator typed commands 数组：
 
 ```text
 CREATE_RESOURCE_NODE
@@ -259,7 +259,7 @@ CREATE_TEXT_NODE
 UPDATE_TEXT_NODE
 UPDATE_FUNCTION
 RENAME_NODE
-MOVE_NODES
+UPDATE_NODE_TRANSFORMS
 DELETE_NODE
 CREATE_LINK
 DELETE_LINK
@@ -270,6 +270,9 @@ DELETE_GROUP
 ```
 
 `graphRevision` 只由成功的用户 Graph Command batch 递增一次。
+
+`UNGROUP` 携带 `groupId + memberNodeIds`，只解除指定成员；`DELETE_GROUP`
+先解除全部成员再删除 Group。
 
 ## 5. Storage and Media
 

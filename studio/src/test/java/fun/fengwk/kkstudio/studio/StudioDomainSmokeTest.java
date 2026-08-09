@@ -5,101 +5,98 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNode;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNodeKind;
-import fun.fengwk.kkstudio.studio.canvas.NodeTransform;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
+import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 
-/** 纯领域值类型及其不变量的冒烟覆盖。 */
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Canvas v1 纯领域不变量。 */
 class StudioDomainSmokeTest {
 
+  private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
+  private static final CanvasTransform TRANSFORM = new CanvasTransform(1, 2, 100, 80);
+
   @Test
-  void canvasDocumentCarriesRevision() {
-    CanvasDocument document = new CanvasDocument(1L, "demo", 0L, "{}");
-    assertEquals("demo", document.title());
-    assertEquals(0L, document.revision());
+  void documentAndTransformRejectInvalidState() {
+    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(0, "x", 0, NOW, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1, " ", 0, NOW, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1, "x", -1, NOW, NOW));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasTransform(Double.NaN, 0, 1, 1));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasTransform(0, 0, 0, 1));
   }
 
   @Test
-  void canvasDocumentRejectsNonPositiveId() {
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(0L, "demo", 0L, "{}"));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(-1L, "demo", 0L, "{}"));
-  }
-
-  @Test
-  void canvasDocumentRejectsBlankTitle() {
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1L, " ", 0L, "{}"));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1L, null, 0L, "{}"));
-  }
-
-  @Test
-  void canvasDocumentRejectsNegativeRevision() {
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1L, "demo", -1L, "{}"));
-  }
-
-  @Test
-  void canvasDocumentRejectsBlankViewport() {
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1L, "demo", 0L, ""));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasDocument(1L, "demo", 0L, null));
-  }
-
-  @Test
-  void nodeTransformKeepsGeometry() {
-    NodeTransform transform = new NodeTransform(10d, 20d, 320d, 240d);
-    assertEquals(10d, transform.x());
-    assertEquals(240d, transform.height());
-  }
-
-  @Test
-  void nodeTransformRejectsNonFiniteOrNonPositive() {
-    assertThrows(IllegalArgumentException.class, () -> new NodeTransform(0d, 0d, 0d, 1d));
-    assertThrows(IllegalArgumentException.class, () -> new NodeTransform(0d, 0d, 1d, 0d));
-    assertThrows(IllegalArgumentException.class, () -> new NodeTransform(Double.NaN, 0d, 1d, 1d));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new NodeTransform(0d, 0d, Double.POSITIVE_INFINITY, 1d));
-  }
-
-  @Test
-  void canvasLinkRejectsSelfLoopAndZero() {
-    assertThrows(IllegalArgumentException.class, () -> new CanvasLink(1L, 7L, 7L));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasLink(0L, 1L, 2L));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasLink(1L, 0L, 2L));
-    assertThrows(IllegalArgumentException.class, () -> new CanvasLink(1L, 1L, 0L));
-  }
-
-  @Test
-  void canvasNodeRejectsBlankFields() {
+  void resourceTextShapeIsStrict() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new CanvasNode(
-                0L,
-                CanvasNodeKind.RESOURCE,
-                "text",
-                "name",
-                new NodeTransform(0, 0, 100, 100),
-                "{}"));
+            new CanvasResource(
+                1, 2, CanvasResourceKind.TEXT, "text/markdown", "a", 1, null, "{}", NOW));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new CanvasNode(
-                1L, CanvasNodeKind.RESOURCE, "", "name", new NodeTransform(0, 0, 100, 100), "{}"));
+            new CanvasResource(
+                1, 2, CanvasResourceKind.IMAGE, "image/png", "a", 1, "bad", "{}", NOW));
+  }
+
+  @Test
+  void ordinaryNodeRequiresSameKindSameCanvasResources() {
+    CanvasResource text =
+        new CanvasResource(1, 10, CanvasResourceKind.TEXT, "text/markdown", "a", 1, "x", "{}", NOW);
+    CanvasResource image =
+        new CanvasResource(2, 10, CanvasResourceKind.IMAGE, "image/png", "b", 1, null, "{}", NOW);
+    CanvasResource foreign =
+        new CanvasResource(3, 11, CanvasResourceKind.TEXT, "text/markdown", "c", 1, "x", "{}", NOW);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasResourceNode(20, 10, "n", TRANSFORM, null, List.of(), null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new CanvasNode(
-                1L, CanvasNodeKind.RESOURCE, "text", "", new NodeTransform(0, 0, 100, 100), "{}"));
+            new CanvasResourceNode(20, 10, "n", TRANSFORM, null, List.of(text, image), null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new CanvasNode(
-                1L,
-                CanvasNodeKind.RESOURCE,
-                "text",
-                "name",
-                new NodeTransform(0, 0, 100, 100),
-                ""));
+        () -> new CanvasResourceNode(20, 10, "n", TRANSFORM, null, List.of(foreign), null, null));
+  }
+
+  @Test
+  void functionNodeMayStartWithoutResources() {
+    CanvasResourceNode node =
+        new CanvasResourceNode(
+            20, 10, "fn", TRANSFORM, null, List.of(), new CanvasFunction("m", "{}"), null);
+    assertEquals("m", node.function().modelKey());
+  }
+
+  @Test
+  void snapshotAndCommandsDefensivelyCopyLists() {
+    List<Long> ids = new ArrayList<>(List.of(1L));
+    CanvasCommand.CreateResourceNode command =
+        new CanvasCommand.CreateResourceNode("n", ids, TRANSFORM);
+    ids.add(2L);
+    assertEquals(List.of(1L), command.resourceIds());
+
+    CanvasDocument document = new CanvasDocument(1, "c", 0, NOW, NOW);
+    CanvasSnapshot snapshot = new CanvasSnapshot(document, List.of(), List.of(), List.of());
+    assertThrows(UnsupportedOperationException.class, () -> snapshot.groups().add(null));
+  }
+
+  @Test
+  void groupAndLinkCarryCanvasIdentityWithoutIndependentLinkId() {
+    CanvasGroup group = new CanvasGroup(2, 1, "g", TRANSFORM);
+    CanvasLink link = new CanvasLink(1, 3, 4);
+    assertEquals(1L, group.canvasId());
+    assertEquals(1L, link.canvasId());
+    assertThrows(IllegalArgumentException.class, () -> new CanvasLink(1, 3, 3));
   }
 }

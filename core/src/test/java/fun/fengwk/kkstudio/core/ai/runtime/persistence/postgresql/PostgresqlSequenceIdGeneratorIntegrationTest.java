@@ -84,7 +84,13 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     Map<String, Long> lastBySite = new LinkedHashMap<>();
 
     String[] sites = {
-      "comfyui_workflow_api", "canvas_document", "canvas_node", "canvas_link", "chat"
+      "comfyui_workflow_api",
+      "canvas_document",
+      "canvas_group",
+      "canvas_node",
+      "canvas_resource",
+      "canvas_upload",
+      "chat"
     };
 
     long previous = 0L;

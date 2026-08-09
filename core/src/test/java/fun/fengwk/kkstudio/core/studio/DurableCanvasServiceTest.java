@@ -1,306 +1,456 @@
 package fun.fengwk.kkstudio.core.studio;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
+import fun.fengwk.kkstudio.studio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
+import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.studio.canvas.CanvasNodeKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.studio.canvas.NodeTransform;
+import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.studio.canvas.CanvasUpload;
+import fun.fengwk.kkstudio.studio.canvas.CanvasUploadRepository;
 
-/**
- * 在权威 PostgreSQL schema 上覆盖最小化的 durable canvas 创建/列表/命令路径。
- *
- * <p>每个测试都运行在全新重置的 schema 中，因此先前测试的 canvas 行不会泄漏到本测试。下面的 {@code request_hash} 哨兵值已被移除——服务端根据规范化后的
- * {@code commandsJson} 计算 hash。
- */
+import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+/** PostgreSQL 上的 Canvas v1 command、CAS、幂等和聚合快照覆盖。 */
 public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
 
-  @Autowired private CanvasCommandService canvasCommandService;
-  @Autowired private CanvasQueryService canvasQueryService;
-  @Autowired private ObjectMapper objectMapper;
+  private static final CanvasTransform T = new CanvasTransform(10, 20, 100, 80);
 
-  private static long firstNodeId(CanvasSnapshot snapshot) {
-    return snapshot.nodes().get(0).id();
-  }
+  @Autowired private CanvasCommandService commandService;
+  @Autowired private CanvasQueryService queryService;
+  @Autowired private CanvasResourceRepository resourceRepository;
+  @Autowired private CanvasFunctionRunRepository runRepository;
+  @Autowired private CanvasUploadRepository uploadRepository;
 
-  private static long secondNodeId(CanvasSnapshot snapshot) {
-    return snapshot.nodes().get(1).id();
+  @Test
+  void createListSnapshotAndTextReplacementKeepResourcesImmutable() {
+    CanvasDocument canvas = commandService.createCanvas(" board ");
+    assertEquals("board", canvas.title());
+    assertEquals(0L, canvas.graphRevision());
+    assertTrue(queryService.listDocuments().stream().anyMatch(item -> item.id() == canvas.id()));
+
+    CanvasSnapshot created =
+        apply(canvas, 0, "text-create", new CanvasCommand.CreateTextNode("note", "old", T));
+    CanvasResourceNode node = created.nodes().get(0);
+    CanvasResource oldResource = node.resources().get(0);
+
+    CanvasSnapshot updated =
+        apply(
+            canvas, 1, "text-update", new CanvasCommand.UpdateTextNode(node.id(), "new markdown"));
+    CanvasResource newResource = updated.nodes().get(0).resources().get(0);
+
+    assertNotEquals(oldResource.id(), newResource.id());
+    assertEquals("new markdown", newResource.textContent());
+    assertEquals(
+        "old",
+        resourceRepository.findById(canvas.id(), oldResource.id()).orElseThrow().textContent());
+    assertEquals(2L, updated.document().graphRevision());
   }
 
   @Test
-  public void shouldCreateListAndApplyMinimalCommands() {
-    CanvasDocument created = canvasCommandService.createCanvas("研究画布");
-    assertEquals(0L, created.revision());
-    assertTrue(
-        canvasQueryService.listDocuments().stream().anyMatch(doc -> doc.id() == created.id()));
-
-    String commands =
-        "[{\"type\":\"create_text_node\",\"name\":\"笔记\",\"text\":\"hello\\nwith\\\"quote\\\"\","
-            + "\"x\":10,\"y\":20,\"width\":200,\"height\":120},"
-            + "{\"type\":\"create_generate_text_node\",\"name\":\"生成\",\"prompt\":\"写摘要\","
-            + "\"x\":300,\"y\":20,\"width\":280,\"height\":180}]";
-    CanvasSnapshot snapshot =
-        canvasCommandService.applyCommands(created.id(), 0L, "cmd-" + created.id(), commands);
-    assertEquals(1L, snapshot.document().revision());
-    assertEquals(2, snapshot.nodes().size());
-    assertTrue(snapshot.nodes().stream().anyMatch(node -> CanvasNodeKind.FUNCTION == node.kind()));
-  }
-
-  @Test
-  public void textNodeDataJsonRoundTripsControlCharacters() throws Exception {
-    CanvasDocument created = canvasCommandService.createCanvas("ctl");
-    String tricky = "line1\nline2\t\"quoted\"\\back";
-    String commands =
-        "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":"
-            + objectMapper.writeValueAsString(tricky)
-            + ",\"x\":0,\"y\":0,\"width\":100,\"height\":100}]";
-    CanvasSnapshot snap = canvasCommandService.applyCommands(created.id(), 0L, "ctl-cmd", commands);
-    JsonNode data = objectMapper.readTree(snap.nodes().get(0).dataJson());
-    assertEquals(tricky, data.path("text").asText());
-  }
-
-  @Test
-  public void geometryValidationRejectsNonFiniteAndNonPositive() {
-    CanvasDocument created = canvasCommandService.createCanvas("geometry");
-
-    // NaN 的 x 由 JSON token "NaN" 传入。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            canvasCommandService.applyCommands(
-                created.id(),
-                0L,
-                "bad-nan",
-                "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":\"NaN\","
-                    + "\"y\":0,\"width\":100,\"height\":100}]"));
-
-    // 零宽度。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            canvasCommandService.applyCommands(
-                created.id(),
-                0L,
-                "bad-zero",
-                "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":0,"
-                    + "\"y\":0,\"width\":0,\"height\":100}]"));
-
-    // move_nodes 更新会拒绝非有限的 x。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            canvasCommandService.applyCommands(
-                created.id(),
-                0L,
-                "bad-inv",
-                "[{\"type\":\"move_nodes\",\"updates\":[{\"id\":1,\"x\":\"NaN\",\"y\":0}]}]"));
-  }
-
-  @Test
-  public void hardDeleteRemovesNodeAndCascadedLink() {
-    CanvasDocument created = canvasCommandService.createCanvas("delete-me");
-    CanvasSnapshot afterFirst =
-        canvasCommandService.applyCommands(
-            created.id(),
-            0L,
-            "create-a-" + created.id(),
-            "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"hi\",\"x\":0,\"y\":0,"
-                + "\"width\":100,\"height\":100}]");
-    long revAfterA = afterFirst.document().revision();
-    long firstNodeId = firstNodeId(afterFirst);
-
-    CanvasSnapshot afterSecond =
-        canvasCommandService.applyCommands(
-            created.id(),
-            revAfterA,
-            "create-b-" + created.id(),
-            "[{\"type\":\"create_text_node\",\"name\":\"b\",\"text\":\"ho\",\"x\":100,\"y\":0,"
-                + "\"width\":100,\"height\":100}]");
-    long revAfterB = afterSecond.document().revision();
-    long secondNodeId = secondNodeId(afterSecond);
-
-    CanvasSnapshot afterLink =
-        canvasCommandService.applyCommands(
-            created.id(),
-            revAfterB,
-            "link-" + created.id(),
-            "[{\"type\":\"create_link\",\"sourceNodeId\":"
-                + firstNodeId
-                + ",\"targetNodeId\":"
-                + secondNodeId
-                + "}]");
-    long revAfterLink = afterLink.document().revision();
-    assertEquals(1, afterLink.links().size());
-    assertEquals(firstNodeId, afterLink.links().get(0).sourceNodeId());
-
-    CanvasSnapshot afterDelete =
-        canvasCommandService.applyCommands(
-            created.id(),
-            revAfterLink,
-            "delete-" + created.id(),
-            "[{\"type\":\"delete_node\",\"id\":" + firstNodeId + "}]");
-
-    assertEquals(1, afterDelete.nodes().size());
-    assertTrue(afterDelete.nodes().stream().noneMatch(n -> n.id() == firstNodeId));
-    assertTrue(afterDelete.links().isEmpty(), "ON DELETE CASCADE must remove the link");
-  }
-
-  @Test
-  public void commandSetEmptyArrayIsRejected() {
-    CanvasDocument created = canvasCommandService.createCanvas("empty");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-empty", "[]"));
-  }
-
-  @Test
-  public void commandPayloadMustBeAJsonArray() {
-    CanvasDocument created = canvasCommandService.createCanvas("notarray");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-obj", "{}"));
-  }
-
-  @Test
-  public void unknownNodeInLinkIsRejected() {
-    CanvasDocument created = canvasCommandService.createCanvas("nope");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            canvasCommandService.applyCommands(
-                created.id(),
-                0L,
-                "bad-link",
-                "[{\"type\":\"create_link\",\"sourceNodeId\":99999,\"targetNodeId\":99998}]"));
-  }
-
-  @Test
-  public void distinctEndpointsRequiredForLink() {
-    CanvasDocument created = canvasCommandService.createCanvas("self-loop");
-    CanvasSnapshot snap =
-        canvasCommandService.applyCommands(
-            created.id(),
-            0L,
-            "self-loop-cmd-" + created.id(),
-            "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":0,\"y\":0,"
-                + "\"width\":100,\"height\":100}]");
-    long id = firstNodeId(snap);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            canvasCommandService.applyCommands(
-                created.id(),
-                snap.document().revision(),
-                "self-link",
-                "[{\"type\":\"create_link\",\"sourceNodeId\":"
-                    + id
-                    + ",\"targetNodeId\":"
-                    + id
-                    + "}]"));
-  }
-
-  @Test
-  public void revisionCasAndIdempotencyConflict() {
-    CanvasDocument created = canvasCommandService.createCanvas("cas");
-    String commands =
-        "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":0,\"y\":0,"
-            + "\"width\":100,\"height\":100}]";
+  void everyNodeFunctionTransformAndLinkCommandIsApplied() {
+    CanvasDocument canvas = commandService.createCanvas("commands");
     CanvasSnapshot first =
-        canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", commands);
-    assertEquals(1L, first.document().revision());
+        apply(
+            canvas,
+            0,
+            "create-nodes",
+            new CanvasCommand.CreateTextNode("source", "x", T),
+            new CanvasCommand.CreateFunctionNode(
+                "target", "model-a", "{\"prompt\":\"x\"}", new CanvasTransform(200, 20, 120, 90)));
+    long sourceId = first.nodes().get(0).id();
+    long targetId = first.nodes().get(1).id();
 
-    // 相同 commandId + 相同 payload：重放返回缓存快照。
-    CanvasSnapshot replay =
-        canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", commands);
-    assertEquals(first.document().revision(), replay.document().revision());
-    assertEquals(first.nodes().size(), replay.nodes().size());
+    CanvasSnapshot changed =
+        apply(
+            canvas,
+            1,
+            "edit-graph",
+            new CanvasCommand.UpdateFunction(targetId, "model-b", "{\"prompt\":\"y\"}"),
+            new CanvasCommand.RenameNode(sourceId, "renamed"),
+            new CanvasCommand.UpdateNodeTransforms(
+                List.of(
+                    new CanvasCommand.NodeTransformUpdate(
+                        sourceId, new CanvasTransform(30, 40, 130, 100)))),
+            new CanvasCommand.CreateLink(sourceId, targetId));
+    assertEquals("renamed", changed.nodes().get(0).name());
+    assertEquals(new CanvasTransform(30, 40, 130, 100), changed.nodes().get(0).transform());
+    assertEquals("model-b", changed.nodes().get(1).function().modelKey());
+    assertEquals(1, changed.links().size());
 
-    // 相同 commandId + 不同 payload：幂等性冲突（hash 不同）。
-    String conflict =
-        "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"y\",\"x\":0,\"y\":0,"
-            + "\"width\":100,\"height\":100}]";
-    assertThrows(
-        IllegalStateException.class,
-        () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-1", conflict));
+    CanvasSnapshot withoutLink =
+        apply(canvas, 2, "delete-link", new CanvasCommand.DeleteLink(sourceId, targetId));
+    assertTrue(withoutLink.links().isEmpty());
 
-    // 新 commandId + 过时 revision：revision 冲突。
-    assertThrows(
-        IllegalStateException.class,
-        () -> canvasCommandService.applyCommands(created.id(), 0L, "cmd-cas-2", commands));
+    CanvasSnapshot withoutSource =
+        apply(canvas, 3, "delete-node", new CanvasCommand.DeleteNode(sourceId));
+    assertEquals(1, withoutSource.nodes().size());
+    assertTrue(
+        resourceRepository
+            .findById(canvas.id(), first.nodes().get(0).resources().get(0).id())
+            .isPresent());
   }
 
   @Test
-  public void nodeTransformFiniteValidation() {
+  void resourceNodePreservesRequestedOrderAndRejectsCrossCanvasOrMixedKinds() {
+    CanvasDocument firstCanvas = commandService.createCanvas("first");
+    CanvasDocument secondCanvas = commandService.createCanvas("second");
+    CanvasResource first = addResource(firstCanvas.id(), CanvasResourceKind.IMAGE, "a");
+    CanvasResource second = addResource(firstCanvas.id(), CanvasResourceKind.IMAGE, "b");
+    CanvasResource audio = addResource(firstCanvas.id(), CanvasResourceKind.AUDIO, "c");
+    CanvasResource foreign = addResource(secondCanvas.id(), CanvasResourceKind.IMAGE, "d");
+
+    CanvasSnapshot snapshot =
+        apply(
+            firstCanvas,
+            0,
+            "ordered",
+            new CanvasCommand.CreateResourceNode("images", List.of(second.id(), first.id()), T));
+    assertEquals(
+        List.of(second.id(), first.id()),
+        snapshot.nodes().get(0).resources().stream().map(CanvasResource::id).toList());
+
     assertThrows(
         IllegalArgumentException.class,
-        () -> new NodeTransform(Double.POSITIVE_INFINITY, 0d, 100d, 100d));
-    assertThrows(
-        IllegalArgumentException.class, () -> new NodeTransform(Double.NaN, 0d, 100d, 100d));
+        () ->
+            apply(
+                firstCanvas,
+                1,
+                "mixed",
+                new CanvasCommand.CreateResourceNode("mixed", List.of(first.id(), audio.id()), T)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new NodeTransform(0d, 0d, Double.NEGATIVE_INFINITY, 100d));
-    assertThrows(IllegalArgumentException.class, () -> new NodeTransform(0d, 0d, -1d, 100d));
+        () ->
+            apply(
+                firstCanvas,
+                1,
+                "foreign",
+                new CanvasCommand.CreateResourceNode("foreign", List.of(foreign.id()), T)));
   }
 
   @Test
-  public void createGenerateTextNodeStoresCanonicalDataJson() throws Exception {
-    CanvasDocument created = canvasCommandService.createCanvas("data");
-    CanvasSnapshot snap =
-        canvasCommandService.applyCommands(
-            created.id(),
-            0L,
-            "data-cmd",
-            "[{\"type\":\"create_generate_text_node\",\"name\":\"gen\",\"prompt\":\"p\","
-                + "\"x\":0,\"y\":0,\"width\":280,\"height\":180}]");
-    assertEquals(1, snap.nodes().size());
-    JsonNode data = objectMapper.readTree(snap.nodes().get(0).dataJson());
-    assertEquals("system.generate-text", data.path("functionId").asText());
-    assertEquals("1", data.path("version").asText());
-    assertEquals("p", data.path("prompt").asText());
-    assertEquals(0, data.path("configRevision").asLong());
+  void linkRequiresFunctionTargetAndSameCanvas() {
+    CanvasDocument firstCanvas = commandService.createCanvas("first");
+    CanvasDocument secondCanvas = commandService.createCanvas("second");
+    CanvasSnapshot first =
+        apply(
+            firstCanvas,
+            0,
+            "nodes",
+            new CanvasCommand.CreateTextNode("a", "a", T),
+            new CanvasCommand.CreateTextNode("b", "b", T),
+            new CanvasCommand.CreateFunctionNode("fn", "m", "{}", T));
+    CanvasSnapshot second =
+        apply(
+            secondCanvas,
+            0,
+            "foreign-node",
+            new CanvasCommand.CreateFunctionNode("foreign", "m", "{}", T));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                firstCanvas,
+                1,
+                "ordinary-target",
+                new CanvasCommand.CreateLink(
+                    first.nodes().get(0).id(), first.nodes().get(1).id())));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                firstCanvas,
+                1,
+                "foreign-target",
+                new CanvasCommand.CreateLink(
+                    first.nodes().get(0).id(), second.nodes().get(0).id())));
+
+    CanvasSnapshot linked =
+        apply(
+            firstCanvas,
+            1,
+            "valid-link",
+            new CanvasCommand.CreateLink(first.nodes().get(0).id(), first.nodes().get(2).id()));
+    assertEquals(1, linked.links().size());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                firstCanvas,
+                2,
+                "long-model",
+                new CanvasCommand.CreateFunctionNode("long", "m".repeat(257), "{}", T)));
   }
 
   @Test
-  public void unknownCanvasReturnsEmptySnapshot() {
-    assertTrue(canvasQueryService.findSnapshot(987654321L).isEmpty());
+  void groupMoveUsesDeltaAndUngroupDeleteOnlyChangeMembership() {
+    CanvasDocument canvas = commandService.createCanvas("groups");
+    CanvasSnapshot nodes =
+        apply(
+            canvas,
+            0,
+            "nodes",
+            new CanvasCommand.CreateTextNode("a", "a", new CanvasTransform(10, 20, 100, 80)),
+            new CanvasCommand.CreateTextNode("b", "b", new CanvasTransform(30, 50, 110, 90)));
+    long firstId = nodes.nodes().get(0).id();
+    long secondId = nodes.nodes().get(1).id();
+
+    CanvasSnapshot grouped =
+        apply(
+            canvas,
+            1,
+            "group",
+            new CanvasCommand.CreateGroup(
+                "G", new CanvasTransform(0, 0, 300, 200), List.of(firstId, secondId)));
+    long groupId = grouped.groups().get(0).id();
+    CanvasSnapshot moved =
+        apply(canvas, 2, "move-group", new CanvasCommand.MoveGroup(groupId, 100, 50));
+    assertEquals(new CanvasTransform(100, 50, 300, 200), moved.groups().get(0).transform());
+    assertEquals(new CanvasTransform(110, 70, 100, 80), moved.nodes().get(0).transform());
+    assertEquals(new CanvasTransform(130, 100, 110, 90), moved.nodes().get(1).transform());
+
+    CanvasSnapshot ungrouped =
+        apply(canvas, 3, "ungroup-one", new CanvasCommand.Ungroup(groupId, List.of(firstId)));
+    assertNull(ungrouped.nodes().get(0).groupId());
+    assertEquals(groupId, ungrouped.nodes().get(1).groupId());
+
+    CanvasSnapshot deleted =
+        apply(canvas, 4, "delete-group", new CanvasCommand.DeleteGroup(groupId));
+    assertTrue(deleted.groups().isEmpty());
+    assertNull(deleted.nodes().get(1).groupId());
   }
 
   @Test
-  public void listDocumentsReturnsCleanly() {
-    assertNotNull(canvasQueryService.listDocuments());
+  void revisionCasIdempotencyAndAtomicRollbackAreEnforced() throws Exception {
+    CanvasDocument canvas = commandService.createCanvas("atomic");
+    List<CanvasCommand> batch = List.of(new CanvasCommand.CreateTextNode("a", "x", T));
+    CanvasSnapshot first = commandService.applyCommands(canvas.id(), 0, "same", batch);
+    CanvasSnapshot replay = commandService.applyCommands(canvas.id(), 0, "same", batch);
+    assertEquals(first.document().graphRevision(), replay.document().graphRevision());
+
+    CanvasConflictException hashConflict =
+        assertThrows(
+            CanvasConflictException.class,
+            () ->
+                commandService.applyCommands(
+                    canvas.id(),
+                    0,
+                    "same",
+                    List.of(new CanvasCommand.CreateTextNode("other", "y", T))));
+    assertEquals(CanvasConflictException.Reason.IDEMPOTENCY_CONFLICT, hashConflict.reason());
+
+    CanvasConflictException revisionConflict =
+        assertThrows(
+            CanvasConflictException.class,
+            () ->
+                commandService.applyCommands(
+                    canvas.id(),
+                    0,
+                    "stale",
+                    List.of(new CanvasCommand.CreateTextNode("b", "x", T))));
+    assertEquals(CanvasConflictException.Reason.REVISION_CONFLICT, revisionConflict.reason());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            commandService.applyCommands(
+                canvas.id(),
+                1,
+                "rollback",
+                List.of(
+                    new CanvasCommand.CreateTextNode("temporary", "x", T),
+                    new CanvasCommand.RenameNode(999_999, "missing"))));
+    CanvasSnapshot afterRollback = queryService.findSnapshot(canvas.id()).orElseThrow();
+    assertEquals(1L, afterRollback.document().graphRevision());
+    assertEquals(1, afterRollback.nodes().size());
+    assertEquals(1L, count("canvas_resource", canvas.id()));
   }
 
   @Test
-  public void realizedNodeCarriesFiniteGeometry() {
-    CanvasDocument created = canvasCommandService.createCanvas("realized");
-    CanvasSnapshot snap =
-        canvasCommandService.applyCommands(
-            created.id(),
-            0L,
-            "realize-cmd",
-            "[{\"type\":\"create_text_node\",\"name\":\"a\",\"text\":\"x\",\"x\":12.5,"
-                + "\"y\":-3.25,\"width\":100,\"height\":80}]");
-    var n = snap.nodes().get(0);
-    assertEquals(new NodeTransform(12.5d, -3.25d, 100d, 80d), n.transform());
-    assertEquals(CanvasNodeKind.RESOURCE, n.kind());
-    assertEquals("text", n.nodeType());
-    assertEquals("a", n.name());
-    assertFalse(n.dataJson().isBlank());
-    assertTrue(Double.isFinite(n.transform().x()));
-    assertTrue(Double.isFinite(n.transform().y()));
-    assertTrue(n.transform().width() > 0d);
-    assertTrue(n.transform().height() > 0d);
+  void normalizedNameIsUniqueAndConcurrentRaceLeavesOneWinner() throws Exception {
+    CanvasDocument canvas = commandService.createCanvas("names");
+    apply(canvas, 0, "first", new CanvasCommand.CreateTextNode("Ｎｏｄｅ", "x", T));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> apply(canvas, 1, "duplicate", new CanvasCommand.CreateTextNode(" node ", "y", T)));
+
+    CanvasDocument raceCanvas = commandService.createCanvas("race");
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<Object> first =
+          executor.submit(
+              () ->
+                  race(
+                      start,
+                      raceCanvas,
+                      "race-a",
+                      new CanvasCommand.CreateTextNode("Race", "a", T)));
+      Future<Object> second =
+          executor.submit(
+              () ->
+                  race(
+                      start,
+                      raceCanvas,
+                      "race-b",
+                      new CanvasCommand.CreateTextNode("race", "b", T)));
+      start.countDown();
+      Object firstResult = first.get();
+      Object secondResult = second.get();
+      long successes =
+          List.of(firstResult, secondResult).stream()
+              .filter(CanvasSnapshot.class::isInstance)
+              .count();
+      assertEquals(1L, successes);
+      assertTrue(
+          List.of(firstResult, secondResult).stream()
+              .anyMatch(
+                  result ->
+                      result instanceof IllegalArgumentException
+                          || result instanceof CanvasConflictException));
+      CanvasSnapshot snapshot = queryService.findSnapshot(raceCanvas.id()).orElseThrow();
+      assertEquals(1, snapshot.nodes().size());
+      assertEquals(1L, snapshot.document().graphRevision());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void functionRunRepositoryFeedsSnapshotWithoutChangingGraphRevision() {
+    CanvasDocument canvas = commandService.createCanvas("run");
+    CanvasSnapshot created =
+        apply(canvas, 0, "fn", new CanvasCommand.CreateFunctionNode("fn", "m", "{}", T));
+    long nodeId = created.nodes().get(0).id();
+    runRepository.save(
+        new CanvasFunctionRun(
+            nodeId,
+            "request-1",
+            CanvasFunctionRunStatus.RUNNING,
+            "{\"stage\":\"queued\"}",
+            null,
+            Instant.now()));
+
+    CanvasSnapshot snapshot = queryService.findSnapshot(canvas.id()).orElseThrow();
+    assertNotNull(snapshot.nodes().get(0).run());
+    assertEquals(CanvasFunctionRunStatus.RUNNING, snapshot.nodes().get(0).run().status());
+    assertEquals(1L, snapshot.document().graphRevision());
+
+    CanvasDocument ordinaryCanvas = commandService.createCanvas("ordinary-run");
+    CanvasSnapshot ordinary =
+        apply(ordinaryCanvas, 0, "ordinary", new CanvasCommand.CreateTextNode("text", "x", T));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runRepository.save(
+                new CanvasFunctionRun(
+                    ordinary.nodes().get(0).id(),
+                    "invalid",
+                    CanvasFunctionRunStatus.RUNNING,
+                    "{}",
+                    null,
+                    Instant.now())));
+  }
+
+  @Test
+  void uploadRepositoryPersistsOnlyUploadFactsWithoutGraphApi() {
+    assertTrue(queryService.findSnapshot(-1).isEmpty());
+    assertTrue(queryService.findSnapshot(Long.MAX_VALUE).isEmpty());
+    CanvasDocument canvas = commandService.createCanvas("upload");
+    Instant createdAt = Instant.parse("2026-08-10T00:00:00Z");
+    CanvasUpload upload =
+        new CanvasUpload(
+            PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet(),
+            canvas.id(),
+            CanvasResourceKind.VIDEO,
+            "clip.mp4",
+            "video/mp4",
+            123,
+            createdAt.plusSeconds(300),
+            createdAt);
+    uploadRepository.add(upload);
+
+    assertEquals(upload, uploadRepository.findById(canvas.id(), upload.id()).orElseThrow());
+    assertEquals(
+        0L, queryService.findSnapshot(canvas.id()).orElseThrow().document().graphRevision());
+  }
+
+  private CanvasSnapshot apply(
+      CanvasDocument canvas, long revision, String commandId, CanvasCommand... commands) {
+    return commandService.applyCommands(canvas.id(), revision, commandId, List.of(commands));
+  }
+
+  private CanvasResource addResource(long canvasId, CanvasResourceKind kind, String name) {
+    long id = PostgresSchemaSupport.FIXTURE_IDS.incrementAndGet();
+    String text = kind == CanvasResourceKind.TEXT ? name : null;
+    CanvasResource resource =
+        new CanvasResource(
+            id,
+            canvasId,
+            kind,
+            kind == CanvasResourceKind.IMAGE ? "image/png" : "audio/mpeg",
+            name,
+            name.getBytes(StandardCharsets.UTF_8).length,
+            text,
+            "{}",
+            Instant.now());
+    resourceRepository.add(resource);
+    return resource;
+  }
+
+  private Object race(
+      CountDownLatch start,
+      CanvasDocument canvas,
+      String commandId,
+      CanvasCommand.CreateTextNode command)
+      throws InterruptedException {
+    start.await();
+    try {
+      return apply(canvas, 0, commandId, command);
+    } catch (RuntimeException ex) {
+      return ex;
+    }
+  }
+
+  private long count(String table, long canvasId) throws Exception {
+    try (Connection connection = PostgresSchemaSupport.newConnection();
+        PreparedStatement statement =
+            connection.prepareStatement("select count(*) from " + table + " where canvas_id = ?")) {
+      statement.setLong(1, canvasId);
+      try (ResultSet resultSet = statement.executeQuery()) {
+        resultSet.next();
+        return resultSet.getLong(1);
+      }
+    }
   }
 }

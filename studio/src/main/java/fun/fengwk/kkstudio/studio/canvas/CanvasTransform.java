@@ -1,18 +1,9 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
-/**
- * Canvas node 的世界空间几何。
- *
- * <p>由规范构造函数强制的不变量：
- *
- * <ul>
- *   <li>{@code x, y} 为有限数值（不允许 NaN / ±∞）
- *   <li>{@code width, height} 为有限且严格为正
- * </ul>
- */
-public record NodeTransform(double x, double y, double width, double height) {
+/** Canvas/world 绝对坐标几何。 */
+public record CanvasTransform(double x, double y, double width, double height) {
 
-  public NodeTransform {
+  public CanvasTransform {
     requireFinite(x, "x");
     requireFinite(y, "y");
     requireFinite(width, "width");
@@ -26,7 +17,7 @@ public record NodeTransform(double x, double y, double width, double height) {
   }
 
   private static void requireFinite(double value, String name) {
-    if (Double.isNaN(value) || Double.isInfinite(value)) {
+    if (!Double.isFinite(value)) {
       throw new IllegalArgumentException(name + " must be finite");
     }
   }

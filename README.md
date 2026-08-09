@@ -5,7 +5,7 @@
 | 域 | 说明 |
 | --- | --- |
 | **Harness / AI** | 可恢复 Agent Thread、Tool 与实时投影 |
-| **Studio / Canvas** | 全局单实例画布工作台，持久化 Canvas 文档/节点/连线/幂等命令 |
+| **Studio / Canvas** | 全局单实例画布工作台，持久化 ResourceNode/Resource/Function/Group/Link 与 typed commands |
 
 架构事实源：
 
@@ -13,11 +13,12 @@
 - [docs/technical-solution/domain-map.md](docs/technical-solution/domain-map.md)
 - [docs/technical-solution/harness-runtime-architecture.md](docs/technical-solution/harness-runtime-architecture.md)
 - [docs/technical-solution/prompt-to-resource.md](docs/technical-solution/prompt-to-resource.md)
+- [docs/technical-solution/canvas-resource-function-v1.md](docs/technical-solution/canvas-resource-function-v1.md)
 
 ## 能力摘要
 
 - Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + revision CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；Redis 仅用于 realtime overlay
-- Studio：Canvas 持久化 document / node / link / command-dedup（硬删除节点）；FUNCTION 节点只暴露 `system.generate-text` v1
+- Studio：Canvas 九表持久化 document/group/node/node-resource/link/function-run/resource/upload/command-dedup；typed command batch 使用 graph revision CAS 与 request hash 幂等
 - 前端：AI 接真实 Thread API（snapshot-first SSE + 命令 batch）；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
 
 ## 模块
