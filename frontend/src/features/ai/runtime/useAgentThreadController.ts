@@ -159,24 +159,32 @@ export function useAgentThreadController(
 
   const approvalMutation = useMutation({
     mutationFn: ({
+      targetThreadId,
       invocationId,
       decision,
       decisionId,
     }: {
+      targetThreadId: string
       invocationId: string
       decision: 'ALLOW' | 'DENY'
       decisionId: string
-    }) => harnessService.decideApproval(threadId, invocationId, {
-      decision,
-      decisionId,
-      actor: 'web',
-      reason: null,
-    }),
+    }) =>
+      harnessService.decideApproval(targetThreadId, invocationId, {
+        decision,
+        decisionId,
+        actor: 'web',
+        reason: null,
+      }),
     onSuccess: async (_result, variables) => {
-      decisionIdByInvocation.current.delete(`${variables.invocationId}:${variables.decision}`)
+      decisionIdByInvocation.current.delete(
+        `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`,
+      )
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-        // 审批会更新投影到 Chat 作用域 Thread 列表中的 ToolInvocation。
+        // 决策落在哪个 Thread 就刷新哪个 Thread 的 snapshot（子 Thread 审批
+        // 会投影到其自己的 ToolInvocation）；Chat 列表总需要刷新。
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.threads.snapshot(variables.targetThreadId),
+        }),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
     },
@@ -186,16 +194,25 @@ export function useAgentThreadController(
    * 审批/拒绝待决的 ToolInvocation。decision id 在重试「同一个」决策期间保持稳定；
    * 切换决策（ALLOW -> DENY）会铸造新 id——当之前的决策已经落地时服务器会返回 409，
    * 刷新后即可呈现该结果。
+   *
+   * targetThreadId 默认指向本 controller 绑定的 Thread（Bound transcript 的既有审批）；
+   * 子 Thread 的审批（Task widget）必须显式传入 status.threadId。
    */
-  function decideApproval(invocationId: string, decision: 'ALLOW' | 'DENY'): Promise<void> {
-    const key = `${invocationId}:${decision}`
+  function decideApproval(
+    invocationId: string,
+    decision: 'ALLOW' | 'DENY',
+    targetThreadId: string = threadId,
+  ): Promise<void> {
+    // 回放键必须包含 targetThreadId：不同子 Thread 可能复用相同的 invocationId，
+    // 绝不能把 A 子 Thread 的幂等键复用给 B 子 Thread。
+    const key = `${targetThreadId}:${invocationId}:${decision}`
     const decisionId = decisionIdByInvocation.current.get(key) ?? createDecisionId()
     decisionIdByInvocation.current.set(key, decisionId)
     return approvalMutation
-      .mutateAsync({ invocationId, decision, decisionId })
+      .mutateAsync({ targetThreadId, invocationId, decision, decisionId })
       .then(() => undefined)
       .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.approvalFailed')
+        reportMutationError(error, 'ai.runtime.action.approvalFailed', targetThreadId)
       })
   }
 
@@ -206,9 +223,9 @@ export function useAgentThreadController(
 
   /**
    * 409 意味着本地 revision 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
-   * Thread，使下一次尝试携带当前的 revision。
+   * 目标 Thread，使下一次尝试携带当前的 revision。
    */
-  function reportMutationError(error: unknown, fallbackKey: string) {
+  function reportMutationError(error: unknown, fallbackKey: string, targetThreadId = threadId) {
     if (isConflictError(error)) {
       setActionError(
         t('ai.runtime.action.threadStateChanged', {
@@ -216,7 +233,9 @@ export function useAgentThreadController(
           error: errorMessage(error),
         }),
       )
-      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.threads.snapshot(targetThreadId),
+      })
       return
     }
     setActionError(errorMessage(error))

@@ -26,7 +26,8 @@ PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 ove
 - 允许的 `entry_type`（check 约束）：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
+COMPACTION, TURN_END
 ```
 
 - payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码；root-to-head path 由 recursive CTE 读取。
@@ -67,7 +68,7 @@ fresh enqueue 事务：锁 Thread → 双 CAS（head/sequence）→ 可选 SET_E
 | --- | --- |
 | `thread_id` / `turn_start_entry_id` | `(thread_id, turn_start_entry_id)` 唯一 |
 | `basis_head_entry_id` | 创建时的 head |
-| `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/YOLO；Provider/Model 只按名称引用） |
+| `request` | 完整冻结 `ModelInvocationRequest` JSON（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata；Provider/Model 只按名称引用） |
 | `status` | READY/DISPATCHING/RUNNING/SUCCEEDED/FAILED/CANCELLED/UNKNOWN |
 | `attempt` | `>= 0` |
 | `stream_checkpoint` | attempt-local 单调 checkpoint；新 attempt 清空，防止跨 attempt partial 混入 |
@@ -128,6 +129,7 @@ durable mutation
 ```
 
 - realtime event 没有业务恢复语义，也不用于审计；`RealtimeEventSink.append` 失败不改变 durable terminal。
+- `TOOL_PARTIAL` 除普通工具进度外，还承载 task 委派的**完整 JSON 快照心跳**（`details.kind=task.status`，约 1s 一次）：它不是 delta，顶层状态可携带扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重；心跳丢失只影响实时展示，恢复仍来自子 Thread 的 durable snapshot。
 - Stream 长度受配置策略（max length）约束，下一次写入时应用。
 - revision SSE 帧使用 PostgreSQL durable revision；Redis stream id 不暴露为 SSE id；重连只携带 revision，重新读取 snapshot 后从 live edge 接收新 delta。
 - Model delta 对应的安全 `stream_checkpoint` 由 Processor **先**持久化，commit 后才 best-effort 发布 Redis delta；terminal `resultJson`/`errorJson` 本身是 durable 边界，不依赖 terminal overlay 事件，客户端据此覆盖并最终移除流式投影。
@@ -154,6 +156,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 | Redis Stream 丢失 | 客户端重新获取 snapshot |
 | Runtime 进程退出 | 已提交 Entry/Command/Invocation/Work 保留；lease 到期后重新 claim |
 | Provider/Tool 结果不确定 | Invocation 收敛 `UNKNOWN`，不重放不确定副作用 |
+| Provider context overflow | 写 FAILED turn；最多启动一次 durable OVERFLOW compaction + immediate CONTINUATION，retry 再 overflow 时停止 |
 | terminal callback 重复 | invocation token/attempt/terminal CAS；terminal result/effects 不可变 |
 | 插件 sibling stale snapshot | materialize 时按 `(pluginId, customType)` 的 frozen READ/WRITE 声明机械写入 `SIBLING_STATE_CONFLICT` FAILED，不 dispatch |
 | Stop/head 与 terminal 并发 | revision CAS 与 claim ownership fencing |
@@ -161,6 +164,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 ## 10. Resource store
 
 - `harness-runtime-spring` 提供 `LocalFileResourceStore`（`ResourceStore.reference` 无副作用地计划精确 `ResourceRef`；canonical `file:///` URI、非空 size/sha256）；`harness-daemon` 的 coding 工具使用同构实现（daemon 侧 `store` 直接落盘并返回 ref）。
+- file/s3 资源经**同源** `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载：调用方只提交内容身份，Core `ManagedResourceDownloadService` 用 `ResourceStore.reference` 重建并读取自身拥有的 canonical 引用（绝不接受浏览器传入任意 file URI）；Web `StudioHarnessResourceController` 只组装 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`（禁 MIME sniff，避免不可信 Tool 输出在同源执行）+ immutable 私有缓存。
 - `ToolResultExternalizer`（core，位于 `CoreToolGateway` callback bridge）在持久化前把 ToolResult all-or-nothing 外部化：插件 intents 必须先完整校验为 effects；Text/Json 内容 UTF-8 ≤ `INLINE_RESULT_UTF8_BYTES`（8KB）保持 inline ToolContent 直接编码；超过阈值或二进制内容先经 `ResourceStore.reference` **无副作用计划**精确 `ResourceRef`，再逐项 `put` 写入，**每次 put 返回的 ref 必须与计划 ref 精确相等**（不等即存储契约违反）；随后才把 `ToolSuccess(result, effects)` 交给 ToolProcessor 落库。**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON（uri/mediaType/name/size/sha256）与可选文本 preview。
 
 ## 11. 验证入口

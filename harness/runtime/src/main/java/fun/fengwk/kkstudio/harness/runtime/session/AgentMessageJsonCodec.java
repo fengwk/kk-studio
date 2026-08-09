@@ -42,9 +42,10 @@ public final class AgentMessageJsonCodec {
   private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "argumentsJson");
+      orderedSet("type", "toolCallId", "toolName", "rendererKey", "argumentsJson");
   private static final Set<String> TOOL_RESULT_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
+      orderedSet(
+          "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
       orderedSet("type", "uri", "mediaType", "name", "size", "sha256", "preview");
 
@@ -136,6 +137,7 @@ public final class AgentMessageJsonCodec {
         node.put("type", "tool_call");
         node.put("toolCallId", value.toolCallId());
         node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
         node.put("argumentsJson", value.argumentsJson());
       }
       case ToolResultMessageContent value -> {
@@ -143,6 +145,7 @@ public final class AgentMessageJsonCodec {
         node.put("type", "tool_result");
         node.put("toolCallId", value.toolCallId());
         node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
         ArrayNode nested = node.putArray("contents");
         for (AgentMessageContent child : value.contents()) {
           if (child instanceof ToolCallMessageContent
@@ -206,6 +209,7 @@ public final class AgentMessageJsonCodec {
         yield new ToolCallMessageContent(
             requiredText(node, "toolCallId", "content"),
             requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
             requiredStrictJsonObjectString(node, "argumentsJson", "content"));
       }
       case "tool_result" -> {
@@ -224,6 +228,7 @@ public final class AgentMessageJsonCodec {
         yield new ToolResultMessageContent(
             requiredText(node, "toolCallId", "content"),
             requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
             nestedContents,
             requiredBoolean(node, "error", "content"),
             requiredStrictJsonObjectString(node, "detailsJson", "content"));

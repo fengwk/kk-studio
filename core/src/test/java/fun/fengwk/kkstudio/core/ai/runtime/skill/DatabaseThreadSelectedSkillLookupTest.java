@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -23,8 +23,8 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码冻结 skill bindings，并把
- * canonical {@code EnvironmentName} 映射回 legacy {@code SkillBinding} 表面（LoadSkillTool 契约）。
+ * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码并直接返回冻结的 canonical skill
+ * bindings。
  */
 class DatabaseThreadSelectedSkillLookupTest {
 
@@ -44,8 +44,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     var skill = skills.get(0);
     assertEquals("review", skill.name());
     assertEquals("Review code", skill.description());
-    // legacy 表面携带 canonical EnvironmentName 文本（EnvironmentSkillBodyLoader 严格解析）。
-    assertEquals(ENV_ID.value(), skill.sourceEnvironment());
+    assertEquals(ENV_ID, skill.sourceEnvironmentName());
   }
 
   @Test
@@ -58,14 +57,14 @@ class DatabaseThreadSelectedSkillLookupTest {
   }
 
   @Test
-  void platformSkillWithoutSourceEnvironmentFailsClosed() {
+  void preservesPlatformSkillWithoutSourceEnvironment() {
     SelectedSkillBindingMapper mapper = mock(SelectedSkillBindingMapper.class);
     when(mapper.findModelRequest(42L, 7L)).thenReturn(encodedRequest(null));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    IllegalArgumentException error =
-        assertThrows(IllegalArgumentException.class, () -> lookup.selectedSkills(42L, 7L));
-    assertTrue(error.getMessage().contains("review"), error.getMessage());
+    var skills = lookup.selectedSkills(42L, 7L);
+    assertEquals(1, skills.size());
+    assertNull(skills.getFirst().sourceEnvironmentName());
   }
 
   private static String encodedRequest(EnvironmentName sourceEnvironmentName) {
@@ -80,7 +79,9 @@ class DatabaseThreadSelectedSkillLookupTest {
                 ProviderCacheControl.none()),
             List.of(),
             List.of(new SkillBinding("review", "Review code", sourceEnvironmentName)),
-            false);
+            false,
+            100_000,
+            null);
     return REQUEST_CODEC.encode(request);
   }
 

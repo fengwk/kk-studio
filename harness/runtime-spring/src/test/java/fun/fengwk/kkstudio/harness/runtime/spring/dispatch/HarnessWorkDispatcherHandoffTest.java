@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -350,10 +351,11 @@ class HarnessWorkDispatcherHandoffTest {
     ThreadProcessor threadProcessor =
         new ThreadProcessor(
             store,
-            (threadId, path, yoloEnabled) -> {
+            (threadId, path, yoloEnabled, preparation) -> {
               throw new AssertionError("resolver must not be called for a quiescent thread");
             },
-            new ThreadProcessorConfig(leaseConfig, 10, Duration.ofSeconds(1)),
+            new ThreadProcessorConfig(
+                leaseConfig, 10, Duration.ofSeconds(1), new CompactionConfig(true, 16_384, 20_000)),
             clock,
             processorScheduler);
     ModelProcessor modelProcessor =

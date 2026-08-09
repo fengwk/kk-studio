@@ -45,6 +45,11 @@ public final class McpListToolsTool extends AbstractMcpBridgeTool {
         false);
   }
 
+  @Override
+  protected String failureMessage(Exception error) {
+    return "MCP tool catalog rendering failed.";
+  }
+
   private List<DaemonMcpServerDescriptor> singleSnapshot(String server) {
     for (DaemonMcpServerDescriptor summary : registry.snapshot()) {
       if (summary.name().equals(server)) {
@@ -65,8 +70,7 @@ public final class McpListToolsTool extends AbstractMcpBridgeTool {
     }
     ArrayNode tools = node.putArray("tools");
     if (summary.status() == DaemonMcpServerStatus.READY) {
-      McpServerClient client = registry.find(summary.name()).orElseThrow();
-      for (McpToolSpec spec : client.listTools()) {
+      for (McpToolSpec spec : registry.toolSpecs(summary.name()).orElseThrow()) {
         ObjectNode toolNode = tools.addObject();
         toolNode.put("name", spec.name());
         toolNode.put("description", spec.description());

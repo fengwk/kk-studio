@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.daemon;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolArgumentAliases;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
@@ -518,12 +517,10 @@ public final class DaemonRuntime implements AutoCloseable {
             "toolVersion does not match environment descriptor: " + payload.toolVersion());
       }
       Duration timeout = resolveTimeout(payload.timeout(), descriptor);
-      String argumentsJson =
-          CodingToolArgumentAliases.normalize(payload.toolName(), payload.argumentsJson());
       ToolExecutionRequest request =
           new ToolExecutionRequest(
               descriptor,
-              new ToolCall(envelope.invocationId(), payload.toolName(), argumentsJson),
+              new ToolCall(envelope.invocationId(), payload.toolName(), payload.argumentsJson()),
               timeout);
       RunningInvocation invocation = new RunningInvocation(envelope.invocationId());
       running.put(envelope.invocationId(), invocation);

@@ -120,6 +120,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
+    config.setSubagents(List.of());
     return config;
   }
 

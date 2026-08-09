@@ -126,7 +126,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       """
       {"settings": {"environmentName": null, "agentName": "lifecycle-test", "model": \
       {"providerName": "openai", "modelName": "gpt-test", "variant": "default"}, \
-      "thinkingLevel": "low", "activeTools": []}}
+      "thinkingLevel": "low", "activeTools": []}, "subagentContext": null}
       """;
 
   private void seedDueThreadWork() {

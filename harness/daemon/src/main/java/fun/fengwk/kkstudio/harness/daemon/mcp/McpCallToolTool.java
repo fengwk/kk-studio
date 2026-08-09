@@ -40,8 +40,13 @@ public final class McpCallToolTool extends AbstractMcpBridgeTool {
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
-    McpCallOutcome outcome =
-        client.call(new McpToolRequest(tool, OBJECT_MAPPER.writeValueAsString(arguments)));
+    McpCallOutcome outcome;
+    try {
+      outcome = client.call(new McpToolRequest(tool, OBJECT_MAPPER.writeValueAsString(arguments)));
+    } catch (RuntimeException error) {
+      // 端口契约要求 call 不抛异常；防御性兜底也不能把 transport/header/command 等细节暴露给模型。
+      return error(request.call().id(), "MCP server call failed.");
+    }
     if (outcome.isError()) {
       return error(request.call().id(), outcome.text());
     }

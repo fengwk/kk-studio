@@ -87,7 +87,7 @@ class HistoryEntryPayloadTest {
     AgentMessage withToolCall =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
-            List.of(new ToolCallMessageContent("call-1", "read", "{}")));
+            List.of(new ToolCallMessageContent("call-1", "read", "read", "{}")));
     AgentMessage withoutToolCall = assistant("answer");
 
     assertEquals(
@@ -112,8 +112,8 @@ class HistoryEntryPayloadTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ToolCallMessageContent("call-1", "read", "{}"),
-                        new ToolCallMessageContent("call-1", "grep", "{}"))),
+                        new ToolCallMessageContent("call-1", "read", "read", "{}"),
+                        new ToolCallMessageContent("call-1", "grep", "grep", "{}"))),
                 metadata(ProviderStopReason.TOOL_CALLS),
                 null));
     assertEquals(
@@ -122,8 +122,8 @@ class HistoryEntryPayloadTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ToolCallMessageContent("call-1", "read", "{}"),
-                        new ToolCallMessageContent("call-2", "grep", "{}"))),
+                        new ToolCallMessageContent("call-1", "read", "read", "{}"),
+                        new ToolCallMessageContent("call-2", "grep", "grep", "{}"))),
                 metadata(ProviderStopReason.TOOL_CALLS),
                 null)
             .message()
@@ -294,7 +294,7 @@ class HistoryEntryPayloadTest {
             new AssistantAbortedPayload(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
-                    List.of(new ToolCallMessageContent("c", "t", "{}")))));
+                    List.of(new ToolCallMessageContent("c", "t", "t", "{}")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -521,7 +521,7 @@ class HistoryEntryPayloadTest {
         AgentMessageRole.TOOL,
         List.of(
             new ToolResultMessageContent(
-                toolCallId, "read", List.of(new TextMessageContent("ok")), false, "{}")));
+                toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
   private static AssistantMessageMetadata metadata(ProviderStopReason reason) {

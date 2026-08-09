@@ -17,6 +17,8 @@ import java.util.Objects;
 /** 包装 LangChain4j {@link DefaultMcpClient} 的 daemon 端口实现；LangChain4j 类型不越过本适配器。 */
 final class LangChainMcpServerClient implements McpServerClient {
 
+  static final String CALL_FAILED_MESSAGE = "MCP server call failed.";
+
   private final String name;
   private final DefaultMcpClient client;
 
@@ -57,13 +59,13 @@ final class LangChainMcpServerClient implements McpServerClient {
       String text = result.resultText();
       return new McpCallOutcome(result.isError(), text == null ? "" : text);
     } catch (RuntimeException error) {
-      // 上游 isError/JSON-RPC 错误统一转换为模型可见的错误结果；中断在桥接工具层按取消处理。
-      String message = error.getMessage();
-      if (message == null || message.isBlank()) {
-        message = error.getClass().getSimpleName();
-      }
-      return new McpCallOutcome(true, message);
+      // Transport/client 异常可能携带 URL、header 或环境变量；模型侧只接收稳定的非敏感错误。
+      return failedCall();
     }
+  }
+
+  static McpCallOutcome failedCall() {
+    return new McpCallOutcome(true, CALL_FAILED_MESSAGE);
   }
 
   @Override

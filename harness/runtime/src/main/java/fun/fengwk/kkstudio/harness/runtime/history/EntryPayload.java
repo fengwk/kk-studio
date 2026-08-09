@@ -13,6 +13,7 @@ public sealed interface EntryPayload
         CustomMessagePayload,
         AssistantErrorPayload,
         AssistantAbortedPayload,
+        CompactionPayload,
         TurnEndPayload {
 
   /** 返回该负载对应的 Entry 类型。 */

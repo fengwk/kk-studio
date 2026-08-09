@@ -28,7 +28,9 @@ public record ToolDescriptor(
     if (description == null || description.isBlank()) {
       throw new IllegalArgumentException("description must not be blank");
     }
-    rendererKey = rendererKey == null || rendererKey.isBlank() ? name : rendererKey;
+    if (rendererKey == null || rendererKey.isBlank()) {
+      throw new IllegalArgumentException("rendererKey must not be blank");
+    }
     inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
     sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     timeout = Objects.requireNonNull(timeout, "timeout");

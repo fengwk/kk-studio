@@ -162,6 +162,7 @@ describe('AI domain utilities', () => {
         config: {
           tools: ['search'],
           skills: [],
+          subagents: [],
         },
         version: '1',
         createTime: '2026-06-20T02:00:00',
@@ -171,6 +172,7 @@ describe('AI domain utilities', () => {
       name: 'assistant',
       model: 'minimax/MiniMax-M2.7',
       tools: ['search'],
+      subagents: [],
     })
   })
 
@@ -247,6 +249,7 @@ describe('AI domain utilities', () => {
       variant: ' default ',
       tools: [' search ', ''],
       skills: [],
+      subagents: [' helper '],
     }
     const expectedAgent = {
       name: 'assistant',
@@ -257,6 +260,7 @@ describe('AI domain utilities', () => {
       config: {
         tools: ['search'],
         skills: [],
+        subagents: ['helper'],
       },
     }
     expect(toEditableAgent(agentInput)).toEqual(expectedAgent)
@@ -267,6 +271,7 @@ describe('AI domain utilities', () => {
       config: {
         tools: ['search'],
         skills: [],
+        subagents: ['helper'],
       },
     })
     expect(toEditableAgent({ ...agentInput, variant: ' ' }).variant).toBeNull()
@@ -285,6 +290,7 @@ describe('AI domain utilities', () => {
         config: {
           tools: [],
           skills: [],
+          subagents: [],
         },
         version: '1',
         createTime: '2026-06-20T02:00:00',
@@ -427,6 +433,7 @@ describe('AI domain utilities', () => {
         config: {
           tools: [],
           skills: [],
+          subagents: [],
         },
         version: '1',
         createTime: '2026-06-20T02:00:00',
@@ -437,6 +444,7 @@ describe('AI domain utilities', () => {
       systemPrompt: '',
       variant: 'default',
       tools: [],
+      subagents: [],
     })
 
     expect(

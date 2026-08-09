@@ -73,6 +73,7 @@ public class AgentDefinitionConfigCodec {
     }
     validateNames(config.getTools(), "tools");
     validateNames(config.getSkills(), "skills");
+    validateNames(config.getSubagents(), "subagents");
   }
 
   private static void validateNames(List<String> values, String field) {

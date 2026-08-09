@@ -26,7 +26,8 @@ class ModelInvocationRequestTest {
     List<ToolBinding> bindings = List.of(platform("bash"), environment("fs"));
 
     ModelInvocationRequest request =
-        new ModelInvocationRequest(ENV_ID, providerRequest(bindings), bindings, List.of(), true);
+        new ModelInvocationRequest(
+            ENV_ID, providerRequest(bindings), bindings, List.of(), true, 100_000, null);
 
     assertEquals(ENV_ID, request.environmentName());
     assertTrue(request.yoloEnabled());
@@ -37,7 +38,8 @@ class ModelInvocationRequestTest {
   @Test
   void acceptsNullableRouteAndEmptyBindings() {
     ModelInvocationRequest request =
-        new ModelInvocationRequest(null, providerRequest(List.of()), List.of(), List.of(), false);
+        new ModelInvocationRequest(
+            null, providerRequest(List.of()), List.of(), List.of(), false, 100_000, null);
 
     assertNull(request.environmentName());
     assertFalse(request.yoloEnabled());
@@ -53,7 +55,13 @@ class ModelInvocationRequestTest {
 
     ModelInvocationRequest request =
         new ModelInvocationRequest(
-            ENV_ID, providerRequest(toolBindings), toolBindings, skillBindings, true);
+            ENV_ID,
+            providerRequest(toolBindings),
+            toolBindings,
+            skillBindings,
+            true,
+            100_000,
+            null);
 
     toolBindings.add(platform("extra"));
     skillBindings.add(new SkillBinding("extra", "Extra", null));
@@ -72,7 +80,7 @@ class ModelInvocationRequestTest {
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of()), bindings, List.of(), true));
+                ENV_ID, providerRequest(List.of()), bindings, List.of(), true, 100_000, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -81,12 +89,20 @@ class ModelInvocationRequestTest {
                 providerRequest(List.of(platform("bash"), platform("fs"))),
                 bindings,
                 List.of(),
-                true));
+                true,
+                100_000,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of(platform("other"))), bindings, List.of(), true));
+                ENV_ID,
+                providerRequest(List.of(platform("other"))),
+                bindings,
+                List.of(),
+                true,
+                100_000,
+                null));
   }
 
   @Test
@@ -96,7 +112,7 @@ class ModelInvocationRequestTest {
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(duplicates), duplicates, List.of(), true));
+                ENV_ID, providerRequest(duplicates), duplicates, List.of(), true, 100_000, null));
   }
 
   @Test
@@ -107,7 +123,7 @@ class ModelInvocationRequestTest {
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of()), List.of(), duplicates, true));
+                ENV_ID, providerRequest(List.of()), List.of(), duplicates, true, 100_000, null));
   }
 
   @Test
@@ -118,14 +134,14 @@ class ModelInvocationRequestTest {
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(envMismatch), envMismatch, List.of(), true));
+                ENV_ID, providerRequest(envMismatch), envMismatch, List.of(), true, 100_000, null));
 
     List<SkillBinding> skillMismatch = List.of(new SkillBinding("web", "Web search", otherEnv));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of()), List.of(), skillMismatch, true));
+                ENV_ID, providerRequest(List.of()), List.of(), skillMismatch, true, 100_000, null));
   }
 
   @Test
@@ -135,14 +151,14 @@ class ModelInvocationRequestTest {
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                null, providerRequest(envBinding), envBinding, List.of(), true));
+                null, providerRequest(envBinding), envBinding, List.of(), true, 100_000, null));
 
     List<SkillBinding> skillWithRoute = List.of(new SkillBinding("web", "Web search", ENV_ID));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelInvocationRequest(
-                null, providerRequest(List.of()), List.of(), skillWithRoute, true));
+                null, providerRequest(List.of()), List.of(), skillWithRoute, true, 100_000, null));
   }
 
   @Test
@@ -154,7 +170,8 @@ class ModelInvocationRequestTest {
             new SkillBinding("code", "Code search", null));
 
     ModelInvocationRequest request =
-        new ModelInvocationRequest(ENV_ID, providerRequest(bindings), bindings, skills, true);
+        new ModelInvocationRequest(
+            ENV_ID, providerRequest(bindings), bindings, skills, true, 100_000, null);
 
     assertEquals(List.of("bash", "fs"), names(request.toolBindings()));
     assertEquals(List.of("web", "code"), skillNames(request.skillBindings()));
@@ -164,21 +181,34 @@ class ModelInvocationRequestTest {
   void rejectsNullFacts() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelInvocationRequest(ENV_ID, null, List.of(), List.of(), true));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelInvocationRequest(ENV_ID, providerRequest(List.of()), null, List.of(), true));
+        () -> new ModelInvocationRequest(ENV_ID, null, List.of(), List.of(), true, 100_000, null));
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of()), List.of(platform("bash")), null, true));
+                ENV_ID, providerRequest(List.of()), null, List.of(), true, 100_000, null));
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelInvocationRequest(
-                ENV_ID, providerRequest(List.of()), List.of((ToolBinding) null), List.of(), true));
+                ENV_ID,
+                providerRequest(List.of()),
+                List.of(platform("bash")),
+                null,
+                true,
+                100_000,
+                null));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelInvocationRequest(
+                ENV_ID,
+                providerRequest(List.of()),
+                List.of((ToolBinding) null),
+                List.of(),
+                true,
+                100_000,
+                null));
   }
 
   private static List<String> names(List<ToolBinding> bindings) {

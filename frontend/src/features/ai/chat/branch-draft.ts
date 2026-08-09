@@ -22,13 +22,27 @@ export interface BranchDraft {
 }
 
 export const DEFAULT_THINKING_LEVEL = 'off'
+export const LOAD_SKILL_TOOL_NAME = 'load_skill'
+export const TASK_TOOL_NAME = 'task'
+
+/** 从 Agent 能力配置派生 branch 的完整 activeTools，包括不可直接选择的内部工具。 */
+export function activeToolsFromAgent(agent: AgentDefinitionDTO): string[] {
+  const activeTools = new Set(agent.config.tools ?? [])
+  if (agent.config.skills?.length) {
+    activeTools.add(LOAD_SKILL_TOOL_NAME)
+  }
+  if (agent.config.subagents?.length) {
+    activeTools.add(TASK_TOOL_NAME)
+  }
+  return [...activeTools]
+}
 
 /**
  * 使用 Chat 默认值（agent + yolo）和 catalog，为空面板构建完整的 branch draft：
  * - agent 的 model ref -> provider/model 选择
  * - variant = agent override 或 model 的 defaultVariant
  * - thinkingLevel = 该 variant 的 reasoningEffort 或 `off`
- * - activeTools = agent.config.tools
+ * - activeTools = agent.config.tools + skills/subagents 对应的内部工具
  * - environmentName 从调用方传入的 Chat 默认值（可 null）开始
  *
  * 当未配置 agent 或无法解析 agent 的 model/variant 时返回 null：
@@ -62,7 +76,7 @@ export function materializeBlankBranchDraft(
       variant: variantId,
     },
     thinkingLevel: variant.reasoningEffort || DEFAULT_THINKING_LEVEL,
-    activeTools: agent.config.tools ? [...agent.config.tools] : [],
+    activeTools: activeToolsFromAgent(agent),
     yoloEnabled,
   }
 }

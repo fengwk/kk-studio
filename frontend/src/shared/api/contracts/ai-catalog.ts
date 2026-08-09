@@ -123,6 +123,8 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
 export interface AgentDefinitionConfigDTO {
   tools: string[]
   skills: string[]
+  /** 可通过 task 委派的 Agent 名称 allowlist；与 tools/skills 一样只接受短名。 */
+  subagents: string[]
 }
 
 /** 可离线选择的统一运行时 tool catalog 条目。 */

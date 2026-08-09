@@ -25,7 +25,7 @@ final class ToolInvocationTestData {
         "1.0",
         type,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));

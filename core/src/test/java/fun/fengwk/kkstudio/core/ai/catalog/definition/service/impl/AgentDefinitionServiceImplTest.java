@@ -65,6 +65,7 @@ public class AgentDefinitionServiceImplTest {
     assertThrows(AiValidationException.class, () -> service.updateAgent("agent", null));
     assertThrows(AiValidationException.class, () -> service.updateAgent("agent", missing));
     when(resolver.requireAgent("agent")).thenReturn(definition);
+    when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(definition);
     when(repository.updateByName(definition, 0L)).thenReturn(false);
     when(repository.getByName("agent")).thenReturn(null);
     assertThrows(AiResourceNotFoundException.class, () -> service.updateAgent("agent", update));
@@ -159,7 +160,7 @@ public class AgentDefinitionServiceImplTest {
 
     // 非法 config：Agent 选择不存在的工具，configValidator 拒绝时包装为 AiValidationException。
     AgentDefinition badConfig = definition();
-    badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[]}");
+    badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
     when(factory.newAgent("agent", "provider", "model", create)).thenReturn(badConfig);
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
   }
@@ -211,7 +212,7 @@ public class AgentDefinitionServiceImplTest {
     definition.setName("agent");
     definition.setModelProviderName("provider");
     definition.setModelName("model");
-    definition.setConfigJson("{\"tools\":[],\"skills\":[]}");
+    definition.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
     definition.setVersion(0L);
     return definition;
   }
@@ -235,6 +236,7 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
+    config.setSubagents(List.of());
     return config;
   }
 

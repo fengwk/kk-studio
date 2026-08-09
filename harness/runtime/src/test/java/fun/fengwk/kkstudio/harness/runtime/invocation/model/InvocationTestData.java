@@ -38,7 +38,7 @@ final class InvocationTestData {
         "1.0",
         type,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
@@ -122,7 +122,7 @@ final class InvocationTestData {
 
   static ModelInvocationRequest request(List<ToolBinding> bindings, boolean yoloEnabled) {
     return new ModelInvocationRequest(
-        ENV_ID, providerRequest(bindings), bindings, List.of(), yoloEnabled);
+        ENV_ID, providerRequest(bindings), bindings, List.of(), yoloEnabled, 100_000, null);
   }
 
   static ModelInvocationRequest request() {

@@ -242,6 +242,7 @@ function agent() {
     config: {
       tools: [],
       skills: [],
+      subagents: [],
     },
     version: '1',
     createTime: null,

@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
@@ -153,6 +154,55 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
+  @Test
+  void crossReferencedAgentUpdatesUseOneCanonicalLockOrder() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider =
+        providerService.createProvider(provider("cross-agent-provider-" + suffix));
+    AgentModelDTO model =
+        modelService.createModel(model(provider.getName(), "cross-agent-model-" + suffix));
+    String modelRef = provider.getName() + "/" + model.getName();
+    AgentDefinitionDTO createdAlpha =
+        definitionService.createAgent(agent(modelRef, "cross-alpha-" + suffix));
+    AgentDefinitionDTO createdOmega =
+        definitionService.createAgent(agent(modelRef, "cross-omega-" + suffix));
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<AgentDefinitionDTO> alphaUpdate =
+          executor.submit(
+              () -> {
+                ready.countDown();
+                await(start);
+                return definitionService.updateAgent(
+                    createdAlpha.getName(), update(createdAlpha, List.of(createdOmega.getName())));
+              });
+      Future<AgentDefinitionDTO> omegaUpdate =
+          executor.submit(
+              () -> {
+                ready.countDown();
+                await(start);
+                return definitionService.updateAgent(
+                    createdOmega.getName(), update(createdOmega, List.of(createdAlpha.getName())));
+              });
+      assertTrue(ready.await(5, TimeUnit.SECONDS));
+      start.countDown();
+
+      AgentDefinitionDTO alpha = alphaUpdate.get(5, TimeUnit.SECONDS);
+      AgentDefinitionDTO omega = omegaUpdate.get(5, TimeUnit.SECONDS);
+      alpha = definitionService.updateAgent(alpha.getName(), update(alpha, List.of()));
+      omega = definitionService.updateAgent(omega.getName(), update(omega, List.of()));
+      definitionService.deleteAgent(alpha.getName(), alpha.getVersion());
+      definitionService.deleteAgent(omega.getName(), omega.getVersion());
+    } finally {
+      start.countDown();
+      executor.shutdownNow();
+    }
+    modelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    providerService.deleteProvider(provider.getName(), provider.getVersion());
+  }
+
   private AgentProviderCreateDTO provider(String name) {
     AgentProviderCreateDTO create = new AgentProviderCreateDTO();
     create.setName(name);
@@ -172,12 +222,27 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
+    config.setSubagents(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName(name);
     create.setModel(model);
     create.setVariant("default");
     create.setConfig(config);
     return create;
+  }
+
+  private AgentDefinitionUpdateDTO update(AgentDefinitionDTO current, List<String> subagentNames) {
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(current.getConfig().getTools());
+    config.setSkills(current.getConfig().getSkills());
+    config.setSubagents(subagentNames);
+    AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
+    update.setDescription(current.getDescription());
+    update.setSystemPrompt(current.getSystemPrompt());
+    update.setVariant(current.getVariant());
+    update.setConfig(config);
+    update.setExpectedVersion(current.getVersion());
+    return update;
   }
 
   private static void await(CountDownLatch latch) {

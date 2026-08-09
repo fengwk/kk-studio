@@ -2,10 +2,13 @@ package fun.fengwk.kkstudio.harness.runtime.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -23,13 +26,16 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 覆盖 selected-skill 解析、platform source 优先级与离线失败场景。 */
 class LoadSkillToolTest {
 
+  private static final EnvironmentName PLATFORM = new EnvironmentName("platform");
+  private static final EnvironmentName LOCAL_DEV = new EnvironmentName("local-dev");
+
   @Test
   void loadsSelectedSkillBodyFromResolvedSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
         (invocationId, threadId) ->
             List.of(
-                new SkillBinding("dev", "Developer rules", "platform"),
-                new SkillBinding("project", "Project skill", "local-dev"));
+                new SkillBinding("dev", "Developer rules", PLATFORM),
+                new SkillBinding("project", "Project skill", LOCAL_DEV));
     RecordingBodyLoader loader = new RecordingBodyLoader();
     loader.result =
         new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n\nDo the thing.\n");
@@ -38,14 +44,14 @@ class LoadSkillToolTest {
     ToolResult result = execute(tool, 42, "{\"name\":\"dev\"}");
     assertFalse(result.error());
     assertEquals("# Skill\n\nDo the thing.\n", ((TextToolContent) result.contents().get(0)).text());
-    assertEquals("platform", loader.environmentName);
+    assertEquals(PLATFORM, loader.environmentName);
     assertEquals("dev", loader.skillName);
   }
 
   @Test
   void rejectsUnselectedSkillAndOfflineSource() throws Exception {
     ThreadSelectedSkillLookup lookup =
-        (invocationId, threadId) -> List.of(new SkillBinding("dev", "Developer rules", "platform"));
+        (invocationId, threadId) -> List.of(new SkillBinding("dev", "Developer rules", PLATFORM));
     RecordingBodyLoader loader = new RecordingBodyLoader();
     loader.result =
         new SkillBodyLoader.SkillBodyLoadResult.Failed(
@@ -59,6 +65,21 @@ class LoadSkillToolTest {
     ToolResult offline = execute(tool, 1, "{\"name\":\"dev\"}");
     assertTrue(offline.error());
     assertTrue(text(offline).contains("offline"));
+  }
+
+  @Test
+  void rejectsSelectedSkillWithoutAnEnvironmentBody() throws Exception {
+    ThreadSelectedSkillLookup lookup =
+        (invocationId, threadId) ->
+            List.of(new SkillBinding("platform-only", "Already provided by the platform", null));
+    RecordingBodyLoader loader = new RecordingBodyLoader();
+    LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
+
+    ToolResult result = execute(tool, 1, "{\"name\":\"platform-only\"}");
+
+    assertTrue(result.error());
+    assertTrue(text(result).contains("has no Environment body"));
+    assertNull(loader.environmentName);
   }
 
   @Test
@@ -123,13 +144,13 @@ class LoadSkillToolTest {
   }
 
   private static final class RecordingBodyLoader implements SkillBodyLoader {
-    private String environmentName;
+    private EnvironmentName environmentName;
     private String skillName;
     private SkillBodyLoadResult result;
 
     @Override
     public CompletableFuture<SkillBodyLoadResult> load(
-        String environmentName, String skillName, Duration timeout) {
+        EnvironmentName environmentName, String skillName, Duration timeout) {
       this.environmentName = environmentName;
       this.skillName = skillName;
       return CompletableFuture.completedFuture(result);

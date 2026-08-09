@@ -11,12 +11,19 @@ import {
   type ThreadCommand,
   useAgentThreadController,
 } from '@/features/ai/runtime'
+import {
+  browserNotificationPermission,
+  requestBrowserNotificationPermission,
+  useThreadNotifications,
+} from '@/features/ai/runtime/thread-notifications'
+import { useThreadUiPreferences } from '@/features/ai/runtime/thread-ui-preferences'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import {
   AgentSelectionModal,
   EnvironmentSelectionModal,
   SelectionListModal,
 } from '@/features/ai/chat/SelectionListModal'
+import { TaskStatusWidget } from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 import type { PaneSortPreference } from '@/features/ai/chat/chat-pane-state'
 import { BOUND_PANE_COMMANDS } from '@/features/ai/chat/chat-workspace-pane/commands'
 import { errorMessage } from '@/features/ai/chat/chat-workspace-pane/pane-errors'
@@ -24,6 +31,7 @@ import { extractContextWindow } from '@/features/ai/catalog'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
+  activeToolsFromAgent,
   projectPendingTarget,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
@@ -116,6 +124,19 @@ export function BoundThreadPane({
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const boundThreadIdRef = useRef<string | null>(null)
+  const threadUiPreferences = useThreadUiPreferences()
+  const [notificationPermission, setNotificationPermission] = useState(
+    browserNotificationPermission,
+  )
+  const threadNotifications = useThreadNotifications({
+    threadId,
+    title: controller.title,
+    messages: controller.timeline.messages,
+    working: controller.working,
+    enabled:
+      threadUiPreferences.notificationsEnabled
+      && notificationPermission === 'granted',
+  })
 
   // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
   // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）。
@@ -265,7 +286,7 @@ export function BoundThreadPane({
     }
     // Draft-local edit：采用新的 agent name + 它的 active tool 集合；冻结的
     // model/thinking/environment/yolo 选中值保持不变。
-    editDraft({ agentName: selectedAgentName, activeTools: [...agent.config.tools] })
+    editDraft({ agentName: selectedAgentName, activeTools: activeToolsFromAgent(agent) })
     setAgentModalOpen(false)
   }
 
@@ -286,6 +307,28 @@ export function BoundThreadPane({
         draft: { ...current.draft, yoloEnabled: !current.draft.yoloEnabled },
       }
     })
+  }
+
+  async function toggleNotifications() {
+    setRebindBlockedReason(null)
+    if (threadUiPreferences.notificationsEnabled) {
+      threadUiPreferences.setNotificationsEnabled(false)
+      return
+    }
+    const permission = await requestBrowserNotificationPermission()
+    setNotificationPermission(permission)
+    if (permission === 'granted') {
+      threadUiPreferences.setNotificationsEnabled(true)
+      return
+    }
+    threadUiPreferences.setNotificationsEnabled(false)
+    setRebindBlockedReason(
+      t(
+        permission === 'unsupported'
+          ? 'ai.runtime.notification.unsupported'
+          : 'ai.runtime.notification.denied',
+      ),
+    )
   }
 
   function selectThread(selectedThreadId: string) {
@@ -415,6 +458,9 @@ export function BoundThreadPane({
     onDecideApproval: (_message, decision) => {
       const invocationId = _message.invocationId
       if (invocationId) {
+        if (decision === 'DENY') {
+          threadNotifications.markPermissionRejected()
+        }
         void controller.decideApproval(invocationId, decision)
       }
     },
@@ -450,9 +496,32 @@ export function BoundThreadPane({
       onFocus()
       setEnvironmentModalOpen(true)
     },
+    taskStatusEnabled: threadUiPreferences.taskStatusEnabled,
+    notificationsEnabled: threadUiPreferences.notificationsEnabled,
+    notificationPermission,
+    onTaskStatusToggle: () => {
+      threadUiPreferences.setTaskStatusEnabled(!threadUiPreferences.taskStatusEnabled)
+    },
+    onNotificationsToggle: () => {
+      void toggleNotifications()
+    },
   }
   const activity: ChatPanelActivityInput = {
     working: controller.working,
+    // 子任务 widget 只读消费 timeline；审批按钮的决策回传目标子 Thread
+    // （status.threadId），由 controller 的 targetThreadId 参数转发。
+    widgets: threadUiPreferences.taskStatusEnabled ? (
+      <TaskStatusWidget
+        messages={controller.timeline.messages}
+        approvalPending={controller.approvalPending}
+        onDecideApproval={(targetThreadId, invocationId, decision) => {
+          if (decision === 'DENY') {
+            threadNotifications.markPermissionRejected()
+          }
+          void controller.decideApproval(invocationId, decision, targetThreadId)
+        }}
+      />
+    ) : null,
     actionError: rebindBlockedReason ?? controller.actionError,
     onDismissActionError: () => {
       setRebindBlockedReason(null)

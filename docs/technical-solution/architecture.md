@@ -36,6 +36,7 @@ flowchart LR
     Web --> Core
     Web --> RuntimeSpring
     Web --> Runtime
+    Web --> Goal
     RuntimeSpring --> Runtime
     Core --> Plugin
     Goal --> Plugin
@@ -57,7 +58,7 @@ flowchart LR
 | --- | --- |
 | `harness-tool` | `Tool`、descriptor、schema、`ResourceRef`、`RemoteTool` 与 Daemon v2 wire |
 | `harness-runtime` | **纯 Java 领域模块**：Session/Entry/Thread/Command/Invocation/Work 状态机、Thread/Model/Tool processor、Stop/Approval/fencing；不依赖 Spring、数据库、Redis、HTTP 或 Provider SDK |
-| `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 intent、context projector 与提示词模板 |
+| `harness-plugin` | **纯 Java 受信任插件 API**：构建期注册、启动时冻结的 `PluginCatalog`，以及 `BranchView`、同步 `PluginTool`、声明式 `AppendCustomEntry` 与 context projector |
 | `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
 | `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、Redis realtime overlay、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
@@ -73,9 +74,9 @@ frontend -> web API / composition root
 web -> core
 web -> harness-runtime-spring -> harness-runtime -> harness-tool
 web -> harness-runtime
+web -> plugins/* -> harness-plugin
 core -> harness-runtime -> harness-tool
 core -> harness-plugin -> harness-runtime
-plugins/* -> harness-plugin
 core -> harness-tool
 web -> share
 harness-daemon -> harness-tool
@@ -89,7 +90,7 @@ harness-daemon -> harness-tool
 | Model | `(providerName, name)` | Agent 通过 Model ref 引用 |
 | Agent | immutable `name` | Chat defaults 与 Entry branch settings 通过 `agentName` 引用 |
 | Variant | Model config 中的 `id` | Agent 的可选 `variant` 覆盖 Model 的 `defaultVariant` |
-| Tool | 只有 `PLATFORM` / `ENVIRONMENT` 两类 | Agent config 保存可选择 Tool 名称集合 |
+| Tool | 只有 `PLATFORM` / `ENVIRONMENT` 两类 | Agent config 保存可选择 Tool 名称集合；`load_skill`/`task` 是内部 `PLATFORM` Tool，不在可选择目录 |
 
 公开 Model ref 的格式是 `providerName/modelName`。`ModelRef.parse` 只在第一个 `/` 切分，因此 `modelName` 可以包含额外 `/`。Catalog response 只使用名称、结构化 config 和版本字段，不使用 bigint resource ID。
 
@@ -99,14 +100,15 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 
 | 事实 | 当前职责 |
 | --- | --- |
-| Chat | 保存 `agentName`、`yoloEnabled` 两个可见发送设置，以及标题、版本和时间 |
+| Chat | 保存 `agentName`、可空默认 `environmentName`、`yoloEnabled` 三个可见发送设置，以及标题、版本和时间 |
 | Pane | 浏览器 `localStorage` 中的八个固定槽位、布局、焦点和每个槽位的 `threadId` |
 | Session | 一棵 append-only Entry Tree 的边界；由 Chat-scoped Thread 创建事务产生 |
-| Entry | 对话与运行审计事实，只允许八种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
+| Entry | 对话与运行审计事实，只允许九种 `EntryType`（见 [harness-runtime-architecture.md](harness-runtime-architecture.md)） |
 | HarnessThread | durable 字段只有 `headEntryId`、`yoloEnabled`、`nextCommandSequence`、`revision` 与时间；Session/Environment/status 由 head Entry 分支派生 |
 | ThreadCommand | 有序 mailbox，只允许八类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
-| ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/YOLO）及其状态、attempt 与 terminal 事实 |
+| ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt 与 terminal 事实 |
 | ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
+| SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即十进制子 ThreadId |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照：`CUSTOM(pluginId=goal, customType=state, schemaVersion=1)`；只取当前分支最近快照，无独立 Goal 表 |
 | Live Environment | 已绑定 Daemon 的服务器内存投影，按 canonical `environmentName` 唯一，状态为 `CONNECTING`/`READY`；可用性 = READY + 连接打开 + 心跳未过期 |
@@ -144,5 +146,14 @@ Canvas 继续使用独立的 `CanvasDocument`、`CanvasNode`、`CanvasLink` 与 
 ## 7. Realtime 与恢复
 
 PostgreSQL 是唯一 durable truth，`harness_work` 是唯一调度 mailbox（NOTIFY 只是可用性提示）。Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable `revision` 打开 SSE。Redis 丢失时重新加载 snapshot，不从 delta 重建状态。
+
+## 8. Subagent 委派（task）
+
+`task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`）：Model 调用后，Core 的 `TaskTool` 以普通 durable Harness Thread 创建子 Agent Session，复用现有 ToolInvocation/approval/stop/Work 与 Thread 状态机——**没有新表、新状态机或新调度器**。关键事实：
+
+- 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是十进制子 ThreadId。
+- 委派权限在父 ModelInvocationRequest 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
+- 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算、轮询间隔；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
+- 进度经非 durable Redis `TOOL_PARTIAL` 心跳（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。
 
 详细契约见 [harness-runtime-architecture.md](harness-runtime-architecture.md)、[harness-runtime-contracts.md](harness-runtime-contracts.md) 与 [harness-storage-runtime.md](harness-storage-runtime.md)。

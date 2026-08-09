@@ -133,7 +133,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                               "off",
                               List.of())),
                       Instant.parse("2026-08-02T00:00:00Z"))));
-      TurnResolver.Result resolution = turnResolver.resolve(1L, path, false);
+      TurnResolver.Result resolution = turnResolver.resolve(1L, path, false, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
@@ -147,11 +147,12 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
       reboundConfig.setTools(List.of());
       reboundConfig.setSkills(List.of());
+      reboundConfig.setSubagents(List.of());
       rebound.setConfig(reboundConfig);
       rebound.setSystemPrompt(reboundSystemPrompt);
       AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
       try {
-        TurnResolver.Result reboundResolution = turnResolver.resolve(1L, path, false);
+        TurnResolver.Result reboundResolution = turnResolver.resolve(1L, path, false, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
         ProviderMessage leadingSystem = resolved.request().providerRequest().messages().get(0);

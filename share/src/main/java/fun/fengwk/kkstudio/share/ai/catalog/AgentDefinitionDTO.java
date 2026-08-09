@@ -23,7 +23,7 @@ public class AgentDefinitionDTO {
   /** 当前生效的模型变体 id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）。 */
   private String variant;
 
-  /** 结构化执行配置（tools/skills），来自持久化的 config JSONB 列。 */
+  /** 结构化执行配置（tools/skills/subagents），来自持久化的 config JSONB 列。 */
   private AgentDefinitionConfigDTO config;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */

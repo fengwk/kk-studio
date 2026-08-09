@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
-/** Assistant 声明的已完成工具调用。 */
-public record ToolCallMessageContent(String toolCallId, String toolName, String argumentsJson)
+/** Assistant 声明的已完成工具调用；rendererKey 是冻结的前端渲染身份。 */
+public record ToolCallMessageContent(
+    String toolCallId, String toolName, String rendererKey, String argumentsJson)
     implements AgentMessageContent {
+
   public ToolCallMessageContent {
     toolCallId = requireNonBlank(toolCallId, "toolCallId");
     toolName = requireNonBlank(toolName, "toolName");
+    rendererKey = requireNonBlank(rendererKey, "rendererKey");
     argumentsJson = requireNonBlank(argumentsJson, "argumentsJson");
   }
 

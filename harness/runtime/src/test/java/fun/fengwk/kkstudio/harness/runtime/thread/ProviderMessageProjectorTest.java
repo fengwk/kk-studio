@@ -59,12 +59,14 @@ class ProviderMessageProjectorTest {
                                 3L,
                                 null),
                             "resource preview"),
-                        new ToolCallMessageContent("call-1", "lookup", "{\"key\":\"value\"}"))),
+                        new ToolCallMessageContent(
+                            "call-1", "lookup", "lookup", "{\"key\":\"value\"}"))),
                 new AgentMessage(
                     AgentMessageRole.TOOL,
                     List.of(
                         new ToolResultMessageContent(
                             "call-1",
+                            "lookup",
                             "lookup",
                             List.of(
                                 new TextMessageContent("tool output"),
@@ -199,7 +201,7 @@ class ProviderMessageProjectorTest {
   private static AgentMessage assistantToolCall(String toolCallId) {
     return new AgentMessage(
         AgentMessageRole.ASSISTANT,
-        List.of(new ToolCallMessageContent(toolCallId, "lookup", "{}")));
+        List.of(new ToolCallMessageContent(toolCallId, "lookup", "lookup", "{}")));
   }
 
   private static void assertSyntheticOrphanResult(ProviderMessage message) {

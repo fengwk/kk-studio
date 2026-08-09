@@ -46,7 +46,7 @@ java ... DaemonMain \
   --daemon-id optional-stable-daemon-name
 ```
 
-`environment-name` 与 `gateway-token` 必填；`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选（属性回退 `kkstudio.daemon.mcp-config`），指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
+`environment-name`、`gateway-uri` 与 `gateway-token` 必填；CLI 是 Daemon 的唯一配置来源。`--skill-dir` 可重复，未提供时若存在则默认 `~/.agents/skills`。`--mcp-config` 可选，指向严格的 UTF-8 JSON 文件（见「本地 MCP server」）。Environment 身份即 CLI 声明的 canonical 名称，随每个 envelope 参与作用域校验。
 
 ## 认证、绑定与目录
 
@@ -98,13 +98,14 @@ Daemon 可选的 `--mcp-config` 指向严格 UTF-8 JSON（`{"servers":[...]}`；
 }
 ```
 
-- server 名必须是 canonical 小写连字符命名（`[a-z][a-z0-9-]{1,64}`，上限 64 字符）；`transport` 为 `stdio` / `streamable-http` / `websocket`；`timeoutSeconds` 可选且必须为正整数；stdio 要求非空 `command`（可选 `environment`），HTTP/WS 要求合法 scheme 的 `url`（可选 `headers`）；environment/headers 的键必须非空白。
+- server 名必须是 canonical 小写连字符命名（`[a-z][a-z0-9-]{0,63}`，上限 64 字符）；`transport` 为 `stdio` / `streamable-http` / `websocket`；`timeoutSeconds` 可选且必须为正整数；stdio 要求非空 `command`（可选 `environment`），HTTP/WS 要求合法 scheme 的 `url`（可选 `headers`）；environment/headers 的键必须非空白。
 - 每个配置的 server **独立初始化**（LangChain4j `DefaultMcpClient` + 对应 transport）：单个失败只记录为 `FAILED`（错误摘要单行有界且剔除 headers/environment 值、命令与 URL），不阻断 coding tools、skills 或其它 server；启动失败的 server 保持 `FAILED` 直到 daemon 重启。退出时对每个成功创建的 client 恰好关闭一次。
+- 每个 READY server 的完整 `McpToolSpec` 在初始化时一次性读取并冻结；READY wire 只投影 name/description 摘要，`mcp_list_tools` 返回同一冻结规格中的完整 schema，`mcp_call_tool` 也只按这份冻结 allowlist 校验。运行期间不再调用 `client.listTools()`，不存在 live/frozen 双目录。
 - MCP 工具**从不**动态进入 `EnvironmentToolCatalog` 或 Agent 可选目录；只有两个固定桥接工具始终注册（即使未配置 `--mcp-config`）：
   - `mcp_list_tools`（READ_ONLY）：确定性 JSON 报告全部/单个 server 的状态与 READY server 的工具（name/description/完整输入 schema）；
   - `mcp_call_tool`（NON_IDEMPOTENT）：按精确 `server`/`tool`/JSON 对象 `arguments` 调用，保留上游 isError 与文本/结构化 JSON 结果；未知/未 READY server 或未知工具是确定性错误。
 
-Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool，不出现在 Agent 可选择目录中，必须由 Agent 的 `activeTools` 显式选择（Resolver 不做隐式追加）。
+Skill 通过 `LOAD_SKILL` / `SKILL_LOADED` / `SKILL_LOAD_FAILED` 按需加载；`load_skill` 是内部 `PLATFORM` Tool（与委派工具 `task` 一样不在 Agent 可选择目录中），必须由 Agent 的 `activeTools` 显式选择（Resolver 不做隐式追加）。Environment 固定目录始终是 11 个工具，不因 Agent 能力或任务委派变化。
 
 ## Invocation 分发
 

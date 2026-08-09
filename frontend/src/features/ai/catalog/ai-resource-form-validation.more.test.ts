@@ -101,10 +101,6 @@ describe('ai-resource-form-validation additional branches', () => {
         new Error('agent model name already exists under this provider: MiniMax-M2.7'),
       ),
     ).toBe('当前 Provider 下已存在同名 Model，请换一个名称')
-    // 兼容旧文案，避免升级中的后端仍返回全局唯一错误时前端吞掉
-    expect(toUserFacingErrorMessage(new Error('agent model name already exists: MiniMax-M2.7'))).toBe(
-      '当前 Provider 下已存在同名 Model，请换一个名称',
-    )
   })
 
   it('passes through other backend business English errors instead of a generic banner', () => {
@@ -159,6 +155,7 @@ describe('ai-resource-form-validation additional branches', () => {
     // 空 variant 是合法的「使用 model 默认」覆盖
     [agent({ tools: ['read', 'read'] }), 'tools'],
     [agent({ skills: ['dev', 'dev'] }), 'skills'],
+    [agent({ subagents: ['dev', 'dev'] }), 'subagents'],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
     const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })
     expect(result.ok).toBe(false)

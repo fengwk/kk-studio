@@ -7,7 +7,11 @@ import fun.fengwk.kkstudio.core.ai.catalog.definition.repo.AgentDefinitionReposi
 import fun.fengwk.kkstudio.core.ai.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.core.ai.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.core.ai.error.AiInUseException;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
+
+import java.util.List;
+import java.util.TreeSet;
 
 /** 解析全局 Agent definition 与 model 引用。 */
 @AllArgsConstructor
@@ -55,5 +59,38 @@ final class AgentDefinitionReferenceResolver {
           MODEL_RESOURCE, MODEL_RESOURCE + " not found: " + providerName + "/" + modelName);
     }
     return model;
+  }
+
+  /** 锁定并校验 task allowlist 中的全部 Agent，防止其在当前配置写入事务中被并发删除。 */
+  void requireSubagentsForUpdate(List<String> names) {
+    for (String name : names.stream().sorted().toList()) {
+      requireAgentForUpdate(name);
+    }
+  }
+
+  /**
+   * 以统一名称顺序锁定待更新 Agent 与其新 allowlist，避免交叉引用更新形成反向行锁顺序。
+   *
+   * @return 已锁定的待更新 Agent
+   */
+  AgentDefinition requireAgentAndSubagentsForUpdate(String agentName, List<String> subagentNames) {
+    TreeSet<String> names = new TreeSet<>(subagentNames);
+    names.add(agentName);
+    AgentDefinition target = null;
+    for (String name : names) {
+      AgentDefinition definition = requireAgentForUpdate(name);
+      if (name.equals(agentName)) {
+        target = definition;
+      }
+    }
+    return target;
+  }
+
+  void ensureNotReferencedAsSubagent(String name) {
+    if (agentDefinitionRepository.existsReferencingSubagent(name)) {
+      throw new AiInUseException(
+          DEFINITION_RESOURCE,
+          DEFINITION_RESOURCE + " is referenced by an agent subagents allowlist: " + name);
+    }
   }
 }

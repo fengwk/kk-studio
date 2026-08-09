@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.mcp;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,9 @@ class McpServerRegistryTest {
     assertTrue(registry.find("ok-b").isPresent());
     assertTrue(registry.find("bad").isEmpty());
     assertTrue(registry.find("missing").isEmpty());
+    List<McpToolSpec> frozenSpecs = registry.toolSpecs("ok-a").orElseThrow();
+    assertEquals(List.of("t1", "t2"), frozenSpecs.stream().map(McpToolSpec::name).toList());
+    assertThrows(UnsupportedOperationException.class, frozenSpecs::clear);
   }
 
   @Test

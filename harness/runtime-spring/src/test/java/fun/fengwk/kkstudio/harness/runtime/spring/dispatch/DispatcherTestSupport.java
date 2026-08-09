@@ -594,7 +594,7 @@ final class DispatcherTestSupport {
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
-                    new ToolCallMessageContent("call-1", "bash", "{}"),
+                    new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                     new TextMessageContent("assistant reply"))),
             new AssistantMessageMetadata(
                 ProviderStopReason.TOOL_CALLS,
@@ -632,7 +632,9 @@ final class DispatcherTestSupport {
             ProviderCacheControl.none()),
         List.of(),
         List.of(),
-        false);
+        false,
+        100_000,
+        null);
   }
 
   private static ModelDescriptor modelDescriptor() {
@@ -664,7 +666,7 @@ final class DispatcherTestSupport {
                 "1.0",
                 ToolType.PLATFORM,
                 "description of bash",
-                null,
+                "bash",
                 new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
                 ToolSideEffect.READ_ONLY,
                 Duration.ofSeconds(30)),

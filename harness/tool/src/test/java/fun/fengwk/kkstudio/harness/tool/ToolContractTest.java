@@ -45,7 +45,7 @@ class ToolContractTest {
                 .validateFor(descriptor));
   }
 
-  /** 工具版本必须稳定，缺省 rendererKey 使用工具名，显式 key 则保持原值。 */
+  /** 工具版本与 rendererKey 必须显式稳定。 */
   @Test
   void definesStableVersionAndRendererIdentity() {
     ToolDescriptor defaultRenderer = descriptor();
@@ -54,6 +54,30 @@ class ToolContractTest {
     assertEquals("1.0.0", defaultRenderer.version());
     assertEquals("search", defaultRenderer.rendererKey());
     assertEquals("repository-search", customRenderer.rendererKey());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search",
+                "1.0.0",
+                ToolType.PLATFORM,
+                "Search",
+                null,
+                schema(),
+                ToolSideEffect.READ_ONLY,
+                Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search",
+                "1.0.0",
+                ToolType.PLATFORM,
+                "Search",
+                " ",
+                schema(),
+                ToolSideEffect.READ_ONLY,
+                Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -143,7 +167,7 @@ class ToolContractTest {
   }
 
   private ToolDescriptor descriptor() {
-    return descriptor(null);
+    return descriptor("search");
   }
 
   private ToolDescriptor descriptor(String rendererKey) {

@@ -17,10 +17,11 @@ export interface ToolAttachment {
   mime: string
   /** 稳定 URI（data:/http:/https:/file:/s3:/...）；自身始终不是 base64 负载。 */
   data: string
-  /** 可选的、规范化的预览文本，嵌入在资源内容中。 */
   preview?: string
   size?: number | null
   sha256?: string | null
+  /** Harness adapter 已解析的显式下载地址；portable panel 不感知 API 路由。 */
+  downloadHref?: string
 }
 
 /** 由 ToolInvocation approvalJson 投影得到的、未决/已决的 Tool 审批状态。 */
@@ -57,21 +58,20 @@ export interface TextDialogueMessage extends BaseDialogueMessage {
 
 export interface ToolDialogueMessage extends BaseDialogueMessage {
   role: 'tool'
+  rendererKey: string
   phase: 'call' | 'result'
   text: string
   toolCallId: string
   toolName: string
   arguments: string
   attachments: ToolAttachment[]
+  status?: DialogueStatus
   errorMessage?: string
+  partialAttachments?: ToolAttachment[]
+  partialErrorText?: string
+  partial?: string
   /** 持有此次调用持久状态（approval/partial）的 ToolInvocation id。 */
   invocationId?: string
-  /** 活动调用的瞬态 TOOL_PARTIAL / 终止态 result overlay attachments。 */
-  partialAttachments?: ToolAttachment[]
-  /** 在尚无持久 result Entry 时，从 errorJson 投影得到的瞬态错误消息。 */
-  partialErrorText?: string
-  /** 为活动 invocation attempt 聚合出的瞬态 TOOL_PARTIAL overlay。 */
-  partial?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
 }

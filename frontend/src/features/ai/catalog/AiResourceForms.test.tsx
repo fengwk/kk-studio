@@ -178,6 +178,7 @@ describe('AiResourceForms', () => {
           variant: 'default',
           tools: [],
           skills: [],
+          subagents: [],
         }}
         models={[]}
         onChange={() => undefined}
@@ -238,6 +239,7 @@ function AgentFormHarness() {
     variant: 'default',
     tools: [],
     skills: [],
+    subagents: [],
   })
   return (
     <AgentForm

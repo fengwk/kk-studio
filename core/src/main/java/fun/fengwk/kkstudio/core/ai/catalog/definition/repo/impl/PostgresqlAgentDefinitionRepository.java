@@ -39,6 +39,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
+  public boolean existsReferencingSubagent(String name) {
+    return agentDefinitionMapper.existsReferencingSubagent(name);
+  }
+
+  @Override
   public boolean create(AgentDefinition agentDefinition) {
     return agentDefinitionMapper.insert(convert(agentDefinition)) == 1;
   }

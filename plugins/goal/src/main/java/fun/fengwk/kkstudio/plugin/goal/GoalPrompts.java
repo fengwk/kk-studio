@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.plugin.goal;
 
-import fun.fengwk.kkstudio.harness.plugin.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.plugin.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.runtime.prompt.PromptTemplateLoader;
 
 import java.util.Map;
 

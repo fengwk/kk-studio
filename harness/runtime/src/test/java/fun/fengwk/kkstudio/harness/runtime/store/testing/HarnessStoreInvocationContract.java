@@ -23,21 +23,39 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolResultPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
@@ -48,6 +66,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -174,6 +193,11 @@ public abstract class HarnessStoreInvocationContract {
             .isPresent());
     assertTrue(
         store.transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), 42)).isEmpty());
+    boolean hasTurnInvocation =
+        store.transaction(tx -> tx.hasModelInvocationForTurn(baseline.turnStartEntryId()));
+    boolean hasMissingTurnInvocation = store.transaction(tx -> tx.hasModelInvocationForTurn(42));
+    assertTrue(hasTurnInvocation);
+    assertFalse(hasMissingTurnInvocation);
   }
 
   @Test
@@ -1364,6 +1388,26 @@ public abstract class HarnessStoreInvocationContract {
                                 ToolInvocationStatus.READY,
                                 null,
                                 T2)))));
+    // rendererKey 必须匹配 Assistant 中冻结的 renderer 身份
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            withRendererKey(
+                                toolInvocation(
+                                    13,
+                                    1,
+                                    assistantEntryId,
+                                    0,
+                                    "call-1",
+                                    ToolInvocationStatus.READY,
+                                    null,
+                                    T2),
+                                "other-renderer")))));
     // 精确匹配被接受
     inTransaction(
         store,
@@ -1393,6 +1437,25 @@ public abstract class HarnessStoreInvocationContract {
     // 匹配的 result link 被接受
     insertTerminalTool(
         10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.CANCELLED, resultEntryId0, T2);
+    long rendererMismatchResult =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            resultEntryId0,
+            toolResultPayload(
+                assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED, "other-renderer"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertTerminalTool(
+                11,
+                1,
+                assistantEntryId,
+                1,
+                "call-2",
+                ToolInvocationStatus.CANCELLED,
+                rendererMismatchResult,
+                T3));
     // assistant MESSAGE 不是 ToolResult entry
     assertThrows(
         IllegalArgumentException.class,
@@ -1791,5 +1854,397 @@ public abstract class HarnessStoreInvocationContract {
                                 null,
                                 T2),
                             null))));
+  }
+
+  // ---- 压缩调用 ----
+
+  /** 关闭 baseline INPUT turn 并开一个 COMPACTION turn（head 推进到其 TURN_START）。 */
+  private long openCompactionTurn() {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          long userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  userMessagePayload(),
+                  T1));
+          long assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
+          long endEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  endEntryId,
+                  baseline.sessionId(),
+                  assistantEntryId,
+                  new TurnEndPayload(
+                      baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          long start = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  start,
+                  baseline.sessionId(),
+                  endEntryId,
+                  new TurnStartPayload(
+                      TurnStartReason.COMPACTION, StoreTestSupport.branchSettings()),
+                  T1));
+          tx.updateThread(
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
+          return start;
+        });
+  }
+
+  /** 在打开的 COMPACTION turn（head == turnStart）下插入 READY compaction invocation，返回 model id。 */
+  private long insertCompactionInvocation(long turnStart, ModelInvocationRequest request) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          long modelId = tx.nextId();
+          tx.insertModelInvocation(
+              new ModelInvocation(
+                  modelId,
+                  baseline.threadId(),
+                  turnStart,
+                  turnStart,
+                  request,
+                  ModelInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  null,
+                  T2,
+                  T2));
+          return modelId;
+        });
+  }
+
+  /** 完整压缩 turn 种子：openCompactionTurn + READY invocation + SUCCEEDED result（元数据/引用按需校验）。 */
+  private long seedCompletedCompactionTurn(
+      ModelInvocationRequest request, CompactionPayload resultPayload) {
+    long turnStart = openCompactionTurn();
+    long modelId = insertCompactionInvocation(turnStart, request);
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          long resultEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(resultEntryId, baseline.sessionId(), turnStart, resultPayload, T2));
+          ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.succeed(successResponse(), T3));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.attachResultEntry(resultEntryId, T3));
+          return modelId;
+        });
+  }
+
+  private static ProviderResponse successResponse() {
+    return new ProviderResponse(
+        "summary",
+        "",
+        List.of(),
+        ProviderStopReason.COMPLETED,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        "req-1",
+        null,
+        "{}");
+  }
+
+  private static ModelInvocationRequest compactionRequest(
+      CompactionPhase phase, long firstKeptEntryId, long cutEntryId, Long turnPrefixStartEntryId) {
+    ModelInvocationRequest base = modelRequest();
+    return new ModelInvocationRequest(
+        base.environmentName(),
+        base.providerRequest(),
+        List.of(),
+        List.of(),
+        base.yoloEnabled(),
+        base.contextWindow(),
+        new CompactionRequest(
+            phase,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            firstKeptEntryId,
+            cutEntryId,
+            turnPrefixStartEntryId));
+  }
+
+  @Test
+  void compactionInvocationAcceptsSucceededResultWithExactFrozenMetadata() {
+    ModelInvocationRequest request = compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
+    CompactionPayload result =
+        new CompactionPayload(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 5L, null);
+
+    long modelId = seedCompletedCompactionTurn(request, result);
+
+    ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, stored.status());
+    assertTrue(stored.resultEntryId() != null);
+  }
+
+  @Test
+  void compactionResultRejectsNonSucceededStatusAndMetadataDrift() {
+    ModelInvocationRequest request = compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
+    CompactionPayload result =
+        new CompactionPayload(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 5L, null);
+
+    // FAILED invocation 携带 COMPACTION result -> 拒绝。
+    long turnStart = openCompactionTurn();
+    long modelId = insertCompactionInvocation(turnStart, request);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  long resultEntryId = tx.nextId();
+                  tx.insertEntry(
+                      new Entry(resultEntryId, baseline.sessionId(), turnStart, result, T2));
+                  ModelInvocation locked = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(
+                      locked.fail(
+                          new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "boom"), T3));
+                  locked = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(locked.attachResultEntry(resultEntryId, T3));
+                  return null;
+                }));
+
+    // SUCCEEDED 但 payload 元数据与冻结请求不一致（phase 漂移）-> 拒绝。
+    CompactionPayload drifted =
+        new CompactionPayload(
+            CompactionPhase.TURN_PREFIX,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "summary",
+            2L,
+            5L,
+            3L);
+    assertThrows(
+        IllegalArgumentException.class, () -> seedCompletedCompactionTurn(request, drifted));
+  }
+
+  @Test
+  void compactionResultReferencesMustPrecedeResultAndRespectOrder() {
+    // cut 不在 result 路径上。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedCompletedCompactionTurn(
+                compactionRequest(CompactionPhase.FULL, 2L, 999L, null),
+                new CompactionPayload(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "summary",
+                    2L,
+                    999L,
+                    null)));
+    // firstKept 与 cut 都存在且位于 result 前，但 firstKept > cut 仍拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedCompletedCompactionTurn(
+                compactionRequest(CompactionPhase.FULL, 5L, 2L, null),
+                new CompactionPayload(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "summary",
+                    5L,
+                    2L,
+                    null)));
+    // firstKept 是 result Entry 自身（不位于 result 之前）-> 拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  ModelInvocationRequest request =
+                      compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
+                  long turnStart = seedCompactionTurnWithReadyInvocation(tx, request);
+                  long modelId = lastModelId(tx, turnStart);
+                  long resultEntryId = tx.nextId();
+                  tx.insertEntry(
+                      new Entry(
+                          resultEntryId,
+                          baseline.sessionId(),
+                          turnStart,
+                          new CompactionPayload(
+                              CompactionPhase.FULL,
+                              CompactionTrigger.THRESHOLD,
+                              500L,
+                              true,
+                              "summary",
+                              resultEntryId,
+                              5L,
+                              null),
+                          T2));
+                  ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(current.beginDispatch(T2));
+                  current = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(current.markRunning(T2));
+                  current = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(current.succeed(successResponse(), T3));
+                  current = tx.lockModelInvocation(modelId).orElseThrow();
+                  tx.updateModelInvocation(current.attachResultEntry(resultEntryId, T3));
+                  return null;
+                }));
+    // prefix 必须 < cut（相等拒绝）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedCompletedCompactionTurn(
+                compactionRequest(CompactionPhase.TURN_PREFIX, 2L, 5L, 5L),
+                new CompactionPayload(
+                    CompactionPhase.TURN_PREFIX,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "summary",
+                    2L,
+                    5L,
+                    5L)));
+    // prefix 不在 result 路径上。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedCompletedCompactionTurn(
+                compactionRequest(CompactionPhase.TURN_PREFIX, 2L, 5L, 999L),
+                new CompactionPayload(
+                    CompactionPhase.TURN_PREFIX,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "summary",
+                    2L,
+                    5L,
+                    999L)));
+  }
+
+  @Test
+  void turnStartReasonMustMatchCompactionPurpose() {
+    // 普通（非压缩）invocation 不能挂在 COMPACTION TURN_START 下。
+    long compactionTurnStart = openCompactionTurn();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      modelInvocation(
+                          42,
+                          baseline.threadId(),
+                          compactionTurnStart,
+                          compactionTurnStart,
+                          ModelInvocationStatus.READY,
+                          null,
+                          T2));
+                }));
+
+    // 压缩 invocation 必须挂在 COMPACTION TURN_START 下（INPUT TURN_START 拒绝）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  tx.insertModelInvocation(
+                      new ModelInvocation(
+                          43,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.turnStartEntryId(),
+                          compactionRequest(CompactionPhase.FULL, 2L, 5L, null),
+                          ModelInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          null,
+                          T2,
+                          T2));
+                }));
+  }
+
+  /** 在给定事务内：开 COMPACTION turn 链 + READY compaction invocation，返回 turnStart id。 */
+  private long seedCompactionTurnWithReadyInvocation(
+      HarnessStore.Transaction tx, ModelInvocationRequest request) {
+    tx.lockThread(baseline.threadId());
+    long userEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            userEntryId,
+            baseline.sessionId(),
+            baseline.turnStartEntryId(),
+            userMessagePayload(),
+            T1));
+    long assistantEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
+    long endEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            endEntryId,
+            baseline.sessionId(),
+            assistantEntryId,
+            new TurnEndPayload(
+                baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+            T1));
+    long start = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            start,
+            baseline.sessionId(),
+            endEntryId,
+            new TurnStartPayload(TurnStartReason.COMPACTION, StoreTestSupport.branchSettings()),
+            T1));
+    tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
+    long modelId = tx.nextId();
+    tx.insertModelInvocation(
+        new ModelInvocation(
+            modelId,
+            baseline.threadId(),
+            start,
+            start,
+            request,
+            ModelInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            null,
+            T2,
+            T2));
+    return start;
+  }
+
+  private long lastModelId(HarnessStore.Transaction tx, long turnStart) {
+    return tx.findModelInvocationByTurn(baseline.threadId(), turnStart).orElseThrow().id();
   }
 }

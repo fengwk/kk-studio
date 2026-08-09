@@ -117,7 +117,7 @@ registerCase({
             systemPrompt: 's',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [] },
+            config: { tools: [], skills: [], subagents: [] },
           }),
         { status: 400, messageIncludes },
       )
@@ -140,7 +140,7 @@ registerCase({
           systemPrompt: 's',
           model: modelRef(model),
           variant: '__missing_variant__',
-          config: { tools: [], skills: [] },
+          config: { tools: [], skills: [], subagents: [] },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -308,7 +308,7 @@ registerCase({
           systemPrompt: 'you are e2e',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [] },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -319,7 +319,7 @@ registerCase({
           description: 'updated',
           systemPrompt: 'updated prompt',
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [] },
+          config: { tools: [], skills: [], subagents: [] },
           expectedVersion: agent.version,
         })
       ).json,
@@ -344,7 +344,7 @@ registerCase({
           systemPrompt: 'recreated prompt',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [] },
+          config: { tools: [], skills: [], subagents: [] },
         })
       ).json,
     )
@@ -359,6 +359,98 @@ registerCase({
       'DELETE',
       `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
     )
+  },
+})
+
+registerCase({
+  id: 'crud.agent.subagent_reference_lifecycle',
+  level: 'L1',
+  title: 'Agent subagents 名称引用与删除保护',
+  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents',
+  async run(ctx) {
+    const model = await firstModel(ctx)
+    const suffix = cid().slice(0, 8)
+    let child = null
+    let parent = null
+    try {
+      child = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-child-${suffix}`,
+            description: 'subagent child',
+            systemPrompt: 'return a concise report',
+            model: modelRef(model),
+            variant: model.config.defaultVariant,
+            config: { tools: [], skills: [], subagents: [] },
+          })
+        ).json,
+      )
+      parent = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-parent-${suffix}`,
+            description: 'subagent parent',
+            systemPrompt: 'delegate when needed',
+            model: modelRef(model),
+            variant: model.config.defaultVariant,
+            config: { tools: [], skills: [], subagents: [child.name] },
+          })
+        ).json,
+      )
+      assert(
+        Array.isArray(parent.config?.tools)
+          && parent.config.tools.length === 0
+          && Array.isArray(parent.config?.skills)
+          && parent.config.skills.length === 0
+          && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name]),
+        JSON.stringify(parent),
+      )
+      await expectHttpError(
+        () =>
+          ctx.call(
+            'DELETE',
+            `/api/ai/catalog/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+          ),
+        { status: 409, messageIncludes: /in use|subagent|referenc/i },
+      )
+      parent = envelopeData(
+        (
+          await ctx.call(
+            'PUT',
+            `/api/ai/catalog/agents/${encodeURIComponent(parent.name)}`,
+            {
+              description: parent.description,
+              systemPrompt: parent.systemPrompt,
+              variant: parent.variant,
+              config: { tools: [], skills: [], subagents: [] },
+              expectedVersion: parent.version,
+            },
+          )
+        ).json,
+      )
+      await ctx.call(
+        'DELETE',
+        `/api/ai/catalog/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+      )
+      child = null
+      await ctx.call(
+        'DELETE',
+        `/api/ai/catalog/agents/${encodeURIComponent(parent.name)}?expectedVersion=${encodeURIComponent(parent.version)}`,
+      )
+      parent = null
+    } finally {
+      for (const agent of [parent, child]) {
+        if (!agent?.name) continue
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          )
+        } catch {
+          // 保留主断言失败；隔离 E2E schema 会在下一次 rebuild 清理。
+        }
+      }
+    }
   },
 })
 

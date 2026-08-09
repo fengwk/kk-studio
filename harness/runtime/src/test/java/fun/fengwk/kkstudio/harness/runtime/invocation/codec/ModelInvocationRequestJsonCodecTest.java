@@ -4,17 +4,25 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCod
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.OTHER_ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.platformModelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.providerRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+
+import java.util.List;
 
 /** 完整 frozen 的 Model 请求 wire，包含 route 拥有的 Tool 与 Skill binding。 */
 class ModelInvocationRequestJsonCodecTest {
@@ -37,7 +45,8 @@ class ModelInvocationRequestJsonCodecTest {
             + "],\"skillBindings\":[{\"name\":\"review\",\"description\":\"Review code\","
             + "\"sourceEnvironmentName\":\""
             + ENVIRONMENT_ID
-            + "\"}],\"yoloEnabled\":true}";
+            + "\"}],\"subagentBindings\":[],\"yoloEnabled\":true,"
+            + "\"contextWindow\":100000,\"compaction\":null}";
 
     assertEquals(expected, codec.encode(request));
     assertEquals(request, codec.decode(expected));
@@ -45,6 +54,29 @@ class ModelInvocationRequestJsonCodecTest {
     assertThrows(
         UnsupportedOperationException.class,
         () -> codec.decode(expected).toolBindings().add(request.toolBindings().getFirst()));
+  }
+
+  @Test
+  void roundTripsFrozenSubagentBindings() {
+    ModelInvocationRequest base = platformModelRequest();
+    ModelInvocationRequest request =
+        new ModelInvocationRequest(
+            base.environmentName(),
+            base.providerRequest(),
+            base.toolBindings(),
+            base.skillBindings(),
+            List.of(new SubagentBinding("reviewer", "Review changes")),
+            base.yoloEnabled(),
+            base.contextWindow(),
+            null);
+
+    String encoded = codec.encode(request);
+
+    assertTrue(
+        encoded.contains(
+            "\"subagentBindings\":[{\"name\":\"reviewer\","
+                + "\"description\":\"Review changes\"}]"));
+    assertEquals(request, codec.decode(encoded));
   }
 
   /** 仅 platform 请求的 null route 保持显式，不获得 fallback 身份。 */
@@ -60,6 +92,41 @@ class ModelInvocationRequestJsonCodecTest {
     assertEquals(
         "{\"environmentName\":null,\"providerRequest\":",
         encoded.substring(0, encoded.indexOf('{', 1)));
+  }
+
+  /** 压缩请求 wire：tokensBefore 是数值（nonNegativeLong），ids 是规范十进制字符串。 */
+  @Test
+  void roundTripsCompactionRequestWithNumericTokensBefore() {
+    ModelInvocationRequest base = environmentModelRequest();
+    ModelInvocationRequest request =
+        new ModelInvocationRequest(
+            base.environmentName(),
+            providerRequest(),
+            List.of(),
+            List.of(),
+            false,
+            100_000,
+            new CompactionRequest(
+                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, 4L, null));
+
+    String encoded = codec.encode(request);
+    assertTrue(
+        encoded.contains(
+            "\"compaction\":{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\","
+                + "\"tokensBefore\":500,\"firstKeptEntryId\":\"2\",\"cutEntryId\":\"4\","
+                + "\"turnPrefixStartEntryId\":null}"),
+        encoded);
+    assertEquals(request, codec.decode(encoded));
+    assertEquals(request, codec.decodeNode(codec.encodeNode(request)));
+
+    // 非数值 tokensBefore / 非规范 id 严格拒绝。
+    ObjectNode object = (ObjectNode) codec.encodeNode(request);
+    ObjectNode compaction = (ObjectNode) object.get("compaction");
+    compaction.put("tokensBefore", "500");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(object));
+    compaction.put("tokensBefore", 500);
+    compaction.put("firstKeptEntryId", "007");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(object));
   }
 
   /** 严格 parser 设置在嵌套 decode 之前拒绝畸形的顶层文档。 */

@@ -29,8 +29,7 @@ import java.util.Set;
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
- * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）。旧协议的 {@code environmentName} 字段不属于
- * canonical shape，由 exact-field 校验直接拒绝，不提供兼容读。字段顺序固定；list 顺序保留。
+ * {@link JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）。字段顺序固定；list 顺序保留。
  */
 public final class ThreadCommandPayloadJsonCodec {
 

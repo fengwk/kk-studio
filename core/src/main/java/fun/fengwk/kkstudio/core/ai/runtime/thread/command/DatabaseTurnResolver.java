@@ -14,23 +14,37 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
 import fun.fengwk.kkstudio.harness.plugin.ContextProjectorContribution;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginToolBinding;
@@ -48,6 +62,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -94,6 +110,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final PluginCatalog pluginCatalog;
   private final LiveEnvironmentRegistry environmentRegistry;
   private final EnvironmentGatewayProperties environmentGatewayProperties;
+  private final CompactionConfig compactionConfig;
+  private final SubagentConfig subagentConfig;
+  private final AgentPromptComposer promptComposer;
   private final Clock clock;
   private final ProviderMessageProjector messageProjector;
   private final ToolDescriptorJsonCodec toolDescriptorCodec;
@@ -110,6 +129,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
       PluginCatalog pluginCatalog,
       LiveEnvironmentRegistry environmentRegistry,
       EnvironmentGatewayProperties environmentGatewayProperties,
+      CompactionConfig compactionConfig,
+      SubagentConfig subagentConfig,
+      AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -123,6 +145,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentGatewayProperties =
         Objects.requireNonNull(environmentGatewayProperties, "environmentGatewayProperties");
+    this.compactionConfig = Objects.requireNonNull(compactionConfig, "compactionConfig");
+    this.subagentConfig = Objects.requireNonNull(subagentConfig, "subagentConfig");
+    this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.messageProjector = new ProviderMessageProjector();
     this.toolDescriptorCodec = new ToolDescriptorJsonCodec();
@@ -130,10 +155,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   @Override
-  public Result resolve(long threadId, EntryPath path, boolean yoloEnabled) {
+  public Result resolve(
+      long threadId,
+      EntryPath path,
+      boolean yoloEnabled,
+      CompactionPreparation compactionPreparation) {
     Objects.requireNonNull(path, "path");
     try {
-      ModelInvocationRequest request = resolveLive(path, yoloEnabled);
+      ModelInvocationRequest request =
+          compactionPreparation == null
+              ? resolveLive(path, yoloEnabled)
+              : resolveCompaction(path, yoloEnabled, compactionPreparation);
       return new TurnResolver.Resolved(request);
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
@@ -182,8 +214,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + providerType
                 + ")");
 
-    List<ToolBinding> toolBindings = resolveTools(settings);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings);
+    List<SubagentBinding> subagentBindings =
+        resolveSubagents(agentConfig.getSubagents(), settings, path);
+    List<ToolBinding> toolBindings = resolveTools(settings, !subagentBindings.isEmpty());
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -214,12 +248,154 @@ public final class DatabaseTurnResolver implements TurnResolver {
             effectiveVariant,
             agent.getSystemPrompt(),
             skillBindings,
+            subagentBindings,
             path,
             toolBindings,
             sessionId,
             cachePolicy(providerFactory));
     return new ModelInvocationRequest(
-        settings.environmentName(), providerRequest, toolBindings, skillBindings, yoloEnabled);
+        settings.environmentName(),
+        providerRequest,
+        toolBindings,
+        skillBindings,
+        subagentBindings,
+        yoloEnabled,
+        contextWindow(parsedModel),
+        null);
+  }
+
+  /**
+   * 压缩 resolver 路径：只使用当前 branch 的 model/provider/variant/thinking 与冻结切分事实构造请求——不查 Agent system
+   * prompt、不查 plugins、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache 写入。
+   * 永远构建一个 SYSTEM（summarization system prompt）+ 一个 USER（conversation + summary prompt）请求；输出上限为
+   * min(有效 model/variant 输出上限, floor(0.8|0.5 * reserveTokens))。
+   */
+  private ModelInvocationRequest resolveCompaction(
+      EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+    BranchSettings settings = path.baseSettings();
+    ModelSelection selection = settings.model();
+    AgentModel model =
+        require(
+            modelRepository.getByProviderNameAndName(
+                selection.providerName(), selection.modelName()),
+            "model not found: " + selection.providerName() + "/" + selection.modelName());
+    ParsedAgentModelConfig parsedModel = parseModel(model);
+    ModelVariant variant = findVariant(parsedModel, selection.variant());
+    if (variant == null) {
+      throw rejection(
+          "model variant not found: "
+              + selection.providerName()
+              + "/"
+              + selection.modelName()
+              + " variant="
+              + selection.variant());
+    }
+    ModelVariant baseVariant = withReasoningEffort(variant, settings.thinkingLevel());
+    if (baseVariant.reasoningEffort() != null && !parsedModel.reasoning()) {
+      throw rejection(
+          "model does not support reasoning: "
+              + selection.providerName()
+              + "/"
+              + selection.modelName());
+    }
+    int budget =
+        preparation.phase() == CompactionPhase.TURN_PREFIX
+            ? (int) Math.floorDiv((long) compactionConfig.reserveTokens(), 2L)
+            : (int) Math.floorDiv((long) compactionConfig.reserveTokens() * 4L, 5L);
+    // 输出上限恒为 min(模型/variant 输出上限, 阶段预算)：variant 未显式设置时回退到模型全局
+    // limit.output（parser 已保证 variant <= model limit，且 limit.output <= limit.context <= int）。
+    int maxOutput =
+        baseVariant.maxOutputTokens() == null
+            ? (int) Math.min(parsedModel.maxOutputTokens(), budget)
+            : Math.min(baseVariant.maxOutputTokens(), budget);
+    ModelVariant compactionVariant =
+        new ModelVariant(
+            baseVariant.id(),
+            maxOutput,
+            baseVariant.temperature(),
+            baseVariant.topP(),
+            baseVariant.topK(),
+            baseVariant.frequencyPenalty(),
+            baseVariant.presencePenalty(),
+            baseVariant.stopSequences(),
+            baseVariant.reasoningEffort());
+    List<AgentMessage> semanticMessages = new ArrayList<>();
+    semanticMessages.add(AgentMessage.system(CompactionPrompts.summarizationSystemPrompt()));
+    String userPrompt =
+        preparation.phase() == CompactionPhase.TURN_PREFIX
+            ? CompactionPrompts.turnPrefixUserPrompt(preparation.messagesToSummarize())
+            : CompactionPrompts.summaryUserPrompt(
+                preparation.messagesToSummarize(), preparation.previousSummary());
+    semanticMessages.add(
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(userPrompt))));
+    ProviderRequest providerRequest =
+        new ProviderRequest(
+            new ModelDescriptor(
+                selection.providerName(),
+                selection.modelName(),
+                parsedModel.tools(),
+                parsedModel.reasoning(),
+                parsedModel.pricing()),
+            compactionVariant,
+            messageProjector.project(semanticMessages),
+            List.of(),
+            ProviderCacheControl.none());
+    CompactionRequest compactionRequest =
+        new CompactionRequest(
+            preparation.phase(),
+            preparation.trigger(),
+            preparation.tokensBefore(),
+            preparation.firstKeptEntryId(),
+            preparation.cutEntryId(),
+            preparation.turnPrefixStartEntryId());
+    // contextWindow 冻结自触发 invocation 的 preparation（model config 变更不导致触发后解析漂移 / 无限 reschedule）。
+    return new ModelInvocationRequest(
+        settings.environmentName(),
+        providerRequest,
+        List.of(),
+        List.of(),
+        yoloEnabled,
+        Math.toIntExact(preparation.contextWindow()),
+        compactionRequest);
+  }
+
+  /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
+  private static int contextWindow(ParsedAgentModelConfig parsedModel) {
+    long contextWindow = parsedModel.contextWindow();
+    if (contextWindow <= 0 || contextWindow > Integer.MAX_VALUE) {
+      throw rejection("model limit.context must be a positive int, got " + contextWindow);
+    }
+    return (int) contextWindow;
+  }
+
+  /** 路径上最新 complete 的压缩 payload（FULL 或 TURN_PREFIX 成功结果）；无则 null。 */
+  private static CompactionPayload latestCompleteCompaction(List<Entry> entries) {
+    CompactionPayload latest = null;
+    for (Entry entry : entries) {
+      if (entry.payload() instanceof CompactionPayload payload && payload.complete()) {
+        latest = payload;
+      }
+    }
+    return latest;
+  }
+
+  private static int indexOfId(List<Entry> entries, long entryId) {
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).id() == entryId) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 返回携带指定 payload 的 Entry 索引；不存在返回 -1。 */
+  private static int indexOfPayload(List<Entry> entries, CompactionPayload payload) {
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).payload() == payload) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
@@ -242,9 +418,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 按 {@link BranchSettings#activeTools()} 的精确顺序逐一绑定。ENVIRONMENT 工具一律绑定最新 branch 的 {@code
    * settings.environmentName()}（可为 null 或当前不可用——实际执行时确定性失败）；PLATFORM 工具不携带路由。缺失能力仍立即拒绝， 绝不静默跳过。
    */
-  private List<ToolBinding> resolveTools(BranchSettings settings) {
+  private List<ToolBinding> resolveTools(
+      BranchSettings settings, boolean subagentDelegationEnabled) {
     List<ToolBinding> bindings = new ArrayList<>(settings.activeTools().size());
     for (String name : settings.activeTools()) {
+      if (name.equals(TaskTool.NAME)) {
+        if (!subagentDelegationEnabled) {
+          throw rejection(
+              "task requires a non-empty Agent subagents allowlist below the maximum depth");
+        }
+        ToolDescriptor task =
+            require(toolCatalog.findInternal(TaskTool.NAME).orElse(null), "task tool not found");
+        bindings.add(platformBinding(task));
+        continue;
+      }
       Optional<ToolDescriptor> selectable = toolCatalog.findSelectable(name);
       if (selectable.isPresent() && selectable.get().type() == ToolType.PLATFORM) {
         bindings.add(platformBinding(selectable.get()));
@@ -337,6 +524,40 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(bindings);
   }
 
+  /**
+   * task 只有在 branch 明确激活内部工具、Agent allowlist 非空且当前 Session depth 小于部署上限时才绑定。 名称与描述在
+   * ModelInvocationRequest 中冻结，Tool 执行绝不依据后续 Agent 配置扩权。
+   */
+  private List<SubagentBinding> resolveSubagents(
+      List<String> names, BranchSettings settings, EntryPath path) {
+    if (!settings.activeTools().contains(TaskTool.NAME)) {
+      return List.of();
+    }
+    RootPayload root = (RootPayload) path.root().payload();
+    int depth = root.subagentContext() == null ? 1 : root.subagentContext().depth();
+    if (depth >= subagentConfig.maxDepth()) {
+      throw rejection(
+          "task is unavailable at subagent depth "
+              + depth
+              + " (maxDepth="
+              + subagentConfig.maxDepth()
+              + ")");
+    }
+    if (names.isEmpty()) {
+      throw rejection("task requires a non-empty Agent subagents allowlist");
+    }
+    List<SubagentBinding> bindings = new ArrayList<>(names.size());
+    for (String name : names) {
+      AgentDefinition subagent =
+          require(agentDefinitionRepository.getByName(name), "subagent not found: " + name);
+      bindings.add(
+          new SubagentBinding(
+              subagent.getName(),
+              subagent.getDescription() == null ? "" : subagent.getDescription()));
+    }
+    return List.copyOf(bindings);
+  }
+
   private static ModelVariant findVariant(ParsedAgentModelConfig model, String name) {
     return model.variants().stream()
         .filter(variant -> variant.id().equals(name))
@@ -372,12 +593,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ModelVariant variant,
       String systemPrompt,
       List<SkillBinding> skillBindings,
+      List<SubagentBinding> subagentBindings,
       EntryPath path,
       List<ToolBinding> toolBindings,
       long sessionId,
       PromptCachePolicy cachePolicy) {
     List<AgentMessage> semanticMessages = new ArrayList<>();
-    String composedPrompt = composeSystemPrompt(systemPrompt, skillBindings);
+    String composedPrompt = promptComposer.compose(systemPrompt, skillBindings, subagentBindings);
     if (!composedPrompt.isBlank()) {
       semanticMessages.add(AgentMessage.system(composedPrompt));
     }
@@ -393,8 +615,50 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 message, "plugin context projector returned a null message: " + contribution.id()));
       }
     }
-    for (Entry entry : path.entries()) {
+    // 压缩感知投影（对齐 Pi defaultContextEntryTransform）：路径上存在 complete 压缩时，以最新 complete 压缩的 summary
+    // 作为单个 wrapper USER 消息，并从其 cutEntryId（首个保留上下文消息，本身保留）继续投影；之前的条目由 summary 替代。
+    // cutEntryId / firstKeptEntryId 必须位于该压缩 Entry 之前且在当前路径上，否则视为分支损坏 fail closed。
+    // COMPACTION 控制 turn（TURN_START(COMPACTION)...TURN_END）内部的任何消息都不投影（状态机抑制）。
+    List<Entry> entries = path.entries();
+    int walkStart = 0;
+    CompactionPayload latestComplete = latestCompleteCompaction(entries);
+    if (latestComplete != null) {
+      int compactionIndex = indexOfPayload(entries, latestComplete);
+      int cutIndex = indexOfId(entries, latestComplete.cutEntryId());
+      int firstKeptIndex = indexOfId(entries, latestComplete.firstKeptEntryId());
+      if (cutIndex < 0
+          || firstKeptIndex < 0
+          || compactionIndex < 0
+          || firstKeptIndex > cutIndex
+          || cutIndex >= compactionIndex) {
+        throw new IllegalStateException(
+            "complete compaction references are corrupt on the current path: firstKeptEntryId="
+                + latestComplete.firstKeptEntryId()
+                + " cutEntryId="
+                + latestComplete.cutEntryId());
+      }
+      semanticMessages.add(
+          AgentMessage.user(CompactionPrompts.compactedContext(latestComplete.summaryText())));
+      walkStart = cutIndex;
+    }
+    boolean inCompactionTurn = false;
+    for (int i = walkStart; i < entries.size(); i++) {
+      Entry entry = entries.get(i);
       EntryPayload payload = entry.payload();
+      if (payload instanceof TurnStartPayload turnStart) {
+        if (turnStart.reason() == TurnStartReason.COMPACTION) {
+          inCompactionTurn = true;
+        }
+        continue;
+      }
+      if (payload instanceof TurnEndPayload) {
+        inCompactionTurn = false;
+        continue;
+      }
+      if (inCompactionTurn) {
+        // COMPACTION 控制 turn 内部（HISTORY/TURN_PREFIX 结果、用户可见消息等）一律不投影。
+        continue;
+      }
       if (payload instanceof MessagePayload message) {
         semanticMessages.add(message.message());
       } else if (payload instanceof CustomMessagePayload message) {
@@ -403,7 +667,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       } else if (payload instanceof AssistantAbortedPayload message) {
         semanticMessages.add(message.message());
       }
-      // CUSTOM 是透明 branch state：provider 消息投影默认忽略它。
     }
     List<ProviderToolDefinition> providerTools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
@@ -424,37 +687,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     // cache policy 由当前 ProviderFactory 显式解析并传入；不随 descriptor/request 持久化。
     return new PromptCacheRequestFinalizer(sessionId, cacheKeyFactory)
         .apply(baseRequest, cachePolicy);
-  }
-
-  private static String composeSystemPrompt(String systemPrompt, List<SkillBinding> skillBindings) {
-    if (skillBindings.isEmpty()) {
-      return systemPrompt;
-    }
-    StringBuilder section = new StringBuilder();
-    section.append("\n\n");
-    section.append("以下技能提供针对特定任务的专业指令。\n");
-    section.append("当任务与描述匹配时，从 <available_skills> 中按其准确名称使用技能。\n");
-    section.append("\n<available_skills>\n");
-    for (SkillBinding skill : skillBindings) {
-      section.append("  <skill>\n");
-      section.append("    <name>").append(escapeXml(skill.name())).append("</name>\n");
-      section
-          .append("    <description>")
-          .append(escapeXml(skill.description()))
-          .append("</description>\n");
-      section.append("  </skill>\n");
-    }
-    section.append("</available_skills>");
-    return systemPrompt.isBlank() ? section.toString().stripLeading() : systemPrompt + section;
-  }
-
-  private static String escapeXml(String value) {
-    return value
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
-        .replace("'", "&apos;");
   }
 
   private static ProviderType toProviderType(AgentProvider provider) {

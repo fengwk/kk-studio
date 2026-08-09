@@ -383,9 +383,10 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private Applied finishSuccessLocked(ProviderResponse response, List<Publish> publishes) {
     ModelStreamAccumulator.Completion completion;
+    ProviderResponse validatedResponse;
     try {
       completion = accumulator.complete(response);
-      ModelResponseValidator.validate(request.providerRequest(), completion.response());
+      validatedResponse = ModelResponseValidator.validate(request, completion.response());
     } catch (RuntimeException failure) {
       log.warn(
           "invalid provider response for invocation {}: {}",
@@ -402,7 +403,7 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     final long finalCheckpointSequence = finalSequence;
     boolean committed =
-        safeTerminal(() -> commitSuccess(completion.response(), finalCheckpointSequence));
+        safeTerminal(() -> commitSuccess(validatedResponse, finalCheckpointSequence));
     if (!committed) {
       return Applied.LOST;
     }
@@ -512,8 +513,9 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                String text = accumulator.text();
-                String thinking = accumulator.thinking();
+                String text = request.compaction() == null ? accumulator.text() : response.text();
+                String thinking =
+                    request.compaction() == null ? accumulator.thinking() : response.thinking();
                 if (!text.isBlank() || !thinking.isBlank()) {
                   ModelInvocation checkpointed =
                       model.checkpoint(
@@ -601,6 +603,9 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private void publishAll(List<Publish> publishes) {
+    if (request.compaction() != null) {
+      return;
+    }
     for (Publish publish : publishes) {
       appendRealtime(publish.event, publish.sequence);
     }

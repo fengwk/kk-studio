@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 
@@ -16,8 +18,10 @@ import java.util.Objects;
  * environmentName}）、provider/model/variant 选择与有序 tool bindings（request 构造器已保证 provider tools 与
  * bindings 一一对应，只需对照名称序列）。agentName / thinkingLevel 在 request 中没有直接的 canonical 字段，不做校验。
  *
- * <p>任何不一致都是 Resolver 契约 / 编程错误：抛清晰的 {@link IllegalStateException}，调用方必须保证此时尚未发生任何 durable
- * mutation，绝不转换为 typed user rejection 或 reschedule。
+ * <p>压缩 turn（{@code plan.preparation()} 非空）必须携带与 preparation 逐字段一致的 {@link CompactionRequest}
+ * 元数据与相同 {@code contextWindow}，且 tool/skill binding 必须为空（正常 turn 的 tool 名称序列校验不适用于压缩请求）； 正常 turn
+ * 必须携带 {@code compaction == null}。任何不一致都是 Resolver 契约 / 编程错误：抛清晰的 {@link
+ * IllegalStateException}，调用方必须保证此时尚未发生任何 durable mutation，绝不转换为 typed user rejection 或 reschedule。
  */
 final class ResolvedRequestValidator {
 
@@ -27,6 +31,7 @@ final class ResolvedRequestValidator {
   static void validate(TurnPlan plan, ModelInvocationRequest request) {
     Objects.requireNonNull(plan, "plan");
     Objects.requireNonNull(request, "request");
+    validateCompactionPurpose(plan, request);
     BranchSettings settings = plan.candidatePath().baseSettings();
     if (request.yoloEnabled() != plan.finalYoloEnabled()) {
       throw new IllegalStateException(
@@ -61,16 +66,74 @@ final class ResolvedRequestValidator {
               + " does not match candidate branch variant "
               + settings.model().variant());
     }
-    List<String> boundToolNames = new ArrayList<>(request.toolBindings().size());
-    for (ToolBinding binding : request.toolBindings()) {
-      boundToolNames.add(binding.descriptor().name());
+    if (plan.preparation() == null) {
+      List<String> boundToolNames = new ArrayList<>(request.toolBindings().size());
+      for (ToolBinding binding : request.toolBindings()) {
+        boundToolNames.add(binding.descriptor().name());
+      }
+      if (!boundToolNames.equals(settings.activeTools())) {
+        throw new IllegalStateException(
+            "resolved request tool bindings "
+                + boundToolNames
+                + " do not match candidate branch activeTools "
+                + settings.activeTools());
+      }
     }
-    if (!boundToolNames.equals(settings.activeTools())) {
+  }
+
+  /** reason COMPACTION iff preparation/request metadata 存在，且逐字段严格一致；压缩请求零 tool/skill。 */
+  private static void validateCompactionPurpose(TurnPlan plan, ModelInvocationRequest request) {
+    CompactionPreparation preparation = plan.preparation();
+    if (preparation == null) {
+      if (request.compaction() != null) {
+        throw new IllegalStateException("a normal turn must not carry compaction request metadata");
+      }
+      return;
+    }
+    CompactionRequest compaction = request.compaction();
+    if (compaction == null) {
+      throw new IllegalStateException("a compaction turn requires compaction request metadata");
+    }
+    if (compaction.phase() != preparation.phase()) {
       throw new IllegalStateException(
-          "resolved request tool bindings "
-              + boundToolNames
-              + " do not match candidate branch activeTools "
-              + settings.activeTools());
+          "resolved compaction phase "
+              + compaction.phase()
+              + " does not match plan preparation phase "
+              + preparation.phase());
+    }
+    if (compaction.trigger() != preparation.trigger()) {
+      throw new IllegalStateException(
+          "resolved compaction trigger "
+              + compaction.trigger()
+              + " does not match plan preparation trigger "
+              + preparation.trigger());
+    }
+    if (compaction.tokensBefore() != preparation.tokensBefore()) {
+      throw new IllegalStateException(
+          "resolved compaction tokensBefore does not match plan preparation");
+    }
+    if (compaction.firstKeptEntryId() != preparation.firstKeptEntryId()) {
+      throw new IllegalStateException(
+          "resolved compaction firstKeptEntryId does not match plan preparation");
+    }
+    if (compaction.cutEntryId() != preparation.cutEntryId()) {
+      throw new IllegalStateException(
+          "resolved compaction cutEntryId does not match plan preparation");
+    }
+    if (!Objects.equals(
+        compaction.turnPrefixStartEntryId(), preparation.turnPrefixStartEntryId())) {
+      throw new IllegalStateException(
+          "resolved compaction turnPrefixStartEntryId does not match plan preparation");
+    }
+    if (request.contextWindow() != preparation.contextWindow()) {
+      throw new IllegalStateException(
+          "resolved compaction contextWindow="
+              + request.contextWindow()
+              + " does not match plan preparation contextWindow="
+              + preparation.contextWindow());
+    }
+    if (!request.toolBindings().isEmpty() || !request.skillBindings().isEmpty()) {
+      throw new IllegalStateException("compaction requests must not carry tool or skill bindings");
     }
   }
 }

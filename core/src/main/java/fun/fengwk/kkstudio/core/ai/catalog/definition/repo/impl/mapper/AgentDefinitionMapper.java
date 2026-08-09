@@ -54,6 +54,16 @@ public interface AgentDefinitionMapper extends BaseMapper {
   @ResultMap("agentDefinitionResultMap")
   AgentDefinitionDO getByNameForUpdate(@Param("name") String name);
 
+  @Select(
+      """
+      select exists (
+          select 1
+          from agent_definition
+          where jsonb_exists(config -> 'subagents', #{name})
+      )
+      """)
+  boolean existsReferencingSubagent(@Param("name") String name);
+
   @Insert(
       """
       insert into agent_definition (

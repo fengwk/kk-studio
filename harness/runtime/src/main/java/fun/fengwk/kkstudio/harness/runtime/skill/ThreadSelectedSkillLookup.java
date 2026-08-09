@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.skill;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+
 import java.util.List;
 import java.util.Optional;
 

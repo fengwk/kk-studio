@@ -72,17 +72,21 @@ CONTINUATION：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/
 1. 从 candidate path 前缀的最近 TURN_START `BranchSettings`（**latest-snapshot-wins**：只使用最近一个 ROOT/TURN_START 的完整快照，null/缺失/不可用值绝不向更旧快照回退）读取 `environmentName`、`agentName`、`model`、`thinkingLevel`、`activeTools`；
 2. 按 `agentName` 读取最新 Agent；按 Model ref 读取最新 Provider/Model/Variant；
 3. 按 `activeTools` 与 `environmentName` 构造 tool set：ENVIRONMENT 工具一律按最新名称绑定（null/缺失/未 READY 规划不拒绝；实际 start 时不可用 → 确定性 `Rejected`，durable `FAILED` ToolResult 对模型可见）；Agent skills 只从 Agent config 读取、必须由最新选中且 live 的 Environment 精确提供（缺失/未 READY/无名称精确拒绝，绝不回看更旧 settings）、且 `activeTools` 必须显式包含内部 `load_skill`；
-4. 生成 `ModelInvocationRequest`：
+4. 按 Agent `subagents` allowlist 解析委派能力：`task` 只在 `activeTools` 显式含 task、allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生）；allowlist 每个名称必须解析到现存 Agent，名称 + 描述冻结为 `subagentBindings`；
+5. 生成 `ModelInvocationRequest`：
 
 ```text
 environmentName    # 本请求的单一 Environment route（可 null）
 providerRequest    # exact Provider transport payload（model/variant/messages/tools/cacheControl）
 toolBindings       # (descriptor, type, environmentName, plugin provenance/access) 与 providerRequest.tools 一一对应
 skillBindings      # 选中 skill（必须显式选中 load_skill，非隐式追加）
+subagentBindings   # task 可委派的 Agent 名称 + 描述 allowlist（activeTools 含 task 且未达最大深度时）
 yoloEnabled        # 冻结运行时策略
 ```
 
-缺失 Agent/Provider/Model/Variant/未知 Tool、Environment 不可用等确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`（message 携带原因）→ `Rejected(AssistantError)`；Processor 写入 `ASSISTANT_ERROR` + `FAILED TURN_END` barrier，不产生 ModelInvocation。临时基础设施失败以异常表达，由 Processor reschedule。
+system prompt 由 `AgentPromptComposer` 集中组合：Agent 正文 → `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。
+
+缺失 Agent/Provider/Model/Variant/未知 Tool、Environment 不可用、task 无 allowlist/超深度等确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`（message 携带原因）→ `Rejected(AssistantError)`；Processor 写入 `ASSISTANT_ERROR` + `FAILED TURN_END` barrier，不产生 ModelInvocation。临时基础设施失败以异常表达，由 Processor reschedule。
 
 ## 4. Model 执行与 usage/cost 冻结
 
@@ -155,8 +159,11 @@ path Entries
 
 Tool Result 的 Resource 呈现：
 
-- **仅 `data:` URI** 自动媒体预览；http/https/file/s3 只展示稳定 URI 文本 + 显式 `rel="noopener noreferrer"` 链接；
+- **仅 `data:` URI** 自动媒体预览；http/https 保持显式直连链接（`rel="noopener noreferrer"`）；
+- file/s3 绝不把宿主 URI 交给浏览器：只按内容身份投影到同源 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name`（attachment + nosniff），Core `ManagedResourceDownloadService` 用 `ResourceStore.reference` 重建并读取 canonical ref，Web controller 只组装安全下载响应；未知/不完整身份（缺 sha256 或非 canonical scheme）不渲染链接；
 - preview 保持 `<pre>` 文本块；
 - 允许的 scheme 集合固定为 data/file/s3/http/https，未知 scheme 不渲染链接。
+
+task 委派工具（`rendererKey=task`）的呈现契约：call 阶段叠加 `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整快照，含扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重），终态展示 `<task id state>` envelope 的 `<task_result>`/`<task_error>`；任意深度子工具的待决审批都按实际子 ThreadId 复用同一 approval 端点。
 
 恢复来源始终是 PostgreSQL 的 Entry/Command/Invocation/Work；daemon connection、processor 进程与 EventSource 都可以重连或替换。

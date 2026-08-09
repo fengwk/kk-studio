@@ -7,7 +7,7 @@ import java.util.function.Consumer;
  * 受信任的 build-time 插件单元：声明自身 descriptor 并通过 {@link PluginRegistrar} 贡献能力。
  *
  * <p>插件是 classpath 构建期单元，不是运行时安装物；贡献在 {@link PluginCatalog} 冻结前完成并校验。插件不得接触 HarnessStore / gateway
- * / transaction / lock——它只能读取不可变 {@link BranchView} 并返回声明式 {@link PluginIntent}。
+ * / transaction / lock——它只能读取不可变 {@link BranchView} 并返回声明式 {@link AppendCustomEntry}。
  */
 public interface HarnessPlugin {
 

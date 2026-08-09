@@ -38,6 +38,7 @@ class AgentDefinitionConfigValidatorTest {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(envTool, "create_goal"));
       config.setSkills(List.of("dev", "ops"));
+      config.setSubagents(List.of("reviewer"));
       assertDoesNotThrow(() -> fixture.validator.validate(config));
     }
   }
@@ -48,6 +49,7 @@ class AgentDefinitionConfigValidatorTest {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of("missing"));
       config.setSkills(List.of());
+      config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
@@ -62,6 +64,7 @@ class AgentDefinitionConfigValidatorTest {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of());
       config.setSkills(List.of(tooLong));
+      config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
@@ -75,10 +78,26 @@ class AgentDefinitionConfigValidatorTest {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of("load_skill"));
       config.setSkills(List.of());
+      config.setSubagents(List.of());
 
       IllegalArgumentException error =
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
       assertTrue(error.getMessage().contains("internal platform tool"));
+    }
+  }
+
+  @Test
+  void rejectsSubagentNameExceeding64Characters() {
+    try (Fixture fixture = new Fixture(List.of())) {
+      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+      config.setTools(List.of());
+      config.setSkills(List.of());
+      config.setSubagents(List.of("x".repeat(65)));
+
+      assertTrue(
+          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
+              .getMessage()
+              .contains("subagent name must be <= 64 characters"));
     }
   }
 

@@ -48,7 +48,7 @@ class CoreToolGatewayPreflightTest {
         "1",
         ToolType.PLATFORM,
         "description of demo",
-        null,
+        "demo",
         new ToolParamsSchema(
             "arguments",
             Map.of("path", new ToolStringSchema("Target path")),
@@ -188,7 +188,7 @@ class CoreToolGatewayPreflightTest {
         "1",
         ToolType.PLATFORM,
         "description of x",
-        null,
+        "x",
         new ToolParamsSchema(
             "arguments",
             Map.of("path", new ToolStringSchema("Target path")),

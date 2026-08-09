@@ -74,7 +74,8 @@ describe('AiConsolePanels', () => {
               variant: 'default',
               config: {
                 tools: ['bash'],
-                skills: []
+                skills: [],
+                subagents: [],
               },
               version: '1',
               createTime: null,

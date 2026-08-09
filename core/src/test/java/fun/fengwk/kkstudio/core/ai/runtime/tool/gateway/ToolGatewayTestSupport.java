@@ -91,7 +91,7 @@ final class ToolGatewayTestSupport {
         "1",
         ToolType.PLATFORM,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));

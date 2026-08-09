@@ -110,7 +110,11 @@ public final class HarnessRuntime {
           Session session = new Session(sessionId, command.title(), now);
           Entry rootEntry =
               new Entry(
-                  rootEntryId, sessionId, null, new RootPayload(command.branchSettings()), now);
+                  rootEntryId,
+                  sessionId,
+                  null,
+                  new RootPayload(command.branchSettings(), command.subagentContext()),
+                  now);
           tx.insertSession(session);
           tx.insertEntry(rootEntry);
           ThreadState thread =

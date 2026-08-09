@@ -25,7 +25,7 @@ export function projectDurableEntry(
     messages.push(projectRootEntry(entry))
     return
   }
-  if (entryType === 'TURN_START' || entryType === 'TURN_END') {
+  if (entryType === 'TURN_START' || entryType === 'COMPACTION' || entryType === 'TURN_END') {
     // 控制边界：不显示成 unknown entry，也不进入对话时间线。
     return
   }
@@ -159,6 +159,7 @@ function projectToolCall(
     subjectEntryId: entry.entryId,
     toolCallId: getString(content.toolCallId),
     toolName: getString(content.toolName),
+    rendererKey: getString(content.rendererKey),
     arguments: getString(content.argumentsJson),
     text: '',
     attachments: [],
@@ -182,6 +183,7 @@ function projectToolResult(
     subjectEntryId: entry.entryId,
     toolCallId: getString(content.toolCallId),
     toolName: getString(content.toolName),
+    rendererKey: getString(content.rendererKey),
     arguments: argumentsJson,
     text: contents.map(contentText).filter(Boolean).join('\n'),
     attachments: contents.flatMap(toResourceAttachment),

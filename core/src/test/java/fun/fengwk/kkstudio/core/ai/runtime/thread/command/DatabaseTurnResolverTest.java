@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.thread.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,7 +23,15 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayProperties;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
+import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
+import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -30,34 +39,42 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
@@ -497,6 +514,105 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
+  void freezesAllowedSubagentsAndComposesTaskPrompt() {
+    Fixture fixture = taskFixture();
+    fixture.agentConfig.setSubagents(List.of("reviewer"));
+    fixture.subagent("reviewer", "Review <carefully> & report.");
+
+    ModelInvocationRequest request =
+        fixture.resolved(fixture.path(settings(null, "default", "low", List.of(TaskTool.NAME))));
+
+    assertEquals(
+        List.of(new SubagentBinding("reviewer", "Review <carefully> & report.")),
+        request.subagentBindings());
+    assertEquals(
+        List.of(TaskTool.NAME),
+        request.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    assertEquals(ToolType.PLATFORM, request.toolBindings().getFirst().type());
+    String system = textOf(request.providerRequest().messages().getFirst());
+    assertTrue(system.contains("<available_subagents>"), system);
+    assertTrue(system.contains("<name>reviewer</name>"), system);
+    assertTrue(
+        system.contains("<description>Review &lt;carefully&gt; &amp; report.</description>"),
+        system);
+    assertTrue(system.contains("task"), system);
+
+    // 请求冻结后 catalog DTO 的后续变更不得扩权或改写描述。
+    fixture.agentConfig.setSubagents(List.of("reviewer", "other"));
+    fixture.subagent("reviewer", "changed");
+    assertEquals(
+        List.of(new SubagentBinding("reviewer", "Review <carefully> & report.")),
+        request.subagentBindings());
+  }
+
+  @Test
+  void taskDelegationRequiresExplicitToolAllowlistAndDepthBudget() {
+    Fixture fixture = taskFixture();
+    fixture.agentConfig.setSubagents(List.of("reviewer"));
+    fixture.subagent("reviewer", "Review");
+
+    ModelInvocationRequest withoutTask =
+        fixture.resolved(fixture.path(settings(null, "default", "low")));
+    assertEquals(List.of(), withoutTask.subagentBindings());
+    assertFalse(textOf(withoutTask.providerRequest().messages().getFirst()).contains("subagent"));
+
+    fixture.agentConfig.setSubagents(List.of());
+    assertEquals(
+        "task requires a non-empty Agent subagents allowlist",
+        fixture
+            .rejected(fixture.path(settings(null, "default", "low", List.of(TaskTool.NAME))))
+            .error()
+            .message());
+
+    fixture.agentConfig.setSubagents(List.of("reviewer"));
+    EntryPath depthLimited =
+        new EntryPath(
+            List.of(
+                new Entry(
+                    1L,
+                    SESSION_ID,
+                    null,
+                    new RootPayload(
+                        settings(null, "default", "low", List.of(TaskTool.NAME)),
+                        new SubagentContext(90L, 80L, 70L, 2)),
+                    NOW)));
+    assertEquals(
+        "task is unavailable at subagent depth 2 (maxDepth=2)",
+        fixture.rejected(depthLimited).error().message());
+  }
+
+  @Test
+  void rejectsMissingSubagentOrTaskDescriptorWithoutSilentFallback() {
+    Fixture fixture = taskFixture();
+    fixture.agentConfig.setSubagents(List.of("ghost"));
+    assertEquals(
+        "subagent not found: ghost",
+        fixture
+            .rejected(fixture.path(settings(null, "default", "low", List.of(TaskTool.NAME))))
+            .error()
+            .message());
+
+    fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            AgentProviderType.openai,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true);
+    fixture.agentConfig.setSubagents(List.of("reviewer"));
+    fixture.subagent("reviewer", "Review");
+    assertEquals(
+        "task tool not found",
+        fixture
+            .rejected(fixture.path(settings(null, "default", "low", List.of(TaskTool.NAME))))
+            .error()
+            .message());
+  }
+
+  @Test
   void appliesThinkingLevelAsFrozenReasoningEffortOverride() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
@@ -627,7 +743,7 @@ class DatabaseTurnResolverTest {
         IllegalStateException.class,
         () ->
             missingAgent.resolver.resolve(
-                1L, missingAgent.path(settings(null, "default", "low")), false));
+                1L, missingAgent.path(settings(null, "default", "low")), false, null));
 
     Fixture missingProvider = new Fixture(List.of(), List.of(), List.of());
     missingProvider.failProviderLookup(new RuntimeException("db down"));
@@ -635,7 +751,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingProvider.resolver.resolve(
-                1L, missingProvider.path(settings(null, "default", "low")), false));
+                1L, missingProvider.path(settings(null, "default", "low")), false, null));
 
     Fixture missingModel = new Fixture(List.of(), List.of(), List.of());
     missingModel.failModelLookup(new RuntimeException("db down"));
@@ -643,7 +759,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingModel.resolver.resolve(
-                1L, missingModel.path(settings(null, "default", "low")), false));
+                1L, missingModel.path(settings(null, "default", "low")), false, null));
   }
 
   @Test
@@ -819,6 +935,391 @@ class DatabaseTurnResolverTest {
         BigDecimal.ZERO);
   }
 
+  @Test
+  void compactionRequestIsMinimalAndFreezesPlannerFacts() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(ENV_A, "default", "low");
+    List<AgentMessage> messages =
+        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
+    CompactionPreparation preparation =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            123L,
+            4096L,
+            2L,
+            3L,
+            null,
+            null,
+            messages);
+
+    ModelInvocationRequest request = fixture.resolved(fixture.path(settings), false, preparation);
+
+    // 冻结的切分事实与 contextWindow 逐字段保留。
+    assertEquals(CompactionPhase.FULL, request.compaction().phase());
+    assertEquals(CompactionTrigger.THRESHOLD, request.compaction().trigger());
+    assertEquals(123L, request.compaction().tokensBefore());
+    assertEquals(2L, request.compaction().firstKeptEntryId());
+    assertEquals(3L, request.compaction().cutEntryId());
+    assertNull(request.compaction().turnPrefixStartEntryId());
+    assertEquals(4096, request.contextWindow());
+    assertEquals(ENV_A, request.environmentName());
+    // 零 tool / skill，无 cache。
+    assertEquals(List.of(), request.toolBindings());
+    assertEquals(List.of(), request.skillBindings());
+    assertEquals(List.of(), request.providerRequest().tools());
+    assertEquals(ProviderCacheControl.none(), request.providerRequest().cacheControl());
+    // 恰好 SYSTEM + USER 两个消息：summarization system prompt + summary user prompt。
+    List<ProviderMessage> providerMessages = request.providerRequest().messages();
+    assertEquals(2, providerMessages.size());
+    assertEquals(ProviderMessageRole.SYSTEM, providerMessages.get(0).role());
+    assertEquals(CompactionPrompts.summarizationSystemPrompt(), textOf(providerMessages.get(0)));
+    assertEquals(ProviderMessageRole.USER, providerMessages.get(1).role());
+    assertEquals(
+        CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(1)));
+    // 输出上限 = min(variant 1024, floor(0.8 * 16384) = 13107) = 1024。
+    assertEquals(1024, request.providerRequest().variant().maxOutputTokens());
+  }
+
+  @Test
+  void compactionOutputCapFallsBackToModelGlobalLimitWhenVariantNull() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.modelGlobalOutputLimit(600);
+    List<AgentMessage> messages =
+        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
+    CompactionPreparation full =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            123L,
+            4096L,
+            2L,
+            3L,
+            null,
+            null,
+            messages);
+    CompactionPreparation prefix =
+        new CompactionPreparation(
+            CompactionPhase.TURN_PREFIX,
+            CompactionTrigger.THRESHOLD,
+            123L,
+            4096L,
+            2L,
+            3L,
+            2L,
+            null,
+            messages);
+
+    // FULL 预算 13107、TURN_PREFIX 预算 8192：variant 未设置时都回退到模型全局 600（绝不直接使用预算）。
+    assertEquals(
+        600,
+        fixture
+            .resolved(fixture.path(settings(null, "default", "low")), false, full)
+            .providerRequest()
+            .variant()
+            .maxOutputTokens());
+    assertEquals(
+        600,
+        fixture
+            .resolved(fixture.path(settings(null, "default", "low")), false, prefix)
+            .providerRequest()
+            .variant()
+            .maxOutputTokens());
+  }
+
+  @Test
+  void normalProjectionUsesLatestSummaryWrapperAndRetainedCutSuffix() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(ENV_A, "default", "low");
+
+    ModelInvocationRequest request =
+        fixture.resolved(projectionPath(settings, "summary text", 2L, 4L));
+
+    List<ProviderMessage> messages = request.providerRequest().messages();
+    assertEquals(5, messages.size());
+    assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
+    assertTrue(textOf(messages.get(0)).startsWith("agent system prompt"));
+    assertEquals(ProviderMessageRole.USER, messages.get(1).role());
+    assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(1)));
+    // 从 cut（ASST1）本身开始保留：ASST1、USER2、ASST2 继续投影；COMPACTION 控制 turn 内部不投影。
+    assertEquals("first reply", textOf(messages.get(2)));
+    assertEquals("second user", textOf(messages.get(3)));
+    assertEquals("second reply", textOf(messages.get(4)));
+  }
+
+  @Test
+  void compactionInternalMessagesAreSuppressedInProjection() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(ENV_A, "default", "low");
+
+    ModelInvocationRequest request = fixture.resolved(stoppedCompactionProjectionPath(settings));
+
+    List<ProviderMessage> messages = request.providerRequest().messages();
+    assertEquals(5, messages.size());
+    assertEquals("first user", textOf(messages.get(1)));
+    assertEquals("first reply", textOf(messages.get(2)));
+    // 被停止压缩 turn 内部的 ABORTED 一律不投影。
+    assertEquals("second user", textOf(messages.get(3)));
+    assertEquals("second reply", textOf(messages.get(4)));
+  }
+
+  @Test
+  void corruptCompactionReferencesFailClosedInProjection() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(ENV_A, "default", "low");
+    // cut 不在当前路径。
+    EntryPath missingCut = projectionPath(settings, "summary", 2L, 999L);
+    assertThrows(IllegalStateException.class, () -> fixture.resolved(missingCut));
+    // firstKept 在 cut 之后（顺序非法）。
+    EntryPath inverted = projectionPath(settings, "summary", 4L, 3L);
+    assertThrows(IllegalStateException.class, () -> fixture.resolved(inverted));
+  }
+
+  @Test
+  void latestCompleteCompactionWinsOverOlderWrapper() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(ENV_A, "default", "low");
+
+    ModelInvocationRequest request = fixture.resolved(twoCompactionProjectionPath(settings));
+
+    List<ProviderMessage> messages = request.providerRequest().messages();
+    assertEquals(6, messages.size());
+    assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(1)));
+    // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
+    assertEquals("third user", textOf(messages.get(4)));
+    assertEquals("third reply", textOf(messages.get(5)));
+  }
+
+  /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn（payload 携带给定 firstKept/cut）。 */
+  private static EntryPath projectionPath(
+      BranchSettings settings, String summary, long firstKeptEntryId, long cutEntryId) {
+    long rootId = 1L;
+    long turn1Id = 2L;
+    long user1Id = 3L;
+    long assistant1Id = 4L;
+    long end1Id = 5L;
+    long compactionStartId = 6L;
+    long compactionId = 7L;
+    long end2Id = 8L;
+    long turn2Id = 9L;
+    long user2Id = 10L;
+    long assistant2Id = 11L;
+    long end3Id = 12L;
+    return new EntryPath(
+        List.of(
+            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(turn1Id, rootId, settings),
+            userEntry(user1Id, turn1Id, "first user"),
+            assistantEntry(assistant1Id, user1Id, "first reply"),
+            turnEnd(end1Id, assistant1Id, turn1Id),
+            compactionStartEntry(compactionStartId, end1Id, settings),
+            new Entry(
+                compactionId,
+                SESSION_ID,
+                compactionStartId,
+                new CompactionPayload(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    summary,
+                    firstKeptEntryId,
+                    cutEntryId,
+                    null),
+                NOW),
+            turnEnd(end2Id, compactionId, compactionStartId),
+            turnEntry(turn2Id, end2Id, settings),
+            userEntry(user2Id, turn2Id, "second user"),
+            assistantEntry(assistant2Id, user2Id, "second reply"),
+            turnEnd(end3Id, assistant2Id, turn2Id)));
+  }
+
+  /** 被停止压缩 turn 投影路径：ROOT + turn1 + 停止压缩 turn（ABORTED）+ turn2。 */
+  private static EntryPath stoppedCompactionProjectionPath(BranchSettings settings) {
+    long rootId = 1L;
+    long turn1Id = 2L;
+    long user1Id = 3L;
+    long assistant1Id = 4L;
+    long end1Id = 5L;
+    long compactionStartId = 6L;
+    long abortedId = 7L;
+    long end2Id = 8L;
+    long turn2Id = 9L;
+    long user2Id = 10L;
+    long assistant2Id = 11L;
+    long end3Id = 12L;
+    return new EntryPath(
+        List.of(
+            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(turn1Id, rootId, settings),
+            userEntry(user1Id, turn1Id, "first user"),
+            assistantEntry(assistant1Id, user1Id, "first reply"),
+            turnEnd(end1Id, assistant1Id, turn1Id),
+            compactionStartEntry(compactionStartId, end1Id, settings),
+            new Entry(
+                abortedId,
+                SESSION_ID,
+                compactionStartId,
+                new AssistantAbortedPayload(
+                    new AgentMessage(
+                        AgentMessageRole.ASSISTANT,
+                        List.of(new TextMessageContent("internal aborted")))),
+                NOW),
+            new Entry(
+                end2Id,
+                SESSION_ID,
+                abortedId,
+                new TurnEndPayload(
+                    compactionStartId,
+                    TurnEndOutcome.STOPPED,
+                    false,
+                    TurnEndReason.USER_STOP,
+                    "s-1"),
+                NOW),
+            turnEntry(turn2Id, end2Id, settings),
+            userEntry(user2Id, turn2Id, "second user"),
+            assistantEntry(assistant2Id, user2Id, "second reply"),
+            turnEnd(end3Id, assistant2Id, turn2Id)));
+  }
+
+  /** 两次完整压缩路径：第二次的 wrapper 与 cut 完全取代第一次。 */
+  private static EntryPath twoCompactionProjectionPath(BranchSettings settings) {
+    long rootId = 1L;
+    long turn1Id = 2L;
+    long user1Id = 3L;
+    long assistant1Id = 4L;
+    long end1Id = 5L;
+    long compaction1StartId = 6L;
+    long compaction1Id = 7L;
+    long end2Id = 8L;
+    long turn2Id = 9L;
+    long user2Id = 10L;
+    long assistant2Id = 11L;
+    long end3Id = 12L;
+    long compaction2StartId = 13L;
+    long compaction2Id = 14L;
+    long end4Id = 15L;
+    long turn3Id = 16L;
+    long user3Id = 17L;
+    long assistant3Id = 18L;
+    long end5Id = 19L;
+    return new EntryPath(
+        List.of(
+            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(turn1Id, rootId, settings),
+            userEntry(user1Id, turn1Id, "first user"),
+            assistantEntry(assistant1Id, user1Id, "first reply"),
+            turnEnd(end1Id, assistant1Id, turn1Id),
+            compactionStartEntry(compaction1StartId, end1Id, settings),
+            new Entry(
+                compaction1Id,
+                SESSION_ID,
+                compaction1StartId,
+                new CompactionPayload(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "old summary",
+                    2L,
+                    4L,
+                    null),
+                NOW),
+            turnEnd(end2Id, compaction1Id, compaction1StartId),
+            turnEntry(turn2Id, end2Id, settings),
+            userEntry(user2Id, turn2Id, "second user"),
+            assistantEntry(assistant2Id, user2Id, "second reply"),
+            turnEnd(end3Id, assistant2Id, turn2Id),
+            compactionStartEntry(compaction2StartId, end3Id, settings),
+            new Entry(
+                compaction2Id,
+                SESSION_ID,
+                compaction2StartId,
+                new CompactionPayload(
+                    CompactionPhase.FULL,
+                    CompactionTrigger.THRESHOLD,
+                    500L,
+                    true,
+                    "latest summary",
+                    2L,
+                    10L,
+                    null),
+                NOW),
+            turnEnd(end4Id, compaction2Id, compaction2StartId),
+            turnEntry(turn3Id, end4Id, settings),
+            userEntry(user3Id, turn3Id, "third user"),
+            assistantEntry(assistant3Id, user3Id, "third reply"),
+            turnEnd(end5Id, assistant3Id, turn3Id)));
+  }
+
+  private static Entry turnEntry(long id, long parentId, BranchSettings settings) {
+    return new Entry(
+        id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.INPUT, settings), NOW);
+  }
+
+  private static Entry userEntry(long id, long parentId, String text) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))),
+            null,
+            null),
+        NOW);
+  }
+
+  private static Entry assistantEntry(long id, long parentId, String text) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+            new AssistantMessageMetadata(
+                ProviderStopReason.COMPLETED,
+                new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+                new ModelCost(
+                    "USD",
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO)),
+            null),
+        NOW);
+  }
+
+  private static Entry compactionStartEntry(long id, long parentId, BranchSettings settings) {
+    return new Entry(
+        id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.COMPACTION, settings), NOW);
+  }
+
+  private static Entry turnEnd(long id, long parentId, long turnStartEntryId) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+        NOW);
+  }
+
+  private static Fixture taskFixture() {
+    return new Fixture(
+        List.of(),
+        List.of(),
+        List.of(platformDescriptor(TaskTool.NAME)),
+        Set.of(TaskTool.NAME),
+        AgentProviderType.openai,
+        ProviderType.OPENAI,
+        PromptCacheCapability.unsupported(),
+        true);
+  }
+
   private static final class Fixture {
 
     private final AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
@@ -830,6 +1331,7 @@ class DatabaseTurnResolverTest {
         mock(AgentModelRuntimeConfigParser.class);
     private final LiveEnvironmentRegistry environmentRegistry = new LiveEnvironmentRegistry();
     private final AgentDefinition agent = new AgentDefinition();
+    private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
     private final DatabaseTurnResolver resolver;
 
@@ -902,9 +1404,9 @@ class DatabaseTurnResolverTest {
       model.setConfigJson("model-config");
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
-      AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
       agentConfig.setTools(tools);
       agentConfig.setSkills(skills);
+      agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
 
       modelSupportsTools(true);
@@ -914,6 +1416,8 @@ class DatabaseTurnResolverTest {
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
+      SubagentConfig subagentConfig =
+          new SubagentConfig(2, 10, null, Duration.ZERO, 50, Duration.ofMillis(100));
       resolver =
           new DatabaseTurnResolver(
               agents,
@@ -926,7 +1430,17 @@ class DatabaseTurnResolverTest {
               pluginCatalog,
               environmentRegistry,
               new EnvironmentGatewayProperties(),
+              CompactionConfig.DEFAULTS,
+              subagentConfig,
+              new AgentPromptComposer(subagentConfig),
               Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private void subagent(String name, String description) {
+      AgentDefinition subagent = new AgentDefinition();
+      subagent.setName(name);
+      subagent.setDescription(description);
+      when(agents.getByName(name)).thenReturn(subagent);
     }
 
     private void missingAgent() {
@@ -976,6 +1490,24 @@ class DatabaseTurnResolverTest {
                   parsed.pricing()));
     }
 
+    /** variant.maxOutputTokens 全部置 null，模型全局 limit.output 固定为 {@code maxOutputTokens}。 */
+    private void modelGlobalOutputLimit(long maxOutputTokens) {
+      ParsedAgentModelConfig parsed = parsedModel();
+      when(modelConfigParser.parse("model-config"))
+          .thenReturn(
+              new ParsedAgentModelConfig(
+                  parsed.contextWindow(),
+                  maxOutputTokens,
+                  parsed.inputModalities(),
+                  parsed.tools(),
+                  parsed.reasoning(),
+                  List.of(
+                      new ModelVariant(
+                          "default", null, 0.7, null, null, null, null, List.of(), null)),
+                  parsed.defaultVariant(),
+                  parsed.pricing()));
+    }
+
     private void modelSupportsReasoning(boolean reasoning) {
       ParsedAgentModelConfig parsed = parsedModel();
       when(modelConfigParser.parse("model-config"))
@@ -1016,12 +1548,18 @@ class DatabaseTurnResolverTest {
     }
 
     private ModelInvocationRequest resolved(EntryPath path, boolean yoloEnabled) {
-      TurnResolver.Result result = resolver.resolve(1L, path, yoloEnabled);
+      TurnResolver.Result result = resolver.resolve(1L, path, yoloEnabled, null);
+      return assertInstanceOf(TurnResolver.Resolved.class, result).request();
+    }
+
+    private ModelInvocationRequest resolved(
+        EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+      TurnResolver.Result result = resolver.resolve(1L, path, yoloEnabled, preparation);
       return assertInstanceOf(TurnResolver.Resolved.class, result).request();
     }
 
     private TurnResolver.Rejected rejected(EntryPath path) {
-      TurnResolver.Result result = resolver.resolve(1L, path, false);
+      TurnResolver.Result result = resolver.resolve(1L, path, false, null);
       return assertInstanceOf(TurnResolver.Rejected.class, result);
     }
 

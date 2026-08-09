@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.skill;
 
+import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
+
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -13,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 public interface SkillBodyLoader {
 
   CompletableFuture<SkillBodyLoadResult> load(
-      String environmentName, String skillName, Duration timeout);
+      EnvironmentName environmentName, String skillName, Duration timeout);
 
   /** 有界 skill body 加载结果。 */
   sealed interface SkillBodyLoadResult

@@ -13,26 +13,12 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 文件系统 coding tools 的通用异步执行与严格 JSON 访问。 */
 abstract class AbstractCodingTool implements Tool {
 
   static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final ExecutorService EXECUTOR =
-      Executors.newCachedThreadPool(
-          new ThreadFactory() {
-            @Override
-            public Thread newThread(Runnable runnable) {
-              Thread thread = new Thread(runnable, "daemon-coding-tool");
-              thread.setDaemon(true);
-              return thread;
-            }
-          });
 
   final CodingToolsConfig config;
   final EnvironmentPathBoundary boundary;
@@ -56,19 +42,21 @@ abstract class AbstractCodingTool implements Tool {
     }
     Objects.requireNonNull(listener, "listener");
     Execution execution = new Execution(request.call().id(), listener);
-    execution.future =
-        EXECUTOR.submit(
-            () -> {
-              try {
-                ToolResult result = run(request, execution);
-                execution.complete(listener, result);
-              } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                execution.complete(listener, error(request.call().id(), "Operation cancelled"));
-              } catch (Exception error) {
-                execution.complete(listener, error(request.call().id(), error.getMessage()));
-              }
-            });
+    execution.worker =
+        Thread.ofVirtual()
+            .name("daemon-coding-tool")
+            .start(
+                () -> {
+                  try {
+                    ToolResult result = run(request, execution);
+                    execution.complete(listener, result);
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    execution.complete(listener, error(request.call().id(), "Operation cancelled"));
+                  } catch (Exception error) {
+                    execution.complete(listener, error(request.call().id(), error.getMessage()));
+                  }
+                });
     return execution;
   }
 
@@ -146,7 +134,7 @@ abstract class AbstractCodingTool implements Tool {
     private final ToolExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
-    private volatile Future<?> future;
+    private volatile Thread worker;
 
     private Execution(String callId, ToolExecutionListener listener) {
       this.callId = callId;
@@ -156,9 +144,9 @@ abstract class AbstractCodingTool implements Tool {
     @Override
     public void cancel() {
       if (cancelled.compareAndSet(false, true)) {
-        Future<?> current = future;
+        Thread current = worker;
         if (current != null) {
-          current.cancel(true);
+          current.interrupt();
         }
         complete(listener, error(callId, "Operation cancelled"));
       }

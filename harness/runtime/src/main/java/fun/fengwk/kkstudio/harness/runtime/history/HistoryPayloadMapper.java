@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
@@ -47,9 +48,10 @@ public final class HistoryPayloadMapper {
 
   private final ToolInvocationErrorJsonCodec errorCodec = new ToolInvocationErrorJsonCodec();
 
-  /** ASSISTANT MESSAGE payload：内容顺序为 thinking（非空）、text（非空）、tool calls；全部为空时回退为单个空 text。 */
-  public MessagePayload assistantPayload(ProviderResponse response) {
+  /** ASSISTANT MESSAGE payload：ToolCall 的 rendererKey 来自本次 ModelInvocation 冻结的 Tool binding。 */
+  public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
     Objects.requireNonNull(response, "response");
+    Objects.requireNonNull(bindings, "bindings");
     List<AgentMessageContent> contents = new ArrayList<>();
     if (!response.thinking().isEmpty()) {
       contents.add(new ThinkingMessageContent(response.thinking()));
@@ -58,7 +60,9 @@ public final class HistoryPayloadMapper {
       contents.add(new TextMessageContent(response.text()));
     }
     for (ProviderToolCall call : response.toolCalls()) {
-      contents.add(new ToolCallMessageContent(call.id(), call.name(), call.argumentsJson()));
+      contents.add(
+          new ToolCallMessageContent(
+              call.id(), call.name(), rendererKey(call.name(), bindings), call.argumentsJson()));
     }
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent(""));
@@ -118,6 +122,7 @@ public final class HistoryPayloadMapper {
         new ToolResultMessageContent(
             call.toolCallId(),
             call.toolName(),
+            call.rendererKey(),
             List.of(new TextMessageContent(HISTORY_CUT_RESULT_TEXT)),
             true,
             EMPTY_DETAILS_JSON);
@@ -154,6 +159,7 @@ public final class HistoryPayloadMapper {
     return new ToolResultMessageContent(
         invocation.request().call().id(),
         invocation.request().call().toolName(),
+        invocation.request().binding().descriptor().rendererKey(),
         contents,
         result.error(),
         result.detailsJson());
@@ -166,6 +172,7 @@ public final class HistoryPayloadMapper {
     return new ToolResultMessageContent(
         invocation.request().call().id(),
         invocation.request().call().toolName(),
+        invocation.request().binding().descriptor().rendererKey(),
         List.of(new TextMessageContent(invocation.error().message())),
         true,
         errorCodec.encode(invocation.error()));
@@ -180,5 +187,14 @@ public final class HistoryPayloadMapper {
       default -> throw new IllegalArgumentException(
           "tool result payload requires a terminal invocation status");
     };
+  }
+
+  private static String rendererKey(String toolName, List<ToolBinding> bindings) {
+    for (ToolBinding binding : bindings) {
+      if (binding.descriptor().name().equals(toolName)) {
+        return binding.descriptor().rendererKey();
+      }
+    }
+    throw new IllegalStateException("no frozen tool binding matches tool call " + toolName);
   }
 }

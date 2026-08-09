@@ -323,6 +323,29 @@ final class HistoryValueCodecs {
     return value;
   }
 
+  static Long nullablePositiveId(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    String text = value.textValue();
+    long parsed;
+    try {
+      parsed = Long.parseLong(text);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a decimal string", error);
+    }
+    if (parsed <= 0 || !Long.toString(parsed).equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical positive decimal string");
+    }
+    return parsed;
+  }
+
   static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {

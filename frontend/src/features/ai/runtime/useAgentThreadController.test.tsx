@@ -225,6 +225,7 @@ describe('useAgentThreadController', () => {
           toolCallId: 'call-1',
           toolName: 'demo',
           toolVersion: '1',
+          rendererKey: 'demo',
           toolType: 'PLATFORM',
           environmentName: null,
           argumentsJson: '{}',
@@ -736,6 +737,7 @@ describe('useAgentThreadController', () => {
         toolCallId: 'call-1',
         toolName: 'demo',
         toolVersion: '1',
+        rendererKey: 'demo',
         toolType: 'PLATFORM',
         environmentName: null,
         argumentsJson: '{}',
@@ -795,6 +797,82 @@ describe('useAgentThreadController', () => {
       actor: 'web',
       reason: null,
     })
+  })
+
+  it('relays child-thread approvals to the target thread with an isolated replay key', async () => {
+    vi.mocked(harnessService.decideApproval)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce({
+        id: 'tool-child',
+        modelInvocationId: 'm1',
+        assistantEntryId: 'a1',
+        ordinal: 0,
+        status: 'APPROVED',
+        attempt: 1,
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        toolVersion: '1',
+        rendererKey: 'bash',
+        toolType: 'PLATFORM',
+        environmentName: null,
+        argumentsJson: '{}',
+        approvalJson: '{}',
+        resultJson: null,
+        errorJson: null,
+        resultEntryId: null,
+        createTime: null,
+        updateTime: null,
+      } as ToolInvocationDTO)
+
+    const { result } = renderHook(() => useAgentThreadController('t1'), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // 子 Thread 审批：mutation 必须打到 status.threadId，而不是父 Thread。
+    await act(async () => {
+      await result.current.decideApproval('tool-child', 'ALLOW', 't-child')
+    })
+    expect(vi.mocked(harnessService.decideApproval).mock.calls[0]?.[0]).toBe('t-child')
+    expect(vi.mocked(harnessService.decideApproval).mock.calls[0]?.[1]).toBe('tool-child')
+
+    // 同一子 Thread + invocation + decision 的重试复用同一幂等键。
+    await act(async () => {
+      await result.current.decideApproval('tool-child', 'ALLOW', 't-child')
+    })
+    const retryId = vi.mocked(harnessService.decideApproval).mock.calls[1]?.[2]?.decisionId
+    expect(retryId).toBe(vi.mocked(harnessService.decideApproval).mock.calls[0]?.[2]?.decisionId)
+
+    // 不同子 Thread 复用相同 invocationId 时，回放键必须隔离（铸造全新 id）。
+    await act(async () => {
+      await result.current.decideApproval('tool-child', 'ALLOW', 't-other')
+    })
+    const otherCall = vi.mocked(harnessService.decideApproval).mock.calls[2]
+    expect(otherCall?.[0]).toBe('t-other')
+    expect(otherCall?.[2]?.decisionId).not.toBe(retryId)
+  })
+
+  it('refreshes the target child thread snapshot on a 409 approval conflict', async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
+      new ApiError('stale child revision', 409),
+    )
+    const { result } = renderHook(() => useAgentThreadController('t1'), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    await act(async () => {
+      await result.current.decideApproval('tool-child', 'ALLOW', 't-child')
+    })
+    // 409 的刷新目标是子 Thread snapshot（而非父 Thread）。
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['threads', 'snapshot', 't-child'] }),
+    )
+    invalidateSpy.mockRestore()
   })
 
   it('invalidates the snapshot after a successful stop', async () => {

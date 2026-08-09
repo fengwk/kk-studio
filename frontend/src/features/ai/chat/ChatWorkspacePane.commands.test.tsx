@@ -150,7 +150,13 @@ function toolCallEntry(
         role: 'ASSISTANT',
         contents: [
           { type: 'text', text: 'run' },
-          { type: 'tool_call', toolCallId, toolName, argumentsJson: '{"command":"ls"}' },
+          {
+            type: 'tool_call',
+            toolCallId,
+            toolName,
+            rendererKey: toolName,
+            argumentsJson: '{"command":"ls"}',
+          },
         ],
       },
     }),
@@ -169,6 +175,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     toolCallId: 'call-1',
     toolName: 'bash',
     toolVersion: '1',
+    rendererKey: 'bash',
     toolType: 'shell',
     environmentName: null,
     argumentsJson: '{"command":"ls"}',

@@ -14,14 +14,39 @@ import java.util.Objects;
  * <p>实际 Environment 路由（{@code environmentName}）是该请求的唯一路由，Thread YOLO policy （{@code
  * yoloEnabled}）也在这里冻结；后续的 Environment 下线、branch rebinding、relocation 或 {@code SET_YOLO} 都不会改变已存在的
  * invocation。{@code providerRequest.tools()} 必须与有序的 {@code toolBindings} descriptor 一一对应，tool 和
- * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的路由。
+ * skill binding 名称不能重复，并且每个 environment-bound tool 或 skill 必须引用正好是该请求的路由。{@code contextWindow}
+ * 是冻结的正上下文窗口（来自 model config limit.context），触发与规划压缩都以此为准；{@code subagentBindings} 冻结本次调用可委派的 Agent
+ * allowlist。{@code compaction} 非空表示这是一次压缩调用（不得携带任何 tool/skill/subagent binding），null 表示正常调用。
  */
 public record ModelInvocationRequest(
     EnvironmentName environmentName,
     ProviderRequest providerRequest,
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
-    boolean yoloEnabled) {
+    List<SubagentBinding> subagentBindings,
+    boolean yoloEnabled,
+    int contextWindow,
+    CompactionRequest compaction) {
+
+  /** 构造不具备子 Agent 委派能力的请求。 */
+  public ModelInvocationRequest(
+      EnvironmentName environmentName,
+      ProviderRequest providerRequest,
+      List<ToolBinding> toolBindings,
+      List<SkillBinding> skillBindings,
+      boolean yoloEnabled,
+      int contextWindow,
+      CompactionRequest compaction) {
+    this(
+        environmentName,
+        providerRequest,
+        toolBindings,
+        skillBindings,
+        List.of(),
+        yoloEnabled,
+        contextWindow,
+        compaction);
+  }
 
   public ModelInvocationRequest {
     if (providerRequest == null) {
@@ -29,10 +54,40 @@ public record ModelInvocationRequest(
     }
     toolBindings = List.copyOf(toolBindings);
     skillBindings = List.copyOf(skillBindings);
+    subagentBindings = List.copyOf(subagentBindings);
+    if (contextWindow <= 0) {
+      throw new IllegalArgumentException("contextWindow must be positive");
+    }
     requireOneToOneProviderTools(providerRequest, toolBindings);
     requireUniqueToolNames(toolBindings);
     requireUniqueSkillNames(skillBindings);
+    requireUniqueSubagentNames(subagentBindings);
     requireConsistentRoutes(environmentName, toolBindings, skillBindings);
+    requireCompactionRequestShape(
+        providerRequest, toolBindings, skillBindings, subagentBindings, compaction);
+  }
+
+  private static void requireCompactionRequestShape(
+      ProviderRequest providerRequest,
+      List<ToolBinding> toolBindings,
+      List<SkillBinding> skillBindings,
+      List<SubagentBinding> subagentBindings,
+      CompactionRequest compaction) {
+    if (compaction == null) {
+      return;
+    }
+    if (!toolBindings.isEmpty()) {
+      throw new IllegalArgumentException("compaction requests must not carry tool bindings");
+    }
+    if (!skillBindings.isEmpty()) {
+      throw new IllegalArgumentException("compaction requests must not carry skill bindings");
+    }
+    if (!subagentBindings.isEmpty()) {
+      throw new IllegalArgumentException("compaction requests must not carry subagent bindings");
+    }
+    if (!providerRequest.tools().isEmpty()) {
+      throw new IllegalArgumentException("compaction requests must not carry provider tools");
+    }
   }
 
   private static void requireOneToOneProviderTools(
@@ -72,6 +127,17 @@ public record ModelInvocationRequest(
       for (int j = i + 1; j < skillBindings.size(); j++) {
         if (name.equals(skillBindings.get(j).name())) {
           throw new IllegalArgumentException("skill binding names must not repeat: " + name);
+        }
+      }
+    }
+  }
+
+  private static void requireUniqueSubagentNames(List<SubagentBinding> subagentBindings) {
+    for (int i = 0; i < subagentBindings.size(); i++) {
+      String name = subagentBindings.get(i).name();
+      for (int j = i + 1; j < subagentBindings.size(); j++) {
+        if (name.equals(subagentBindings.get(j).name())) {
+          throw new IllegalArgumentException("subagent binding names must not repeat: " + name);
         }
       }
     }

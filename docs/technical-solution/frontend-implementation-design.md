@@ -8,7 +8,7 @@
 | --- | --- |
 | 工程 | 独立 Vite/TypeScript 工程，发布时由 Maven 嵌入 `web` |
 | 服务端状态 | React Query |
-| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位与全局 Locale |
+| 本地状态 | `localStorage` 中按 Chat 保存的八个 Pane 槽位、全局 Locale 与 Thread UI 偏好 |
 | Catalog API | `/api/ai/catalog/providers`、`/models`、`/agents`、`/tools` |
 | Chat API | `/api/ai/chat` |
 | Runtime API | `/api/ai/runtime/threads/{threadId}` 的 `snapshot` / `commands` / `head` / `stop` / `tool-invocations/{id}/approval` / `events/stream` |
@@ -25,12 +25,13 @@ interface ChatDTO {
   id: string
   title: string | null
   agentName: string
+  environmentName: string | null
   yoloEnabled: boolean
   version: string
 }
 ```
 
-Chat 编辑器更新这两项设置时携带 `expectedVersion`，pending 期间锁定该 Chat 的发送。Pane 本地维护完整 `BranchDraft`：
+Chat 编辑器更新 `agentName`、`environmentName`、`yoloEnabled` 时携带 `expectedVersion`，pending 期间锁定该 Chat 的发送。Pane 本地维护完整 `BranchDraft`：
 
 ```ts
 interface BranchDraft {
@@ -43,7 +44,7 @@ interface BranchDraft {
 }
 ```
 
-- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/env/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。
+- **Blank pane**：`frozenDraft` 是 Chat defaults 经 Catalog 首次可解析值物化的不可变副本（`initialFrozenDraft` 基线）；agent/env/yolo 编辑标记 dirty，后续 Chat/Catalog refetch 不静默改写。**activeTools 由 Agent 能力配置派生**（`activeToolsFromAgent`）：`config.tools` + skills 非空时的内部 `load_skill` + subagents 非空时的内部 `task`——内部工具不可直接选择，但作为派生值进入 branch settings。
 - **Bound pane**：`branchState` 从 Thread snapshot 的 `branchSettings` 初始化（base）；queued SET_* 命令投影出 `effectiveBase`，dirty = `effectiveBase` 与用户 `draft` 不等；durable base 跟随 snapshot，用户 draft 不被覆盖。
 
 ## 3. Blank first send
@@ -115,26 +116,37 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 2. Redis `realtime` 事件叠加流式 overlay：MODEL_DELTA 按 invocation+attempt+sequence 严格推进，TOOL_PARTIAL 按 `createdAt|canonical payload` 指纹去重（FIFO 有界，attempt 变化/terminal/resultEntryId/消失时清空）。
 3. **Gap recovery**：缺失 sequence 触发 `useGapRecoveryLoop`——单飞、指数退避（200→2000ms、最多 8 次）refetch snapshot；immutable per-recovery token 防旧 Thread tick 干扰新 Thread；refetch 失败继续退避不冻结；caught-up/stale/terminal 停止。
 4. **Terminal fence**：`resultJson`/`errorJson`/`resultEntryId` 是 durable 边界——late MODEL_DELTA 被拒绝；snapshot reconcile 中 `status:'done'|'error'` 的 durable projection **无条件**压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后 overlay 移除；timeline 按 `modelStream.status` 渲染，terminal projection 绝不标 streaming。
-5. TOOL_PARTIAL 永不携带 Resource；Tool overlay 投影按 `(assistantEntryId, ordinal)` durable identity + toolCallId 一致性匹配，禁止 first-candidate fallback。
+5. TOOL_PARTIAL 永不携带 Resource；Tool overlay 投影按 `(assistantEntryId, ordinal)` durable identity + toolCallId 一致性匹配，禁止 first-candidate fallback；`task.status` 心跳是**完整 JSON 快照**（非 delta），顶层状态与扁平 `descendants` 一起进入规范化指纹并整帧替换、语义去重，绝不追加/合并——同一子 Thread 只保留最新一帧。
+6. **Compaction suppression**：Runtime 不发布 compaction Redis MODEL_DELTA；timeline 按 root-to-head Entry 顺序识别 `TURN_START(reason=COMPACTION)...TURN_END`，整个内部 turn（COMPACTION/ASSISTANT_ERROR/ASSISTANT_ABORTED）不进入 transcript；最新 turn 是 COMPACTION 时，持久 checkpoint overlay 同样不渲染。Session Tree 的 all 视图仍保留这些 durable 审计节点。
 
 ## 10. Resource 安全呈现
 
-Tool Result 的 Resource（`ResourceRef {uri, mediaType, name, size, sha256}` + 可选文本 preview）：
+Tool Result 的 Resource（`ResourceRef {uri, mediaType, name, size, sha256}` + 可选文本 preview）投影为 `ToolAttachment`，**renderer 契约包含 `downloadHref` 投影**（`content-utils.managedResourceHref`）：
 
-- **仅 `data:` URI** 自动媒体预览（图片等）；http/https/file/s3 只展示稳定 URI 文本 + 显式 `rel="noopener noreferrer"` 链接。
-- 允许的 scheme 集合仍是 data/file/s3/http/https；未知 scheme 不渲染链接。
-- preview 保持 `<pre>` 文本块，不执行富内容。
+- **仅 `data:` URI** 自动媒体预览（图片等）；http/https 保持稳定 URI 文本 + 显式直连链接（`rel="noopener noreferrer"`，不触发自动 GET）；
+- file/s3 **绝不把宿主 URI 交给浏览器**：只按内容身份（mediaType/size/name/sha256）投影到同源 `GET /api/ai/runtime/resources/{sha256}`（`downloadHref`）；未知/不完整身份（缺 sha256、非 canonical scheme 或无法重建 ref）**不渲染链接**，只显示 fallback 标签；
+- preview 保持 `<pre>` 文本块，不执行富内容；允许的 scheme 集合固定为 data/file/s3/http/https。
 
 ## 11. Agent 能力表单
 
-Agent 表单的 Tools/Skills 只保存**名称集合**，不保存 Environment、Tool 实例或 MCP 摘要：
+Agent 表单的 Tools/Skills/Subagents 只保存**名称集合**（DTO 三个必填列表），不保存 Environment、Tool 实例或 MCP 摘要：
 
-- **Tools 候选**只来自固定 `GET /api/ai/catalog/tools` 的 `ToolCatalogEntryDTO[]`；Environment live `tools` 与 MCP server 摘要只是展示数据，绝不动态并入可选目录，零 live Environment 时 Tools 仍可编辑；
+- **Tools 候选**只来自固定 `GET /api/ai/catalog/tools` 的 `ToolCatalogEntryDTO[]`（内部 `load_skill`/`task` 不在其中，不可直接勾选；由 skills/subagents 非空派生激活）；Environment live `tools` 与 MCP server 摘要只是展示数据，绝不动态并入可选目录，零 live Environment 时 Tools 仍可编辑；
 - **Skills 候选**来自表单内**瞬态**的「Skill 目录 Environment」选择器：只允许从当前 `ready===true` 的 live Environment 中**显式选中一个**作为浏览来源（初始为无，不自动选择），仅用于浏览该 Environment 当前发布的 skill 名称；
+- **Subagents 候选**来自全局 Agent catalog（`buildSubagentCandidates`：名称 + 描述；create 模式下排除与当前 draft 同名项）；已勾选但已不存在的引用保留为可移除 orphan，提交时服务端按现存 Agent 校验（未知引用 404）；
 - 该选择是组件本地瞬态状态：**不进入 AgentDraft、不随提交 DTO 持久化、不绑定 Agent**；切换 Agent / 重新打开创建编辑器时重置；
 - 切换来源保留已选 skill 名称（同一 short name 在不同 Environment 中是同一个持久化名称）；来源失效（消失或 `ready===false`）后保留为禁用「不可用」选项、不显示 live 候选，已选名称作为可移除 orphan 保留。
 
-## 12. 前端目录
+## 12. Tool renderer 分发与 task 呈现
+
+- **renderer 分发**：`MessageList` 对 tool 消息不做工具名 switch，一律经 ExtensionHost `toolRenderers.get(message.rendererKey)` 取组件（`rendererKey` 由后端冻结在 ToolDescriptor/TOOL MESSAGE）；未注册的 key 落到默认 `ToolMessageBlock` 呈现（完整 arguments 保持可见）。内置 `task` renderer 按 `rendererKey=task` 注册（`ai-extension.definition.ts`，与后端 `TaskTool.RENDERER_KEY` 精确一致）。
+- **TaskToolRenderer**：call 阶段展示解析后的 `{subagent_type, session_id, maxTurns, prompt}`（prompt 在 `ToolOutputViewport` 中）与最新 `task.status` 状态条；result 阶段解析 `<task id state>` envelope 展示 `<task_result>`/`<task_error>`；非规范文本回退原始文本 + 错误（不丢信息）。
+- **ToolOutputViewport**：完整保留 Tool 输出（全量文本仍在 DOM），默认以可滚动五行视口跟随尾部；用户向上滚动后暂停自动跟随。
+- **TaskStatusWidget**（挂载在 `ThreadWidgetStack.children`）：一次 reduce 把全部活动 task 消息按 `parentTaskLevel + depth` 聚合为层级列表（同子 Thread 只保留最新帧，深度变化移层）；`waiting_approval`/含审批项的行展示子工具名称、原因与 Allow/Deny——决策经宿主 controller 转发到**子 ThreadId** 的既有 approval 端点（`harnessService.decideApproval(targetThreadId, ...)`），**replay 身份包含 `targetThreadId + invocationId + decision`**（不同子 Thread 可能复用相同 invocationId）。
+- **浏览器通知**（`useThreadNotifications`，best-effort UI 副作用）：汇总父 Thread、直接子 task 与 descendant relay 的**全部待决审批**（身份含实际目标 Thread）；父/子 Agent 完成与错误通知在 working 结束后触发，deny 后 5 秒内抑制 completion；不建立第二套 Session 状态。
+- **Thread UI 偏好**：`localStorage` 键 `kkstudio.ai.thread-ui-preferences.v1` 控制任务状态 widget / 通知 footer 的开关（默认任务状态开、通知关），是浏览器本地偏好，**不是 durable runtime 状态**。
+
+## 13. 前端目录
 
 ```text
 frontend/src
@@ -144,7 +156,7 @@ frontend/src
 │   ├── catalog/
 │   ├── chat/            # ChatWorkspacePane / BlankComposerPane / BoundThreadPane / command-batch-plan
 │   ├── environment/
-│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline
+│   └── runtime/         # useAgentThreadController / useHarnessThreadRealtime / thread-timeline / task-status / thread-notifications / thread-ui-preferences
 ├── features/canvas/
 ├── shared/api/
 │   ├── contracts/ai-catalog.ts
@@ -156,7 +168,7 @@ frontend/src
 └── styles.css
 ```
 
-## 13. 验证
+## 14. 验证
 
 ```bash
 cd frontend
@@ -165,4 +177,4 @@ npm run lint
 npm run build
 ```
 
-前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first SSE 与 terminal 投影。
+前端 API 契约重点覆盖名称身份、Model ref、命令 batch 严格 wire、CAS、exact replay 与 409 rebuild、approval/stop 身份、snapshot-first SSE 与 terminal 投影；task 呈现契约（`task.status` 心跳解析/规范化去重、`<task>` envelope 解析、renderer 分发、TaskStatusWidget 聚合与子审批转发、浏览器通知、UI 偏好）由前端单测覆盖，不依赖 E2E 默认 L1。

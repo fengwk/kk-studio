@@ -5,7 +5,10 @@ import {
   isPreviewableAttachment,
   toToolAttachmentSrc,
 } from '@/features/ai/runtime/thread-panel/tool-attachments'
+import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type { ComponentType } from 'react'
+import type { ToolRendererProps } from '@/platform/extensions/types'
 import { translate, useI18n } from '@/shared/i18n'
 
 type ApprovalDecision = 'ALLOW' | 'DENY'
@@ -28,10 +31,12 @@ interface ToolRenderContext {
 /** Tool 回合以独立的全宽 call/result 块展示。 */
 export function ToolMessageBlock({
   message,
+  renderer: Renderer,
   onDecideApproval,
   approvalPending = false,
 }: {
   message: ToolDialogueMessage
+  renderer?: ComponentType<ToolRendererProps>
   onDecideApproval?: (message: ToolDialogueMessage, decision: ApprovalDecision) => void
   approvalPending?: boolean
 }) {
@@ -64,11 +69,13 @@ export function ToolMessageBlock({
               {formatToolStatus(message.status)}
             </span>
           </div>
-          <div className="thread-block-body"><DefaultToolCall context={context} /></div>
+          <div className="thread-block-body">
+            {Renderer ? <Renderer message={message} /> : <DefaultToolCall context={context} />}
+          </div>
           {/* 活动 call 下方的瞬态结果块：TOOL_PARTIAL / 终态结果 /
               资源附件 / 错误都会渲染在这里，直到持久的 Tool result Entry
               到达并由持久的 result 阶段接管。 */}
-          <TransientToolResult context={context} />
+          {Renderer ? null : <TransientToolResult context={context} />}
           <ToolApprovalBar context={context} onDecideApproval={onDecideApproval} message={message} />
         </section>
       ) : (
@@ -81,7 +88,9 @@ export function ToolMessageBlock({
               {formatToolStatus(message.status)}
             </span>
           </div>
-          <div className="thread-block-body"><DefaultToolResult context={context} /></div>
+          <div className="thread-block-body">
+            {Renderer ? <Renderer message={message} /> : <DefaultToolResult context={context} />}
+          </div>
         </section>
       )}
     </div>
@@ -164,7 +173,7 @@ function TransientToolResult({ context }: { context: ToolRenderContext }) {
         </span>
       </div>
       <div className="thread-block-body">
-        {hasText ? <pre className="thread-tool-pre">{context.partial}</pre> : null}
+        {hasText ? <ToolOutputViewport text={context.partial ?? ''} /> : null}
         {hasError ? <p className="thread-tool-error">{context.partialErrorText}</p> : null}
         {hasAttachments ? (
           <div className="thread-tool-attachments">
@@ -185,7 +194,7 @@ function DefaultToolCall({ context }: { context: ToolRenderContext }) {
   if (!context.arguments.trim()) {
     return <span className="thread-tool-placeholder">{translate('ai.runtime.message.noArguments')}</span>
   }
-  return <pre className="thread-tool-pre">{context.arguments}</pre>
+  return <pre className="thread-tool-pre thread-tool-input">{context.arguments}</pre>
 }
 
 function DefaultToolResult({ context }: { context: ToolRenderContext }) {
@@ -196,7 +205,7 @@ function DefaultToolResult({ context }: { context: ToolRenderContext }) {
   const hasAttachments = context.attachments.length > 0
   return (
     <>
-      {hasText ? <pre className="thread-tool-pre">{text}</pre> : null}
+      {hasText ? <ToolOutputViewport text={text} /> : null}
       {!hasText && !hasAttachments ? <p className="thread-tool-placeholder">{placeholder(context)}</p> : null}
       {hasAttachments ? (
         <div className="thread-tool-attachments">
@@ -241,7 +250,7 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
           {preview ? (
             // 资源 preview 是文本（例如 JSON 摘录），绝不是 URL；把它当作
             // <img src> 渲染会抛出非法资源错误。
-            <pre className="thread-tool-attachment-preview">{preview}</pre>
+            <ToolOutputViewport text={preview} className="thread-tool-attachment-preview" />
           ) : null}
           <span className="thread-tool-attachment-uri-text">{attachment.data}</span>
         </div>

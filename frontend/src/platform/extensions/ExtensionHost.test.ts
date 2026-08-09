@@ -83,4 +83,19 @@ describe('ExtensionHost', () => {
     host.register({ id: 'first', statuses: [{ id: 'status', component: () => null }] })
     expect(() => host.register({ id: 'first' })).toThrow('Extension id already registered: first')
   })
+
+  it('registers tool renderers with the same priority and fallback semantics', () => {
+    const host = new ExtensionHost()
+    const Base = () => null
+    const Override = () => null
+    host.register({ id: 'base', toolRenderers: [{ id: 'read', component: Base }] })
+    const dispose = host.register({
+      id: 'override',
+      toolRenderers: [{ id: 'read', component: Override, priority: 10 }],
+    })
+
+    expect(host.toolRenderers.get('read')?.component).toBe(Override)
+    dispose()
+    expect(host.toolRenderers.get('read')?.component).toBe(Base)
+  })
 })

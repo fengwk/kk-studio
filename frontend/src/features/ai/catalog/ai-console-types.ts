@@ -74,6 +74,7 @@ export interface AgentDraft {
   variant: string
   tools: string[]
   skills: string[]
+  subagents: string[]
 }
 
 export type ResourceModal =

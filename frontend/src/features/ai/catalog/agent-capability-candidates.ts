@@ -1,4 +1,4 @@
-import type { ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 
 export interface CapabilityOption {
@@ -52,6 +52,29 @@ export function buildSkillCandidates(
     options.push({
       name,
       description: skill.description ?? null,
+    })
+  }
+  return options
+}
+
+/**
+ * 构建当前全局 Agent catalog 的 subagent 候选。
+ *
+ * 候选来自全局 Agent 定义（名称 + 描述）；create 模式下的「与当前 draft.name 同名」排除由表单负责，
+ * 这里只做名称去重与空名过滤。
+ */
+export function buildSubagentCandidates(agents: AgentDefinitionDTO[]): CapabilityOption[] {
+  const options: CapabilityOption[] = []
+  const seen = new Set<string>()
+  for (const agent of agents) {
+    const name = agent.name?.trim()
+    if (!name || seen.has(name)) {
+      continue
+    }
+    seen.add(name)
+    options.push({
+      name,
+      description: agent.description ?? null,
     })
   }
   return options

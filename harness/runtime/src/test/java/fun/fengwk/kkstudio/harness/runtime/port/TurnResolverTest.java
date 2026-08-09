@@ -41,9 +41,9 @@ class TurnResolverTest {
   void resolveIsASynchronousNoSideEffectContractMethod() {
     // 该 port 是单方法函数式契约，必须支持匿名实现
     TurnResolver resolver =
-        (threadId, path, yoloEnabled) ->
+        (threadId, path, yoloEnabled, preparation) ->
             new TurnResolver.Rejected(new AssistantError("PLANNING_FAILED", "rejected"));
-    TurnResolver.Result result = resolver.resolve(1L, null, true);
+    TurnResolver.Result result = resolver.resolve(1L, null, true, null);
     assertTrue(result instanceof TurnResolver.Rejected);
     assertEquals("rejected", ((TurnResolver.Rejected) result).error().message());
   }

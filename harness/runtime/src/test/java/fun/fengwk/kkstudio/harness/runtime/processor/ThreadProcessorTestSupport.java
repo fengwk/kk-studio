@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.fail;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -102,6 +105,12 @@ final class ThreadProcessorTestSupport {
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
   static final int STEP_LIMIT = 8;
+
+  /** 测试请求统一的冻结上下文窗口。 */
+  static final int CONTEXT_WINDOW = 100_000;
+
+  /** 测试用默认压缩配置（开启、16_384 预留、20_000 保留）。 */
+  static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(true, 16_384, 20_000);
 
   private ThreadProcessorTestSupport() {}
 
@@ -595,7 +604,7 @@ final class ThreadProcessorTestSupport {
   static EntryPayload assistantPayload(List<String> callIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (int i = 0; i < callIds.size(); i++) {
-      contents.add(new ToolCallMessageContent(callIds.get(i), "bash", "{}"));
+      contents.add(new ToolCallMessageContent(callIds.get(i), "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     ProviderStopReason stopReason =
@@ -610,7 +619,7 @@ final class ThreadProcessorTestSupport {
   static EntryPayload realToolResultPayload(long assistantEntryId, int ordinal, String callId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
-            callId, "bash", List.of(new TextMessageContent("ok")), false, "{}");
+            callId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
             assistantEntryId, callId, ordinal, ToolResultStatus.SUCCEEDED, false, null);
@@ -626,7 +635,7 @@ final class ThreadProcessorTestSupport {
       definitions.add(new ProviderToolDefinition(name, "description of " + name, "{}"));
     }
     return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false);
+        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
   }
 
   static ModelInvocationRequest plainRequest() {
@@ -641,7 +650,7 @@ final class ThreadProcessorTestSupport {
               binding.descriptor().name(), binding.descriptor().description(), "{}"));
     }
     return new ModelInvocationRequest(
-        ENV_ID, providerRequest(definitions), bindings, List.of(), false);
+        ENV_ID, providerRequest(definitions), bindings, List.of(), false, CONTEXT_WINDOW, null);
   }
 
   /** 按 candidate BranchSettings 构造机械一致的 Resolved 请求（env / model / variant / activeTools / yolo）。 */
@@ -663,11 +672,185 @@ final class ThreadProcessorTestSupport {
             ProviderCacheControl.none()),
         bindings,
         List.of(),
-        yoloEnabled);
+        yoloEnabled,
+        CONTEXT_WINDOW,
+        null);
   }
 
   static ToolInvocationRequest toolRequest(String callId) {
     return new ToolInvocationRequest(new ToolCall(callId, "bash", "{}"), platformBinding("bash"));
+  }
+
+  /**
+   * 按冻结 preparation 构造机械一致的压缩 Resolved 请求（零 tool/skill、零 provider tools、缓存 none、
+   * contextWindow/tokensBefore/ids 与 preparation 逐字段一致）。
+   */
+  static ModelInvocationRequest compactionRequest(CompactionPreparation preparation) {
+    return new ModelInvocationRequest(
+        ENV_ID,
+        new ProviderRequest(
+            modelDescriptor("provider", "model"),
+            new ModelVariant("v1", null, null, null, null, null, null, List.of(), null),
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none()),
+        List.of(),
+        List.of(),
+        false,
+        Math.toIntExact(preparation.contextWindow()),
+        new CompactionRequest(
+            preparation.phase(),
+            preparation.trigger(),
+            preparation.tokensBefore(),
+            preparation.firstKeptEntryId(),
+            preparation.cutEntryId(),
+            preparation.turnPrefixStartEntryId()));
+  }
+
+  /**
+   * 种子一条压缩可触发状态：关闭的 INPUT turn（ASSISTANT 携带 {@code usage}）+ SUCCEEDED invocation（resultEntryId 挂上）。
+   */
+  static ClosedTurnBaseline seedCompactionReadyClosedTurn(
+      InMemoryHarnessStore store, ModelUsage usage) {
+    return seedCompactionReadyClosedTurn(store, usage, false);
+  }
+
+  static ClosedTurnBaseline seedCompactionReadyClosedTurn(
+      InMemoryHarnessStore store, ModelUsage usage, boolean continueModel) {
+    // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
+    // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
+    // FULL）。
+    long[] modelIdHolder = new long[1];
+    ClosedTurnBaseline baseline =
+        store.transaction(
+            tx -> {
+              long sessionId = tx.nextId();
+              long rootEntryId = tx.nextId();
+              long turnStartEntryId = tx.nextId(); // turn1 TURN_START
+              long userEntryId = tx.nextId(); // turn1 USER
+              long assistantEntryId = tx.nextId(); // turn1 ASSISTANT
+              long turnEndEntryId = tx.nextId(); // turn1 TURN_END
+              long secondTurnStartId = tx.nextId(); // turn2 TURN_START
+              long secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
+              long secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
+              long secondTurnEndId = tx.nextId(); // turn2 TURN_END
+              long threadId = tx.nextId();
+              tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+              tx.insertEntry(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+              // turn1：短消息。
+              tx.insertEntry(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      NOW));
+              tx.insertEntry(
+                  new Entry(
+                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+              tx.insertEntry(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant reply"))),
+                          new AssistantMessageMetadata(
+                              ProviderStopReason.COMPLETED, usage(), cost()),
+                          null),
+                      NOW));
+              tx.insertEntry(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      assistantEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
+              // turn2：长 USER + 短 ASSISTANT（usage 挂这里）。
+              tx.insertEntry(
+                  new Entry(
+                      secondTurnStartId,
+                      sessionId,
+                      turnEndEntryId,
+                      new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                      NOW));
+              tx.insertEntry(
+                  new Entry(
+                      secondUserEntryId,
+                      sessionId,
+                      secondTurnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent(compactionUserText()))),
+                          null,
+                          null),
+                      NOW));
+              // Thread head 停在 turn2 USER：invocation 的 basis 必须是插入时刻的 head（与真实流程一致）。
+              tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
+              modelIdHolder[0] = tx.nextId();
+              tx.insertModelInvocation(
+                  new ModelInvocation(
+                      modelIdHolder[0],
+                      threadId,
+                      secondTurnStartId,
+                      secondUserEntryId,
+                      plainRequest(),
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW));
+              tx.insertEntry(
+                  new Entry(
+                      secondAssistantEntryId,
+                      sessionId,
+                      secondUserEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant reply"))),
+                          new AssistantMessageMetadata(ProviderStopReason.COMPLETED, usage, cost()),
+                          null),
+                      NOW));
+              tx.insertEntry(
+                  new Entry(
+                      secondTurnEndId,
+                      sessionId,
+                      secondAssistantEntryId,
+                      new TurnEndPayload(
+                          secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                      NOW));
+              tx.updateThread(
+                  tx.findThread(threadId).orElseThrow().advanceHead(secondTurnEndId, false, NOW));
+              return new ClosedTurnBaseline(
+                  sessionId,
+                  rootEntryId,
+                  secondTurnStartId,
+                  secondUserEntryId,
+                  secondAssistantEntryId,
+                  secondTurnEndId,
+                  threadId);
+            });
+    // 插入后推进到 SUCCEEDED 并挂上 assistant 结果（与 seedModelInvocation 相同的状态机路径）。
+    long modelId = modelIdHolder[0];
+    transitionModel(store, modelId, m -> m.beginDispatch(NOW));
+    transitionModel(store, modelId, m -> m.markRunning(NOW));
+    transitionModel(store, modelId, m -> m.succeed(successResponse(List.of(), "bash"), NOW));
+    transitionModel(store, modelId, m -> m.attachResultEntry(baseline.assistantEntryId(), NOW));
+    return baseline;
+  }
+
+  /** 长 USER 文本：估计 token（22_500）超过默认 keepRecentTokens（20_000），保证 planner 把 cut 选在 turn2 USER 上。 */
+  static String compactionUserText() {
+    return "user asks a very long question" + "x".repeat(90_000);
   }
 
   /** SUCCEEDED response：{@code callIds} 个 tool call（name 均为 {@code toolName}）。 */
@@ -774,7 +957,7 @@ final class ThreadProcessorTestSupport {
         "1.0",
         ToolType.PLATFORM,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
@@ -793,14 +976,17 @@ final class ThreadProcessorTestSupport {
     long lastThreadId;
     EntryPath lastPath;
     boolean lastYoloEnabled;
+    CompactionPreparation lastPreparation;
     int calls;
 
     @Override
-    public Result resolve(long threadId, EntryPath path, boolean yoloEnabled) {
+    public Result resolve(
+        long threadId, EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
       calls++;
       lastThreadId = threadId;
       lastPath = path;
       lastYoloEnabled = yoloEnabled;
+      lastPreparation = preparation;
       if (onResolve != null) {
         onResolve.run();
       }
@@ -808,8 +994,12 @@ final class ThreadProcessorTestSupport {
         throw failure;
       }
       if (autoConsistent) {
-        // 按 candidate path 的最终 branch 事实自动构造一致请求（settings/yolo 与校验完全同源）。
-        return new TurnResolver.Resolved(requestFor(path.baseSettings(), yoloEnabled));
+        // 按 candidate path 的最终 branch 事实自动构造一致请求（settings/yolo 与校验完全同源）；
+        // 压缩 turn 按冻结 preparation 构造零工具压缩请求。
+        return new TurnResolver.Resolved(
+            preparation == null
+                ? requestFor(path.baseSettings(), yoloEnabled)
+                : compactionRequest(preparation));
       }
       if (results.isEmpty()) {
         return null;
@@ -874,7 +1064,8 @@ final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               processorStore == null ? store : processorStore,
               resolver,
-              new ThreadProcessorConfig(LEASE_CONFIG, stepLimit, RESOLVE_FAILURE_DELAY),
+              new ThreadProcessorConfig(
+                  LEASE_CONFIG, stepLimit, RESOLVE_FAILURE_DELAY, COMPACTION_CONFIG),
               clock,
               scheduler);
     }

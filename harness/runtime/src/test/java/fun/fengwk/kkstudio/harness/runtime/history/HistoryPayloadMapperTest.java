@@ -69,7 +69,11 @@ class HistoryPayloadMapperTest {
             "req",
             null,
             "{}");
-    MessagePayload payload = MAPPER.assistantPayload(response);
+    MessagePayload payload =
+        MAPPER.assistantPayload(
+            response,
+            List.of(
+                request().binding(), new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -99,24 +103,42 @@ class HistoryPayloadMapperTest {
                 cost(),
                 null,
                 null,
-                "{}"));
+                "{}"),
+            List.of());
     assertEquals(1, thinkingOnly.message().contents().size());
     assertTrue(thinkingOnly.message().contents().get(0) instanceof ThinkingMessageContent);
 
     MessagePayload empty =
         MAPPER.assistantPayload(
             new ProviderResponse(
-                "",
-                "",
-                List.of(),
-                ProviderStopReason.COMPLETED,
-                usage(),
-                cost(),
-                null,
-                null,
-                "{}"));
+                "", "", List.of(), ProviderStopReason.COMPLETED, usage(), cost(), null, null, "{}"),
+            List.of());
     assertEquals(1, empty.message().contents().size());
     assertEquals("", ((TextMessageContent) empty.message().contents().get(0)).text());
+  }
+
+  @Test
+  void assistantPayloadFreezesRendererKeyFromTheModelToolBinding() {
+    ProviderResponse response =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(new ProviderToolCall("call-1", "bash", "{}")),
+            ProviderStopReason.TOOL_CALLS,
+            usage(),
+            cost(),
+            null,
+            null,
+            "{}");
+
+    MessagePayload payload = MAPPER.assistantPayload(response, List.of(request().binding()));
+    ToolCallMessageContent call = (ToolCallMessageContent) payload.message().contents().get(0);
+    assertEquals("shell-command", call.rendererKey());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            MAPPER.assistantPayload(
+                response, List.of(new ToolBinding(descriptor("grep"), ToolType.PLATFORM, null))));
   }
 
   @Test
@@ -142,6 +164,7 @@ class HistoryPayloadMapperTest {
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertFalse(result.error());
+    assertEquals("shell-command", result.rendererKey());
     assertEquals("{}", result.detailsJson());
     assertEquals(2, result.contents().size());
     assertEquals("plain", ((TextMessageContent) result.contents().get(0)).text());
@@ -276,7 +299,7 @@ class HistoryPayloadMapperTest {
   void syntheticHistoryCutToolResultIsStableUnknownWithNoResultProvided() {
     MessagePayload payload =
         MAPPER.syntheticHistoryCutToolResult(
-            7L, 2, new ToolCallMessageContent("call-9", "bash", "{}"));
+            7L, 2, new ToolCallMessageContent("call-9", "bash", "shell-command", "{}"));
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(7L, metadata.assistantEntryId());
     assertEquals("call-9", metadata.toolCallId());
@@ -329,18 +352,19 @@ class HistoryPayloadMapperTest {
   private static ToolInvocationRequest request() {
     return new ToolInvocationRequest(
         new ToolCall("call-1", "bash", "{}"),
-        new ToolBinding(
-            new ToolDescriptor(
-                "bash",
-                "1.0",
-                ToolType.PLATFORM,
-                "desc",
-                null,
-                new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
-                ToolSideEffect.READ_ONLY,
-                Duration.ofSeconds(30)),
-            ToolType.PLATFORM,
-            null));
+        new ToolBinding(descriptor("bash"), ToolType.PLATFORM, null));
+  }
+
+  private static ToolDescriptor descriptor(String name) {
+    return new ToolDescriptor(
+        name,
+        "1.0",
+        ToolType.PLATFORM,
+        "desc",
+        name.equals("bash") ? "shell-command" : name,
+        new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(30));
   }
 
   private static ModelUsage usage() {
