@@ -29,6 +29,10 @@ registerCase({
     assert(/^[1-9][0-9]*$/.test(reservation.uploadId), JSON.stringify(reservation))
     assert(reservation.method === 'PUT', JSON.stringify(reservation))
     assert(/^https?:\/\//.test(reservation.url), JSON.stringify(reservation))
+    const ifNoneMatch = Object.entries(reservation.headers || {}).find(
+      ([name]) => name.toLowerCase() === 'if-none-match',
+    )
+    assert(ifNoneMatch?.[1] === '*', JSON.stringify(reservation))
     assert(!('bucket' in reservation) && !('key' in reservation), JSON.stringify(reservation))
 
     await expectHttpError(

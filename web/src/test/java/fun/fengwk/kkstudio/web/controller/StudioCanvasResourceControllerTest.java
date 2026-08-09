@@ -50,7 +50,7 @@ class StudioCanvasResourceControllerTest {
                 99L,
                 "PUT",
                 "https://s3.fengwk.fun/signed",
-                Map.of("Content-Type", "image/png"),
+                Map.of("Content-Type", "image/png", "If-None-Match", "*"),
                 NOW.plusSeconds(600).toString()));
 
     mockMvc
@@ -66,6 +66,7 @@ class StudioCanvasResourceControllerTest {
         .andExpect(jsonPath("$.data.uploadId").value("99"))
         .andExpect(jsonPath("$.data.method").value("PUT"))
         .andExpect(jsonPath("$.data.url").value("https://s3.fengwk.fun/signed"))
+        .andExpect(jsonPath("$.data.headers['If-None-Match']").value("*"))
         .andExpect(jsonPath("$.data.key").doesNotExist())
         .andExpect(jsonPath("$.data.bucket").doesNotExist());
     verify(storageService).reserve(42L, CanvasResourceKind.IMAGE, "a.png", "image/png", 3L);

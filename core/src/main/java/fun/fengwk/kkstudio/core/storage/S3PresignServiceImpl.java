@@ -46,21 +46,38 @@ public class S3PresignServiceImpl implements S3PresignService {
   @Override
   public S3PresignedResponseDTO presignUpload(
       String key, String contentType, Long expiresInSeconds) {
+    PutObjectRequest putRequest = newPutObjectRequest(key, contentType).build();
+    return presignUpload(putRequest, expiresInSeconds);
+  }
+
+  @Override
+  public S3PresignedResponseDTO presignCreateOnlyUpload(
+      String key, String contentType, Long expiresInSeconds) {
+    PutObjectRequest putRequest = newPutObjectRequest(key, contentType).ifNoneMatch("*").build();
+    return presignUpload(putRequest, expiresInSeconds);
+  }
+
+  private PutObjectRequest.Builder newPutObjectRequest(String key, String contentType) {
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
     String normalizedContentType = normalizeContentType(contentType);
-    Duration duration = resolveExpires(expiresInSeconds);
     PutObjectRequest.Builder putBuilder =
         PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
     if (normalizedContentType != null) {
       putBuilder.contentType(normalizedContentType);
     }
+    return putBuilder;
+  }
+
+  private S3PresignedResponseDTO presignUpload(
+      PutObjectRequest putObjectRequest, Long expiresInSeconds) {
+    Duration duration = resolveExpires(expiresInSeconds);
     PutObjectPresignRequest presignRequest =
         PutObjectPresignRequest.builder()
             .signatureDuration(duration)
-            .putObjectRequest(putBuilder.build())
+            .putObjectRequest(putObjectRequest)
             .build();
     PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
-    return toResponse(presigned, "PUT", normalizedKey);
+    return toResponse(presigned, "PUT", putObjectRequest.key());
   }
 
   @Override
