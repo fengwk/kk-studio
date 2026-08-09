@@ -71,6 +71,36 @@ public class HarnessRuntimeProperties {
   /** dispatcher worker executor 的有界队列容量。 */
   private int dispatcherWorkerQueueCapacity = 64;
 
+  /** 自动对话压缩开关（默认开启）。 */
+  private boolean compactionEnabled = true;
+
+  /**
+   * 压缩 Model 调用的预留 token 预算：summary prompt + output（FULL/HISTORY 输出上限 floor(0.8*r)，TURN_PREFIX
+   * floor(0.5*r)）。
+   */
+  private int compactionReserveTokens = 16_384;
+
+  /** 压缩后保留的最近上下文 token 上限（与 floor(contextWindow * 0.5) 取小为有效保留量）。 */
+  private int compactionMaxRecentTokens = 20_000;
+
+  /** task 委派最大深度；普通根 Thread 的 depth 为 1。 */
+  private int subagentMaxDepth = 2;
+
+  /** 单个父 Thread 同时运行的直接子 Agent 上限。 */
+  private int subagentMaxConcurrency = 10;
+
+  /** 整棵委派树的同时运行上限；null 表示不额外限制。 */
+  private Integer subagentMaxTotalConcurrency;
+
+  /** 子 Agent 无 durable 进展的超时；零表示关闭，active Tool 执行期间不计时。 */
+  private Duration subagentIdleTimeout = Duration.ZERO;
+
+  /** task.maxTurns 未指定时的默认软回合预算。 */
+  private int subagentMaxTurns = 50;
+
+  /** task Tool 观察子 Thread durable 状态的轮询间隔。 */
+  private Duration subagentPollInterval = Duration.ofMillis(100);
+
   public Path resolvedEnvironmentRoot() {
     if (environmentRoot == null) {
       throw new IllegalArgumentException(

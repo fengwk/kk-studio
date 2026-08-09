@@ -102,6 +102,7 @@ describe('thread realtime state', () => {
       toolCallId: 'call-1',
       toolName: 'web-search',
       toolVersion: null,
+      rendererKey: 'web-search',
       toolType: 'PLATFORM',
       environmentName: null,
       argumentsJson: '{}',
@@ -181,6 +182,69 @@ describe('thread realtime state', () => {
     // text/json 分片会被聚合；resource 分片不会被从 partial 中投影出来。
     expect(stream.text).toBe('one')
     expect(stream.attachments).toBeUndefined()
+  })
+
+  it('replaces task.status heartbeat snapshots instead of appending them', () => {
+    const status = (state: string, createdAt: string) => ({
+      threadId: '7',
+      invocationId: 'inv-task',
+      attempt: 1,
+      payload: {
+        toolCallId: 'call-task',
+        contents: [{ type: 'text', text: `{"kind":"task.status","state":"${state}"}\n` }],
+        error: false,
+        details: { kind: 'task.status', state },
+      },
+      createdAt,
+    })
+
+    const running = reduceRealtimeToolStream(
+      null,
+      status('running_model', '2026-07-28T10:00:00Z'),
+    )
+    const waiting = reduceRealtimeToolStream(
+      running,
+      status('waiting_approval', '2026-07-28T10:00:01Z'),
+    )
+
+    expect(waiting.text).toBe('{"kind":"task.status","state":"waiting_approval"}\n')
+    expect(waiting.createdAt).toBe('2026-07-28T10:00:01Z')
+  })
+
+  it('reuses the task stream when a heartbeat only changes JSON order and transport time', () => {
+    const partial = (text: string, createdAt: string) => ({
+      threadId: '7',
+      invocationId: 'inv-task',
+      attempt: 1,
+      payload: {
+        toolCallId: 'call-task',
+        contents: [{ type: 'text', text }],
+        error: false,
+        details: { kind: 'task.status' },
+      },
+      createdAt,
+    })
+    const first = reduceRealtimeToolStream(
+      null,
+      partial(
+        '{"kind":"task.status","threadId":"8","subagentType":"coder",'
+        + '"state":"running_model","depth":2,"turns":1,"toolCalls":0,'
+        + '"lastActivity":"running","approvals":[]}\n',
+        '2026-07-28T10:00:00Z',
+      ),
+    )
+    const semanticallySame = reduceRealtimeToolStream(
+      first,
+      partial(
+        '{ "approvals": [], "lastActivity": "running", "toolCalls": 0, "turns": 1,'
+        + '"depth": 2, "state": "running_model", "subagentType": "coder",'
+        + '"threadId": "8", "kind": "task.status" }\n',
+        '2026-07-28T10:00:01Z',
+      ),
+    )
+
+    expect(semanticallySame).toBe(first)
+    expect(semanticallySame.createdAt).toBe('2026-07-28T10:00:00Z')
   })
 
   it('restores the stream from the single snapshot ModelInvocation checkpoint', () => {

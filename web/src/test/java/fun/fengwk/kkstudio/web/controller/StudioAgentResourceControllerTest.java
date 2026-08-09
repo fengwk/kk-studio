@@ -118,6 +118,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     agentConfig.setTools(List.of());
     agentConfig.setSkills(List.of());
+    agentConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO agent = new AgentDefinitionCreateDTO();
     agent.setName(agentName);
     agent.setModel(providerName + "/" + modelName);
@@ -138,6 +139,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
                 .andExpect(jsonPath("$.data.providerId").doesNotExist())
                 .andExpect(jsonPath("$.data.config.tools").isEmpty())
                 .andExpect(jsonPath("$.data.config.skills").isEmpty())
+                .andExpect(jsonPath("$.data.config.subagents").isEmpty())
                 .andExpect(jsonPath("$.data.version").value("0"))
                 .andReturn());
     assertEquals(agentName, agentData.path("name").asText());
@@ -348,6 +350,7 @@ public class StudioAgentResourceControllerTest extends WebPostgresTestSupport {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
+    config.setSubagents(List.of());
 
     AgentDefinitionCreateDTO malformed = new AgentDefinitionCreateDTO();
     malformed.setName("malformed-agent-" + suffix);

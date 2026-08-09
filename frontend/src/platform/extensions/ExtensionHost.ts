@@ -8,6 +8,7 @@ import type {
   PageContribution,
   PanelContribution,
   StatusContribution,
+  ToolRendererContribution,
   TrustedReactExtension,
   WidgetContribution,
 } from '@/platform/extensions/types'
@@ -121,6 +122,7 @@ export class ExtensionHost {
   readonly statuses = new ContributionRegistry<StatusContribution>()
   readonly dialogs = new ContributionRegistry<DialogContribution>()
   readonly overlays = new ContributionRegistry<OverlayContribution>()
+  readonly toolRenderers = new ContributionRegistry<ToolRendererContribution>()
 
   private readonly listeners = new Set<RegistryListener>()
   private readonly extensionRegistrations = new Map<string, ExtensionRegistration>()
@@ -159,6 +161,7 @@ export class ExtensionHost {
     registerAll(this.statuses, extension.statuses)
     registerAll(this.dialogs, extension.dialogs)
     registerAll(this.overlays, extension.overlays)
+    registerAll(this.toolRenderers, extension.toolRenderers)
 
     this.extensionRegistrations.set(extension.id, { contributions })
     this.publish(changedRegistries)
@@ -219,6 +222,7 @@ export class ExtensionHost {
     validateContributionList('statuses', extension.statuses)
     validateContributionList('dialogs', extension.dialogs)
     validateContributionList('overlays', extension.overlays)
+    validateContributionList('toolRenderers', extension.toolRenderers)
   }
 }
 

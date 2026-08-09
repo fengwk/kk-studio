@@ -19,8 +19,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
@@ -37,8 +35,6 @@ public final class BashTool implements Tool {
 
   static final int DEFAULT_TIMEOUT_SECONDS = 120;
   static final int MAX_TIMEOUT_SECONDS = 3600;
-  private static final ExecutorService EXECUTOR =
-      Executors.newCachedThreadPool(threadFactory("daemon-bash"));
   private static final ScheduledThreadPoolExecutor SCHEDULER = createScheduler();
   private final CodingToolsConfig config;
   private final EnvironmentPathBoundary boundary;
@@ -62,7 +58,7 @@ public final class BashTool implements Tool {
     }
     Objects.requireNonNull(listener, "listener");
     BashHandle handle = new BashHandle(request.call().id(), listener);
-    EXECUTOR.execute(() -> run(request, listener, handle));
+    Thread.ofVirtual().name("daemon-bash").start(() -> run(request, listener, handle));
     return handle;
   }
 

@@ -13,10 +13,13 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
+import java.time.Instant;
 import java.util.List;
 
 /** TurnPlan 不可变快照校验：positive id、非负 cutoff、非空引用、防御性列表拷贝与 deferred-message 推导。 */
@@ -42,7 +45,8 @@ class TurnPlanTest {
             99,
             100,
             false,
-            TurnStartReason.INPUT);
+            TurnStartReason.INPUT,
+            null);
     assertEquals(baseline.threadId(), plan.threadId());
     assertEquals(100, plan.candidateHeadEntryId());
     assertEquals(TurnStartReason.INPUT, plan.reason());
@@ -79,7 +83,8 @@ class TurnPlanTest {
             99,
             100,
             false,
-            TurnStartReason.CONTINUATION);
+            TurnStartReason.CONTINUATION,
+            null);
     assertTrue(withDeferred.hasDeferredMessages());
     // 同一命令已被消费 -> 不再需要 wake。
     TurnPlan consumed =
@@ -96,8 +101,36 @@ class TurnPlanTest {
             99,
             100,
             false,
-            TurnStartReason.CONTINUATION);
+            TurnStartReason.CONTINUATION,
+            null);
     assertFalse(consumed.hasDeferredMessages());
+  }
+
+  @Test
+  void continuationConsumesOnlySystemCustomMessagesForSteering() {
+    ThreadCommand system =
+        new ThreadCommand(
+            1,
+            1,
+            1,
+            new CustomMessageCommandPayload(AgentMessage.system("finish now")),
+            "system",
+            null,
+            null,
+            Instant.EPOCH);
+    ThreadCommand user =
+        new ThreadCommand(
+            2,
+            1,
+            2,
+            new CustomMessageCommandPayload(AgentMessage.user("later input")),
+            "user",
+            null,
+            null,
+            Instant.EPOCH);
+
+    assertTrue(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, system));
+    assertFalse(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, user));
   }
 
   @Test
@@ -149,7 +182,8 @@ class TurnPlanTest {
                 99,
                 100,
                 false,
-                TurnStartReason.INPUT));
+                TurnStartReason.INPUT,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -166,6 +200,7 @@ class TurnPlanTest {
                 99,
                 100,
                 false,
+                null,
                 null));
   }
 
@@ -190,6 +225,7 @@ class TurnPlanTest {
         turnStartEntryId,
         candidateHeadEntryId,
         false,
-        TurnStartReason.INPUT);
+        TurnStartReason.INPUT,
+        null);
   }
 }

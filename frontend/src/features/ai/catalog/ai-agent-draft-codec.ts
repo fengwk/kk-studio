@@ -19,7 +19,7 @@ function normalizeNames(items: string[] | null | undefined): string[] {
 
 function normalizeCapabilityShortNames(
   items: string[] | null | undefined,
-  kind: 'tools' | 'skills',
+  kind: 'tools' | 'skills' | 'subagents',
 ): string[] {
   const shortNames = normalizeNames(items)
   const seen = new Set<string>()
@@ -45,6 +45,7 @@ function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
     tools: normalizeCapabilityShortNames(draft.tools, 'tools'),
     skills: normalizeCapabilityShortNames(draft.skills, 'skills'),
+    subagents: normalizeCapabilityShortNames(draft.subagents, 'subagents'),
   }
 }
 
@@ -58,6 +59,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     variant: '',
     tools: [],
     skills: [],
+    subagents: [],
   }
 }
 
@@ -71,6 +73,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     variant: agent.variant?.trim() || '',
     tools: normalizeNames(config.tools),
     skills: normalizeNames(config.skills),
+    subagents: normalizeNames(config.subagents),
   }
 }
 

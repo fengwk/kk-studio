@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -14,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -688,6 +693,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public boolean hasModelInvocationForTurn(long turnStartEntryId) {
+      checkOpen();
+      return state.modelInvocations.values().stream()
+          .anyMatch(invocation -> invocation.turnStartEntryId() == turnStartEntryId);
+    }
+
+    @Override
     public void insertModelInvocation(ModelInvocation invocation) {
       checkOpen();
       Objects.requireNonNull(invocation, "invocation");
@@ -703,6 +715,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
       if (turnStart.payload().type() != EntryType.TURN_START) {
         throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
+      }
+      boolean compactionInvocation = invocation.request().compaction() != null;
+      if (((TurnStartPayload) turnStart.payload()).reason()
+          == TurnStartReason.COMPACTION
+          != compactionInvocation) {
+        throw new IllegalArgumentException(
+            "TURN_START reason COMPACTION must match the invocation compaction purpose");
       }
       // 新 durable invocation 初始状态不变量：READY / attempt=0 / 无 terminal facts（record 配合保证后者）。
       if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
@@ -762,10 +781,17 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return;
       }
       Entry result = requireExistingEntry(resultEntryId);
-      if (!isModelResultEntry(result)) {
+      boolean compactionInvocation = invocation.request().compaction() != null;
+      if (compactionInvocation && result.payload().type() == EntryType.COMPACTION) {
+        requireValidCompactionResult(invocation, result);
+      }
+      if (!isModelResultEntry(result, compactionInvocation)) {
         throw new IllegalArgumentException(
-            "model resultEntryId must reference an assistant, assistant-error or"
-                + " assistant-aborted entry");
+            compactionInvocation
+                ? "model resultEntryId must reference a compaction, assistant-error or"
+                    + " assistant-aborted entry for a compaction invocation"
+                : "model resultEntryId must reference an assistant, assistant-error or"
+                    + " assistant-aborted entry");
       }
       // result path 必须同时包含 basis 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
       EntryPath resultPath = loadEntryPath(resultEntryId);
@@ -787,11 +813,70 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    private static boolean isModelResultEntry(Entry entry) {
+    /**
+     * COMPACTION 结果 Entry 只接受 SUCCEEDED invocation：payload 元数据必须与冻结请求逐字段一致，且 firstKept / cut /
+     * prefix（存在时）引用必须存在于 result 路径上、位于 result Entry 之前并满足 firstKept &lt;= cut、prefix &lt; cut；
+     * 引用缺失或顺序非法视为分支损坏，fail closed。
+     */
+    private void requireValidCompactionResult(ModelInvocation invocation, Entry result) {
+      if (invocation.status() != ModelInvocationStatus.SUCCEEDED) {
+        throw new IllegalArgumentException(
+            "compaction result entry requires a SUCCEEDED invocation status");
+      }
+      CompactionRequest request = invocation.request().compaction();
+      CompactionPayload payload = (CompactionPayload) result.payload();
+      if (payload.phase() != request.phase()
+          || payload.trigger() != request.trigger()
+          || payload.tokensBefore() != request.tokensBefore()
+          || payload.firstKeptEntryId() != request.firstKeptEntryId()
+          || payload.cutEntryId() != request.cutEntryId()
+          || !Objects.equals(payload.turnPrefixStartEntryId(), request.turnPrefixStartEntryId())) {
+        throw new IllegalArgumentException(
+            "compaction result payload metadata must match the frozen compaction request");
+      }
+      requireValidCompactionReferences(invocation, result);
+    }
+
+    /** 切分引用必须是 result Entry 的祖先且满足 firstKept <= cut、prefix < cut（存在时）。 */
+    private void requireValidCompactionReferences(ModelInvocation invocation, Entry result) {
+      CompactionRequest request = invocation.request().compaction();
+      List<Entry> entries = loadEntryPath(result.id()).entries();
+      int resultIndex = entries.size() - 1; // result 是路径 head，其引用必须全部在其之前
+      int firstKeptIndex = indexOfId(entries, request.firstKeptEntryId());
+      int cutIndex = indexOfId(entries, request.cutEntryId());
+      Long prefixId = request.turnPrefixStartEntryId();
+      int prefixIndex = prefixId == null ? -1 : indexOfId(entries, prefixId);
+      boolean referencesBeforeResult =
+          firstKeptIndex >= 0
+              && firstKeptIndex < resultIndex
+              && cutIndex >= 0
+              && cutIndex < resultIndex
+              && (prefixId == null || (prefixIndex >= 0 && prefixIndex < resultIndex));
+      if (!referencesBeforeResult
+          || firstKeptIndex > cutIndex
+          || (prefixId != null && prefixIndex >= cutIndex)) {
+        throw new IllegalArgumentException(
+            "compaction result references must exist on the result path before the result entry"
+                + " with firstKeptEntryId <= cutEntryId and turnPrefixStartEntryId < cutEntryId");
+      }
+    }
+
+    private static int indexOfId(List<Entry> entries, long entryId) {
+      for (int i = 0; i < entries.size(); i++) {
+        if (entries.get(i).id() == entryId) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
+    private static boolean isModelResultEntry(Entry entry, boolean compactionInvocation) {
       return switch (entry.payload().type()) {
         case ASSISTANT_ERROR, ASSISTANT_ABORTED -> true;
-        case MESSAGE -> entry.payload() instanceof MessagePayload message
+        case MESSAGE -> !compactionInvocation
+            && entry.payload() instanceof MessagePayload message
             && message.message().role() == AgentMessageRole.ASSISTANT;
+        case COMPACTION -> compactionInvocation;
         default -> false;
       };
     }
@@ -927,8 +1012,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * request.call 必须与 Assistant MESSAGE 中按 ordinal 提取的 ToolCall（id / toolName /
-     * argumentsJson）精确一致。
+     * request binding/call 必须与 Assistant MESSAGE 中按 ordinal 提取的 ToolCall（id / toolName /
+     * rendererKey / argumentsJson）精确一致。
      */
     private static void requireMatchingAssistantToolCall(
         ToolInvocation invocation, Entry assistant) {
@@ -947,9 +1032,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
       ToolCall requestCall = invocation.request().call();
       if (!call.toolCallId().equals(requestCall.id())
           || !call.toolName().equals(requestCall.toolName())
+          || !call.rendererKey().equals(invocation.request().binding().descriptor().rendererKey())
           || !call.argumentsJson().equals(requestCall.argumentsJson())) {
         throw new IllegalArgumentException(
-            "tool request call must exactly match the assistant tool call at the same ordinal");
+            "tool request binding/call must exactly match the assistant tool call at the same"
+                + " ordinal");
       }
     }
 
@@ -970,12 +1057,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "tool resultEntryId must reference a TOOL MESSAGE entry");
       }
       ToolResultMetadata metadata = ((MessagePayload) result.payload()).toolResultMetadata();
+      ToolResultMessageContent content =
+          (ToolResultMessageContent)
+              ((MessagePayload) result.payload()).message().contents().get(0);
       if (metadata.assistantEntryId() != invocation.assistantEntryId()
           || metadata.ordinal() != invocation.ordinal()
-          || !metadata.toolCallId().equals(invocation.request().call().id())) {
+          || !metadata.toolCallId().equals(invocation.request().call().id())
+          || !content.toolCallId().equals(invocation.request().call().id())
+          || !content.toolName().equals(invocation.request().call().toolName())
+          || !content
+              .rendererKey()
+              .equals(invocation.request().binding().descriptor().rendererKey())) {
         throw new IllegalArgumentException(
-            "tool result entry must match the invocation assistant entry, ordinal and"
-                + " toolCallId");
+            "tool result entry must match the invocation assistant entry, ordinal, call and"
+                + " renderer");
       }
       // synthetic 结果（history normalization 补写）不关联真实 ToolInvocation。
       if (metadata.synthetic()) {

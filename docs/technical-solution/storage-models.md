@@ -10,7 +10,7 @@ PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。�
 | `agent_model` | `(provider_name, name)` 复合主键；`provider_name` 外键到 `agent_provider(name)`；`config` 保存结构化 Model 配置 |
 | `agent_definition` | `name` 主键；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
 
-Catalog 只有上述三张名称资源表。三张表不使用 bigint resource ID，均以名称（Provider/Agent 为 `name`，Model 为 `(providerName, name)`）作为身份与全部引用；`version` 是当前行的 CRUD 乐观锁（CAS）token。删除是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config 只保存 tools/skills 名称集合。
+Catalog 只有上述三张名称资源表。三张表不使用 bigint resource ID，均以名称（Provider/Agent 为 `name`，Model 为 `(providerName, name)`）作为身份与全部引用；`version` 是当前行的 CRUD 乐观锁（CAS）token。删除是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config（`agent_definition.config` JSONB）保存三个**必填**列表：`tools`/`skills` 短名集合与 `subagents` Agent 名称 allowlist——`subagents` 引用被锁定（`agent_definition` 上存在引用该名称的 allowlist 时，删除该 Agent 返回 409；更新/创建时必须能解析到现存 Agent，未知引用 404），无独立引用表。
 
 ## 2. ComfyUI Workflow API
 
@@ -24,10 +24,10 @@ Catalog 只有上述三张名称资源表。三张表不使用 bigint resource I
 
 | 表 | 字段与职责 |
 | --- | --- |
-| `chat` | `id`、`title`、`agent_name`、`yolo_enabled`、`version`、时间；两项名称/开关是 Chat 唯一可见发送设置 |
+| `chat` | `id`、`title`、`agent_name`、可空 `environment_name`、`yolo_enabled`、`version`、时间；后三项是 Chat 的可见发送设置 |
 | `chat_thread` | `(chat_id, thread_id)` 主键，表示 Chat 与 Thread 的历史多对多关系 |
 
-Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch 设置来自 head Entry 的 `BranchSettings` 快照。
+Chat 的 `agent_name`、`environment_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch 设置来自 head Entry 的 `BranchSettings` 快照。
 
 ## 4. Harness 表（精确 7 张）
 
@@ -44,7 +44,8 @@ Chat 的 `agent_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch
 `harness_entry.entry_type` 只允许：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
+COMPACTION, TURN_END
 ```
 
 `harness_thread_command.command_type` 只允许：
@@ -78,11 +79,11 @@ Goal 不使用独立表。`plugins/goal` 把每次完整状态快照写成当前
 
 同一 `(pluginId, customType)` 的最近快照在当前 branch 生效；fork 只继承其分叉点之前的快照。`create_goal` / `get_goal` / `update_goal` v2 分别声明 WRITE / READ / WRITE，状态只允许 `active`、`complete`、`blocked`；`update_goal` 只允许从 active 进入终态。`agent_thread_goal`、`GoalStore` 与 `DatabaseGoalStore` 均不存在。
 
-**不存在的表**：没有 `agent_thread_goal`、dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
+**不存在的表**：没有 `agent_thread_goal`、dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。**没有子 Agent/委派表**：`task` 委派复用既有 Thread/Entry/Invocation（子 Session 由 ROOT 的 `subagentContext` payload 标识），进程内 `SubagentRunRegistry` 不是 durable 表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
 
 ## 5. Invocation 冻结事实
 
-`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route/plugin provenance/state accesses）与 `skillBindings`、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment 或插件贡献。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route/plugin provenance/state accesses）、`skillBindings` 与 `subagentBindings`（Agent 名称 + 描述 allowlist）、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment 或插件贡献。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
 
 `harness_tool_invocation.effects` 是 strict JSON object，保存有序 `ToolEffectBatch`；仅 `SUCCEEDED` 可非空，且与成功结果在同一次 Store update 中原子持久化。其后状态与 effects 均 terminal immutable。
 

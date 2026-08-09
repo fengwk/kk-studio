@@ -35,6 +35,7 @@
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-plugin-goal</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>

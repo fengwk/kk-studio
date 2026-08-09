@@ -12,12 +12,7 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * 为平台工具适配 {@link EnvironmentSkillLoader}。
- *
- * <p>Runtime {@link SkillBodyLoader} 的绑定引用是 canonical {@link EnvironmentName} 文本
- * （绝不是展示名）；它被严格解析，因此展示名引用会 fail-closed，而不是按名路由。
- */
+/** 为平台工具适配 {@link EnvironmentSkillLoader}。 */
 @Component
 public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
   private final EnvironmentSkillLoader environmentSkillLoader;
@@ -29,8 +24,7 @@ public final class EnvironmentSkillBodyLoader implements SkillBodyLoader {
 
   @Override
   public CompletableFuture<SkillBodyLoadResult> load(
-      String environmentNameText, String skillName, Duration timeout) {
-    EnvironmentName environmentName = new EnvironmentName(environmentNameText);
+      EnvironmentName environmentName, String skillName, Duration timeout) {
     return environmentSkillLoader
         .loadSkill(environmentName, skillName, timeout)
         .thenApply(EnvironmentSkillBodyLoader::map);

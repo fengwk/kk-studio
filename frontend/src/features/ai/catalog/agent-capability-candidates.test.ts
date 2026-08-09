@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSkillCandidates,
+  buildSubagentCandidates,
   buildToolCandidates,
   withSelectedOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
+
+function agent(name: string, description: string | null): AgentDefinitionDTO {
+  return {
+    name,
+    description,
+    systemPrompt: null,
+    model: 'minimax/MiniMax',
+    variant: null,
+    config: { tools: [], skills: [], subagents: [] },
+    version: '1',
+    createTime: null,
+    updateTime: null,
+  }
+}
 
 function environment(name: string, skills: { name: string; description: string | null }[]): LiveEnvironmentDTO {
   return {
@@ -66,6 +82,32 @@ describe('agent-capability-candidates', () => {
     expect(withSelectedOrphans(buildSkillCandidates(local), ['missing'])).toEqual([
       { name: 'dev', description: 'dev skill' },
       { name: 'missing', description: null, offline: true, missing: true },
+    ])
+  })
+
+  it('builds subagent candidates from the global Agent catalog with name and description', () => {
+    expect(
+      buildSubagentCandidates([
+        agent('helper', 'runs isolated tasks'),
+        agent('writer', null),
+        agent('helper', 'duplicate'),
+        agent('  ', 'blank name'),
+      ]),
+    ).toEqual([
+      { name: 'helper', description: 'runs isolated tasks' },
+      { name: 'writer', description: null },
+    ])
+  })
+
+  it('returns no subagent candidates from an empty catalog', () => {
+    expect(buildSubagentCandidates([])).toEqual([])
+  })
+
+  it('keeps selected subagents missing from the catalog as removable orphans', () => {
+    const candidates = buildSubagentCandidates([agent('helper', 'runs isolated tasks')])
+    expect(withSelectedOrphans(candidates, ['ghost-agent'])).toEqual([
+      { name: 'helper', description: 'runs isolated tasks' },
+      { name: 'ghost-agent', description: null, offline: true, missing: true },
     ])
   })
 })

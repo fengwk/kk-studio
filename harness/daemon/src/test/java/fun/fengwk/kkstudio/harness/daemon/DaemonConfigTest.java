@@ -4,8 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,34 +13,10 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /** 配置契约用于阻止生产 Daemon 在缺少身份或 gateway 凭证时接入。 */
 class DaemonConfigTest {
-
-  private static final String[] PROPERTY_NAMES = {
-    "kkstudio.daemon.gateway-uri",
-    "kkstudio.daemon.environment-name",
-    "kkstudio.daemon.id",
-    "kkstudio.daemon.gateway-token",
-    "kkstudio.daemon.heartbeat",
-    "kkstudio.daemon.reconnect-initial",
-    "kkstudio.daemon.reconnect-max",
-    "kkstudio.daemon.tool-timeout",
-    "kkstudio.daemon.mcp-config"
-  };
-
-  private final Map<String, String> originalProperties = new LinkedHashMap<>();
-
-  @BeforeEach
-  void captureProperties() {
-    for (String name : PROPERTY_NAMES) {
-      originalProperties.put(name, System.getProperty(name));
-      System.clearProperty(name);
-    }
-  }
 
   /** 所有显式连接输入，包括共享的 gateway token，都是必填且有界的。 */
   @Test
@@ -101,23 +75,28 @@ class DaemonConfigTest {
                 List.of()));
   }
 
-  /** CLI 对 environment name 和 skill dirs 是权威的；连接配置可以回退到 properties。 */
+  /** CLI 是 daemon 连接、身份、超时与 skill roots 的唯一配置来源。 */
   @Test
-  void readsCliArgumentsWithPropertyFallback(@TempDir Path skillDir) {
-    set("kkstudio.daemon.gateway-uri", "wss://gateway.example/daemon");
-    set("kkstudio.daemon.gateway-token", "secret");
-    set("kkstudio.daemon.heartbeat", "PT2S");
-    set("kkstudio.daemon.reconnect-initial", "PT0S");
-    set("kkstudio.daemon.reconnect-max", "PT3S");
-    set("kkstudio.daemon.tool-timeout", "PT4S");
-
+  void readsCliArguments(@TempDir Path skillDir) {
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
               "--environment-name",
               "local-dev",
+              "--gateway-uri",
+              "wss://gateway.example/daemon",
+              "--gateway-token",
+              "secret",
               "--daemon-id",
               "daemon-a",
+              "--heartbeat",
+              "PT2S",
+              "--reconnect-initial",
+              "PT0S",
+              "--reconnect-max",
+              "PT3S",
+              "--tool-timeout",
+              "PT4S",
               "--skill-dir",
               skillDir.toString()
             });
@@ -136,14 +115,15 @@ class DaemonConfigTest {
   /** 显式 skill dirs 会替换默认的发现根目录。 */
   @Test
   void acceptsRepeatableSkillDirs(@TempDir Path first, @TempDir Path second) {
-    set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
-    set("kkstudio.daemon.gateway-token", "secret");
-
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
               "--environment-name",
               "env",
+              "--gateway-uri",
+              "ws://gateway.example/daemon",
+              "--gateway-token",
+              "secret",
               "--skill-dir",
               first.toString(),
               "--skill-dir",
@@ -156,32 +136,38 @@ class DaemonConfigTest {
     assertTrue(config.mcpConfigPath() == null);
   }
 
-  /** {@code --mcp-config} 是可选的 CLI 参数，并回退 {@code kkstudio.daemon.mcp-config}。 */
+  /** {@code --mcp-config} 是可选的 CLI 参数。 */
   @Test
-  void acceptsMcpConfigCliAndPropertyFallback(@TempDir Path configDir) throws Exception {
+  void acceptsMcpConfigCli(@TempDir Path configDir) throws Exception {
     Path configFile = configDir.resolve("mcp.json");
     Files.writeString(configFile, "{\"servers\":[]}");
-    set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
-    set("kkstudio.daemon.gateway-token", "secret");
 
     DaemonConfig cliConfig =
         DaemonConfig.fromArgs(
-            new String[] {"--environment-name", "env", "--mcp-config", configFile.toString()});
+            new String[] {
+              "--environment-name",
+              "env",
+              "--gateway-uri",
+              "ws://gateway.example/daemon",
+              "--gateway-token",
+              "secret",
+              "--mcp-config",
+              configFile.toString()
+            });
     assertEquals(configFile.toAbsolutePath().normalize(), cliConfig.mcpConfigPath());
-
-    set("kkstudio.daemon.mcp-config", configFile.toString());
-    DaemonConfig propertyConfig = DaemonConfig.fromArgs(new String[] {"--environment-name", "env"});
-    assertEquals(configFile.toAbsolutePath().normalize(), propertyConfig.mcpConfigPath());
   }
 
   /** 当部署缺少 gateway 所需的密钥时，启动失败关闭。 */
   @Test
   void rejectsMissingGatewayToken() {
-    set("kkstudio.daemon.gateway-uri", "ws://gateway.example/daemon");
-
     assertThrows(
         IllegalArgumentException.class,
-        () -> DaemonConfig.fromArgs(new String[] {"--environment-name", "env"}));
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--environment-name", "env",
+                  "--gateway-uri", "ws://gateway.example/daemon"
+                }));
   }
 
   /** 非 canonical 的 {@code --environment-name} 在配置解析期立即失败（名称是路由身份，不允许歧义）。 */
@@ -227,18 +213,6 @@ class DaemonConfigTest {
     assertTrue(DaemonConfig.defaultSkillDir().endsWith(Path.of(".agents", "skills")));
   }
 
-  @AfterEach
-  void restoreProperties() {
-    for (String name : PROPERTY_NAMES) {
-      String original = originalProperties.get(name);
-      if (original == null) {
-        System.clearProperty(name);
-      } else {
-        System.setProperty(name, original);
-      }
-    }
-  }
-
   private DaemonConfig config(
       URI gatewayUri,
       String environmentName,
@@ -260,9 +234,5 @@ class DaemonConfigTest {
         gatewayToken,
         skillDirs,
         null);
-  }
-
-  private void set(String name, String value) {
-    System.setProperty(name, value);
   }
 }

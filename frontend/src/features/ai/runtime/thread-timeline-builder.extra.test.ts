@@ -16,7 +16,13 @@ describe('thread timeline edge branches', () => {
           '5',
           'MESSAGE',
           messagePayload('ASSISTANT', [
-            { type: 'tool_call', toolCallId: 'call-a', toolName: 'search', argumentsJson: '{"q":1}' },
+            {
+              type: 'tool_call',
+              toolCallId: 'call-a',
+              toolName: 'search',
+              rendererKey: 'search',
+              argumentsJson: '{"q":1}',
+            },
             { type: 'text', text: '调用工具' },
           ]),
         ),
@@ -28,6 +34,7 @@ describe('thread timeline edge branches', () => {
               type: 'tool_result',
               toolCallId: 'call-a',
               toolName: 'search',
+              rendererKey: 'search',
               error: true,
               detailsJson: '{"code":"FAILED"}',
               contents: [
@@ -112,20 +119,50 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
-  it('does not emit any dialogue message for TURN_START / TURN_END even if user-visible content sneaks in', () => {
+  it('suppresses the entire compaction turn and its realtime model overlay', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('turn-start', 'TURN_START', { reason: 'USER_MESSAGE', settings: {} }),
-        entry('turn-end', 'TURN_END', {
-          turnStartEntryId: 'turn-start',
+        entry('stopped-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
+        entry('aborted', 'ASSISTANT_ABORTED', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [{ type: 'text', text: 'internal partial summary' }],
+          },
+        }),
+        entry('stopped-end', 'TURN_END', {
+          turnStartEntryId: 'stopped-start',
+          outcome: 'STOPPED',
+          continueModel: false,
+          reason: 'USER_STOP',
+          closeRequestId: 'stop-1',
+        }),
+        entry('completed-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
+        entry('compaction', 'COMPACTION', {
+          phase: 'FULL',
+          trigger: 'THRESHOLD',
+          complete: true,
+          summaryText: 'internal summary',
+        }),
+        entry('completed-end', 'TURN_END', {
+          turnStartEntryId: 'completed-start',
           outcome: 'COMPLETED',
           continueModel: false,
-          reason: 'no-continuation',
+          reason: null,
           closeRequestId: null,
         }),
       ],
       [],
       [],
+      {
+        threadId: 't1',
+        invocationId: 'm1',
+        attempt: 0,
+        sequence: 1,
+        text: 'internal realtime summary',
+        thinking: '',
+        createdAt: '2026-01-01T00:00:00',
+        status: 'streaming',
+      },
     )
     expect(timeline.messages).toEqual([])
     expect(timeline.queuedMessages).toEqual([])

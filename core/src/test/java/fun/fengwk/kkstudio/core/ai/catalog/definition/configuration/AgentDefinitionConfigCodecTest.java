@@ -20,11 +20,13 @@ class AgentDefinitionConfigCodecTest {
     AgentDefinitionConfigDTO config = config();
     config.setTools(List.of("read"));
     config.setSkills(List.of("dev"));
+    config.setSubagents(List.of("reviewer"));
 
     AgentDefinitionConfigDTO decoded = codec.decode(codec.encode(config));
 
     assertEquals(List.of("read"), decoded.getTools());
     assertEquals(List.of("dev"), decoded.getSkills());
+    assertEquals(List.of("reviewer"), decoded.getSubagents());
   }
 
   @Test
@@ -38,6 +40,10 @@ class AgentDefinitionConfigCodecTest {
     AgentDefinitionConfigDTO missingSkills = config();
     missingSkills.setSkills(null);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSkills));
+
+    AgentDefinitionConfigDTO missingSubagents = config();
+    missingSubagents.setSubagents(null);
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSubagents));
 
     AgentDefinitionConfigDTO duplicate = config();
     duplicate.setSkills(List.of("dev", "dev"));
@@ -56,16 +62,20 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalStateException.class, () -> codec.decode("{}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[],\"skills\":[],\"unknown\":true}"));
-    assertThrows(IllegalStateException.class, () -> codec.decode("{\"tools\":[42],\"skills\":[]}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[],\"unknown\":true}"));
     assertThrows(
-        IllegalStateException.class, () -> codec.decode("{\"tools\":[],\"skills\":[]} {}"));
+        IllegalStateException.class,
+        () -> codec.decode("{\"tools\":[42],\"skills\":[],\"subagents\":[]}"));
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]} {}"));
   }
 
   private static AgentDefinitionConfigDTO config() {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
+    config.setSubagents(List.of());
     return config;
   }
 }

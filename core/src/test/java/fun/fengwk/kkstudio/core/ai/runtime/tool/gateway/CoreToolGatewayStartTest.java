@@ -145,7 +145,7 @@ class CoreToolGatewayStartTest {
             DESCRIPTOR.version(),
             ToolType.PLATFORM,
             "drifted description",
-            null,
+            DESCRIPTOR.rendererKey(),
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
@@ -172,7 +172,7 @@ class CoreToolGatewayStartTest {
             "1",
             ToolType.ENVIRONMENT,
             "not in the daemon catalog",
-            null,
+            "no_such_daemon_tool",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
@@ -202,7 +202,7 @@ class CoreToolGatewayStartTest {
             "1",
             ToolType.ENVIRONMENT,
             "drifted bash description",
-            null,
+            "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
@@ -607,7 +607,7 @@ class CoreToolGatewayStartTest {
         version,
         ToolType.PLATFORM,
         "drifted description",
-        null,
+        DESCRIPTOR.rendererKey(),
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(1));

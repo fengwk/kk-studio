@@ -138,13 +138,17 @@ public interface HarnessStore {
     /** 按 (threadId, turnStartEntryId) 查找 ModelInvocation；不存在返回 {@link Optional#empty()}。 */
     Optional<ModelInvocation> findModelInvocationByTurn(long threadId, long turnStartEntryId);
 
+    /** 任意 Thread 是否存在绑定指定 TURN_START 的 ModelInvocation。 */
+    boolean hasModelInvocationForTurn(long turnStartEntryId);
+
     /**
      * 插入新 ModelInvocation（初始状态不变量：只能 READY / attempt=0 / 无 terminal facts）。约束：thread 存在且已在本事务锁定
      * （{@link #lockThread} 或同事务 {@link #insertThread}，basis CAS 才能原子成立，未锁定抛 {@link
      * IllegalStateException}）； basisHeadEntryId 必须等于 Thread 当前 head（创建时精确 basis
      * CAS）；turnStartEntryId 指向 TURN_START Entry 且必须位于 basisHeadEntryId 的 EntryPath 上；{@code
-     * (threadId, turnStartEntryId)} 唯一；resultEntryId 全局 唯一、必须是 Assistant / AssistantError /
-     * AssistantAborted Entry，且其 path 同时包含 basisHeadEntryId 与 turnStartEntryId（同 branch
+     * (threadId, turnStartEntryId)} 唯一；resultEntryId 全局 唯一、必须是与 invocation 用途一致的结果 Entry（正常
+     * invocation：Assistant / AssistantError / AssistantAborted；压缩 invocation：COMPACTION /
+     * AssistantError / AssistantAborted），且其 path 同时包含 basisHeadEntryId 与 turnStartEntryId（同 branch
      * descendant）。违反抛 {@link IllegalArgumentException}。插入后本事务内可更新。
      */
     void insertModelInvocation(ModelInvocation invocation);

@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.plugin.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.plugin.ContributionId;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.plugin.PluginId;
-import fun.fengwk.kkstudio.harness.plugin.PluginIntent;
 import fun.fengwk.kkstudio.harness.plugin.PluginStateMode;
 import fun.fengwk.kkstudio.harness.plugin.PluginToolContext;
 import fun.fengwk.kkstudio.harness.plugin.PluginToolResult;
@@ -441,11 +440,7 @@ public final class CoreToolGateway implements ToolGateway {
   private ToolEffectBatch mapPluginEffects(
       ToolContribution contribution, PluginToolResult outcome) {
     List<CustomEntryPayload> payloads = new ArrayList<>();
-    for (PluginIntent intent : outcome.intents()) {
-      if (!(intent instanceof AppendCustomEntry append)) {
-        throw new IllegalArgumentException(
-            "plugin Tool intents may only append CUSTOM state entries");
-      }
+    for (AppendCustomEntry append : outcome.intents()) {
       CustomEntryPayload payload = append.payload();
       if (!payload.pluginId().equals(contribution.id().pluginId().value())) {
         throw new IllegalArgumentException(

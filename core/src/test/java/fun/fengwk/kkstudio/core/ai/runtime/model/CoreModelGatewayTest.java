@@ -65,7 +65,13 @@ class CoreModelGatewayTest {
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
   private static final ModelInvocationRequest INVOCATION_REQUEST =
       new ModelInvocationRequest(
-          new EnvironmentName("env-1"), PROVIDER_REQUEST, List.of(), List.of(), false);
+          new EnvironmentName("env-1"),
+          PROVIDER_REQUEST,
+          List.of(),
+          List.of(),
+          false,
+          100_000,
+          null);
 
   @Test
   void startReturnsStartedImmediatelyAndBridgesStreamCallbacks() throws Exception {

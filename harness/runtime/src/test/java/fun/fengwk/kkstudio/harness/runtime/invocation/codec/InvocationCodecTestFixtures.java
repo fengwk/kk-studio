@@ -42,7 +42,7 @@ final class InvocationCodecTestFixtures {
         "1.0",
         type,
         "Run a command",
-        null,
+        "bash",
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
@@ -77,7 +77,9 @@ final class InvocationCodecTestFixtures {
         providerRequest(binding.descriptor()),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", ENVIRONMENT_ID)),
-        true);
+        true,
+        100_000,
+        null);
   }
 
   static ModelInvocationRequest platformModelRequest() {
@@ -87,7 +89,9 @@ final class InvocationCodecTestFixtures {
         providerRequest(binding.descriptor()),
         List.of(binding),
         List.of(new SkillBinding("review", "Review code", null)),
-        false);
+        false,
+        100_000,
+        null);
   }
 
   private static ModelPricing pricing() {

@@ -15,6 +15,9 @@ public interface AgentDefinitionRepository {
   /** 返回有效的 Agent 并持有其行锁，直到外层事务结束。 */
   AgentDefinition getByNameForUpdate(String name);
 
+  /** 是否有 Agent 的 config.subagents 数组引用该名称。 */
+  boolean existsReferencingSubagent(String name);
+
   boolean create(AgentDefinition agentDefinition);
 
   /** 基于 (name, expectedVersion) 的原子 CAS 更新。 */

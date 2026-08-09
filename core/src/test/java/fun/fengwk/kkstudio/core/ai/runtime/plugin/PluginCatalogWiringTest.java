@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -53,26 +52,23 @@ class PluginCatalogWiringTest {
       context.refresh();
 
       PluginCatalog catalog = context.getBean(PluginCatalog.class);
-      assertEquals(3, catalog.descriptors().size());
+      assertEquals(2, catalog.descriptors().size());
       assertEquals("first", catalog.findTool("extra_tool").orElseThrow().id().pluginId().value());
-      assertEquals("goal", catalog.findTool("create_goal").orElseThrow().id().pluginId().value());
       assertTrue(catalog.findCustomEntryType(new PluginId("second"), "goal").isPresent());
-      assertTrue(catalog.findCustomEntryType(new PluginId("goal"), "state").isPresent());
     }
   }
 
   @Test
-  void registersTheBuiltInGoalPluginWithoutExtensions() {
+  void allowsAnEmptyPluginSet() {
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       context.register(PluginCatalogConfiguration.class);
       context.refresh();
 
       PluginCatalog catalog = context.getBean(PluginCatalog.class);
-      assertEquals(
-          List.of("goal"), catalog.descriptors().stream().map(d -> d.id().value()).toList());
-      assertEquals(3, catalog.tools().size());
-      assertEquals(1, catalog.customEntryTypes().size());
-      assertEquals(1, catalog.contextProjectors().size());
+      assertTrue(catalog.descriptors().isEmpty());
+      assertTrue(catalog.tools().isEmpty());
+      assertTrue(catalog.customEntryTypes().isEmpty());
+      assertTrue(catalog.contextProjectors().isEmpty());
     }
   }
 

@@ -177,7 +177,7 @@ final class StoreTestSupport {
   static EntryPayload assistantPayload(String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "{}"));
+      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     ProviderStopReason stopReason =
@@ -193,7 +193,7 @@ final class StoreTestSupport {
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(
-                new ToolCallMessageContent(toolCallId, "bash", argumentsJson),
+                new ToolCallMessageContent(toolCallId, "bash", "bash", argumentsJson),
                 new TextMessageContent("assistant reply"))),
         assistantMetadata(ProviderStopReason.TOOL_CALLS),
         null);
@@ -223,9 +223,18 @@ final class StoreTestSupport {
   /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
   static EntryPayload toolResultPayload(
       long assistantEntryId, int ordinal, String toolCallId, ToolResultStatus status) {
+    return toolResultPayload(assistantEntryId, ordinal, toolCallId, status, "bash");
+  }
+
+  static EntryPayload toolResultPayload(
+      long assistantEntryId,
+      int ordinal,
+      String toolCallId,
+      ToolResultStatus status,
+      String rendererKey) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
-            toolCallId, "bash", List.of(new TextMessageContent("ok")), false, "{}");
+            toolCallId, "bash", rendererKey, List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(assistantEntryId, toolCallId, ordinal, status, false, null);
     return new MessagePayload(
@@ -237,7 +246,7 @@ final class StoreTestSupport {
       long assistantEntryId, int ordinal, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
-            toolCallId, "bash", List.of(new TextMessageContent("ok")), false, "{}");
+            toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
             assistantEntryId,
@@ -353,13 +362,48 @@ final class StoreTestSupport {
         createdAt);
   }
 
+  /** 复制 invocation，仅替换冻结 binding 的 rendererKey。 */
+  static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
+    ToolDescriptor descriptor = invocation.request().binding().descriptor();
+    ToolBinding binding =
+        new ToolBinding(
+            new ToolDescriptor(
+                descriptor.name(),
+                descriptor.version(),
+                descriptor.type(),
+                descriptor.description(),
+                rendererKey,
+                descriptor.inputSchema(),
+                descriptor.sideEffect(),
+                descriptor.timeout()),
+            invocation.request().binding().type(),
+            invocation.request().binding().environmentName(),
+            invocation.request().binding().plugin());
+    return new ToolInvocation(
+        invocation.id(),
+        invocation.modelInvocationId(),
+        invocation.assistantEntryId(),
+        invocation.ordinal(),
+        new ToolInvocationRequest(invocation.request().call(), binding),
+        invocation.status(),
+        invocation.attempt(),
+        invocation.approval(),
+        invocation.result(),
+        invocation.effects(),
+        invocation.error(),
+        invocation.resultEntryId(),
+        invocation.createdAt(),
+        invocation.updatedAt());
+  }
+
   static BranchSettings branchSettings() {
     return new BranchSettings(
         ENV_ID, "agent", new ModelSelection("provider", "model", "v1"), "low", List.of());
   }
 
   static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(ENV_ID, providerRequest(), List.of(), List.of(), false);
+    return new ModelInvocationRequest(
+        ENV_ID, providerRequest(), List.of(), List.of(), false, 100_000, null);
   }
 
   static ToolInvocationRequest toolRequest(String toolCallId) {
@@ -433,7 +477,7 @@ final class StoreTestSupport {
         "1.0",
         ToolType.PLATFORM,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));

@@ -6,7 +6,7 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **58** 个 API case；标准入口默认执行免费的 **L1 52** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 58 个 Node API case。
+当前注册 **64** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke 由 `scripts/e2e.sh --ui` 另行附加，不计入这 64 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -51,10 +51,10 @@ npm --prefix frontend run e2e:docs
 
 | 层级 | 开关 | 成本 | 覆盖 |
 | --- | --- | --- | --- |
-| L1 | 默认 | 免费 | Catalog/Chat CRUD、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、i18n 与 proxy |
-| L2 | `--real` | MiniMax | 文本轮次 durable 边界、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
+| L1 | 默认 | 免费 | Catalog/Chat CRUD（含 Agent subagents 引用校验与删除保护）、内部工具目录、Chat-scoped Thread、命令 batch 严格 wire、CAS/幂等、head move、IDLE stop no-op、i18n 与 proxy |
+| L2 | `--real` | MiniMax | 文本轮次 durable 边界、真实 task 委派 durable 子 Thread、运行中原子 batch 合并收割、stop partial + REPLAYED + continue |
 | L3 | `--real --with-branch` | MiniMax | 同一 Thread 同 Session move head 回退到历史 Entry 后继续 |
-| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流与 Resource 外部化 |
+| L4 | `--with-tools` 或 `--real --with-tools` | Daemon / MiniMax | READY Environment、ToolCatalog、非 YOLO approval 流、Resource 外部化与同源下载验证 |
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
 
@@ -62,11 +62,12 @@ npm --prefix frontend run e2e:docs
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（52）
+### L1（57）
 
 ```text
 seed.structured_model_config
 seed.agent_and_provider
+catalog.internal_tools_hidden
 thread.chat_scoped_create_atomic
 thread.branch_settings_projection
 thread.user_message_strict_wire
@@ -87,6 +88,7 @@ crud.agent.invalid_variant
 crud.provider.lifecycle
 crud.model.lifecycle
 crud.agent.lifecycle
+crud.agent.subagent_reference_lifecycle
 crud.chat.invalid_agent_name
 crud.chat.thread_branch_settings_independent
 crud.model.delete_unknown_rejected
@@ -113,8 +115,11 @@ config.agent.valid.empty_lists
 config.agent.valid.goal_plugin_tools
 config.agent.invalid.missing_tools
 config.agent.invalid.missing_skills
+config.agent.invalid.missing_subagents
 config.agent.invalid.unknown_tool
 config.agent.invalid.duplicate_skill
+config.agent.invalid.duplicate_subagent
+config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
 ```
@@ -122,7 +127,8 @@ matrix.agent.teardown_model
 L1 的关键语义断言：
 
 - Provider/Agent name 与 Model `(providerName,name)` 创建、更新、硬删除、同名重建；记录存续期间名称不可修改，DELETE 带 `expectedVersion` 硬删除后列表不再出现，同名立即可重建且 `version` 从 `"0"` 重新开始并读取到新数据（删除前数据不残留）；
-- Model config、Agent 可选择 Tool 名与 Skill 字段结构严格校验；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
+- Agent config 的 `tools`/`skills`/`subagents` 三个列表**必填**（缺失 400），元素去重、非空白短名；`tools` 只允许可选目录中的名称（未知 400），`subagents` 是 Agent 名称 allowlist——引用锁定（被引用的 Agent 不可删除，DELETE 409；移除引用后即可硬删除），未知引用 404；
+- `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
@@ -136,10 +142,11 @@ L1 的关键语义断言：
 - 未知 Thread snapshot 404；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 
-### L2/L3/L4（6）
+### L2/L3/L4（7）
 
 ```text
 real.text_turn
+real.task_delegation
 real.queued_command_batch
 real.stop_partial_continue
 branch.same_session_move_head
@@ -150,11 +157,12 @@ tool.read_turn
 | Case | 开关 | 重点验证 |
 | --- | --- | --- |
 | `real.text_turn` | `--real` | 真实 Provider 文本轮次；durable `TURN_START -> USER -> assistant MESSAGE -> TURN_END(COMPLETED)` 边界（TurnPlanBuilder 先追加 TURN_START 再追加 USER/CUSTOM）；IDLE 后 `modelInvocation=null`（快照无 `modelInvocations[]` 历史列表） |
+| `real.task_delegation` | `--real` | 父 Agent config 携带 `subagents=[child]` 且 branch `activeTools` 含 `task`：真实 Model 调用内部 `task`，创建 durable 子 Thread（ROOT 携带 `subagentContext{parentThreadId,rootThreadId,taskInvocationId,depth=2}`）；最终 TOOL MESSAGE 冻结 `rendererKey=task` 与 `<task id state>` envelope，`id` 即子 ThreadId |
 | `real.queued_command_batch` | `--real` | 运行中用最新 cursor 一次原子 batch 入队两条 USER_MESSAGE（sequence 连续）；下一 turn 收割为两个 USER entry + 一个 assistant |
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状 |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256） |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256）；按内容身份请求 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载并验证返回字节数、mediaType、`X-Content-Type-Options: nosniff` 与 sha256 一致 |
 
 ## 4. API 契约与验证方式
 
@@ -195,6 +203,8 @@ PUT  /api/ai/runtime/threads/{threadId}/head
 POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
 GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
+
+GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 同源 managed Resource 下载（attachment + nosniff）
 ```
 
 Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
@@ -262,7 +272,10 @@ WebSocket /api/ai/environment/daemon/v2
 
 - Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
 - Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
-- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB。
+- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB；
+- managed Resource 只按内容身份（mediaType/size/sha256/name）经 `GET /api/ai/runtime/resources/{sha256}` 同源下载：响应 `attachment` + `X-Content-Type-Options: nosniff`，字节与 sha256 一致；未知/不完整身份不产生链接。
+
+默认 L1 不覆盖 task 心跳与 UI 呈现：`task.status` 心跳、renderer 分发、TaskStatusWidget 与浏览器通知等呈现契约由前端单测覆盖，真实 task 委派只由显式 `--real` 的 `real.task_delegation` 覆盖。
 
 SSE：`afterRevision` 与 `Last-Event-ID` 是 canonical decimal durable cursor；Redis realtime delta 无 SSE id。
 

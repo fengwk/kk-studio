@@ -4,7 +4,7 @@
 
 ## 1. 模块与 ID
 
-Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）与 `cache`。Runtime 内部使用 `long` durable ID；HTTP 边界使用 strict decimal strings：
+Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）、`compaction` 与 `cache`。Runtime 内部使用 `long` durable ID；HTTP 边界使用 strict decimal strings：
 
 ```text
 id / sequence          -> [1-9][0-9]*
@@ -30,13 +30,23 @@ public record ThreadState(
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
 - 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
 
-Entry 类型固定为八种：
+Entry 类型固定为九种：
 
 ```java
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
+COMPACTION, TURN_END
 ```
 
-Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
+Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_START 携带 `BranchSettings`；`BranchSettings.environmentName` 是 canonical bounded 小写路由名称或 null，`agentName`/`thinkingLevel`/tool 名是 canonical 非空名称）。`ROOT` 额外携带可选的 `subagentContext`（子 Agent Session 冻结委派归属）：
+
+```json
+{
+  "settings": { "environmentName": null, "agentName": "...", "model": {...}, "thinkingLevel": "off", "activeTools": [...] },
+  "subagentContext": null | { "parentThreadId": "1", "rootThreadId": "1", "taskInvocationId": "2", "depth": 2 }
+}
+```
+
+普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{phase, trigger, tokensBefore, complete, summaryText, firstKeptEntryId, cutEntryId, turnPrefixStartEntryId}`：`tokensBefore` 是 JSON number，Entry ID 是 canonical positive decimal string。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
 
 ## 3. 命令 batch
 
@@ -191,10 +201,16 @@ public record ModelInvocationRequest(
     ProviderRequest providerRequest,  // exact Provider transport payload
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
-    boolean yoloEnabled) {}
+    List<SubagentBinding> subagentBindings,
+    boolean yoloEnabled,
+    int contextWindow,
+    CompactionRequest compaction) {}
 ```
 
-- `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill binding 名称不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
+- `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
+- `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 request 冻结，task 执行绝不依据后续 Agent 配置扩权。
+- `contextWindow` 是创建时冻结的正 int；threshold、retention 与 overflow retry 均使用该值，不受后续 Model config 修改影响。
+- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent/provider tools 必须全部为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical positive decimal strings。
 - `ToolBinding(descriptor, type, environmentName, plugin)`：`PLATFORM` binding 的 environmentName 为 null，`ENVIRONMENT` binding 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 request 冻结，retry 不按工具名重新归属。
 - `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
@@ -225,6 +241,14 @@ public record ModelInvocationRequest(
 - apply 时唯一 `ToolOutcomeAppender` 先按 effects 顺序追加 CUSTOM，再追加 Tool Result Entry；`resultEntryId` 始终指向 Tool Result，而不是最后一个 CUSTOM。正常 Thread apply 与 Stop winner 共用该实现。
 - 同一 Assistant sibling 的 frozen state accesses 按 ordinal 静态检查：某个 `(pluginId, customType)` 出现 WRITE 后，后续 READ/WRITE invocation 直接成为 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch；READ+READ、READ→WRITE、不同 key、不同 pluginId 均允许。
 
+### task 工具契约
+
+`task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`），其调用与结果仍是普通 ToolInvocation/TOOL MESSAGE 事实，不引入新表或新状态机：
+
+- 运行中进度以**非 durable** Redis `TOOL_PARTIAL` 心跳发布（约 1s 一次），`details.kind=task.status`，payload 是**完整 JSON 快照**：`{threadId, subagentType, state, depth, turns, toolCalls, lastActivity, approvals[], descendants[]}`；`state` 为 `queued` / `running_model` / `running_tool` / `waiting_approval`，`approvals[]` 项为 `{invocationId, toolName, reason}`（该状态 Thread 的待决审批），`descendants[]` 是应用相同字段契约的扁平活动子树状态。descendant relay 仅用于实时呈现与审批寻址，不参与调度、并发计数或终态判定；前端按规范化完整快照整帧替换/语义去重，绝不追加或 delta 合并。
+- 终态 ToolResult 文本为 `<task id="..." state="completed|error|cancelled">` envelope：成功含 `<task_result>` 报告，失败/取消含 `<task_error>`（报告正文最多保留 8000 字符）；`details.kind=task.result`，`details` 携带 `threadId`/`subagentType`/`state`。`id` 即子 ThreadId（十进制），可作 `session_id` 恢复。
+- 恢复契约：`session_id` 必须指向同 parent/root 归属的既有子 Session，且子 Thread quiescent；`maxTurns` 是软预算——达到后每 5 turn 注入一条 SYSTEM `CUSTOM_MESSAGE` 提醒（`rendererKey=message`），不是硬终止。
+
 `ProviderResponse` 是 terminal `resultJson` 的 canonical shape：
 
 ```java
@@ -236,6 +260,16 @@ public record ProviderResponse(
     String requestId, String serviceTier, String rawUsageJson) {}
 ```
 
+### Durable compaction
+
+- `TurnStartReason.COMPACTION` 消费零 Command，candidate path 只追加 TURN_START；`CompactionPreparation` 作为 transient plan 事实传给 Resolver，并与 frozen `CompactionRequest` 逐字段机械比对。
+- 成功结果只能是 `CompactionPayload`；正常 invocation 不能挂 COMPACTION，compaction invocation 不能挂普通 Assistant MESSAGE。Store 要求 invocation 已 SUCCEEDED、payload metadata 与 request 精确相等，且 firstKept/cut/prefix 都在 result 前并满足 `firstKept <= cut`、`prefix < cut`。
+- phase/complete 固定：HISTORY 为 incomplete；FULL/TURN_PREFIX 为 complete。completed TURN_END 只有 complete OVERFLOW 允许 `continueModel=true`。
+- HISTORY 之后只读取紧邻、已完成且 metadata 匹配的 partial；TURN_PREFIX 不扫描更早 stale partial。direct TURN_PREFIX 的 history 文本固定为 `No prior history.`。
+- Threshold freshness 只被 complete CompactionPayload 消费；普通 failed invocation 与无 invocation 的 Resolver Rejected 不覆盖当前 Thread 最新成功 usage，FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止立即原地重试。若 turn 存在其它 Thread 的 ModelInvocation，则作为 shared-history ownership barrier。
+- `<read-files>` / `<modified-files>` 是 Runtime-owned reserved section：previous summary 入 prompt 前剥离，response 在 terminal success 前校验并剥离，最后只追加一次从完整 durable branch history 重算的 canonical 清单；modified 覆盖 read，空白或破坏 reserved 标签结构的 path 忽略。
+- immediate overflow recovery continuation 再次 OVERFLOW 时不再压缩；该失败 Entry/TURN_END 保持 durable。
+
 ## 10. TurnResolver
 
 ```java
@@ -246,11 +280,12 @@ record Resolved(ModelInvocationRequest request) {}
 record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable barrier
 ```
 
-- 同步、无副作用、事务外：调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
+- 同步、无副作用、事务外：`resolve(threadId, candidatePath, yoloEnabled, compactionPreparation)`；调用方在短事务内锁 Thread、捕获 Command 快照与 YOLO、分配 Entry ID 并构造 candidate path 后调用；实现只读最新 Catalog/Environment 事实，不写 Store、不持有行锁、不得按 candidate Entry ID 回查 Store。
 - 抛异常表示临时基础设施失败，由 Processor reschedule；`Rejected` 产生 `AssistantError` barrier（`ASSISTANT_ERROR` + `FAILED` TURN_END），不产生 ModelInvocation。
 - 所有确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`，message 携带具体原因。
 - **Environment route 规则（工具）**：ENVIRONMENT 工具一律按最新 `BranchSettings.environmentName()` 绑定（可为 null/缺失/未 READY），规划阶段**绝不拒绝**；实际 Tool start 时按冻结 route 确定性判定——null route 或目标不可用（未注册/未 READY/心跳过期）→ `Rejected`（`UNAVAILABLE`），durable `FAILED` ToolResult 对模型可见，turn 正常收敛。绝不回看更旧的 branch settings。
 - **Environment route 规则（skills）**：Agent skills 只从 Agent config 读取，必须由**最新选中** Environment 精确提供且可用（缺失 → `agent skills require the latest selected environment which is not live: <name>`；未 READY → `...which is not ready: <name>`；分支无名称 → `...but the branch has no environmentName`），且 `activeTools` 必须显式包含内部 `load_skill`（`agent has skills but activeTools must include load_skill` 拒绝）；`load_skill` 不是 Resolver 隐式追加，也不在 selectable catalog。
+- **Subagent 规则（task）**：`task` 只在 `activeTools` 显式包含内部 `task`、Agent `subagents` allowlist 非空且当前 Session depth 小于 `maxDepth` 时绑定（depth 由 ROOT `subagentContext` 派生，普通根为 1）；allowlist 为空 → `task requires a non-empty Agent subagents allowlist`，已达最大深度 → `task is unavailable at subagent depth <d> (maxDepth=<m>)`。allowlist 每个名称必须解析到现存 Agent（缺失 → `subagent not found: <name>`），名称 + 描述（可空）冻结为有序 `subagentBindings`；执行绝不重读父 Agent 配置扩权。
 
 ## 11. Realtime
 
@@ -258,3 +293,4 @@ record Rejected(AssistantError error) {}   // 确定性拒绝：写入 durable b
 - revision SSE 帧使用 durable revision 作为 `Last-Event-ID`/`afterRevision` cursor；Redis delta 事件没有 SSE id。
 - 客户端恢复顺序：REST snapshot → durable revision SSE → Redis realtime overlay；revision 是唯一 durable cursor。
 - 前端把 `resultJson`/`errorJson` 当作 terminal 边界：durable terminal projection 无条件压过更高 sequence 的 Redis overlay；`resultEntryId` 落地后移除 overlay。
+- Runtime 不向 RealtimeEventSink 发布 compaction ModelDelta；其 checkpoint 仅作 Stop/恢复 durable fact。前端再按 `TURN_START(COMPACTION)...TURN_END` 状态化抑制该 turn 的 COMPACTION/ERROR/ABORTED Entry，latest turn 是 COMPACTION 时也不渲染 snapshot Model overlay。

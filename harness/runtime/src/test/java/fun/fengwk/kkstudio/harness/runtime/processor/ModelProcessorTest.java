@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -19,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -471,6 +474,32 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("hel"), new ProviderStreamEvent.TextDelta("lo")),
         deltas.stream().filter(delta -> delta instanceof ProviderStreamEvent.TextDelta).toList());
+  }
+
+  @Test
+  void compactionCheckpointIsCanonicalAndRealtimeDeltasAreSuppressed() {
+    Fixture fixture = fixture(NO_RETRY, compactionInvocationRequest());
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onEvent(new ProviderStreamEvent.TextDelta("structured summary"));
+    assertEquals(
+        "structured summary", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
+    assertTrue(deltas(fixture.sink).isEmpty());
+
+    listener.onSucceeded(
+        response(
+            "structured summary\n\n<read-files>\nstale.txt\n</read-files>",
+            ProviderStopReason.COMPLETED));
+
+    ModelInvocation terminal = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+    assertEquals("structured summary", terminal.result().text());
+    assertEquals("structured summary", terminal.streamCheckpoint().text());
+    assertTrue(deltas(fixture.sink).isEmpty());
   }
 
   /**
@@ -2443,7 +2472,11 @@ class ModelProcessorTest {
         ScheduledExecutorService scheduler) {
       this.scheduler = scheduler;
       this.request = request;
-      this.baseline = seedBaseline(store, NOW);
+      this.baseline =
+          seedBaseline(
+              store,
+              NOW,
+              request.compaction() == null ? TurnStartReason.INPUT : TurnStartReason.COMPACTION);
       this.invocationId = seedInvocation(store, baseline, request, NOW);
       this.processor =
           new ModelProcessor(
@@ -2460,6 +2493,11 @@ class ModelProcessorTest {
   private record Baseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
 
   private static Baseline seedBaseline(InMemoryHarnessStore store, Instant now) {
+    return seedBaseline(store, now, TurnStartReason.INPUT);
+  }
+
+  private static Baseline seedBaseline(
+      InMemoryHarnessStore store, Instant now, TurnStartReason reason) {
     return store.transaction(
         tx -> {
           long sessionId = tx.nextId();
@@ -2474,7 +2512,7 @@ class ModelProcessorTest {
                   turnStartEntryId,
                   sessionId,
                   rootEntryId,
-                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings()),
+                  new TurnStartPayload(reason, branchSettings()),
                   now.plusMillis(1)));
           tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1, 0, now, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
@@ -2565,7 +2603,19 @@ class ModelProcessorTest {
 
   private static ModelInvocationRequest request() {
     return new ModelInvocationRequest(
-        ENV_ID, providerRequest(List.of()), List.of(), List.of(), false);
+        ENV_ID, providerRequest(List.of()), List.of(), List.of(), false, 100_000, null);
+  }
+
+  private static ModelInvocationRequest compactionInvocationRequest() {
+    return new ModelInvocationRequest(
+        ENV_ID,
+        providerRequest(List.of()),
+        List.of(),
+        List.of(),
+        false,
+        100_000,
+        new CompactionRequest(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, 2L, 2L, null));
   }
 
   private static ModelInvocationRequest requestWithTool() {
@@ -2575,14 +2625,15 @@ class ModelProcessorTest {
             "1.0",
             ToolType.PLATFORM,
             "run bash commands",
-            null,
+            "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
     ToolBinding binding = new ToolBinding(descriptor, ToolType.PLATFORM, null);
     ProviderRequest provider =
         providerRequest(List.of(new ProviderToolDefinition("bash", "run bash commands", "{}")));
-    return new ModelInvocationRequest(ENV_ID, provider, List.of(binding), List.of(), false);
+    return new ModelInvocationRequest(
+        ENV_ID, provider, List.of(binding), List.of(), false, 100_000, null);
   }
 
   private static ProviderRequest providerRequest(List<ProviderToolDefinition> tools) {

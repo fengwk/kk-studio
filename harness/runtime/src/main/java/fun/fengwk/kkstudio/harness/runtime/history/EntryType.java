@@ -16,6 +16,8 @@ public enum EntryType {
   ASSISTANT_ERROR,
   /** 用户主动 stop 的 assistant turn：仅保存安全 text/thinking，绝不包含 tool call。 */
   ASSISTANT_ABORTED,
+  /** 自动压缩（compaction）turn 的摘要结果：仅出现在 COMPACTION turn 的 assistant result 位置。 */
+  COMPACTION,
   /** 一次 Model response turn 的关闭结果与 continuation obligation。 */
   TURN_END;
 

@@ -65,7 +65,7 @@ class ToolInvocationRequestTest {
             "1.0",
             ToolType.PLATFORM,
             "desc",
-            null,
+            "bash",
             new ToolParamsSchema(
                 "arguments", Map.of("path", new ToolStringSchema(null)), Set.of("path"), false),
             ToolSideEffect.READ_ONLY,

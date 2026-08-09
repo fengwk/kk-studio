@@ -24,7 +24,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
     { match: /frequencyPenalty|presencePenalty/i, key: 'ai.catalog.validation.penalty' },
     { match: /providerName|请选择 Provider/i, key: 'ai.catalog.validation.provider' },
     {
-      match: /agent model name already exists( under this provider)?:?\s*(.*)$/i,
+      match: /agent model name already exists under this provider:?\s*(.*)$/i,
       key: 'ai.catalog.validation.duplicateModel',
     },
     {

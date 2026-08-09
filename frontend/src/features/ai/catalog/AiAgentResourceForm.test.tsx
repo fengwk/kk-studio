@@ -6,6 +6,7 @@ import { AgentForm } from '@/features/ai/catalog/AiAgentResourceForm'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
 import type {
+  AgentDefinitionDTO,
   AgentModelConfigDTO,
   AgentModelView,
 } from '@/shared/api/contracts/ai-catalog'
@@ -57,6 +58,20 @@ function liveEnvironment(
     skills,
     mcpServers: [],
     ...extra,
+  }
+}
+
+function agentDefinition(name: string, description: string | null): AgentDefinitionDTO {
+  return {
+    name,
+    description,
+    systemPrompt: null,
+    model: 'minimax/MiniMax',
+    variant: null,
+    config: { tools: [], skills: [], subagents: [] },
+    version: '1',
+    createTime: null,
+    updateTime: null,
   }
 }
 
@@ -461,4 +476,101 @@ describe('AgentForm current contracts', () => {
       expect(screen.getByPlaceholderText('用途说明')).not.toBeDisabled()
     },
   )
+
+  it('lists global Agent catalog candidates and excludes the same-name row in create mode', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const draft: AgentDraft = {
+      ...emptyAgentDraft(modelWithVariants()),
+      name: 'assistant',
+    }
+    render(
+      <AgentForm
+        draft={draft}
+        mode="create"
+        models={[modelWithVariants()]}
+        agents={[
+          agentDefinition('helper', 'runs isolated tasks'),
+          agentDefinition('writer', null),
+          agentDefinition('assistant', 'self'),
+        ]}
+        onChange={onChange}
+      />,
+    )
+
+    // 候选展示全局 Agent 的名称与描述；create 模式下与 draft.name 相同的行尚不存在，不展示。
+    expect(screen.getByLabelText(/helper/)).toBeInTheDocument()
+    expect(screen.getByText('runs isolated tasks')).toBeInTheDocument()
+    expect(screen.getByLabelText(/writer/)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^assistant/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByLabelText(/helper/))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ ...draft, subagents: ['helper'] })
+  })
+
+  it('keeps selected subagents missing from the catalog as removable orphans', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const draft: AgentDraft = {
+      ...emptyAgentDraft(modelWithVariants()),
+      name: 'assistant',
+      subagents: ['ghost-agent'],
+    }
+    render(
+      <AgentForm
+        draft={draft}
+        mode="create"
+        models={[modelWithVariants()]}
+        agents={[agentDefinition('helper', 'runs isolated tasks')]}
+        onChange={onChange}
+      />,
+    )
+
+    // catalog 缺失的已选名称不静默丢弃：保留为可移除 orphan（不可用标记）。
+    const ghost = screen.getByLabelText(/ghost-agent/)
+    expect(ghost).toBeChecked()
+    expect(ghost.closest('.capability-option')).toHaveClass('is-offline')
+    expect(ghost.closest('.capability-option')).toHaveClass('is-missing')
+    expect(screen.getByText('不可用')).toBeInTheDocument()
+
+    await user.click(ghost)
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({ ...draft, subagents: [] })
+  })
+
+  it('shows the current agent as a subagent candidate in edit mode', () => {
+    const draft: AgentDraft = {
+      ...emptyAgentDraft(modelWithVariants()),
+      name: 'assistant',
+      subagents: ['writer'],
+    }
+    render(
+      <AgentForm
+        draft={draft}
+        mode="edit"
+        models={[modelWithVariants()]}
+        agents={[agentDefinition('assistant', 'self'), agentDefinition('writer', null)]}
+        onChange={() => undefined}
+      />,
+    )
+
+    // edit 模式下当前 agent 已存在，可正常显示；已选的 writer 保持勾选。
+    expect(screen.getByLabelText(/assistant/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/writer/)).toBeChecked()
+  })
+
+  it('renders field-level errors for the subagents checklist', () => {
+    render(
+      <AgentForm
+        draft={emptyAgentDraft(modelWithVariants())}
+        models={[modelWithVariants()]}
+        fieldErrors={{ subagents: 'Subagents 名称冲突' }}
+        onChange={() => undefined}
+      />,
+    )
+
+    expect(screen.getByText('Subagents 名称冲突')).toBeInTheDocument()
+    expect(screen.getByText('暂无候选 Subagents')).toBeInTheDocument()
+  })
 })

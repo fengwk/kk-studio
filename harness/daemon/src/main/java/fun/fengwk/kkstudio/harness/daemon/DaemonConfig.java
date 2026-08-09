@@ -14,9 +14,9 @@ import java.util.UUID;
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>CLI 参数是权威来源：{@code --environment-name}、可重复 {@code --skill-dir} 与可选 {@code
- * --mcp-config}。gateway 连接类参数也支持 CLI；若 CLI 未给出，再回退到系统属性以便现有独立启动方式继续工作。{@code --environment-name} 是
- * canonical 路由身份，必须是规范的 {@link EnvironmentName}。skill/MCP 路径不使用服务端托管配置，仅 CLI 与默认本地目录。
+ * <p>CLI 是唯一配置来源：{@code --environment-name}、gateway 连接参数、可重复 {@code --skill-dir} 与可选 {@code
+ * --mcp-config}。{@code --environment-name} 是 canonical 路由身份，必须是规范的 {@link
+ * EnvironmentName}。skill/MCP 路径不使用服务端托管配置。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -54,10 +54,7 @@ public record DaemonConfig(
     mcpConfigPath = mcpConfigPath == null ? null : mcpConfigPath.toAbsolutePath().normalize();
   }
 
-  /**
-   * 解析 CLI 参数；未给出的 gateway 连接项可回退系统属性。未给出 {@code --skill-dir} 时默认 {@code
-   * ~/.agents/skills}（仅当该目录存在时纳入）；{@code --mcp-config} 也可回退 {@code kkstudio.daemon.mcp-config}。
-   */
+  /** 解析 CLI 参数。未给出 {@code --skill-dir} 时默认 {@code ~/.agents/skills}（仅当该目录存在时纳入）。 */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
     String environmentName = null;
@@ -92,32 +89,8 @@ public record DaemonConfig(
       }
     }
 
-    if (environmentName == null || environmentName.isBlank()) {
-      environmentName = System.getProperty("kkstudio.daemon.environment-name");
-    }
-    if (gatewayUri == null || gatewayUri.isBlank()) {
-      gatewayUri = System.getProperty("kkstudio.daemon.gateway-uri");
-    }
     if (daemonId == null || daemonId.isBlank()) {
-      daemonId = System.getProperty("kkstudio.daemon.id", UUID.randomUUID().toString());
-    }
-    if (gatewayToken == null || gatewayToken.isBlank()) {
-      gatewayToken = System.getProperty("kkstudio.daemon.gateway-token");
-    }
-    if (heartbeat == null || heartbeat.isBlank()) {
-      heartbeat = System.getProperty("kkstudio.daemon.heartbeat");
-    }
-    if (reconnectInitial == null || reconnectInitial.isBlank()) {
-      reconnectInitial = System.getProperty("kkstudio.daemon.reconnect-initial");
-    }
-    if (reconnectMax == null || reconnectMax.isBlank()) {
-      reconnectMax = System.getProperty("kkstudio.daemon.reconnect-max");
-    }
-    if (toolTimeout == null || toolTimeout.isBlank()) {
-      toolTimeout = System.getProperty("kkstudio.daemon.tool-timeout");
-    }
-    if (mcpConfig == null || mcpConfig.isBlank()) {
-      mcpConfig = System.getProperty("kkstudio.daemon.mcp-config");
+      daemonId = UUID.randomUUID().toString();
     }
 
     if (!skillDirExplicit) {
@@ -128,15 +101,14 @@ public record DaemonConfig(
     }
 
     return new DaemonConfig(
-        URI.create(requirePresent(gatewayUri, "gateway-uri / kkstudio.daemon.gateway-uri")),
-        new EnvironmentName(
-            requirePresent(environmentName, "environment-name / kkstudio.daemon.environment-name")),
+        URI.create(requirePresent(gatewayUri, "gateway-uri")),
+        new EnvironmentName(requirePresent(environmentName, "environment-name")),
         requirePresent(daemonId, "daemon-id"),
         parseDuration(heartbeat, Duration.ofSeconds(15)),
         parseDuration(reconnectInitial, Duration.ofSeconds(1)),
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
-        requirePresent(gatewayToken, "gateway-token / kkstudio.daemon.gateway-token"),
+        requirePresent(gatewayToken, "gateway-token"),
         skillDirs,
         mcpConfig == null ? null : Path.of(mcpConfig));
   }

@@ -673,7 +673,7 @@ class ThreadContextClassifierTest {
         () -> context.siblings().add(tool(2, "call-3", ToolInvocationStatus.READY, null)));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> context.calls().add(new ToolCallMessageContent("call-9", "bash", "{}")));
+        () -> context.calls().add(new ToolCallMessageContent("call-9", "bash", "bash", "{}")));
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -757,7 +757,7 @@ class ThreadContextClassifierTest {
   private static EntryPayload assistantMessage(List<String> callIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String callId : callIds) {
-      contents.add(new ToolCallMessageContent(callId, "bash", "{}"));
+      contents.add(new ToolCallMessageContent(callId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     ProviderStopReason stopReason =
@@ -855,7 +855,9 @@ class ThreadContextClassifierTest {
             ProviderCacheControl.none()),
         List.of(),
         List.of(),
-        false);
+        false,
+        100_000,
+        null);
   }
 
   private static ToolBinding toolBinding() {
@@ -865,7 +867,7 @@ class ThreadContextClassifierTest {
             "1.0",
             ToolType.PLATFORM,
             "description of bash",
-            null,
+            "bash",
             new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30)),

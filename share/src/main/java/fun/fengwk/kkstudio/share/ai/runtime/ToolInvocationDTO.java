@@ -44,6 +44,9 @@ public class ToolInvocationDTO {
   /** 绑定工具版本字符串。 */
   private String toolVersion;
 
+  /** 冻结的编译期前端 Tool renderer contribution id。 */
+  private String rendererKey;
+
   /** 工具类型，取 {@code ToolType} 枚举名：PLATFORM（平台内置）或 ENVIRONMENT（由 live Environment 提供）。 */
   private String toolType;
 

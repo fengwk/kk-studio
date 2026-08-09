@@ -368,6 +368,7 @@ class HarnessRuntimeWebMapperTest {
     assertEquals("call-1", tool.path("toolCallId").asText());
     assertEquals("web_search", tool.path("toolName").asText());
     assertEquals("1.0", tool.path("toolVersion").asText());
+    assertEquals("web_search", tool.path("rendererKey").asText());
     assertEquals("PLATFORM", tool.path("toolType").asText());
     assertTrue(tool.path("environmentName").isNull());
     assertEquals("{}", tool.path("argumentsJson").asText());

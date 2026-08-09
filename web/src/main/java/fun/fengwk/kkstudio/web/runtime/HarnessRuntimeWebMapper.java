@@ -234,6 +234,7 @@ public final class HarnessRuntimeWebMapper {
     ToolBinding binding = invocation.request().binding();
     dto.setToolName(binding.descriptor().name());
     dto.setToolVersion(binding.descriptor().version());
+    dto.setRendererKey(binding.descriptor().rendererKey());
     dto.setToolType(binding.type().name());
     dto.setEnvironmentName(
         binding.environmentName() == null ? null : binding.environmentName().value());

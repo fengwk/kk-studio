@@ -61,16 +61,23 @@ describe('tool-attachments', () => {
     })).toBe('https://example.test/image.png')
   })
 
-  it('returns null src for file:/s3: URIs but keeps href pointing to the URI', () => {
+  it('routes managed file:/s3: resources through the content-addressed download endpoint', () => {
     const fileAttachment = {
       type: 'file' as const,
       name: 'result.json',
       mime: 'application/json',
       data: 'file:///tmp/result.json',
+      size: 12,
+      sha256: 'a'.repeat(64),
+      downloadHref:
+        `/api/ai/runtime/resources/${'a'.repeat(64)}`
+        + '?mediaType=application%2Fjson&size=12&name=result.json',
     }
     expect(toToolAttachmentSrc(fileAttachment)).toBeNull()
     expect(isPreviewableAttachment(fileAttachment)).toBe(false)
-    expect(getToolAttachmentHref(fileAttachment)).toBe('file:///tmp/result.json')
+    expect(getToolAttachmentHref(fileAttachment)).toBe(
+      `/api/ai/runtime/resources/${'a'.repeat(64)}?mediaType=application%2Fjson&size=12&name=result.json`,
+    )
     expect(formatToolAttachmentFallback(fileAttachment)).toBe('[file] result.json')
 
     const s3Attachment = {
@@ -78,20 +85,27 @@ describe('tool-attachments', () => {
       name: 'blob.bin',
       mime: 'application/octet-stream',
       data: 's3://bucket/obj',
+      size: 4,
+      sha256: 'b'.repeat(64),
+      downloadHref:
+        `/api/ai/runtime/resources/${'b'.repeat(64)}`
+        + '?mediaType=application%2Foctet-stream&size=4&name=blob.bin',
     }
     expect(toToolAttachmentSrc(s3Attachment)).toBeNull()
     expect(isPreviewableAttachment(s3Attachment)).toBe(false)
-    expect(getToolAttachmentHref(s3Attachment)).toBe('s3://bucket/obj')
+    expect(getToolAttachmentHref(s3Attachment)).toBe(
+      `/api/ai/runtime/resources/${'b'.repeat(64)}?mediaType=application%2Foctet-stream&size=4&name=blob.bin`,
+    )
     expect(formatToolAttachmentFallback(s3Attachment)).toBe('[file] blob.bin')
   })
 
-  it('only links canonical data/file/s3/http/https schemes', () => {
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'https://x/y' })).toBe('https://x/y')
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'file:///tmp/a' })).toBe('file:///tmp/a')
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 's3://b/a' })).toBe('s3://b/a')
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'javascript:alert(1)' })).toBeNull()
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: 'ftp://x/y' })).toBeNull()
-    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: null, data: '' })).toBeNull()
+  it('only links direct safe schemes or complete managed resource identities', () => {
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'https://x/y' })).toBe('https://x/y')
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'file:///tmp/a' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 's3://b/a' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'javascript:alert(1)' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'ftp://x/y' })).toBeNull()
+    expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: '' })).toBeNull()
   })
 
   it('exposes consistent labels and fallbacks', () => {

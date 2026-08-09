@@ -10,7 +10,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.core.ai.runtime.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -90,6 +92,12 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
+  public ManagedResourceDownloadService managedResourceDownloadService(
+      ResourceStore resourceStore) {
+    return new ManagedResourceDownloadService(resourceStore);
+  }
+
+  @Bean
   public RedisRealtimeConfig redisRealtimeConfig(HarnessRuntimeProperties properties) {
     return new RedisRealtimeConfig(properties.getRedisPrefix(), properties.getRedisMaxLength());
   }
@@ -119,9 +127,14 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
-      HarnessRuntimeProperties properties, ProcessorLeaseConfig leaseConfig) {
+      HarnessRuntimeProperties properties,
+      ProcessorLeaseConfig leaseConfig,
+      CompactionConfig compactionConfig) {
     return new ThreadProcessorConfig(
-        leaseConfig, properties.getThreadStepLimit(), properties.getThreadResolveFailureDelay());
+        leaseConfig,
+        properties.getThreadStepLimit(),
+        properties.getThreadResolveFailureDelay(),
+        compactionConfig);
   }
 
   @Bean

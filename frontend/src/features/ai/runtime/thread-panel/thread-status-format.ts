@@ -1,7 +1,7 @@
 import { translate } from '@/shared/i18n'
 
 export interface ThreadStatusSegment {
-  key: 'agent' | 'model' | 'environment'
+  key: 'agent' | 'model' | 'environment' | 'task-status' | 'notifications'
   className: string
   text: string
   title: string
@@ -36,6 +36,11 @@ export interface ThreadStatusModelInput {
   onModelClick?: () => void
   onVariantClick?: () => void
   onEnvironmentClick?: () => void
+  taskStatusEnabled?: boolean
+  notificationsEnabled?: boolean
+  notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
+  onTaskStatusToggle?: () => void
+  onNotificationsToggle?: () => void
 }
 
 /** 规范化空白占位字符串；对 null/undefined/'undefined'/'null'/'-' 返回 ""。 */
@@ -108,6 +113,36 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       onClick: input.onEnvironmentClick,
     },
   ]
+  if (input.onTaskStatusToggle || input.taskStatusEnabled != null) {
+    const text = input.taskStatusEnabled
+      ? translate('ai.runtime.status.taskStatusOn')
+      : translate('ai.runtime.status.taskStatusOff')
+    segments.push({
+      key: 'task-status',
+      className: 'thread-status-task-toggle',
+      text,
+      title: translate('ai.runtime.status.taskStatusToggleTitle'),
+      onClick: input.onTaskStatusToggle,
+    })
+  }
+  if (input.onNotificationsToggle || input.notificationsEnabled != null) {
+    const permission = input.notificationPermission ?? 'default'
+    const text =
+      permission === 'unsupported'
+        ? translate('ai.runtime.status.notificationsUnsupported')
+        : permission === 'denied'
+          ? translate('ai.runtime.status.notificationsDenied')
+          : input.notificationsEnabled
+            ? translate('ai.runtime.status.notificationsOn')
+            : translate('ai.runtime.status.notificationsOff')
+    segments.push({
+      key: 'notifications',
+      className: 'thread-status-notification-toggle',
+      text,
+      title: translate('ai.runtime.status.notificationsToggleTitle'),
+      onClick: input.onNotificationsToggle,
+    })
+  }
 
   return {
     agentLabel,

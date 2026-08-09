@@ -134,6 +134,24 @@ registerCase({
 })
 
 registerCase({
+  id: 'catalog.internal_tools_hidden',
+  level: 'L1',
+  title: '内部 Platform Tool 不进入 Agent 可选目录',
+  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
+  async run(ctx) {
+    const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)
+    assert(Array.isArray(tools), JSON.stringify(tools))
+    const names = tools.map((tool) => String(tool.name))
+    assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
+    assert(!names.includes('task'), `task must be internal: ${JSON.stringify(names)}`)
+    assert(
+      ['create_goal', 'get_goal', 'update_goal'].every((name) => names.includes(name)),
+      `Goal plugin tools must remain selectable: ${JSON.stringify(names)}`,
+    )
+  },
+})
+
+registerCase({
   id: 'thread.chat_scoped_create_atomic',
   level: 'L1',
   title: 'Chat-scoped Thread 原子创建返回完整快照',

@@ -2,15 +2,26 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.PluginStateAccess;
@@ -21,6 +32,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -89,6 +102,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * TURN_END；FAILED / CANCELLED / UNKNOWN 追加 AssistantError 与 FAILED TURN_END。Tool sibling 应用绝不部分
  * apply：数量 / ordinal 前缀 / ownership / 全部 terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread
  * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
+ *
+ * <p>自动压缩：无 open turn / continuation 待续且无 queued 输入时，按最新已关闭非压缩 turn 的 usage（providerTotalTokens
+ * 优先，否则 categorizedTokens）与冻结 contextWindow 做阈值触发（{@code > max(0, contextWindow -
+ * reserveTokens)}），或按 terminal OVERFLOW 错误触发 overflow 压缩；压缩 turn 复用同一 MODEL invocation + Work
+ * 状态机，成功把 COMPACTION 结果 Entry 挂到 resultEntryId 后关闭（OVERFLOW 用 continueModel=true 让既有 CONTINUATION
+ * 重试失败 turn，THRESHOLD 用 false）。切分 turn 先 HISTORY（incomplete payload）再机械启动独立 TURN_PREFIX 调用； 失败 / 停止
+ * / 完成的压缩 turn 绝不立即再次压缩，压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -102,6 +122,7 @@ public final class ThreadProcessor {
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
+  private final CompactionPlanner compactionPlanner;
 
   public ThreadProcessor(
       HarnessStore store,
@@ -114,6 +135,7 @@ public final class ThreadProcessor {
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.compactionPlanner = new CompactionPlanner(config.compaction());
   }
 
   /**
@@ -257,9 +279,17 @@ public final class ThreadProcessor {
         tx.completeWork(claim, now);
         yield new LoopStep.Suspend();
       }
-      case ThreadContext.ContinuationDue ignored -> planStep(
-          tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
+      case ThreadContext.ContinuationDue ignored -> {
+        // continuation 优先：现有 continueModel 义务必须原样执行，阈值压缩绝不插队（否则会吞掉既有 continuation）。
+        // OVERFLOW 失败的 turn 已关闭为 FAILED/idle，仍会通过 IdleOrHistorical 的 overflow 路径压缩。
+        yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
+      }
       case ThreadContext.IdleOrHistorical ignored -> {
+        // 压缩优先于输入：到期压缩先执行（消费零 Command），不能被已 queued 的用户消息绕过。
+        CompactionPreparation preparation = compactionPreparation(tx, thread, path);
+        if (preparation != null) {
+          yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+        }
         List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
         boolean hasInput = false;
         for (ThreadCommand command : queued) {
@@ -278,6 +308,254 @@ public final class ThreadProcessor {
         yield new LoopStep.Quiescent();
       }
     };
+  }
+
+  /**
+   * 计算当前 Thread 是否应当启动一次压缩 turn（纯读、无锁写）。
+   *
+   * <p>只基于路径上最新已关闭 turn：该 turn 是 COMPACTION 时，只有其结果为 incomplete HISTORY payload 才机械启动
+   * TURN_PREFIX（失败 / 停止 / 完成的压缩 turn 绝不立即再次压缩，避免 spin）；有 ModelInvocation 的非压缩 turn 必须由本 Thread
+   * 自己拥有（共享历史 turn 属于另一 Thread 时不压缩），且 turn 结果 Entry 必须正是该 invocation 的 {@code resultEntryId}；无
+   * ModelInvocation 的 Resolver Rejected turn 可跨越（normalized/relocated 历史形状不得借用其它后代结果）。最新 terminal
+   * OVERFLOW 错误优先触发 overflow 压缩；否则在最近一次 complete COMPACTION barrier 之后向前寻找本 Thread 最新 SUCCEEDED
+   * invocation，其 usage 超过 {@code max(0, contextWindow - reserveTokens)} 时阈值触发（providerTotalTokens 为
+   * 0 时回退 categorizedTokens，全零不触发）。planner 无内容可摘要时返回 null。
+   */
+  private CompactionPreparation compactionPreparation(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    CompactionConfig compaction = config.compaction();
+    if (!compaction.enabled()) {
+      return null;
+    }
+    ClosedTurn latestTurn = latestClosedTurn(path, path.entries().size());
+    if (latestTurn == null) {
+      return null;
+    }
+    Entry latestStart = latestTurn.start();
+    if (((TurnStartPayload) latestStart.payload()).reason() == TurnStartReason.COMPACTION) {
+      // 机械延续：最新关闭的 COMPACTION turn 结果为 incomplete HISTORY payload 时启动第二次 TURN_PREFIX 调用。
+      if (latestTurn.end().outcome() != TurnEndOutcome.COMPLETED) {
+        return null;
+      }
+      CompactionPayload incomplete = compactionResultOfTurn(path, latestStart);
+      if (incomplete == null || incomplete.phase() != CompactionPhase.HISTORY) {
+        return null;
+      }
+      ModelInvocation history =
+          tx.findModelInvocationByTurn(thread.id(), latestStart.id()).orElse(null);
+      if (history == null || history.request().compaction() == null) {
+        return null;
+      }
+      return compactionPlanner.prepareTurnPrefix(
+          path, incomplete, history.request().contextWindow());
+    }
+    ModelInvocation latestInvocation =
+        tx.findModelInvocationByTurn(thread.id(), latestStart.id()).orElse(null);
+    if (latestInvocation == null) {
+      if (tx.hasModelInvocationForTurn(latestStart.id())) {
+        // 最新已关闭 turn 的 invocation 属于另一 Thread 的共享历史：不压缩。
+        return null;
+      }
+    } else {
+      Entry latestResultEntry = turnResultEntry(path, latestStart);
+      if (latestInvocation.status().isTerminal()
+          && (latestResultEntry == null
+              || !Objects.equals(latestResultEntry.id(), latestInvocation.resultEntryId()))) {
+        // normalized/relocated 历史形状不得借用其它后代结果。
+        return null;
+      }
+      if (latestInvocation.status().isTerminal()
+          && latestInvocation.error() != null
+          && latestInvocation.error().kind() == ProviderErrorKind.OVERFLOW) {
+        if (isOverflowRecoveryRetry(path, latestTurn)) {
+          // 一次 OVERFLOW 只允许 compact + immediate CONTINUATION 重试一次；重试仍 overflow 时保留失败结果，
+          // 绝不进入无界 compaction/retry 循环。后续新的 INPUT 或 tool continuation 仍可独立触发压缩。
+          return null;
+        }
+        return compactionPlanner
+            .prepare(path, CompactionTrigger.OVERFLOW, latestInvocation.request().contextWindow())
+            .orElse(null);
+      }
+    }
+    return thresholdPreparation(tx, thread, path, latestTurn, compaction);
+  }
+
+  /**
+   * 最近一次 complete compaction 是 threshold freshness barrier；失败、STOPPED、incomplete compaction 与无
+   * invocation 的 Resolver Rejected turn 不抹掉更早成功 usage。无本 Thread invocation、但存在其它 Thread invocation
+   * 的共享 turn 是 ownership barrier。
+   */
+  private CompactionPreparation thresholdPreparation(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      ClosedTurn latestTurn,
+      CompactionConfig compaction) {
+    ClosedTurn candidate = latestTurn;
+    while (candidate != null) {
+      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
+      if (start.reason() == TurnStartReason.COMPACTION) {
+        CompactionPayload result = compactionResultOfTurn(path, candidate.start());
+        if (result != null && result.complete()) {
+          return null;
+        }
+        candidate = previousClosedTurn(path, candidate);
+        continue;
+      }
+      ModelInvocation invocation =
+          tx.findModelInvocationByTurn(thread.id(), candidate.start().id()).orElse(null);
+      if (invocation == null) {
+        if (tx.hasModelInvocationForTurn(candidate.start().id())) {
+          return null;
+        }
+        candidate = previousClosedTurn(path, candidate);
+        continue;
+      }
+      Entry resultEntry = turnResultEntry(path, candidate.start());
+      if (invocation.status().isTerminal()
+          && (resultEntry == null
+              || !Objects.equals(resultEntry.id(), invocation.resultEntryId()))) {
+        return null;
+      }
+      if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
+        if (!(resultEntry.payload() instanceof MessagePayload message)
+            || message.message().role() != AgentMessageRole.ASSISTANT) {
+          return null;
+        }
+        ModelUsage usage = message.assistantMetadata().usage();
+        long contextTokens =
+            usage.providerTotalTokens() > 0
+                ? usage.providerTotalTokens()
+                : usage.categorizedTokens();
+        long threshold =
+            Math.max(0L, (long) invocation.request().contextWindow() - compaction.reserveTokens());
+        if (contextTokens <= threshold) {
+          return null;
+        }
+        return compactionPlanner
+            .prepare(path, CompactionTrigger.THRESHOLD, invocation.request().contextWindow())
+            .orElse(null);
+      }
+      if (!invocation.status().isTerminal()) {
+        return null;
+      }
+      candidate = previousClosedTurn(path, candidate);
+    }
+    return null;
+  }
+
+  private static ClosedTurn previousClosedTurn(EntryPath path, ClosedTurn turn) {
+    int startIndex = indexOfEntry(path.entries(), turn.start().id());
+    return startIndex < 0 ? null : latestClosedTurn(path, startIndex);
+  }
+
+  /**
+   * 路径上最新已关闭 turn 的 assistant 结果 Entry（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED）；无则
+   * null。
+   */
+  private static Entry turnResultEntry(EntryPath path, Entry turn) {
+    boolean inTurn = false;
+    for (Entry entry : path.entries()) {
+      if (entry.id() == turn.id()) {
+        inTurn = true;
+        continue;
+      }
+      if (!inTurn) {
+        continue;
+      }
+      EntryPayload payload = entry.payload();
+      if (payload instanceof TurnEndPayload) {
+        return null;
+      }
+      if (payload instanceof MessagePayload message) {
+        if (message.message().role() == AgentMessageRole.ASSISTANT) {
+          return entry;
+        }
+      } else if (payload instanceof AssistantErrorPayload
+          || payload instanceof AssistantAbortedPayload) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  /** {@code beforeExclusive} 之前最近的已关闭 turn；该范围末尾仍是 open turn / 无任何 turn 时返回 null。 */
+  private static ClosedTurn latestClosedTurn(EntryPath path, int beforeExclusive) {
+    for (int i = beforeExclusive - 1; i >= 0; i--) {
+      EntryPayload payload = path.entries().get(i).payload();
+      if (payload instanceof TurnEndPayload end) {
+        for (int j = i - 1; j >= 0; j--) {
+          Entry entry = path.entries().get(j);
+          if (entry.id() == end.turnStartEntryId()) {
+            return new ClosedTurn(entry, end);
+          }
+        }
+        return null;
+      }
+      if (payload instanceof TurnStartPayload) {
+        // 该范围末尾仍处于 open turn（classifier 保证主路径不会到达此分支）；防御性不触发。
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /** 返回指定 turn 内唯一的 COMPACTION result payload；turn 以其它 assistant result 结束 / 无结果时返回 null。 */
+  private static CompactionPayload compactionResultOfTurn(EntryPath path, Entry turn) {
+    boolean inTurn = false;
+    for (Entry entry : path.entries()) {
+      if (entry.id() == turn.id()) {
+        inTurn = true;
+        continue;
+      }
+      if (!inTurn) {
+        continue;
+      }
+      EntryPayload payload = entry.payload();
+      if (payload instanceof TurnEndPayload
+          || payload instanceof AssistantErrorPayload
+          || payload instanceof AssistantAbortedPayload
+          || payload instanceof MessagePayload) {
+        return null;
+      }
+      if (payload instanceof CompactionPayload compaction) {
+        return compaction;
+      }
+    }
+    return null;
+  }
+
+  /** 当前失败 turn 是否正是 complete OVERFLOW compaction 创建的 immediate CONTINUATION 重试。 */
+  private static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
+    if (((TurnStartPayload) latestTurn.start().payload()).reason()
+        != TurnStartReason.CONTINUATION) {
+      return false;
+    }
+    int latestStartIndex = indexOfEntry(path.entries(), latestTurn.start().id());
+    if (latestStartIndex < 0) {
+      return false;
+    }
+    ClosedTurn previousTurn = latestClosedTurn(path, latestStartIndex);
+    if (previousTurn == null
+        || previousTurn.end().outcome() != TurnEndOutcome.COMPLETED
+        || !previousTurn.end().continueModel()
+        || ((TurnStartPayload) previousTurn.start().payload()).reason()
+            != TurnStartReason.COMPACTION) {
+      return false;
+    }
+    CompactionPayload previousCompaction = compactionResultOfTurn(path, previousTurn.start());
+    return previousCompaction != null
+        && previousCompaction.complete()
+        && previousCompaction.trigger() == CompactionTrigger.OVERFLOW;
+  }
+
+  private static int indexOfEntry(List<Entry> entries, long entryId) {
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).id() == entryId) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /**
@@ -301,26 +579,46 @@ public final class ThreadProcessor {
     long parentId = path.head().id();
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
     ProviderResponse response = model.result();
-    long assistantEntryId = tx.nextId();
+    CompactionRequest compactionRequest = model.request().compaction();
+    long resultEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
-            assistantEntryId,
+            resultEntryId,
             sessionId,
             parentId,
             succeeded
-                ? payloadMapper.assistantPayload(response)
+                ? compactionRequest != null
+                    ? CompactionSummaryAssembler.resultPayload(
+                        compactionRequest, response.text(), path)
+                    : payloadMapper.assistantPayload(response, model.request().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error()),
             now));
-    tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, now));
-    long head = assistantEntryId;
+    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, now));
+    long head = resultEntryId;
     List<ToolInvocation> invocations = List.of();
-    if (succeeded && response.toolCalls().isEmpty()) {
+    if (succeeded && compactionRequest != null) {
+      // 压缩 turn：成功结果固定无 tool call；HISTORY 部分成功固定 continueModel=false，只有 complete 最终压缩且
+      // OVERFLOW 触发时才 continueModel=true（让既有 CONTINUATION 重试失败 turn）。
+      boolean continueModel =
+          compactionRequest.phase() != CompactionPhase.HISTORY
+              && compactionRequest.trigger() == CompactionTrigger.OVERFLOW;
       long turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
               turnEndId,
               sessionId,
-              assistantEntryId,
+              resultEntryId,
+              new TurnEndPayload(
+                  model.turnStartEntryId(), TurnEndOutcome.COMPLETED, continueModel, null, null),
+              now));
+      head = turnEndId;
+    } else if (succeeded && response.toolCalls().isEmpty()) {
+      long turnEndId = tx.nextId();
+      tx.insertEntry(
+          new Entry(
+              turnEndId,
+              sessionId,
+              resultEntryId,
               new TurnEndPayload(
                   model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
               now));
@@ -347,7 +645,7 @@ public final class ThreadProcessor {
             new ToolInvocation(
                 toolId,
                 model.id(),
-                assistantEntryId,
+                resultEntryId,
                 ordinal,
                 new ToolInvocationRequest(
                     new ToolCall(call.id(), call.name(), call.argumentsJson()), binding),
@@ -369,7 +667,7 @@ public final class ThreadProcessor {
           new Entry(
               turnEndId,
               sessionId,
-              assistantEntryId,
+              resultEntryId,
               new TurnEndPayload(
                   model.turnStartEntryId(),
                   TurnEndOutcome.FAILED,
@@ -463,13 +761,25 @@ public final class ThreadProcessor {
       EntryPath path,
       TurnStartReason reason,
       Instant now) {
+    return planStep(tx, claim, thread, path, reason, null, now);
+  }
+
+  /** COMPACTION turn 的 plan：切分事实由调用方传入（reason COMPACTION 时非空）。 */
+  private LoopStep planStep(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      TurnStartReason reason,
+      CompactionPreparation preparation,
+      Instant now) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     if (reason == TurnStartReason.CONTINUATION) {
       if (path.openTurnStart().isPresent()
           || !(path.head().payload() instanceof TurnEndPayload end && end.continueModel())) {
         return new LoopStep.Continue();
       }
-    } else {
+    } else if (reason != TurnStartReason.COMPACTION) {
       boolean hasInput = false;
       for (ThreadCommand command : queued) {
         if (command.type().isMessage()) {
@@ -488,7 +798,8 @@ public final class ThreadProcessor {
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed, config.leaseConfig(), now);
     TurnPlan plan =
-        planBuilder.build(thread.id(), path, thread.yoloEnabled(), reason, queued, tx::nextId, now);
+        planBuilder.build(
+            thread.id(), path, thread.yoloEnabled(), reason, queued, tx::nextId, now, preparation);
     return new LoopStep.Plan(plan);
   }
 
@@ -509,7 +820,9 @@ public final class ThreadProcessor {
     }
     TurnResolver.Result result;
     try {
-      result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.finalYoloEnabled());
+      result =
+          resolver.resolve(
+              plan.threadId(), plan.candidatePath(), plan.finalYoloEnabled(), plan.preparation());
     } catch (RuntimeException failure) {
       log.warn(
           "turn resolver failed for thread {}; rescheduling its work", plan.threadId(), failure);
@@ -702,6 +1015,8 @@ public final class ThreadProcessor {
       return pluginId + ":" + customType;
     }
   }
+
+  private record ClosedTurn(Entry start, TurnEndPayload end) {}
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
   private boolean claimOwned(ClaimedWork claim) {

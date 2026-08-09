@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import {
   buildSkillCandidates,
+  buildSubagentCandidates,
   buildToolCandidates,
   withSelectedOrphans,
   type CapabilityOption,
@@ -28,6 +29,7 @@ export function AgentForm({
   mode = 'create',
   models,
   toolCatalog = [],
+  agents = [],
   environments = [],
   fieldErrors = {},
   onChange,
@@ -109,6 +111,15 @@ export function AgentForm({
   const skillCandidates = withSelectedOrphans(
     buildSkillCandidates(selectedSkillSource),
     draft.skills,
+  )
+  // Subagent 候选来自当前全局 Agent catalog；create 模式下同名候选（该行尚不存在）不展示，
+  // edit 模式下当前 agent 已存在，可以正常显示。已勾选但 catalog 缺失的名称保留为可移除 orphan。
+  const subagentCatalogCandidates = buildSubagentCandidates(agents)
+  const subagentCandidates = withSelectedOrphans(
+    mode === 'create' && draft.name.trim()
+      ? subagentCatalogCandidates.filter((candidate) => candidate.name !== draft.name.trim())
+      : subagentCatalogCandidates,
+    draft.subagents,
   )
 
   return (
@@ -209,6 +220,19 @@ export function AgentForm({
           onToggle={(name) => onChange({ ...draft, skills: toggleName(draft.skills, name) })}
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
+      </fieldset>
+
+      <fieldset className={`form-group capability-picker${fieldErrors.subagents ? ' is-error' : ''}`}>
+        <legend>{t('ai.catalog.card.subagents')}</legend>
+        <CapabilityChecklist
+          options={subagentCandidates}
+          selected={draft.subagents}
+          emptyText={t('ai.catalog.form.noCandidateSubagents')}
+          onToggle={(name) => onChange({ ...draft, subagents: toggleName(draft.subagents, name) })}
+        />
+        {fieldErrors.subagents ? (
+          <span className="field-error">{fieldErrors.subagents}</span>
+        ) : null}
       </fieldset>
 
       {models.length === 0 && (

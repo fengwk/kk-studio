@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -14,7 +15,9 @@ import java.util.Objects;
  *
  * <p>{@code candidatePath} 是 source path + candidate Entries 的完整合法 root-to-head 链（candidate Entry
  * 已分配 稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；提交事务必须重新校验
- * source head / source YOLO / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交。
+ * source head / source YOLO / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交。{@code preparation}
+ * 非空当且仅当 {@code reason == COMPACTION}：压缩 turn 的切分事实由纯 planner 在 plan 事务内冻结，Resolver 与
+ * ResolvedRequestValidator 据此构造并严格校验压缩请求。
  */
 record TurnPlan(
     long threadId,
@@ -29,7 +32,8 @@ record TurnPlan(
     long turnStartEntryId,
     long candidateHeadEntryId,
     boolean finalYoloEnabled,
-    TurnStartReason reason) {
+    TurnStartReason reason,
+    CompactionPreparation preparation) {
 
   TurnPlan {
     if (threadId <= 0) {
@@ -55,6 +59,10 @@ record TurnPlan(
       throw new IllegalArgumentException("candidateHeadEntryId must be positive");
     }
     reason = Objects.requireNonNull(reason, "reason");
+    if ((reason == TurnStartReason.COMPACTION) != (preparation != null)) {
+      throw new IllegalArgumentException(
+          "compaction preparation must be present iff reason is COMPACTION");
+    }
   }
 
   /** continuation 保留的 message 命令（USER/CUSTOM 未被消费）仍 queued 时需要一次显式 THREAD wake。 */

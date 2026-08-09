@@ -39,7 +39,9 @@ final class PortTestData {
             ProviderCacheControl.none()),
         List.of(),
         List.of(),
-        false);
+        false,
+        100_000,
+        null);
   }
 
   static ToolInvocationRequest toolRequest() {
@@ -56,7 +58,7 @@ final class PortTestData {
         "1.0",
         ToolType.PLATFORM,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));

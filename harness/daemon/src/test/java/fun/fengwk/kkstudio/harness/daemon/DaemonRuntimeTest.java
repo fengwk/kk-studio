@@ -60,7 +60,6 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.schema.ToolParamsSchema;
-import fun.fengwk.kkstudio.harness.tool.schema.ToolStringSchema;
 
 import java.io.IOException;
 import java.net.URI;
@@ -479,38 +478,6 @@ class DaemonRuntimeTest {
 
     assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
     assertEquals(0, tool.executions.get());
-  }
-
-  /** pi-base 的 filePath 别名必须在 strict descriptor 校验前归一化为 path。 */
-  @Test
-  void normalizesPiFilePathAliasBeforeStrictPathToolValidation() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    TestTool tool =
-        new TestTool(
-            "read",
-            new ToolParamsSchema(
-                "read arguments",
-                Map.of("path", new ToolStringSchema("path")),
-                Set.of("path"),
-                false));
-    runtime = runtime(transport, tool);
-
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake(0);
-    transport.takeMessages(2);
-    transport.receive(
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION_2,
-            DaemonMessageType.INVOKE,
-            ENVIRONMENT_NAME,
-            "file-path-alias",
-            1,
-            "{\"toolName\":\"read\",\"toolVersion\":\"1.0.0\","
-                + "\"arguments\":{\"filePath\":\"src/App.java\"},\"timeoutMillis\":1000}"));
-
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-    assertEquals("{\"path\":\"src/App.java\"}", tool.request.call().argumentsJson());
   }
 
   /** 重复 INVOKE 仅重放 STARTED 或终态，不得再次调用本地 Tool。 */
@@ -1829,7 +1796,7 @@ class DaemonRuntimeTest {
             "1.0.0",
             ToolType.ENVIRONMENT,
             "default timeout tool",
-            null,
+            "fallback",
             new ToolParamsSchema("fallback arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ZERO);
@@ -1874,7 +1841,7 @@ class DaemonRuntimeTest {
               "1.0.0",
               ToolType.ENVIRONMENT,
               name + " tool",
-              null,
+              name,
               schema,
               ToolSideEffect.READ_ONLY,
               Duration.ofSeconds(10));
@@ -1915,7 +1882,7 @@ class DaemonRuntimeTest {
             "1.0.0",
             ToolType.ENVIRONMENT,
             "blocking tool",
-            null,
+            "blocking",
             new ToolParamsSchema("blocking arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(10));

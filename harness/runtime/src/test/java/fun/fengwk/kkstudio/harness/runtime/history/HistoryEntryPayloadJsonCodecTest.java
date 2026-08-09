@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -74,10 +76,13 @@ class HistoryEntryPayloadJsonCodecTest {
             new ToolResultMetadata(
                 2L, "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT));
     EntryPayload root = new RootPayload(settings(null));
+    EntryPayload subagentRoot =
+        new RootPayload(settings(null), new SubagentContext(11L, 10L, 12L, 2));
     EntryPayload completedEnd = new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, null, null);
 
     assertEquals(tool, CODEC.decode(EntryType.MESSAGE, CODEC.encode(tool)));
     assertEquals(root, CODEC.decode(EntryType.ROOT, CODEC.encode(root)));
+    assertEquals(subagentRoot, CODEC.decode(EntryType.ROOT, CODEC.encode(subagentRoot)));
     assertEquals(completedEnd, CODEC.decode(EntryType.TURN_END, CODEC.encode(completedEnd)));
   }
 
@@ -86,7 +91,8 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         "{\"settings\":{\"environmentName\":null,\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"},"
-            + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]}}",
+            + "\"thinkingLevel\":\"high\",\"activeTools\":[\"read\",\"grep\"]},"
+            + "\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings(null))));
     assertEquals(
         "{\"pluginId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
@@ -112,6 +118,158 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hi\"}]},"
             + "\"assistantMetadata\":null,\"toolResultMetadata\":null}",
         CODEC.encode(new MessagePayload(user("hi"), null, null)));
+  }
+
+  @Test
+  void roundTripsAllCompactionPhaseShapes() {
+    CompactionPayload full =
+        new CompactionPayload(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "full summary",
+            2L,
+            4L,
+            null);
+    CompactionPayload history =
+        new CompactionPayload(
+            CompactionPhase.HISTORY, CompactionTrigger.OVERFLOW, 0L, false, "partial", 2L, 4L, 3L);
+    CompactionPayload prefix =
+        new CompactionPayload(
+            CompactionPhase.TURN_PREFIX,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "prefix",
+            2L,
+            4L,
+            3L);
+
+    for (CompactionPayload payload : List.of(full, history, prefix)) {
+      assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
+      assertEquals(payload, CODEC.decodeNode(EntryType.COMPACTION, CODEC.encodeNode(payload)));
+    }
+  }
+
+  @Test
+  void encodesCompactionCanonicalFieldOrder() {
+    assertEquals(
+        "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
+            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\"2\","
+            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":null}",
+        CODEC.encode(
+            new CompactionPayload(
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                true,
+                "summary",
+                2L,
+                4L,
+                null)));
+    assertEquals(
+        "{\"phase\":\"HISTORY\",\"trigger\":\"OVERFLOW\",\"tokensBefore\":0,"
+            + "\"complete\":false,\"summaryText\":\"partial\",\"firstKeptEntryId\":\"2\","
+            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":\"3\"}",
+        CODEC.encode(
+            new CompactionPayload(
+                CompactionPhase.HISTORY,
+                CompactionTrigger.OVERFLOW,
+                0L,
+                false,
+                "partial",
+                2L,
+                4L,
+                3L)));
+  }
+
+  @Test
+  void compactionCodecRejectsInvalidPhaseCompleteAndScalars() {
+    String base =
+        "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
+            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\"2\","
+            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":null}";
+    assertEquals(
+        new CompactionPayload(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 4L, null),
+        CODEC.decode(EntryType.COMPACTION, base));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.COMPACTION, base.replace("\"FULL\"", "\"FOO\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.COMPACTION, base.replace("\"THRESHOLD\"", "\"FOO\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, base.replace("\"tokensBefore\":500", "\"tokensBefore\":-1")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"tokensBefore\":500", "\"tokensBefore\":\"500\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"tokensBefore\":500", "\"tokensBefore\":1.5")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"2\",\"cutEntryId\":\"4\"", "\"0\",\"cutEntryId\":\"4\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":\"-4\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":5")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, base.replace("\"complete\":true", "\"complete\":\"yes\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"summaryText\":\"summary\"", "\"summaryText\":5")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace(
+                    "\"turnPrefixStartEntryId\":null", "\"turnPrefixStartEntryId\":\"-1\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"turnPrefixStartEntryId\":null", "\"turnPrefixStartEntryId\":5")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, base.replace("\"cutEntryId\"", "\"extra\",\"cutEntryId\"")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":\"4\",\"cutEntryId\":\"4\"")));
   }
 
   @Test
@@ -634,7 +792,7 @@ class HistoryEntryPayloadJsonCodecTest {
         AgentMessageRole.TOOL,
         List.of(
             new ToolResultMessageContent(
-                toolCallId, "read", List.of(new TextMessageContent("ok")), false, "{}")));
+                toolCallId, "read", "read", List.of(new TextMessageContent("ok")), false, "{}")));
   }
 
   private static AssistantMessageMetadata metadata(ProviderStopReason reason) {

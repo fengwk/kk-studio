@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.plugin.PluginCatalog;
 import fun.fengwk.kkstudio.harness.runtime.skill.LoadSkillTool;
@@ -25,20 +26,19 @@ class RuntimeToolsWiringTest extends PostgresSpringTestSupport {
   @Autowired private PluginCatalog pluginCatalog;
   @Autowired private ToolCatalog toolCatalog;
   @Autowired private LoadSkillTool loadSkillTool;
+  @Autowired private TaskTool taskTool;
 
   @Test
   void registersPlatformTools() {
     Set<String> beanNames =
         tools.stream().map(tool -> tool.descriptor().name()).collect(Collectors.toSet());
-    assertEquals(Set.of("load_skill"), beanNames);
+    assertEquals(Set.of("load_skill", "task"), beanNames);
     assertEquals("1", loadSkillTool.descriptor().version());
+    assertEquals("1", taskTool.descriptor().version());
     assertTrue(toolFactories.find("load_skill", "1").isPresent());
+    assertTrue(toolFactories.find("task", "1").isPresent());
     assertTrue(toolFactories.find("create_goal", "2").isEmpty());
-    assertEquals(
-        "goal", pluginCatalog.findTool("create_goal").orElseThrow().id().pluginId().value());
-    assertEquals("2", pluginCatalog.findTool("create_goal").orElseThrow().descriptor().version());
-    assertTrue(toolCatalog.findSelectable("create_goal").isPresent());
-    assertTrue(toolCatalog.findSelectable("get_goal").isPresent());
-    assertTrue(toolCatalog.findSelectable("update_goal").isPresent());
+    assertTrue(pluginCatalog.tools().isEmpty());
+    assertTrue(toolCatalog.findSelectable("create_goal").isEmpty());
   }
 }

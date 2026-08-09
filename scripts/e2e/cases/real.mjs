@@ -1,11 +1,13 @@
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { assert, envelopeData, sleep, cid } from '../lib/http.mjs'
 import {
   approveToolInvocation,
   branchSettingsOf,
   createChat,
   createChatThread,
+  createConfiguredChatThread,
   enqueueCommands,
   getThread,
   getThreadSnapshot,
@@ -98,6 +100,149 @@ registerCase({
     ctx.vars.assistantEntryId = String(assistantEntry.entryId)
     ctx.vars.turnEndEntryId = String(entries[turnEndIndex].entryId)
     ctx.writeArtifact('real-turn.json', JSON.stringify(threadSnapshot, null, 2))
+  },
+})
+
+registerCase({
+  id: 'real.task_delegation',
+  level: 'L2',
+  title: '真实 task 委派创建 durable 子 Thread',
+  requires: ['real'],
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；最终 TOOL MESSAGE 冻结 rendererKey=task 与 <task id> envelope；id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)',
+  async run(ctx) {
+    await requireRealMiniMaxM27(ctx)
+    const suffix = cid().slice(0, 8)
+    const marker = `SUBAGENT-E2E-${suffix}`
+    let childAgent = null
+    let parentAgent = null
+    let chat = null
+    try {
+      childAgent = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-task-child-${suffix}`,
+            description: 'Return the requested marker without using tools.',
+            systemPrompt:
+              'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
+            model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
+            variant: ctx.vars.seedModel.config.defaultVariant,
+            config: { tools: [], skills: [], subagents: [] },
+          })
+        ).json,
+      )
+      parentAgent = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/agents', {
+            name: `e2e-task-parent-${suffix}`,
+            description: 'Always delegates once to the configured child.',
+            systemPrompt:
+              `For every user message, call task exactly once with subagent_type="${childAgent.name}". `
+              + `Delegate the instruction "Return exactly ${marker}". After the task result, answer with the same marker.`,
+            model: `${ctx.vars.seedModel.providerName}/${ctx.vars.seedModel.name}`,
+            variant: ctx.vars.seedModel.config.defaultVariant,
+            config: { tools: [], skills: [], subagents: [childAgent.name] },
+          })
+        ).json,
+      )
+      assert(
+        JSON.stringify(parentAgent.config?.subagents) === JSON.stringify([childAgent.name]),
+        JSON.stringify(parentAgent),
+      )
+      chat = await createChat(ctx, {
+        title: `e2e-task-${suffix}`,
+        agentName: parentAgent.name,
+        yoloEnabled: false,
+      })
+      const snapshot = await createChatThread(ctx, chat.id, {
+        title: null,
+        yoloEnabled: false,
+        branchSettings: branchSettingsOf(
+          parentAgent,
+          {
+            providerName: ctx.vars.seedModel.providerName,
+            modelName: ctx.vars.seedModel.name,
+            variant: ctx.vars.seedModel.config.defaultVariant,
+          },
+          { environmentName: null, thinkingLevel: 'off', activeTools: ['task'] },
+        ),
+      })
+      const parentThreadId = String(snapshot.thread.threadId)
+      await enqueueCommands(ctx, parentThreadId, {
+        expectedHeadEntryId: snapshot.thread.headEntryId,
+        expectedNextCommandSequence: snapshot.thread.nextCommandSequence,
+        commands: [
+          userMessageCommand(
+            `Use task with subagent_type "${childAgent.name}" and ask it to return exactly ${marker}.`,
+            cid(),
+          ),
+        ],
+      })
+      const finalThread = await waitForQuiescentThread(ctx, parentThreadId, {
+        timeoutMs: 300_000,
+        intervalMs: 500,
+      })
+      assert(finalThread.status === 'IDLE', JSON.stringify(finalThread))
+      const parentSnapshot = await getThreadSnapshot(ctx, parentThreadId)
+      const taskResults = []
+      for (const entry of parentSnapshot.entries || []) {
+        if (entryType(entry) !== 'MESSAGE') continue
+        const message = parseEntryPayload(entry).message
+        if (message?.role !== 'TOOL') continue
+        for (const content of message.contents || []) {
+          if (content?.type === 'tool_result' && content.toolName === 'task') {
+            taskResults.push(content)
+          }
+        }
+      }
+      assert(taskResults.length === 1, `expected one task result: ${JSON.stringify(taskResults)}`)
+      const taskResult = taskResults[0]
+      assert(taskResult.rendererKey === 'task', JSON.stringify(taskResult))
+      const taskText = (taskResult.contents || [])
+        .filter((content) => content?.type === 'text')
+        .map((content) => String(content.text || ''))
+        .join('')
+      const taskId = /<task id="([1-9]\d*)" state="completed">/.exec(taskText)?.[1]
+      assert(taskId, `completed task envelope missing: ${taskText}`)
+      assert(taskText.includes(marker), `subagent report missing marker: ${taskText}`)
+
+      const childSnapshot = await getThreadSnapshot(ctx, taskId)
+      const childRoot = (childSnapshot.entries || [])[0]
+      assert(entryType(childRoot) === 'ROOT', JSON.stringify(childSnapshot.entries))
+      const context = parseEntryPayload(childRoot).subagentContext
+      assert(
+        String(context?.parentThreadId) === parentThreadId
+          && String(context?.rootThreadId) === parentThreadId
+          && /^[1-9]\d*$/.test(String(context?.taskInvocationId || ''))
+          && context?.depth === 2,
+        `invalid child ROOT subagentContext: ${JSON.stringify(context)}`,
+      )
+      ctx.writeArtifact(
+        'task-delegation.json',
+        JSON.stringify({ parentSnapshot, childSnapshot, taskResult }, null, 2),
+      )
+    } finally {
+      if (chat?.id) {
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/chat/${chat.id}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          )
+        } catch {
+          // 保留主断言失败。
+        }
+      }
+      for (const agent of [parentAgent, childAgent]) {
+        if (!agent?.name) continue
+        try {
+          await ctx.call(
+            'DELETE',
+            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          )
+        } catch {
+          // 隔离 E2E schema 会在下一次 rebuild 清理。
+        }
+      }
+    }
   },
 })
 
@@ -508,6 +653,7 @@ registerCase({
       config: {
         tools: ['read'],
         skills: [],
+        subagents: [],
       },
     })
     const toolAgent = envelopeData(agentJson)
@@ -517,10 +663,11 @@ registerCase({
       const agentConfig = toolAgent.config
       assert(
         agentConfig
-          && Object.keys(agentConfig).sort().join(',') === 'skills,tools'
+          && Object.keys(agentConfig).sort().join(',') === 'skills,subagents,tools'
           && JSON.stringify(agentConfig.tools) === JSON.stringify(['read'])
-          && JSON.stringify(agentConfig.skills) === JSON.stringify([]),
-        `temporary tool Agent config must be exactly tools=[read], skills=[]: ${JSON.stringify(toolAgent)}`,
+          && JSON.stringify(agentConfig.skills) === JSON.stringify([])
+          && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
+        `temporary tool Agent config must be exactly tools=[read], skills=[], subagents=[]: ${JSON.stringify(toolAgent)}`,
       )
       const environmentName = ctx.vars.daemonEnvironment.name
       // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
@@ -694,6 +841,32 @@ registerCase({
           `resource sha256 must be a 64-hex digest: ${JSON.stringify(resource)}`,
         )
       }
+      const managed = resources[0]
+      const query = new URLSearchParams({
+        mediaType: managed.mediaType,
+        size: String(managed.size),
+      })
+      if (typeof managed.name === 'string' && managed.name.trim()) {
+        query.set('name', managed.name)
+      }
+      const downloadUrl =
+        `${ctx.baseUrl}/api/ai/runtime/resources/${managed.sha256}?${query.toString()}`
+      const download = await fetch(downloadUrl)
+      assert(download.status === 200, `managed resource download status ${download.status}`)
+      assert(
+        String(download.headers.get('content-type') || '').startsWith(managed.mediaType),
+        `managed resource media type mismatch: ${download.headers.get('content-type')}`,
+      )
+      assert(
+        download.headers.get('x-content-type-options') === 'nosniff',
+        `managed resource must set nosniff: ${JSON.stringify([...download.headers])}`,
+      )
+      const bytes = Buffer.from(await download.arrayBuffer())
+      assert(bytes.length === managed.size, `download size ${bytes.length} != ${managed.size}`)
+      assert(
+        createHash('sha256').update(bytes).digest('hex') === managed.sha256,
+        'managed resource download digest mismatch',
+      )
       ctx.writeArtifact(
         'tool-turn-final.json',
         JSON.stringify({ finalThread, finalSnapshot }, null, 2),

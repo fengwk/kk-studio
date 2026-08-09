@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -32,11 +33,13 @@ import java.util.function.LongSupplier;
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath、queued Command 快照与 YOLO 开关构造完整合法
  * candidate EntryPath，不接触 Store、不写任何 durable 状态。
  *
- * <p>CONTINUATION 只消费普通配置命令（SET_AGENT / SET_MODEL / SET_THINKING_LEVEL / SET_ACTIVE_TOOLS /
- * SET_YOLO），保留 USER_MESSAGE / CUSTOM_MESSAGE / SET_ENVIRONMENT，不产生 Message Entry；INPUT 消费 cutoff
- * 内完整 queued 快照并先做可选 history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED
- * TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message。candidate Entry 使用调用方提供的 ID
- * 分配器，createdAt 使用调用方时钟。
+ * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_THINKING_LEVEL / SET_ACTIVE_TOOLS /
+ * SET_YOLO）与 SYSTEM CUSTOM_MESSAGE（用于 task soft steering），保留 USER_MESSAGE、USER CUSTOM_MESSAGE 与
+ * SET_ENVIRONMENT；INPUT 消费 cutoff 内完整 queued 快照并先做可选 history normalization（synthetic
+ * UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的
+ * USER/CUSTOM Message；COMPACTION 只追加 TURN_START(COMPACTION)（settings 快照为当前 branch），消费零
+ * Command，切分事实由调用方传入的 {@link CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt
+ * 使用调用方时钟。
  */
 final class TurnPlanBuilder {
 
@@ -50,7 +53,8 @@ final class TurnPlanBuilder {
       TurnStartReason reason,
       List<ThreadCommand> plannedCommands,
       LongSupplier idAllocator,
-      Instant now) {
+      Instant now,
+      CompactionPreparation preparation) {
     Objects.requireNonNull(sourcePath, "sourcePath");
     Objects.requireNonNull(reason, "reason");
     Objects.requireNonNull(plannedCommands, "plannedCommands");
@@ -58,6 +62,10 @@ final class TurnPlanBuilder {
     Objects.requireNonNull(now, "now");
     if (threadId <= 0) {
       throw new IllegalArgumentException("threadId must be positive");
+    }
+    if ((reason == TurnStartReason.COMPACTION) != (preparation != null)) {
+      throw new IllegalArgumentException(
+          "compaction preparation must be present iff reason is COMPACTION");
     }
 
     List<ThreadCommand> consumedCommands = new ArrayList<>();
@@ -92,9 +100,9 @@ final class TurnPlanBuilder {
             new TurnStartPayload(reason, harvest.branchSettings()),
             now));
     parentId = turnStartEntryId;
-    if (reason == TurnStartReason.INPUT) {
+    if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
       for (ThreadCommand command : plannedCommands) {
-        if (command.type() == ThreadCommandType.USER_MESSAGE) {
+        if (reason == TurnStartReason.INPUT && command.type() == ThreadCommandType.USER_MESSAGE) {
           long entryId = idAllocator.getAsLong();
           candidateEntries.add(
               new Entry(
@@ -105,7 +113,8 @@ final class TurnPlanBuilder {
                       ((UserMessageCommandPayload) command.payload()).message(), null, null),
                   now));
           parentId = entryId;
-        } else if (command.type() == ThreadCommandType.CUSTOM_MESSAGE) {
+        } else if (command.type() == ThreadCommandType.CUSTOM_MESSAGE
+            && isConsumed(reason, command)) {
           long entryId = idAllocator.getAsLong();
           candidateEntries.add(
               new Entry(
@@ -141,17 +150,23 @@ final class TurnPlanBuilder {
         turnStartEntryId,
         parentId,
         harvest.yoloEnabled(),
-        reason);
+        reason,
+        preparation);
   }
 
-  /** CONTINUATION 只消费普通配置命令；INPUT 消费完整 queued 快照。 */
+  /** INPUT 消费完整 queued 快照；CONTINUATION 额外消费 SYSTEM steering message；COMPACTION 消费零 Command。 */
   static boolean isConsumed(TurnStartReason reason, ThreadCommand command) {
     if (reason == TurnStartReason.INPUT) {
       return true;
     }
+    if (reason == TurnStartReason.COMPACTION) {
+      return false;
+    }
     return switch (command.type()) {
       case SET_AGENT, SET_MODEL, SET_THINKING_LEVEL, SET_ACTIVE_TOOLS, SET_YOLO -> true;
-      case USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT -> false;
+      case CUSTOM_MESSAGE -> ((CustomMessageCommandPayload) command.payload()).message().role()
+          == AgentMessageRole.SYSTEM;
+      case USER_MESSAGE, SET_ENVIRONMENT -> false;
     };
   }
 

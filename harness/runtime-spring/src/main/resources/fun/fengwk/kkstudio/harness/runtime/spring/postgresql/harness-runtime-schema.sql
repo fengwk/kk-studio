@@ -33,6 +33,7 @@ create table harness_entry (
             'CUSTOM_MESSAGE',
             'ASSISTANT_ERROR',
             'ASSISTANT_ABORTED',
+            'COMPACTION',
             'TURN_END'
         )
     ),

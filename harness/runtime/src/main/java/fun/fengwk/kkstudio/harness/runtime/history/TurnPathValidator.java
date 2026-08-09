@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -16,11 +17,14 @@ import java.util.List;
  * 内（CUSTOM 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；INPUT turn 在 Assistant
  * 结果前必须已有至少一条 USER/CUSTOM；CONTINUATION turn 偿还上一 TURN_END 的 continueModel obligation，不消费
  * USER/CUSTOM（配置 Commands 只体现在 TURN_START.settings， 不形成 Message），可零 input 直接产生 Assistant
- * 结果；Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED）只能出现一次且之后 不得再出现
+ * 结果；COMPACTION turn 消费零 Command、绝不出现 USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通 turn
+ * 绝不包含它），失败/停止可复用 ASSISTANT_ERROR / ASSISTANT_ABORTED barrier 且无需 USER input； Assistant
+ * 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现
  * USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带 ToolCall 的 ASSISTANT MESSAGE，且必须是 ordinal 0
  * 开始的严格前缀（ordinal 连续、toolCallId/toolName 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END
- * 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE 且 ToolResult
- * 完整；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意
+ * 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且
+ * ToolResult 完整；complete OVERFLOW compaction 必须 {@code continueModel=true}，其它 compaction 必须 false；
+ * FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意
  * open phase 关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
@@ -65,7 +69,23 @@ final class TurnPathValidator {
       }
       switch (end.outcome()) {
         case COMPLETED -> {
-          requireAssistantMessage("completed");
+          if (openReason == TurnStartReason.COMPACTION) {
+            // COMPACTION turn 的成功结果必须是 COMPACTION payload（见 visit 的跨用途校验）。
+            if (!(assistantResultEntry != null
+                && assistantResultEntry.payload() instanceof CompactionPayload)) {
+              throw new IllegalArgumentException(
+                  "completed compaction turns require a COMPACTION result");
+            }
+            CompactionPayload compaction = (CompactionPayload) assistantResultEntry.payload();
+            boolean expectedContinueModel =
+                compaction.complete() && compaction.trigger() == CompactionTrigger.OVERFLOW;
+            if (end.continueModel() != expectedContinueModel) {
+              throw new IllegalArgumentException(
+                  "completed compaction continueModel must be true only for complete OVERFLOW");
+            }
+          } else {
+            requireAssistantMessage("completed");
+          }
           requireInput("a completed turn");
           requireCompleteToolResults("completed");
         }
@@ -97,6 +117,9 @@ final class TurnPathValidator {
           if (openReason == TurnStartReason.CONTINUATION) {
             throw new IllegalArgumentException("continuation turns must not consume USER messages");
           }
+          if (openReason == TurnStartReason.COMPACTION) {
+            throw new IllegalArgumentException("compaction turns must not consume USER messages");
+          }
           inputSeen = true;
           return;
         }
@@ -105,6 +128,10 @@ final class TurnPathValidator {
               "tool results require an assistant message with tool calls");
         }
         // ASSISTANT：本 turn 唯一的 assistant result。SYSTEM 在此处不可能出现。
+        if (openReason == TurnStartReason.COMPACTION) {
+          throw new IllegalArgumentException(
+              "compaction turns require a COMPACTION result, not an assistant message");
+        }
         assistantSeen = true;
         assistantResultEntry = entry;
         requireInput("an assistant result");
@@ -132,7 +159,23 @@ final class TurnPathValidator {
       if (openReason == TurnStartReason.CONTINUATION) {
         throw new IllegalArgumentException("continuation turns must not consume custom messages");
       }
+      if (openReason == TurnStartReason.COMPACTION) {
+        throw new IllegalArgumentException("compaction turns must not consume custom messages");
+      }
       inputSeen = true;
+      return;
+    }
+    if (payload instanceof CompactionPayload) {
+      // COMPACTION payload：只能是 COMPACTION turn 的唯一 assistant result；普通 turn 绝不包含它。
+      if (assistantSeen) {
+        throw new IllegalArgumentException("assistant result must not repeat");
+      }
+      if (openReason != TurnStartReason.COMPACTION) {
+        throw new IllegalArgumentException(
+            "compaction entries are only allowed inside compaction turns");
+      }
+      assistantSeen = true;
+      assistantResultEntry = entry;
       return;
     }
     // ASSISTANT_ERROR / ASSISTANT_ABORTED：本 turn 唯一的 assistant result。

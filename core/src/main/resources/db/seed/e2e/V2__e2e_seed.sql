@@ -110,7 +110,7 @@ insert into agent_definition (
     'default-assistant', 'Default e2e assistant.',
     '你是 kk-studio 的本地开发助手。',
     'minimax', 'MiniMax-M2.7', 'high',
-    '{"tools":[],"skills":[]}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 )
 on conflict (name) do nothing;

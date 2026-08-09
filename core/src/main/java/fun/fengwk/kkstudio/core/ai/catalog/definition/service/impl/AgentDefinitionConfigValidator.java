@@ -22,6 +22,7 @@ final class AgentDefinitionConfigValidator {
     Objects.requireNonNull(config, "config");
     validateTools(config.getTools());
     validateSkills(config.getSkills());
+    validateSubagents(config.getSubagents());
   }
 
   private void validateTools(List<String> names) {
@@ -40,6 +41,14 @@ final class AgentDefinitionConfigValidator {
     for (String name : names) {
       if (name.length() > 128) {
         throw new IllegalArgumentException("agent skill name must be <= 128 characters: " + name);
+      }
+    }
+  }
+
+  private static void validateSubagents(List<String> names) {
+    for (String name : names) {
+      if (name.length() > 64) {
+        throw new IllegalArgumentException("subagent name must be <= 64 characters: " + name);
       }
     }
   }

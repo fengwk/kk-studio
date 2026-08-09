@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
@@ -15,11 +16,18 @@ import java.util.Objects;
  * EntryPath 全量不变量校验。实现只读取最新 catalog / environment 事实，不得写 store、不得产生副作用、 不得要求事务上下文，且不得按 candidate
  * Entry ID 回查 Store（suffix 尚未持久化）；其结果只有在 Processor 第二事务 CAS 成功后才成为 durable execution
  * fact。抛出的异常表示临时基础设施失败（DB / 网络不可用），由 Processor reschedule，绝不改写 durable invocation。
+ *
+ * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实构造压缩请求（一个 SYSTEM + 一个 USER
+ * summary 请求、零 tool/skill、不查 Agent system prompt / plugins / environment 可用性 / prompt-cache）。
  */
 public interface TurnResolver {
 
   /** 解析一次 turn；临时基础设施失败以异常表达，由调用方 reschedule。 */
-  Result resolve(long threadId, EntryPath path, boolean yoloEnabled);
+  Result resolve(
+      long threadId,
+      EntryPath path,
+      boolean yoloEnabled,
+      CompactionPreparation compactionPreparation);
 
   /** 解析结果：冻结请求或确定性拒绝。 */
   sealed interface Result permits TurnResolver.Resolved, TurnResolver.Rejected {}

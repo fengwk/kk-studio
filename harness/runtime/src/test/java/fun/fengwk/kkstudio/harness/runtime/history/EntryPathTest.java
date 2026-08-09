@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -188,6 +190,133 @@ class EntryPathTest {
     Entry end = turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null);
 
     new EntryPath(List.of(root, start, assistant, end));
+  }
+
+  @Test
+  void acceptsCompletedCompactionTurnsForAllPhases() {
+    Entry root = root(settings("root"));
+    for (CompactionPhase phase :
+        List.of(CompactionPhase.FULL, CompactionPhase.HISTORY, CompactionPhase.TURN_PREFIX)) {
+      boolean complete = phase != CompactionPhase.HISTORY;
+      Long prefix = phase == CompactionPhase.FULL ? null : 3L;
+      new EntryPath(
+          List.of(
+              root,
+              compactionStart(2L, 1L, settings("turn")),
+              compactionResult(3L, 2L, phase, complete, prefix),
+              turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null)));
+    }
+  }
+
+  @Test
+  void completedCompactionContinueModelMatchesOverflowRecoverySemantics() {
+    Entry root = root(settings("root"));
+    Entry start = compactionStart(2L, 1L, settings("turn"));
+    Entry threshold =
+        compactionResult(3L, 2L, CompactionPhase.FULL, CompactionTrigger.THRESHOLD, true, null);
+    Entry overflow =
+        compactionResult(3L, 2L, CompactionPhase.FULL, CompactionTrigger.OVERFLOW, true, null);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    start,
+                    threshold,
+                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, true, null, null))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    start,
+                    overflow,
+                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, false, null, null))));
+
+    new EntryPath(
+        List.of(
+            root,
+            start,
+            overflow,
+            turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, true, null, null)));
+  }
+
+  @Test
+  void rejectsCompactionPayloadInNormalTurnsAndNormalResultsInCompactionTurns() {
+    Entry root = root(settings("root"));
+    // 普通 turn 绝不包含 COMPACTION payload。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
+                    userMessage(3L, 2L),
+                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
+                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+    // COMPACTION turn 绝不消费 USER / CUSTOM / 普通 ASSISTANT 结果。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    compactionStart(2L, 1L, settings("turn")),
+                    userMessage(3L, 2L),
+                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
+                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    compactionStart(2L, 1L, settings("turn")),
+                    customMessage(3L, 2L),
+                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
+                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    compactionStart(2L, 1L, settings("turn")),
+                    assistantMessage(3L, 2L),
+                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+    // COMPACTION turn 不能以普通 ASSISTANT 结果完成。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    compactionStart(2L, 1L, settings("turn")),
+                    assistantMessage(3L, 2L),
+                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+  }
+
+  @Test
+  void acceptsFailedAndStoppedCompactionBarriers() {
+    Entry root = root(settings("root"));
+    // 失败压缩：ASSISTANT_ERROR + FAILED。
+    new EntryPath(
+        List.of(
+            root,
+            compactionStart(2L, 1L, settings("turn")),
+            assistantError(3L, 2L),
+            turnEnd(4L, 3L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
+    // 停止压缩：ASSISTANT_ABORTED + STOPPED。
+    new EntryPath(
+        List.of(
+            root,
+            compactionStart(2L, 1L, settings("turn")),
+            assistantAborted(3L, 2L),
+            turnEnd(4L, 3L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1")));
   }
 
   @Test
@@ -695,11 +824,22 @@ class EntryPathTest {
       TurnEndOutcome outcome,
       TurnEndReason reason,
       String closeRequestId) {
+    return turnEnd(id, parentId, turnStartEntryId, outcome, false, reason, closeRequestId);
+  }
+
+  private static Entry turnEnd(
+      long id,
+      long parentId,
+      long turnStartEntryId,
+      TurnEndOutcome outcome,
+      boolean continueModel,
+      TurnEndReason reason,
+      String closeRequestId) {
     return new Entry(
         id,
         SESSION,
         parentId,
-        new TurnEndPayload(turnStartEntryId, outcome, false, reason, closeRequestId),
+        new TurnEndPayload(turnStartEntryId, outcome, continueModel, reason, closeRequestId),
         time(id));
   }
 
@@ -744,7 +884,10 @@ class EntryPathTest {
       int separator = toolCall.indexOf(':');
       contents.add(
           new ToolCallMessageContent(
-              toolCall.substring(0, separator), toolCall.substring(separator + 1), "{}"));
+              toolCall.substring(0, separator),
+              toolCall.substring(separator + 1),
+              toolCall.substring(separator + 1),
+              "{}"));
     }
     if (contents.isEmpty()) {
       contents.add(new TextMessageContent("answer"));
@@ -776,10 +919,50 @@ class EntryPathTest {
                 AgentMessageRole.TOOL,
                 List.of(
                     new ToolResultMessageContent(
-                        toolCallId, toolName, List.of(new TextMessageContent("ok")), false, "{}"))),
+                        toolCallId,
+                        toolName,
+                        toolName,
+                        List.of(new TextMessageContent("ok")),
+                        false,
+                        "{}"))),
             null,
             new ToolResultMetadata(
                 assistantEntryId, toolCallId, ordinal, ToolResultStatus.SUCCEEDED, false, null)),
+        time(id));
+  }
+
+  private static Entry compactionStart(long id, long parentId, BranchSettings settings) {
+    return new Entry(
+        id,
+        SESSION,
+        parentId,
+        new TurnStartPayload(TurnStartReason.COMPACTION, settings),
+        time(id));
+  }
+
+  private static Entry compactionResult(
+      long id,
+      long parentId,
+      CompactionPhase phase,
+      boolean complete,
+      Long turnPrefixStartEntryId) {
+    return compactionResult(
+        id, parentId, phase, CompactionTrigger.THRESHOLD, complete, turnPrefixStartEntryId);
+  }
+
+  private static Entry compactionResult(
+      long id,
+      long parentId,
+      CompactionPhase phase,
+      CompactionTrigger trigger,
+      boolean complete,
+      Long turnPrefixStartEntryId) {
+    return new Entry(
+        id,
+        SESSION,
+        parentId,
+        new CompactionPayload(
+            phase, trigger, 500L, complete, "summary", 2L, 4L, turnPrefixStartEntryId),
         time(id));
   }
 

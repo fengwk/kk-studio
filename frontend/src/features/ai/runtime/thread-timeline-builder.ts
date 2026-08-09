@@ -36,8 +36,23 @@ export function buildThreadTimeline(
   const queuedMessages: QueuedThreadMessage[] = []
   const durableToolArguments = new Map<string, string[]>()
   let hasPendingInputs = false
+  let inCompactionTurn = false
+  let latestTurnIsCompaction = false
 
   for (const entry of entries) {
+    if (entry.entryType === 'TURN_START') {
+      const payload = asRecord(parsePayload(entry.payloadJson))
+      latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
+      inCompactionTurn = latestTurnIsCompaction
+      projectDurableEntry(entry, messages, durableToolArguments)
+      continue
+    }
+    if (inCompactionTurn) {
+      if (entry.entryType === 'TURN_END') {
+        inCompactionTurn = false
+      }
+      continue
+    }
     projectDurableEntry(entry, messages, durableToolArguments)
   }
 
@@ -60,7 +75,7 @@ export function buildThreadTimeline(
 
   projectInvocationOverlays(messages, toolInvocations, toolStreams)
 
-  if (modelStream != null && (modelStream.text || modelStream.thinking)) {
+  if (!latestTurnIsCompaction && modelStream != null && (modelStream.text || modelStream.thinking)) {
     messages.push({
       id: `realtime:model:${modelStream.invocationId}:${modelStream.attempt}`,
       role: 'assistant',
@@ -114,6 +129,7 @@ function projectInvocationOverlays(
       invocation == null
       || message.subjectEntryId !== invocation.assistantEntryId
       || invocation.toolCallId !== message.toolCallId
+      || invocation.rendererKey !== message.rendererKey
     ) {
       continue
     }

@@ -28,6 +28,7 @@ export function AgentResourceCard({
   const modelLabel = formatAgentModelLabel(model, agent.model)
   const tools = agent.config.tools
   const skills = agent.config.skills
+  const subagents = agent.config.subagents
 
   return (
     <ResourceCardLayout
@@ -42,6 +43,7 @@ export function AgentResourceCard({
         ],
         { label: t('ai.catalog.card.tools'), tags: tools, limit: 2 },
         { label: t('ai.catalog.card.skills'), tags: skills, limit: 2 },
+        { label: t('ai.catalog.card.subagents'), tags: subagents, limit: 2 },
       ]}
       onEdit={onEdit}
       onDelete={onDelete}

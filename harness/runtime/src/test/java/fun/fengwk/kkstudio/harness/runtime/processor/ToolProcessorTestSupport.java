@@ -450,14 +450,15 @@ final class ToolProcessorTestSupport {
         "1.0",
         ToolType.PLATFORM,
         "description of bash",
-        null,
+        "bash",
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         sideEffect,
         Duration.ofSeconds(30));
   }
 
   private static ModelInvocationRequest modelRequest(boolean yoloEnabled) {
-    return new ModelInvocationRequest(ENV_ID, providerRequest(), List.of(), List.of(), yoloEnabled);
+    return new ModelInvocationRequest(
+        ENV_ID, providerRequest(), List.of(), List.of(), yoloEnabled, 100_000, null);
   }
 
   private static ProviderRequest providerRequest() {
@@ -504,7 +505,7 @@ final class ToolProcessorTestSupport {
   private static EntryPayload assistantPayload(String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "{}"));
+      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     ProviderStopReason stopReason =
@@ -530,7 +531,7 @@ final class ToolProcessorTestSupport {
       long assistantEntryId, int ordinal, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
-            toolCallId, "bash", List.of(new TextMessageContent("ok")), false, "{}");
+            toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
             assistantEntryId, toolCallId, ordinal, ToolResultStatus.SUCCEEDED, false, null);

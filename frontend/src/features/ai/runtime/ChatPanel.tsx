@@ -1,4 +1,4 @@
-import type { RefObject } from 'react'
+import type { RefObject, ReactNode } from 'react'
 import {
   ThreadPanel,
   ThreadStatusFooter,
@@ -48,11 +48,18 @@ export interface ChatPanelFooterInput {
   onModelClick?: () => void
   onVariantClick?: () => void
   onEnvironmentClick?: () => void
+  taskStatusEnabled?: boolean
+  notificationsEnabled?: boolean
+  notificationPermission?: 'default' | 'denied' | 'granted' | 'unsupported'
+  onTaskStatusToggle?: () => void
+  onNotificationsToggle?: () => void
 }
 
 /** Composer 上方展示的工作状态与可关闭的反馈信息。 */
 export interface ChatPanelActivityInput {
   working: boolean
+  /** 追加到 ThreadWidgetStack.children 的自定义 widget（如子任务状态）。 */
+  widgets?: ReactNode
   actionError?: string | null
   onDismissActionError?: () => void
 }
@@ -85,6 +92,7 @@ export function ChatPanel({
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
+    widgets: activity.widgets,
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,
   }
@@ -107,6 +115,11 @@ export function ChatPanel({
             onModelClick={footer.onModelClick}
             onVariantClick={footer.onVariantClick}
             onEnvironmentClick={footer.onEnvironmentClick}
+            taskStatusEnabled={footer.taskStatusEnabled}
+            notificationsEnabled={footer.notificationsEnabled}
+            notificationPermission={footer.notificationPermission}
+            onTaskStatusToggle={footer.onTaskStatusToggle}
+            onNotificationsToggle={footer.onNotificationsToggle}
           />
         ),
       }}

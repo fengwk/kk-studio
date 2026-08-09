@@ -15,6 +15,7 @@ function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMess
     text: '',
     toolCallId: 'call-1',
     toolName: 'read',
+    rendererKey: 'read',
     arguments: '',
     attachments: [],
     ...overrides,
@@ -75,7 +76,17 @@ describe('ToolMessageBlock', () => {
         message={message({
           attachments: [
             { type: 'image', name: 'preview.png', mime: 'image/png', data: 'data:image/png;base64,aGVsbG8=' },
-            { type: 'file', name: 'result.json', mime: 'application/json', data: 'file:///tmp/result.json' },
+            {
+              type: 'file',
+              name: 'result.json',
+              mime: 'application/json',
+              data: 'file:///tmp/result.json',
+              size: 2,
+              sha256: 'a'.repeat(64),
+              downloadHref:
+                `/api/ai/runtime/resources/${'a'.repeat(64)}`
+                + '?mediaType=application%2Fjson&size=2&name=result.json',
+            },
             { type: 'audio', name: '', mime: 'audio/mpeg', data: '' },
           ],
         })}
@@ -338,5 +349,43 @@ describe('ToolMessageBlock', () => {
     )
     expect(container.textContent).toContain('streaming partial')
     expect(container.textContent).not.toContain('stable text')
+  })
+
+  it('keeps complete input visible and constrains only output to the tail viewport', () => {
+    const { container, rerender } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          arguments: '{"line1":1,\n"line2":2,\n"line3":3,\n"line4":4,\n"line5":5,\n"line6":6}',
+        })}
+      />,
+    )
+    const input = container.querySelector('.thread-tool-input')
+    expect(input).toHaveTextContent('"line1":1')
+    expect(input).toHaveTextContent('"line6":6')
+    expect(input).not.toHaveClass('thread-tool-output')
+
+    rerender(
+      <ToolMessageBlock
+        message={message({ phase: 'result', text: 'one\ntwo\nthree\nfour\nfive\nsix' })}
+      />,
+    )
+    const output = container.querySelector('.thread-tool-output')
+    expect(output).toHaveTextContent('one')
+    expect(output).toHaveTextContent('six')
+    expect(output).toHaveAttribute('tabindex', '0')
+  })
+
+  it('delegates the body to a compile-time renderer without duplicating the default output', () => {
+    render(
+      <ToolMessageBlock
+        message={message({ text: 'default output' })}
+        renderer={({ message: rendered }) => (
+          <div>custom renderer: {rendered.text}</div>
+        )}
+      />,
+    )
+    expect(screen.getByText('custom renderer: default output')).toBeInTheDocument()
+    expect(screen.queryByText('default output')).not.toBeInTheDocument()
   })
 })

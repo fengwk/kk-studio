@@ -33,6 +33,23 @@ class HarnessRuntimePropertiesTest {
     assertEquals(64, properties.getDispatcherMaxDispatchTasks());
     assertEquals(16, properties.getDispatcherWorkerConcurrency());
     assertEquals(64, properties.getDispatcherWorkerQueueCapacity());
+    // 自动对话压缩默认值对齐上游 Pi。
+    assertEquals(true, properties.isCompactionEnabled());
+    assertEquals(16_384, properties.getCompactionReserveTokens());
+    assertEquals(20_000, properties.getCompactionMaxRecentTokens());
+  }
+
+  /** 压缩字段可显式覆盖（属性绑定路径 kk-studio.harness.runtime.compaction-*）。 */
+  @Test
+  void supportsCompactionOverrides() {
+    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
+    properties.setCompactionEnabled(false);
+    properties.setCompactionReserveTokens(4_096);
+    properties.setCompactionMaxRecentTokens(8_192);
+
+    assertEquals(false, properties.isCompactionEnabled());
+    assertEquals(4_096, properties.getCompactionReserveTokens());
+    assertEquals(8_192, properties.getCompactionMaxRecentTokens());
   }
 
   /** 相对 workdir 在 environmentRoot 下解析，越界与绝对路径逃逸必须失败。 */

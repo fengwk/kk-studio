@@ -57,7 +57,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
         definitionMutationFactory.newAgent(
             name, modelRef.providerName(), modelRef.modelName(), createDTO);
     validateVariant(modelRef, definition.getVariant());
-    validateConfig(configCodec.decode(definition.getConfigJson()));
+    AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
+    validateConfig(config);
+    referenceResolver.requireSubagentsForUpdate(config.getSubagents());
     try {
       if (!agentDefinitionRepository.create(definition)) {
         throw new IllegalStateException("create agent definition failed");
@@ -90,7 +92,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     referenceResolver.requireModel(modelRef.providerName(), modelRef.modelName());
     definitionMutationFactory.update(definition, updateDTO);
     validateVariant(modelRef, definition.getVariant());
-    validateConfig(configCodec.decode(definition.getConfigJson()));
+    AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
+    validateConfig(config);
+    AgentDefinition locked =
+        referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
+    ensureExpectedVersion(locked, name, rawExpected, expected);
     if (!agentDefinitionRepository.updateByName(definition, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getByName(name);
       if (reread == null) {
@@ -109,6 +115,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
     AgentDefinition definition = referenceResolver.requireAgentForUpdate(name);
     ensureExpectedVersion(definition, name, expectedVersion, expected);
+    referenceResolver.ensureNotReferencedAsSubagent(name);
     if (!agentDefinitionRepository.deleteByName(name, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getByName(name);
       if (reread == null) {

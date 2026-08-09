@@ -6,12 +6,12 @@ import java.util.List;
 import java.util.Objects;
 
 /** 插件 Tool 的纯返回值：模型可见 ToolResult 与待由 Harness Core 校验、持久化的 intents。 */
-public record PluginToolResult(ToolResult result, List<PluginIntent> intents) {
+public record PluginToolResult(ToolResult result, List<AppendCustomEntry> intents) {
 
   public PluginToolResult {
     result = Objects.requireNonNull(result, "result");
     intents = List.copyOf(Objects.requireNonNull(intents, "intents"));
-    for (PluginIntent intent : intents) {
+    for (AppendCustomEntry intent : intents) {
       Objects.requireNonNull(intent, "intents[]");
     }
     if (result.error() && !intents.isEmpty()) {

@@ -1,4 +1,5 @@
 import type { ModelInvocationDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import { taskStatusFingerprint } from '@/features/ai/runtime/task-status'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
 
@@ -439,6 +440,7 @@ export function reduceRealtimeToolStream(
   partial: RealtimeToolPartial,
 ): RealtimeToolStream {
   const chunkText = partialText(partial.payload)
+  const replaceText = isTaskStatusPartial(partial.payload)
   if (
     current == null
     || current.threadId !== partial.threadId
@@ -455,12 +457,30 @@ export function reduceRealtimeToolStream(
       createdAt: partial.createdAt,
     }
   }
+  const nextError = current.error || partial.payload[TOOL_RESULT_ERROR_KEY] === true
+  const currentTaskStatus = replaceText ? taskStatusFingerprint(current.text) : null
+  if (
+    currentTaskStatus != null
+    && nextError === current.error
+    && currentTaskStatus === taskStatusFingerprint(chunkText)
+  ) {
+    // heartbeat 的传输时间与 JSON 字段顺序不属于 task 状态；语义未变化时复用
+    // 现有对象，避免每秒制造无意义的 transcript/widget 重渲染。
+    return current
+  }
   return {
     ...current,
-    text: current.text + chunkText,
-    error: current.error || partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+    // task.status 是完整快照 heartbeat，而不是增量文本；只保留最新一帧，
+    // 避免长任务每秒追加同一 JSON 并保证刷新后的审批状态可恢复。
+    text: replaceText ? chunkText : current.text + chunkText,
+    error: nextError,
     createdAt: partial.createdAt,
   }
+}
+
+function isTaskStatusPartial(payload: Record<string, unknown>): boolean {
+  const details = payload.details
+  return isRecord(details) && details.kind === 'task.status'
 }
 
 /** 当 tool partial overlay 属于同一 invocation attempt 且没有陈旧时返回 true。 */

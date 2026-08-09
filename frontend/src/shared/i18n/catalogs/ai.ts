@@ -189,6 +189,10 @@ export const aiCatalog = {
     'en-US': 'Skills',
     'zh-CN': 'Skills',
   },
+  'ai.catalog.card.subagents': {
+    'en-US': 'Subagents',
+    'zh-CN': 'Subagents',
+  },
   'ai.catalog.card.ref': {
     'en-US': 'Ref',
     'zh-CN': 'Ref',
@@ -468,6 +472,10 @@ export const aiCatalog = {
   'ai.catalog.form.noCandidateSkills': {
     'en-US': 'No candidate Skills',
     'zh-CN': '暂无候选 Skills',
+  },
+  'ai.catalog.form.noCandidateSubagents': {
+    'en-US': 'No candidate Subagents',
+    'zh-CN': '暂无候选 Subagents',
   },
   'ai.catalog.form.skillCatalogSource': {
     'en-US': 'Skill Catalog Environment',
@@ -1253,6 +1261,150 @@ export const aiCatalog = {
   'ai.runtime.status.environmentText': {
     'en-US': 'env:{{name}}',
     'zh-CN': 'env:{{name}}',
+  },
+  'ai.runtime.status.taskStatusOn': {
+    'en-US': 'task-status:on',
+    'zh-CN': 'task-status:on',
+  },
+  'ai.runtime.status.taskStatusOff': {
+    'en-US': 'task-status:off',
+    'zh-CN': 'task-status:off',
+  },
+  'ai.runtime.status.taskStatusToggleTitle': {
+    'en-US': 'Toggle the live subagent task widget',
+    'zh-CN': '切换子任务实时状态组件',
+  },
+  'ai.runtime.status.notificationsOn': {
+    'en-US': 'notify:on',
+    'zh-CN': 'notify:on',
+  },
+  'ai.runtime.status.notificationsOff': {
+    'en-US': 'notify:off',
+    'zh-CN': 'notify:off',
+  },
+  'ai.runtime.status.notificationsDenied': {
+    'en-US': 'notify:denied',
+    'zh-CN': 'notify:denied',
+  },
+  'ai.runtime.status.notificationsUnsupported': {
+    'en-US': 'notify:unsupported',
+    'zh-CN': 'notify:unsupported',
+  },
+  'ai.runtime.status.notificationsToggleTitle': {
+    'en-US': 'Toggle browser notifications',
+    'zh-CN': '切换浏览器通知',
+  },
+  'ai.runtime.notification.unsupported': {
+    'en-US': 'This browser does not support notifications.',
+    'zh-CN': '当前浏览器不支持通知。',
+  },
+  'ai.runtime.notification.denied': {
+    'en-US': 'Browser notification permission was denied.',
+    'zh-CN': '浏览器通知权限已被拒绝。',
+  },
+  'ai.runtime.notification.permissionTitle': {
+    'en-US': 'Approval requested',
+    'zh-CN': '等待审批',
+  },
+  'ai.runtime.notification.permissionBody': {
+    'en-US': '{{title}} is waiting to run {{toolName}}.',
+    'zh-CN': '{{title}} 正在等待运行 {{toolName}}。',
+  },
+  'ai.runtime.notification.permissionBodyWithReason': {
+    'en-US': '{{title}} is waiting to run {{toolName}}: {{reason}}',
+    'zh-CN': '{{title}} 正在等待运行 {{toolName}}：{{reason}}',
+  },
+  'ai.runtime.notification.completedTitle': {
+    'en-US': 'Agent completed',
+    'zh-CN': 'Agent 已完成',
+  },
+  'ai.runtime.notification.errorTitle': {
+    'en-US': 'Agent failed',
+    'zh-CN': 'Agent 执行失败',
+  },
+  'ai.runtime.notification.agentBody': {
+    'en-US': '{{title}}',
+    'zh-CN': '{{title}}',
+  },
+  'ai.runtime.task.widget': {
+    'en-US': 'Subagent tasks',
+    'zh-CN': '子任务',
+  },
+  'ai.runtime.task.running': {
+    'en-US': '{{count}} running',
+    'zh-CN': '{{count}} 个运行中',
+  },
+  'ai.runtime.task.state.queued': {
+    'en-US': 'queued',
+    'zh-CN': '排队中',
+  },
+  'ai.runtime.task.state.runningModel': {
+    'en-US': 'running model',
+    'zh-CN': '模型运行中',
+  },
+  'ai.runtime.task.state.runningTool': {
+    'en-US': 'running tool',
+    'zh-CN': '工具运行中',
+  },
+  'ai.runtime.task.state.waitingApproval': {
+    'en-US': 'waiting approval',
+    'zh-CN': '等待审批',
+  },
+  'ai.runtime.task.state.completed': {
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
+  },
+  'ai.runtime.task.state.error': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
+  },
+  'ai.runtime.task.state.cancelled': {
+    'en-US': 'Cancelled',
+    'zh-CN': '已取消',
+  },
+  'ai.runtime.task.turns': {
+    'en-US': '{{count}} turns',
+    'zh-CN': '{{count}} 轮',
+  },
+  'ai.runtime.task.toolCalls': {
+    'en-US': '{{count}} tool calls',
+    'zh-CN': '{{count}} 次工具调用',
+  },
+  'ai.runtime.task.subagent': {
+    'en-US': 'Subagent',
+    'zh-CN': '子代理',
+  },
+  'ai.runtime.task.prompt': {
+    'en-US': 'Prompt',
+    'zh-CN': '任务提示',
+  },
+  'ai.runtime.task.session': {
+    'en-US': 'Session',
+    'zh-CN': '会话',
+  },
+  'ai.runtime.task.maxTurns': {
+    'en-US': 'Max turns',
+    'zh-CN': '最大轮数',
+  },
+  'ai.runtime.task.report': {
+    'en-US': 'Report',
+    'zh-CN': '报告',
+  },
+  'ai.runtime.task.error': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
+  },
+  'ai.runtime.task.approvalRequested': {
+    'en-US': 'Awaiting approval for {{toolName}}',
+    'zh-CN': '等待审批：{{toolName}}',
+  },
+  'ai.runtime.task.allowTool': {
+    'en-US': 'Allow {{toolName}}',
+    'zh-CN': '允许 {{toolName}}',
+  },
+  'ai.runtime.task.denyTool': {
+    'en-US': 'Deny {{toolName}}',
+    'zh-CN': '拒绝 {{toolName}}',
   },
   'ai.runtime.entry.rootTitle': {
     'en-US': 'Conversation started',

@@ -48,6 +48,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     config: {
       tools: ['read', 'bash', 'grep'],
       skills: ['dev'],
+      subagents: ['writer'],
     },
     version: '1',
     createTime: null,
@@ -96,6 +97,46 @@ describe('AI resource cards', () => {
     expect(onDelete).toHaveBeenCalledOnce()
   })
 
+  it('renders agent subagents as a tagged row with the same 2-item limit', () => {
+    const { rerender } = render(
+      <AgentResourceCard
+        agent={agent({
+          config: {
+            tools: [],
+            skills: [],
+            subagents: ['helper', 'writer', 'architect'],
+          },
+        })}
+        models={[]}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+        deletePending={false}
+      />,
+    )
+
+    // 标签行保留 label；tag limit 沿用 2，第 3 个折叠为 +1。
+    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    expect(screen.getByText('helper')).toBeInTheDocument()
+    expect(screen.getByText('writer')).toBeInTheDocument()
+    expect(screen.queryByText('architect')).not.toBeInTheDocument()
+    expect(screen.getByText('+1')).toBeInTheDocument()
+
+    // 空 subagents 行保留 label，右侧留空。
+    rerender(
+      <AgentResourceCard
+        agent={agent({
+          config: { tools: [], skills: [], subagents: [] },
+        })}
+        models={[]}
+        onEdit={() => undefined}
+        onDelete={() => undefined}
+        deletePending={false}
+      />,
+    )
+    expect(screen.getByText('Subagents')).toBeInTheDocument()
+    expect(screen.queryByText('+1')).not.toBeInTheDocument()
+  })
+
   it('renders missing agent references without inventing metadata', () => {
     const { rerender } = render(
       <AgentResourceCard
@@ -105,6 +146,7 @@ describe('AI resource cards', () => {
           config: {
             tools: [],
             skills: [],
+            subagents: [],
           },
         })}
         models={[]}

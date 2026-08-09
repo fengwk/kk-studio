@@ -14,6 +14,7 @@ const EMPTY_AGENT_DRAFT = {
   variant: '',
   tools: [],
   skills: [],
+  subagents: [],
 }
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {

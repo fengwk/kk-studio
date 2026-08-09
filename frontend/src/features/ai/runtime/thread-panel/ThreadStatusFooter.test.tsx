@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
 
@@ -100,5 +101,30 @@ describe('ThreadStatusFooter', () => {
         Object.defineProperty(HTMLElement.prototype, 'clientWidth', descriptor)
       }
     }
+  })
+
+  it('renders clickable task-status and browser-notification toggles when supplied', async () => {
+    const user = userEvent.setup()
+    let taskToggles = 0
+    let notificationToggles = 0
+    render(
+      <ThreadStatusFooter
+        agentName="assistant"
+        taskStatusEnabled
+        notificationsEnabled={false}
+        notificationPermission="default"
+        onTaskStatusToggle={() => {
+          taskToggles += 1
+        }}
+        onNotificationsToggle={() => {
+          notificationToggles += 1
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'task-status:on' }))
+    await user.click(screen.getByRole('button', { name: 'notify:off' }))
+    expect(taskToggles).toBe(1)
+    expect(notificationToggles).toBe(1)
   })
 })

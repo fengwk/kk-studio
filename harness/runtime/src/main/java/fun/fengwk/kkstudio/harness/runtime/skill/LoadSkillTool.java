@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -99,8 +100,12 @@ public final class LoadSkillTool implements Tool {
         return handle;
       }
       SkillBinding skill = selected.get();
+      if (skill.sourceEnvironmentName() == null) {
+        complete(handle, error(callId, "skill has no Environment body: " + skill.name()));
+        return handle;
+      }
       CompletableFuture<SkillBodyLoader.SkillBodyLoadResult> future =
-          skillBodyLoader.load(skill.sourceEnvironment(), skill.name(), loadTimeout);
+          skillBodyLoader.load(skill.sourceEnvironmentName(), skill.name(), loadTimeout);
       handle.future.set(future);
       future.whenComplete(
           (result, error) -> {

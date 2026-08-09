@@ -191,10 +191,11 @@ export function agentConfigMatrix() {
     {
       id: 'valid.empty_lists',
       ok: true,
-      title: '空 tools/skills',
+      title: '空 tools/skills/subagents',
       build: () => ({
         tools: [],
         skills: [],
+        subagents: [],
       }),
     },
     {
@@ -204,6 +205,7 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: ['create_goal', 'get_goal', 'update_goal'],
         skills: [],
+        subagents: [],
       }),
     },
     {
@@ -214,6 +216,7 @@ export function agentConfigMatrix() {
       title: 'tools 必填',
       build: () => ({
         skills: [],
+        subagents: [],
       }),
     },
     {
@@ -224,6 +227,18 @@ export function agentConfigMatrix() {
       title: 'skills 必填',
       build: () => ({
         tools: [],
+        subagents: [],
+      }),
+    },
+    {
+      id: 'invalid.missing_subagents',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /subagents.*required/i,
+      title: 'subagents 必填',
+      build: () => ({
+        tools: [],
+        skills: [],
       }),
     },
     {
@@ -235,6 +250,7 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: ['definitely-not-a-real-tool'],
         skills: [],
+        subagents: [],
       }),
     },
     {
@@ -246,6 +262,31 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         skills: ['a', 'a'],
+        subagents: [],
+      }),
+    },
+    {
+      id: 'invalid.duplicate_subagent',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /duplicate|subagent/i,
+      title: 'subagents 重复',
+      build: () => ({
+        tools: [],
+        skills: [],
+        subagents: ['missing-agent', 'missing-agent'],
+      }),
+    },
+    {
+      id: 'invalid.unknown_subagent',
+      ok: false,
+      expectStatus: 404,
+      messageIncludes: /agent_definition.*not found|not found/i,
+      title: '未知 subagent 引用',
+      build: () => ({
+        tools: [],
+        skills: [],
+        subagents: ['definitely-not-a-real-agent'],
       }),
     },
     {
@@ -257,6 +298,7 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         skills: [],
+        subagents: [],
         unexpected: true,
       }),
     },

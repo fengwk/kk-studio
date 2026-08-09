@@ -48,6 +48,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(modelRef, definition.getModel());
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
+    assertEquals(List.of(), definition.getConfig().getSubagents());
     assertEquals("0", definition.getVersion());
     assertThrows(
         AiDuplicateException.class,
@@ -87,6 +88,54 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
         AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
     agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
+  }
+
+  @Test
+  void subagentAllowlistRequiresLiveReferencesAndPreventsDeletion() {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("subagent-provider-" + suffix);
+    AgentModelDTO model = model(provider.getName(), "subagent-model-" + suffix);
+    String modelRef = provider.getName() + "/" + model.getName();
+    AgentDefinitionDTO child =
+        agentDefinitionService.createAgent(agent(modelRef, "subagent-child-" + suffix));
+    AgentDefinitionCreateDTO parentCreate = agent(modelRef, "subagent-parent-" + suffix);
+    parentCreate.getConfig().setSubagents(List.of(child.getName()));
+    AgentDefinitionDTO parent = agentDefinitionService.createAgent(parentCreate);
+    try {
+      assertEquals(List.of(child.getName()), parent.getConfig().getSubagents());
+      assertThrows(
+          AiInUseException.class,
+          () -> agentDefinitionService.deleteAgent(child.getName(), child.getVersion()));
+
+      AgentDefinitionCreateDTO missing = agent(modelRef, "subagent-missing-" + suffix);
+      missing.getConfig().setSubagents(List.of("missing-" + suffix));
+      assertThrows(
+          AiResourceNotFoundException.class, () -> agentDefinitionService.createAgent(missing));
+
+      AgentDefinitionUpdateDTO removeReference = new AgentDefinitionUpdateDTO();
+      removeReference.setDescription(parent.getDescription());
+      removeReference.setSystemPrompt(parent.getSystemPrompt());
+      removeReference.setVariant(parent.getVariant());
+      removeReference.setConfig(parent.getConfig());
+      removeReference.getConfig().setSubagents(List.of());
+      removeReference.setExpectedVersion(parent.getVersion());
+      parent = agentDefinitionService.updateAgent(parent.getName(), removeReference);
+
+      agentDefinitionService.deleteAgent(child.getName(), child.getVersion());
+      agentDefinitionService.deleteAgent(parent.getName(), parent.getVersion());
+    } finally {
+      if (agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+          .anyMatch(candidate -> candidate.getName().equals(parentCreate.getName()))) {
+        AgentDefinitionDTO current =
+            agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
+                .filter(candidate -> candidate.getName().equals(parentCreate.getName()))
+                .findFirst()
+                .orElseThrow();
+        agentDefinitionService.deleteAgent(current.getName(), current.getVersion());
+      }
+      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
+    }
   }
 
   @Test
@@ -139,6 +188,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
+    config.setSubagents(List.of());
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
     dto.setName(name);
     dto.setModel(model);

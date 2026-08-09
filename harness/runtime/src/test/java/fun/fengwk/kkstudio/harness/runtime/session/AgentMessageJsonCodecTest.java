@@ -25,7 +25,7 @@ class AgentMessageJsonCodecTest {
                 new AudioMessageContent("audio/wav", "https://example.test/audio.wav"),
                 new ThinkingMessageContent("reasoning"),
                 new JsonMessageContent("[1,{\"ok\":true}]"),
-                new ToolCallMessageContent("call-1", "read", "{\"path\":\"README.md\"}"),
+                new ToolCallMessageContent("call-1", "read", "read", "{\"path\":\"README.md\"}"),
                 new ResourceMessageContent(
                     new ResourceRef(
                         "data:text/plain,hello",
@@ -48,6 +48,7 @@ class AgentMessageJsonCodecTest {
                 new ToolResultMessageContent(
                     "call-1",
                     "read",
+                    "read",
                     List.of(new TextMessageContent("ok"), new JsonMessageContent("{}")),
                     false,
                     "{\"exitCode\":0}")));
@@ -63,22 +64,30 @@ class AgentMessageJsonCodecTest {
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"call-1\","
-            + "\"toolName\":\"read\",\"argumentsJson\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}",
+            + "\"toolName\":\"read\",\"rendererKey\":\"read\","
+            + "\"argumentsJson\":\"{\\\"path\\\":\\\"README.md\\\"}\"}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
-                    new ToolCallMessageContent("call-1", "read", "{\"path\":\"README.md\"}")))));
+                    new ToolCallMessageContent(
+                        "call-1", "read", "read", "{\"path\":\"README.md\"}")))));
     assertEquals(
         "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"call-1\","
-            + "\"toolName\":\"read\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],"
+            + "\"toolName\":\"read\",\"rendererKey\":\"read\","
+            + "\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],"
             + "\"error\":false,\"detailsJson\":\"{}\"}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.TOOL,
                 List.of(
                     new ToolResultMessageContent(
-                        "call-1", "read", List.of(new TextMessageContent("ok")), false, "{}")))));
+                        "call-1",
+                        "read",
+                        "read",
+                        List.of(new TextMessageContent("ok")),
+                        false,
+                        "{}")))));
     // resource 是扁平精确字段：所有可空字段显式写出为 JSON null。
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
@@ -267,12 +276,16 @@ class AgentMessageJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\",\"toolName\":\"t\",\"argumentsJson\":\"[1]\"}]}"));
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"[1]\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\",\"toolName\":\"t\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],\"error\":false,\"detailsJson\":\"\\\"x\\\"\"}]}"));
+                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\","
+                    + "\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
+                    + "\"error\":false,\"detailsJson\":\"\\\"x\\\"\"}]}"));
   }
 
   @Test
@@ -288,7 +301,7 @@ class AgentMessageJsonCodecTest {
             codec.encode(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
-                    List.of(new ToolCallMessageContent("c", "t", "[1]")))));
+                    List.of(new ToolCallMessageContent("c", "t", "t", "[1]")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -297,7 +310,7 @@ class AgentMessageJsonCodecTest {
                     AgentMessageRole.TOOL,
                     List.of(
                         new ToolResultMessageContent(
-                            "c", "t", List.of(new TextMessageContent("x")), false, "5")))));
+                            "c", "t", "t", List.of(new TextMessageContent("x")), false, "5")))));
   }
 
   @Test
@@ -312,7 +325,8 @@ class AgentMessageJsonCodecTest {
                         new ToolResultMessageContent(
                             "c",
                             "t",
-                            List.of(new ToolCallMessageContent("c2", "t2", "{}")),
+                            "t",
+                            List.of(new ToolCallMessageContent("c2", "t2", "t2", "{}")),
                             false,
                             "{}")))));
     assertThrows(
@@ -325,9 +339,15 @@ class AgentMessageJsonCodecTest {
                         new ToolResultMessageContent(
                             "c",
                             "t",
+                            "t",
                             List.of(
                                 new ToolResultMessageContent(
-                                    "c2", "t2", List.of(new TextMessageContent("x")), false, "{}")),
+                                    "c2",
+                                    "t2",
+                                    "t2",
+                                    List.of(new TextMessageContent("x")),
+                                    false,
+                                    "{}")),
                             false,
                             "{}")))));
     assertThrows(
@@ -335,15 +355,19 @@ class AgentMessageJsonCodecTest {
         () ->
             codec.decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
-                    + "\"toolName\":\"t\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c2\","
-                    + "\"toolName\":\"t2\",\"argumentsJson\":\"{}\"}],\"error\":false,\"detailsJson\":\"{}\"}]}"));
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\","
+                    + "\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c2\","
+                    + "\"toolName\":\"t2\",\"rendererKey\":\"t2\",\"argumentsJson\":\"{}\"}],"
+                    + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
-                    + "\"toolName\":\"t\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c2\","
-                    + "\"toolName\":\"t2\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\","
+                    + "\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c2\","
+                    + "\"toolName\":\"t2\",\"rendererKey\":\"t2\","
+                    + "\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
                     + "\"error\":false,\"detailsJson\":\"{}\"}],\"error\":false,\"detailsJson\":\"{}\"}]}"));
   }
 
@@ -353,16 +377,22 @@ class AgentMessageJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\",\"toolName\":\"t\",\"argumentsJson\":\"{}\"}]}"));
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"{}\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\",\"toolName\":\"t\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],\"error\":\"no\",\"detailsJson\":\"{}\"}]}"));
+                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\","
+                    + "\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
+                    + "\"error\":\"no\",\"detailsJson\":\"{}\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\",\"toolName\":\"t\",\"contents\":{},\"error\":false,\"detailsJson\":\"{}\"}]}"));
+                "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
+                    + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"contents\":{},"
+                    + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
   }
 }

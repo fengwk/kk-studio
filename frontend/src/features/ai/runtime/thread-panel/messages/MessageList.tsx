@@ -8,6 +8,7 @@ import type {
   DialogueMessage,
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 
 /** 将每条对话消息分派给对应的块组件（pi 风格按消息类型分发）。 */
 export function MessageList({
@@ -20,6 +21,7 @@ export function MessageList({
   /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
   approvalPending?: boolean
 }) {
+  const extensionHost = useOptionalExtensionHostSnapshot()
   return (
     <>
       {messages.map((message) => {
@@ -30,15 +32,18 @@ export function MessageList({
             return <AssistantMessageBlock key={message.id} message={message} />
           case 'system':
             return <SystemMessageBlock key={message.id} message={message} />
-          case 'tool':
+          case 'tool': {
+            const renderer = extensionHost?.toolRenderers.get(message.rendererKey)?.component
             return (
               <ToolMessageBlock
                 key={message.id}
                 message={message}
+                renderer={renderer}
                 onDecideApproval={onDecideApproval}
                 approvalPending={approvalPending}
               />
             )
+          }
           case 'meta':
             return <MetaMessageBlock key={message.id} message={message} />
           case 'entry':

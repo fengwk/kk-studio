@@ -13,9 +13,7 @@ import java.util.List;
  */
 @Data
 public class HarnessBranchSettingsDTO {
-  /**
-   * 可空的 live Environment 路由身份：canonical lowercase UUID（非 nil）；null 表示未绑定 Environment，显示名永不进入该快照。
-   */
+  /** 可空的 live Environment 路由身份：canonical bounded 小写名称；null 表示未绑定 Environment，显示名永不进入该快照。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentName;
 

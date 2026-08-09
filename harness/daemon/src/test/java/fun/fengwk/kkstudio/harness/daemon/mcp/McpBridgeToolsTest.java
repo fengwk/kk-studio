@@ -36,7 +36,9 @@ class McpBridgeToolsTest {
   @Test
   void listToolsReportsAllServerStatusesAndReadySchemas() throws Exception {
     ToolExecutionRequest request = request("mcp_list_tools", "{}");
-    McpListToolsTool tool = new McpListToolsTool(registry(new FakeClient("fs")));
+    FakeClient client = new FakeClient("fs");
+    McpListToolsTool tool = new McpListToolsTool(registry(client));
+    client.tools = List.of(new McpToolSpec("late_tool", "Late tool", "{\"name\":\"late_tool\"}"));
 
     ToolResult result = new RecordingListener().execute(tool, request);
 
@@ -55,6 +57,7 @@ class McpBridgeToolsTest {
     assertEquals("FAILED", root.path("servers").get(1).path("status").asText());
     assertTrue(root.path("servers").get(1).path("error").isTextual());
     assertEquals(0, root.path("servers").get(1).path("tools").size());
+    assertEquals(1, client.listCalls.get());
   }
 
   @Test
@@ -76,6 +79,22 @@ class McpBridgeToolsTest {
             .execute(tool, request("mcp_list_tools", "{\"server\":\"missing\"}"));
     assertTrue(unknown.error());
     assertTrue(((TextToolContent) unknown.contents().get(0)).text().contains("unknown MCP server"));
+  }
+
+  @Test
+  void listToolsDoesNotExposeFrozenSchemaRenderingFailures() throws Exception {
+    FakeClient client = new FakeClient("fs");
+    client.tools = List.of(new McpToolSpec("read_file", "Read a file", "credential=secret-value"));
+    McpListToolsTool tool = new McpListToolsTool(registry(client));
+
+    ToolResult result = new RecordingListener().execute(tool, request("mcp_list_tools", "{}"));
+
+    assertTrue(result.error());
+    assertEquals(
+        "Error: MCP tool catalog rendering failed.",
+        ((TextToolContent) result.contents().get(0)).text());
+    assertFalse(((TextToolContent) result.contents().get(0)).text().contains("secret-value"));
+    assertEquals(1, client.listCalls.get());
   }
 
   @Test
@@ -221,6 +240,17 @@ class McpBridgeToolsTest {
     private final String name;
     private final Map<String, McpCallOutcome> outcomes = new LinkedHashMap<>();
     private final AtomicInteger calls = new AtomicInteger();
+    private final AtomicInteger listCalls = new AtomicInteger();
+    private volatile List<McpToolSpec> tools =
+        List.of(
+            new McpToolSpec(
+                "read_file",
+                "Read a file",
+                "{\"name\":\"read_file\",\"description\":\"Read a file\","
+                    + "\"parameters\":{\"type\":\"object\",\"properties\":{}}}"),
+            new McpToolSpec("echo", "Echo", "{\"name\":\"echo\"}"),
+            new McpToolSpec("sum", "Sum", "{\"name\":\"sum\"}"),
+            new McpToolSpec("boom", "Boom", "{\"name\":\"boom\"}"));
     private volatile String lastArguments;
 
     private FakeClient(String name) {
@@ -234,15 +264,8 @@ class McpBridgeToolsTest {
 
     @Override
     public List<McpToolSpec> listTools() {
-      return List.of(
-          new McpToolSpec(
-              "read_file",
-              "Read a file",
-              "{\"name\":\"read_file\",\"description\":\"Read a file\","
-                  + "\"parameters\":{\"type\":\"object\",\"properties\":{}}}"),
-          new McpToolSpec("echo", "Echo", "{\"name\":\"echo\"}"),
-          new McpToolSpec("sum", "Sum", "{\"name\":\"sum\"}"),
-          new McpToolSpec("boom", "Boom", "{\"name\":\"boom\"}"));
+      listCalls.incrementAndGet();
+      return tools;
     }
 
     @Override

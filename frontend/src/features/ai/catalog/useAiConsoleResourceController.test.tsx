@@ -278,7 +278,8 @@ function agent() {
     variant: 'default',
     config: {
       tools: [],
-      skills: []
+      skills: [],
+      subagents: [],
     },
     version: '0',
     createTime: '2026-06-20T02:00:00',

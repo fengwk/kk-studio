@@ -11,6 +11,8 @@ export function getToolAttachmentLabel(attachment: ToolAttachment): string {
 
 /** UI 视作安全的链接/预览目标的资源 scheme。 */
 const RESOURCE_URI_PATTERN = /^(data:|file:|s3:|https?:\/\/)/i
+const DIRECT_RESOURCE_URI_PATTERN = /^(data:|https?:\/\/)/i
+const MANAGED_RESOURCE_URI_PATTERN = /^(file:|s3:)/i
 
 /**
  * 当 URI 是内联 data: 资源时可自动预览。远程 http(s) 与本地
@@ -42,13 +44,22 @@ export function toToolAttachmentSrc(attachment: ToolAttachment): string | null {
   return null
 }
 
-/** 返回稳定 URI 作为链接目标；只有规范的 data/file/s3/http/https scheme 符合条件。 */
+/**
+ * 返回完整资源链接。data/http(s) 保持显式直连；file/s3 只按内容身份走同源 managed-resource 下载，
+ * 绝不把宿主文件 URI 直接交给浏览器。
+ */
 export function getToolAttachmentHref(attachment: ToolAttachment): string | null {
   const uri = attachment.data.trim()
   if (!uri || !isCanonicalResourceUri(uri)) {
     return null
   }
-  return uri
+  if (DIRECT_RESOURCE_URI_PATTERN.test(uri)) {
+    return uri
+  }
+  if (MANAGED_RESOURCE_URI_PATTERN.test(uri)) {
+    return attachment.downloadHref?.trim() || null
+  }
+  return null
 }
 
 export function formatToolAttachmentFallback(attachment: ToolAttachment): string {

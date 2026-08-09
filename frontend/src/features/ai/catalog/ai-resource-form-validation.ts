@@ -25,6 +25,7 @@ export type ResourceFieldKey =
   | 'variant'
   | 'tools'
   | 'skills'
+  | 'subagents'
   | 'general'
 
 export interface ResourceFormValidationResult {
@@ -79,6 +80,10 @@ function mapError(error: unknown): ResourceFormValidationResult {
   }
   if (/skills/i.test(raw)) {
     return { ok: false, message, fields: { skills: message } }
+  }
+  // subagents 必须先于通用 name 匹配命中：duplicate 文案包含英文 "names"。
+  if (/subagents/i.test(raw)) {
+    return { ok: false, message, fields: { subagents: message } }
   }
   if (/name/i.test(raw) && !/variant/i.test(raw)) {
     return { ok: false, message, fields: { name: message } }

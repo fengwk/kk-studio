@@ -20,6 +20,9 @@ describe('AI extension composition architecture', () => {
       'ai.resource-editor',
       'ai.delete-resource',
     ])
+    // task renderer 必须通过 extension 注册（rendererKey = contribution id），
+    // MessageList 不做 name switch。
+    expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
     expect(comfyuiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['ai.comfyui', 'comfyui'],
     ])

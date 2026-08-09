@@ -154,7 +154,7 @@ public final class HarnessRuntimeTestFixtures {
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
-            List.of(new ToolCallMessageContent("call-1", "web_search", "{}")));
+            List.of(new ToolCallMessageContent("call-1", "web_search", "web_search", "{}")));
     MessagePayload payload =
         new MessagePayload(
             message,

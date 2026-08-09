@@ -82,7 +82,7 @@ class CoreToolGatewayPluginTest {
   }
 
   @Test
-  void validPluginIntentIsValidatedThenDeliveredAsAPluginOwnedEffect() {
+  void validPluginAppendIsValidatedThenDeliveredAsAPluginOwnedEffect() {
     CustomEntryPayload payload =
         new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}");
     PluginTool tool =

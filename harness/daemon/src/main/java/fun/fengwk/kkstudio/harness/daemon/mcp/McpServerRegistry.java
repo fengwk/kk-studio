@@ -55,13 +55,15 @@ public final class McpServerRegistry implements AutoCloseable {
       McpServerClient client = null;
       try {
         client = factory.create(server, defaultTimeout);
-        List<DaemonMcpToolDescriptor> tools = summarize(client.listTools());
+        List<McpToolSpec> toolSpecs = freeze(client.listTools());
+        List<DaemonMcpToolDescriptor> tools = summarize(toolSpecs);
         states.add(
             new ServerState(
                 server,
                 new DaemonMcpServerDescriptor(
                     server.name(), DaemonMcpServerStatus.READY, null, tools),
-                client));
+                client,
+                toolSpecs));
       } catch (RuntimeException error) {
         // client 已创建但工具摘要失败时，必须恰好关闭一次，避免泄漏半初始化 client。
         if (client != null) {
@@ -79,7 +81,8 @@ public final class McpServerRegistry implements AutoCloseable {
                     DaemonMcpServerStatus.FAILED,
                     sanitize(server, error),
                     List.of()),
-                null));
+                null,
+                List.of()));
       }
     }
   }
@@ -106,6 +109,19 @@ public final class McpServerRegistry implements AutoCloseable {
     return Optional.empty();
   }
 
+  /** 返回 READY server 在启动时冻结的完整工具规格；未知或 FAILED server 返回 empty。 */
+  synchronized Optional<List<McpToolSpec>> toolSpecs(String name) {
+    if (name == null || name.isBlank()) {
+      return Optional.empty();
+    }
+    for (ServerState state : states) {
+      if (state.config.name().equals(name)) {
+        return state.client == null ? Optional.empty() : Optional.of(state.toolSpecs);
+      }
+    }
+    return Optional.empty();
+  }
+
   /** 精确校验 READY server 的冻结工具列表是否包含 {@code toolName}；未知/FAILED server 或未知工具返回 false。 */
   public synchronized boolean hasTool(String serverName, String toolName) {
     if (serverName == null || serverName.isBlank() || toolName == null || toolName.isBlank()) {
@@ -116,7 +132,7 @@ public final class McpServerRegistry implements AutoCloseable {
         if (state.client == null) {
           return false;
         }
-        for (DaemonMcpToolDescriptor tool : state.summary.tools()) {
+        for (McpToolSpec tool : state.toolSpecs) {
           if (tool.name().equals(toolName)) {
             return true;
           }
@@ -145,8 +161,11 @@ public final class McpServerRegistry implements AutoCloseable {
     }
   }
 
+  private static List<McpToolSpec> freeze(List<McpToolSpec> tools) {
+    return List.copyOf(Objects.requireNonNull(tools, "client.listTools()"));
+  }
+
   private static List<DaemonMcpToolDescriptor> summarize(List<McpToolSpec> tools) {
-    Objects.requireNonNull(tools, "client.listTools()");
     List<DaemonMcpToolDescriptor> result = new ArrayList<>(tools.size());
     for (McpToolSpec tool : tools) {
       result.add(new DaemonMcpToolDescriptor(tool.name(), tool.description()));
@@ -197,12 +216,17 @@ public final class McpServerRegistry implements AutoCloseable {
     private final McpServerConfig config;
     private final DaemonMcpServerDescriptor summary;
     private final McpServerClient client;
+    private final List<McpToolSpec> toolSpecs;
 
     private ServerState(
-        McpServerConfig config, DaemonMcpServerDescriptor summary, McpServerClient client) {
+        McpServerConfig config,
+        DaemonMcpServerDescriptor summary,
+        McpServerClient client,
+        List<McpToolSpec> toolSpecs) {
       this.config = config;
       this.summary = summary;
       this.client = client;
+      this.toolSpecs = toolSpecs;
     }
   }
 }

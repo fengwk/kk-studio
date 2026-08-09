@@ -3,20 +3,17 @@ package fun.fengwk.kkstudio.core.ai.runtime.skill;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.skill.SkillBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
 /**
  * 从与已 claim 的 Model invocation 一起持久化的不可变请求中解析选中的 skills。
  *
- * <p>用新的 {@link ModelInvocationRequestJsonCodec} 解码冻结的请求，并把持久的 {@link
- * fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding}（canonical {@code
- * EnvironmentName} 路由，平台技能可为 null）映射回 {@code LoadSkillTool} 消费的旧 {@link SkillBinding} 表面；没有源
- * environment 的平台技能没有可加载正文，按 fail-closed 处理。
+ * <p>用 {@link ModelInvocationRequestJsonCodec} 解码冻结请求并直接返回其中的 canonical {@link SkillBinding}；
+ * source Environment 可空，是否存在可加载正文由 {@code LoadSkillTool} 对目标 skill 精确判定。
  */
 @Component
 public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSkillLookup {
@@ -41,17 +38,6 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
     if (requestJson == null) {
       return List.of();
     }
-    var frozen = REQUEST_CODEC.decode(requestJson).skillBindings();
-    List<SkillBinding> mapped = new ArrayList<>(frozen.size());
-    for (var skill : frozen) {
-      if (skill.sourceEnvironmentName() == null) {
-        throw new IllegalArgumentException(
-            "skill binding has no source environment: " + skill.name());
-      }
-      mapped.add(
-          new SkillBinding(
-              skill.name(), skill.description(), skill.sourceEnvironmentName().value()));
-    }
-    return List.copyOf(mapped);
+    return REQUEST_CODEC.decode(requestJson).skillBindings();
   }
 }

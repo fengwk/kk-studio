@@ -30,6 +30,7 @@ export type EntryType =
   | 'CUSTOM_MESSAGE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
+  | 'COMPACTION'
   | 'TURN_END'
 
 /** Session Entry 查询投影；id 均为严格的正十进制数字字符串。 */
@@ -181,6 +182,7 @@ export interface ToolInvocationDTO {
   toolCallId: string
   toolName: string
   toolVersion: string
+  rendererKey: string
   toolType: string
   environmentName: string | null
   argumentsJson: string

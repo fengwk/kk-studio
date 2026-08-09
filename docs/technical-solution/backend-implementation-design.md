@@ -26,7 +26,7 @@ flowchart LR
 | `share` | DTO、JSON 字段、分页与错误边界 |
 | `web` | 生产组合根、Runtime/dispatcher/listener 生命周期、路由、参数校验、HTTP 状态、SSE emitter、WebSocket v2 adapter |
 | `core.ai.catalog` | Provider/Model/Agent 的名称身份、结构化 config 与版本并发 |
-| `core.ai.chat` | Chat CRUD、`agentName`/`yoloEnabled` 可见发送设置与 Chat↔Thread 关系 |
+| `core.ai.chat` | Chat CRUD、`agentName`/可空默认 `environmentName`/`yoloEnabled` 可见发送设置与 Chat↔Thread 关系 |
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
 | `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
 | `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
@@ -55,9 +55,10 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | `web.runtime.HarnessRuntimeConfiguration` | 构造 PostgreSQL Store、Redis sink/tail、ResourceStore、Thread/Model/Tool Processor、`HarnessRuntime`、dispatcher/listener/executor；注入 Core 的 TurnResolver/ModelGateway/ToolGateway ports |
 | `HarnessRuntimeLifecycle` | 启动/停止 dispatcher 与 processor；REST/SSE 只经 `HarnessRuntime` 门面 |
 | `ModelExecutionConfiguration` | `ObjectProvider<ProviderFactory>` 收集并索引；`CoreModelGateway`（serialized FIFO 单 drainer 回调桥） |
-| `PluginCatalogConfiguration` | 收集 `HarnessPlugin` beans，补齐默认 `GoalPlugin`，构造并冻结 `PluginCatalog` |
+| `web.runtime.BuiltInPluginConfiguration` | 在生产组合根注册随应用交付的受信任 `GoalPlugin` |
+| `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
 | `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
-| `RuntimeToolsConfiguration` | 装配唯一 internal Platform Tool `load_skill`；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
+| `RuntimeToolsConfiguration` | 装配两个内部 Platform Tool `load_skill` 与 `task`（含 `SubagentConfig`、并发 reservation/活动 descendant relay 共用的 `SubagentRunRegistry`、子 Agent 执行线程池）；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
 | `HarnessRuntimeWebMapper` | strict decimal/JSON 校验：DTO → 领域命令 |
 
 ## 4. HTTP API
@@ -89,6 +90,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + Redis realtime overlay |
+| GET | `/api/ai/runtime/resources/{sha256}` | 按内容身份（`mediaType`/`size`/可选 `name`）同源下载 managed Resource：Core `ManagedResourceDownloadService` 通过 `ResourceStore.reference` 重建并读取 canonical `ResourceRef`，Web 只负责 attachment + `X-Content-Type-Options: nosniff` 响应 |
 
 **不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 查询、无 `/messages` 或 `/messages/custom` 端点（消息由 `/commands` 的 `USER_MESSAGE`/`CUSTOM_MESSAGE` 命令表达）、无 `expectedExecutionEpoch` 字段。
 
@@ -126,8 +128,26 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 | `ThreadProcessor` | Agent Loop：terminal apply、continuation、INPUT turn、QUIESCENT |
 | `ModelProcessor` | 两阶段激活、checkpoint/terminal 持久化、terminal-once、Thread revision touch、Work/realtime 与 reschedule；不写 Entry/head |
 | `ToolProcessor` | 两阶段激活、preflight、接收已验证/外部化的 terminal `ToolSuccess(result, effects)`、领域校验与严格 terminal CAS，并维护 Thread revision/Work/realtime；不写 Entry/head |
-| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`；冻结插件 contribution/state accesses，并注入插件 context projection；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝；skills 需最新选中 Environment live + 显式 `load_skill`；planning 拒绝共用 `PLANNING_FAILED` |
+| `DatabaseTurnResolver` | 以 candidate path + YOLO 解析冻结 `ModelInvocationRequest`（含 `subagentBindings`）；冻结插件 contribution/state accesses，并注入插件 context projection；ENVIRONMENT 工具按最新 `environmentName` 绑定、规划不拒绝；skills 需最新选中 Environment live + 显式 `load_skill`；`task` 只在 activeTools 含 task、allowlist 非空、depth < maxDepth 时绑定；planning 拒绝共用 `PLANNING_FAILED` |
+| `AgentPromptComposer` | 组合 system prompt 的唯一边界：Agent 正文 → `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令）；prompt 模板是 strict classpath resource（Pi 派生资源同目录保留 MIT `NOTICE`） |
+| `TaskTool` | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：校验冻结 allowlist、以 `createThread(SubagentContext)` 创建/恢复子 Thread、物化子 Agent branch settings、入队 task prompt、轮询等待并发布 `task.status` 心跳、以 `<task id state>` envelope 结束 |
+| `AgentBranchSettingsMaterializer` | 按最新 Agent/Model catalog 物化子 Agent 完整 `BranchSettings`：`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且 depth < maxDepth 时 task` |
+| `SubagentRunRegistry` | 进程内并发 reservation（每父/每根上限、resume 单飞）；不是 durable truth，durable 子 Session 仍是 Thread/Entry |
 | `HarnessWorkDispatcher` | Work-only claim、round-robin、bounded handoff、NOTIFY/poll 合并 |
+
+### Subagent 委派（task）运行语义
+
+`task` 是内部 `PLATFORM` Tool（`ToolDescriptor` 冻结 `rendererKey=task`、`ToolSideEffect.NON_IDEMPOTENT`）。Model 调用后 `TaskTool.execute` 在独立虚拟线程执行：
+
+- 参数 `{subagent_type, prompt, maxTurns?, session_id?}` 严格校验；`subagent_type` 必须命中父 Invocation 冻结的 `subagentBindings`（执行绝不重读父 Agent 配置）。
+- 新建时按 `AgentBranchSettingsMaterializer` 物化子 Agent branch settings（继承父 branch 的 `environmentName` 与父 Thread 的 YOLO），以 `createThread` 原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`）+ Thread（yolo 继承父 Thread），随后一个原子 batch 入队 settings diff + `USER_MESSAGE`（task prompt）；`clientCommandId` 以 `task-{invocationId}-{ordinal}` 稳定生成。
+- 恢复（`session_id`，十进制子 ThreadId）：要求 ROOT 的 parent/root 归属与当前父一致、子 Thread quiescent（无 model/tool siblings/queued、head 非 continueModel TURN_END）；目标 Agent 可在恢复时切换。
+- 轮询等待期间：以 durable snapshot 指纹判定活动（idle 超时排除 active tool 时间）；约 1s 一次发布非 durable `TOOL_PARTIAL` 心跳（完整 JSON 快照，`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）。`descendants` 由进程内活动 registry 扁平 relay 给祖先，仅用于实时展示和审批寻址；`turns >= maxTurns` 起每 5 turn 入队一条 SYSTEM `CUSTOM_MESSAGE` 软提醒；达到 idle 超时/被取消时 `stop` 子 Thread 并保留可恢复 Session。
+- 终态 ToolResult 为 `<task id state>` envelope（`<task_result>` / `<task_error>`，报告正文最多保留 8000 字符），`details.kind=task.result`；`state` 为 `completed` / `error` / `cancelled`。
+
+配置（`HarnessRuntimeProperties` → `SubagentConfig`）：`subagent-max-depth=2`、`subagent-max-concurrency=10`（每父）、`subagent-max-total-concurrency`（每根，默认不限）、`subagent-idle-timeout=0`（默认禁用）、`subagent-max-turns=50`、`subagent-poll-interval=100ms`。`SubagentRunRegistry` 只做进程内并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+
+权限保持既有管线：YOLO 在加载 settings/evaluator 之前直接 Allow；否则 Allow/Ask/Deny，Ask 即既有 ToolInvocation `WAITING_APPROVAL`，不存在第二套权限实体；子 Thread 继承父 Thread YOLO，子工具审批仍走同一 `POST /tool-invocations/{id}/approval` 端点（携带子 ThreadId）。
 
 ## 7. Snapshot-first SSE
 

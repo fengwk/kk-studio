@@ -688,7 +688,7 @@ final class HarnessRuntimeTestSupport {
       long id, long sessionId, long parentId, Instant createdAt, String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, "bash", "{}"));
+      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
     }
     contents.add(new TextMessageContent("assistant reply"));
     ProviderStopReason stopReason =
@@ -796,7 +796,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   static ModelInvocationRequest modelRequest() {
-    return new ModelInvocationRequest(ENV, providerRequest(), List.of(), List.of(), false);
+    return new ModelInvocationRequest(
+        ENV, providerRequest(), List.of(), List.of(), false, 100_000, null);
   }
 
   static ToolInvocationRequest toolRequest(String toolCallId) {
@@ -879,7 +880,7 @@ final class HarnessRuntimeTestSupport {
         "1.0",
         ToolType.PLATFORM,
         "description of " + name,
-        null,
+        name,
         new ToolParamsSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));

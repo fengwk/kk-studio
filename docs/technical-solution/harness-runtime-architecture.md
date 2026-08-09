@@ -38,7 +38,7 @@ harness-daemon -> harness-tool
 
 ### Session 与 Entry
 
-Session 只组织一棵 append-only Entry Tree。Entry 类型固定为八种：
+Session 只组织一棵 append-only Entry Tree。Entry 类型固定为九种：
 
 ```text
 ROOT
@@ -48,16 +48,18 @@ CUSTOM
 CUSTOM_MESSAGE
 ASSISTANT_ERROR
 ASSISTANT_ABORTED
+COMPACTION
 TURN_END
 ```
 
-- `ROOT` 是每个 Session 的唯一无 parent 根，payload 携带初始完整 `BranchSettings`。
-- `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION`）。
+- `ROOT` 是每个 Session 的唯一无 parent 根，payload 携带初始完整 `BranchSettings`；子 Agent Session 的 ROOT 额外携带可选 `SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}` 冻结委派归属（普通用户 Session 为 null）。
+- `TURN_START` 打开一次 Model response turn，payload 携带该 turn 的完整 `BranchSettings` 快照与 `TurnStartReason`（`INPUT` / `CONTINUATION` / `COMPACTION`）。
 - `MESSAGE` 是对话消息；`USER` / `ASSISTANT` / `TOOL` 语义由 payload 子类型决定（Tool 结果消息带 ToolResult 元数据）。
 - `CUSTOM` 是业务插件追加的透明 branch state 节点：允许 ROOT 后任意位置（含 open/closed turn），不参与 turn grammar，provider 消息投影默认忽略；payload 为 `(pluginId, customType, schemaVersion, data)`。Goal 插件用 `goal/state@1` 保存完整替换快照，读取时只取当前 branch 最近一条。
 - `CUSTOM_MESSAGE` 是业务扩展注入的对话消息：冻结 `AgentMessage`（SYSTEM/USER）保持 model-visible，`details` 绝不投影；非插件命令消息使用稳定 core 元数据（`pluginId=core`、`customType=message`、`rendererKey=message`、`details={}`）。
 - `ASSISTANT_ERROR` 是 Provider/Assistant-side 失败审计：stable `code` + 非空 `message`（≤2048 字符），不投影到 Provider Context。
 - `ASSISTANT_ABORTED` 是用户主动 Stop 的 assistant turn：只保存安全 text/thinking，绝不包含 tool call。
+- `COMPACTION` 是内部压缩 Model 的 durable summary：冻结 phase/trigger、`tokensBefore`、complete 标记与 `firstKeptEntryId`/`cutEntryId`/`turnPrefixStartEntryId`。它只能作为 `TURN_START(COMPACTION)` 的唯一成功结果；HISTORY 为 incomplete，FULL/TURN_PREFIX 为 complete。
 - `TURN_END` 关闭一次 turn，payload 携带 `TurnEndOutcome`（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）与 `TurnEndReason`（`USER_STOP` / `HISTORY_CUT` / `CANCELLED` / `TURN_FAILED`），以及 continuation obligation。
 
 `BranchSettings` 是完整不可变设置快照：
@@ -109,7 +111,7 @@ SET_YOLO
 
 | 事实 | durable 字段（要点） |
 | --- | --- |
-| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
+| `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON（route/provider/tools/skills/**subagentBindings**/YOLO/contextWindow 与可空 compaction metadata）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding + plugin provenance/access）、status、attempt、`approval` JSON、`result`/`effects`/`error`/`result_entry_id`、时间 |
 
 冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
@@ -180,8 +182,9 @@ ThreadProcessor 消费 dispatcher 已 claim 的 THREAD Work，每步短事务按
 3. MODEL_ACTIVE / TOOL_ACTIVE -> 完成 claim 返回 SUSPENDED（等 Model/Tool Work）
 4. CONTINUATION_DUE        -> 启动 continuation：消费普通配置命令（SET_AGENT/MODEL/THINKING/ACTIVE_TOOLS/YOLO），
                               保留 SET_ENVIRONMENT（留给后续 INPUT 完整收割进入 BranchSettings），不产生 Message Entry
-5. 有 queued USER_MESSAGE/CUSTOM_MESSAGE -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）
-6. 否则                    -> 完成 claim 返回 QUIESCENT
+5. IDLE/HISTORICAL 且压缩到期 -> 启动 COMPACTION Turn（消费零 Command，优先于 queued input）
+6. 有 queued USER_MESSAGE/CUSTOM_MESSAGE -> 启动 INPUT Turn（先 normalization 旧 open Turn，再 TURN_START(INPUT) + Message）
+7. 否则                    -> 完成 claim 返回 QUIESCENT
 ```
 
 Turn 启动采用 speculative plan 两段式：
@@ -192,6 +195,26 @@ Turn 启动采用 speculative plan 两段式：
 Model terminal materialize Tool siblings 时，Runtime 按 ordinal 扫描 frozen plugin state accesses。对同一 `(pluginId, customType)`，`READ+READ` 与 `READ -> WRITE` 允许；已有 `WRITE` 后的 `READ` 或 `WRITE` 机械创建为 unattached `FAILED(kind=SIBLING_STATE_CONFLICT, attempt=0)`，不 dispatch、不请求 TOOL Work，也不把冲突调用登记为后续访问。不同 customType 或不同 pluginId 不冲突。
 
 任何 CAS / claim 损失一律完整 no-op 返回 `LOST_OWNERSHIP`；Resolver 异常/null/heartbeat 失败按单一固定失败延迟（`resolveFailureDelay`）reschedule，绝不静默丢弃 Work。历史/非 applicable open Turn 只做 unlocked 读，绝不先锁 Model/Tool 再落 INPUT normalization。
+
+### Durable compaction
+
+压缩复用现有三 processor、MODEL Work、ModelInvocation retry/lease/Stop/UNKNOWN 语义，不增加表、processor 或 Work target：
+
+```text
+TURN_START(COMPACTION)
+  -> ModelInvocation（SYSTEM summarization prompt + USER summary prompt，零 tool/skill/cache）
+  -> COMPACTION
+  -> TURN_END
+```
+
+- 默认 `reserveTokens=16384`、`maxRecentTokens=20000`；最近一次 complete compaction 之后，本 Thread 最新成功 Model usage 严格大于 `contextWindow-reserveTokens` 时 threshold 触发。后续普通 FAILED/CANCELLED/UNKNOWN 或无 ModelInvocation 的 Resolver Rejected turn 不抹掉该 usage；存在其它 Thread invocation 的 shared turn 是 ownership barrier。terminal `OVERFLOW` 失败可触发一次恢复。
+- 有效 recent retention 为 `min(floor(contextWindow*0.5), maxRecentTokens)`；cut point 只允许 USER/ASSISTANT/CUSTOM_MESSAGE/AssistantAborted，绝不切在 ToolResult。`firstKeptEntryId` 向前包含相邻控制元数据，但不跨任何 CompactionPayload。
+- split turn 先生成 incomplete HISTORY，再以完全冻结的 ids/trigger/tokens/contextWindow 机械生成 TURN_PREFIX；没有先前 history 的 direct TURN_PREFIX 使用固定文本 `No prior history.`。
+- `TURN_START(COMPACTION)...TURN_END` 内全部对话事实对后续 planner、token estimate、Provider Context 与前端 transcript 不可见；停止压缩的 AssistantAborted 不成为未来 cut 或摘要内容。FAILED/STOPPED/CANCELLED/incomplete compaction 只阻止原地立即重试，出现新的普通 turn 后不再充当长期 freshness barrier。
+- complete summary 在下一次正常请求中投影为一个 wrapped USER message，并从 `cutEntryId` 本身继续保留上下文。`tokensBefore` 估算 wrapper + retained suffix；文件 read/write/edit 清单从当前 branch 的完整 durable history 累计重算。`<read-files>` / `<modified-files>` 是 Runtime 保留 section：旧 summary 和模型响应中的同名 section 先剥离，最终只机械追加一份 canonical 清单，modified 覆盖 read。
+- HISTORY 与 threshold 压缩固定 `continueModel=false`；只有 complete OVERFLOW 压缩为 true。它创建一次 immediate CONTINUATION 恢复；该 retry 再次 overflow 时保留失败并停止，不进入无界压缩循环。后续新的 input/tool continuation 可独立触发压缩。
+- phase output budget 为 FULL/HISTORY `floor(0.8*reserveTokens)`、TURN_PREFIX `floor(0.5*reserveTokens)`，最终上限取该预算与有效 model/variant max output 的较小值。
+- 所有 prompt 是 strict classpath resource；复制自 Pi 的资源在同目录保留 MIT `NOTICE`。
 
 ## 6. ModelProcessor
 
@@ -246,7 +269,16 @@ durable mutation
 
 - Stop 的 durable key 是 `(threadId, stopRequestId)`：重试同 ID 恒命中 replay，`expectedRevision` 只用于未 replay 的首发 CAS；`REPLAYED` 返回被重放的 `stoppedTurnEndEntryId` 且 `cancelledCommandCount=0`。
 - 前端对 ambiguous Stop 保留完整操作（stopRequestId + 原始 expectedRevision + basis head/revision）：basis 未变时精确重试，basis 被权威 snapshot 证明变化时自动 retire 并 mint 新 ID（同步 fence 见 [frontend-implementation-design.md](frontend-implementation-design.md)）。
-- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供 text/thinking/tool partial overlay；revision/resync 只触发 snapshot invalidate；terminal `resultJson`/`errorJson` 是 durable 边界，前端无条件压过更高 sequence 的 Redis overlay。
+- 客户端先读取 Thread snapshot，再订阅 revision SSE。Redis `realtime` 只提供正常 turn 的 text/thinking/tool partial overlay；Runtime 不发布 compaction ModelDelta，只保留其 durable checkpoint 供 Stop/恢复。revision/resync 只触发 snapshot invalidate；terminal `resultJson`/`errorJson` 是 durable 边界，前端无条件压过更高 sequence 的 Redis overlay。前端仍按 TURN_START reason 抑制完整 COMPACTION turn 及其 Model overlay，作为 snapshot 投影防线。
+
+## 11. Subagent 委派（task）
+
+`task` 是内部 `PLATFORM` Tool，由 Core `TaskTool` 实现，**不增加表、状态机或调度器**：父 Thread 的 ToolInvocation 照常走 approval/Work/ToolProcessor，子 Agent 则是另一个普通 durable Harness Thread（其执行仍由既有 ThreadProcessor 驱动）。
+
+- 子 Thread 创建复用 `HarnessRuntime.createThread`：ROOT 携带 `SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`（普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）；Thread YOLO 继承父 Thread；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
+- 委派权限冻结在父 `ModelInvocationRequest.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 轮询子 Thread snapshot：以 durable 指纹（revision/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
+- 恢复（`session_id` = 十进制子 ThreadId）要求同 parent/root 归属且子 Thread quiescent；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 只做并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+- 子 Agent 的工具审批仍复用既有 `decideToolApproval`（以子 ThreadId 定位），approval 事实/`WAITING_APPROVAL` 语义与父 Thread 完全一致；子工具执行经同一 ToolGateway 管线，权限判定同 YOLO/Allow/Ask/Deny 规则。
 
 相关文档：
 
