@@ -56,6 +56,10 @@ kk-studio:
 - 服务端 `endpoint` 与浏览器 `public-endpoint` 必须显式分离；预签名 URL 只能落在 `public-endpoint` 上（未配置时回退到 `endpoint`，仅适合内网场景）。
 - 所有面向固定 bucket 的服务端读取与浏览器预签名链路都必须使用 `S3ObjectKeyNormalizer.normalize` 校验 key， 避免签名键与实际读取键出现语义偏差。
 - 响应 `headers` 不会返回 `Host`：浏览器根据 URL 自动发送且脚本禁止设置的该头不应该出现在响应中。
+- Canvas 浏览器 API 使用不含 bucket/key 的包装 DTO；Canvas 对象 key 只能由
+  `CanvasResourcePaths` 根据 canvas/resource id 生成，浏览器不能指定。
+- `S3StorageService` 同时提供必须关闭的流式 read、HEAD 与 delete；既有 ComfyUI
+  bounded byte[] 下载继续保留，并在 HEAD 与实际读取两阶段执行大小上限校验。
 
 ## 实现位置
 

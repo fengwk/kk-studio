@@ -41,6 +41,17 @@ public class PostgresqlCanvasUploadRepository implements CanvasUploadRepository 
         .map(PostgresqlCanvasUploadRepository::toDomain);
   }
 
+  @Override
+  public Optional<CanvasUpload> findByIdForUpdate(long canvasId, long uploadId) {
+    return Optional.ofNullable(uploadMapper.getByIdForUpdate(canvasId, uploadId))
+        .map(PostgresqlCanvasUploadRepository::toDomain);
+  }
+
+  @Override
+  public boolean delete(long canvasId, long uploadId) {
+    return uploadMapper.delete(canvasId, uploadId) == 1;
+  }
+
   private static CanvasUpload toDomain(CanvasUploadDO upload) {
     return new CanvasUpload(
         upload.getId(),

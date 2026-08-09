@@ -127,7 +127,7 @@ public final class StudioWebMapper {
     return dto;
   }
 
-  private static CanvasResourceDTO toDto(CanvasResource resource) {
+  public static CanvasResourceDTO toDto(CanvasResource resource) {
     CanvasResourceDTO dto = new CanvasResourceDTO();
     dto.setId(Long.toString(resource.id()));
     dto.setCanvasId(Long.toString(resource.canvasId()));

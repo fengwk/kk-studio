@@ -31,8 +31,19 @@ public class PostgresqlCanvasResourceRepository implements CanvasResourceReposit
   }
 
   @Override
+  public boolean addIfAbsent(CanvasResource resource) {
+    return resourceMapper.insertIfAbsent(toDO(resource)) == 1;
+  }
+
+  @Override
   public Optional<CanvasResource> findById(long canvasId, long resourceId) {
     return Optional.ofNullable(resourceMapper.getById(canvasId, resourceId))
+        .map(PostgresqlCanvasResourceRepository::toDomain);
+  }
+
+  @Override
+  public Optional<CanvasResource> findById(long resourceId) {
+    return Optional.ofNullable(resourceMapper.getByResourceId(resourceId))
         .map(PostgresqlCanvasResourceRepository::toDomain);
   }
 

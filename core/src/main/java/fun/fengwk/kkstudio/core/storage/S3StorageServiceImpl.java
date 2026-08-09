@@ -3,19 +3,24 @@ package fun.fengwk.kkstudio.core.storage;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
-import software.amazon.awssdk.core.ResponseBytes;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -69,6 +74,48 @@ public class S3StorageServiceImpl implements S3StorageService {
   }
 
   @Override
+  public S3ObjectMetadata headObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    HeadObjectResponse response =
+        s3Client.headObject(
+            HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    Long contentLength = response.contentLength();
+    Assert.isTrue(
+        contentLength != null && contentLength >= 0L,
+        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
+    return new S3ObjectMetadata(contentLength, response.contentType(), response.eTag());
+  }
+
+  @Override
+  public S3ObjectStream readObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    ResponseInputStream<GetObjectResponse> response =
+        s3Client.getObject(
+            GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    Long contentLength = response.response().contentLength();
+    if (contentLength == null || contentLength < 0L) {
+      try {
+        response.close();
+      } catch (IOException closeError) {
+        throw new UncheckedIOException(closeError);
+      }
+      throw new IllegalArgumentException(
+          "S3 GET response must report a non-negative content length for key: " + normalizedKey);
+    }
+    return new S3ObjectStream(
+        response,
+        new S3ObjectMetadata(
+            contentLength, response.response().contentType(), response.response().eTag()));
+  }
+
+  @Override
+  public void deleteObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    s3Client.deleteObject(
+        DeleteObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+  }
+
+  @Override
   public String getPublicUrl(String key) {
     Assert.hasText(
         properties.getPublicBaseUrl(),
@@ -79,32 +126,33 @@ public class S3StorageServiceImpl implements S3StorageService {
 
   @Override
   public byte[] download(String key) {
-    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    ResponseBytes<GetObjectResponse> response = getObject(normalizedKey);
-    return response.asByteArray();
+    try (S3ObjectStream object = readObject(key)) {
+      return object.inputStream().readAllBytes();
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to read S3 object: " + key, e);
+    }
   }
 
   @Override
   public S3ObjectContent download(String key, long maxSizeBytes) {
     Assert.isTrue(maxSizeBytes >= 0L, "maxSizeBytes must be greater than or equal to 0");
-    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    HeadObjectRequest headRequest =
-        HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
-    Long declaredContentLength = s3Client.headObject(headRequest).contentLength();
-    // 防御性校验：S3 响应必须报告非负的对象长度；缺失或非法声明不允许继续读取，避免把"无长度"对象加载到下游。
-    Assert.isTrue(
-        declaredContentLength != null && declaredContentLength >= 0L,
-        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
-    Assert.isTrue(declaredContentLength <= maxSizeBytes, "S3 object exceeds max input file size");
-    ResponseBytes<GetObjectResponse> response = getObject(normalizedKey);
-    byte[] bytes = response.asByteArray();
-    Assert.isTrue(bytes.length <= maxSizeBytes, "S3 object exceeds max input file size");
-    return new S3ObjectContent(bytes, response.response().contentType());
-  }
-
-  private ResponseBytes<GetObjectResponse> getObject(String normalizedKey) {
-    return s3Client.getObjectAsBytes(
-        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    S3ObjectMetadata head = headObject(key);
+    Assert.isTrue(head.contentLength() <= maxSizeBytes, "S3 object exceeds max input file size");
+    try (S3ObjectStream object = readObject(key);
+        ByteArrayOutputStream output =
+            new ByteArrayOutputStream((int) Math.min(head.contentLength(), 8192L))) {
+      byte[] buffer = new byte[8192];
+      long total = 0L;
+      int read;
+      while ((read = object.inputStream().read(buffer)) != -1) {
+        total += read;
+        Assert.isTrue(total <= maxSizeBytes, "S3 object exceeds max input file size");
+        output.write(buffer, 0, read);
+      }
+      return new S3ObjectContent(output.toByteArray(), object.metadata().contentType());
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to read S3 object: " + key, e);
+    }
   }
 
   private String normalizePublicBaseUrl(String publicBaseUrl) {

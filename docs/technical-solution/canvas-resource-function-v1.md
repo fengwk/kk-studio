@@ -250,6 +250,12 @@ POST   /api/canvases/{canvasId}/resources/{resourceId}/download-url
 POST   /api/canvases/{canvasId}/resources/{resourceId}/preview-url
 ```
 
+Upload reserve 请求 `{kind, filename, mediaType, size}`，其中 `size` 与所有 bigint id
+一样使用规范十进制字符串。响应只返回
+`{uploadId, method, url, headers, expiresAt}`；Resource URL 响应只返回
+`{method, url, headers, expiresAt}`。两类 Canvas DTO 都不暴露 bucket/key，客户端也
+不能提交对象 key。
+
 Graph Commands 直接使用 JSON discriminator typed commands 数组：
 
 ```text
@@ -309,6 +315,32 @@ POST uploads
 执行必须有输入大小上限、执行超时和临时目录清理。
 
 Runtime image 安装 ffmpeg/ffprobe。
+
+运行时配置：
+
+```yaml
+kk-studio:
+  storage:
+    s3:
+      endpoint: http://vps-s3:9000
+      public-endpoint: https://s3.fengwk.fun
+  canvas:
+    resource:
+      ffprobe-binary: ffprobe
+      ffmpeg-binary: ffmpeg
+      process-timeout: 30s
+      thumbnail-max-dimension: 512
+      thumbnail-quality: 80
+      temp-dir: /tmp
+      upload-expiry: 15m
+```
+
+Upload reserve 只接受 `IMAGE`、`VIDEO`、`AUDIO`，并在签名前校验文件扩展名与声明
+大小。Finalize 以 S3 HEAD/实际流长度和 ffprobe 结果为准：图片最多 30MiB
+（JPG/JPEG/PNG/WEBP/HEIC/HEIF），视频最多 50MiB（MP4/MOV），音频最多
+15MiB（WAV/MP3）。图片和视频 preview 使用 ffmpeg 生成最长边不超过 512px 的
+WebP；任何超时、非零退出、非法数值或输出缺失都拒绝入库。整个过程中只使用有界
+buffer 和临时文件，不把媒体整体加载进 JVM heap。
 
 ## 6. Function Models
 

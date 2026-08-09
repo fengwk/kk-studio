@@ -24,7 +24,8 @@
 1. `docker compose config --quiet`；
 2. build 当前应用 Dockerfile；
 3. 启动依赖并等待 healthcheck；
-4. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 `ffmpeg` / `ffprobe`；
+4. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的
+   `ffmpeg` / `ffprobe`；
 5. 执行 PostgreSQL `SELECT 1`、检查 MinIO bucket 和 HTTP mock 健康；
 6. 无论成功或失败，都执行 `down --volumes --remove-orphans`。
 
@@ -34,9 +35,14 @@
 ./deploy/test/run.sh --with-app
 ```
 
+`--with-app` 还会使用仓库内极小 PNG fixture 执行完整的 Canvas Resource
+`create canvas -> reserve -> browser-style direct PUT -> complete -> preview-url -> direct GET`
+smoke，并验证 Canvas DTO 不暴露 bucket/key。
+
 应用通过环境变量连接 `postgres:5432`、`minio:9000`、`comfyui:8080` 和
 `opencli-hub:8080`。当前尚未启用 ComfyUI/OpenCLI adapter，相关 base URL 只作为后续
-联调注入点；测试栈不预设 Canvas API 或 adapter 请求体。
+联调注入点。Canvas Resource 媒体进程显式配置为容器内的 `ffprobe` / `ffmpeg`，
+临时目录为 `/tmp`，每次 finalize/materialize 都会清理自己的工作目录。
 
 ## 手动使用
 
