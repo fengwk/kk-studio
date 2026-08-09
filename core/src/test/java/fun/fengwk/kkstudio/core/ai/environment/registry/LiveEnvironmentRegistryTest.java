@@ -11,9 +11,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentDaemonConnection;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 /** 基于 canonical EnvironmentName 的占用、断开/租约释放接管与 READY + 心跳过期可用性规则。 */
 class LiveEnvironmentRegistryTest {
@@ -22,6 +25,12 @@ class LiveEnvironmentRegistryTest {
   private static final Duration HEARTBEAT_TIMEOUT = Duration.ofSeconds(60);
   private static final EnvironmentName DEV = new EnvironmentName("dev");
   private static final EnvironmentName PROD = new EnvironmentName("prod");
+  private static final DaemonCapabilities CAPABILITIES =
+      new DaemonCapabilities(
+          DaemonCapabilities.VERSION,
+          new DaemonEnvironmentInfo(DaemonOperatingSystem.LINUX, "/workspace", "UTC"),
+          List.of(),
+          List.of());
 
   private static BindResult bind(
       LiveEnvironmentRegistry registry,
@@ -39,7 +48,7 @@ class LiveEnvironmentRegistryTest {
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
     assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
-    registry.updateCapabilities(DEV, first, DaemonCapabilities.empty(), NOW);
+    registry.updateCapabilities(DEV, first, CAPABILITIES, NOW);
     registry.markReady(DEV, first, NOW);
     assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
 
@@ -81,6 +90,8 @@ class LiveEnvironmentRegistryTest {
 
     // CONNECTING 的新鲜声明（连接打开 + 心跳未过期）与 READY 同等受保护：不能因为未 READY 就被抢走。
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    assertEquals(null, registry.find(DEV).orElseThrow().capabilities());
+    assertThrows(IllegalStateException.class, () -> registry.markReady(DEV, first, NOW));
     assertInstanceOf(BindResult.Rejected.class, bind(registry, DEV, second, NOW));
     assertEquals("c1", registry.find(DEV).orElseThrow().connection().connectionId());
   }
@@ -92,6 +103,7 @@ class LiveEnvironmentRegistryTest {
     FakeConnection second = new FakeConnection("c2");
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.updateCapabilities(DEV, first, CAPABILITIES, NOW);
     registry.markReady(DEV, first, NOW);
     first.close();
 
@@ -104,6 +116,7 @@ class LiveEnvironmentRegistryTest {
     registry.unregister(DEV, first);
     assertEquals("c2", registry.find(DEV).orElseThrow().connection().connectionId());
     // 新 holder 可正常升级 READY。
+    registry.updateCapabilities(DEV, second, CAPABILITIES, NOW);
     registry.markReady(DEV, second, NOW);
     assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
   }
@@ -115,6 +128,7 @@ class LiveEnvironmentRegistryTest {
     FakeConnection second = new FakeConnection("c2");
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.updateCapabilities(DEV, first, CAPABILITIES, NOW);
     registry.markReady(DEV, first, NOW);
     Instant stale = NOW.plus(HEARTBEAT_TIMEOUT).plusSeconds(1);
 
@@ -133,6 +147,7 @@ class LiveEnvironmentRegistryTest {
     FakeConnection second = new FakeConnection("c2");
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, first, NOW));
+    registry.updateCapabilities(DEV, first, CAPABILITIES, NOW);
     registry.markReady(DEV, first, NOW);
     Instant refreshed = NOW.plus(HEARTBEAT_TIMEOUT).minusSeconds(1);
     registry.heartbeat(DEV, first, refreshed);
@@ -148,6 +163,7 @@ class LiveEnvironmentRegistryTest {
     FakeConnection connection = new FakeConnection("c1");
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, connection, NOW));
+    registry.updateCapabilities(DEV, connection, CAPABILITIES, NOW);
     registry.markReady(DEV, connection, NOW);
     assertTrue(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
     // 心跳超过超时未刷新：同一规则下不可用。
@@ -164,6 +180,7 @@ class LiveEnvironmentRegistryTest {
     FakeConnection connection = new FakeConnection("c1");
 
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, connection, NOW));
+    registry.updateCapabilities(DEV, connection, CAPABILITIES, NOW);
     registry.markReady(DEV, connection, NOW);
     connection.close();
     assertFalse(registry.isReady(DEV, NOW, HEARTBEAT_TIMEOUT));
@@ -178,7 +195,7 @@ class LiveEnvironmentRegistryTest {
     assertInstanceOf(BindResult.Accepted.class, bind(registry, DEV, owner, NOW));
     assertThrows(
         IllegalStateException.class,
-        () -> registry.updateCapabilities(DEV, foreign, DaemonCapabilities.empty(), NOW));
+        () -> registry.updateCapabilities(DEV, foreign, CAPABILITIES, NOW));
     registry.unregister(DEV, foreign);
     assertTrue(registry.find(DEV).isPresent());
   }

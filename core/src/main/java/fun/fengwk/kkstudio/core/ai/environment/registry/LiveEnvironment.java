@@ -17,7 +17,8 @@ import java.util.Objects;
  * 以 canonical {@link EnvironmentName} 为键的服务端内存 Environment 条目快照。
  *
  * <p>{@code name} 是唯一逻辑路由身份：HELLO 声称、branch 持久化、查询投影与远程调用全部使用同一个名称。Environment 工具由 {@link
- * EnvironmentToolCatalog} 固定；READY 只发布 daemon 的版本化能力对象（skills + MCP server 摘要）。
+ * EnvironmentToolCatalog} 固定；READY 只发布 daemon 的版本化能力对象（environment metadata + skills + MCP server
+ * 摘要）。CONNECTING 可以暂时没有 capabilities，READY 必须持有非 null capabilities。
  */
 public record LiveEnvironment(
     EnvironmentName name,
@@ -30,7 +31,9 @@ public record LiveEnvironment(
     name = Objects.requireNonNull(name, "name");
     status = Objects.requireNonNull(status, "status");
     connection = Objects.requireNonNull(connection, "connection");
-    capabilities = Objects.requireNonNull(capabilities, "capabilities");
+    if (status == LiveEnvironmentStatus.READY) {
+      capabilities = Objects.requireNonNull(capabilities, "READY capabilities");
+    }
     lastSeenAt = Objects.requireNonNull(lastSeenAt, "lastSeenAt");
   }
 
@@ -40,12 +43,12 @@ public record LiveEnvironment(
 
   /** READY 能力对象中的 skill 摘要。 */
   public List<DaemonSkillDescriptor> skills() {
-    return capabilities.skills();
+    return capabilities == null ? List.of() : capabilities.skills();
   }
 
   /** READY 能力对象中的 MCP server 摘要。 */
   public List<DaemonMcpServerDescriptor> mcpServers() {
-    return capabilities.mcpServers();
+    return capabilities == null ? List.of() : capabilities.mcpServers();
   }
 
   /** 可用性规则：READY + 连接仍打开 + 心跳未超过 {@code heartbeatTimeout} 过期。调用方必须使用与注册表相同的时钟。 */

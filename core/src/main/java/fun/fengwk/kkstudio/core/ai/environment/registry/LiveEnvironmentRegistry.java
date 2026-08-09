@@ -51,11 +51,7 @@ public class LiveEnvironmentRegistry {
       byName.put(
           environmentName,
           new LiveEnvironment(
-              environmentName,
-              LiveEnvironmentStatus.CONNECTING,
-              connection,
-              DaemonCapabilities.empty(),
-              now));
+              environmentName, LiveEnvironmentStatus.CONNECTING, connection, null, now));
       return BindResult.accepted();
     }
     if (existing.connection().connectionId().equals(connection.connectionId())) {
@@ -71,11 +67,7 @@ public class LiveEnvironmentRegistry {
     byName.put(
         environmentName,
         new LiveEnvironment(
-            environmentName,
-            LiveEnvironmentStatus.CONNECTING,
-            connection,
-            DaemonCapabilities.empty(),
-            now));
+            environmentName, LiveEnvironmentStatus.CONNECTING, connection, null, now));
     return BindResult.replaced(existing.connection());
   }
 
@@ -100,6 +92,9 @@ public class LiveEnvironmentRegistry {
   public synchronized void markReady(
       EnvironmentName environmentName, EnvironmentDaemonConnection connection, Instant now) {
     LiveEnvironment current = requireOwned(environmentName, connection);
+    if (current.capabilities() == null) {
+      throw new IllegalStateException("environment cannot become READY before capabilities");
+    }
     byName.put(
         current.name(),
         new LiveEnvironment(

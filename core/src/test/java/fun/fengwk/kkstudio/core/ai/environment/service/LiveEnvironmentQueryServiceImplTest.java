@@ -16,9 +16,11 @@ import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentMcpServerDTO;
@@ -40,6 +42,9 @@ class LiveEnvironmentQueryServiceImplTest {
 
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
+  private static final DaemonEnvironmentInfo ENVIRONMENT_INFO =
+      new DaemonEnvironmentInfo(
+          DaemonOperatingSystem.LINUX, "/internal/workspace", "Asia/Shanghai");
   private static final Clock CLOCK =
       new Clock() {
         @Override
@@ -74,7 +79,8 @@ class LiveEnvironmentQueryServiceImplTest {
             ENVIRONMENT_NAME,
             LiveEnvironmentStatus.READY,
             connection,
-            new DaemonCapabilities(DaemonCapabilities.VERSION, List.of(skill), List.of(fs)),
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION, ENVIRONMENT_INFO, List.of(skill), List.of(fs)),
             NOW);
     LiveEnvironmentRegistry registry = mock(LiveEnvironmentRegistry.class);
     when(registry.list()).thenReturn(List.of(environment));
@@ -115,7 +121,8 @@ class LiveEnvironmentQueryServiceImplTest {
             ENVIRONMENT_NAME,
             LiveEnvironmentStatus.READY,
             connection,
-            DaemonCapabilities.empty(),
+            new DaemonCapabilities(
+                DaemonCapabilities.VERSION, ENVIRONMENT_INFO, List.of(), List.of()),
             NOW.minus(Duration.ofSeconds(120)));
     EnvironmentGatewayProperties properties = new EnvironmentGatewayProperties();
     properties.setHeartbeatTimeout(Duration.ofSeconds(60));

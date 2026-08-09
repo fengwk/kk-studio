@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,9 +15,10 @@ import java.util.UUID;
 /**
  * Daemon 独立进程的连接与执行配置。
  *
- * <p>CLI 是唯一配置来源：{@code --environment-name}、gateway 连接参数、可重复 {@code --skill-dir} 与可选 {@code
- * --mcp-config}。{@code --environment-name} 是 canonical 路由身份，必须是规范的 {@link
- * EnvironmentName}。skill/MCP 路径不使用服务端托管配置。
+ * <p>连接、身份、workdir、skill 与 MCP 的唯一配置来源是 CLI：{@code --environment-name}、gateway 连接参数、唯一 {@code
+ * --workdir}、可重复 {@code --skill-dir} 与可选 {@code --mcp-config}。{@code --environment-name} 是
+ * canonical 路由身份，必须是规范的 {@link EnvironmentName}。workdir 默认启动用户 canonical HOME；skill/MCP
+ * 路径不使用服务端托管配置。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -27,6 +29,7 @@ public record DaemonConfig(
     Duration maxReconnectDelay,
     Duration defaultToolTimeout,
     String gatewayToken,
+    Path workdir,
     List<Path> skillDirs,
     Path mcpConfigPath) {
 
@@ -45,6 +48,7 @@ public record DaemonConfig(
     }
     defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
     gatewayToken = requireNonBlank(gatewayToken, "gatewayToken");
+    workdir = canonicalDirectory(workdir, "workdir");
     skillDirs =
         List.copyOf(Objects.requireNonNull(skillDirs, "skillDirs")).stream()
             .map(
@@ -66,6 +70,7 @@ public record DaemonConfig(
     String reconnectMax = null;
     String toolTimeout = null;
     String mcpConfig = null;
+    String workdir = null;
     List<Path> skillDirs = new ArrayList<>();
     boolean skillDirExplicit = false;
 
@@ -81,6 +86,12 @@ public record DaemonConfig(
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
         case "--mcp-config" -> mcpConfig = requireArgValue(args, ++index, arg);
+        case "--workdir" -> {
+          if (workdir != null) {
+            throw new IllegalArgumentException("--workdir may only be specified once");
+          }
+          workdir = requireArgValue(args, ++index, arg);
+        }
         case "--skill-dir" -> {
           skillDirExplicit = true;
           skillDirs.add(Path.of(requireArgValue(args, ++index, arg)));
@@ -109,6 +120,7 @@ public record DaemonConfig(
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         requirePresent(gatewayToken, "gateway-token"),
+        workdir == null ? defaultWorkdir() : Path.of(workdir),
         skillDirs,
         mcpConfig == null ? null : Path.of(mcpConfig));
   }
@@ -116,6 +128,11 @@ public record DaemonConfig(
   /** 默认本地 skill 根目录：{@code ~/.agents/skills}。 */
   public static Path defaultSkillDir() {
     return Path.of(System.getProperty("user.home"), ".agents", "skills");
+  }
+
+  /** 默认执行目录：启动用户 HOME 的 canonical 目录。 */
+  public static Path defaultWorkdir() {
+    return canonicalDirectory(Path.of(System.getProperty("user.home")), "user.home");
   }
 
   private static String requireArgValue(String[] args, int index, String flag) {
@@ -164,5 +181,17 @@ public record DaemonConfig(
       throw new IllegalArgumentException(name + " must not be negative");
     }
     return value;
+  }
+
+  private static Path canonicalDirectory(Path value, String name) {
+    try {
+      Path path = Objects.requireNonNull(value, name).toRealPath();
+      if (!Files.isDirectory(path)) {
+        throw new IllegalArgumentException(name + " must be an existing directory");
+      }
+      return path;
+    } catch (IOException error) {
+      throw new IllegalArgumentException(name + " must be an existing directory", error);
+    }
   }
 }

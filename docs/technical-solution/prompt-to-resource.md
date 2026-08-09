@@ -84,7 +84,16 @@ subagentBindings   # task 可委派的 Agent 名称 + 描述 allowlist（activeT
 yoloEnabled        # 冻结运行时策略
 ```
 
-system prompt 由 `AgentPromptComposer` 集中组合：Agent 正文 → `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。
+system prompt 由 `AgentPromptComposer` 作为唯一受信任边界集中组合，固定顺序为：Agent 正文（非空时）→ `<current_environment>`（始终存在）→ `available_skills`（skills 非空时）→ `available_subagents`（subagents 非空时，含 task 指令与默认回合预算）。动态名称、路径与时区在进入模板前做 XML escape。
+
+`DatabaseTurnResolver` 每次普通解析只读取一次 `clock.instant()`，构造携带同一个 `ZonedDateTime` 的 `CurrentEnvironmentContext`：
+
+- 未选择 Environment：name/status/operating_system/working_directory 都是 `none`，日期时间按服务端 Clock zone；
+- 选择且统一 ready 规则通过：name 为 canonical route、status=`ready`，OS/workdir/timezone 来自 READY metadata，日期时间按 daemon timezone；
+- 已选择但不存在或不可用：name 保留、status=`unavailable`；registry 仍有 READY metadata（如心跳过期）时保留 OS/workdir/timezone，否则 OS/workdir 为 `none` 并使用服务端 Clock zone；
+- 日期固定 `yyyy-MM-dd`，时间固定 `HH:mm:ss`，time_zone 始终存在。
+
+Compaction summarizer 走独立最小请求路径，不调用 `AgentPromptComposer`，因此不注入 `<current_environment>`。
 
 缺失 Agent/Provider/Model/Variant/未知 Tool、Environment 不可用、task 无 allowlist/超深度等确定性拒绝共用稳定 `AssistantError` code `PLANNING_FAILED`（message 携带原因）→ `Rejected(AssistantError)`；Processor 写入 `ASSISTANT_ERROR` + `FAILED TURN_END` barrier，不产生 ModelInvocation。临时基础设施失败以异常表达，由 Processor reschedule。
 

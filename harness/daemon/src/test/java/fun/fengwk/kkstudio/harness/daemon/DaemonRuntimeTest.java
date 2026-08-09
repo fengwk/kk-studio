@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerDescriptor;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMcpServerStatus;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
@@ -66,6 +67,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -92,6 +94,7 @@ class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("environment");
+  private static final Path WORKDIR = Path.of(System.getProperty("user.dir"));
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private DaemonRuntime runtime;
@@ -160,12 +163,18 @@ class DaemonRuntimeTest {
     assertEquals("daemon", hello.path("daemonId").asText());
     assertEquals(DaemonProtocol.VERSION_2, hello.path("protocolVersion").asInt());
     assertEquals(EnvironmentToolCatalog.version(), hello.path("toolCatalogVersion").asText());
+    DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+    DaemonEnvironmentInfo firstEnvironment =
+        capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
     assertTrue(codec.readPayload(handshake.get(1)).path("skills").isArray());
 
     transport.disconnect();
     transport.awaitConnections(1);
     completeHandshake(0);
-    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+    List<DaemonEnvelope> reconnected = transport.takeMessages(2);
+    assertMessageTypes(reconnected, HELLO, READY);
+    assertEquals(
+        firstEnvironment, capabilitiesCodec.decode(reconnected.get(1).payloadJson()).environment());
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
@@ -184,6 +193,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            WORKDIR,
             List.of(),
             null);
 
@@ -226,6 +236,11 @@ class DaemonRuntimeTest {
 
       DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
+      assertEquals(WORKDIR.toRealPath().toString(), capabilities.environment().workingDirectory());
+      assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
+      assertEquals(
+          DaemonOperatingSystemDetector.detectCurrent(),
+          capabilities.environment().operatingSystem());
       assertEquals(1, capabilities.skills().size());
       assertEquals("demo", capabilities.skills().get(0).name());
       assertEquals("Demo skill", capabilities.skills().get(0).description());
@@ -909,7 +924,7 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** READY 能力对象只携带 skills/MCP server 摘要，且不含本地路径/正文/工具 schema。 */
+  /** READY 能力对象只携带 environment、skills/MCP server 摘要，且不含正文/工具 schema。 */
   @Test
   void announcesSkillsAlongsideMcpServersInCapabilities() throws Exception {
     Path skillRoot = Files.createTempDirectory("daemon-skills");
@@ -939,7 +954,10 @@ class DaemonRuntimeTest {
 
       JsonNode payload = codec.readPayload(handshake.get(1));
       assertFalse(payload.has("tools"));
-      assertEquals(1, payload.path("version").asInt());
+      assertEquals(2, payload.path("version").asInt());
+      assertEquals(
+          WORKDIR.toRealPath().toString(),
+          payload.path("environment").path("workingDirectory").asText());
       assertEquals(1, payload.path("skills").size());
       assertEquals("demo", payload.path("skills").get(0).path("name").asText());
       assertEquals("Demo skill", payload.path("skills").get(0).path("description").asText());
@@ -1354,6 +1372,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            WORKDIR,
             List.of(),
             null),
         transport,
@@ -1378,6 +1397,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             Duration.ofSeconds(10),
             "test-gateway-token",
+            WORKDIR,
             List.of(),
             null),
         transport,
@@ -1451,6 +1471,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             defaultToolTimeout,
             "test-gateway-token",
+            WORKDIR,
             List.of(),
             null),
         transport,

@@ -6,28 +6,28 @@ import java.util.Objects;
 /**
  * Daemon READY 上报的版本化/类型化能力摘要。
  *
- * <p>只包含可安全上报的短字段：skills 与 MCP server 摘要；本地路径、完整 SKILL.md 正文、headers、命令、URL 与完整工具 schema 不进入 READY
- * wire。MCP 工具完整 schema 只通过固定的 {@code mcp_list_tools} 桥接工具按需返回。
+ * <p>除 prompt 所需且显式允许的 canonical workdir 外，只包含可安全上报的短字段：environment metadata、skills 与 MCP server
+ * 摘要；完整 SKILL.md 正文、headers、命令、URL 与完整工具 schema 不进入 READY wire。MCP 工具完整 schema 只通过固定的 {@code
+ * mcp_list_tools} 桥接工具按需返回。
  */
 public record DaemonCapabilities(
-    int version, List<DaemonSkillDescriptor> skills, List<DaemonMcpServerDescriptor> mcpServers) {
+    int version,
+    DaemonEnvironmentInfo environment,
+    List<DaemonSkillDescriptor> skills,
+    List<DaemonMcpServerDescriptor> mcpServers) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 1;
+  public static final int VERSION = 2;
 
   public DaemonCapabilities {
     if (version != VERSION) {
       throw new IllegalArgumentException("unsupported capabilities version: " + version);
     }
+    environment = Objects.requireNonNull(environment, "environment");
     skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
     mcpServers = List.copyOf(Objects.requireNonNull(mcpServers, "mcpServers"));
     requireUniqueSkillNames(skills);
     requireUniqueServerNames(mcpServers);
-  }
-
-  /** 空能力集，用于未配置 skills/MCP 的 daemon 或 registry 初值。 */
-  public static DaemonCapabilities empty() {
-    return new DaemonCapabilities(VERSION, List.of(), List.of());
   }
 
   private static void requireUniqueSkillNames(List<DaemonSkillDescriptor> skills) {

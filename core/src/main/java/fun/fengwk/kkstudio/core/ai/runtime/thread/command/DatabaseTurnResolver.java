@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentGatewayPropert
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironment;
 import fun.fengwk.kkstudio.core.ai.environment.registry.LiveEnvironmentRegistry;
 import fun.fengwk.kkstudio.core.ai.runtime.task.AgentPromptComposer;
+import fun.fengwk.kkstudio.core.ai.runtime.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.core.ai.runtime.task.TaskTool;
 import fun.fengwk.kkstudio.harness.plugin.BranchView;
@@ -72,11 +73,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolCatalog;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolType;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonSkillDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderType;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -214,7 +219,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + providerType
                 + ")");
 
-    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings);
+    Instant now = clock.instant();
+    CurrentEnvironmentContext currentEnvironment =
+        resolveCurrentEnvironment(settings.environmentName(), now);
+    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), settings, now);
     List<SubagentBinding> subagentBindings =
         resolveSubagents(agentConfig.getSubagents(), settings, path);
     List<ToolBinding> toolBindings = resolveTools(settings, !subagentBindings.isEmpty());
@@ -246,6 +254,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             descriptor,
             variant,
             agent.getSystemPrompt(),
+            currentEnvironment,
             skillBindings,
             subagentBindings,
             path,
@@ -477,7 +486,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * Agent skills 只从 Agent config 读取，且必须由最新选中的 Environment 精确提供（live descriptors）； load_skill
    * 必须显式出现在 activeTools 中。
    */
-  private List<SkillBinding> resolveSkills(List<String> skillNames, BranchSettings settings) {
+  private List<SkillBinding> resolveSkills(
+      List<String> skillNames, BranchSettings settings, Instant now) {
     if (skillNames.isEmpty()) {
       return List.of();
     }
@@ -494,8 +504,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
           "agent skills require the latest selected environment which is not live: "
               + environmentName);
     }
-    if (!environment.isReady(
-        clock.instant(), environmentGatewayProperties.requireHeartbeatTimeout())) {
+    if (!environment.isReady(now, environmentGatewayProperties.requireHeartbeatTimeout())) {
       throw rejection(
           "agent skills require the latest selected environment which is not ready: "
               + environmentName);
@@ -520,6 +529,31 @@ public final class DatabaseTurnResolver implements TurnResolver {
       bindings.add(new SkillBinding(skill.name(), skill.description(), settings.environmentName()));
     }
     return List.copyOf(bindings);
+  }
+
+  private CurrentEnvironmentContext resolveCurrentEnvironment(
+      EnvironmentName environmentName, Instant now) {
+    if (environmentName == null) {
+      return new CurrentEnvironmentContext(
+          null,
+          CurrentEnvironmentContext.Status.NONE,
+          null,
+          ZonedDateTime.ofInstant(now, clock.getZone()));
+    }
+    LiveEnvironment liveEnvironment = environmentRegistry.find(environmentName).orElse(null);
+    DaemonEnvironmentInfo environmentInfo =
+        liveEnvironment == null || liveEnvironment.capabilities() == null
+            ? null
+            : liveEnvironment.capabilities().environment();
+    ZoneId zone = environmentInfo == null ? clock.getZone() : ZoneId.of(environmentInfo.timeZone());
+    CurrentEnvironmentContext.Status status =
+        liveEnvironment != null
+                && liveEnvironment.isReady(
+                    now, environmentGatewayProperties.requireHeartbeatTimeout())
+            ? CurrentEnvironmentContext.Status.READY
+            : CurrentEnvironmentContext.Status.UNAVAILABLE;
+    return new CurrentEnvironmentContext(
+        environmentName, status, environmentInfo, ZonedDateTime.ofInstant(now, zone));
   }
 
   /**
@@ -576,6 +610,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ModelDescriptor descriptor,
       ModelVariant variant,
       String systemPrompt,
+      CurrentEnvironmentContext currentEnvironment,
       List<SkillBinding> skillBindings,
       List<SubagentBinding> subagentBindings,
       EntryPath path,
@@ -583,7 +618,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       long sessionId,
       PromptCachePolicy cachePolicy) {
     List<AgentMessage> semanticMessages = new ArrayList<>();
-    String composedPrompt = promptComposer.compose(systemPrompt, skillBindings, subagentBindings);
+    String composedPrompt =
+        promptComposer.compose(systemPrompt, currentEnvironment, skillBindings, subagentBindings);
     if (!composedPrompt.isBlank()) {
       semanticMessages.add(AgentMessage.system(composedPrompt));
     }

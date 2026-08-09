@@ -72,13 +72,9 @@ public record CodingToolsConfig(
         DEFAULT_JAVAP_EXECUTABLE);
   }
 
-  /** 从稳定的 Daemon 系统属性构建独立运行配置。 */
-  public static CodingToolsConfig fromSystemProperties() {
-    Path root =
-        Path.of(
-            System.getProperty("kkstudio.daemon.environment-root", System.getProperty("user.dir")));
-    Path defaultWorkdir =
-        Path.of(System.getProperty("kkstudio.daemon.default-workdir", root.toString()));
+  /** 使用 CLI 冻结的唯一 workdir，并从其余稳定 Daemon 系统属性构建独立运行配置。 */
+  public static CodingToolsConfig fromSystemProperties(Path workdir) {
+    Path root = canonicalDirectory(workdir, "workdir");
     Path resourceDirectory =
         Path.of(
             System.getProperty(
@@ -86,7 +82,7 @@ public record CodingToolsConfig(
                 root.resolve(".kkstudio").resolve("resources").toString()));
     return new CodingToolsConfig(
         root,
-        defaultWorkdir,
+        root,
         DEFAULT_PREVIEW_MAX_LINES,
         DEFAULT_PREVIEW_MAX_BYTES,
         System.getProperty("kkstudio.daemon.bash", "bash"),

@@ -77,7 +77,7 @@ class DaemonConfigTest {
 
   /** CLI 是 daemon 连接、身份、超时与 skill roots 的唯一配置来源。 */
   @Test
-  void readsCliArguments(@TempDir Path skillDir) {
+  void readsCliArguments(@TempDir Path skillDir) throws Exception {
     DaemonConfig config =
         DaemonConfig.fromArgs(
             new String[] {
@@ -97,6 +97,8 @@ class DaemonConfigTest {
               "PT3S",
               "--tool-timeout",
               "PT4S",
+              "--workdir",
+              skillDir.toString(),
               "--skill-dir",
               skillDir.toString()
             });
@@ -109,7 +111,55 @@ class DaemonConfigTest {
     assertEquals(Duration.ZERO, config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
     assertEquals(Duration.ofSeconds(4), config.defaultToolTimeout());
+    assertEquals(skillDir.toRealPath(), config.workdir());
     assertEquals(List.of(skillDir.toAbsolutePath().normalize()), config.skillDirs());
+  }
+
+  /** 未显式配置时，workdir 使用启动用户 HOME 的 canonical 目录。 */
+  @Test
+  void defaultsWorkdirToCanonicalUserHome(@TempDir Path home) throws Exception {
+    String oldHome = System.getProperty("user.home");
+    try {
+      System.setProperty("user.home", home.toString());
+      DaemonConfig config =
+          DaemonConfig.fromArgs(
+              new String[] {
+                "--environment-name", "env",
+                "--gateway-uri", "ws://gateway.example/daemon",
+                "--gateway-token", "secret"
+              });
+
+      assertEquals(home.toRealPath(), config.workdir());
+    } finally {
+      System.setProperty("user.home", oldHome);
+    }
+  }
+
+  /** 显式 workdir 必须是唯一、已存在的目录，并在解析时 canonical 化。 */
+  @Test
+  void validatesExplicitWorkdir(@TempDir Path root) throws Exception {
+    Path file = Files.writeString(root.resolve("file.txt"), "x");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--environment-name", "env",
+                  "--gateway-uri", "ws://gateway.example/daemon",
+                  "--gateway-token", "secret",
+                  "--workdir", file.toString()
+                }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            DaemonConfig.fromArgs(
+                new String[] {
+                  "--environment-name", "env",
+                  "--gateway-uri", "ws://gateway.example/daemon",
+                  "--gateway-token", "secret",
+                  "--workdir", root.toString(),
+                  "--workdir", root.toString()
+                }));
   }
 
   /** 显式 skill dirs 会替换默认的发现根目录。 */
@@ -232,6 +282,7 @@ class DaemonConfigTest {
         maxReconnectDelay,
         defaultToolTimeout,
         gatewayToken,
+        DaemonConfig.defaultWorkdir(),
         skillDirs,
         null);
   }

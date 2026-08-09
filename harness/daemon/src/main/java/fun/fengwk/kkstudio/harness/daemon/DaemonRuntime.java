@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.tool.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.tool.daemon.DaemonProtocolException;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -72,6 +74,7 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ResourceStore resourceStore;
+  private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonToolResultCodec resultCodec = new DaemonToolResultCodec();
@@ -235,6 +238,11 @@ public final class DaemonRuntime implements AutoCloseable {
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.resourceStore = resourceStore;
+    this.environmentInfo =
+        new DaemonEnvironmentInfo(
+            DaemonOperatingSystemDetector.detectCurrent(),
+            config.workdir().toString(),
+            ZoneId.systemDefault().getId());
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedToolCatalog
         && !List.copyOf(toolRegistry.descriptors()).equals(EnvironmentToolCatalog.descriptors())) {
@@ -373,6 +381,7 @@ public final class DaemonRuntime implements AutoCloseable {
     DaemonCapabilities capabilities =
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
+            environmentInfo,
             List.copyOf(skillRegistry.descriptors()),
             mcpRegistry.snapshot());
     return sendOn(
