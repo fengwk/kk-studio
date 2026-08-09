@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -32,11 +33,11 @@ import java.util.Optional;
  * 纯运行时压缩规划器：基于 root-to-head EntryPath 与 {@link CompactionConfig} 计算一次压缩 turn 的切分事实。
  *
  * <p>算法对齐上游 Pi 的 {@code prepareCompaction} / {@code findCutPoint}：从路径尾部按估计消息 token （{@code
- * ceil(chars / 4)}，image/audio/resource 使用固定占位预算）向 boundary start 累加，首个累计越过 {@code keepRecentTokens
- * = min(floor(contextWindow * 0.5), maxRecentTokens)} 的位置之后取下一个合法 cut point （USER/ASSISTANT 上下文消息、
- * CUSTOM_MESSAGE 或 {@code AssistantAborted}，绝不切在 ToolResult）；若预算从未越过则取范围内最早的合法 cut point。 {@code
- * tokensBefore} 是压缩前的压缩感知上下文估计（wrapper summary + cut 之后保留段，对齐 Pi checkpoint 元数据），只作 durable
- * 元数据，不参与触发（触发只看 provider usage）。
+ * ceil(chars / 4)}，image/audio/video/resource 使用固定占位预算）向 boundary start 累加，首个累计越过 {@code
+ * keepRecentTokens = min(floor(contextWindow * 0.5), maxRecentTokens)} 的位置之后取下一个合法 cut point
+ * （USER/ASSISTANT 上下文消息、 CUSTOM_MESSAGE 或 {@code AssistantAborted}，绝不切在
+ * ToolResult）；若预算从未越过则取范围内最早的合法 cut point。 {@code tokensBefore} 是压缩前的压缩感知上下文估计（wrapper summary +
+ * cut 之后保留段，对齐 Pi checkpoint 元数据），只作 durable 元数据，不参与触发（触发只看 provider usage）。
  *
  * <p>firstKept 重绕：从 cut 位置向 boundary start 回退，把相邻的非上下文控制元数据（CUSTOM / TURN 边界 / 错误障碍等，
  * 不含任何对话消息）纳入保留区起点；实际首个保留上下文消息为 {@code cutEntryId}。重绕绝不跨越任何 CompactionPayload 边界 （对齐 Pi 的 {@code
@@ -414,6 +415,7 @@ public final class CompactionPlanner {
         chars += contentChars(result.contents());
       } else if (content instanceof ImageMessageContent
           || content instanceof AudioMessageContent
+          || content instanceof VideoMessageContent
           || content instanceof ResourceMessageContent) {
         chars += ESTIMATED_MEDIA_CHARS;
       }
@@ -430,6 +432,7 @@ public final class CompactionPlanner {
         chars += json.json().length();
       } else if (content instanceof ImageMessageContent
           || content instanceof AudioMessageContent
+          || content instanceof VideoMessageContent
           || content instanceof ResourceMessageContent) {
         chars += ESTIMATED_MEDIA_CHARS;
       }

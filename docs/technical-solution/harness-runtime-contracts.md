@@ -65,7 +65,16 @@ SET_ACTIVE_TOOLS, SET_YOLO
   "expectedNextCommandSequence": "3",
   "commands": [
     { "type": "SET_AGENT", "clientCommandId": "cid-1", "agentName": "coder" },
-    { "type": "USER_MESSAGE", "clientCommandId": "cid-2", "content": "hello" }
+    {
+      "type": "USER_MESSAGE",
+      "clientCommandId": "cid-2",
+      "contents": [
+        { "type": "TEXT", "text": "describe these references" },
+        { "type": "IMAGE", "mediaType": "image/png", "source": "https://example.test/image.png" },
+        { "type": "AUDIO", "mediaType": "audio/mpeg", "source": "https://example.test/audio.mp3" },
+        { "type": "VIDEO", "mediaType": "video/mp4", "source": "https://example.test/video.mp4" }
+      ]
+    }
   ]
 }
 ```
@@ -74,9 +83,10 @@ SET_ACTIVE_TOOLS, SET_YOLO
 
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
-- `USER_MESSAGE` 携带 `content`，**不携带 role**（role 恒为 USER，strict mapper 拒绝多余字段）；`CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
+- `USER_MESSAGE` 必须且只能携带一个纯文本 shorthand `text` 或非空结构化 `contents`，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`，未知字段、未知类型、模态不匹配的 mediaType 与空 source 一律拒绝。现有 `content` 纯文本 shorthand 继续兼容，但不能与 `text`/`contents` 同时出现。
+- `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
-- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `role`/`content` 等不相关字段。
+- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `text`/`contents`/`role` 等不相关字段。
 
 ### Ordered command-set replay
 

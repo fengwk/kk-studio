@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
@@ -51,6 +52,44 @@ class CompactionPlannerTest {
   private static final CompactionConfig CONFIG = CompactionConfig.DEFAULTS;
   private static final long SESSION = 100L;
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
+
+  @Test
+  void estimatesVideoWithTheDeterministicMediaPlaceholderBudget() {
+    Entry video =
+        new Entry(
+            2L,
+            SESSION,
+            1L,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(new VideoMessageContent("video/mp4", "video-source"))),
+                null,
+                null),
+            BASE);
+    Entry nestedVideo =
+        new Entry(
+            3L,
+            SESSION,
+            2L,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "read",
+                            "read",
+                            List.of(new VideoMessageContent("video/mp4", "video-source")),
+                            false,
+                            "{}"))),
+                null,
+                new ToolResultMetadata(1L, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+            BASE);
+
+    assertEquals(1_200L, CompactionPlanner.estimateTokens(video));
+    assertEquals(1_200L, CompactionPlanner.estimateTokens(nestedVideo));
+  }
 
   @Test
   void neverExceedingBudgetYieldsNoPreparation() {

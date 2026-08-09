@@ -23,6 +23,7 @@ class AgentMessageJsonCodecTest {
                 new TextMessageContent("answer"),
                 new ImageMessageContent("image/png", "data:image/png;base64,AA=="),
                 new AudioMessageContent("audio/wav", "https://example.test/audio.wav"),
+                new VideoMessageContent("video/mp4", "https://example.test/video.mp4"),
                 new ThinkingMessageContent("reasoning"),
                 new JsonMessageContent("[1,{\"ok\":true}]"),
                 new ToolCallMessageContent("call-1", "read", "read", "{\"path\":\"README.md\"}"),
@@ -49,7 +50,10 @@ class AgentMessageJsonCodecTest {
                     "call-1",
                     "read",
                     "read",
-                    List.of(new TextMessageContent("ok"), new JsonMessageContent("{}")),
+                    List.of(
+                        new TextMessageContent("ok"),
+                        new VideoMessageContent("video/mp4", "video-source"),
+                        new JsonMessageContent("{}")),
                     false,
                     "{\"exitCode\":0}")));
 
@@ -62,6 +66,13 @@ class AgentMessageJsonCodecTest {
         "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}",
         codec.encode(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
+    assertEquals(
+        "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\","
+            + "\"source\":\"https://example.test/video.mp4\"}]}",
+        codec.encode(
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(new VideoMessageContent("video/mp4", "https://example.test/video.mp4")))));
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"call-1\","
             + "\"toolName\":\"read\",\"rendererKey\":\"read\","
@@ -166,7 +177,8 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"url\":\"x\"}]}"));
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"document\",\"url\":\"x\"}]}"));
   }
 
   @Test
@@ -214,6 +226,11 @@ class AgentMessageJsonCodecTest {
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"audio\",\"mediaType\":\"a\",\"source\":5}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\",\"source\":\" \"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->

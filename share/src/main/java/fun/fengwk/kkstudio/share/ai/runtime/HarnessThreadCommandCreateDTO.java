@@ -1,7 +1,12 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import lombok.AccessLevel;
 import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.List;
 
@@ -24,8 +29,29 @@ public class HarnessThreadCommandCreateDTO {
   /** 必填稳定客户端幂等键（canonical name）：同一批命令重放返回既有行。 */
   private String clientCommandId;
 
-  /** 消息正文：仅 USER_MESSAGE / CUSTOM_MESSAGE 必填，SET_* 命令禁止提供。 */
+  /**
+   * 兼容消息正文：CUSTOM_MESSAGE 必填；旧 USER_MESSAGE 调用继续接受。新 USER_MESSAGE 推荐使用 {@link #text} 或 {@link
+   * #contents}。
+   */
   private String content;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean contentFieldPresent;
+
+  /** USER_MESSAGE 的纯文本 shorthand，与 {@link #content} / {@link #contents} 互斥。 */
+  private String text;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean textFieldPresent;
+
+  /** USER_MESSAGE 的非空结构化内容，与 {@link #text} / {@link #content} 互斥。 */
+  private List<HarnessUserMessageContentDTO> contents;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean contentsFieldPresent;
 
   /** 消息角色：仅 CUSTOM_MESSAGE 必填，取值仅限 SYSTEM 或 USER；其余类型禁止提供。 */
   private String role;
@@ -44,6 +70,39 @@ public class HarnessThreadCommandCreateDTO {
 
   /** 目标 Environment 路由：仅 SET_ENVIRONMENT 必填；可空 canonical bounded 小写名称（null 表示解绑）；其余类型禁止提供。 */
   private String environmentName;
+
+  @JsonSetter("content")
+  public void setContent(String content) {
+    this.content = content;
+    this.contentFieldPresent = true;
+  }
+
+  @JsonSetter("text")
+  public void setText(String text) {
+    this.text = text;
+    this.textFieldPresent = true;
+  }
+
+  @JsonSetter("contents")
+  public void setContents(List<HarnessUserMessageContentDTO> contents) {
+    this.contents = contents;
+    this.contentsFieldPresent = true;
+  }
+
+  @JsonIgnore
+  public boolean hasContentField() {
+    return contentFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasTextField() {
+    return textFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasContentsField() {
+    return contentsFieldPresent;
+  }
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.net.URI;
@@ -122,6 +124,9 @@ public final class ProviderMessageProjector {
     }
     if (content instanceof AudioMessageContent value) {
       return new ProviderAudioBlock(value.mediaType(), value.source());
+    }
+    if (content instanceof VideoMessageContent value) {
+      return new ProviderVideoBlock(value.mediaType(), value.source());
     }
     if (content instanceof ThinkingMessageContent value) {
       return new ProviderThinkingBlock(value.text());

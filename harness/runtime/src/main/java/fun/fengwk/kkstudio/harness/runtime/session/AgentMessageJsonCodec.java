@@ -19,7 +19,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 共享的 {@link AgentMessage} 与 8 类 {@link AgentMessageContent} 严格、确定性 JSON codec。
+ * 共享的 {@link AgentMessage} 与 9 类 {@link AgentMessageContent} 严格、确定性 JSON codec。
  *
  * <p>字段固定且顺序确定；content 通过 {@code type} discriminator 区分。codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON
  * null；trailing token（共享 {@link ObjectMapper} 启用 {@link
@@ -39,6 +39,7 @@ public final class AgentMessageJsonCodec {
   private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
   private static final Set<String> IMAGE_FIELDS = orderedSet("type", "mediaType", "source");
   private static final Set<String> AUDIO_FIELDS = orderedSet("type", "mediaType", "source");
+  private static final Set<String> VIDEO_FIELDS = orderedSet("type", "mediaType", "source");
   private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
@@ -122,6 +123,11 @@ public final class AgentMessageJsonCodec {
         node.put("mediaType", value.mediaType());
         node.put("source", value.source());
       }
+      case VideoMessageContent value -> {
+        node.put("type", "video");
+        node.put("mediaType", value.mediaType());
+        node.put("source", value.source());
+      }
       case ThinkingMessageContent value -> {
         node.put("type", "thinking");
         node.put("text", value.text());
@@ -193,6 +199,11 @@ public final class AgentMessageJsonCodec {
       case "audio" -> {
         requireExactFields(node, AUDIO_FIELDS, "content");
         yield new AudioMessageContent(
+            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
+      }
+      case "video" -> {
+        requireExactFields(node, VIDEO_FIELDS, "content");
+        yield new VideoMessageContent(
             requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
       }
       case "thinking" -> {

@@ -5,6 +5,7 @@ public sealed interface AgentMessageContent
     permits TextMessageContent,
         ImageMessageContent,
         AudioMessageContent,
+        VideoMessageContent,
         ThinkingMessageContent,
         JsonMessageContent,
         ToolCallMessageContent,

@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
@@ -49,6 +51,7 @@ class ProviderMessageProjectorTest {
                         new TextMessageContent("answer"),
                         new ImageMessageContent("image/png", "image-data"),
                         new AudioMessageContent("audio/mpeg", "audio-data"),
+                        new VideoMessageContent("video/mp4", "video-data"),
                         new ThinkingMessageContent("reasoning"),
                         new JsonMessageContent("{\"answer\":true}"),
                         new ResourceMessageContent(
@@ -70,6 +73,7 @@ class ProviderMessageProjectorTest {
                             "lookup",
                             List.of(
                                 new TextMessageContent("tool output"),
+                                new VideoMessageContent("video/webm", "tool-video-data"),
                                 new JsonMessageContent("{\"found\":true}")),
                             true,
                             "{\"code\":\"NOT_FOUND\"}")))));
@@ -88,6 +92,7 @@ class ProviderMessageProjectorTest {
             new ProviderTextBlock("answer"),
             new ProviderImageBlock("image/png", "image-data"),
             new ProviderAudioBlock("audio/mpeg", "audio-data"),
+            new ProviderVideoBlock("video/mp4", "video-data"),
             new ProviderThinkingBlock("reasoning"),
             new ProviderJsonBlock("{\"answer\":true}"),
             new ProviderTextBlock("[Resource report]\nresource preview"),
@@ -101,6 +106,7 @@ class ProviderMessageProjectorTest {
                 "lookup",
                 List.of(
                     new ProviderTextBlock("tool output"),
+                    new ProviderVideoBlock("video/webm", "tool-video-data"),
                     new ProviderJsonBlock("{\"found\":true}")),
                 true,
                 "{\"code\":\"NOT_FOUND\"}")),

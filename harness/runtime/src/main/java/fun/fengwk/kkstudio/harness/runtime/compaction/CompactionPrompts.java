@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -116,6 +117,8 @@ public final class CompactionPrompts {
               texts.add("[Image: " + image.mediaType() + "]");
             } else if (content instanceof AudioMessageContent audio) {
               texts.add("[Audio: " + audio.mediaType() + "]");
+            } else if (content instanceof VideoMessageContent video) {
+              texts.add("[Video: " + video.mediaType() + "]");
             } else if (content instanceof ResourceMessageContent resource) {
               texts.add(resourcePlaceholder(resource));
             }
@@ -185,6 +188,8 @@ public final class CompactionPrompts {
         parts.add("[Image: " + image.mediaType() + "]");
       } else if (content instanceof AudioMessageContent audio) {
         parts.add("[Audio: " + audio.mediaType() + "]");
+      } else if (content instanceof VideoMessageContent video) {
+        parts.add("[Video: " + video.mediaType() + "]");
       } else if (content instanceof ResourceMessageContent resource) {
         parts.add(resourcePlaceholder(resource));
       }

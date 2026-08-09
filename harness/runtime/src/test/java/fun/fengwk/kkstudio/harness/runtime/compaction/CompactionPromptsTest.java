@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
@@ -129,14 +130,20 @@ class CompactionPromptsTest {
             List.of(
                 new ImageMessageContent("image/png", "image-data"),
                 new AudioMessageContent("audio/mp3", "audio-data"),
+                new VideoMessageContent("video/mp4", "video-data"),
                 new ResourceMessageContent(
                     new ResourceRef(
                         "http://example.test/res.png", "image/png", "res.png", 3L, null),
                     null)));
+    AgentMessage assistant =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new VideoMessageContent("video/webm", "assistant-video-data")));
 
     assertEquals(
-        "[User]: [Image: image/png]\n[Audio: audio/mp3]\n[Resource: res.png]",
-        CompactionPrompts.serializeConversation(List.of(user)));
+        "[User]: [Image: image/png]\n[Audio: audio/mp3]\n[Video: video/mp4]\n"
+            + "[Resource: res.png]\n\n[Assistant]: [Video: video/webm]",
+        CompactionPrompts.serializeConversation(List.of(user, assistant)));
   }
 
   @Test

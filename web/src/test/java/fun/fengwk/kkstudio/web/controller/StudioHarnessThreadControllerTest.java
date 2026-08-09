@@ -96,7 +96,7 @@ class StudioHarnessThreadControllerTest {
           "expectedHeadEntryId": "3",
           "expectedNextCommandSequence": 4,
           "commands": [
-            {"type": "USER_MESSAGE", "content": "hello", "clientCommandId": "c-1"},
+            {"type": "USER_MESSAGE", "text": "hello", "clientCommandId": "c-1"},
             {"type": "SET_AGENT", "agentName": "default-assistant", "clientCommandId": "c-2"},
             {"type": "SET_MODEL",
              "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
@@ -177,6 +177,106 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isBadRequest());
+    verify(runtime, never()).enqueueCommands(any(ThreadCommandBatch.class));
+  }
+
+  @Test
+  void enqueueCommandsMapsStructuredUserContentsToCanonicalPersistentMessage() throws Exception {
+    when(runtime.enqueueCommands(any(ThreadCommandBatch.class)))
+        .thenReturn(List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()));
+    String body =
+        """
+        {
+          "expectedHeadEntryId": "3",
+          "expectedNextCommandSequence": 4,
+          "commands": [{
+            "type": "USER_MESSAGE",
+            "clientCommandId": "c-structured",
+            "contents": [
+              {"type": "TEXT", "text": "animate this"},
+              {"type": "IMAGE", "mediaType": "image/png", "source": "https://example.test/image.png"},
+              {"type": "AUDIO", "mediaType": "audio/mpeg", "source": "https://example.test/audio.mp3"},
+              {"type": "VIDEO", "mediaType": "video/mp4", "source": "https://example.test/video.mp4"}
+            ]
+          }]
+        }
+        """;
+
+    mockMvc
+        .perform(
+            post("/api/ai/runtime/threads/1/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isAccepted());
+
+    ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
+    verify(runtime).enqueueCommands(captor.capture());
+    assertEquals(
+        "{\"message\":{\"role\":\"USER\",\"contents\":["
+            + "{\"type\":\"text\",\"text\":\"animate this\"},"
+            + "{\"type\":\"image\",\"mediaType\":\"image/png\","
+            + "\"source\":\"https://example.test/image.png\"},"
+            + "{\"type\":\"audio\",\"mediaType\":\"audio/mpeg\","
+            + "\"source\":\"https://example.test/audio.mp3\"},"
+            + "{\"type\":\"video\",\"mediaType\":\"video/mp4\","
+            + "\"source\":\"https://example.test/video.mp4\"}]}}",
+        COMMAND_PAYLOADS.encode(captor.getValue().commands().get(0).payload()));
+  }
+
+  @Test
+  void enqueueCommandsRejectsInvalidStructuredUserMessageShapesAsBadRequest() throws Exception {
+    String prefix =
+        """
+        {
+          "expectedHeadEntryId": "3",
+          "expectedNextCommandSequence": 4,
+          "commands": [{
+            "type": "USER_MESSAGE",
+            "clientCommandId": "c-invalid",
+        """;
+    String suffix = """
+          }]
+        }
+        """;
+    List<String> invalidBodies =
+        List.of(
+            prefix + "\"contents\": []" + suffix,
+            prefix
+                + "\"text\": \"hello\", \"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\"}]"
+                + suffix,
+            prefix
+                + "\"text\": null, \"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\"}]"
+                + suffix,
+            prefix
+                + "\"contents\": [{\"type\": \"IMAGE\", \"mediaType\": \"audio/mpeg\","
+                + " \"source\": \"image-source\"}]"
+                + suffix,
+            prefix
+                + "\"contents\": [{\"type\": \"VIDEO\", \"mediaType\": \"video/mp4\","
+                + " \"source\": \" \"}]"
+                + suffix,
+            prefix + "\"contents\": [{\"type\": \"TOOL\", \"text\": \"hidden\"}]" + suffix,
+            prefix
+                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\", \"unknown\": true}]"
+                + suffix,
+            prefix
+                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\","
+                + " \"mediaType\": null}]"
+                + suffix,
+            prefix + "\"text\": \"hello\", \"textFieldPresent\": true" + suffix,
+            prefix
+                + "\"contents\": [{\"type\": \"TEXT\", \"text\": \"hello\","
+                + " \"mediaTypeFieldPresent\": true}]"
+                + suffix);
+
+    for (String body : invalidBodies) {
+      mockMvc
+          .perform(
+              post("/api/ai/runtime/threads/1/commands")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
     verify(runtime, never()).enqueueCommands(any(ThreadCommandBatch.class));
   }
 

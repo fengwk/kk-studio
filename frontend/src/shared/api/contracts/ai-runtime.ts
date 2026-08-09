@@ -87,12 +87,23 @@ export interface HarnessThreadCommandDTO {
 /**
  * 类型化的 Thread mailbox command 请求。
  *
- * 该可辨识联合镜像了 Java mapper 严格的按类型字段规则：USER_MESSAGE 不得携带 role
- * （mapper 禁止该字段——role 始终是 USER）；CUSTOM_MESSAGE 携带大写 role
- * （SYSTEM/USER）。clientCommandId 是稳定的幂等键。
+ * USER_MESSAGE 支持 text shorthand、结构化 contents，以及现有 content shorthand 兼容形态；
+ * 三者互斥且不得携带 role（role 始终是 USER）。CUSTOM_MESSAGE 携带大写 role
+ *（SYSTEM/USER）。clientCommandId 是稳定的幂等键。
  */
+export type HarnessUserMessageContentDTO =
+  | { type: 'TEXT'; text: string }
+  | { type: 'IMAGE'; mediaType: string; source: string }
+  | { type: 'AUDIO'; mediaType: string; source: string }
+  | { type: 'VIDEO'; mediaType: string; source: string }
+
+type HarnessUserMessageCommandDTO =
+  | { type: 'USER_MESSAGE'; clientCommandId: string; text: string; content?: never; contents?: never }
+  | { type: 'USER_MESSAGE'; clientCommandId: string; contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]; text?: never; content?: never }
+  | { type: 'USER_MESSAGE'; clientCommandId: string; content: string; text?: never; contents?: never }
+
 export type HarnessThreadCommandCreateDTO =
-  | { type: 'USER_MESSAGE'; clientCommandId: string; content: string }
+  | HarnessUserMessageCommandDTO
   | { type: 'CUSTOM_MESSAGE'; clientCommandId: string; content: string; role: 'SYSTEM' | 'USER' }
   | { type: 'SET_AGENT'; clientCommandId: string; agentName: string }
   | { type: 'SET_MODEL'; clientCommandId: string; model: HarnessModelSelectionDTO }
