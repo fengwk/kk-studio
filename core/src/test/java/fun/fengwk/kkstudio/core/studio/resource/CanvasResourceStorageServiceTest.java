@@ -96,6 +96,7 @@ class CanvasResourceStorageServiceTest {
 
     assertEquals("photo.PNG", upload.filename());
     assertEquals("PUT", reservation.method());
+    assertEquals("*", reservation.headers().get("If-None-Match"));
     assertFalse(reservation.url().contains("bucket="));
     assertTrue(
         reservation.url().contains(CanvasResourcePaths.original(1L, reservation.uploadId())));
@@ -273,6 +274,12 @@ class CanvasResourceStorageServiceTest {
     public S3PresignedResponseDTO presignUpload(
         String key, String contentType, Long expiresInSeconds) {
       return response("PUT", key, Map.of("Content-Type", contentType));
+    }
+
+    @Override
+    public S3PresignedResponseDTO presignCreateOnlyUpload(
+        String key, String contentType, Long expiresInSeconds) {
+      return response("PUT", key, Map.of("Content-Type", contentType, "If-None-Match", "*"));
     }
 
     @Override

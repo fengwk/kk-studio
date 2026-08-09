@@ -149,7 +149,8 @@ L1 的关键语义断言：
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 - `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
   S3 配置；IMAGE reserve 返回 `uploadId + PUT + public URL + headers + expiresAt`，不暴露
-  bucket/key，TEXT 与客户端注入 key 均返回 400。完整 PUT/finalize/preview 字节链路由
+  bucket/key，并包含签名覆盖的 `If-None-Match: *`；TEXT 与客户端注入 key 均返回
+  400。完整 create-only PUT 拒绝覆盖、finalize、original/preview 字节链路由
   `deploy/test` MinIO smoke 和后端定向测试覆盖。
 
 ### L2/L3/L4（7）

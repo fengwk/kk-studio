@@ -94,7 +94,7 @@ public class CanvasResourceStorageService implements CanvasResourceMaterializer 
     Instant createdAt = now.get();
     Instant expiresAt = createdAt.plus(properties.getUploadExpiry());
     S3PresignedResponseDTO presigned =
-        presignService.presignUpload(
+        presignService.presignCreateOnlyUpload(
             CanvasResourcePaths.original(canvasId, uploadId),
             normalizedMediaType,
             properties.getUploadExpiry().toSeconds());

@@ -302,7 +302,7 @@ Browser -> https://s3.fengwk.fun
 
 ```text
 POST uploads
--> server-generated resource id/key + presigned PUT
+-> server-generated resource id/key + create-only presigned PUT
 -> browser direct PUT to s3.fengwk.fun
 -> POST complete
 -> server stream object from vps-s3
@@ -310,6 +310,12 @@ POST uploads
 -> insert immutable Resource
 -> create or update ResourceNode
 ```
+
+Canvas reserve 返回的 PUT headers 必须包含签名覆盖的 `If-None-Match: *`，浏览器
+必须原样发送。首次 PUT 创建 original 后，同一预签名 URL 在有效期内再次 PUT 会由
+S3/MinIO 拒绝，避免已 finalize Resource 的 original 被覆盖，并保证并发 finalize
+读取的原件与最终 preview/metadata 一致。这一条件写入是 Resource immutable 的对象
+存储边界；部署时 bucket CORS 必须允许 `If-None-Match` 请求头。
 
 服务端媒体校验不相信浏览器的 MIME、宽高、时长、帧率或编码声明。ffmpeg/ffprobe
 执行必须有输入大小上限、执行超时和临时目录清理。

@@ -27,7 +27,7 @@
 | `key` | string | 服务端校验后的对象键 |
 | `method` | string | `PUT` 或 `GET` |
 | `url` | string | 已签名 URL，path-style |
-| `headers` | map<string,string> | 调用方发起请求时必须显式设置的已签名头（典型如直传场景下的 `Content-Type`）；浏览器自动发送且脚本禁止设置的 `Host` 不会返回 |
+| `headers` | map<string,string> | 调用方发起请求时必须显式设置的已签名头（典型如直传场景下的 `Content-Type`）；Canvas create-only 上传还包含 `If-None-Match: *`；浏览器自动发送且脚本禁止设置的 `Host` 不会返回 |
 | `expiresAt` | string | UTC ISO-8601 过期时刻 |
 
 ## 配置
@@ -58,6 +58,11 @@ kk-studio:
 - 响应 `headers` 不会返回 `Host`：浏览器根据 URL 自动发送且脚本禁止设置的该头不应该出现在响应中。
 - Canvas 浏览器 API 使用不含 bucket/key 的包装 DTO；Canvas 对象 key 只能由
   `CanvasResourcePaths` 根据 canvas/resource id 生成，浏览器不能指定。
+- 通用 `/api/s3/presigned-uploads` 与 `presignUpload` 保持普通 PUT 覆盖语义；Canvas
+  reserve 必须调用独立的 `presignCreateOnlyUpload`，在 PutObject 签名和返回 headers
+  中都包含 `If-None-Match: *`。浏览器必须原样发送该 header，S3/MinIO 在 original
+  已存在时以 409/412 拒绝覆盖。这是 Resource immutable 的对象存储边界，也要求
+  生产环境 bucket CORS 允许浏览器发送 `If-None-Match`。
 - `S3StorageService` 同时提供必须关闭的流式 read、HEAD 与 delete；既有 ComfyUI
   bounded byte[] 下载继续保留，并在 HEAD 与实际读取两阶段执行大小上限校验。
 

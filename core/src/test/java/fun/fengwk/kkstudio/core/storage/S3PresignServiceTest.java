@@ -64,7 +64,27 @@ public class S3PresignServiceTest {
           "expected Content-Type to be among signed headers, got: " + resp.getUrl());
       assertNotNull(resp.getHeaders(), "signed headers must not be null");
       assertEquals("application/octet-stream", getHeader(resp, "content-type"));
+      assertFalse(
+          hasHeader(resp, "if-none-match"), "ordinary PUT must preserve overwrite semantics");
+      assertFalse(resp.getUrl().toLowerCase().contains("if-none-match"));
       assertFalse(hasHeader(resp, "host"), "browser response headers must not include Host");
+    }
+  }
+
+  /** Create-only PUT 必须签名并返回 If-None-Match，确保已存在对象无法被覆盖。 */
+  @Test
+  public void testPresignCreateOnlyUploadIncludesIfNoneMatchHeader() {
+    try (TestContext context = newTestContext()) {
+      S3PresignedResponseDTO resp =
+          context.service.presignCreateOnlyUpload(
+              "uploads/immutable.bin", "application/octet-stream", 120L);
+
+      assertEquals("*", getHeader(resp, "if-none-match"));
+      assertTrue(
+          resp.getUrl().toLowerCase().contains("if-none-match"),
+          "expected If-None-Match to be among signed headers, got: " + resp.getUrl());
+      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
+      assertFalse(hasHeader(resp, "host"));
     }
   }
 

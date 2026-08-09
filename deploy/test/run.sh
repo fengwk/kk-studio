@@ -117,6 +117,7 @@ if [[ "$WITH_APP" == "true" ]]; then
     python3 - <<'PY'
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -147,6 +148,11 @@ reservation = json_call(
     },
 )
 assert "bucket" not in reservation and "key" not in reservation
+assert next(
+    value
+    for name, value in reservation["headers"].items()
+    if name.lower() == "if-none-match"
+) == "*"
 put = urllib.request.Request(
     reservation["url"],
     data=image,
@@ -156,6 +162,20 @@ put = urllib.request.Request(
 with urllib.request.urlopen(put, timeout=30) as response:
     assert response.status == 200
 
+replacement = bytes([image[0] ^ 0xFF]) + image[1:]
+overwrite = urllib.request.Request(
+    reservation["url"],
+    data=replacement,
+    headers=reservation.get("headers") or {},
+    method=reservation["method"],
+)
+try:
+    urllib.request.urlopen(overwrite, timeout=30)
+except urllib.error.HTTPError as error:
+    assert error.code in (409, 412), error.code
+else:
+    raise AssertionError("create-only presigned PUT unexpectedly overwrote original")
+
 resource = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/uploads/{reservation['uploadId']}/complete",
@@ -164,6 +184,14 @@ assert resource["id"] == reservation["uploadId"]
 assert resource["mediaType"] == "image/png"
 metadata = json.loads(resource["metadataJson"])
 assert metadata["width"] > 0 and metadata["height"] > 0
+
+original = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/resources/{resource['id']}/download-url",
+)
+with urllib.request.urlopen(original["url"], timeout=30) as response:
+    assert response.status == 200
+    assert response.read() == image
 
 preview = json_call(
     "POST",
