@@ -5,10 +5,11 @@
 # `web` module via the `distribution` profile, which installs Node 24 + npm 11 and
 # embeds the React build output into BOOT-INF/classes/static.
 #
-# Runtime: Temurin JRE 21 (Ubuntu 22.04 base). Only the Fat JAR ships in the image;
-# no Maven, no Node, no source. Healthcheck uses `curl` (already shipped in the
-# JRE base image) against `/actuator/health`. The JVM runs as a dedicated
-# unprivileged `kkstudio` user.
+# Runtime: Temurin JRE 21 (Ubuntu 22.04 base) with ffmpeg/ffprobe for media
+# inspection and transformation. Only the Fat JAR and runtime packages ship in
+# the image; no Maven, no Node, no source. Healthcheck uses `curl` (already
+# shipped in the JRE base image) against `/actuator/health`. The JVM runs as a
+# dedicated unprivileged `kkstudio` user.
 
 # ---------- builder ----------
 FROM maven:3.9.11-eclipse-temurin-21 AS builder
@@ -38,10 +39,15 @@ ENV LANG=C.UTF-8 \
     SERVER_PORT=8080 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 
-# Create a dedicated unprivileged user and writable app directory.
-# `curl` is shipped by the eclipse-temurin JRE image, so no apt-get install is
-# required for the healthcheck.
+# Install Canvas media tools, then create a dedicated unprivileged user and
+# writable app directory. `curl` is already shipped by the JRE base image.
 RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends ffmpeg; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*; \
+    command -v ffmpeg; \
+    command -v ffprobe; \
     groupadd --system --gid 10001 kkstudio; \
     useradd --system --uid 10001 \
             --gid kkstudio \
