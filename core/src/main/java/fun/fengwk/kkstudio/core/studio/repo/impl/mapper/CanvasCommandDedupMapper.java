@@ -15,18 +15,24 @@ public interface CanvasCommandDedupMapper extends BaseMapper {
 
   @Insert(
       """
-      insert into canvas_command_dedup (canvas_id, command_id, request_hash)
-      values (#{canvasId}, #{commandId}, #{requestHash})
+      insert into canvas_command_dedup (
+          canvas_id, command_id, request_hash, applied_revision, created_at
+      ) values (
+          #{canvasId}, #{commandId}, #{requestHash}, #{appliedRevision}, current_timestamp
+      )
       """)
   int insert(CanvasCommandDedupDO command);
 
   @Select(
-      "select canvas_id, command_id, request_hash from canvas_command_dedup"
+      "select canvas_id, command_id, request_hash, applied_revision, created_at"
+          + " from canvas_command_dedup"
           + " where canvas_id = #{canvasId} and command_id = #{commandId}")
   @Results({
     @Result(column = "canvas_id", property = "canvasId"),
     @Result(column = "command_id", property = "commandId"),
-    @Result(column = "request_hash", property = "requestHash")
+    @Result(column = "request_hash", property = "requestHash"),
+    @Result(column = "applied_revision", property = "appliedRevision"),
+    @Result(column = "created_at", property = "createdAt")
   })
   CanvasCommandDedupDO findById(
       @Param("canvasId") long canvasId, @Param("commandId") String commandId);

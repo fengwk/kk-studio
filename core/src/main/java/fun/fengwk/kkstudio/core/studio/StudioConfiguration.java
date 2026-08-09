@@ -7,10 +7,13 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandDedupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasGroupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
-import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
-import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeResourceMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceRepository;
 
 /** 装配持久的 Canvas command/query 端口。 */
 @Configuration
@@ -19,22 +22,27 @@ public class StudioConfiguration {
   @Bean
   public DurableCanvasService durableCanvasService(
       CanvasDocumentMapper documentMapper,
+      CanvasGroupMapper groupMapper,
       CanvasNodeMapper nodeMapper,
+      CanvasResourceMapper resourceMapper,
+      CanvasNodeResourceMapper nodeResourceMapper,
       CanvasLinkMapper linkMapper,
       CanvasCommandDedupMapper commandDedupMapper,
+      CanvasResourceRepository resourceRepository,
+      CanvasFunctionRunRepository functionRunRepository,
       ObjectMapper objectMapper,
       PostgresqlSequenceIdGenerator idGenerator) {
     return new DurableCanvasService(
-        documentMapper, nodeMapper, linkMapper, commandDedupMapper, objectMapper, idGenerator);
-  }
-
-  @Bean
-  public CanvasQueryService canvasQueryService(DurableCanvasService durableCanvasService) {
-    return durableCanvasService;
-  }
-
-  @Bean
-  public CanvasCommandService canvasCommandService(DurableCanvasService durableCanvasService) {
-    return durableCanvasService;
+        documentMapper,
+        groupMapper,
+        nodeMapper,
+        resourceMapper,
+        nodeResourceMapper,
+        linkMapper,
+        commandDedupMapper,
+        resourceRepository,
+        functionRunRepository,
+        objectMapper,
+        idGenerator);
   }
 }

@@ -91,12 +91,17 @@ Goal 不使用独立表。`plugins/goal` 把每次完整状态快照写成当前
 
 | 表 | 职责 |
 | --- | --- |
-| `canvas_document` | Canvas 身份、标题、revision、viewport |
-| `canvas_node` | RESOURCE/FUNCTION 节点，硬删除 |
-| `canvas_link` | 同 Canvas 的可见性边，节点删除级联 |
-| `canvas_command_dedup` | `(canvas_id, command_id)` 幂等事实与 request hash |
+| `canvas_document` | Canvas 身份、标题、graph revision 与时间 |
+| `canvas_group` | 不嵌套的 world transform Group |
+| `canvas_node` | ResourceNode、规范化唯一名称、transform、可选 Group/Function |
+| `canvas_node_resource` | Node 当前有序 Resource 关系；Node 删除时级联，Resource 保留 |
+| `canvas_link` | `(canvas_id, source_node_id, target_node_id)` 可见性边；节点删除级联 |
+| `canvas_function_run` | Function 节点当前/最后一次 Run |
+| `canvas_resource` | Canvas 内 immutable Resource 内容与 metadata |
+| `canvas_upload` | finalize 前的上传声明与过期事实 |
+| `canvas_command_dedup` | `(canvas_id, command_id)`、request hash、applied revision 与创建时间 |
 
-当前 `DurableCanvasService` 支持创建 Canvas、创建文本/生成文本节点、创建 link、移动节点和删除节点。
+`DurableCanvasService` 支持 Canvas create/list/snapshot，以及 CREATE/UPDATE 文本、Resource/Function Node、Function 配置、rename、绝对 transform、Node/Link/Group 创建移动解绑删除的 typed atomic command batch。名称使用 trim + NFKC + case-insensitive 规范值并由唯一索引并发强制。
 
 ## 7. 事务不变量
 

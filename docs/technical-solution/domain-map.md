@@ -7,7 +7,7 @@
 | 域 | 代码位置 | 职责 |
 | --- | --- | --- |
 | Harness / AI | `harness-tool`、`harness-runtime`、`harness-plugin`、`plugins/*`、`harness-runtime-spring`、`harness-daemon`、`core.ai`、`features/ai` | Catalog、Chat、Session、Entry Tree、Thread、Command、Model/Tool Invocation、插件 branch state、Work |
-| Studio / Canvas | `studio`、`core.studio`、`features/canvas` | Canvas document、node、link、command dedup |
+| Studio / Canvas | `studio`、`core.studio`、`features/canvas` | Canvas document、ResourceNode、Resource、Function、Group、Link、typed command |
 
 ```text
 frontend
@@ -81,12 +81,16 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 
 | 概念 | 含义 |
 | --- | --- |
-| CanvasDocument | 画布身份、标题与 revision |
-| CanvasNodeKind | `RESOURCE` / `FUNCTION` |
-| CanvasLink | 同一 Canvas 内的可见性边 |
-| CanvasCommand | 带 `commandId` 与 `baseRevision` 的幂等命令 |
+| CanvasDocument | 画布身份、标题、`graphRevision` 与创建/更新时间 |
+| ResourceNode | 唯一业务节点；包含 name/world transform/groupId、当前有序 `Resource[]` 与可选 Function |
+| Resource | Canvas 内 immutable 的 IMAGE/VIDEO/AUDIO/TEXT 内容事实；对象 key 不落库 |
+| Function | ResourceNode 上可选的 `modelKey + configJson` 资源生产能力 |
+| FunctionRun | Function 节点当前或最后一次运行；状态变化不修改 `graphRevision` |
+| CanvasGroup | 不嵌套、使用 world 绝对坐标的节点分组 |
+| CanvasLink | 以 `(canvasId, sourceNodeId, targetNodeId)` 标识；target 必须有 Function |
+| CanvasCommand | `expectedRevision + commandId + typed commands[]` 原子批次；成功批次只递增一次 `graphRevision` |
 
-当前可持久化的 Function 节点是 `system.generate-text` v1；前端 demo 节点在构造时直接携带对应的 `domainKind`。
+节点没有 kind、nodeType、dataJson 或 resourceKind；普通节点类型由当前 Resource 决定，Function 节点生产类型由服务端 model registry 决定。
 
 ## 6. API 边界
 
@@ -108,6 +112,9 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `GET /api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog（不含内部 load_skill/task） |
 | `GET /api/ai/environment` | 当前 live Environment 内存投影（含 CONNECTING/READY status） |
 | WebSocket `/api/ai/environment/daemon/v2` | Daemon v2 连接 |
+| `GET/POST /api/canvases` | Canvas 列表与创建 |
+| `GET /api/canvases/{canvasId}` | Canvas document、ResourceNode/Resource/Function/Run、Group、Link 完整快照 |
+| `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；revision CAS 与 commandId/hash 幂等 |
 
 **不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `/commands` 命令表达）、无 `expectedExecutionEpoch`。
 

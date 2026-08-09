@@ -116,69 +116,188 @@ create unique index uk_comfyui_workflow_api_api_name
     on comfyui_workflow_api (api_name);
 
 create table canvas_document (
-    id              bigint        primary key default nextval('kk_studio_id_seq'),
-    title           varchar(256)  not null,
-    revision        bigint        not null,
-    home_viewport   jsonb         not null,
+    id              bigint         primary key default nextval('kk_studio_id_seq'),
+    title           varchar(256)   not null,
+    graph_revision  bigint         not null default 0,
+    created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     constraint ck_canvas_document_title_nonblank check (btrim(title) <> ''),
-    constraint ck_canvas_document_revision_nonneg check (revision >= 0),
+    constraint ck_canvas_document_revision_nonneg check (graph_revision >= 0),
+    constraint ck_canvas_document_time_order check (updated_at >= created_at),
     constraint ck_canvas_document_id_pos check (id > 0)
 );
 
 create index idx_canvas_document_updated
     on canvas_document (updated_at, id);
 
-create table canvas_node (
-    id           bigint        primary key default nextval('kk_studio_id_seq'),
-    canvas_id    bigint        not null,
-    kind         varchar(32)   not null,
-    node_type    varchar(128)  not null,
-    name         varchar(256)  not null,
+create table canvas_group (
+    id           bigint         primary key default nextval('kk_studio_id_seq'),
+    canvas_id    bigint         not null,
+    title        varchar(256)   not null,
     x            double precision not null,
     y            double precision not null,
     width        double precision not null,
     height       double precision not null,
-    data         jsonb         not null,
-    constraint ck_canvas_node_id_pos check (id > 0),
-    constraint ck_canvas_node_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_node_kind check (
-        kind in ('RESOURCE','FUNCTION')
+    constraint ck_canvas_group_id_pos check (id > 0),
+    constraint ck_canvas_group_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_group_title_nonblank check (btrim(title) <> ''),
+    constraint ck_canvas_group_geometry check (
+        x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and y not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and width not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and height not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and width > 0 and height > 0
     ),
-    constraint ck_canvas_node_type_nonblank check (btrim(node_type) <> ''),
-    constraint ck_canvas_node_name_nonblank check (btrim(name) <> ''),
-    constraint ck_canvas_node_width_pos check (width > 0),
-    constraint ck_canvas_node_height_pos check (height > 0)
+    constraint uk_canvas_group_canvas_id unique (canvas_id, id)
 );
 
-create index idx_canvas_node_canvas on canvas_node (canvas_id);
-create unique index uk_canvas_node_canvas_id on canvas_node (canvas_id, id);
+create index idx_canvas_group_canvas on canvas_group (canvas_id, id);
+
+create table canvas_node (
+    id                    bigint         primary key default nextval('kk_studio_id_seq'),
+    canvas_id             bigint         not null,
+    name                  varchar(256)   not null,
+    name_normalized       varchar(256)   not null,
+    x                     double precision not null,
+    y                     double precision not null,
+    width                 double precision not null,
+    height                double precision not null,
+    group_id              bigint,
+    model_key             varchar(256),
+    function_config_json  jsonb,
+    constraint ck_canvas_node_id_pos check (id > 0),
+    constraint ck_canvas_node_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_node_group_id_pos check (group_id is null or group_id > 0),
+    constraint ck_canvas_node_name_nonblank check (btrim(name) <> ''),
+    constraint ck_canvas_node_name_normalized_nonblank check (btrim(name_normalized) <> ''),
+    constraint ck_canvas_node_geometry check (
+        x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and y not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and width not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and height not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
+        and width > 0 and height > 0
+    ),
+    constraint ck_canvas_node_function_pair check (
+        (model_key is null and function_config_json is null)
+        or (
+            model_key is not null
+            and btrim(model_key) <> ''
+            and function_config_json is not null
+            and jsonb_typeof(function_config_json) = 'object'
+        )
+    ),
+    constraint uk_canvas_node_canvas_id unique (canvas_id, id)
+);
+
+create index idx_canvas_node_canvas on canvas_node (canvas_id, id);
+create index idx_canvas_node_group on canvas_node (canvas_id, group_id)
+    where group_id is not null;
+create unique index uk_canvas_node_name_normalized
+    on canvas_node (canvas_id, name_normalized);
+
+create table canvas_resource (
+    id             bigint         primary key default nextval('kk_studio_id_seq'),
+    canvas_id      bigint         not null,
+    kind           varchar(16)    not null,
+    media_type     varchar(256)   not null,
+    name           varchar(256)   not null,
+    size           bigint         not null,
+    text_content   text,
+    metadata_json  jsonb          not null,
+    created_at     timestamptz(3) not null default current_timestamp,
+    constraint ck_canvas_resource_id_pos check (id > 0),
+    constraint ck_canvas_resource_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_resource_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO', 'TEXT')),
+    constraint ck_canvas_resource_media_type_nonblank check (btrim(media_type) <> ''),
+    constraint ck_canvas_resource_name_nonblank check (btrim(name) <> ''),
+    constraint ck_canvas_resource_size_nonneg check (size >= 0),
+    constraint ck_canvas_resource_text_shape check (
+        (kind = 'TEXT' and text_content is not null)
+        or (kind <> 'TEXT' and text_content is null)
+    ),
+    constraint ck_canvas_resource_metadata_object check (jsonb_typeof(metadata_json) = 'object'),
+    constraint uk_canvas_resource_canvas_id unique (canvas_id, id)
+);
+
+create index idx_canvas_resource_canvas_created
+    on canvas_resource (canvas_id, created_at, id);
+
+create table canvas_upload (
+    id                   bigint         primary key default nextval('kk_studio_id_seq'),
+    canvas_id            bigint         not null,
+    kind                 varchar(16)    not null,
+    filename             varchar(512)   not null,
+    declared_media_type  varchar(256)   not null,
+    declared_size        bigint         not null,
+    expires_at           timestamptz(3) not null,
+    created_at           timestamptz(3) not null default current_timestamp,
+    constraint ck_canvas_upload_id_pos check (id > 0),
+    constraint ck_canvas_upload_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_upload_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO', 'TEXT')),
+    constraint ck_canvas_upload_filename_nonblank check (btrim(filename) <> ''),
+    constraint ck_canvas_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
+    constraint ck_canvas_upload_size_nonneg check (declared_size >= 0),
+    constraint ck_canvas_upload_expiry check (expires_at > created_at)
+);
+
+create index idx_canvas_upload_canvas_expiry
+    on canvas_upload (canvas_id, expires_at, id);
+
+create table canvas_node_resource (
+    canvas_id       bigint   not null,
+    node_id         bigint   not null,
+    resource_index  integer  not null,
+    resource_id     bigint   not null,
+    constraint pk_canvas_node_resource primary key (canvas_id, node_id, resource_index),
+    constraint ck_canvas_node_resource_canvas_id_pos check (canvas_id > 0),
+    constraint ck_canvas_node_resource_node_id_pos check (node_id > 0),
+    constraint ck_canvas_node_resource_index_nonneg check (resource_index >= 0),
+    constraint ck_canvas_node_resource_resource_id_pos check (resource_id > 0)
+);
+
+create index idx_canvas_node_resource_resource
+    on canvas_node_resource (canvas_id, resource_id);
 
 create table canvas_link (
-    id              bigint        primary key default nextval('kk_studio_id_seq'),
     canvas_id       bigint        not null,
     source_node_id  bigint        not null,
     target_node_id  bigint        not null,
-    constraint ck_canvas_link_id_pos check (id > 0),
+    constraint pk_canvas_link primary key (canvas_id, source_node_id, target_node_id),
     constraint ck_canvas_link_canvas_id_pos check (canvas_id > 0),
     constraint ck_canvas_link_source_id_pos check (source_node_id > 0),
     constraint ck_canvas_link_target_id_pos check (target_node_id > 0),
     constraint ck_canvas_link_distinct check (source_node_id <> target_node_id)
 );
 
-create unique index uk_canvas_link
-    on canvas_link (canvas_id, source_node_id, target_node_id);
+create index idx_canvas_link_target
+    on canvas_link (canvas_id, target_node_id, source_node_id);
+
+create table canvas_function_run (
+    node_id      bigint         primary key,
+    request_id   varchar(128)   not null,
+    status       varchar(16)    not null,
+    state_json   jsonb          not null,
+    error        text,
+    updated_at   timestamptz(3) not null default current_timestamp,
+    constraint ck_canvas_function_run_node_id_pos check (node_id > 0),
+    constraint ck_canvas_function_run_request_id_nonblank check (btrim(request_id) <> ''),
+    constraint ck_canvas_function_run_status check (
+        status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
+    ),
+    constraint ck_canvas_function_run_state_object check (jsonb_typeof(state_json) = 'object')
+);
 
 create table canvas_command_dedup (
-    canvas_id      bigint        not null,
-    command_id     varchar(128)  not null,
-    request_hash   varchar(64)   not null,
+    canvas_id        bigint         not null,
+    command_id       varchar(128)   not null,
+    request_hash     varchar(64)    not null,
+    applied_revision bigint         not null,
+    created_at       timestamptz(3) not null default current_timestamp,
     constraint pk_canvas_command_dedup primary key (canvas_id, command_id),
     constraint ck_canvas_command_dedup_canvas_id_pos check (canvas_id > 0),
     constraint ck_canvas_command_dedup_command_id_nonblank check (btrim(command_id) <> ''),
-    constraint ck_canvas_command_dedup_request_hash_length check (
-        char_length(request_hash) = 64
-    )
+    constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$'),
+    constraint ck_canvas_command_dedup_applied_revision_nonneg check (applied_revision >= 0)
 );
 
 create table chat (
@@ -492,14 +611,39 @@ create trigger trg_harness_thread_revision_notify
     for each row execute function harness_thread_revision_notify();
 
 ------------------------------------------------------------------------------
--- 5. Canvas self-referencing FKs added after targets exist.
---    Node hard-delete cascades to its links via ON DELETE CASCADE on the
---    same-canvas composite FK (canvas_id, source_node_id) / (canvas_id, target_node_id).
+-- 5. Canvas ownership and same-canvas composite FKs.
 ------------------------------------------------------------------------------
+
+alter table canvas_group
+    add constraint fk_canvas_group_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete cascade;
 
 alter table canvas_node
     add constraint fk_canvas_node_canvas foreign key (canvas_id)
     references canvas_document (id) on delete cascade;
+
+alter table canvas_node
+    add constraint fk_canvas_node_group
+    foreign key (canvas_id, group_id)
+    references canvas_group (canvas_id, id);
+
+alter table canvas_resource
+    add constraint fk_canvas_resource_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete cascade;
+
+alter table canvas_upload
+    add constraint fk_canvas_upload_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete cascade;
+
+alter table canvas_node_resource
+    add constraint fk_canvas_node_resource_node
+    foreign key (canvas_id, node_id)
+    references canvas_node (canvas_id, id) on delete cascade;
+
+alter table canvas_node_resource
+    add constraint fk_canvas_node_resource_resource
+    foreign key (canvas_id, resource_id)
+    references canvas_resource (canvas_id, id);
 
 alter table canvas_command_dedup
     add constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
@@ -514,3 +658,7 @@ alter table canvas_link
     add constraint fk_canvas_link_target
     foreign key (canvas_id, target_node_id)
     references canvas_node (canvas_id, id) on delete cascade;
+
+alter table canvas_function_run
+    add constraint fk_canvas_function_run_node foreign key (node_id)
+    references canvas_node (id) on delete cascade;

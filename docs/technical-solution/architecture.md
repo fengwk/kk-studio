@@ -141,7 +141,7 @@ Blank first send:
 
 ## 6. Canvas
 
-Canvas 继续使用独立的 `CanvasDocument`、`CanvasNode`、`CanvasLink` 与 `CanvasCommandDedup`。当前持久化 Function 节点是 `system.generate-text` v1。Canvas 不引用 Harness Session/Thread。
+Canvas 使用独立的 `CanvasDocument` 聚合：所有业务节点都是 `ResourceNode`，当前内容通过有序 `Resource[]` 表达，资源生产能力通过可选 Function 表达；Group 与 Link 独立存在，Link target 必须有 Function。用户 typed command batch 通过 document 行 `graphRevision` CAS 原子提交，并以 `(canvasId, commandId) + requestHash` 幂等；FunctionRun 与资源替换不递增 graphRevision。Canvas 不引用 Harness Session/Thread。
 
 ## 7. Realtime 与恢复
 

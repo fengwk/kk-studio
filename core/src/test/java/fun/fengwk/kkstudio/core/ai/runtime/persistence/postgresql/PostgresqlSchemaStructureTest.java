@@ -39,8 +39,13 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "flyway_schema_history",
           "comfyui_workflow_api",
           "canvas_document",
+          "canvas_group",
           "canvas_node",
+          "canvas_node_resource",
           "canvas_link",
+          "canvas_function_run",
+          "canvas_resource",
+          "canvas_upload",
           "canvas_command_dedup",
           "chat",
           "chat_thread",
@@ -79,7 +84,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   /** 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供。 */
   private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
-      Set.of("comfyui_workflow_api", "canvas_document", "canvas_node", "canvas_link", "chat");
+      Set.of(
+          "comfyui_workflow_api",
+          "canvas_document",
+          "canvas_group",
+          "canvas_node",
+          "canvas_resource",
+          "canvas_upload",
+          "chat");
 
   @BeforeEach
   void setup() throws SQLException {
@@ -175,21 +187,59 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns("canvas_document", "id", "title", "revision", "home_viewport", "updated_at");
+    assertColumns("canvas_document", "id", "title", "graph_revision", "created_at", "updated_at");
+    assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
         "canvas_node",
         "id",
         "canvas_id",
-        "kind",
-        "node_type",
         "name",
+        "name_normalized",
         "x",
         "y",
         "width",
         "height",
-        "data");
-    assertColumns("canvas_link", "id", "canvas_id", "source_node_id", "target_node_id");
-    assertColumns("canvas_command_dedup", "canvas_id", "command_id", "request_hash");
+        "group_id",
+        "model_key",
+        "function_config_json");
+    assertColumns("canvas_node_resource", "canvas_id", "node_id", "resource_index", "resource_id");
+    assertColumns("canvas_link", "canvas_id", "source_node_id", "target_node_id");
+    assertColumns(
+        "canvas_function_run",
+        "node_id",
+        "request_id",
+        "status",
+        "state_json",
+        "error",
+        "updated_at");
+    assertColumns(
+        "canvas_resource",
+        "id",
+        "canvas_id",
+        "kind",
+        "media_type",
+        "name",
+        "size",
+        "text_content",
+        "metadata_json",
+        "created_at");
+    assertColumns(
+        "canvas_upload",
+        "id",
+        "canvas_id",
+        "kind",
+        "filename",
+        "declared_media_type",
+        "declared_size",
+        "expires_at",
+        "created_at");
+    assertColumns(
+        "canvas_command_dedup",
+        "canvas_id",
+        "command_id",
+        "request_hash",
+        "applied_revision",
+        "created_at");
     assertColumns(
         "chat",
         "id",
@@ -327,6 +377,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "agent_provider", "config");
     assertColumnType("jsonb", "agent_model", "config");
     assertColumnType("jsonb", "agent_definition", "config");
+    assertColumnType("jsonb", "canvas_node", "function_config_json");
+    assertColumnType("jsonb", "canvas_resource", "metadata_json");
+    assertColumnType("jsonb", "canvas_function_run", "state_json");
   }
 
   @Test
@@ -356,6 +409,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "harness_tool_invocation", "updated_at");
     assertColumnType("timestamp with time zone", "harness_work", "available_at");
     assertColumnType("timestamp with time zone", "harness_work", "lease_until");
+    assertColumnType("timestamp with time zone", "canvas_document", "created_at");
+    assertColumnType("timestamp with time zone", "canvas_document", "updated_at");
+    assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
+    assertColumnType("timestamp with time zone", "canvas_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
   }
 
   @Test
@@ -718,8 +776,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         Set.of(
             "uk_comfyui_workflow_api_api_name",
+            "uk_canvas_group_canvas_id",
             "uk_canvas_node_canvas_id",
-            "uk_canvas_link",
+            "uk_canvas_node_name_normalized",
+            "uk_canvas_resource_canvas_id",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_sequence",
@@ -738,10 +798,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             st.executeQuery(
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
-                    + " 'fk_agent_definition_model', 'fk_canvas_node_canvas',"
+                    + " 'fk_agent_definition_model', 'fk_canvas_group_canvas',"
+                    + " 'fk_canvas_node_canvas', 'fk_canvas_node_group',"
+                    + " 'fk_canvas_resource_canvas', 'fk_canvas_upload_canvas',"
+                    + " 'fk_canvas_node_resource_node',"
+                    + " 'fk_canvas_node_resource_resource',"
                     + " 'fk_canvas_command_dedup_canvas',"
                     + " 'fk_canvas_link_source',"
-                    + " 'fk_canvas_link_target')")) {
+                    + " 'fk_canvas_link_target',"
+                    + " 'fk_canvas_function_run_node')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -750,10 +815,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "fk_agent_model_provider",
             "fk_agent_definition_model",
+            "fk_canvas_group_canvas",
             "fk_canvas_node_canvas",
+            "fk_canvas_node_group",
+            "fk_canvas_resource_canvas",
+            "fk_canvas_upload_canvas",
+            "fk_canvas_node_resource_node",
+            "fk_canvas_node_resource_resource",
             "fk_canvas_command_dedup_canvas",
             "fk_canvas_link_source",
-            "fk_canvas_link_target"),
+            "fk_canvas_link_target",
+            "fk_canvas_function_run_node"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }
