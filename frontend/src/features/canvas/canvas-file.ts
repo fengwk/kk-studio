@@ -20,18 +20,5 @@ const EXTENSION_DESCRIPTORS: Record<string, CanvasFileDescriptor> = {
 
 export function canvasFileDescriptor(file: Pick<File, 'name' | 'type'>): CanvasFileDescriptor | null {
   const extension = file.name.split('.').at(-1)?.toLowerCase()
-  const fallback = extension ? EXTENSION_DESCRIPTORS[extension] : undefined
-  if (!file.type) {
-    return fallback ?? null
-  }
-  if (file.type.startsWith('image/')) {
-    return { kind: 'IMAGE', mediaType: file.type }
-  }
-  if (file.type.startsWith('video/')) {
-    return { kind: 'VIDEO', mediaType: file.type }
-  }
-  if (file.type.startsWith('audio/')) {
-    return { kind: 'AUDIO', mediaType: file.type }
-  }
-  return fallback ?? null
+  return extension ? EXTENSION_DESCRIPTORS[extension] ?? null : null
 }
