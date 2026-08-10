@@ -38,6 +38,7 @@ export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
 
 function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   const [originalRequested, setOriginalRequested] = useState(false)
+  const [playRequested, setPlayRequested] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const hasPreview = resource.kind === 'IMAGE' || resource.kind === 'VIDEO'
   const {
@@ -83,6 +84,16 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
         ) : (
           <MediaPlaceholder loading={previewLoading} error={previewError} kind="IMAGE" />
         )}
+        <OriginalActions
+          resource={resource}
+          url={originalUrl}
+          loading={originalLoading}
+          error={originalError}
+          requestLabel="获取原图"
+          openLabel="打开原图"
+          downloadLabel="下载原图"
+          onRequest={() => setOriginalRequested(true)}
+        />
       </div>
     )
   }
@@ -90,7 +101,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   if (resource.kind === 'VIDEO') {
     return (
       <div className="canvas-resource-media video" ref={previewTargetRef}>
-        {originalUrl ? (
+        {playRequested && originalUrl ? (
           <video
             ref={(element) => {
               if (element) {
@@ -115,14 +126,26 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
               type="button"
               className="media-play-button"
               disabled={originalLoading}
-              onClick={() => setOriginalRequested(true)}
+              onClick={() => {
+                setPlayRequested(true)
+                setOriginalRequested(true)
+              }}
               aria-label={`播放视频 ${resource.name}`}
             >
               {originalLoading ? '加载中…' : '▶'}
             </button>
-            {originalError ? <span className="media-error">视频加载失败</span> : null}
           </>
         )}
+        <OriginalActions
+          resource={resource}
+          url={originalUrl}
+          loading={originalLoading}
+          error={originalError}
+          requestLabel="获取视频原件"
+          openLabel="打开视频原件"
+          downloadLabel="下载视频原件"
+          onRequest={() => setOriginalRequested(true)}
+        />
       </div>
     )
   }
@@ -130,7 +153,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   const durationMs = finiteNumber(resource.metadata.durationMs)
   return (
     <div className="canvas-resource-media audio">
-      {originalUrl ? (
+      {playRequested && originalUrl ? (
         <audio
           ref={(element) => {
             if (element) {
@@ -147,14 +170,71 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           type="button"
           className="audio-load-button"
           disabled={originalLoading}
-          onClick={() => setOriginalRequested(true)}
+          onClick={() => {
+            setPlayRequested(true)
+            setOriginalRequested(true)
+          }}
         >
           <span aria-hidden="true">♪</span>
           <strong>{originalLoading ? '加载中…' : '加载音频'}</strong>
           <small>{durationMs === null ? resource.mediaType : formatDuration(durationMs)}</small>
         </button>
       )}
-      {originalError ? <span className="media-error">音频加载失败</span> : null}
+      <OriginalActions
+        resource={resource}
+        url={originalUrl}
+        loading={originalLoading}
+        error={originalError}
+        requestLabel="获取音频原件"
+        openLabel="打开音频原件"
+        downloadLabel="下载音频原件"
+        onRequest={() => setOriginalRequested(true)}
+      />
+    </div>
+  )
+}
+
+function OriginalActions({
+  resource,
+  url,
+  loading,
+  error,
+  requestLabel,
+  openLabel,
+  downloadLabel,
+  onRequest,
+}: {
+  resource: Resource
+  url: string | null
+  loading: boolean
+  error: unknown
+  requestLabel: string
+  openLabel: string
+  downloadLabel: string
+  onRequest: () => void
+}) {
+  return (
+    <div className="media-original-actions">
+      {url ? (
+        <>
+          <a href={url} target="_blank" rel="noreferrer" aria-label={`${openLabel} ${resource.name}`}>
+            {openLabel}
+          </a>
+          <a href={url} download={resource.name} aria-label={`${downloadLabel} ${resource.name}`}>
+            {downloadLabel}
+          </a>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={loading}
+          onClick={onRequest}
+          aria-label={`${requestLabel} ${resource.name}`}
+        >
+          {loading ? '签名中…' : requestLabel}
+        </button>
+      )}
+      {error ? <span className="media-error">原件签名失败</span> : null}
     </div>
   )
 }

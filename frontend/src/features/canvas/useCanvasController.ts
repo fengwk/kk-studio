@@ -1,8 +1,13 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
 import type { ResourceNode } from '@/features/canvas/domain'
 import { createDefaultFunctionConfig } from '@/features/canvas/generation'
+import {
+  normalizeNodeAlias,
+  uniqueNodeAlias,
+} from '@/features/canvas/node-alias'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
 import type {
   AddMenuAction,
@@ -25,7 +30,6 @@ import type {
   CanvasCommandDTO,
   CanvasFunctionConfigDTO,
   CanvasFunctionRunDTO,
-  CanvasResourceKind,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
   DecimalString,
@@ -81,6 +85,7 @@ export function useCanvasController() {
   const pendingGroupMovesRef = useRef(new Map<DecimalString, { x: number; y: number }>())
   const pendingFunctionConfigsRef = useRef(new Map<DecimalString, PendingFunctionConfig>())
   const functionConfigTimersRef = useRef(new Map<DecimalString, number>())
+  const reservedNodeAliasesRef = useRef(new Set<string>())
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
@@ -201,6 +206,7 @@ export function useCanvasController() {
     }
     functionConfigTimersRef.current.clear()
     pendingFunctionConfigsRef.current.clear()
+    reservedNodeAliasesRef.current.clear()
     queueRef.current = null
     setState((current) => ({
       ...current,
@@ -222,6 +228,7 @@ export function useCanvasController() {
     }
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
+    reservedNodeAliasesRef.current.clear()
     setState((current) => ({
       ...current,
       view: 'library',
@@ -394,14 +401,42 @@ export function useCanvasController() {
     editTextNode,
   }), [editTextNode, renameNode])
 
+  const availableNodeNames = useCallback(() => {
+    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
+    return [
+      ...(snapshot?.nodes.map((node) => node.name) ?? []),
+      ...reservedNodeAliasesRef.current,
+    ]
+  }, [snapshotQuery.data])
+
+  const suggestNodeAlias = useCallback((preferred: string) => (
+    uniqueNodeAlias(preferred, availableNodeNames())
+  ), [availableNodeNames])
+
+  const reserveNodeAlias = useCallback((preferred: string) => {
+    const alias = suggestNodeAlias(preferred)
+    reservedNodeAliasesRef.current.add(alias)
+    return alias
+  }, [suggestNodeAlias])
+
+  const releaseNodeAlias = useCallback((alias: string) => {
+    const normalized = normalizeNodeAlias(alias)
+    for (const reserved of reservedNodeAliasesRef.current) {
+      if (normalizeNodeAlias(reserved) === normalized) {
+        reservedNodeAliasesRef.current.delete(reserved)
+        return
+      }
+    }
+  }, [])
+
   const nextTransform = useCallback((): CanvasTransformDTO => {
-    const count = snapshotQuery.data?.nodes.length ?? 0
+    const count = (queueRef.current?.currentSnapshot() ?? snapshotQuery.data)?.nodes.length ?? 0
     return {
       ...NODE_SIZE,
       x: 100 + (count % 4) * 360,
       y: 100 + Math.floor(count / 4) * 300,
     }
-  }, [snapshotQuery.data?.nodes.length])
+  }, [snapshotQuery.data])
 
   const createTextNode = useCallback(() => {
     setState((current) => ({
@@ -409,11 +444,11 @@ export function useCanvasController() {
       textEditor: {
         mode: 'create',
         nodeId: null,
-        name: '文本',
+        name: suggestNodeAlias('文本'),
         markdown: '# 新文本\n\n在这里编写 Markdown。',
       },
     }))
-  }, [])
+  }, [suggestNodeAlias])
 
   const setTextEditorDraft = useCallback((patch: { name?: string; markdown?: string }) => {
     setState((current) => current.textEditor ? {
@@ -431,22 +466,26 @@ export function useCanvasController() {
     if (!editor || !editor.name.trim() || !editor.markdown.trim()) {
       return
     }
-    const command: CanvasCommandDTO = editor.mode === 'create'
-      ? {
-        type: 'CREATE_TEXT_NODE',
-        name: editor.name.trim(),
-        markdown: editor.markdown,
-        transform: nextTransform(),
-      }
-      : {
+    if (editor.mode === 'edit') {
+      void executeCommands([{
         type: 'UPDATE_TEXT_NODE',
         nodeId: editor.nodeId,
         markdown: editor.markdown,
-      }
-    void executeCommands([command]).then(() => {
+      }]).then(() => {
+        setState((current) => ({ ...current, textEditor: null }))
+      }).catch(() => undefined)
+      return
+    }
+    const alias = reserveNodeAlias(editor.name)
+    void executeCommands([{
+      type: 'CREATE_TEXT_NODE',
+      name: alias,
+      markdown: editor.markdown,
+      transform: nextTransform(),
+    }]).then(() => {
       setState((current) => ({ ...current, textEditor: null }))
-    }).catch(() => undefined)
-  }, [executeCommands, nextTransform, state.textEditor])
+    }).catch(() => undefined).finally(() => releaseNodeAlias(alias))
+  }, [executeCommands, nextTransform, releaseNodeAlias, reserveNodeAlias, state.textEditor])
 
   const createFunctionNode = useCallback((outputKind: 'IMAGE' | 'VIDEO') => {
     const model = modelsQuery.data?.find((item) => item.outputKind === outputKind && item.available)
@@ -457,14 +496,22 @@ export function useCanvasController() {
     }
     const config = createDefaultFunctionConfig(model)
     config.prompt.segments = [{ type: 'TEXT', text: outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频' }]
+    const alias = reserveNodeAlias(outputKind === 'IMAGE' ? '图片生成' : '视频生成')
     void executeCommands([{
       type: 'CREATE_FUNCTION_NODE',
-      name: outputKind === 'IMAGE' ? '图片生成' : '视频生成',
+      name: alias,
       modelKey: model.key,
       configJson: JSON.stringify(config),
       transform: nextTransform(),
-    }]).catch(() => undefined)
-  }, [executeCommands, modelsQuery.data, nextTransform, setToast])
+    }]).catch(() => undefined).finally(() => releaseNodeAlias(alias))
+  }, [
+    executeCommands,
+    modelsQuery.data,
+    nextTransform,
+    releaseNodeAlias,
+    reserveNodeAlias,
+    setToast,
+  ])
 
   const createGroup = useCallback(() => {
     const snapshot = snapshotQuery.data
@@ -536,9 +583,9 @@ export function useCanvasController() {
     }
     const canvasId = state.canvasId
     for (const file of Array.from(files)) {
-      const kind = fileKind(file)
+      const descriptor = canvasFileDescriptor(file)
       const localId = `${file.name}:${file.lastModified}:${file.size}`
-      if (!kind) {
+      if (!descriptor) {
         setToast(`不支持的文件类型：${file.name}`)
         continue
       }
@@ -548,9 +595,9 @@ export function useCanvasController() {
           uploadProgress: { ...current.uploadProgress, [localId]: 0.1 },
         }))
         const reservation = await reserveCanvasUpload(canvasId, {
-          kind,
+          kind: descriptor.kind,
           filename: file.name,
-          mediaType: file.type || fallbackMediaType(kind),
+          mediaType: descriptor.mediaType,
           size: String(file.size) as DecimalString,
         })
         setState((current) => ({
@@ -563,12 +610,17 @@ export function useCanvasController() {
           uploadProgress: { ...current.uploadProgress, [localId]: 0.8 },
         }))
         const resource = await completeCanvasUpload(canvasId, reservation.uploadId)
-        await executeCommands([{
-          type: 'CREATE_RESOURCE_NODE',
-          name: file.name,
-          resourceIds: [resource.id],
-          transform: nextTransform(),
-        }])
+        const alias = reserveNodeAlias(file.name)
+        try {
+          await executeCommands([{
+            type: 'CREATE_RESOURCE_NODE',
+            name: alias,
+            resourceIds: [resource.id],
+            transform: nextTransform(),
+          }])
+        } finally {
+          releaseNodeAlias(alias)
+        }
         setState((current) => {
           const progress = { ...current.uploadProgress }
           delete progress[localId]
@@ -586,7 +638,14 @@ export function useCanvasController() {
         })
       }
     }
-  }, [executeCommands, nextTransform, setToast, state.canvasId])
+  }, [
+    executeCommands,
+    nextTransform,
+    releaseNodeAlias,
+    reserveNodeAlias,
+    setToast,
+    state.canvasId,
+  ])
 
   const handleAddAction = useCallback((action: AddMenuAction) => {
     setState((current) => ({ ...current, addMenuOpen: false }))
@@ -870,39 +929,6 @@ export function useCanvasController() {
     contextCount: contextNodes.length,
     contextDescription,
   }
-}
-
-function fileKind(file: File): Exclude<CanvasResourceKind, 'TEXT'> | null {
-  if (file.type.startsWith('image/')) {
-    return 'IMAGE'
-  }
-  if (file.type.startsWith('video/')) {
-    return 'VIDEO'
-  }
-  if (file.type.startsWith('audio/')) {
-    return 'AUDIO'
-  }
-  const extension = file.name.split('.').at(-1)?.toLowerCase()
-  if (extension && ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(extension)) {
-    return 'IMAGE'
-  }
-  if (extension && ['mp4', 'mov'].includes(extension)) {
-    return 'VIDEO'
-  }
-  if (extension && ['wav', 'mp3'].includes(extension)) {
-    return 'AUDIO'
-  }
-  return null
-}
-
-function fallbackMediaType(kind: Exclude<CanvasResourceKind, 'TEXT'>): string {
-  if (kind === 'IMAGE') {
-    return 'image/jpeg'
-  }
-  if (kind === 'VIDEO') {
-    return 'video/mp4'
-  }
-  return 'audio/mpeg'
 }
 
 function removeSubmittedDrafts(

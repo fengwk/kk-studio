@@ -37,6 +37,7 @@ function StageInner() {
     state,
     snapshot: snapshotDTO,
     models,
+    stageMetrics,
     nodeCallbacks,
     stageElementRef,
     fitViewRef,
@@ -83,6 +84,9 @@ function StageInner() {
       node.id === state.selectedIds[0] && Boolean(node.function)
     )) ?? null
   }, [snapshot, state.selectedIds])
+  const selectedFunctionFlowNode = selectedFunctionNode
+    ? nodes.find((node) => node.id === selectedFunctionNode.id)
+    : null
 
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
@@ -294,8 +298,10 @@ function StageInner() {
               })),
             )
           }}
-          onNodeClick={(_event, node) => {
-            setSelection([node.id])
+          onNodeClick={(event, node) => {
+            if (!event.shiftKey) {
+              setSelection([node.id])
+            }
           }}
           onPaneClick={() => {
             setSelection([])
@@ -337,9 +343,18 @@ function StageInner() {
 
       {snapshot && selectedFunctionNode ? (
         <CanvasGenerationPanel
-          key={`${selectedFunctionNode.id}:${selectedFunctionNode.function?.configJson ?? ''}`}
+          key={selectedFunctionNode.id}
           snapshot={snapshot}
           node={selectedFunctionNode}
+          anchor={selectedFunctionFlowNode ? {
+            node: {
+              ...selectedFunctionNode.transform,
+              x: selectedFunctionFlowNode.position.x,
+              y: selectedFunctionFlowNode.position.y,
+            },
+            viewport: state.viewport,
+            stage: stageMetrics,
+          } : undefined}
         />
       ) : null}
 

@@ -86,8 +86,8 @@ describe('Canvas lazy resource media', () => {
     disconnect.mockClear()
   })
 
-  it('requests IMAGE preview only after intersection and disconnects its observer', async () => {
-    // No signed URL is fetched before visibility; unmount proves observer cleanup.
+  it('lazily previews IMAGE and signs original open/download actions only after a click', async () => {
+    // Preview visibility and original access remain independent signed-URL boundaries.
     const view = renderMedia(resource('IMAGE'))
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
     intersectionCallback([{
@@ -99,6 +99,15 @@ describe('Canvas lazy resource media', () => {
       'https://s3.example/preview.webp',
     )
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
+    expect(await screen.findByRole('link', { name: '打开原图 image.asset' })).toHaveAttribute(
+      'href',
+      'https://s3.example/original',
+    )
+    expect(screen.getByRole('link', { name: '下载原图 image.asset' })).toHaveAttribute(
+      'download',
+      'image.asset',
+    )
     view.unmount()
     expect(disconnect).toHaveBeenCalled()
   })
@@ -112,6 +121,12 @@ describe('Canvas lazy resource media', () => {
     } as IntersectionObserverEntry], {} as IntersectionObserver)
     await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledOnce())
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '获取视频原件 video.asset' }))
+    expect(await screen.findByRole('link', { name: '下载视频原件 video.asset' })).toHaveAttribute(
+      'href',
+      'https://s3.example/original',
+    )
+    expect(screen.queryByLabelText('播放 video.asset')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '播放视频 video.asset' }))
     const video = await screen.findByLabelText('播放 video.asset')
     expect(video).toHaveAttribute('src', 'https://s3.example/original')
@@ -124,6 +139,12 @@ describe('Canvas lazy resource media', () => {
     renderMedia(resource('AUDIO'))
     expect(screen.getByText('1:05')).toBeInTheDocument()
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '获取音频原件 audio.asset' }))
+    expect(await screen.findByRole('link', { name: '下载音频原件 audio.asset' })).toHaveAttribute(
+      'download',
+      'audio.asset',
+    )
+    expect(screen.queryByLabelText('播放音频 audio.asset')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /加载音频/ }))
     expect(await screen.findByLabelText('播放音频 audio.asset')).toHaveAttribute(
       'src',

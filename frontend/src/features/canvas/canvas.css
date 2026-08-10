@@ -474,6 +474,25 @@
   background: rgba(0, 0, 0, 0.62);
 }
 
+.canvas-feature .media-original-actions {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.canvas-feature .media-original-actions > button,
+.canvas-feature .media-original-actions > a {
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, white 24%, transparent);
+  border-radius: 5px;
+  color: white;
+  background: rgba(0, 0, 0, 0.68);
+  font-size: 8px;
+}
+
 .canvas-feature .media-error {
   position: absolute;
   right: 8px;
@@ -732,6 +751,15 @@
   height: 36px;
   border: 1px solid var(--line);
   border-radius: 7px;
+}
+
+.canvas-feature .generation-reference.referenced {
+  color: var(--green);
+}
+
+.canvas-feature .generation-reference.referenced .canvas-resource-thumbnail {
+  border-color: var(--green-border);
+  box-shadow: 0 0 0 1px var(--green-border);
 }
 
 .canvas-feature .generation-reference > span:last-child {
@@ -1297,8 +1325,12 @@
   }
 
   .canvas-feature .generation-panel {
-    bottom: 84px;
+    top: auto !important;
+    right: auto !important;
+    bottom: 84px !important;
+    left: 50% !important;
     width: calc(100% - 24px);
+    transform: translateX(-50%) !important;
   }
 
   .canvas-feature .canvas-text-dialog form {

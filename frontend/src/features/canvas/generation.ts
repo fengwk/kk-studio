@@ -46,14 +46,31 @@ export function parseFunctionConfig(
     if (!isConfig(parsed)) {
       return createDefaultFunctionConfig(model)
     }
+    const defaults = createDefaultFunctionConfig(model)
+    const parameters: Record<string, string | number> = { ...defaults.parameters }
+    for (const definition of model.parameters) {
+      const value = parsed.parameters[definition.key]
+      if (
+        definition.type === 'ENUM'
+        && typeof value === 'string'
+        && definition.options.includes(value)
+      ) {
+        parameters[definition.key] = value
+      } else if (
+        definition.type === 'INTEGER'
+        && typeof value === 'number'
+        && Number.isInteger(value)
+        && (definition.min === null || value >= definition.min)
+        && (definition.max === null || value <= definition.max)
+      ) {
+        parameters[definition.key] = value
+      }
+    }
     return {
       prompt: {
         segments: parsed.prompt.segments.map((segment) => ({ ...segment })),
       },
-      parameters: {
-        ...createDefaultFunctionConfig(model).parameters,
-        ...parsed.parameters,
-      },
+      parameters,
     }
   } catch {
     return createDefaultFunctionConfig(model)
