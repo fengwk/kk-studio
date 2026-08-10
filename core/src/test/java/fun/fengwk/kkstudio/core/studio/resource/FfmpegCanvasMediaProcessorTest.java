@@ -10,6 +10,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 
@@ -91,6 +93,107 @@ class FfmpegCanvasMediaProcessorTest {
       assertThrows(
           IllegalArgumentException.class,
           () -> processor.process(CanvasResourceKind.VIDEO, input, Files.size(fixture)));
+    }
+    assertTempDirEmpty();
+  }
+
+  /** IMAGE 必须是实际图片 pipe，AVI 中的 mjpeg 视频不能仅凭 codec 冒充 JPEG。 */
+  @Test
+  void rejectsVideoContainerWithImageCodec() throws Exception {
+    Path probe =
+        writeScript(
+            "ffprobe-avi-mjpeg",
+            """
+            cat <<'JSON'
+            {"streams":[{"codec_type":"video","codec_name":"mjpeg","width":64,"height":48}],
+            "format":{"format_name":"avi"}}
+            JSON
+            """);
+    CanvasMediaProperties properties = properties();
+    properties.setFfprobeBinary(probe.toString());
+    FfmpegCanvasMediaProcessor processor = new FfmpegCanvasMediaProcessor(properties, objectMapper);
+    Path fixture = fixture("tiny.png");
+
+    try (InputStream input = Files.newInputStream(fixture)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> processor.process(CanvasResourceKind.IMAGE, input, Files.size(fixture)));
+    }
+    assertTempDirEmpty();
+  }
+
+  /** JPEG/PNG/WebP codec 与对应 pipe container 同时匹配时仍可正常处理。 */
+  @ParameterizedTest
+  @CsvSource({
+    "jpeg_pipe, mjpeg, image/jpeg",
+    "png_pipe, png, image/png",
+    "webp_pipe, webp, image/webp"
+  })
+  void acceptsMatchingImagePipeFormats(String format, String codec, String mediaType)
+      throws Exception {
+    Path probe =
+        writeScript(
+            "ffprobe-" + format,
+            """
+            cat <<'JSON'
+            {"streams":[{"codec_type":"video","codec_name":"%s","width":64,"height":48}],
+            "format":{"format_name":"%s"}}
+            JSON
+            """
+                .formatted(codec, format));
+    Path ffmpeg =
+        writeScript(
+            "ffmpeg-" + format,
+            """
+            for output do :; done
+            printf preview > "$output"
+            """);
+    CanvasMediaProperties properties = properties();
+    properties.setFfprobeBinary(probe.toString());
+    properties.setFfmpegBinary(ffmpeg.toString());
+    FfmpegCanvasMediaProcessor processor = new FfmpegCanvasMediaProcessor(properties, objectMapper);
+    Path fixture = fixture("tiny.png");
+
+    try (InputStream input = Files.newInputStream(fixture);
+        CanvasProcessedMedia media =
+            processor.process(CanvasResourceKind.IMAGE, input, Files.size(fixture))) {
+      assertEquals(mediaType, media.mediaType());
+      assertTrue(Files.size(media.previewPath()) > 0L);
+    }
+    assertTempDirEmpty();
+  }
+
+  /** HEIC/HEIF 继续由 HEVC codec 与 major brand 共同识别。 */
+  @ParameterizedTest
+  @CsvSource({"heic, image/heic", "mif1, image/heif"})
+  void acceptsHeifBrands(String brand, String mediaType) throws Exception {
+    Path probe =
+        writeScript(
+            "ffprobe-" + brand,
+            """
+            cat <<'JSON'
+            {"streams":[{"codec_type":"video","codec_name":"hevc","width":64,"height":48}],
+            "format":{"format_name":"mov,mp4","tags":{"major_brand":"%s"}}}
+            JSON
+            """
+                .formatted(brand));
+    Path ffmpeg =
+        writeScript(
+            "ffmpeg-" + brand,
+            """
+            for output do :; done
+            printf preview > "$output"
+            """);
+    CanvasMediaProperties properties = properties();
+    properties.setFfprobeBinary(probe.toString());
+    properties.setFfmpegBinary(ffmpeg.toString());
+    FfmpegCanvasMediaProcessor processor = new FfmpegCanvasMediaProcessor(properties, objectMapper);
+    Path fixture = fixture("tiny.png");
+
+    try (InputStream input = Files.newInputStream(fixture);
+        CanvasProcessedMedia media =
+            processor.process(CanvasResourceKind.IMAGE, input, Files.size(fixture))) {
+      assertEquals(mediaType, media.mediaType());
     }
     assertTempDirEmpty();
   }

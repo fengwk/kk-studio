@@ -20,10 +20,10 @@ public final class CanvasFunctionDispatcher {
     this.worker = worker;
   }
 
-  public void dispatch(long nodeId, String requestId) {
+  public boolean dispatch(long nodeId, String requestId) {
     RunKey key = new RunKey(nodeId, requestId);
     if (!inFlight.add(key)) {
-      return;
+      return true;
     }
     try {
       executor.execute(
@@ -34,9 +34,11 @@ public final class CanvasFunctionDispatcher {
               inFlight.remove(key);
             }
           });
+      return true;
     } catch (RejectedExecutionException rejected) {
       inFlight.remove(key);
       log.warn("Canvas Function dispatch queue is full nodeId={} requestId={}", nodeId, requestId);
+      return false;
     }
   }
 

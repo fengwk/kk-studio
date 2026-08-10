@@ -70,6 +70,7 @@ class CanvasFunctionRuntimeServiceTest {
     service =
         new CanvasFunctionRuntimeService(
             nodeMapper, repository, transactions, dispatcher, registry, stateCodec);
+    when(dispatcher.dispatch(NODE_ID, "request")).thenReturn(true);
     frozen =
         new CanvasFunctionFrozenRun(
             CANVAS_ID,
@@ -101,6 +102,34 @@ class CanvasFunctionRuntimeServiceTest {
     assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
 
     verify(dispatcher, times(2)).dispatch(NODE_ID, "request");
+    verify(transactions, never())
+        .failIfRunning(NODE_ID, "request", "Function execution could not be scheduled");
+  }
+
+  @Test
+  void failsNewAndReplayedRunningStartsWhenExecutorRejectsDispatch() {
+    CanvasFunctionRun running = run(CanvasFunctionRunStatus.RUNNING, frozen);
+    CanvasFunctionFrozenRun failed = stateCodec.checkpoint(frozen, "FAILED", frozen.adapterState());
+    CanvasFunctionRun terminal =
+        new CanvasFunctionRun(
+            NODE_ID,
+            "request",
+            CanvasFunctionRunStatus.FAILED,
+            failed.stage(),
+            stateCodec.encode(failed),
+            "Function execution could not be scheduled",
+            NOW);
+    when(transactions.start(CANVAS_ID, NODE_ID, "request"))
+        .thenReturn(new CanvasFunctionStartResult(running, true))
+        .thenReturn(new CanvasFunctionStartResult(running, false));
+    when(dispatcher.dispatch(NODE_ID, "request")).thenReturn(false);
+    when(repository.findByNodeId(NODE_ID)).thenReturn(Optional.of(terminal));
+
+    assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
+    assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
+
+    verify(transactions, times(2))
+        .failIfRunning(NODE_ID, "request", "Function execution could not be scheduled");
   }
 
   @Test

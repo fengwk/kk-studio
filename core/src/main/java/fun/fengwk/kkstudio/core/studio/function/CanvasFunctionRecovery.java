@@ -21,19 +21,35 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 @RequiredArgsConstructor
 public class CanvasFunctionRecovery {
 
+  private static final String DISPATCH_FAILURE = "Function execution could not be scheduled";
+
   private final CanvasFunctionRunRepository runRepository;
+  private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionDispatcher dispatcher;
 
   @EventListener(ApplicationReadyEvent.class)
   public void recover() {
+    Iterable<CanvasFunctionRun> running;
     try {
-      for (CanvasFunctionRun run : runRepository.findRunning()) {
-        dispatcher.dispatch(run.nodeId(), run.requestId());
-      }
+      running = runRepository.findRunning();
     } catch (RuntimeException ex) {
       log.warn(
           "Failed to recover Canvas Function runs; recovery will retry after restart: {}",
           ex.getMessage());
+      return;
+    }
+    for (CanvasFunctionRun run : running) {
+      try {
+        if (!dispatcher.dispatch(run.nodeId(), run.requestId())) {
+          transactions.failIfRunning(run.nodeId(), run.requestId(), DISPATCH_FAILURE);
+        }
+      } catch (RuntimeException ex) {
+        log.warn(
+            "Failed to recover Canvas Function run nodeId={} requestId={} type={}",
+            run.nodeId(),
+            run.requestId(),
+            ex.getClass().getSimpleName());
+      }
     }
   }
 }

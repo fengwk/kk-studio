@@ -122,13 +122,13 @@ public class FfmpegCanvasMediaProcessor implements CanvasMediaProcessor {
     String formatName = requireText(output.format().formatName(), "image container");
     String mediaType;
     String container;
-    if (JPEG_CODECS.contains(codec)) {
+    if (JPEG_CODECS.contains(codec) && hasFormat(formatName, "jpeg_pipe")) {
       mediaType = "image/jpeg";
       container = "jpeg";
-    } else if ("png".equals(codec)) {
+    } else if ("png".equals(codec) && hasFormat(formatName, "png_pipe")) {
       mediaType = "image/png";
       container = "png";
-    } else if ("webp".equals(codec)) {
+    } else if ("webp".equals(codec) && hasFormat(formatName, "webp_pipe")) {
       mediaType = "image/webp";
       container = "webp";
     } else if ("hevc".equals(codec) && isHeif(output.format())) {
