@@ -211,7 +211,15 @@ async function main(argv) {
   mkdirSync(artRoot, { recursive: true })
   if (args.real) await requireRealMiniMaxM27(args.backendUrl)
 
-  const browser = await chromium.launch({ headless: !args.headed })
+  const browserEnv = { ...process.env }
+  if (!args.headed) {
+    delete browserEnv.DISPLAY
+    delete browserEnv.WAYLAND_DISPLAY
+  }
+  const browser = await chromium.launch({
+    headless: !args.headed,
+    env: browserEnv,
+  })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
   await context.addInitScript(() => {
     if (!localStorage.getItem('kk-studio.locale')) {
@@ -464,19 +472,18 @@ async function main(argv) {
 
   await run('ui.agent.create_edit_delete_flow', 'UI 创建/编辑/删除 Agent', async (caseArt) => {
     const name = `e2e-ui-agent-${stamp}`
+    const systemPrompt = () =>
+      page.getByRole('textbox', { name: /^(System Prompt|系统提示词)$/ })
     await goto('/agents')
     await page.getByText('新建 Agent', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
-    await page.locator('label.form-group', { hasText: 'System Prompt' }).locator('textarea').fill('ui e2e agent')
+    await systemPrompt().fill('ui e2e agent')
     await page.getByRole('button', { name: '确认创建' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-created')
 
     await page.getByRole('button', { name: `编辑 ${name}` }).click()
-    await page
-      .locator('label.form-group', { hasText: 'System Prompt' })
-      .locator('textarea')
-      .fill('updated ui e2e agent')
+    await systemPrompt().fill('updated ui e2e agent')
     await page.getByRole('button', { name: '保存修改' }).click()
     await page.getByText(name, { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await shot(caseArt, 'agent-updated')
