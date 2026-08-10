@@ -276,7 +276,7 @@ snapshot = json_call(
                     },
                     separators=(",", ":"),
                 ),
-                "transform": {"x": 0, "y": 0, "width": 100, "height": 80},
+                "transform": {"x": 100, "y": 100, "width": 320, "height": 260},
             }
         ],
     },
@@ -357,7 +357,7 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
                         },
                         separators=(",", ":"),
                     ),
-                    "transform": {"x": 0, "y": 0, "width": 100, "height": 80},
+                    "transform": {"x": 100, "y": 100, "width": 320, "height": 260},
                 }
             ],
         },

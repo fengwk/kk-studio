@@ -5,6 +5,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  useNodesInitialized,
   useReactFlow,
   type Connection,
   type Edge,
@@ -56,6 +57,8 @@ function StageInner() {
     ungroupSelection,
     uploadFiles,
     focusAgentDock,
+    initialFitPending,
+    completeInitialFit,
   } = runtime
   const snapshot = useMemo(
     () => snapshotDTO ? projectCanvasSnapshot(snapshotDTO) : null,
@@ -64,7 +67,10 @@ function StageInner() {
   const containerRef = useRef<HTMLElement | null>(null)
   const dockWrapRef = useRef<HTMLDivElement | null>(null)
   const lastViewportRef = useRef(state.viewport)
+  const initialFitStartedRef = useRef(false)
+  const mountedRef = useRef(true)
   const { fitView, getViewport, setViewport: setFlowViewport, zoomTo } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
 
   const nodes = useMemo(
     () => snapshot
@@ -131,33 +137,84 @@ function StageInner() {
     void setFlowViewport(next)
   }, [setFlowViewport, state.viewport])
 
+  const syncViewport = useCallback(() => {
+    const viewport = getViewport()
+    const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
+    lastViewportRef.current = next
+    setViewport(next)
+  }, [getViewport, setViewport])
+
   useEffect(() => {
-    const sync = () => {
-      const viewport = getViewport()
-      const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
-      lastViewportRef.current = next
-      setViewport(next)
+    initialFitStartedRef.current = false
+  }, [state.canvasId])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
     }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !initialFitPending
+      || !nodesInitialized
+      || nodes.length === 0
+      || initialFitStartedRef.current
+    ) {
+      return
+    }
+    initialFitStartedRef.current = true
+    void fitView({
+      padding: 0.18,
+      maxZoom: 1,
+      duration: 0,
+    }).then((fitted) => {
+      if (!mountedRef.current) {
+        return
+      }
+      if (!fitted) {
+        initialFitStartedRef.current = false
+        return
+      }
+      syncViewport()
+      completeInitialFit()
+    })
+  }, [
+    completeInitialFit,
+    fitView,
+    initialFitPending,
+    nodes.length,
+    nodesInitialized,
+    syncViewport,
+  ])
+
+  useEffect(() => {
     fitViewRef.current = () => {
-      void fitView({ padding: 0.16, duration: 0 }).then(sync)
+      void fitView({
+        padding: 0.18,
+        maxZoom: 1,
+        duration: 0,
+      }).then(syncViewport)
     }
     focusSelectionRef.current = () => {
       const selected = nodes.filter((node) => node.selected)
       void fitView({
         nodes: selected.length > 0 ? selected : undefined,
         padding: 0.22,
+        maxZoom: 1.15,
         duration: 0,
-      }).then(sync)
+      }).then(syncViewport)
     }
     zoomRef.current = (zoom) => {
-      void zoomTo(zoom).then(sync)
+      void zoomTo(zoom).then(syncViewport)
     }
     return () => {
       fitViewRef.current = null
       focusSelectionRef.current = null
       zoomRef.current = null
     }
-  }, [fitView, fitViewRef, focusSelectionRef, getViewport, nodes, setViewport, zoomRef, zoomTo])
+  }, [fitView, fitViewRef, focusSelectionRef, nodes, syncViewport, zoomRef, zoomTo])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     if (!snapshot) {
@@ -373,7 +430,13 @@ function StageInner() {
         <div className="zoom-controls" role="group" aria-label={t('canvas.stage.zoomControls')}>
           <button type="button" aria-label={t('canvas.stage.zoomOut')} onClick={() => zoomRef.current?.(Math.max(MIN_CANVAS_ZOOM, state.viewport.zoom / 1.15))}>−</button>
           <button type="button" aria-label={t('canvas.stage.fitAll')} onClick={() => fitViewRef.current?.()}>⊙</button>
-          <button type="button" onClick={() => zoomRef.current?.(1)}>100%</button>
+          <button
+            type="button"
+            aria-label={t('canvas.stage.resetZoom')}
+            onClick={() => zoomRef.current?.(1)}
+          >
+            {`${Math.round(state.viewport.zoom * 100)}%`}
+          </button>
           <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_CANVAS_ZOOM, state.viewport.zoom * 1.15))}>＋</button>
           <button type="button" aria-pressed={state.tool === 'select'} onClick={() => setTool('select')}>V</button>
           <button type="button" aria-pressed={state.tool === 'hand'} onClick={() => setTool('hand')}>H</button>

@@ -231,7 +231,7 @@ Shell 约定：
 | 项 | 路由 | 状态 |
 | --- | --- | --- |
 | AI | `/chats`、`/agents`、`/models`、`/providers`、`/environment`、`/settings` | 已落地 |
-| 画布 | `/canvas` | 已落地 |
+| 画布 | `/canvas`、`/canvas/:canvasId` | 已落地 |
 | 资产 | 预留 disabled | 后续开放 |
 
 ## 5. 组件规范

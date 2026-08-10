@@ -26,6 +26,10 @@ describe('AI extension composition architecture', () => {
     expect(comfyuiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['ai.comfyui', 'comfyui'],
     ])
+    expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([
+      ['canvas.home', 'canvas'],
+      ['canvas.editor', 'canvas/:canvasId'],
+    ])
     expect(comfyuiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
       'ai.comfyui-editor',
       'ai.comfyui-delete',
@@ -41,6 +45,7 @@ describe('AI extension composition architecture', () => {
       'ai.environments',
       'ai.comfyui',
       'canvas.home',
+      'canvas.editor',
     ])
     expect(host.dialogs.list().map((dialog) => dialog.id)).toEqual([
       ...aiExtension.dialogs!.map((dialog) => dialog.id),
@@ -48,6 +53,9 @@ describe('AI extension composition architecture', () => {
     ])
     expect(host.pages.get('canvas.home')?.component).toBe(
       canvasExtension.pages?.[0].component,
+    )
+    expect(host.pages.get('canvas.editor')?.component).toBe(
+      canvasExtension.pages?.[1].component,
     )
   })
 

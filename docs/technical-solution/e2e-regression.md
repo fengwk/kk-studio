@@ -201,7 +201,8 @@ L1 的关键语义断言：
   `deploy/test` MinIO smoke 和后端定向测试覆盖。
 - `canvas.function_fake_runtime` 仅在 `--with-canvas-function` 下执行：显式注册
   `fake-image`，验证 Function node 创建、start/poll、成功 Resource 原子替换、
-  `graphRevision` 不变、公开 run DTO 无 `stateJson`，以及 preview signed GET。
+  `320×260 @ (100,100)` transform 精确回读、`graphRevision` 不变、公开 run DTO 无
+  `stateJson`，以及 preview signed GET。
 
 ### L2/L3/L4（7）
 
@@ -247,8 +248,10 @@ ui.provider.create_edit_delete_flow
 ui.chat.blank_workspace_shell
 ```
 
-其中 `ui.canvas.page_loads` 验证 `/canvas` 可达、真实 Canvas library 渲染及创建入口可用；
-Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime 隔离。
+其中 `ui.canvas.page_loads` 验证 `/canvas` library 可达，点击或创建后进入正整数
+`/canvas/:canvasId`，初始重置缩放显示 `100%`，刷新保持编辑器，浏览器 back 返回 library、
+forward 再进入编辑器；Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用
+fake Function runtime 隔离。
 `--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
 宿主 `DISPLAY` 与 `WAYLAND_DISPLAY`，避免混合桌面环境导致 compositor 停帧；`--headed`
 保留宿主显示环境。

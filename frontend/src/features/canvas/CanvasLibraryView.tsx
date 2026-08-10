@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import {
   createCanvas,
@@ -9,8 +10,9 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasLibraryView() {
-  const { openEditor, setToast } = useCanvasRuntime()
+  const { setToast } = useCanvasRuntime()
   const { t } = useI18n()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   const canvasesQuery = useQuery({
@@ -22,8 +24,7 @@ export function CanvasLibraryView() {
     mutationFn: (title: string) => createCanvas(title),
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvases })
-      setToast(t('canvas.toast.library.created', { title: created.title }))
-      openEditor(created.id)
+      navigate(`/canvas/${created.id}`)
     },
     onError: (error: Error) => {
       setToast(error.message || t('canvas.toast.library.createError'))
@@ -87,10 +88,7 @@ export function CanvasLibraryView() {
                 key={canvas.id}
                 type="button"
                 className="project-card"
-                onClick={() => {
-                  setToast(t('canvas.toast.library.open', { title: canvas.title }))
-                  openEditor(canvas.id)
-                }}
+                onClick={() => navigate(`/canvas/${canvas.id}`)}
               >
                 <div className="project-preview research-preview">
                   <i />

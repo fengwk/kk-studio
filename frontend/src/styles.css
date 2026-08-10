@@ -349,6 +349,10 @@ a {
   line-height: 1;
 }
 
+html[lang="en-US"] .topnav a small {
+  display: none;
+}
+
 .nav-toggle {
   display: none;
   align-items: center;

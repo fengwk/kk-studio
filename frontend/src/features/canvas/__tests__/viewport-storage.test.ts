@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canvasViewportStorageKey,
   DEFAULT_CANVAS_VIEWPORT,
+  hasStoredCanvasViewport,
   loadCanvasViewport,
   saveCanvasViewport,
 } from '@/features/canvas/viewport-storage'
@@ -19,15 +20,22 @@ describe('canvas viewport storage', () => {
 
     expect(loadCanvasViewport('1', storage)).toEqual({ x: 12, y: -9, zoom: 1.45 })
     expect(loadCanvasViewport('2', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
+    expect(hasStoredCanvasViewport('1', storage)).toBe(true)
     expect(values.has(canvasViewportStorageKey('1'))).toBe(true)
+    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v2:1')
   })
 
   it('falls back for malformed or non-finite persisted values', () => {
-    const storage = {
+    const nonFiniteStorage = {
       getItem: () => '{"x":0,"y":0,"zoom":"NaN"}',
     }
-    expect(loadCanvasViewport('1', storage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
-    expect(loadCanvasViewport('1', { getItem: () => '{' })).toEqual(DEFAULT_CANVAS_VIEWPORT)
+    const malformedStorage = { getItem: () => '{' }
+
+    // Invalid JSON or value types must not suppress the editor's one-time initial fit.
+    expect(hasStoredCanvasViewport('1', nonFiniteStorage)).toBe(false)
+    expect(hasStoredCanvasViewport('1', malformedStorage)).toBe(false)
+    expect(loadCanvasViewport('1', nonFiniteStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
+    expect(loadCanvasViewport('1', malformedStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
   })
 
   it('ignores non-finite values instead of corrupting storage', () => {
