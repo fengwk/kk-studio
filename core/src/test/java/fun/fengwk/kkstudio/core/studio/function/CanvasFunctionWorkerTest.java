@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
@@ -67,8 +68,10 @@ class CanvasFunctionWorkerTest {
     when(registry.require(MODEL.key()))
         .thenReturn(new CanvasFunctionModelRegistry.RegisteredModel(MODEL, adapter));
     ObjectProvider<S3StorageService> storageServices = mock(ObjectProvider.class);
+    ObjectProvider<S3PresignService> presignServices = mock(ObjectProvider.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
     when(storageServices.getIfAvailable()).thenReturn(mock(S3StorageService.class));
+    when(presignServices.getIfAvailable()).thenReturn(mock(S3PresignService.class));
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
     worker =
         new CanvasFunctionWorker(
@@ -77,6 +80,7 @@ class CanvasFunctionWorkerTest {
             stateCodec,
             transactions,
             storageServices,
+            presignServices,
             materializers,
             Clock.fixed(NOW, ZoneOffset.UTC));
     frozen =

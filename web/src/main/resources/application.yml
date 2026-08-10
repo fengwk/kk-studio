@@ -60,3 +60,19 @@ convention:
     i18n:
       # 错误码i18n语言，与i18n.locale保持一致
       locale: ${convention.i18n.locale}
+
+kk-studio:
+  canvas:
+    function:
+      minimax-h3:
+        enabled: ${KK_STUDIO_CANVAS_H3_ENABLED:false}
+        prompt-agent-name: ${KK_STUDIO_CANVAS_H3_PROMPT_AGENT:}
+        prompt-environment-name: ${KK_STUDIO_CANVAS_H3_PROMPT_ENVIRONMENT:}
+        presign-expiry-seconds: ${KK_STUDIO_CANVAS_H3_PRESIGN_EXPIRY_SECONDS:600}
+        prompt-max-wait: ${KK_STUDIO_CANVAS_H3_PROMPT_MAX_WAIT:10m}
+        comfy-base-url: ${KK_STUDIO_CANVAS_H3_COMFY_BASE_URL:}
+        comfy-bearer-token: ${KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN:}
+        comfy-connect-timeout: ${KK_STUDIO_CANVAS_H3_COMFY_CONNECT_TIMEOUT:10s}
+        comfy-request-timeout: ${KK_STUDIO_CANVAS_H3_COMFY_REQUEST_TIMEOUT:30s}
+        comfy-poll-interval: ${KK_STUDIO_CANVAS_H3_COMFY_POLL_INTERVAL:2s}
+        comfy-max-wait: ${KK_STUDIO_CANVAS_H3_COMFY_MAX_WAIT:30m}

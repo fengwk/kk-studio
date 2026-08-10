@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
@@ -28,6 +29,7 @@ public class CanvasFunctionWorker {
   private final CanvasFunctionRunStateCodec stateCodec;
   private final CanvasFunctionRunTransactions transactions;
   private final ObjectProvider<S3StorageService> storageServices;
+  private final ObjectProvider<S3PresignService> presignServices;
   private final ObjectProvider<CanvasResourceMaterializer> materializers;
   private final Clock clock;
 
@@ -47,7 +49,13 @@ public class CanvasFunctionWorker {
       CanvasFunctionFrozenRun frozen = stateCodec.decode(current.stateJson(), registered.model());
       CanvasFunctionExecutionContextImpl context =
           new CanvasFunctionExecutionContextImpl(
-              runRepository, stateCodec, storageServices, materializers, clock, frozen);
+              runRepository,
+              stateCodec,
+              storageServices,
+              presignServices,
+              materializers,
+              clock,
+              frozen);
       List<Long> result = List.copyOf(registered.adapter().execute(context, frozen));
       if (!result.equals(List.of(frozen.targetResourceId()))) {
         throw new IllegalArgumentException(
