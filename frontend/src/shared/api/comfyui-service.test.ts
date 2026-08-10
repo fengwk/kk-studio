@@ -28,7 +28,10 @@ describe('comfyuiService', () => {
     await service.createWorkflow(body)
     await service.updateWorkflow('workflow/1', body)
     await service.deleteWorkflow('workflow/1')
-    await service.createPresignedUpload({ key: 'inputs/a.png', contentType: 'image/png' })
+    await service.createPresignedUpload({
+      key: 'comfyui-inputs/image-upscale/upload/a.png',
+      contentType: 'image/png',
+    })
     await service.runWorkflow('image/upscale', { parameters: { scale: 2 }, files: {} })
     await service.getRun('run/1', '$.outputs[?(@.type=="image")]')
     await service.getRun('run-2')
@@ -38,7 +41,10 @@ describe('comfyuiService', () => {
     expect(client.post).toHaveBeenNthCalledWith(1, '/comfyui/workflows', body)
     expect(client.put).toHaveBeenCalledWith('/comfyui/workflows/workflow%2F1', body)
     expect(client.delete).toHaveBeenCalledWith('/comfyui/workflows/workflow%2F1')
-    expect(client.post).toHaveBeenNthCalledWith(2, '/s3/presigned-uploads', { key: 'inputs/a.png', contentType: 'image/png' })
+    expect(client.post).toHaveBeenNthCalledWith(2, '/s3/presigned-uploads', {
+      key: 'comfyui-inputs/image-upscale/upload/a.png',
+      contentType: 'image/png',
+    })
     expect(client.post).toHaveBeenNthCalledWith(3, '/comfyui/workflows/image%2Fupscale/runs', {
       parameters: { scale: 2 },
       files: {},

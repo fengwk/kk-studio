@@ -2,20 +2,20 @@
 
 ## 职责
 
-为浏览器提供不经过后端的 S3 对象直传 / 直下载通道。后端只负责生成签名 URL 与调用方必须显式携带的请求头， 不读写任何对象字节，也不代理任何 HTTP 流量。
+为浏览器提供 ComfyUI 临时输入对象的 S3 直传 / 直下载通道。后端只负责生成签名 URL 与调用方必须显式携带的请求头，不读写任何对象字节，也不代理任何 HTTP 流量。Canvas Resource 使用独立的专用 API，不通过本通用入口暴露对象 key。
 
 ## 端点
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/api/s3/presigned-uploads` | 为 `PUT` 上传生成签名响应 |
-| `POST` | `/api/s3/presigned-downloads` | 为 `GET` 下载生成签名响应 |
+| `POST` | `/api/s3/presigned-uploads` | 为 `comfyui-inputs/` 下对象的 `PUT` 上传生成签名响应 |
+| `POST` | `/api/s3/presigned-downloads` | 为 `comfyui-inputs/` 下对象的 `GET` 下载生成签名响应 |
 
 请求体字段：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `key` | string | 是 | 对象键；空白、前导 `/`、`.` / `..` 段、控制字符、UTF-8 超过 1024 字节的 key 一律拒绝 |
+| `key` | string | 是 | 对象键；经 `S3ObjectKeyNormalizer.normalize` 校验后必须位于 `comfyui-inputs/` 下且具有非空对象后缀；空白、前导 `/`、`.` / `..` 段、控制字符、UTF-8 超过 1024 字节或其它命名空间一律拒绝 |
 | `contentType` | string | 否 | 仅 `presigned-uploads` 有效；空白视为未提供；非空时校验长度（≤255）、控制字符和 media type 语法，并按 Spring `MimeTypeUtils` 规范化 |
 | `expiresInSeconds` | long | 否 | 缺省使用服务端默认（600s）；必须为正数且不超过服务端上限（3600s） |
 
@@ -54,15 +54,16 @@ kk-studio:
 
 - bucket 与 region 全部来自服务端配置；调用方既不能选择也不能覆盖。
 - 服务端 `endpoint` 与浏览器 `public-endpoint` 必须显式分离；预签名 URL 只能落在 `public-endpoint` 上（未配置时回退到 `endpoint`，仅适合内网场景）。
-- 所有面向固定 bucket 的服务端读取与浏览器预签名链路都必须使用 `S3ObjectKeyNormalizer.normalize` 校验 key， 避免签名键与实际读取键出现语义偏差。
+- 所有面向固定 bucket 的服务端读取与浏览器预签名链路都必须使用 `S3ObjectKeyNormalizer.normalize` 校验 key，避免签名键与实际读取键出现语义偏差。
+- 通用预签名 HTTP 端点只接受 `comfyui-inputs/` 下具有非空后缀的 key；`canvases/` 及其它命名空间返回 400，不能借此读取或覆盖 Canvas 受保护对象。
 - 响应 `headers` 不会返回 `Host`：浏览器根据 URL 自动发送且脚本禁止设置的该头不应该出现在响应中。
 - Canvas 浏览器 API 使用不含 bucket/key 的包装 DTO；Canvas 对象 key 只能由
   `CanvasResourcePaths` 根据 canvas/resource id 生成，浏览器不能指定。
-- 通用 `/api/s3/presigned-uploads` 与 `presignUpload` 保持普通 PUT 覆盖语义；Canvas
-  reserve 必须调用独立的 `presignCreateOnlyUpload`，在 PutObject 签名和返回 headers
-  中都包含 `If-None-Match: *`。浏览器必须原样发送该 header，S3/MinIO 在 original
-  已存在时以 409/412 拒绝覆盖。这是 Resource immutable 的对象存储边界，也要求
-  生产环境 bucket CORS 允许浏览器发送 `If-None-Match`。
+- 通用 `/api/s3/presigned-uploads` 在 `comfyui-inputs/` 临时命名空间内保持普通 PUT
+  覆盖语义；Canvas reserve 必须调用独立的 `presignCreateOnlyUpload`，在 PutObject
+  签名和返回 headers 中都包含 `If-None-Match: *`。浏览器必须原样发送该 header，
+  S3/MinIO 在 original 已存在时以 409/412 拒绝覆盖。这是 Resource immutable
+  的对象存储边界，也要求生产环境 bucket CORS 允许浏览器发送 `If-None-Match`。
 - `S3StorageService` 同时提供必须关闭的流式 read、HEAD 与 delete；既有 ComfyUI
   bounded byte[] 下载继续保留，并在 HEAD 与实际读取两阶段执行大小上限校验。
 

@@ -85,6 +85,7 @@ export function useCanvasController() {
   const pendingGroupMovesRef = useRef(new Map<DecimalString, { x: number; y: number }>())
   const pendingFunctionConfigsRef = useRef(new Map<DecimalString, PendingFunctionConfig>())
   const functionConfigTimersRef = useRef(new Map<DecimalString, number>())
+  const functionConfigFlushesRef = useRef(new Map<DecimalString, Promise<void>>())
   const reservedNodeAliasesRef = useRef(new Set<string>())
 
   const snapshotQuery = useQuery({
@@ -703,23 +704,39 @@ export function useCanvasController() {
     void executeCommands([{ type: 'DELETE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
   }, [executeCommands])
 
-  const flushFunctionConfig = useCallback(async (nodeId: DecimalString) => {
+  const flushFunctionConfig = useCallback((nodeId: DecimalString): Promise<void> => {
     const timer = functionConfigTimersRef.current.get(nodeId)
     if (timer !== undefined) {
       window.clearTimeout(timer)
       functionConfigTimersRef.current.delete(nodeId)
     }
-    const pending = pendingFunctionConfigsRef.current.get(nodeId)
-    if (!pending) {
-      return
+    const existing = functionConfigFlushesRef.current.get(nodeId)
+    if (existing) {
+      return existing
     }
-    pendingFunctionConfigsRef.current.delete(nodeId)
-    await executeCommands([{
-      type: 'UPDATE_FUNCTION',
-      nodeId: pending.nodeId,
-      modelKey: pending.modelKey,
-      configJson: JSON.stringify(pending.config),
-    }])
+    const trackedFlush = (async () => {
+      while (true) {
+        const pending = pendingFunctionConfigsRef.current.get(nodeId)
+        if (!pending) {
+          return
+        }
+        await executeCommands([{
+          type: 'UPDATE_FUNCTION',
+          nodeId: pending.nodeId,
+          modelKey: pending.modelKey,
+          configJson: JSON.stringify(pending.config),
+        }])
+        if (pendingFunctionConfigsRef.current.get(nodeId) === pending) {
+          pendingFunctionConfigsRef.current.delete(nodeId)
+        }
+      }
+    })().finally(() => {
+      if (functionConfigFlushesRef.current.get(nodeId) === trackedFlush) {
+        functionConfigFlushesRef.current.delete(nodeId)
+      }
+    })
+    functionConfigFlushesRef.current.set(nodeId, trackedFlush)
+    return trackedFlush
   }, [executeCommands])
 
   const scheduleFunctionConfig = useCallback((
@@ -763,11 +780,27 @@ export function useCanvasController() {
     }
     try {
       await flushFunctionConfig(nodeId)
-      const run = await startCanvasFunctionRun(state.canvasId, nodeId, {
-        requestId: crypto.randomUUID(),
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '启动生成失败')
+      return
+    }
+    const canvasId = state.canvasId
+    const requestId = crypto.randomUUID()
+    try {
+      const run = await startCanvasFunctionRun(canvasId, nodeId, {
+        requestId,
       })
       publishRun(run)
     } catch (error) {
+      try {
+        const current = await getCanvasFunctionRun(canvasId, nodeId)
+        if (current.requestId === requestId) {
+          publishRun(current)
+          return
+        }
+      } catch {
+        // Preserve the original start error when reconciliation is unavailable.
+      }
       setToast(error instanceof Error ? error.message : '启动生成失败')
     }
   }, [flushFunctionConfig, publishRun, setToast, state.canvasId])

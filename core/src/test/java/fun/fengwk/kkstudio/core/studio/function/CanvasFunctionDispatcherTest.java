@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.core.studio.function;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
@@ -21,9 +23,23 @@ class CanvasFunctionDispatcherTest {
     doThrow(new RejectedExecutionException("full")).when(executor).execute(any());
     CanvasFunctionDispatcher dispatcher = new CanvasFunctionDispatcher(executor, worker);
 
-    dispatcher.dispatch(1L, "request");
+    assertFalse(dispatcher.dispatch(1L, "request"));
+    assertFalse(dispatcher.dispatch(1L, "request"));
 
     assertFalse(dispatcher.isDispatched(1L, "request"));
+    verify(executor, times(2)).execute(any());
+  }
+
+  @Test
+  void treatsDuplicateInFlightDispatchAsAcceptedWithoutSubmittingTwice() {
+    ExecutorService executor = mock(ExecutorService.class);
+    CanvasFunctionDispatcher dispatcher =
+        new CanvasFunctionDispatcher(executor, mock(CanvasFunctionWorker.class));
+
+    assertTrue(dispatcher.dispatch(1L, "request"));
+    assertTrue(dispatcher.dispatch(1L, "request"));
+
+    assertTrue(dispatcher.isDispatched(1L, "request"));
     verify(executor).execute(any());
   }
 }

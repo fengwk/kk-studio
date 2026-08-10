@@ -17,6 +17,8 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionRunException;
 @Slf4j
 public class CanvasFunctionRuntimeService {
 
+  private static final String DISPATCH_FAILURE = "Function execution could not be scheduled";
+
   private final CanvasNodeMapper nodeMapper;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
@@ -26,10 +28,25 @@ public class CanvasFunctionRuntimeService {
 
   public CanvasFunctionRun start(long canvasId, long nodeId, String requestId) {
     CanvasFunctionStartResult result = transactions.start(canvasId, nodeId, requestId);
-    if (result.run().status() == CanvasFunctionRunStatus.RUNNING) {
-      dispatcher.dispatch(result.run().nodeId(), result.run().requestId());
+    CanvasFunctionRun run = result.run();
+    if (run.status() == CanvasFunctionRunStatus.RUNNING
+        && !dispatcher.dispatch(run.nodeId(), run.requestId())) {
+      transactions.failIfRunning(run.nodeId(), run.requestId(), DISPATCH_FAILURE);
+      CanvasFunctionRun terminal =
+          runRepository
+              .findByNodeId(run.nodeId())
+              .orElseThrow(
+                  () ->
+                      new IllegalStateException(
+                          "Canvas Function run disappeared after dispatch rejection"));
+      if (!terminal.requestId().equals(run.requestId())
+          || terminal.status() == CanvasFunctionRunStatus.RUNNING) {
+        throw new IllegalStateException(
+            "Canvas Function run did not become terminal after dispatch rejection");
+      }
+      return terminal;
     }
-    return result.run();
+    return run;
   }
 
   public CanvasFunctionRun get(long canvasId, long nodeId) {

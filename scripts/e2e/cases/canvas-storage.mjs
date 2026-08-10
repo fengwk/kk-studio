@@ -5,15 +5,42 @@ registerCase({
   id: 'canvas.storage_upload_contract',
   level: 'L1',
   requires: ['canvas-storage'],
-  title: 'Canvas Resource reserve 边界与隐藏存储坐标',
+  title: 'Canvas Resource 与通用 S3 预签名命名空间边界',
   docs:
-    '需 backend 启用 S3；创建 Canvas 后验证 IMAGE reserve 返回 uploadId/PUT/public URL 且不暴露 bucket/key，TEXT 与客户端 key 注入均 400',
+    '需 backend 启用 S3；验证 ComfyUI 临时输入可预签名，Canvas key 无法通过通用 S3 端点签名，IMAGE reserve 隐藏 bucket/key 且保持 create-only，TEXT 与客户端 key 注入均 400',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-resource-storage',
     })
     const canvas = envelopeData(createJson)
     assert(/^[1-9][0-9]*$/.test(canvas.id), JSON.stringify(canvas))
+
+    const { json: comfyuiPresignJson } = await ctx.call(
+      'POST',
+      '/api/s3/presigned-uploads',
+      {
+        key: 'comfyui-inputs/e2e/upload/input.png',
+        contentType: 'image/png',
+      },
+    )
+    const comfyuiPresign = envelopeData(comfyuiPresignJson)
+    assert(comfyuiPresign.key === 'comfyui-inputs/e2e/upload/input.png', JSON.stringify(comfyuiPresign))
+    assert(comfyuiPresign.method === 'PUT', JSON.stringify(comfyuiPresign))
+    await expectHttpError(
+      () =>
+        ctx.call('POST', '/api/s3/presigned-uploads', {
+          key: `canvases/${canvas.id}/resources/1/original`,
+          contentType: 'image/png',
+        }),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () =>
+        ctx.call('POST', '/api/s3/presigned-downloads', {
+          key: `canvases/${canvas.id}/resources/1/preview.webp`,
+        }),
+      { status: 400 },
+    )
 
     const { json: reserveJson } = await ctx.call(
       'POST',

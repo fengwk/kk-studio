@@ -7,8 +7,9 @@ node scripts/e2e/run-matrix.mjs --list
 ```
 
 当前注册 **66** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。Canvas
-Resource reserve contract 需要 backend 已启用 S3，并通过 `--with-canvas-storage` 显式
-执行；免费 fake Function 完整链路还需通过 `--with-canvas-function` 显式开启 fake
+Resource 与通用 S3 预签名命名空间 contract 需要 backend 已启用 S3，并通过
+`--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
+`--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
 由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 66 个 Node API case。
 
@@ -20,7 +21,7 @@ model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或
 ./scripts/e2e.sh --real                  # L2 真实 MiniMax
 ./scripts/e2e.sh --real --with-branch    # L3 同 Session 分支
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
-./scripts/e2e.sh --with-canvas-storage   # Canvas Resource reserve（需 S3 配置）
+./scripts/e2e.sh --with-canvas-storage   # Canvas Resource / 通用 S3 命名空间边界（需 S3 配置）
 ./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
 ./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
 ./scripts/e2e.sh --ui                    # Playwright UI smoke

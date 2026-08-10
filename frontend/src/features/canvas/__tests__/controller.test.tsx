@@ -128,6 +128,16 @@ function Wrapper({ children }: PropsWithChildren) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve
+    reject = nextReject
+  })
+  return { promise, resolve, reject }
+}
+
 describe('useCanvasController real snapshot runtime', () => {
   let revision: bigint
   let commands: ApplyCanvasCommandsRequestDTO[]
@@ -517,6 +527,153 @@ describe('useCanvasController real snapshot runtime', () => {
       expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run?.status).toBe('CANCELLED')
     })
   })
+
+  it('retains a failed config draft so start retries the save before posting the run', async () => {
+    vi.mocked(applyCanvasCommands).mockRejectedValueOnce(new Error('save failed'))
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor('1'))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+
+    act(() => {
+      result.current.scheduleFunctionConfig('3', 'fake-image', {
+        prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+    await act(async () => {
+      await expect(result.current.flushFunctionConfig('3')).rejects.toThrow('save failed')
+    })
+    expect(startCanvasFunctionRun).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await result.current.startFunctionRun('3')
+    })
+
+    expect(applyCanvasCommands).toHaveBeenCalledTimes(2)
+    expect(commands.at(-1)?.commands).toEqual([{
+      type: 'UPDATE_FUNCTION',
+      nodeId: '3',
+      modelKey: 'fake-image',
+      configJson: JSON.stringify({
+        prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      }),
+    }])
+    expect(vi.mocked(applyCanvasCommands).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(startCanvasFunctionRun).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    )
+  })
+
+  it('deduplicates concurrent flushes and drains a newer draft before start', async () => {
+    const firstSave = deferred<CanvasSnapshotDTO>()
+    const secondSave = deferred<CanvasSnapshotDTO>()
+    vi.mocked(applyCanvasCommands)
+      .mockImplementationOnce(async (_canvasId, request) => {
+        commands.push(request)
+        return firstSave.promise
+      })
+      .mockImplementationOnce(async (_canvasId, request) => {
+        commands.push(request)
+        return secondSave.promise
+      })
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor('1'))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+
+    act(() => {
+      result.current.scheduleFunctionConfig('3', 'fake-image', {
+        prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+    let firstFlush!: Promise<void>
+    let duplicateFlush!: Promise<void>
+    act(() => {
+      firstFlush = result.current.flushFunctionConfig('3')
+      duplicateFlush = result.current.flushFunctionConfig('3')
+    })
+    expect(duplicateFlush).toBe(firstFlush)
+    await waitFor(() => expect(applyCanvasCommands).toHaveBeenCalledTimes(1))
+
+    act(() => {
+      result.current.scheduleFunctionConfig('3', 'fake-image', {
+        prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+    let start!: Promise<void>
+    act(() => {
+      start = result.current.startFunctionRun('3')
+    })
+    expect(startCanvasFunctionRun).not.toHaveBeenCalled()
+
+    await act(async () => {
+      firstSave.resolve(snapshot('1'))
+      await firstSave.promise
+    })
+    await waitFor(() => expect(applyCanvasCommands).toHaveBeenCalledTimes(2))
+    expect(startCanvasFunctionRun).not.toHaveBeenCalled()
+    expect(commands.map((request) => request.commands)).toEqual([
+      [{
+        type: 'UPDATE_FUNCTION',
+        nodeId: '3',
+        modelKey: 'fake-image',
+        configJson: JSON.stringify({
+          prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
+          parameters: { ratio: 'AUTO' },
+        }),
+      }],
+      [{
+        type: 'UPDATE_FUNCTION',
+        nodeId: '3',
+        modelKey: 'fake-image',
+        configJson: JSON.stringify({
+          prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
+          parameters: { ratio: 'AUTO' },
+        }),
+      }],
+    ])
+
+    await act(async () => {
+      secondSave.resolve(snapshot('2'))
+      await Promise.all([firstFlush, duplicateFlush, start])
+    })
+    expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['RUNNING', 'FAILED'] as const)(
+    'recovers a lost start response from the matching server run in %s state',
+    async (status) => {
+      let submittedRequestId = ''
+      vi.mocked(startCanvasFunctionRun).mockImplementation(async (_canvasId, _nodeId, request) => {
+        submittedRequestId = request.requestId
+        throw new Error('start response lost')
+      })
+      vi.mocked(getCanvasFunctionRun).mockImplementation(async () => ({
+        nodeId: '3',
+        requestId: submittedRequestId,
+        status,
+        stage: status === 'RUNNING' ? 'QUEUED' : 'FAILED',
+        error: status === 'RUNNING' ? null : 'safe failure',
+        updatedAt: '2026-08-10T00:00:01Z',
+      }))
+      const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+      act(() => result.current.openEditor('1'))
+      await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+
+      await act(async () => {
+        await result.current.startFunctionRun('3')
+      })
+
+      await waitFor(() => {
+        expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run).toEqual(
+          expect.objectContaining({ requestId: submittedRequestId, status }),
+        )
+      })
+      expect(submittedRequestId).toMatch(/^[0-9a-f-]{36}$/i)
+      expect(result.current.state.toast).toBeNull()
+    },
+  )
 
   it('refetches the authoritative snapshot after a successful polled run', async () => {
     // Success is complete only when the snapshot query replaces old output with backend materialized resources.

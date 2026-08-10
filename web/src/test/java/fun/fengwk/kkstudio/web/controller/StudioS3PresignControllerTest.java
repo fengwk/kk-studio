@@ -49,7 +49,7 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
   @Test
   public void shouldReturnPresignedUploadResponse() throws Exception {
     S3PresignedRequestDTO body = new S3PresignedRequestDTO();
-    body.setKey("uploads/demo.bin");
+    body.setKey("comfyui-inputs/demo/upload/demo.bin");
     body.setContentType("application/octet-stream");
     body.setExpiresInSeconds(300L);
 
@@ -60,11 +60,13 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(body)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.bucket").value("test-bucket"))
-        .andExpect(jsonPath("$.data.key").value("uploads/demo.bin"))
+        .andExpect(jsonPath("$.data.key").value("comfyui-inputs/demo/upload/demo.bin"))
         .andExpect(jsonPath("$.data.method").value("PUT"))
         .andExpect(
             jsonPath("$.data.url")
-                .value(startsWith("https://cdn.example.com/test-bucket/uploads/demo.bin")))
+                .value(
+                    startsWith(
+                        "https://cdn.example.com/test-bucket/comfyui-inputs/demo/upload/demo.bin")))
         .andExpect(jsonPath("$.data.url").value(containsString("X-Amz-Signature=")))
         .andExpect(jsonPath("$.data.headers").exists())
         .andExpect(jsonPath("$.data.expiresAt").isString())
@@ -74,7 +76,7 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
   @Test
   public void shouldReturnPresignedDownloadResponse() throws Exception {
     S3PresignedRequestDTO body = new S3PresignedRequestDTO();
-    body.setKey("exports/report.pdf");
+    body.setKey("comfyui-inputs/demo/download/report.pdf");
     body.setExpiresInSeconds(120L);
 
     mockMvc
@@ -84,12 +86,25 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
                 .content(objectMapper.writeValueAsString(body)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.bucket").value("test-bucket"))
-        .andExpect(jsonPath("$.data.key").value("exports/report.pdf"))
+        .andExpect(jsonPath("$.data.key").value("comfyui-inputs/demo/download/report.pdf"))
         .andExpect(jsonPath("$.data.method").value("GET"))
         .andExpect(
             jsonPath("$.data.url")
-                .value(startsWith("https://cdn.example.com/test-bucket/exports/report.pdf")))
+                .value(
+                    startsWith(
+                        "https://cdn.example.com/test-bucket/comfyui-inputs/demo/download/report.pdf")))
         .andExpect(jsonPath("$.data.url").value(containsString("X-Amz-Signature=")));
+  }
+
+  /** 通用预签名端点只能访问 ComfyUI 临时输入，不能触达 Canvas 或其它对象命名空间。 */
+  @Test
+  public void shouldRejectKeysOutsideComfyuiInputsNamespace() throws Exception {
+    assertRejectedKey("/api/s3/presigned-uploads", "canvases/1/resources/2/original");
+    assertRejectedKey("/api/s3/presigned-downloads", "canvases/1/resources/2/preview.webp");
+    assertRejectedKey("/api/s3/presigned-uploads", "uploads/demo.bin");
+    assertRejectedKey("/api/s3/presigned-downloads", "comfyui-inputs/");
+    assertRejectedKey("/api/s3/presigned-uploads", "comfyui-inputs/   ");
+    assertRejectedKey("/api/s3/presigned-downloads", "comfyui-inputs///");
   }
 
   /** 校验失败的 key（如空白）必须原样抛回 4xx，而不能被 controller 吞掉。 */
@@ -124,7 +139,7 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
   @Test
   public void shouldUseDefaultExpiresWhenNotProvided() throws Exception {
     S3PresignedRequestDTO body = new S3PresignedRequestDTO();
-    body.setKey("docs/readme.md");
+    body.setKey("comfyui-inputs/demo/default/readme.md");
 
     String responseBody =
         mockMvc
@@ -148,12 +163,23 @@ public class StudioS3PresignControllerTest extends WebPostgresTestSupport {
   @Test
   public void shouldRejectExpiresOverMax() throws Exception {
     S3PresignedRequestDTO body = new S3PresignedRequestDTO();
-    body.setKey("big/file.bin");
+    body.setKey("comfyui-inputs/demo/expires/file.bin");
     body.setExpiresInSeconds(86_400L);
 
     mockMvc
         .perform(
             post("/api/s3/presigned-downloads")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body)))
+        .andExpect(status().isBadRequest());
+  }
+
+  private void assertRejectedKey(String endpoint, String key) throws Exception {
+    S3PresignedRequestDTO body = new S3PresignedRequestDTO();
+    body.setKey(key);
+    mockMvc
+        .perform(
+            post(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)))
         .andExpect(status().isBadRequest());
