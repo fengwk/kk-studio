@@ -12,5 +12,7 @@ public interface CanvasFunctionExecutionContext {
 
   CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference);
 
+  String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds);
+
   long materializeTarget(long targetResourceId, String mediaType, long size, InputStream content);
 }

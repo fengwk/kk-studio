@@ -311,7 +311,35 @@ WebSocket /api/ai/environment/daemon/v2
 
 SSE：`afterRevision` 与 `Last-Event-ID` 是 canonical decimal durable cursor；Redis realtime delta 无 SSE id。
 
-## 5. 实现结构与报告
+## 5. MiniMax-H3 手工 smoke
+
+MiniMax-H3 Ref2VA 不注册自动 E2E case。默认 L1、`--with-canvas-function` 和 `--real`
+都不得触发 H3 Prompt Agent 或 ComfyUI `/prompt`；自动验证使用本地 Harness mock 和本地
+HTTP routes 覆盖 multipart、history、streaming、恢复与 materialize。
+
+只有明确安排高成本 smoke 时才执行以下步骤：
+
+1. 使用隔离的 S3 bucket、Prompt Agent/Environment 和测试专用 ComfyUI；先以只读方式
+   检查 ComfyUI `/object_info`、`/system_stats`，不得在准备阶段上传或提交 prompt。
+2. 配置 `KK_STUDIO_CANVAS_H3_ENABLED=true`、
+   `KK_STUDIO_CANVAS_H3_PROMPT_AGENT`、
+   `KK_STUDIO_CANVAS_H3_PROMPT_ENVIRONMENT`、
+   `KK_STUDIO_CANVAS_H3_COMFY_BASE_URL` 和可选 Bearer，重启 backend。
+3. 创建一张满足 H3 metadata 约束的图片 Resource，将其连接到 Function Node；选择
+   `minimax-h3-ref2va`、`ratio=16:9`、`duration=4`，只执行一次。
+4. 验证 Prompt Thread 为 root Thread、`activeTools=[]`，SYSTEM/USER 在同一 batch，USER
+   的 `<Picture 1>` 表格、文字引用和 IMAGE attachment 使用同一编号。
+5. 验证 Run checkpoint 从 `H3_INITIALIZED` 收敛到 `H3_COMPLETE`，ComfyUI 上传位于
+   `kk-studio/{canvasId}`，workflow 动态参数和 SaveVideo node 92 正确，最终视频流式写入
+   target Resource。
+6. 另建一个尚在 pending queue 的 Run 后停止，确认仅删除其 prompt，不影响 running job，
+   且没有调用全局 `/interrupt`。
+7. 记录 Run/Thread/promptId/targetResourceId 和人工播放结论；随后关闭 H3 开关并清理测试
+   Thread、ComfyUI output 与对象存储。
+
+本方案实现验收不执行上述 smoke；任何真实 H3 生成都必须由任务负责人单独授权。
+
+## 6. 实现结构与报告
 
 | 路径 | 职责 |
 | --- | --- |
@@ -336,7 +364,7 @@ reports/e2e/latest/report.md
 
 判读顺序为 `latest/report.md` → `summary.json` → case JSON/artifacts → logs。报告目录已加入 gitignore。
 
-## 6. 维护
+## 7. 维护
 
 1. API 字段、状态或验证变化时，同步 case 与本文件。
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。

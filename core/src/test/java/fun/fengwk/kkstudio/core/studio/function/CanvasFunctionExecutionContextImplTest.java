@@ -20,7 +20,9 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -50,6 +52,7 @@ class CanvasFunctionExecutionContextImplTest {
 
   private CanvasFunctionRunRepository runs;
   private S3StorageService storage;
+  private S3PresignService presign;
   private CanvasResourceMaterializer materializer;
   private CanvasFunctionRunStateCodec stateCodec;
   private CanvasFunctionFrozenRun frozen;
@@ -58,6 +61,7 @@ class CanvasFunctionExecutionContextImplTest {
   void setUp() {
     runs = mock(CanvasFunctionRunRepository.class);
     storage = mock(S3StorageService.class);
+    presign = mock(S3PresignService.class);
     materializer = mock(CanvasResourceMaterializer.class);
     CanvasFunctionConfigCodec configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
@@ -159,6 +163,29 @@ class CanvasFunctionExecutionContextImplTest {
   }
 
   @Test
+  void presignsOnlyFrozenOriginalWhileRunIsRunning() {
+    when(presign.presignDownload("canvases/1/resources/3/original", 120L))
+        .thenReturn(S3PresignedResponseDTO.builder().url("https://s3.example/object").build());
+    CanvasFunctionExecutionContextImpl context = context();
+
+    assertEquals(
+        "https://s3.example/object", context.presignOriginal(frozen.manifest().get(0), 120L));
+    verify(presign).presignDownload("canvases/1/resources/3/original", 120L);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            context.presignOriginal(
+                new CanvasFunctionFrozenReference(
+                    9L, 0, 10L, CanvasResourceKind.IMAGE, "other.png", "image/png", 3L, "{}"),
+                120L));
+
+    when(runs.findByNodeId(4L)).thenReturn(Optional.empty());
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () -> context.presignOriginal(frozen.manifest().get(0), 120L));
+  }
+
+  @Test
   void checkpointCasStopsExecutionAndAdapterStateIsBounded() {
     CanvasFunctionExecutionContextImpl context = context();
     when(runs.checkpoint(anyLong(), anyString(), anyString(), anyString(), any()))
@@ -180,11 +207,13 @@ class CanvasFunctionExecutionContextImplTest {
 
   private CanvasFunctionExecutionContextImpl context() {
     ObjectProvider<S3StorageService> storageProvider = provider(storage);
+    ObjectProvider<S3PresignService> presignProvider = provider(presign);
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
         runs,
         stateCodec,
         storageProvider,
+        presignProvider,
         materializerProvider,
         Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
         frozen);

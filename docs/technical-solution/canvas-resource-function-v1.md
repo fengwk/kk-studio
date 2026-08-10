@@ -587,6 +587,53 @@ H3 workflow 以官方 `minimax_h3_r2v_官流.json` 为事实源：
 - 保持 `ref_audios.ref_audio_N` 的独立编号；
 - Prompt、比例、时长、seed 与 filename prefix 动态注入。
 
+H3 Adapter 默认关闭，但模型仍进入 registry 并以 unavailable 状态返回。启用配置前缀为
+`kk-studio.canvas.function.minimax-h3`。启用时必须提供 Prompt Agent 名称、Prompt
+Environment 名称和 ComfyUI origin；Prompt Thread 强制 `activeTools=[]`。Foundation 只向
+Adapter 暴露冻结 manifest 成员的 original 短期 presign，且仅在 Run 仍为 RUNNING 时允许
+签名，Adapter 不直接依赖 Canvas mapper 或 S3 key 细节。
+
+执行 checkpoint 固定为：
+
+```text
+H3_INITIALIZED
+-> H3_PROMPT_SUBMITTING
+-> H3_PROMPT_WAITING
+-> H3_PROMPT_READY
+-> H3_COMFY_UPLOADING
+-> H3_COMFY_SUBMITTING
+-> H3_COMFY_WAITING
+-> H3_COMFY_READY
+-> H3_COMPLETE
+```
+
+`H3_PROMPT_SUBMITTING` 没有 durable `harnessThreadId`、或
+`H3_COMFY_SUBMITTING` 没有 durable `promptId` 时，恢复必须拒绝自动重提，避免外部作业
+重复创建。每个素材上传成功后立即在 `H3_COMFY_UPLOADING` 保存 upload descriptor，恢复
+时复用。取消先 best-effort stop Harness Thread，再只删除仍处于 ComfyUI pending queue
+中的 prompt；不调用全局 `/interrupt`。
+
+ComfyUI 客户端只接受无 path/query/fragment/userinfo 的 HTTP(S) origin，禁止 redirect，
+JSON 请求和响应均有大小上限。素材通过固定长度 multipart 流上传到
+`kk-studio/{canvasId}`；结果只接受 `outputs."92".videos[]` 恰好一个 descriptor，并要求
+`/view` 返回正 `Content-Length` 后流式导入 Resource materializer。
+
+手工 H3 smoke 属于付费/高成本显式验证，不进入自动回归，也不得在常规 CI 中运行：
+
+1. 准备隔离的 Prompt Agent/Environment，确认 Agent 可处理 IMAGE/VIDEO/AUDIO
+   structured message，且 smoke 期间不配置工具。
+2. 准备测试专用 ComfyUI，安装官方 H3 workflow 所需节点与模型；先只读检查
+   `/object_info` 和 `/system_stats`。
+3. 设置 `KK_STUDIO_CANVAS_H3_ENABLED=true`、Prompt Agent/Environment、ComfyUI origin
+   和可选 Bearer；使用测试 S3 bucket，启动 backend。
+4. 创建带最小合法图片引用的 Function Node，选择 `minimax-h3-ref2va`、`ratio=16:9`、
+   `duration=4`，只提交一次。
+5. 观察 checkpoint 依次进入 Prompt waiting、Comfy uploading/waiting、ready/complete；
+   验证 Prompt Thread 的 `activeTools` 为空、structured USER 标签与附件编号一致。
+6. 验证 ComfyUI upload subfolder、动态 workflow 的 node 136/115/132/129/92、输出视频
+   Resource 和 preview；停止另一个 pending Run，确认只删除对应 pending prompt。
+7. smoke 完成后立即关闭 H3 开关并清理测试素材、Thread、ComfyUI output 和对象存储。
+
 ## 7. UI
 
 选中 Function ResourceNode 后，在节点附近显示无标题、无模式 Tab 的输入面板：

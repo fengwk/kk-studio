@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.studio.function;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
+import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -27,6 +28,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunStateCodec stateCodec;
   private final S3StorageService storageService;
+  private final S3PresignService presignService;
   private final CanvasResourceMaterializer materializer;
   private final Clock clock;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
@@ -35,6 +37,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionRunStateCodec stateCodec,
       ObjectProvider<S3StorageService> storageServices,
+      ObjectProvider<S3PresignService> presignServices,
       ObjectProvider<CanvasResourceMaterializer> materializers,
       Clock clock,
       CanvasFunctionFrozenRun frozen) {
@@ -43,6 +46,10 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     storageService =
         Objects.requireNonNull(
             storageServices.getIfAvailable(), "S3 storage is required for Canvas Function runtime");
+    presignService =
+        Objects.requireNonNull(
+            presignServices.getIfAvailable(),
+            "S3 presign service is required for Canvas Function runtime");
     materializer =
         Objects.requireNonNull(
             materializers.getIfAvailable(),
@@ -79,10 +86,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   @Override
   public CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference) {
-    CanvasFunctionFrozenRun frozen = current.get();
-    if (!frozen.manifest().contains(reference)) {
-      throw new IllegalArgumentException("reference is not part of the frozen manifest");
-    }
+    CanvasFunctionFrozenRun frozen = requireManifestReference(reference);
     ensureRunning();
     S3ObjectStream object =
         storageService.readObject(
@@ -97,6 +101,16 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     }
     return new CanvasFunctionResourceStream(
         object.inputStream(), object.metadata().contentLength(), object);
+  }
+
+  @Override
+  public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
+    CanvasFunctionFrozenRun frozen = requireManifestReference(reference);
+    ensureRunning();
+    return presignService
+        .presignDownload(
+            CanvasResourcePaths.original(frozen.canvasId(), reference.resourceId()), expiresSeconds)
+        .getUrl();
   }
 
   @Override
@@ -133,5 +147,14 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     if (!isRunning()) {
       throw new CanvasFunctionInternalCancellation("FunctionRun is no longer RUNNING");
     }
+  }
+
+  private CanvasFunctionFrozenRun requireManifestReference(
+      CanvasFunctionFrozenReference reference) {
+    CanvasFunctionFrozenRun frozen = current.get();
+    if (!frozen.manifest().contains(reference)) {
+      throw new IllegalArgumentException("reference is not part of the frozen manifest");
+    }
+    return frozen;
   }
 }
