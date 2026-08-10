@@ -439,7 +439,8 @@ MinIO Resource
 
 首次付费提交前写 `SEEDANCE_SUBMITTING`。恢复时若该 stage 没有 Hub execution id 或
 assetId，则提交结果不可判定，Run 必须失败且禁止自动重提。提交 stdout 只接受单 object
-或单元素 array；命令显式使用 `--format json`，要求 `submitted=true`、
+或单元素 array；Hub 统一注入 JSON 格式与 managed output 参数，调用方不得传递
+`--format`、`-f`、`--profile` 或 `--op`。提交结果要求 `submitted=true`、
 `status=submitted` 与 16 位小写 hex assetId。
 后续 status 查询是无付费调用；每次 execution id 都 checkpoint，查询之间按配置间隔等待，
 `generating/not_found` 继续，`failed/cancelled` 终止，`ready+downloaded` 必须恰有一个
