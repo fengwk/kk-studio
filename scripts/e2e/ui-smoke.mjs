@@ -20,6 +20,7 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createDurationTimer } from './lib/time.mjs'
 
 // Playwright 安装在 frontend/node_modules，从仓库根/scripts 直接 import 会找不到包。
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -249,7 +250,7 @@ async function main(argv) {
   }
 
   async function run(id, title, fn) {
-    const t0 = Date.now()
+    const elapsed = createDurationTimer()
     const caseArt = path.join(artRoot, id.replaceAll('.', '_'))
     mkdirSync(caseArt, { recursive: true })
     console.log(`\n==> [L5] ${id}: ${title}`)
@@ -260,7 +261,7 @@ async function main(argv) {
         level: 'L5',
         title,
         status: 'pass',
-        durationMs: Date.now() - t0,
+        durationMs: elapsed(),
         error: null,
         traceback: null,
         artifactPaths: listArtifacts(caseArt, reportDir),
@@ -275,7 +276,7 @@ async function main(argv) {
         level: 'L5',
         title,
         status: 'fail',
-        durationMs: Date.now() - t0,
+        durationMs: elapsed(),
         error: String(err?.message || err),
         traceback: err?.stack || null,
         artifactPaths: listArtifacts(caseArt, reportDir),

@@ -31,6 +31,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { httpJson } from './lib/http.mjs'
 import { ALL_CASES } from './lib/registry.mjs'
+import { createDurationTimer } from './lib/time.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -124,7 +125,15 @@ function writeCaseResult(runDir, result) {
   )
 }
 
-function writeSummaryAndReport(runDir, runId, args, results, startedAt, finishedAt) {
+function writeSummaryAndReport(
+  runDir,
+  runId,
+  args,
+  results,
+  startedAt,
+  finishedAt,
+  durationMs,
+) {
   const passed = results.filter((r) => r.status === 'pass')
   const failed = results.filter((r) => r.status === 'fail')
   const skipped = results.filter((r) => r.status === 'skip')
@@ -138,7 +147,7 @@ function writeSummaryAndReport(runDir, runId, args, results, startedAt, finished
     runId,
     startedAt,
     finishedAt,
-    durationMs: new Date(finishedAt) - new Date(startedAt),
+    durationMs,
     baseUrl: args.baseUrl,
     frontendUrl: args.frontendUrl || null,
     flags: {
@@ -378,6 +387,7 @@ async function main(argv) {
     return 2
   }
 
+  const runElapsed = createDurationTimer()
   const startedAt = new Date().toISOString()
   let runId = ''
   let runDir = null
@@ -404,7 +414,7 @@ async function main(argv) {
   for (const c of selected) {
     console.log(`\n==> [${c.level}] ${c.id}: ${c.title}`)
     ctx.caseId = c.id
-    const t0 = Date.now()
+    const elapsed = createDurationTimer()
     try {
       await c.run(ctx)
       const result = {
@@ -412,7 +422,7 @@ async function main(argv) {
         level: c.level,
         title: c.title,
         status: 'pass',
-        durationMs: Date.now() - t0,
+        durationMs: elapsed(),
         error: null,
         traceback: null,
         artifactPaths: runDir ? collectArtifactPaths(runDir, c.id) : [],
@@ -427,7 +437,7 @@ async function main(argv) {
         level: c.level,
         title: c.title,
         status: 'fail',
-        durationMs: Date.now() - t0,
+        durationMs: elapsed(),
         error: String(err?.message || err),
         traceback: tb,
         artifactPaths: [],
@@ -443,6 +453,7 @@ async function main(argv) {
   }
 
   const finishedAt = new Date().toISOString()
+  const runDurationMs = runElapsed()
   const failed = results.filter((r) => r.status === 'fail').map((r) => r.id)
   console.log(`\n${'='.repeat(60)}`)
   console.log(
@@ -452,7 +463,15 @@ async function main(argv) {
 
   if (runDir) {
     maybeCopyRuntimeLogs(runDir)
-    const reportPath = writeSummaryAndReport(runDir, runId, args, results, startedAt, finishedAt)
+    const reportPath = writeSummaryAndReport(
+      runDir,
+      runId,
+      args,
+      results,
+      startedAt,
+      finishedAt,
+      runDurationMs,
+    )
     const latest = publishLatest(args.reportRoot, runDir)
     // machine-friendly pointer for agents
     writeFileSync(
