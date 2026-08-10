@@ -6,7 +6,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.Assert;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 
@@ -37,7 +36,7 @@ public class MiniMaxH3Configuration {
       havingValue = "true")
   public StandardComfyuiClient standardH3ComfyuiClient(
       MiniMaxH3Properties properties, ObjectMapper objectMapper) {
-    validateEnabled(properties);
+    properties.validateEnabled();
     return new StandardComfyuiClient(
         properties.getComfyBaseUrl(),
         properties.getComfyBearerToken(),
@@ -63,35 +62,5 @@ public class MiniMaxH3Configuration {
         workflowBuilder,
         comfyClients,
         objectMapper);
-  }
-
-  private static void validateEnabled(MiniMaxH3Properties properties) {
-    Assert.hasText(
-        properties.getPromptAgentName(),
-        "kk-studio.canvas.function.minimax-h3.prompt-agent-name must not be blank");
-    Assert.hasText(
-        properties.getPromptEnvironmentName(),
-        "kk-studio.canvas.function.minimax-h3.prompt-environment-name must not be blank");
-    Assert.isTrue(
-        properties.getPresignExpirySeconds() > 0L,
-        "kk-studio.canvas.function.minimax-h3.presign-expiry-seconds must be positive");
-    Assert.notNull(
-        properties.getPromptMaxWait(),
-        "kk-studio.canvas.function.minimax-h3.prompt-max-wait must not be null");
-    Assert.hasText(
-        properties.getComfyBaseUrl(),
-        "kk-studio.canvas.function.minimax-h3.comfy-base-url must not be blank");
-    Assert.notNull(
-        properties.getComfyConnectTimeout(),
-        "kk-studio.canvas.function.minimax-h3.comfy-connect-timeout must not be null");
-    Assert.notNull(
-        properties.getComfyRequestTimeout(),
-        "kk-studio.canvas.function.minimax-h3.comfy-request-timeout must not be null");
-    Assert.notNull(
-        properties.getComfyPollInterval(),
-        "kk-studio.canvas.function.minimax-h3.comfy-poll-interval must not be null");
-    Assert.notNull(
-        properties.getComfyMaxWait(),
-        "kk-studio.canvas.function.minimax-h3.comfy-max-wait must not be null");
   }
 }

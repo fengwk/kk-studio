@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.function.h3;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -46,25 +47,90 @@ class MiniMaxH3ConfigurationTest {
   }
 
   @Test
-  void rejectsEveryMissingEnabledPropertyAtStartup() {
+  void acceptsExactRuntimeBounds() {
+    MiniMaxH3Properties properties = validProperties();
+    properties.setPromptAgentName("a".repeat(MiniMaxH3Properties.MAX_AGENT_NAME_LENGTH));
+    properties.setPromptEnvironmentName("a".repeat(64));
+    properties.setPresignExpirySeconds(1L);
+    properties.setPromptMaxWait(MiniMaxH3Properties.MAX_PROMPT_WAIT);
+    properties.setComfyConnectTimeout(MiniMaxH3Properties.MAX_COMFY_CONNECT_TIMEOUT);
+    properties.setComfyRequestTimeout(MiniMaxH3Properties.MAX_COMFY_REQUEST_TIMEOUT);
+    properties.setComfyPollInterval(MiniMaxH3Properties.MAX_COMFY_POLL_INTERVAL);
+    properties.setComfyMaxWait(MiniMaxH3Properties.MAX_COMFY_WAIT);
+    assertDoesNotThrow(properties::validateEnabled);
+
+    properties.setPresignExpirySeconds(MiniMaxH3Properties.MAX_PRESIGN_EXPIRY_SECONDS);
+    assertDoesNotThrow(properties::validateEnabled);
+  }
+
+  @Test
+  void rejectsInvalidIdentityAndRuntimeBounds() {
     List<Consumer<MiniMaxH3Properties>> invalidators =
         List.of(
+            value -> value.setPromptAgentName(null),
             value -> value.setPromptAgentName(""),
+            value -> value.setPromptAgentName(" h3-agent"),
+            value -> value.setPromptAgentName("h3/agent"),
+            value ->
+                value.setPromptAgentName("a".repeat(MiniMaxH3Properties.MAX_AGENT_NAME_LENGTH + 1)),
+            value -> value.setPromptEnvironmentName(null),
             value -> value.setPromptEnvironmentName(""),
+            value -> value.setPromptEnvironmentName("H3-prompt"),
+            value -> value.setPromptEnvironmentName("h3/prompt"),
+            value -> value.setPromptEnvironmentName("-h3"),
+            value -> value.setPromptEnvironmentName("a".repeat(65)),
             value -> value.setPresignExpirySeconds(0L),
+            value -> value.setPresignExpirySeconds(-1L),
+            value ->
+                value.setPresignExpirySeconds(MiniMaxH3Properties.MAX_PRESIGN_EXPIRY_SECONDS + 1L),
             value -> value.setPromptMaxWait(null),
-            value -> value.setComfyBaseUrl(""),
+            value -> value.setPromptMaxWait(Duration.ZERO),
+            value -> value.setPromptMaxWait(Duration.ofNanos(-1L)),
+            value -> value.setPromptMaxWait(MiniMaxH3Properties.MAX_PROMPT_WAIT.plusNanos(1L)),
             value -> value.setComfyConnectTimeout(null),
+            value -> value.setComfyConnectTimeout(Duration.ZERO),
+            value -> value.setComfyConnectTimeout(Duration.ofNanos(-1L)),
+            value ->
+                value.setComfyConnectTimeout(
+                    MiniMaxH3Properties.MAX_COMFY_CONNECT_TIMEOUT.plusNanos(1L)),
             value -> value.setComfyRequestTimeout(null),
+            value -> value.setComfyRequestTimeout(Duration.ZERO),
+            value -> value.setComfyRequestTimeout(Duration.ofNanos(-1L)),
+            value ->
+                value.setComfyRequestTimeout(
+                    MiniMaxH3Properties.MAX_COMFY_REQUEST_TIMEOUT.plusNanos(1L)),
             value -> value.setComfyPollInterval(null),
-            value -> value.setComfyMaxWait(null));
+            value -> value.setComfyPollInterval(Duration.ZERO),
+            value -> value.setComfyPollInterval(Duration.ofNanos(-1L)),
+            value ->
+                value.setComfyPollInterval(
+                    MiniMaxH3Properties.MAX_COMFY_POLL_INTERVAL.plusNanos(1L)),
+            value -> value.setComfyMaxWait(null),
+            value -> value.setComfyMaxWait(Duration.ZERO),
+            value -> value.setComfyMaxWait(Duration.ofNanos(-1L)),
+            value -> value.setComfyMaxWait(MiniMaxH3Properties.MAX_COMFY_WAIT.plusNanos(1L)),
+            value -> {
+              value.setComfyPollInterval(Duration.ofSeconds(1));
+              value.setComfyMaxWait(Duration.ofSeconds(1));
+            },
+            value -> {
+              value.setComfyPollInterval(Duration.ofSeconds(2));
+              value.setComfyMaxWait(Duration.ofSeconds(1));
+            });
     for (Consumer<MiniMaxH3Properties> invalidate : invalidators) {
       MiniMaxH3Properties properties = validProperties();
       invalidate.accept(properties);
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> configuration.standardH3ComfyuiClient(properties, mapper));
+      assertThrows(IllegalArgumentException.class, properties::validateEnabled);
     }
+  }
+
+  @Test
+  void configurationUsesTheSingleRuntimeValidationEntry() {
+    MiniMaxH3Properties properties = validProperties();
+    properties.setPromptEnvironmentName("H3-prompt");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> configuration.standardH3ComfyuiClient(properties, mapper));
   }
 
   private static MiniMaxH3Properties validProperties() {
