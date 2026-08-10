@@ -66,6 +66,20 @@ npm --prefix frontend run e2e:docs
 
 默认 L1 不启动真实 Provider，也不执行 Tool 外部副作用。
 
+Canvas OpenCLI adapters 的付费开关不属于 Node 默认矩阵。`deploy/test/run.sh --with-app`
+将 app 只连接到容器内 fake Hub，免费覆盖 GPT Image 与 Seedance 的 execute/poll/download/
+materialize 闭环。真实 Seedance 只允许单独执行：
+
+```bash
+RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
+SEEDANCE_WORKSPACE_ID=... \
+  ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
+```
+
+该脚本硬编码 `seedance2.0fast + duration=4 + submit=0`，直接调用 Hub，不通过
+FunctionRun，不下载或导入视频。它只准备页面，不触发生成；GPT Image 与 Seedance
+`submit=1` 均可能产生费用，不进入自动回归。
+
 ## 3. 当前注册 case
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
@@ -328,3 +342,5 @@ reports/e2e/latest/report.md
 2. 新增或删除 case 后运行 `node scripts/e2e/run-matrix.mjs --list`，以输出的 ID 和总数更新本文件。
 3. Chat/Thread 编排步骤集中在 `scripts/e2e/lib/harness.mjs`；Thread 创建携带完整 `branchSettings`，后续变更通过命令 batch 表达。
 4. 真模型、Tool、分支和 UI 只通过显式开关执行；默认 L1 保持免费。
+5. OpenCLI fake Hub 完整闭环由 `deploy/test/run.sh --with-app` 覆盖；真实 Seedance
+   prepare-only smoke 必须同时提供确认参数和环境开关，且固定 `submit=0`。

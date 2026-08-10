@@ -431,6 +431,20 @@ MinIO Resource
 -> stream into MinIO Resource materializer
 ```
 
+冻结 manifest 按首次引用顺序逐个上传，checkpoint 中保存
+`uploads=[{resourceId,resourcePath}]`；图片、视频、音频分别从 1 编号，结构化 prompt
+渲染为 `@图片N`、`@视频N`、`@音频N`。视频/音频 metadata 在提交前再次严格校验：
+单条 2–15 秒、各自总时长不超过 15 秒；视频只允许 MP4/MOV、h264/hevc，内嵌音轨
+只允许 aac/mp3。
+
+首次付费提交前写 `SEEDANCE_SUBMITTING`。恢复时若该 stage 没有 Hub execution id 或
+assetId，则提交结果不可判定，Run 必须失败且禁止自动重提。提交 stdout 只接受单 object
+或单元素 array；命令显式使用 `--format json`，要求 `submitted=true`、
+`status=submitted` 与 16 位小写 hex assetId。
+后续 status 查询是无付费调用；每次 execution id 都 checkpoint，查询之间按配置间隔等待，
+`generating/not_found` 继续，`failed/cancelled` 终止，`ready+downloaded` 必须恰有一个
+`video/*` Hub Resource。
+
 自动化测试只允许：
 
 ```text
@@ -441,8 +455,7 @@ submit=0
 
 ### 6.2 GPT Image 2
 
-通过 `vps-opencli-hub` 的 `chatgpt-agent ask` 实现，不再使用旧 Base64
-`GptImage2Service`。
+通过 `vps-opencli-hub` 的 `chatgpt-agent ask` 实现，不再使用旧 Base64 图片 API。
 
 参数：
 
@@ -453,9 +466,61 @@ submit=0
 Adapter 将参考图片流式上传到 Hub，执行 ChatGPT Agent，并将 Hub 收集的图片
 流式导入 MinIO。v1 默认请求一张图片。
 
+图片引用最多 20 个且每个不超过 20MiB。附件顺序与 manifest 一致，prompt 中的结构化
+引用渲染为 `Reference image N`，零上下文指令明确要求 GPT Image 2、指定比例、恰好一张
+可下载图片 artifact。调用 `chatgpt-agent ask` 时不传 Hub 托管的 `--op`。
+
+首次付费提交前写 `GPT_IMAGE_SUBMITTING`。恢复时若该 stage 没有 Hub execution id，
+提交结果不可判定，Run 必须失败且禁止自动重提。成功 execution 只接受恰好一个
+`image/*` Hub Resource，并通过 must-close 流交给统一 Resource materializer。
+
 付费真实生成不进入自动化回归。
 
-### 6.3 MiniMax-H3 Ref2VA
+### 6.3 OpenCLI Hub client and configuration
+
+OpenCLI Hub client 只使用 JDK `HttpClient`，redirect 固定为 `NEVER`。base URL 必须是纯
+HTTP(S) origin，不允许 userinfo、path、query 或 fragment。上传固定使用单文件 multipart
+part `files` 与已知 `Content-Length` 的流式 BodyPublisher；JSON response、错误摘要与
+stdout/stderr 都有本地小型上限，媒体不进入 JVM heap。Hub Resource URL 只允许配置 origin
+下的 `/api/resources/`，下载响应必须提供正 `Content-Length`。
+
+默认配置全部禁用真实提交：
+
+```yaml
+kk-studio:
+  opencli-hub:
+    enabled: false
+    base-url: http://vps-opencli-hub:8080
+    instance-id: null
+    connect-timeout: 5s
+    request-timeout: 2m
+    long-poll-timeout: 130s
+    stream-buffer-bytes: 16384
+    max-json-response-bytes: 524288
+    max-error-response-bytes: 4096
+    max-output-chars: 65535
+  canvas:
+    function:
+      gpt-image-2:
+        paid-enabled: false
+        ask-timeout-seconds: 900
+        hub-execution-timeout: 16m
+        max-wait: 20m
+      seedance:
+        enabled: false
+        workspace-id: null
+        retry: 0
+        hub-execution-timeout: 10m
+        status-poll-interval: 30s
+        max-wait: 30m
+```
+
+即使 provider 开关关闭，五个真实模型仍进入 Registry，但 `available=false`，公开 reason
+只说明功能未启用，不暴露 workspace、instance 或其他内部配置值。Function `configJson`
+仍只包含公开的 ratio/duration 和结构化 prompt，所有 endpoint、workspace、Hub path 与
+execution/asset id 只存在服务端配置或私有 checkpoint。
+
+### 6.4 MiniMax-H3 Ref2VA
 
 v1 仅支持本地开源 Ref2VA，固定 768P 档位，比例：
 
@@ -599,3 +664,10 @@ ResourceNodeRenderer 按当前 Resource 或 model 描述渲染图片、视频、
 - Seedance 可选 smoke 仅 `seedance2.0fast + 4s + submit=0`；
 - GPT Image 2 与 Seedance 正式提交必须显式人工开关；
 - MiniMax-H3 真实远端提交不进入默认回归。
+
+隔离容器 smoke 使用内置 fake Hub 完整执行 GPT Image 与 Seedance adapter，再把极小
+PNG/MP4 流式 materialize 到 MinIO；该环境虽打开 provider 开关，但 Hub origin 固定为
+容器内 mock，不会访问真实站点。真实 Seedance prepare-only smoke 由
+`scripts/seedance-prepare-smoke.sh --confirm-prepare-only` 直接调用 Hub，另要求
+`RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`，硬编码 `seedance2.0fast + 4s + submit=0`，不创建
+FunctionRun，也不导入视频。

@@ -17,8 +17,8 @@ public record CanvasFunctionModel(
 
   public CanvasFunctionModel {
     requireText(key, "key");
-    if (!key.matches("[a-z0-9]+(?:-[a-z0-9]+)*")) {
-      throw new IllegalArgumentException("key must be a canonical lowercase kebab token");
+    if (!key.matches("[a-z0-9]+(?:[._-][a-z0-9]+)*")) {
+      throw new IllegalArgumentException("key must be a canonical lowercase model token");
     }
     requireText(label, "label");
     Objects.requireNonNull(outputKind, "outputKind");
