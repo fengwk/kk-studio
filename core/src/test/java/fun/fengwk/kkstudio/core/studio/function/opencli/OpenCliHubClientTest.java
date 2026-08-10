@@ -25,6 +25,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -98,28 +99,59 @@ class OpenCliHubClientTest {
   }
 
   @Test
-  void canonicalizesChineseAndSupplementaryFilenameToAsciiWhilePreservingExtension() {
-    AtomicReference<String> requestBody = new AtomicReference<>();
+  void preservesExtensionWithinLimitForLongAsciiFilename() {
+    String expected = "a".repeat(124) + ".png";
+
+    assertEquals(128, expected.length());
+    assertUploadedFilename("a".repeat(200) + ".png", expected);
+  }
+
+  @Test
+  void preservesExtensionWithinLimitForLongUnicodeFilename() {
+    String expected = "_".repeat(124) + ".mp4";
+
+    assertEquals(128, expected.length());
+    assertUploadedFilename("参考😀图".repeat(80) + ".mp4", expected);
+  }
+
+  @Test
+  void capsLongFilenameWithoutExtension() {
+    String expected = "b".repeat(128);
+
+    assertUploadedFilename("b".repeat(200), expected);
+  }
+
+  @Test
+  void neutralizesMultipleAndBoundaryDotsWhilePreservingExtension() {
+    assertUploadedFilename("..archive..png", "__archive_.png");
+  }
+
+  @Test
+  void fallsBackForEmptyAndDotSegmentFilenames() {
+    List<String> requestBodies = new ArrayList<>();
     server.createContext(
         "/api/resources/uploads",
         exchange -> {
-          requestBody.set(
+          requestBodies.add(
               new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
           respond(
               exchange,
               201,
               """
               {"status":201,"code":"CREATED","success":true,"data":{"items":[{
-                "resourcePath":"/resources/2026-08-10/upload-test/____.png"
+                "resourcePath":"/resources/2026-08-10/upload-test/resource.bin"
               }]}}
               """);
         });
 
-    OpenCliHubClient.UploadedResource uploaded =
-        client.upload("参考😀图.png", "image/png", 1L, new ByteArrayInputStream(new byte[] {1}));
+    for (String filename : List.of("", ".", "..")) {
+      OpenCliHubClient.UploadedResource uploaded =
+          client.upload(filename, "image/png", 1L, new ByteArrayInputStream(new byte[] {1}));
+      assertEquals("/resources/2026-08-10/upload-test/resource.bin", uploaded.resourcePath());
+    }
 
-    assertEquals("/resources/2026-08-10/upload-test/____.png", uploaded.resourcePath());
-    assertTrue(requestBody.get().contains("filename=\"____.png\""));
+    assertEquals(3, requestBodies.size());
+    requestBodies.forEach(body -> assertTrue(body.contains("filename=\"resource.bin\"")));
   }
 
   @Test
@@ -310,6 +342,32 @@ class OpenCliHubClientTest {
     OpenCliHubProperties ipv6 = new OpenCliHubProperties();
     ipv6.setBaseUrl(URI.create("http://[::1]:8080"));
     new OpenCliHubClient(ipv6, mapper);
+  }
+
+  private void assertUploadedFilename(String filename, String expected) {
+    AtomicReference<String> requestBody = new AtomicReference<>();
+    String resourcePath = "/resources/2026-08-10/upload-test/" + expected;
+    server.createContext(
+        "/api/resources/uploads",
+        exchange -> {
+          requestBody.set(
+              new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
+          respond(
+              exchange,
+              201,
+              """
+              {"status":201,"code":"CREATED","success":true,"data":{"items":[{
+                "resourcePath":"%s"
+              }]}}
+              """
+                  .formatted(resourcePath));
+        });
+
+    OpenCliHubClient.UploadedResource uploaded =
+        client.upload(filename, "image/png", 1L, new ByteArrayInputStream(new byte[] {1}));
+
+    assertEquals(resourcePath, uploaded.resourcePath());
+    assertTrue(requestBody.get().contains("filename=\"" + expected + "\""));
   }
 
   private String execution(
