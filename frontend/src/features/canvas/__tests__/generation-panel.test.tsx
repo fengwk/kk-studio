@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
@@ -144,6 +144,7 @@ function renderPanel(
   const startFunctionRun = vi.fn(async () => undefined)
   const cancelFunctionRun = vi.fn(async () => undefined)
   const setToast = vi.fn()
+  const setSelection = vi.fn()
   const runtime = {
     models: availableModels,
     scheduleFunctionConfig,
@@ -151,6 +152,7 @@ function renderPanel(
     startFunctionRun,
     cancelFunctionRun,
     setToast,
+    setSelection,
   } as unknown as CanvasController
   const { snapshot, target } = fixture(run)
   const tree = (currentSnapshot: CanvasSnapshot, currentNode: ResourceNode) => (
@@ -175,6 +177,7 @@ function renderPanel(
     flushFunctionConfig,
     startFunctionRun,
     cancelFunctionRun,
+    setSelection,
   }
 }
 
@@ -345,5 +348,79 @@ describe('Canvas generic generation panel', () => {
       updatedAt: '2026-08-10T00:00:01Z',
     })
     expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
+  })
+
+  it('shows the legacy header with the real model label and the true run status', () => {
+    // The header reuses the old kicker/status grammar while displaying registry data.
+    const view = renderPanel()
+    const header = view.container.querySelector('.generation-panel-head')
+    expect(header).not.toBeNull()
+    expect(within(header as HTMLElement).getByText('Image A')).toBeInTheDocument()
+    expect(within(header as HTMLElement).getByText('就绪')).toBeInTheDocument()
+    expect(within(header as HTMLElement).getByText('Function')).toHaveClass('generation-node-kicker')
+    view.unmount()
+
+    const running = renderPanel({
+      nodeId: '9',
+      requestId: 'request-1',
+      status: 'RUNNING',
+      stage: 'GENERATING',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    expect(within(running.container.querySelector('.generation-panel-head') as HTMLElement)
+      .getByText('运行中')).toHaveClass('generation-node-status', 'running')
+    running.unmount()
+
+    const failed = renderPanel({
+      nodeId: '9',
+      requestId: 'request-2',
+      status: 'FAILED',
+      stage: 'FAILED',
+      error: 'boom',
+      updatedAt: '2026-08-10T00:00:01Z',
+    })
+    expect(within(failed.container.querySelector('.generation-panel-head') as HTMLElement)
+      .getByText('失败')).toHaveClass('generation-node-status', 'failed')
+    failed.unmount()
+
+    const cancelled = renderPanel({
+      nodeId: '9',
+      requestId: 'request-3',
+      status: 'CANCELLED',
+      stage: 'CANCELLED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:02Z',
+    })
+    expect(within(cancelled.container.querySelector('.generation-panel-head') as HTMLElement)
+      .getByText('已取消')).toHaveClass('generation-node-status', 'cancelled')
+  })
+
+  it('expands and collapses the panel width through the header action', async () => {
+    const user = userEvent.setup()
+    const view = renderPanel()
+    const panel = view.container.querySelector('.generation-panel')
+    expect(panel).not.toHaveClass('expanded')
+
+    const expand = screen.getByRole('button', { name: '展开面板' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    await user.click(expand)
+    expect(panel).toHaveClass('expanded')
+    expect(screen.getByRole('button', { name: '收起面板' })).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(screen.getByRole('button', { name: '收起面板' }))
+    expect(panel).not.toHaveClass('expanded')
+    expect(screen.getByRole('button', { name: '展开面板' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('closes the panel by clearing the selection while the unmount flush still runs', async () => {
+    // Close is the documented escape hatch: it clears selection (unmounting the panel)
+    // and the unmount effect still flushes the latest draft config.
+    const user = userEvent.setup()
+    const view = renderPanel()
+    await user.click(screen.getByRole('button', { name: '关闭面板' }))
+    expect(view.setSelection).toHaveBeenCalledWith([])
+    view.unmount()
+    expect(view.flushFunctionConfig).toHaveBeenCalledWith('9')
   })
 })

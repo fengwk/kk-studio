@@ -7,6 +7,7 @@ import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { ResourceFlowNodeData } from '@/features/canvas/types'
+import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(async () => ({
@@ -198,9 +199,26 @@ describe('Canvas resource/group node renderers', () => {
 
     expect(screen.getByText('Function 首次成功前暂无资源')).toBeInTheDocument()
     expect(screen.getByText('Model label')).toBeInTheDocument()
-    expect(screen.getByText('FAILED')).toBeInTheDocument()
+    expect(screen.getByText('失败')).toBeInTheDocument()
     expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
     expect(view.container.querySelector('.generation-panel')).toBeNull()
+  })
+
+  it('renders a cancelled Function with a neutral localized status', () => {
+    const view = renderResourceNode(resourceNode({
+      resources: [],
+      function: { modelKey: 'fake-image', configJson: '{}' },
+      run: {
+        nodeId: '2',
+        requestId: 'request-2',
+        status: 'CANCELLED',
+        stage: 'CANCELLED',
+        error: null,
+        updatedAt: '2026-08-10T00:00:00Z',
+      },
+    }))
+    expect(screen.getByText('已取消')).toHaveClass('run-status', 'cancelled')
+    expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
   })
 
   it('renders the generic empty-resource state without a model descriptor', () => {
@@ -326,5 +344,64 @@ describe('Canvas resource/group node renderers', () => {
       } as NodeProps<CanvasFlowNode>)} />,
     )
     expect(groupView.container).toBeEmptyDOMElement()
+  })
+
+  it('restores the card grammar with an inset preview, kind label, and rename title', () => {
+    const view = renderResourceNode(resourceNode({
+      name: 'Vision board',
+      resources: [resource('IMAGE', { metadata: { width: 1024, height: 768 } })],
+    }))
+    expect(view.container.querySelector('.resource-node-content')).not.toBeNull()
+    expect(view.container.querySelector('.resource-node-preview')).not.toBeNull()
+    expect(screen.getByText('图片参考')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Vision board' })).toBeInTheDocument()
+    expect(view.container.querySelector('.resource-node-footer')).not.toBeNull()
+  })
+
+  it('extracts a real Function summary from the prompt config', () => {
+    const view = renderResourceNode(resourceNode({
+      name: 'Generator',
+      resources: [],
+      function: {
+        modelKey: 'fake-image',
+        configJson: JSON.stringify({
+          prompt: { segments: [{ type: 'TEXT', text: 'generate a red square' }] },
+          parameters: {},
+        }),
+      },
+      run: null,
+    }))
+    const summary = view.container.querySelector('.resource-node-summary')
+    expect(summary).not.toBeNull()
+    expect(summary).toHaveTextContent('generate a red square')
+  })
+
+  it('localizes visible chrome labels with the active locale', () => {
+    setLocale('en-US')
+    const imageView = renderResourceNode(resourceNode({
+      resources: [resource('IMAGE', { metadata: { width: 1024, height: 768 } })],
+    }))
+    expect(screen.getByText('Image reference')).toBeInTheDocument()
+    imageView.unmount()
+
+    const textView = renderResourceNode(resourceNode({
+      resources: [resource('TEXT', { text: 'note' })],
+    }))
+    expect(screen.getByRole('button', { name: 'Edit Markdown' })).toBeInTheDocument()
+    textView.unmount()
+
+    const multiView = renderResourceNode(resourceNode({
+      resources: [
+        resource('IMAGE', { metadata: { width: 1024, height: 768 } }),
+        resource('IMAGE', { metadata: { width: 512, height: 512 } }),
+      ],
+    }))
+    expect(screen.getByRole('button', { name: 'Previous resource' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Next resource' })).toBeEnabled()
+    multiView.unmount()
+
+    const emptyView = renderResourceNode(resourceNode({ resources: [] }))
+    expect(screen.getByText('No resources yet')).toBeInTheDocument()
+    emptyView.unmount()
   })
 })

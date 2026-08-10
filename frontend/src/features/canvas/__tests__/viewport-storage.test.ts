@@ -18,11 +18,11 @@ describe('canvas viewport storage', () => {
     saveCanvasViewport('1', { x: 12, y: -9, zoom: 99 }, storage)
     saveCanvasViewport('2', { x: 1, y: 2, zoom: 0.5 }, storage)
 
-    expect(loadCanvasViewport('1', storage)).toEqual({ x: 12, y: -9, zoom: 1.45 })
+    expect(loadCanvasViewport('1', storage)).toEqual({ x: 12, y: -9, zoom: 2 })
     expect(loadCanvasViewport('2', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
     expect(hasStoredCanvasViewport('1', storage)).toBe(true)
     expect(values.has(canvasViewportStorageKey('1'))).toBe(true)
-    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v2:1')
+    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v3:1')
   })
 
   it('falls back for malformed or non-finite persisted values', () => {

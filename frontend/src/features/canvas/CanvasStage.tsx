@@ -23,6 +23,10 @@ import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
+import {
+  selectionToolbarPosition,
+  selectionWorldBounds,
+} from '@/features/canvas/selection-toolbar-position'
 import type { CanvasPositionUpdate } from '@/features/canvas/types'
 import {
   MAX_CANVAS_ZOOM,
@@ -30,6 +34,9 @@ import {
 } from '@/features/canvas/viewport-storage'
 import type { DecimalString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
+
+const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
+const FOCUS_SELECTION_FIT = { padding: 0.22, maxZoom: 1.8, duration: 0 }
 
 function StageInner() {
   const runtime = useCanvasRuntime()
@@ -93,6 +100,47 @@ function StageInner() {
   const selectedFunctionFlowNode = selectedFunctionNode
     ? nodes.find((node) => node.id === selectedFunctionNode.id)
     : null
+
+  // 选区工具条锚点：选中节点（edge-only 时含端点）的 world bounds 投影到 screen space。
+  const selectedFlowNodes = useMemo(() => {
+    const ids = new Set(state.selectedIds)
+    for (const link of state.selectedLinks) {
+      ids.add(link.sourceNodeId)
+      ids.add(link.targetNodeId)
+    }
+    return nodes.filter((node) => ids.has(node.id))
+  }, [nodes, state.selectedIds, state.selectedLinks])
+  const selectionBounds = useMemo(
+    () => selectionWorldBounds(selectedFlowNodes),
+    [selectedFlowNodes],
+  )
+  const toolbarPosition = useMemo(() => (
+    selectionBounds
+      ? (() => {
+        const mediumFunctionPanel = Boolean(
+          selectedFunctionNode
+          && stageMetrics.width > 900
+          && stageMetrics.width <= 1600
+        )
+        return selectionToolbarPosition({
+          bounds: selectionBounds,
+          viewport: state.viewport,
+          stage: {
+            width: mediumFunctionPanel && stageMetrics.width > 1180
+              ? stageMetrics.width - 140
+              : stageMetrics.width,
+            height: mediumFunctionPanel
+              ? stageMetrics.dockTop + 8
+              : Math.min(stageMetrics.height, stageMetrics.dockTop - 8),
+          },
+          toolbar: mediumFunctionPanel ? { width: 360, height: 37 } : undefined,
+          gap: mediumFunctionPanel ? 8 : undefined,
+          padding: mediumFunctionPanel ? 8 : undefined,
+          preferBelow: mediumFunctionPanel,
+        })
+      })()
+      : null
+  ), [selectedFunctionNode, selectionBounds, stageMetrics, state.viewport])
 
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
@@ -165,11 +213,7 @@ function StageInner() {
       return
     }
     initialFitStartedRef.current = true
-    void fitView({
-      padding: 0.18,
-      maxZoom: 1,
-      duration: 0,
-    }).then((fitted) => {
+    void fitView(INITIAL_FIT).then((fitted) => {
       if (!mountedRef.current) {
         return
       }
@@ -191,19 +235,13 @@ function StageInner() {
 
   useEffect(() => {
     fitViewRef.current = () => {
-      void fitView({
-        padding: 0.18,
-        maxZoom: 1,
-        duration: 0,
-      }).then(syncViewport)
+      void fitView(INITIAL_FIT).then(syncViewport)
     }
     focusSelectionRef.current = () => {
       const selected = nodes.filter((node) => node.selected)
       void fitView({
+        ...FOCUS_SELECTION_FIT,
         nodes: selected.length > 0 ? selected : undefined,
-        padding: 0.22,
-        maxZoom: 1.15,
-        duration: 0,
       }).then(syncViewport)
     }
     zoomRef.current = (zoom) => {
@@ -387,16 +425,22 @@ function StageInner() {
         </ReactFlow>
       </div>
 
-      {state.selectedIds.length > 0 || state.selectedLinks.length > 0 ? (
-        <div className="selection-toolbar" role="toolbar" aria-label="选区操作">
+      {toolbarPosition && (state.selectedIds.length > 0 || state.selectedLinks.length > 0) ? (
+        <div
+          className="selection-toolbar"
+          role="toolbar"
+          aria-label={t('canvas.stage.selectionToolbar')}
+          data-placement={toolbarPosition.placement}
+          style={{ left: toolbarPosition.left, top: toolbarPosition.top }}
+        >
           {state.selectedIds.length > 0 ? (
             <>
-              <button type="button" onClick={createGroup}>分组</button>
-              <button type="button" onClick={ungroupSelection}>解散 / 移出分组</button>
-              <button type="button" onClick={focusAgentDock}>交给 Agent</button>
+              <button type="button" onClick={createGroup}>{t('canvas.stage.group')}</button>
+              <button type="button" onClick={ungroupSelection}>{t('canvas.stage.ungroup')}</button>
+              <button type="button" onClick={focusAgentDock}>{t('canvas.stage.agent')}</button>
             </>
           ) : null}
-          <button type="button" className="danger" onClick={deleteSelection}>删除</button>
+          <button type="button" className="danger" onClick={deleteSelection}>{t('canvas.stage.delete')}</button>
         </div>
       ) : null}
 
@@ -419,11 +463,20 @@ function StageInner() {
 
       <div className="canvas-hint">
         <kbd>Space</kbd>
-        {' 平移 · '}
+        {' '}
+        {t('canvas.stage.hint.pan')}
+        {' '}
+        ·
+        {' '}
         <kbd>V / H / T</kbd>
-        {' 工具 · '}
+        {' '}
+        {t('canvas.stage.hint.tools')}
+        {' '}
+        ·
+        {' '}
         <kbd>⌘ K</kbd>
-        {' Agent'}
+        {' '}
+        {t('canvas.stage.hint.invokeAgent')}
       </div>
 
       <div className="canvas-controls">
@@ -438,8 +491,24 @@ function StageInner() {
             {`${Math.round(state.viewport.zoom * 100)}%`}
           </button>
           <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_CANVAS_ZOOM, state.viewport.zoom * 1.15))}>＋</button>
-          <button type="button" aria-pressed={state.tool === 'select'} onClick={() => setTool('select')}>V</button>
-          <button type="button" aria-pressed={state.tool === 'hand'} onClick={() => setTool('hand')}>H</button>
+        </div>
+        <div className="tool-controls" role="group" aria-label={t('canvas.stage.toolControls')}>
+          <button
+            type="button"
+            aria-label={t('canvas.stage.toolSelect')}
+            aria-pressed={state.tool === 'select'}
+            onClick={() => setTool('select')}
+          >
+            V
+          </button>
+          <button
+            type="button"
+            aria-label={t('canvas.stage.toolHand')}
+            aria-pressed={state.tool === 'hand'}
+            onClick={() => setTool('hand')}
+          >
+            H
+          </button>
         </div>
       </div>
 

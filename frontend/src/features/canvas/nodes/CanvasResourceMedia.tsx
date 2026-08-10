@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
+import { useI18n } from '@/shared/i18n'
 
 export function CanvasResourceMedia({ resource }: { resource: Resource }) {
   if (resource.kind === 'TEXT') {
@@ -37,6 +38,7 @@ export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
 }
 
 function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
+  const { t } = useI18n()
   const [originalRequested, setOriginalRequested] = useState(false)
   const [playRequested, setPlayRequested] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
@@ -82,16 +84,23 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             decoding="async"
           />
         ) : (
-          <MediaPlaceholder loading={previewLoading} error={previewError} kind="IMAGE" />
+          <MediaPlaceholder
+            loading={previewLoading}
+            error={previewError}
+            kind="IMAGE"
+            t={t}
+          />
         )}
         <OriginalActions
           resource={resource}
           url={originalUrl}
           loading={originalLoading}
           error={originalError}
-          requestLabel="获取原图"
-          openLabel="打开原图"
-          downloadLabel="下载原图"
+          requestLabel={t('canvas.media.fetchImage')}
+          openLabel={t('canvas.media.openImage')}
+          downloadLabel={t('canvas.media.downloadImage')}
+          signingLabel={t('canvas.media.signing')}
+          signFailedLabel={t('canvas.media.signFailed')}
           onRequest={() => setOriginalRequested(true)}
         />
       </div>
@@ -113,14 +122,19 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             autoPlay
             playsInline
             preload="metadata"
-            aria-label={`播放 ${resource.name}`}
+            aria-label={t('canvas.media.play', { name: resource.name })}
           />
         ) : (
           <>
             {previewUrl ? (
               <img src={previewUrl} alt="" loading="lazy" decoding="async" />
             ) : (
-              <MediaPlaceholder loading={previewLoading} error={previewError} kind="VIDEO" />
+              <MediaPlaceholder
+                loading={previewLoading}
+                error={previewError}
+                kind="VIDEO"
+                t={t}
+              />
             )}
             <button
               type="button"
@@ -130,9 +144,9 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
                 setPlayRequested(true)
                 setOriginalRequested(true)
               }}
-              aria-label={`播放视频 ${resource.name}`}
+              aria-label={t('canvas.media.playVideo', { name: resource.name })}
             >
-              {originalLoading ? '加载中…' : '▶'}
+              {originalLoading ? t('canvas.media.loading') : '▶'}
             </button>
           </>
         )}
@@ -141,9 +155,11 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           url={originalUrl}
           loading={originalLoading}
           error={originalError}
-          requestLabel="获取视频原件"
-          openLabel="打开视频原件"
-          downloadLabel="下载视频原件"
+          requestLabel={t('canvas.media.fetchVideo')}
+          openLabel={t('canvas.media.openVideo')}
+          downloadLabel={t('canvas.media.downloadVideo')}
+          signingLabel={t('canvas.media.signing')}
+          signFailedLabel={t('canvas.media.signFailed')}
           onRequest={() => setOriginalRequested(true)}
         />
       </div>
@@ -163,7 +179,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           src={originalUrl}
           controls
           preload="metadata"
-          aria-label={`播放音频 ${resource.name}`}
+          aria-label={t('canvas.media.playAudio', { name: resource.name })}
         />
       ) : (
         <button
@@ -176,7 +192,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           }}
         >
           <span aria-hidden="true">♪</span>
-          <strong>{originalLoading ? '加载中…' : '加载音频'}</strong>
+          <strong>{originalLoading ? t('canvas.media.loading') : t('canvas.media.loadAudio')}</strong>
           <small>{durationMs === null ? resource.mediaType : formatDuration(durationMs)}</small>
         </button>
       )}
@@ -185,9 +201,11 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
         url={originalUrl}
         loading={originalLoading}
         error={originalError}
-        requestLabel="获取音频原件"
-        openLabel="打开音频原件"
-        downloadLabel="下载音频原件"
+        requestLabel={t('canvas.media.fetchAudio')}
+        openLabel={t('canvas.media.openAudio')}
+        downloadLabel={t('canvas.media.downloadAudio')}
+        signingLabel={t('canvas.media.signing')}
+        signFailedLabel={t('canvas.media.signFailed')}
         onRequest={() => setOriginalRequested(true)}
       />
     </div>
@@ -202,6 +220,8 @@ function OriginalActions({
   requestLabel,
   openLabel,
   downloadLabel,
+  signingLabel,
+  signFailedLabel,
   onRequest,
 }: {
   resource: Resource
@@ -211,6 +231,8 @@ function OriginalActions({
   requestLabel: string
   openLabel: string
   downloadLabel: string
+  signingLabel: string
+  signFailedLabel: string
   onRequest: () => void
 }) {
   return (
@@ -231,10 +253,10 @@ function OriginalActions({
           onClick={onRequest}
           aria-label={`${requestLabel} ${resource.name}`}
         >
-          {loading ? '签名中…' : requestLabel}
+          {loading ? signingLabel : requestLabel}
         </button>
       )}
-      {error ? <span className="media-error">原件签名失败</span> : null}
+      {error ? <span className="media-error">{signFailedLabel}</span> : null}
     </div>
   )
 }
@@ -243,15 +265,23 @@ function MediaPlaceholder({
   loading,
   error,
   kind,
+  t,
 }: {
   loading: boolean
   error: unknown
   kind: 'IMAGE' | 'VIDEO'
+  t: (key: string, values?: Record<string, string | number>) => string
 }) {
   return (
     <div className="media-placeholder" role={error ? 'alert' : undefined}>
       <span aria-hidden="true">{resourceIcon(kind)}</span>
-      <small>{error ? '预览加载失败' : loading ? '加载预览…' : '等待进入视口'}</small>
+      <small>
+        {error
+          ? t('canvas.media.previewFailed')
+          : loading
+            ? t('canvas.media.loadingPreview')
+            : t('canvas.media.waitingViewport')}
+      </small>
     </div>
   )
 }
