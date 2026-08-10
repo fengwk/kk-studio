@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
@@ -7,8 +7,12 @@ import test from 'node:test'
 import { CASE_NODE_SCRIPT, runCommand } from '../docker-case.mjs'
 
 test('case inspector accepts absolute paths only when they stay inside the disposable case', async () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'kk-studio-reliability-case-'))
+  const base = mkdtempSync(path.join(tmpdir(), 'kk-studio-reliability-case-'))
+  const root = path.join(base, 'case')
+  const outsideRoot = path.join(base, 'outside')
   try {
+    mkdirSync(root)
+    mkdirSync(outsideRoot)
     const file = path.join(root, 'proof.txt')
     writeFileSync(file, 'proof', 'utf8')
 
@@ -26,11 +30,21 @@ test('case inspector accepts absolute paths only when they stay inside the dispo
       ],
     })
 
+    const dotDotNamedFile = path.join(root, '..proof.txt')
+    writeFileSync(dotDotNamedFile, 'proof', 'utf8')
+    assert.equal((await inspect(root, dotDotNamedFile)).code, 0)
+
     const outside = await inspect(root, path.join(root, '..', 'outside.txt'))
     assert.notEqual(outside.code, 0)
     assert.match(outside.stderr, /path escapes case root/)
+
+    writeFileSync(path.join(outsideRoot, 'secret.txt'), 'secret', 'utf8')
+    symlinkSync(outsideRoot, path.join(root, 'outside-link'), 'dir')
+    const symlinkEscape = await inspect(root, path.join(root, 'outside-link', 'secret.txt'))
+    assert.notEqual(symlinkEscape.code, 0)
+    assert.match(symlinkEscape.stderr, /path escapes case root/)
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    rmSync(base, { recursive: true, force: true })
   }
 })
 

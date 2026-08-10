@@ -64,7 +64,7 @@ export function main(argv = process.argv.slice(2)) {
       + `result=${summary.status.toUpperCase()} pass=${summary.totals.pass} `
       + `fail=${summary.totals.fail} skip=${summary.totals.skip} modelTurnsStarted=0`,
   )
-  return 0
+  return summary.status === 'pass' ? 0 : 1
 }
 
 export function reassessResult(testCase, previous, trace) {

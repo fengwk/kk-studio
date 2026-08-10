@@ -187,7 +187,9 @@ lock Thread
 
 durable `approval` JSON 使用领域枚举 `ALLOWED` / `DENIED`（不是输入值）。契约：
 
-- 未决定请求必须命中锁定的 TOOL_ACTIVE 上下文中的 `WAITING_APPROVAL` Invocation；`ALLOWED` → `READY`（请求 TOOL Work），`DENIED` → `FAILED`（请求 THREAD Work）；revision 恰好 touch 一次。
+- 未决定请求必须命中锁定的 TOOL_ACTIVE 上下文中的 `WAITING_APPROVAL` Invocation；mutation 与 `decidedAt` 抬升到已锁定
+  Thread/head/Model/siblings/approval 的最新 durable 时间，Work request 保持原始本地调度时钟；`ALLOWED` → `READY`（请求 TOOL
+  Work），`DENIED` → `FAILED`（请求 THREAD Work）；revision 恰好 touch 一次。
 - 已决定请求按 `(threadId, toolInvocationId, decisionId)` 精确 replay：返回当前锁定 Invocation（原 `decidedAt` 保留），无 revision bump、无 Work 请求；不一致 → `APPROVAL_DECISION_MISMATCH` 409。
 - 前端对同一 decision 复用同一 `decisionId`；切换 decision 时 mint 新 ID。
 

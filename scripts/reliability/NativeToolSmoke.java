@@ -48,6 +48,12 @@ final class NativeToolSmoke {
           text(slashPattern).equals("src/a.ts"),
           "slash-containing find must remain segment-aware: " + text(slashPattern));
 
+      ToolResult escapedClass =
+          invoke(new FindTool(config), "{\"pattern\":\"[\\\\d].txt\",\"path\":\".\"}");
+      check(
+          text(escapedClass).equals("d.txt"),
+          "escaped glob character-class literal mismatch: " + text(escapedClass));
+
       ToolResult ignored = invoke(new FindTool(config), "{\"pattern\":\"*\",\"path\":\".\"}");
       check(!text(ignored).contains("ignored.txt"), "root .gitignore file leaked");
       check(!text(ignored).contains("ignored-dir/hidden.ts"), "ignored directory leaked");
@@ -110,6 +116,8 @@ final class NativeToolSmoke {
     write(root, ".pi/git/.gitignore", "!.gitignore\n");
     write(root, ".pi/git/generated.txt", "firstKeptEntryId\n");
     write(root, ".git/config", "firstKeptEntryId\n");
+    write(root, "d.txt", "literal d\n");
+    write(root, "1.txt", "digit one\n");
     write(root, "multi.txt", "alpha\nbeta\ngamma\n");
     Files.write(root.resolve("binary.bin"), new byte[] {'x', 0, 'y'});
   }

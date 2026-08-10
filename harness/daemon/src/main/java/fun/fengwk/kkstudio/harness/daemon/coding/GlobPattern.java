@@ -99,7 +99,7 @@ final class GlobPattern {
     for (; index < end; index++) {
       char current = glob.charAt(index);
       if (current == '\\' && index + 1 < end) {
-        regex.append('\\').append(glob.charAt(++index));
+        appendEscapedCharacterClassLiteral(regex, glob.charAt(++index));
       } else if (current == '[' || current == '&') {
         regex.append('\\').append(current);
       } else {
@@ -108,6 +108,14 @@ final class GlobPattern {
     }
     regex.append(']');
     return end;
+  }
+
+  /** glob 字符类内的反斜杠始终把下一字符转成字面量，不能透传成 Java regex 的 {@code \d}/{@code \n} 等转义。 */
+  private static void appendEscapedCharacterClassLiteral(StringBuilder regex, char value) {
+    if ("\\^-[]&".indexOf(value) >= 0) {
+      regex.append('\\');
+    }
+    regex.append(value);
   }
 
   private static void appendLiteral(StringBuilder regex, char value) {

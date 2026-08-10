@@ -25,11 +25,24 @@ function safePath(requestedPath) {
   const resolved = path.isAbsolute(requestedPath)
     ? path.resolve(requestedPath)
     : path.resolve(root, requestedPath)
-  const relative = path.relative(root, resolved)
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+  assertInsideRoot(resolved)
+
+  let existing = resolved
+  while (!existsSync(existing)) {
+    const parent = path.dirname(existing)
+    if (parent === existing) break
+    existing = parent
+  }
+  const canonical = path.resolve(realpathSync(existing), path.relative(existing, resolved))
+  assertInsideRoot(canonical)
+  return resolved
+}
+
+function assertInsideRoot(candidate) {
+  const relative = path.relative(root, candidate)
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
     throw new Error('path escapes case root')
   }
-  return resolved
 }
 
 function count(source, needle) {
