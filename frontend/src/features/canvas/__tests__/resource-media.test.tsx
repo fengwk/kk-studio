@@ -115,6 +115,31 @@ describe('Canvas lazy resource media', () => {
     expect(disconnect).toHaveBeenCalled()
   })
 
+  it('loads a lazy preview immediately when layout already places it near the viewport', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
+      {} as DOMRect,
+    ] as unknown as DOMRectList)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      bottom: 300,
+      height: 200,
+      left: 100,
+      right: 400,
+      top: 100,
+      width: 300,
+      x: 100,
+      y: 100,
+      toJSON: () => ({}),
+    })
+
+    renderMedia(resource('IMAGE'))
+
+    expect(await screen.findByRole('img', { name: 'image.asset' })).toHaveAttribute(
+      'src',
+      'https://s3.example/preview.webp',
+    )
+    expect(observe).not.toHaveBeenCalled()
+  })
+
   it('keeps VIDEO on preview until play and cleans the original media element on unmount', async () => {
     // Explicit play is the boundary that permits an original URL request.
     const view = renderMedia(resource('VIDEO'))
