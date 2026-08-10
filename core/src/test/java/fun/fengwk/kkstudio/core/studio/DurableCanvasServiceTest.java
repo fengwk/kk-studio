@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.core.ai.runtime.persistence.postgresql.PostgresSchemaSupport;
@@ -29,6 +32,11 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.studio.canvas.CanvasUpload;
 import fun.fengwk.kkstudio.studio.canvas.CanvasUploadRepository;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -36,15 +44,24 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /** PostgreSQL 上的 Canvas v1 command、CAS、幂等和聚合快照覆盖。 */
+@Import(DurableCanvasServiceTest.TestAdapterConfiguration.class)
 public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
 
   private static final CanvasTransform T = new CanvasTransform(10, 20, 100, 80);
+  private static final String FUNCTION_CONFIG =
+      """
+      {"prompt":{"segments":[{"type":"TEXT","text":"prompt"}]},"parameters":{}}
+      """;
+  private static final CanvasFunctionReferencePolicy NO_REFERENCES =
+      new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 0, Map.of());
 
   @Autowired private CanvasCommandService commandService;
   @Autowired private CanvasQueryService queryService;
@@ -87,7 +104,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
             "create-nodes",
             new CanvasCommand.CreateTextNode("source", "x", T),
             new CanvasCommand.CreateFunctionNode(
-                "target", "model-a", "{\"prompt\":\"x\"}", new CanvasTransform(200, 20, 120, 90)));
+                "target", "model-a", FUNCTION_CONFIG, new CanvasTransform(200, 20, 120, 90)));
     long sourceId = first.nodes().get(0).id();
     long targetId = first.nodes().get(1).id();
 
@@ -96,7 +113,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
             canvas,
             1,
             "edit-graph",
-            new CanvasCommand.UpdateFunction(targetId, "model-b", "{\"prompt\":\"y\"}"),
+            new CanvasCommand.UpdateFunction(targetId, "model-b", FUNCTION_CONFIG),
             new CanvasCommand.RenameNode(sourceId, "renamed"),
             new CanvasCommand.UpdateNodeTransforms(
                 List.of(
@@ -169,13 +186,13 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
             "nodes",
             new CanvasCommand.CreateTextNode("a", "a", T),
             new CanvasCommand.CreateTextNode("b", "b", T),
-            new CanvasCommand.CreateFunctionNode("fn", "m", "{}", T));
+            new CanvasCommand.CreateFunctionNode("fn", "m", FUNCTION_CONFIG, T));
     CanvasSnapshot second =
         apply(
             secondCanvas,
             0,
             "foreign-node",
-            new CanvasCommand.CreateFunctionNode("foreign", "m", "{}", T));
+            new CanvasCommand.CreateFunctionNode("foreign", "m", FUNCTION_CONFIG, T));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -210,7 +227,29 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
                 firstCanvas,
                 2,
                 "long-model",
-                new CanvasCommand.CreateFunctionNode("long", "m".repeat(257), "{}", T)));
+                new CanvasCommand.CreateFunctionNode("long", "m".repeat(257), FUNCTION_CONFIG, T)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                firstCanvas,
+                2,
+                "unknown-model",
+                new CanvasCommand.CreateFunctionNode("unknown", "unknown", FUNCTION_CONFIG, T)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                firstCanvas,
+                2,
+                "unknown-parameter",
+                new CanvasCommand.CreateFunctionNode(
+                    "invalid",
+                    "m",
+                    """
+                    {"prompt":{"segments":[{"type":"TEXT","text":"prompt"}]},"parameters":{"extra":"x"}}
+                    """,
+                    T)));
   }
 
   @Test
@@ -351,14 +390,15 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
   void functionRunRepositoryFeedsSnapshotWithoutChangingGraphRevision() {
     CanvasDocument canvas = commandService.createCanvas("run");
     CanvasSnapshot created =
-        apply(canvas, 0, "fn", new CanvasCommand.CreateFunctionNode("fn", "m", "{}", T));
+        apply(canvas, 0, "fn", new CanvasCommand.CreateFunctionNode("fn", "m", FUNCTION_CONFIG, T));
     long nodeId = created.nodes().get(0).id();
-    runRepository.save(
+    runRepository.insertRunning(
         new CanvasFunctionRun(
             nodeId,
             "request-1",
             CanvasFunctionRunStatus.RUNNING,
-            "{\"stage\":\"queued\"}",
+            "QUEUED",
+            "{\"stage\":\"QUEUED\"}",
             null,
             Instant.now()));
 
@@ -373,12 +413,13 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runRepository.save(
+            runRepository.insertRunning(
                 new CanvasFunctionRun(
                     ordinary.nodes().get(0).id(),
                     "invalid",
                     CanvasFunctionRunStatus.RUNNING,
-                    "{}",
+                    "QUEUED",
+                    "{\"stage\":\"QUEUED\"}",
                     null,
                     Instant.now())));
   }
@@ -469,6 +510,44 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
         resultSet.next();
         return resultSet.getLong(1);
       }
+    }
+  }
+
+  @TestConfiguration
+  static class TestAdapterConfiguration {
+
+    @Bean
+    CanvasFunctionAdapter durableCanvasTestAdapter() {
+      List<CanvasFunctionModel> models = List.of(model("m"), model("model-a"), model("model-b"));
+      return new CanvasFunctionAdapter() {
+        @Override
+        public List<CanvasFunctionModel> models() {
+          return models;
+        }
+
+        @Override
+        public boolean enabled() {
+          return true;
+        }
+
+        @Override
+        public String unavailableReason() {
+          return null;
+        }
+
+        @Override
+        public void preflight(CanvasFunctionFrozenRun run) {}
+
+        @Override
+        public List<Long> execute(
+            CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+          throw new UnsupportedOperationException();
+        }
+      };
+    }
+
+    private static CanvasFunctionModel model(String key) {
+      return new CanvasFunctionModel(key, key, CanvasResourceKind.IMAGE, NO_REFERENCES, List.of());
     }
   }
 }

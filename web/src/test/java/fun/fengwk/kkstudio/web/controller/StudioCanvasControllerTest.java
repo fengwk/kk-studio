@@ -31,6 +31,8 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLink;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
@@ -82,6 +84,8 @@ class StudioCanvasControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.nodes[0].resources[0].id").value("201"))
         .andExpect(jsonPath("$.data.nodes[1].function.modelKey").value("model"))
+        .andExpect(jsonPath("$.data.nodes[1].run.stage").value("QUEUED"))
+        .andExpect(jsonPath("$.data.nodes[1].run.stateJson").doesNotExist())
         .andExpect(jsonPath("$.data.groups[0].id").value("301"))
         .andExpect(jsonPath("$.data.links[0].canvasId").value("42"))
         .andExpect(jsonPath("$.data.links[0].id").doesNotExist());
@@ -239,7 +243,14 @@ class StudioCanvasControllerTest {
             null,
             List.of(),
             new CanvasFunction("model", "{}"),
-            null);
+            new CanvasFunctionRun(
+                102,
+                "request",
+                CanvasFunctionRunStatus.RUNNING,
+                "QUEUED",
+                "{\"stage\":\"QUEUED\",\"secret\":\"must-not-leak\"}",
+                null,
+                NOW));
     return new CanvasSnapshot(
         document(),
         List.of(ordinary, function),

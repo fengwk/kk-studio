@@ -103,11 +103,28 @@ modelKey
 configJson
 ```
 
-`configJson` 只包含用户配置：
+`configJson` 是唯一严格用户配置契约：
 
-- Prompt 文档；
-- `@` 引用的 `{nodeId, index}`；
-- 模型允许用户配置的比例、时长等参数。
+```json
+{
+  "prompt": {
+    "segments": [
+      {"type": "TEXT", "text": "..."},
+      {"type": "REFERENCE", "nodeId": "123", "index": 0}
+    ]
+  },
+  "parameters": {"ratio": "16:9", "duration": 5}
+}
+```
+
+所有对象层拒绝未知字段、`null`、错误类型和重复字段。`type` 只使用大写
+`TEXT|REFERENCE`；引用 nodeId 是 canonical positive decimal string，index 是非负整数。
+canonical freeze 删除空 TEXT、合并相邻 TEXT；最终可见文本必须非空。manifest 按
+REFERENCE 首次出现顺序去重，但 prompt 中可重复 mention 同一引用。`parameters` 必须是
+object，v1 只由 model descriptor 声明并校验 `ENUM|INTEGER` 参数及 required/default/
+options/min/max。Create/Update Function command 必须命中 Registry 中的 model descriptor，
+并在写库前完成上述校验、默认值补齐和 canonical JSON 编码；start 时再次按当前 descriptor
+校验后冻结。
 
 Provider endpoint、ComfyUI 节点、workflow、MinIO key、Hub resource path、
 内部帧数等实现细节不得进入 `configJson`。
@@ -128,13 +145,17 @@ FunctionRun
 └── updatedAt
 ```
 
-`stateJson` 是当前运行的 crash-recovery checkpoint，最少保存：
+`stateJson` 是 versioned typed crash-recovery checkpoint，保存：
 
-- 冻结后的 model/config；
+- 冻结后的 model identity/output kind/config；
 - 冻结后的有序 Resource manifest；
 - 当前 adapter stage；
 - provider execution/job/thread id；
 - 已预分配的目标 Resource id。
+
+固定外层为 `version + plan + stage + adapterState object`。adapterState 最大 64KiB，
+stage 使用大写 token。公开 `CanvasFunctionRunDTO` 只返回
+`nodeId/requestId/status/stage/error/updatedAt`，不返回 stateJson。
 
 不变量：
 
@@ -148,6 +169,13 @@ FunctionRun
 8. `SUCCEEDED` 表示所有资源已写入 MinIO、校验、建表并完成节点资源替换。
 
 Run 状态更新与资源替换不修改 `graphRevision`。
+
+start 在短事务中先锁 Function node，再锁当前 run。相同 requestId 无论 RUNNING 或终态
+都 exact replay；不同 requestId 遇 RUNNING 冲突；终态可被新 request 覆盖。checkpoint
+和 terminal transition 都使用 `nodeId + requestId + RUNNING` 条件更新。成功只在所有目标
+Resource 已通过 materializer 后，重新锁 node/run，并在同一短事务中原子替换完整有序
+Resource 列表与标记 SUCCEEDED。cancel 先提交数据库 CANCELLED，再 best-effort 调用
+adapter hook。
 
 ### 2.5 Link and References
 
@@ -349,6 +377,24 @@ WebP；任何超时、非零退出、非法数值或输出缺失都拒绝入库�
 buffer 和临时文件，不把媒体整体加载进 JVM heap。
 
 ## 6. Function Models
+
+Registry 由 `CanvasFunctionAdapter` 声明一个或多个 `CanvasFunctionModel`。descriptor 只含
+key、label、output kind、reference policy 与参数定义；availability 由 adapter enabled
+状态决定，provider endpoint/workflow 不进入 share DTO。重复 model key 在应用启动时失败。
+
+Foundation 向 adapter 只暴露 checkpoint、isRunning、打开 frozen Resource original 的
+must-close 流，以及向唯一预分配 target id 物化输出。original 使用 deterministic S3 key
+并校验对象长度等于 frozen size；输出统一复用 `CanvasResourceMaterializer` 的
+ffprobe/ffmpeg/preview 路径。
+
+异步 dispatcher 使用可配置有界 executor，并在本进程按 nodeId/requestId 去重；新建或
+重复 RUNNING start 都可补 dispatch，ApplicationReady 扫描 durable RUNNING 恢复。adapter
+根据 typed stage/adapterState 自行决定供应商不确定阶段的恢复行为，foundation 不自动
+重试付费提交。
+
+只有同时启用 S3 与 `kk-studio.canvas.function.fake-enabled=true` 时才注册免费
+`fake-image`/`fake-video`。两者从 main resources 读取极小合法 PNG/MP4，并仍经过同一
+materializer、ffprobe 与 preview 路径；普通环境不暴露 fake models。
 
 ### 6.1 Seedance 2.0
 

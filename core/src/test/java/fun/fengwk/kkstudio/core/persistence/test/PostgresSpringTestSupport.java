@@ -40,6 +40,7 @@ public abstract class PostgresSpringTestSupport {
     registry.add("spring.datasource.multi.primary.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
+    registry.add("kk-studio.canvas.function.recovery-enabled", () -> WORKERS_DISABLED);
   }
 
   @BeforeEach

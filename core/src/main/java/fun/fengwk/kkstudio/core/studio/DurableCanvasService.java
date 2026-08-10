@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.studio;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -9,6 +8,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
+import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionConfigCodec;
+import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
 import fun.fengwk.kkstudio.core.studio.repo.impl.PostgresqlCanvasResourceRepository;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandDedupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
@@ -74,6 +75,8 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
   private final CanvasCommandDedupMapper commandDedupMapper;
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository functionRunRepository;
+  private final CanvasFunctionConfigCodec functionConfigCodec;
+  private final CanvasFunctionModelRegistry functionModelRegistry;
   private final ObjectMapper objectMapper;
   private final PostgresqlSequenceIdGenerator idGenerator;
 
@@ -87,6 +90,8 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
       CanvasCommandDedupMapper commandDedupMapper,
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository functionRunRepository,
+      CanvasFunctionConfigCodec functionConfigCodec,
+      CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
       PostgresqlSequenceIdGenerator idGenerator) {
     this.documentMapper = documentMapper;
@@ -98,6 +103,8 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
     this.commandDedupMapper = commandDedupMapper;
     this.resourceRepository = resourceRepository;
     this.functionRunRepository = functionRunRepository;
+    this.functionConfigCodec = functionConfigCodec;
+    this.functionModelRegistry = functionModelRegistry;
     this.objectMapper = objectMapper;
     this.idGenerator = idGenerator;
   }
@@ -273,29 +280,30 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
   }
 
   private void createFunctionNode(long canvasId, CanvasCommand.CreateFunctionNode command) {
-    validateJsonObject(command.configJson(), "configJson");
+    String modelKey = canonicalModelKey(command.modelKey());
+    String configJson = canonicalFunctionConfig(modelKey, command.configJson());
     String name = canonicalNodeName(command.name());
     nodeMapper.insert(
-        newNode(
-            idGenerator.next(),
-            canvasId,
-            name,
-            command.transform(),
-            canonicalModelKey(command.modelKey()),
-            command.configJson()));
+        newNode(idGenerator.next(), canvasId, name, command.transform(), modelKey, configJson));
   }
 
   private void updateFunction(long canvasId, CanvasCommand.UpdateFunction command) {
-    validateJsonObject(command.configJson(), "configJson");
+    String modelKey = canonicalModelKey(command.modelKey());
+    String configJson = canonicalFunctionConfig(modelKey, command.configJson());
     CanvasNodeDO node = requireNode(canvasId, command.nodeId());
     if (node.getModelKey() == null) {
       throw new IllegalArgumentException("UPDATE_FUNCTION requires a Function node");
     }
-    node.setModelKey(canonicalModelKey(command.modelKey()));
-    node.setFunctionConfigJson(command.configJson());
+    node.setModelKey(modelKey);
+    node.setFunctionConfigJson(configJson);
     if (nodeMapper.updateFunction(node) != 1) {
       throw new IllegalArgumentException("Unknown Function node: " + command.nodeId());
     }
+  }
+
+  private String canonicalFunctionConfig(String modelKey, String configJson) {
+    return functionConfigCodec.encode(
+        functionConfigCodec.decode(configJson, functionModelRegistry.require(modelKey).model()));
   }
 
   private void renameNode(long canvasId, CanvasCommand.RenameNode command) {
@@ -521,17 +529,6 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
       return sha256Hex(objectMapper.writeValueAsBytes(canonical));
     } catch (JsonProcessingException ex) {
       throw new IllegalStateException("command hash serialization failed", ex);
-    }
-  }
-
-  private void validateJsonObject(String json, String field) {
-    try {
-      JsonNode node = objectMapper.readTree(json);
-      if (node == null || !node.isObject()) {
-        throw new IllegalArgumentException(field + " must be a JSON object");
-      }
-    } catch (JsonProcessingException ex) {
-      throw new IllegalArgumentException(field + " must be valid JSON", ex);
     }
   }
 

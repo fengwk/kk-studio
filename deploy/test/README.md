@@ -35,10 +35,13 @@
 ./deploy/test/run.sh --with-app
 ```
 
-`--with-app` 还会使用仓库内极小 PNG fixture 执行完整的 Canvas Resource
+`--with-app` 还会使用仓库内极小 PNG/MP4 fixture 执行完整的 Canvas Resource
 `create canvas -> reserve -> browser-style direct PUT -> complete -> preview-url -> direct GET`
 smoke，并验证 create-only PUT 的首次写入成功、不同内容的重复写入被 MinIO 拒绝、
-original 字节不变，以及 Canvas DTO 不暴露 bucket/key。
+original 字节不变，以及 Canvas DTO 不暴露 bucket/key。随后显式开启
+`kk-studio.canvas.function.fake-enabled`，执行
+`create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
+并验证 FunctionRun 不修改 `graphRevision` 且公开 DTO 不包含 `stateJson`。
 
 应用通过环境变量连接 `postgres:5432`、`minio:9000`、`comfyui:8080` 和
 `opencli-hub:8080`。当前尚未启用 ComfyUI/OpenCLI adapter，相关 base URL 只作为后续

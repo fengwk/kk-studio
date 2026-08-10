@@ -3,6 +3,9 @@ package fun.fengwk.kkstudio.web.studio;
 import fun.fengwk.kkstudio.share.studio.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasFunctionDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasFunctionModelDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasFunctionParameterDefinitionDTO;
+import fun.fengwk.kkstudio.share.studio.CanvasFunctionReferencePolicyDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasGroupDTO;
 import fun.fengwk.kkstudio.share.studio.CanvasLinkDTO;
@@ -20,9 +23,13 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.studio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionParameterDefinition;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /** Canvas domain 与 share DTO 之间的严格 HTTP 边界映射。 */
@@ -148,14 +155,50 @@ public final class StudioWebMapper {
     return dto;
   }
 
-  private static CanvasFunctionRunDTO toDto(CanvasFunctionRun run) {
+  public static CanvasFunctionRunDTO toDto(CanvasFunctionRun run) {
     CanvasFunctionRunDTO dto = new CanvasFunctionRunDTO();
     dto.setNodeId(Long.toString(run.nodeId()));
     dto.setRequestId(run.requestId());
     dto.setStatus(run.status().name());
-    dto.setStateJson(run.stateJson());
+    dto.setStage(run.stage());
     dto.setError(run.error());
     dto.setUpdatedAt(run.updatedAt().toString());
+    return dto;
+  }
+
+  public static CanvasFunctionModelDTO toDto(
+      CanvasFunctionModel model, boolean available, String unavailableReason) {
+    CanvasFunctionModelDTO dto = new CanvasFunctionModelDTO();
+    dto.setKey(model.key());
+    dto.setLabel(model.label());
+    dto.setOutputKind(model.outputKind().name());
+    CanvasFunctionReferencePolicyDTO referencePolicy = new CanvasFunctionReferencePolicyDTO();
+    referencePolicy.setAllowedKinds(
+        model.referencePolicy().allowedKinds().stream().map(Enum::name).sorted().toList());
+    referencePolicy.setMaxReferences(model.referencePolicy().maxReferences());
+    LinkedHashMap<String, Integer> maxByKind = new LinkedHashMap<>();
+    model.referencePolicy().maxByKind().entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .forEach(entry -> maxByKind.put(entry.getKey().name(), entry.getValue()));
+    referencePolicy.setMaxByKind(maxByKind);
+    dto.setReferencePolicy(referencePolicy);
+    dto.setParameters(model.parameters().stream().map(StudioWebMapper::toDto).toList());
+    dto.setAvailable(available);
+    dto.setUnavailableReason(unavailableReason);
+    return dto;
+  }
+
+  private static CanvasFunctionParameterDefinitionDTO toDto(
+      CanvasFunctionParameterDefinition definition) {
+    CanvasFunctionParameterDefinitionDTO dto = new CanvasFunctionParameterDefinitionDTO();
+    dto.setKey(definition.key());
+    dto.setLabel(definition.label());
+    dto.setType(definition.type().name());
+    dto.setRequired(definition.required());
+    dto.setDefaultValue(definition.defaultValue());
+    dto.setOptions(definition.options());
+    dto.setMin(definition.min());
+    dto.setMax(definition.max());
     return dto;
   }
 

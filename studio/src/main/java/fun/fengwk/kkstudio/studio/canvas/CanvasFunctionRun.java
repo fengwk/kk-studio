@@ -8,6 +8,7 @@ public record CanvasFunctionRun(
     long nodeId,
     String requestId,
     CanvasFunctionRunStatus status,
+    String stage,
     String stateJson,
     String error,
     Instant updatedAt) {
@@ -16,6 +17,7 @@ public record CanvasFunctionRun(
     CanvasValidation.requirePositive(nodeId, "nodeId");
     CanvasValidation.requireNonBlank(requestId, "requestId");
     Objects.requireNonNull(status, "status");
+    CanvasValidation.requireNonBlank(stage, "stage");
     CanvasValidation.requireNonBlank(stateJson, "stateJson");
     Objects.requireNonNull(updatedAt, "updatedAt");
   }
