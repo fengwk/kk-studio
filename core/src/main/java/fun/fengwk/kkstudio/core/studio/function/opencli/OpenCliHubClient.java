@@ -112,11 +112,11 @@ public class OpenCliHubClient {
 
   public Execution execute(List<String> argv, long timeoutMillis) {
     requireEnabled();
-    List<String> normalized = List.copyOf(Objects.requireNonNull(argv, "argv"));
-    if (normalized.isEmpty()
-        || normalized.stream().anyMatch(value -> value == null || value.isEmpty())) {
+    Objects.requireNonNull(argv, "argv");
+    if (argv.isEmpty() || argv.stream().anyMatch(value -> value == null || value.isEmpty())) {
       throw new IllegalArgumentException("argv must contain non-empty tokens");
     }
+    List<String> normalized = List.copyOf(argv);
     if (timeoutMillis <= 0L || timeoutMillis > Duration.ofMinutes(30).toMillis()) {
       throw new IllegalArgumentException("timeoutMillis must be between 1 and 1800000");
     }
