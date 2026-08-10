@@ -282,7 +282,7 @@ describe('CanvasPage real list/create/load integration', () => {
     })
     expect(flowHarness.fitView).toHaveBeenCalledWith({
       padding: 0.18,
-      maxZoom: 1,
+      maxZoom: 1.6,
       duration: 0,
     })
     await waitFor(() => {
@@ -434,7 +434,7 @@ describe('CanvasPage real list/create/load integration', () => {
     await user.click(screen.getByRole('button', { name: '适应全部内容' }))
     expect(flowHarness.fitView).toHaveBeenNthCalledWith(1, {
       padding: 0.18,
-      maxZoom: 1,
+      maxZoom: 1.6,
       duration: 0,
     })
 
@@ -446,7 +446,7 @@ describe('CanvasPage real list/create/load integration', () => {
       expect(flowHarness.fitView).toHaveBeenNthCalledWith(2, {
         nodes: undefined,
         padding: 0.22,
-        maxZoom: 1.15,
+        maxZoom: 1.8,
         duration: 0,
       })
     })
@@ -605,6 +605,13 @@ describe('CanvasPage real list/create/load integration', () => {
           }),
         },
         run: null,
+      }],
+      // A real group gives the selection toolbar measurable world bounds to anchor to.
+      groups: [{
+        id: '99',
+        canvasId: '1',
+        title: 'Frame',
+        transform: { x: 800, y: 30, width: 400, height: 300 },
       }],
     })
     const user = userEvent.setup()

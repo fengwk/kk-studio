@@ -249,9 +249,10 @@ ui.chat.blank_workspace_shell
 ```
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` library 可达，点击或创建后进入正整数
-`/canvas/:canvasId`，初始重置缩放显示 `100%`，刷新保持编辑器，浏览器 back 返回 library、
-forward 再进入编辑器；Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用
-fake Function runtime 隔离。
+`/canvas/:canvasId`，首屏 fit 产生的动态缩放值位于合法区间，点击缩放值可重置为
+`100%` 且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
+Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime
+隔离。
 `--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
 宿主 `DISPLAY` 与 `WAYLAND_DISPLAY`，避免混合桌面环境导致 compositor 停帧；`--headed`
 保留宿主显示环境。

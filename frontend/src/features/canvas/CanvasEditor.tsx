@@ -13,11 +13,11 @@ export function CanvasEditor() {
     const notFound = (snapshotQuery.error as { status?: number }).status === 404
     return (
       <section className="canvas-editor-state danger" role="alert">
-        <h2>{notFound ? '画布不存在' : '画布加载失败'}</h2>
+        <h2>{notFound ? t('canvas.editor.notFound') : t('canvas.editor.loadFailed')}</h2>
         <p>{(snapshotQuery.error as Error).message}</p>
         <div>
-          <button type="button" onClick={openLibrary}>返回画布库</button>
-          {!notFound ? <button type="button" onClick={() => void snapshotQuery.refetch()}>重试</button> : null}
+          <button type="button" onClick={openLibrary}>{t('canvas.editor.backToLibrary')}</button>
+          {!notFound ? <button type="button" onClick={() => void snapshotQuery.refetch()}>{t('canvas.editor.retry')}</button> : null}
         </div>
       </section>
     )
@@ -26,7 +26,7 @@ export function CanvasEditor() {
     return (
       <section className="canvas-editor-state" role="status">
         <span className="canvas-spinner" />
-        正在加载画布…
+        {t('canvas.editor.loading')}
       </section>
     )
   }
@@ -42,12 +42,12 @@ export function CanvasEditor() {
         <span className="header-divider" />
         <div className="document-title">
           <strong>{snapshot.document.title}</strong>
-          <span id="saveState" aria-live="polite">
+          <span className="save-state" id="saveState" aria-live="polite">
             {state.commandPending ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
           </span>
-        </div>
-        <div className="editor-actions">
-          <span className="revision-pill">r{snapshot.document.graphRevision}</span>
+          <span className="revision-pill" title={t('canvas.editor.revision')}>
+            r{snapshot.document.graphRevision}
+          </span>
         </div>
       </header>
       <CanvasStage />

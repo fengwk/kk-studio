@@ -434,9 +434,26 @@ async function main(argv) {
       name: /^(Reset zoom to 100%|重置缩放为 100%)$/,
     })
     await resetZoom.waitFor({ state: 'visible' })
-    assert((await resetZoom.textContent())?.trim() === '100%', 'canvas reset zoom is not 100%')
+    const fittedZoom = Number.parseInt((await resetZoom.textContent())?.trim() ?? '', 10)
+    assert(
+      Number.isInteger(fittedZoom) && fittedZoom >= 25 && fittedZoom <= 200,
+      `canvas fitted zoom is invalid: ${await resetZoom.textContent()}`,
+    )
+    await resetZoom.click()
+    await page.waitForFunction(() => {
+      const button = document.querySelector(
+        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
+      )
+      return button?.textContent?.trim() === '100%'
+    })
     await page.reload({ waitUntil: 'networkidle' })
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForFunction(() => {
+      const button = document.querySelector(
+        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
+      )
+      return button?.textContent?.trim() === '100%'
+    })
     assert(
       /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
       `canvas reload pathname invalid: ${new URL(page.url()).pathname}`,

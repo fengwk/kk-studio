@@ -26,6 +26,7 @@ import {
 import { CanvasResourceThumbnail } from '@/features/canvas/nodes/CanvasResourceMedia'
 import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
+import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionConfigDTO,
   CanvasFunctionModelDTO,
@@ -49,10 +50,12 @@ export function CanvasGenerationPanel({
   anchor?: CanvasGenerationPanelAnchor
 }) {
   const runtime = useCanvasRuntime()
+  const { t } = useI18n()
   const { flushFunctionConfig } = runtime
   const sourceModel = modelForNode(runtime.models, node)
   const [modelKey, setModelKey] = useState(sourceModel?.key ?? node.function?.modelKey ?? '')
   const model = runtime.models.find((item) => item.key === modelKey) ?? sourceModel
+  const [expanded, setExpanded] = useState(false)
   const [config, setConfig] = useState<CanvasFunctionConfigDTO>(() => (
     sourceModel && node.function
       ? parseFunctionConfig(node.function.configJson, sourceModel)
@@ -61,7 +64,7 @@ export function CanvasGenerationPanel({
         : { prompt: { segments: [{ type: 'TEXT', text: '' }] }, parameters: {} }
   ))
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
-  const [panelSize, setPanelSize] = useState({ width: 760, height: 190 })
+  const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
   const panelRef = useRef<HTMLElement | null>(null)
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
   const cursorRef = useRef<PromptCursor>({ segmentIndex: 0, offset: 0 })
@@ -89,7 +92,7 @@ export function CanvasGenerationPanel({
     ))
     .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
   const panelPosition = useMemo(() => (
-    anchor && anchor.stage.width > 700
+    anchor && anchor.stage.width > 900
       ? generationPanelPosition({
         node: anchor.node,
         viewport: anchor.viewport,
@@ -240,7 +243,7 @@ export function CanvasGenerationPanel({
 
   function insertCandidate(candidate: ReferenceCandidate) {
     if (!canInsertReference(config.prompt.segments, candidate, candidates, activeModel)) {
-      runtime.setToast('当前模型的参考资源数量已达到上限。')
+      runtime.setToast(t('canvas.generation.referenceLimit'))
       return
     }
     const next = insertReferenceAtCursor(config.prompt.segments, cursorRef.current, candidate)
@@ -267,38 +270,69 @@ export function CanvasGenerationPanel({
 
   return (
     <section
-      className="generation-panel"
-      aria-label="Function 生成面板"
+      className={`generation-panel ${expanded ? 'expanded' : ''}`}
+      aria-label={t('canvas.generation.panelAria')}
       data-placement={panelPosition?.placement}
       ref={panelRef}
       style={panelStyle}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="generation-reference-row" aria-label="可用参考资源">
-        {candidates.length > 0 ? candidates.map((candidate) => (
+      <div className="generation-panel-head">
+        <div>
+          <span className="generation-node-kicker">{t('canvas.generation.nodeKicker')}</span>
+          <strong>{model.label}</strong>
+          <span className={`generation-node-status ${node.run?.status.toLowerCase() ?? 'ready'}`}>
+            {node.run
+              ? t(runStatusKey(node.run.status))
+              : t('canvas.generation.status.ready')}
+          </span>
+        </div>
+        <div className="generation-panel-actions">
           <button
-            key={referenceKey(candidate.nodeId, candidate.index)}
             type="button"
-            className={`generation-reference ${
-              referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
-                ? 'referenced'
-                : ''
-            }`}
-            onClick={() => insertCandidate(candidate)}
-            title={candidate.label}
-            aria-label={`插入参考 ${candidate.label}`}
-            aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
+            aria-label={t(expanded ? 'canvas.generation.collapse' : 'canvas.generation.expand')}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
           >
-            <CanvasResourceThumbnail resource={candidate.resource} />
-            <span>{candidate.label}</span>
+            ↔
           </button>
-        )) : (
-          <span className="generation-reference-empty">连接 ResourceNode 后可在这里引用</span>
-        )}
+          <button
+            className="close-panel"
+            type="button"
+            aria-label={t('canvas.generation.close')}
+            onClick={() => runtime.setSelection([])}
+          >
+            ×
+          </button>
+        </div>
       </div>
 
-      <div className="prompt-segment-composer" aria-label="结构化提示词">
+      {candidates.length > 0 ? (
+        <div className="generation-reference-row" aria-label={t('canvas.generation.references')}>
+          {candidates.map((candidate) => (
+            <button
+              key={referenceKey(candidate.nodeId, candidate.index)}
+              type="button"
+              className={`generation-reference ${
+                referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
+                  ? 'referenced'
+                  : ''
+              }`}
+              onClick={() => insertCandidate(candidate)}
+              title={candidate.label}
+              aria-label={t('canvas.generation.referenceInsert', { label: candidate.label })}
+              aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
+            >
+              <CanvasResourceThumbnail resource={candidate.resource} />
+              <span>{candidate.label}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <span className="generation-prompt-label">{t('canvas.generation.promptLabel')}</span>
+      <div className="prompt-segment-composer" aria-label={t('canvas.generation.composerAria')}>
         {config.prompt.segments.map((segment, index) => (
           segment.type === 'TEXT' ? (
             <input
@@ -312,8 +346,8 @@ export function CanvasGenerationPanel({
                 }
               }}
               value={segment.text}
-              aria-label={`提示词片段 ${index + 1}`}
-              placeholder={config.prompt.segments.length === 1 ? '描述你想生成的内容，输入 @ 引用资源' : ''}
+              aria-label={t('canvas.generation.segmentAria', { index: index + 1 })}
+              placeholder={config.prompt.segments.length === 1 ? t('canvas.generation.placeholder') : ''}
               style={{ flexGrow: Math.max(2, Math.min(20, segment.text.length || 2)) }}
               onFocus={(event) => {
                 cursorRef.current = {
@@ -373,7 +407,7 @@ export function CanvasGenerationPanel({
               key={`reference:${index}:${segment.nodeId}:${segment.index}`}
               type="button"
               className="prompt-mention"
-              aria-label={`删除 ${candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}[${segment.index}]`}`}
+              aria-label={t('canvas.generation.referenceRemove', { label: candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}[${segment.index}]` })}
               onClick={() => removeReferenceAt(index)}
               onKeyDown={(event) => {
                 if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -389,7 +423,7 @@ export function CanvasGenerationPanel({
           )
         ))}
         {mentionMenuOpen ? (
-          <div className="mention-candidates" role="listbox" aria-label="@ 引用候选">
+          <div className="mention-candidates" role="listbox" aria-label={t('canvas.generation.referenceCandidates')}>
             {candidates.map((candidate) => (
               <button
                 key={referenceKey(candidate.nodeId, candidate.index)}
@@ -402,43 +436,48 @@ export function CanvasGenerationPanel({
                 <span>{candidate.label}</span>
               </button>
             ))}
-            {candidates.length === 0 ? <span>没有可用引用</span> : null}
+            {candidates.length === 0 ? <span>{t('canvas.generation.referenceNone')}</span> : null}
           </div>
         ) : null}
       </div>
 
-      <div className="generation-controls">
-        <label>
-          <span className="sr-only">模型</span>
-          <select
-            aria-label="模型"
-            value={modelKey}
-            disabled={running}
-            onChange={(event) => {
-              const nextModel = runtime.models.find((item) => item.key === event.target.value)
-              if (!nextModel) {
-                return
-              }
-              const defaults = createDefaultFunctionConfig(nextModel)
-              const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
-              const nextConfig = filterConfigReferences({
-                prompt: {
-                  segments: config.prompt.segments.map((segment) => ({ ...segment })),
-                },
-                parameters: defaults.parameters,
-              }, nextCandidates, nextModel)
-              setModelKey(nextModel.key)
-              updateConfig(nextConfig, nextModel.key)
-            }}
-          >
-            {modelOptions.map((item) => (
-              <option key={item.key} value={item.key} disabled={!item.available}>
-                {item.label}
-                {item.available ? '' : `（${item.unavailableReason ?? '不可用'}）`}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="generation-footer">
+        <div className="generation-controls">
+          <label>
+            <span className="sr-only">{t('canvas.generation.modelLabel')}</span>
+            <select
+              aria-label={t('canvas.generation.modelLabel')}
+              value={modelKey}
+              disabled={running}
+              onChange={(event) => {
+                const nextModel = runtime.models.find((item) => item.key === event.target.value)
+                if (!nextModel) {
+                  return
+                }
+                const defaults = createDefaultFunctionConfig(nextModel)
+                const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
+                const nextConfig = filterConfigReferences({
+                  prompt: {
+                    segments: config.prompt.segments.map((segment) => ({ ...segment })),
+                  },
+                  parameters: defaults.parameters,
+                }, nextCandidates, nextModel)
+                setModelKey(nextModel.key)
+                updateConfig(nextConfig, nextModel.key)
+              }}
+            >
+              {modelOptions.map((item) => (
+                <option key={item.key} value={item.key} disabled={!item.available}>
+                {item.available
+                  ? item.label
+                  : t('canvas.generation.modelUnavailableOption', {
+                    label: item.label,
+                    reason: item.unavailableReason ?? t('canvas.generation.modelUnavailable'),
+                  })}
+                </option>
+              ))}
+            </select>
+          </label>
         {activeModel.parameters.map((parameter) => (
           <label key={parameter.key}>
             <span>{parameter.label}</span>
@@ -491,11 +530,11 @@ export function CanvasGenerationPanel({
         ))}
         {node.run?.status === 'FAILED' ? (
           <span className="generation-run-feedback failed" role="alert">
-            {node.run.error ?? '生成失败，已有资源已保留'}
+            {node.run.error ?? t('canvas.generation.runFailed')}
           </span>
         ) : node.run ? (
           <span className={`generation-run-feedback ${node.run.status.toLowerCase()}`}>
-            {node.run.stage || node.run.status}
+            {runDisplayLabel(t, node.run.status, node.run.stage)}
           </span>
         ) : null}
         {running ? (
@@ -504,19 +543,20 @@ export function CanvasGenerationPanel({
             className="generation-submit cancel"
             onClick={() => void runtime.cancelFunctionRun(node.id, node.run?.requestId ?? '')}
           >
-            取消
+            {t('canvas.generation.cancel')}
           </button>
         ) : (
           <button
             type="button"
             className="generation-submit"
-            aria-label="开始生成"
+            aria-label={t('canvas.generation.submit')}
             disabled={!activeModel.available || !promptValid}
             onClick={() => void runtime.startFunctionRun(node.id)}
           >
             ↑
           </button>
         )}
+        </div>
       </div>
     </section>
   )
@@ -536,4 +576,25 @@ function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfigDT
       left.localeCompare(right)
     ))),
   })}`
+}
+
+function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): string {
+  if (status === 'RUNNING') {
+    return 'canvas.generation.status.running'
+  }
+  if (status === 'FAILED') {
+    return 'canvas.generation.status.failed'
+  }
+  if (status === 'CANCELLED') {
+    return 'canvas.generation.status.cancelled'
+  }
+  return 'canvas.generation.status.succeeded'
+}
+
+function runDisplayLabel(
+  t: (key: string, values?: Record<string, string | number>) => string,
+  status: NonNullable<ResourceNode['run']>['status'],
+  stage: string,
+): string {
+  return stage && stage !== status ? stage : t(runStatusKey(status))
 }

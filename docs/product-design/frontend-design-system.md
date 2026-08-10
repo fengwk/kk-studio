@@ -319,10 +319,11 @@ CanvasAgentDock
 | 区域 | 规则 |
 | --- | --- |
 | Stage | `--stage-bg`，点阵 `--stage-dot` |
-| 节点 | 中性表面 + 类型色点缀（orange/blue/purple/green） |
-| Selection toolbar | 浮层，靠近选区，不阻塞主操作 |
-| Generator Workbench | 固定类型，不允许运行期改类型 |
-| Agent Dock | 底部居中；Thread / Add Menu 向上展开且互斥 |
+| 节点 | 中性单表面；统一 `preview → kind → title → summary → footer` 信息层级，真实媒体预览内嵌而不吞没整张卡片 |
+| 首屏视口 | 无有效持久化视口时 fit 内容，允许在稀疏画布上放大到 160%；Fit All 同策略，Focus Selection 可到 180% |
+| Selection toolbar | 按选区 world bounds 投影后就近附着；空间不足时上下翻转，不固定在 viewport 顶部 |
+| Function Workbench | 保持真实 Function 类型与参数；桌面默认 560px、展开 720px，围绕选中节点并避让 Dock，窄屏切为 bottom sheet |
+| Agent Dock | 底部居中，最大 720px、低视觉重量；Thread / Add Menu 向上展开且互斥 |
 | MiniMap | 桌面可见，移动端可隐藏 |
 
 ## 6. 布局与响应式
