@@ -36,6 +36,8 @@ public class OpenCliHubClient {
       Pattern.compile("/resources/[A-Za-z0-9._~!$&'()+,;=:@%/-]+");
   private static final List<String> TERMINAL_STATUSES =
       List.of("SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED");
+  private static final int MAX_UPLOAD_BASENAME_LENGTH = 128;
+  private static final int MAX_UPLOAD_EXTENSION_LENGTH = 16;
 
   private final OpenCliHubProperties properties;
   private final ObjectMapper mapper;
@@ -401,26 +403,60 @@ public class OpenCliHubClient {
     String normalized = Normalizer.normalize(filename, Normalizer.Form.NFKC);
     int slash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
     String basename = (slash >= 0 ? normalized.substring(slash + 1) : normalized).strip();
-    StringBuilder safe = new StringBuilder(Math.min(basename.length(), 128));
-    for (int index = 0; index < basename.length() && safe.length() < 128; ) {
-      int codePoint = basename.codePointAt(index);
+    if (basename.isEmpty() || ".".equals(basename) || "..".equals(basename)) {
+      return "resource.bin";
+    }
+
+    String extension = safeTrailingExtension(basename);
+    String rawStem = basename.substring(0, basename.length() - extension.length());
+    int stemBudget = MAX_UPLOAD_BASENAME_LENGTH - extension.length();
+    StringBuilder safeStem = new StringBuilder(Math.min(rawStem.length(), stemBudget));
+    for (int index = 0; index < rawStem.length() && safeStem.length() < stemBudget; ) {
+      int codePoint = rawStem.codePointAt(index);
       if ((codePoint >= 'A' && codePoint <= 'Z')
           || (codePoint >= 'a' && codePoint <= 'z')
           || (codePoint >= '0' && codePoint <= '9')
           || codePoint == '.'
           || codePoint == '_'
           || codePoint == '-') {
-        safe.append((char) codePoint);
+        safeStem.append((char) codePoint);
       } else {
-        safe.append('_');
+        safeStem.append('_');
       }
       index += Character.charCount(codePoint);
     }
-    String result = safe.toString();
+    if (safeStem.isEmpty()) {
+      safeStem.append('_');
+    }
+    for (int index = 0; index < safeStem.length() && safeStem.charAt(index) == '.'; index++) {
+      safeStem.setCharAt(index, '_');
+    }
+    for (int index = safeStem.length() - 1; index >= 0 && safeStem.charAt(index) == '.'; index--) {
+      safeStem.setCharAt(index, '_');
+    }
+
+    String result = safeStem.append(extension).toString();
     if (result.isBlank() || ".".equals(result) || "..".equals(result)) {
       return "resource.bin";
     }
     return result;
+  }
+
+  private static String safeTrailingExtension(String basename) {
+    int dot = basename.lastIndexOf('.');
+    int extensionLength = basename.length() - dot - 1;
+    if (dot < 0 || extensionLength < 1 || extensionLength > MAX_UPLOAD_EXTENSION_LENGTH) {
+      return "";
+    }
+    for (int index = dot + 1; index < basename.length(); index++) {
+      char character = basename.charAt(index);
+      if (!((character >= 'A' && character <= 'Z')
+          || (character >= 'a' && character <= 'z')
+          || (character >= '0' && character <= '9'))) {
+        return "";
+      }
+    }
+    return basename.substring(dot);
   }
 
   private static String safeMediaType(String mediaType) {
