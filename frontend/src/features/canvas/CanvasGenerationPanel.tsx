@@ -93,12 +93,17 @@ export function CanvasGenerationPanel({
     .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
   const panelPosition = useMemo(() => (
     anchor && anchor.stage.width > 900
-      ? generationPanelPosition({
-        node: anchor.node,
-        viewport: anchor.viewport,
-        stage: anchor.stage,
-        panel: panelSize,
-      })
+      ? (() => {
+        const compactDesktop = anchor.stage.width <= 1600
+        return generationPanelPosition({
+          node: anchor.node,
+          viewport: anchor.viewport,
+          stage: anchor.stage,
+          panel: panelSize,
+          gap: compactDesktop ? 8 : undefined,
+          padding: compactDesktop ? 4 : undefined,
+        })
+      })()
       : null
   ), [anchor, panelSize])
   const panelStyle: CSSProperties | undefined = panelPosition ? {

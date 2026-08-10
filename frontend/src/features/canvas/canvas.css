@@ -1456,7 +1456,7 @@
 
 @media (min-width: 901px) and (max-width: 1600px) {
   .canvas-feature .generation-panel {
-    gap: 5px;
+    gap: 4px;
     padding: 8px;
   }
 
@@ -1466,6 +1466,10 @@
 
   .canvas-feature .generation-prompt-label {
     display: none;
+  }
+
+  .canvas-feature .generation-reference .canvas-resource-thumbnail {
+    height: 30px;
   }
 
   .canvas-feature .prompt-segment-composer {
@@ -1486,6 +1490,12 @@
     width: 30px;
     height: 30px;
     flex-basis: 30px;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1300px) {
+  .canvas-feature .generation-controls label > span:not(.sr-only) {
+    display: none;
   }
 }
 

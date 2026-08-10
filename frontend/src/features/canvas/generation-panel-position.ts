@@ -67,10 +67,8 @@ export function generationPanelPosition({
       left: Math.max(0, nodeLeft - gap - padding),
     }
     const comfortableHeight = Math.min(panel.height, 100)
-    if (area.below >= comfortableHeight) {
-      placement = 'below'
-    } else if (area.above >= comfortableHeight) {
-      placement = 'above'
+    if (Math.max(area.above, area.below) >= comfortableHeight) {
+      placement = area.above >= area.below ? 'above' : 'below'
     } else if (fitsLeft) {
       placement = 'left'
     } else {

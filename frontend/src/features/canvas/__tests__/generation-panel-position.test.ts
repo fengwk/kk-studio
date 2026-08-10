@@ -70,6 +70,22 @@ describe('generationPanelPosition', () => {
     })
   })
 
+  it('uses the larger vertical space instead of clamping a marginal below placement over the node', () => {
+    // Regression geometry from OpenCLI at 1266px: below is comfortable but much smaller than above.
+    expect(generationPanelPosition({
+      node: { x: 875, y: 204, width: 296, height: 241 },
+      viewport: { x: 0, y: 0, zoom: 1 },
+      stage: { width: 1266, height: 649, dockTop: 581 },
+      panel: { width: 560, height: 199 },
+      gap: 8,
+      padding: 4,
+    })).toEqual({
+      left: 702,
+      top: 4,
+      placement: 'above',
+    })
+  })
+
   it('clamps the overlay inside the stage when the node is off screen', () => {
     // Both axes remain reachable even while the selected node is partially outside the viewport.
     expect(generationPanelPosition({
