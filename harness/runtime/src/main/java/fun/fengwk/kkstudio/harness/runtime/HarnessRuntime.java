@@ -41,7 +41,8 @@ import java.util.function.LongConsumer;
  * snapshot 永不观察到混合的 durable 状态。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
  * HarnessRuntimeNotFoundException}；被破坏的持久化 不变量（所有权错误、sibling 混合挂接、ordinal 不连续）仍为 {@link
  * IllegalStateException}。对已存在 Thread 的 mutation 在相关 durable 锁之后读取时间戳，因此 lock-wait 不会让过期的 pre-lock
- * instant 让 {@code updatedAt} 回退；Stop 还额外将其时间戳钳制到最新的已锁定 durable fact，以容忍本地时钟回滚与 跨节点时钟偏差。
+ * instant 让 {@code updatedAt} 回退；Stop 与未决 Approval 还会把 mutation 时间钳制到最新的已锁定 durable fact，以容忍本地时钟回滚与
+ * 跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
  * <p>本切片实现 {@link #createThread}、{@link #enqueueCommands}、{@link #moveHead}、{@link #stop}、 {@link
  * #decideToolApproval} 与 {@link #getThreadSnapshot}。
@@ -555,18 +556,34 @@ public final class HarnessRuntime {
       throw new IllegalStateException(
           "tool invocation " + tool.id() + " changed its approval state before being decided");
     }
-    Instant now = clock.instant();
+    Instant workNow = clock.instant();
+    Instant mutationNow = max(workNow, thread.updatedAt());
+    mutationNow = max(mutationNow, locked.path().head().createdAt());
+    mutationNow = max(mutationNow, active.model().updatedAt());
+    mutationNow = max(mutationNow, approval.requestedAt());
+    for (ToolInvocation sibling : active.siblings()) {
+      mutationNow = max(mutationNow, sibling.updatedAt());
+    }
     ToolInvocation updated =
         tool.decideApproval(
-            command.decision(), command.decisionId(), command.actor(), command.reason(), now, now);
+            command.decision(),
+            command.decisionId(),
+            command.actor(),
+            command.reason(),
+            mutationNow,
+            mutationNow);
     tx.updateToolInvocations(List.of(updated));
-    tx.updateThread(thread.touchRevision(now));
+    tx.updateThread(thread.touchRevision(mutationNow));
     WorkTarget wake =
         command.decision() == ToolApprovalDecision.ALLOWED
             ? new WorkTarget(WorkTargetType.TOOL, tool.id())
             : new WorkTarget(WorkTargetType.THREAD, thread.id());
-    tx.requestWork(wake, now);
+    tx.requestWork(wake, workNow);
     return updated;
+  }
+
+  private static Instant max(Instant left, Instant right) {
+    return right.isAfter(left) ? right : left;
   }
 
   private static LongConsumer modelExecutionCanceller(ModelProcessor processor) {

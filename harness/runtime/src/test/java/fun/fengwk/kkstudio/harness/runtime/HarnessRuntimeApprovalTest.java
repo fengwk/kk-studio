@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.TestClock;
@@ -114,6 +116,27 @@ class HarnessRuntimeApprovalTest {
     assertTrue(
         store.<Boolean>transaction(
             tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).isEmpty()));
+  }
+
+  @Test
+  void approvalDecisionUsesDurableFloorsWithoutClampingWorkClock() {
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    ToolInvocation waiting = setWaitingApproval(store, baseline);
+    clock.advance(T2);
+
+    ToolInvocation decided =
+        runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
+
+    assertEquals(T3, waiting.approval().requestedAt());
+    assertEquals(T3, decided.approval().decidedAt());
+    assertEquals(T3, decided.updatedAt());
+    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals(T3, thread.updatedAt());
+    Work toolWork =
+        store.transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).orElseThrow());
+    assertEquals(T2, toolWork.availableAt());
   }
 
   @Test

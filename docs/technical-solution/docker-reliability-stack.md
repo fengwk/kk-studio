@@ -54,8 +54,9 @@ token 或 provider 配置。
 `tool-smoke` 不经过 app、Agent 或 Provider。它把仓库内固定的 `NativeToolSmoke.java` 通过
 stdin 送入正在运行的 uid 10001 Daemon 容器，使用镜像内
 `daemon.jar:/opt/kk-studio/lib/*` 编译并直接执行 `FindTool`、`GrepTool` 与 `BashTool`。
-断言覆盖 slash/double-star glob、分层 `.gitignore`/`.git` 边界、grep 行号与 multiline、
-非法 regex、直接二进制目标和 ANSI bash 文本；Java class 与 fixture 在结束时删除。
+断言覆盖 slash/double-star/字符类转义 glob、分层 `.gitignore`/`.git` 边界、grep 行号与
+multiline、非法 regex、直接二进制目标和 ANSI bash 文本；Java class 与 fixture 在结束时
+删除。
 
 ## 锚点与 case
 
@@ -136,7 +137,8 @@ node scripts/reliability/reassess-agent-run.mjs <runId>
 ```
 
 该命令不会创建 Agent、Chat、Thread 或调用 Provider；它在原 run 的 `summary.json` / case
-结果中记录 `offline-archived-trace` reassessment 元数据，并重新发布 `latest-agent`。
+结果中记录 `offline-archived-trace` reassessment 元数据，并重新发布 `latest-agent`。重算后
+矩阵通过时退出码为 0，仍有 fail/skip 时退出码为 1，CLI/归档输入错误时为 2。
 
 CLI 选项：
 
@@ -176,7 +178,8 @@ repair USER message 携带同一份超过 12 KiB 的确定性 write payload，�
 `write.content` 同样只保留摘要，用于区分模型 arguments 损坏、write tool 返回错误和落盘
 内容不一致。路径校验按规范化后的 case root 执行：相对路径必须绑定 case 内 workdir，case
 内绝对路径同样合法；`..`、`@` 前缀和绝对路径都在规范化后重新检查，不能越到 anchor 或其他
-case。离线基于已归档 trace 复核时使用同一策略，不需要再次调用模型。
+case。容器内 inspector 还会解析目标或其最近已存在祖先的 real path，拒绝通过 case 内
+symlink 越出 case root。离线基于已归档 trace 复核时使用同一策略，不需要再次调用模型。
 
 ## 凭证边界
 

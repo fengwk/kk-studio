@@ -235,6 +235,7 @@ class NativeSearchToolsTest {
     assertTrue(GlobPattern.compile("[.txt").matches("[.txt"));
     assertTrue(GlobPattern.compile("[[]").matches("["));
     assertTrue(GlobPattern.compile("[a\\]]").matches("]"));
+    assertTrue(GlobPattern.compile("[\\d].txt").matches("d.txt"));
     assertTrue(GlobPattern.compile("a**b").matches("ab"));
     assertTrue(GlobPattern.compile("a**b").matches("axxb"));
     assertTrue(GlobPattern.compile("**.java").matches("Main.java"));
@@ -243,6 +244,7 @@ class NativeSearchToolsTest {
     assertFalse(GlobPattern.compile("*.java").matches("src/Main.java"));
     assertFalse(GlobPattern.compile("a/**/b?.[ch]").matches("a/deep/b12.c"));
     assertFalse(GlobPattern.compile("[!a].txt").matches("a.txt"));
+    assertFalse(GlobPattern.compile("[\\d].txt").matches("1.txt"));
     assertFalse(GlobPattern.compile("a**b").matches("ax/yb"));
     assertFalse(GlobPattern.compile("**.java").matches("src/Main.java"));
     assertFalse(GlobPattern.compile("foo**bar").matches("foo/deep/bar"));
