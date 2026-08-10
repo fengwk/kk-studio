@@ -14,7 +14,9 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
+import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
@@ -25,6 +27,7 @@ import {
   MAX_CANVAS_ZOOM,
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
+import type { DecimalString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
 function StageInner() {
@@ -69,9 +72,17 @@ function StageInner() {
     [models, nodeCallbacks, snapshot, state.positionDrafts, state.selectedIds],
   )
   const edges = useMemo(
-    () => snapshot ? projectEdges(snapshot.links) : [],
-    [snapshot],
+    () => snapshot ? projectEdges(snapshot.links, state.selectedLinks) : [],
+    [snapshot, state.selectedLinks],
   )
+  const selectedFunctionNode = useMemo(() => {
+    if (!snapshot || state.selectedIds.length !== 1) {
+      return null
+    }
+    return snapshot.resourceNodes.find((node) => (
+      node.id === state.selectedIds[0] && Boolean(node.function)
+    )) ?? null
+  }, [snapshot, state.selectedIds])
 
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
@@ -275,7 +286,13 @@ function StageInner() {
           onMove={(_event, viewport) => emitViewport(viewport)}
           onMoveEnd={(_event, viewport) => emitViewport(viewport)}
           onSelectionChange={(params: OnSelectionChangeParams) => {
-            setSelection(params.nodes.map((node) => node.id))
+            setSelection(
+              params.nodes.map((node) => node.id),
+              params.edges.map((edge) => ({
+                sourceNodeId: edge.source as DecimalString,
+                targetNodeId: edge.target as DecimalString,
+              })),
+            )
           }}
           onNodeClick={(_event, node) => {
             setSelection([node.id])
@@ -305,13 +322,25 @@ function StageInner() {
         </ReactFlow>
       </div>
 
-      {state.selectedIds.length > 0 ? (
+      {state.selectedIds.length > 0 || state.selectedLinks.length > 0 ? (
         <div className="selection-toolbar" role="toolbar" aria-label="选区操作">
-          <button type="button" onClick={createGroup}>分组</button>
-          <button type="button" onClick={ungroupSelection}>移出分组</button>
-          <button type="button" onClick={focusAgentDock}>交给 Agent</button>
+          {state.selectedIds.length > 0 ? (
+            <>
+              <button type="button" onClick={createGroup}>分组</button>
+              <button type="button" onClick={ungroupSelection}>解散 / 移出分组</button>
+              <button type="button" onClick={focusAgentDock}>交给 Agent</button>
+            </>
+          ) : null}
           <button type="button" className="danger" onClick={deleteSelection}>删除</button>
         </div>
+      ) : null}
+
+      {snapshot && selectedFunctionNode ? (
+        <CanvasGenerationPanel
+          key={`${selectedFunctionNode.id}:${selectedFunctionNode.function?.configJson ?? ''}`}
+          snapshot={snapshot}
+          node={selectedFunctionNode}
+        />
       ) : null}
 
       <div className="canvas-hint">
@@ -335,6 +364,7 @@ function StageInner() {
       </div>
 
       <CanvasAgentDock dockWrapRef={dockWrapRef} />
+      <CanvasTextEditor />
     </section>
   )
 }

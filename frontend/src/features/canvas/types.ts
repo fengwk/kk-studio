@@ -1,4 +1,5 @@
 import type {
+  CanvasFunctionConfigDTO,
   CanvasFunctionModelDTO,
   CanvasTransformDTO,
   DecimalString,
@@ -22,10 +23,20 @@ export type CanvasThreadMessage =
   | { kind: 'user'; text: string }
   | { kind: 'agent'; text: string }
 
+export interface CanvasLinkSelection {
+  sourceNodeId: DecimalString
+  targetNodeId: DecimalString
+}
+
+export type CanvasTextEditorState =
+  | { mode: 'create'; nodeId: null; name: string; markdown: string }
+  | { mode: 'edit'; nodeId: DecimalString; name: string; markdown: string }
+
 export interface CanvasLocalState {
   view: CanvasView
   canvasId: DecimalString | null
   selectedIds: string[]
+  selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>
   viewport: StoredCanvasViewport
   tool: CanvasTool
@@ -39,11 +50,18 @@ export interface CanvasLocalState {
   uploadProgress: Record<string, number>
   commandPending: boolean
   conflictMessage: string | null
+  textEditor: CanvasTextEditorState | null
 }
 
 export interface CanvasNodeCallbacks {
   renameNode: (nodeId: DecimalString, name: string) => void
   editTextNode: (node: ResourceNode) => void
+}
+
+export interface PendingFunctionConfig {
+  nodeId: DecimalString
+  modelKey: string
+  config: CanvasFunctionConfigDTO
 }
 
 export interface ResourceFlowNodeData extends Record<string, unknown> {

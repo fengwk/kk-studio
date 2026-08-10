@@ -10,7 +10,7 @@ node scripts/e2e/run-matrix.mjs --list
 Resource reserve contract 需要 backend 已启用 S3，并通过 `--with-canvas-storage` 显式
 执行；免费 fake Function 完整链路还需通过 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
-由 `scripts/e2e.sh --ui` 另行附加，不计入这 65 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 66 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -195,6 +195,32 @@ tool.read_turn
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
 | `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256）；按内容身份请求 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载并验证返回字节数、mediaType、`X-Content-Type-Options: nosniff` 与 sha256 一致 |
+
+### L5 UI（默认 15，`--real` 追加 1）
+
+`scripts/e2e.sh --ui` 的免费 UI smoke 包含：
+
+```text
+ui.i18n.language_switch
+ui.chats.page_loads
+ui.models.page_loads
+ui.models.open_create_modal
+ui.agents.page_loads
+ui.providers.page_loads
+ui.environments.page_loads
+ui.canvas.page_loads
+ui.nav.roundtrip
+ui.chat.create_flow
+ui.model.create_edit_delete_flow
+ui.agent.create_edit_delete_flow
+ui.model.validation_empty_name
+ui.provider.create_edit_delete_flow
+ui.chat.blank_workspace_shell
+```
+
+其中 `ui.canvas.page_loads` 验证 `/canvas` 可达、真实 Canvas library 渲染及创建入口可用；
+Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime 隔离。
+`--real` 额外执行 `ui.chat.blank_first_send_real`。
 
 ## 4. API 契约与验证方式
 

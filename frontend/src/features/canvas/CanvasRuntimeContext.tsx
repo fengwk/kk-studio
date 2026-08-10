@@ -2,7 +2,7 @@
 import { createContext, useContext, type PropsWithChildren } from 'react'
 import { useCanvasController, type CanvasController } from '@/features/canvas/useCanvasController'
 
-const CanvasRuntimeContext = createContext<CanvasController | null>(null)
+export const CanvasRuntimeContext = createContext<CanvasController | null>(null)
 
 export function CanvasRuntimeProvider({ children }: PropsWithChildren) {
   const controller = useCanvasController()

@@ -232,6 +232,9 @@ describe('CanvasPage real list/create/load integration', () => {
 
     await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
     await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /文本资源/ }))
+    await user.clear(screen.getByLabelText('Markdown 内容'))
+    await user.type(screen.getByLabelText('Markdown 内容'), '# E2E 文本')
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
       expect(commandBodies.some((body) => body.commands[0]?.type === 'CREATE_TEXT_NODE')).toBe(true)
     })
@@ -378,6 +381,88 @@ describe('CanvasPage real list/create/load integration', () => {
     await waitFor(() => {
       expect(commandBodies.some((body) => body.commands[0]?.type === 'UPDATE_NODE_TRANSFORMS')).toBe(true)
     })
+  })
+
+  it('restricts links to Resource -> Function and wires link/group deletion UI', async () => {
+    // React Flow callbacks prove selection toolbar and keyboard operations emit typed graph commands.
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get('1') as CanvasSnapshotDTO
+    snapshots.set('1', {
+      ...current,
+      nodes: [{
+        id: '10',
+        canvasId: '1',
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: '100',
+          canvasId: '1',
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          name: 'image.png',
+          size: '3',
+          textContent: null,
+          metadataJson: '{}',
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: '11',
+        canvasId: '1',
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    const flow = flowHarness.current as {
+      isValidConnection: (connection: { source: string; target: string }) => boolean
+      onConnect: (connection: { source: string; target: string }) => void
+      onSelectionChange: (params: {
+        nodes: Array<{ id: string }>
+        edges: Array<{ source: string; target: string }>
+      }) => void
+    }
+    expect(flow.isValidConnection({ source: '10', target: '11' })).toBe(true)
+    expect(flow.isValidConnection({ source: '11', target: '10' })).toBe(false)
+    act(() => flow.onConnect({ source: '10', target: '11' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'CREATE_LINK'
+    ))).toBe(true))
+
+    act(() => flow.onSelectionChange({
+      nodes: [],
+      edges: [{ source: '10', target: '11' }],
+    }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_LINK'
+    ))).toBe(true))
+
+    act(() => flow.onSelectionChange({ nodes: [{ id: '10' }], edges: [] }))
+    await user.click(screen.getByRole('button', { name: '分组' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'CREATE_GROUP'
+    ))).toBe(true))
+    act(() => flow.onSelectionChange({ nodes: [{ id: 'group:99' }], edges: [] }))
+    await user.click(screen.getByRole('button', { name: '解散 / 移出分组' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_GROUP'
+    ))).toBe(true))
   })
 })
 

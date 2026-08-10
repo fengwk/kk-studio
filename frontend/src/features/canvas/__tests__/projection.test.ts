@@ -153,6 +153,10 @@ describe('Canvas snapshot projection', () => {
       selectable: true,
       focusable: true,
     })
+    expect(projectEdges(snapshot.links, [{
+      sourceNodeId: '3',
+      targetNodeId: '2',
+    }])[0]?.selected).toBe(true)
     expect(groupIdFromFlowId('group:4')).toBe('4')
     expect(groupIdFromFlowId('group:04')).toBeNull()
     expect(groupIdFromFlowId('4')).toBeNull()
