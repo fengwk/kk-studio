@@ -419,6 +419,7 @@ reports/e2e/latest/report.md
 ```
 
 判读顺序为 `latest/report.md` → `summary.json` → case JSON/artifacts → logs。报告目录已加入 gitignore。
+case 与整轮 `durationMs` 使用 Node 单调时钟计算，不受宿主 wall clock 校正影响。
 
 ## 7. 维护
 
