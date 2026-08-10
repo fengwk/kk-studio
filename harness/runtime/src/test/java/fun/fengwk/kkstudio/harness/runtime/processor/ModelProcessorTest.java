@@ -539,6 +539,32 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
+  /**
+   * 真实故障回归：RUNNING 后本地 wall clock 回拨到 invocation 创建时间之前，terminal 仍必须落地并 complete MODEL Work，不能遗留给
+   * lease-expiry UNKNOWN recovery。
+   */
+  @Test
+  void successTerminalSurvivesClockRollbackAndCompletesModelWork() {
+    Fixture fixture = fixture();
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    fixture.clock.set(NOW.minusSeconds(1));
+
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onSucceeded(response("answer", ProviderStopReason.COMPLETED));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
+    assertEquals(NOW, model.updatedAt());
+    assertEquals(NOW, thread(fixture.store, fixture.baseline.threadId()).updatedAt());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
   /** 成功终态在 THREAD Work 已被消费后仍按升序重建 THREAD Work，不能卡在 RUNNING。 */
   @Test
   void successTerminalRecreatesConsumedThreadWork() {
@@ -2799,6 +2825,10 @@ class ModelProcessorTest {
 
     void advance(Duration duration) {
       now = now.plus(duration);
+    }
+
+    void set(Instant now) {
+      this.now = now;
     }
 
     @Override

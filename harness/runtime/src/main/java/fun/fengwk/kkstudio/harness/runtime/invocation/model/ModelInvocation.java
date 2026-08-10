@@ -13,9 +13,9 @@ import java.util.Objects;
  * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
  * partial，永远不是第二个 result。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用 尚未被 durable
- * 确认。所有状态变更都通过下面的纯转换方法进行；Store 必须在每次 {@code update*} 写入 之前调用 {@link #validateTransition}，从而把直接构造
- * record 的场景限制在持久化解码。
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被 durable
+ * 确认。纯转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
+ * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ModelInvocation(
     long id,
@@ -341,13 +341,14 @@ public record ModelInvocation(
             error,
             resultEntryId,
             createdAt,
-            requireNow(now));
+            effectiveMutationTime(now));
     validateTransition(this, next);
     return next;
   }
 
-  private static Instant requireNow(Instant now) {
-    return Objects.requireNonNull(now, "now");
+  private Instant effectiveMutationTime(Instant now) {
+    Instant candidate = Objects.requireNonNull(now, "now");
+    return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 
   private static void validateStatusFields(

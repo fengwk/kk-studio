@@ -688,6 +688,10 @@ final class ToolProcessorTestSupport {
       now = now.plus(duration);
     }
 
+    void set(Instant now) {
+      this.now = now;
+    }
+
     @Override
     public Instant instant() {
       return now;

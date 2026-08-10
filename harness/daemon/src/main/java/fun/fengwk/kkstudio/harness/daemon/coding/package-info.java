@@ -3,6 +3,9 @@
  *
  * <p>所有文件系统操作都必须经过同一个 canonical environment root 边界；命令权限属于 Platform 职责，Daemon 保留不可绕过的 workdir 边界。
  *
+ * <p>{@code grep}/{@code find} 使用 Java NIO 原生遍历，不跟随符号链接，并由包内规则实现稳定排序、glob 与分层 {@code .gitignore}
+ * 语义；它们不启动外部搜索命令。
+ *
  * <p>稳定的能力集合：{@code read}、{@code write}、{@code edit}、{@code bash}、{@code grep}、 {@code find}、{@code
  * lsp_goto_definition}、{@code lsp_workspace_symbols}、{@code lsp_java_decompile}。LSP tools 使用可选的本机命令
  * bridge（{@code kkstudio.daemon.lsp-bridge}）；未配置时返回明确的不可用错误，但 {@code lsp_java_decompile} 对可解析的

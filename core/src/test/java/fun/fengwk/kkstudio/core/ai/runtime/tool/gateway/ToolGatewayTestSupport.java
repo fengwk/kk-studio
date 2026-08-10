@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.Tool;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolTransport;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
@@ -305,6 +306,7 @@ final class ToolGatewayTestSupport {
       RETURN_HANDLE,
       SYNC_COMPLETE,
       SYNC_PARTIALS,
+      THROW_BUSY,
       THROW_UNAVAILABLE,
       THROW_UNCERTAIN,
       THROW_INVALID,
@@ -333,6 +335,8 @@ final class ToolGatewayTestSupport {
                     "call-1", List.of(new TextToolContent("progress-" + i)), false, "{}", false));
           }
           break;
+        case THROW_BUSY:
+          throw new RemoteToolBusyException("environment already active");
         case THROW_UNAVAILABLE:
           throw new RemoteToolUnavailableException("environment offline");
         case THROW_UNCERTAIN:

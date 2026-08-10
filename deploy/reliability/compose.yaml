@@ -1,0 +1,109 @@
+name: kk-studio-reliability
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kk_studio_reliability
+      POSTGRES_USER: kk_studio
+      POSTGRES_PASSWORD: kk_studio
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kk_studio -d kk_studio_reliability"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - reliability
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      - reliability
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/local/Dockerfile
+    image: kk-studio-app:reliability
+    init: true
+    environment:
+      SPRING_PROFILES_ACTIVE: e2e
+      KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/kk_studio_reliability
+      KK_STUDIO_DB_USER: kk_studio
+      KK_STUDIO_DB_PASSWORD: kk_studio
+      KK_STUDIO_REDIS_URL: redis://redis:6379
+    ports:
+      - "127.0.0.1:${RELIABILITY_APP_PORT:-18091}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
+    networks:
+      - reliability
+      - app-ingress
+
+  workspace-init:
+    build:
+      context: ../..
+      dockerfile: deploy/reliability/daemon.Dockerfile
+    image: kk-studio-daemon:reliability
+    user: "0:0"
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["chown 10001:10001 /workspace"]
+    volumes:
+      - daemon-workspace:/workspace
+    networks:
+      - reliability
+
+  daemon:
+    build:
+      context: ../..
+      dockerfile: deploy/reliability/daemon.Dockerfile
+    image: kk-studio-daemon:reliability
+    init: true
+    depends_on:
+      app:
+        condition: service_healthy
+      workspace-init:
+        condition: service_completed_successfully
+    command:
+      - --environment-name
+      - ${RELIABILITY_ENV_NAME:-docker-reliability}
+      - --gateway-uri
+      - ws://app:8080/api/ai/environment/daemon/v2
+      - --gateway-token
+      - e2e-daemon-token
+      - --daemon-id
+      - docker-reliability-daemon
+      - --note
+      - Isolated Docker reliability environment.
+      - --workdir
+      - /workspace
+    volumes:
+      - daemon-workspace:/workspace
+    networks:
+      - reliability
+
+networks:
+  reliability:
+    internal: true
+  app-ingress:
+
+volumes:
+  postgres-data:
+  daemon-workspace:

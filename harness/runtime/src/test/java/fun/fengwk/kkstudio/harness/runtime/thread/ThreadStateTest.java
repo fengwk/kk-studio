@@ -94,6 +94,17 @@ class ThreadStateTest {
   }
 
   @Test
+  void transitionMethodsClampWallClockRollbackToCurrentUpdatedAt() {
+    Instant durableNow = CREATED.plusSeconds(2);
+    ThreadState stored = state(7L, 42L, false, 3L, 5L, durableNow);
+
+    // Caller wall-clock 回拨时，纯转换保留 durable 时间下界；revision/sequence/head 语义照常推进。
+    assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
+    assertEquals(durableNow, stored.advanceHead(99L, true, CREATED).updatedAt());
+    assertEquals(durableNow, stored.touchRevision(CREATED).updatedAt());
+  }
+
+  @Test
   void validateTransitionAcceptsExactReplayAndRejectsIdentityRegression() {
     ThreadState stored = state(7L, 42L, false, 3L, 5L, CREATED);
     ThreadState.validateTransition(stored, stored);

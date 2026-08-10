@@ -266,6 +266,28 @@ class CoreToolGatewayStartTest {
     assertEquals("UNAVAILABLE", rejected.error().kind());
   }
 
+  /** 同 Environment 的瞬时 active 槽位冲突必须返回精确配置延迟的 Busy，不创建 durable error。 */
+  @Test
+  void environmentBusyUsesExactConfiguredRetryDelay() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_BUSY;
+    CoreToolGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.factories(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.ManualExecutor());
+
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A)),
+            new ToolGatewayTestSupport.RecordingListener());
+
+    ToolGateway.Busy busy = assertInstanceOf(ToolGateway.Busy.class, result);
+    assertEquals(ToolGatewayTestSupport.CONFIG.busyRetryDelay(), busy.retryAfter());
+  }
+
   @Test
   void environmentUncertainSendIsIndeterminate() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();

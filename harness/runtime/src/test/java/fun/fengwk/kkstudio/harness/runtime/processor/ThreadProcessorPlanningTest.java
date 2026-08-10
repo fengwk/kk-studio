@@ -15,6 +15,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedModelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedOpenInputTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,6 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -214,6 +216,49 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);
+  }
+
+  /**
+   * plan 使用首次锁定 Thread/path 的 durable floor；resolve 期间同 head 的并发 Thread touch 进一步推进时间后，commit 会重标
+   * candidate Entries 与新 ModelInvocation，而 Work lease 判断仍使用 raw local clock。
+   */
+  @Test
+  void resolvedCommitRebasesNewFactsToConcurrentThreadTimestampWithoutClampingLeaseClock() {
+    Fixture fixture = fixture();
+    var baseline = seedBaseline(fixture.store);
+    seedCommand(
+        fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
+    Instant planFloor = NOW.plusSeconds(120);
+    Instant commitFloor = NOW.plusSeconds(180);
+    touchThreadTimestamp(fixture.store, baseline.threadId(), planFloor);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+    fixture.resolver.onResolve =
+        () -> {
+          for (Entry candidate : fixture.resolver.lastPath.entries().subList(1, 3)) {
+            assertEquals(planFloor, candidate.createdAt());
+          }
+          touchThreadTimestamp(fixture.store, baseline.threadId(), commitFloor);
+        };
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
+
+    EntryPath durablePath = path(fixture.store, baseline.threadId());
+    for (Entry committed : durablePath.entries().subList(1, 3)) {
+      assertEquals(commitFloor, committed.createdAt());
+    }
+    ModelInvocation invocation =
+        inTx(
+                fixture,
+                tx ->
+                    tx.findModelInvocationByTurn(
+                        baseline.threadId(), durablePath.entries().get(1).id()))
+            .orElseThrow();
+    assertEquals(commitFloor, invocation.createdAt());
+    assertEquals(commitFloor, invocation.updatedAt());
+    assertEquals(commitFloor, thread(fixture.store, baseline.threadId()).updatedAt());
   }
 
   @Test
