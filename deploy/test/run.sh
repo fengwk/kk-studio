@@ -269,6 +269,76 @@ with urllib.request.urlopen(generated_preview["url"], timeout=30) as response:
     body = response.read()
     assert response.status == 200
     assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
+
+models = json_call("GET", "/api/canvas-function-models")
+for model_key in (
+    "gpt-image-2",
+    "seedance2.0",
+    "seedance2.0fast",
+    "seedance2.0_vip",
+    "seedance2.0fast_vip",
+):
+    model = next(item for item in models if item["key"] == model_key)
+    assert model["available"] is True, model
+assert all(item["key"] != "seedance2.0mini" for item in models)
+
+
+def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
+    current = json_call("GET", f"/api/canvases/{canvas['id']}")
+    command = json_call(
+        "POST",
+        f"/api/canvases/{canvas['id']}/commands",
+        {
+            "expectedRevision": current["document"]["graphRevision"],
+            "commandId": f"container-{model_key}",
+            "commands": [
+                {
+                    "type": "CREATE_FUNCTION_NODE",
+                    "name": name,
+                    "modelKey": model_key,
+                    "configJson": json.dumps(
+                        {
+                            "prompt": {
+                                "segments": [
+                                    {"type": "TEXT", "text": f"mock {model_key}"}
+                                ]
+                            },
+                            "parameters": parameters,
+                        },
+                        separators=(",", ":"),
+                    ),
+                    "transform": {"x": 0, "y": 0, "width": 100, "height": 80},
+                }
+            ],
+        },
+    )
+    node = next(item for item in command["nodes"] if item["name"] == name)
+    run = json_call(
+        "POST",
+        f"/api/canvases/{canvas['id']}/nodes/{node['id']}/runs",
+        {"requestId": f"container-{model_key}-run"},
+    )
+    for _ in range(160):
+        if run["status"] != "RUNNING":
+            break
+        time.sleep(0.1)
+        run = json_call(
+            "GET", f"/api/canvases/{canvas['id']}/nodes/{node['id']}/run"
+        )
+    assert run["status"] == "SUCCEEDED", run
+    snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
+    return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
+
+
+gpt_node = create_and_run("gpt-image-2", "mock-gpt", {"ratio": "1:1"})
+assert len(gpt_node["resources"]) == 1
+assert gpt_node["resources"][0]["kind"] == "IMAGE"
+
+seedance_node = create_and_run(
+    "seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}
+)
+assert len(seedance_node["resources"]) == 1
+assert seedance_node["resources"][0]["kind"] == "VIDEO"
 PY
 fi
 

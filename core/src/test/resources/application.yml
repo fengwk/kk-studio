@@ -34,11 +34,3 @@ kk-studio:
     runtime:
       workers-enabled: false
       environment-root: target/harness-environment
-
-kk-circle:
-  ai:
-    image:
-      gpt-image-2:
-        url: https://webai2api.kk1.fun/api/gpt-image-2
-        api-key: ${TOOLS_API_KEY}
-        timeout-ms: 180000

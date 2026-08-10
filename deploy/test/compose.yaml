@@ -73,12 +73,21 @@ services:
     read_only: true
     environment:
       PYTHONDONTWRITEBYTECODE: "1"
-    command: ["python", "/mock/server.py", "--routes", "/config/routes.json"]
+    command:
+      [
+        "python",
+        "/mock/server.py",
+        "--routes",
+        "/config/routes.json",
+        "--opencli-fake-fixtures",
+        "/fixtures"
+      ]
     ports:
       - "127.0.0.1:${CANVAS_TEST_MOCK_PORT:-18089}:8080"
     volumes:
       - ./mock/server.py:/mock/server.py:ro
       - ${CANVAS_TEST_MOCK_ROUTES:-./mock/routes.json}:/config/routes.json:ro
+      - ../../core/src/test/resources/fun/fengwk/kkstudio/core/studio/resource:/fixtures:ro
     healthcheck:
       test:
         - CMD
@@ -127,9 +136,15 @@ services:
       KK_STUDIO_CANVAS_FUNCTION_EXECUTOR_CORE_SIZE: "1"
       KK_STUDIO_CANVAS_FUNCTION_EXECUTOR_MAX_SIZE: "2"
       KK_STUDIO_CANVAS_FUNCTION_EXECUTOR_QUEUE_CAPACITY: "8"
+      KK_STUDIO_OPENCLI_HUB_ENABLED: "true"
       KK_STUDIO_COMFYUI_ENABLED: "false"
       KK_STUDIO_COMFYUI_BASE_URL: http://comfyui:8080
       KK_STUDIO_OPENCLI_HUB_BASE_URL: http://opencli-hub:8080
+      KK_STUDIO_CANVAS_FUNCTION_GPT_IMAGE_2_PAID_ENABLED: "true"
+      KK_STUDIO_CANVAS_FUNCTION_SEEDANCE_ENABLED: "true"
+      KK_STUDIO_CANVAS_FUNCTION_SEEDANCE_WORKSPACE_ID: mock-workspace
+      KK_STUDIO_CANVAS_FUNCTION_SEEDANCE_STATUS_POLL_INTERVAL: 10ms
+      KK_STUDIO_CANVAS_FUNCTION_SEEDANCE_MAX_WAIT: 30s
     ports:
       - "127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}:8080"
     depends_on:

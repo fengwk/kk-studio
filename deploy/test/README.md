@@ -41,11 +41,15 @@ smoke，并验证 create-only PUT 的首次写入成功、不同内容的重复�
 original 字节不变，以及 Canvas DTO 不暴露 bucket/key。随后显式开启
 `kk-studio.canvas.function.fake-enabled`，执行
 `create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
-并验证 FunctionRun 不修改 `graphRevision` 且公开 DTO 不包含 `stateJson`。
+并验证 FunctionRun 不修改 `graphRevision` 且公开 DTO 不包含 `stateJson`。最后启用仅指向
+容器内 HTTP mock 的 OpenCLI Hub/GPT Image/Seedance 开关，执行
+`gpt-image-2 -> fake Hub PNG -> materialize` 与
+`seedance2.0fast -> fake submit/status -> fake Hub MP4 -> materialize` 两条完整 adapter
+闭环。这里没有浏览器登录、真实 provider 或付费请求。
 
 应用通过环境变量连接 `postgres:5432`、`minio:9000`、`comfyui:8080` 和
-`opencli-hub:8080`。当前尚未启用 ComfyUI/OpenCLI adapter，相关 base URL 只作为后续
-联调注入点。Canvas Resource 媒体进程显式配置为容器内的 `ffprobe` / `ffmpeg`，
+`opencli-hub:8080`。ComfyUI 保持禁用；OpenCLI adapters 只在该隔离栈中指向内置 fake Hub。
+Canvas Resource 媒体进程显式配置为容器内的 `ffprobe` / `ffmpeg`，
 临时目录为 `/tmp`，每次 finalize/materialize 都会清理自己的工作目录。
 
 ## 手动使用
@@ -75,7 +79,8 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 
 ## 注入 mock routes
 
-HTTP mock 固定提供 `GET /health`。其余 route 从 JSON 文件读取，只按 HTTP method 与
+HTTP mock 固定提供 `GET /health`，并在隔离栈中模拟本切片使用的 Hub upload、
+execute、execution detail 与 Resource download。其余 route 从 JSON 文件读取，只按 HTTP method 与
 URL path 精确匹配，不解析或假设请求体。默认
 [`mock/routes.json`](mock/routes.json) 为空。
 
@@ -107,5 +112,23 @@ route 文件格式：
 ```
 
 响应可以使用 `json`，或使用字符串 `body` 并自行设置 `Content-Type`。同一份 route
-配置可通过 `http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问；
-具体 adapter route 应由对应 contract test 提供，而不是固化在此测试底座。
+配置可通过 `http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问。
+内置 fake Hub 只实现 Canvas adapter smoke 所需的最小协议；细粒度异常、origin、multipart
+与状态边界仍由 JDK HttpServer contract tests 覆盖。
+
+## 真实 Seedance prepare-only 边界
+
+真实 smoke 不走本容器栈，也不通过 Canvas FunctionRun。只有同时给出确认参数与环境开关
+才会运行：
+
+```bash
+RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
+SEEDANCE_WORKSPACE_ID=... \
+OPENCLI_HUB_BASE_URL=http://vps-opencli-hub:8080 \
+  ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
+```
+
+脚本硬编码 `seedance2.0fast`、`duration=4`、`submit=0`、`retry=0`，只验证 Jimeng 页面
+准备与 checkpoint，不点击真实生成，不创建 FunctionRun，不下载或导入视频。任何正式
+Seedance/GPT Image 提交都可能产生费用，只能通过应用的独立真实提交开关人工启用，绝不
+属于默认测试或此 prepare-only smoke。
