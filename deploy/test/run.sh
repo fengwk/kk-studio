@@ -2,8 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 COMPOSE_FILE="$SCRIPT_DIR/compose.yaml"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
+APP_IMAGE=${CANVAS_TEST_APP_IMAGE:-kk-studio-app:canvas-test}
 WITH_APP=false
 
 usage() {
@@ -22,6 +24,44 @@ EOF
 
 step() {
   printf '\n==> %s\n' "$*"
+}
+
+configure_build_proxy() {
+  export CANVAS_TEST_BUILD_HTTP_PROXY="${CANVAS_TEST_BUILD_HTTP_PROXY:-${HTTP_PROXY:-${http_proxy:-}}}"
+  export CANVAS_TEST_BUILD_HTTPS_PROXY="${CANVAS_TEST_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-${https_proxy:-}}}"
+  export CANVAS_TEST_BUILD_NO_PROXY="${CANVAS_TEST_BUILD_NO_PROXY:-${NO_PROXY:-${no_proxy:-}}}"
+
+  local http_options=""
+  local https_options=""
+  http_options=$(java_proxy_options http "$CANVAS_TEST_BUILD_HTTP_PROXY") || true
+  https_options=$(java_proxy_options https "$CANVAS_TEST_BUILD_HTTPS_PROXY") || true
+  if [[ -z "$http_options" && -z "$https_options" ]]; then
+    return
+  fi
+
+  export CANVAS_TEST_BUILD_NETWORK="${CANVAS_TEST_BUILD_NETWORK:-host}"
+  if [[ -n "${CANVAS_TEST_BUILD_MAVEN_OPTS:-}" ]]; then
+    step "Using host build proxy for Maven and npm"
+    return
+  fi
+  export CANVAS_TEST_BUILD_MAVEN_OPTS="$http_options $https_options -Dhttp.nonProxyHosts=localhost|127.*|[::1]"
+  step "Using host build proxy for Maven and npm"
+}
+
+java_proxy_options() {
+  local protocol=$1
+  local proxy=$2
+  [[ -n "$proxy" ]] || return 1
+
+  local authority=${proxy#http://}
+  authority=${authority#https://}
+  authority=${authority%/}
+  [[ "$authority" != *"/"* && "$authority" != *"@"* && "$authority" == *":"* ]] || return 1
+
+  local host=${authority%:*}
+  local port=${authority##*:}
+  [[ -n "$host" && "$port" =~ ^[0-9]+$ ]] || return 1
+  printf -- '-D%s.proxyHost=%s -D%s.proxyPort=%s' "$protocol" "$host" "$protocol" "$port"
 }
 
 die() {
@@ -53,6 +93,8 @@ if [[ "$WITH_APP" == "true" ]]; then
   command -v python3 >/dev/null 2>&1 || die "python3 is required for the Canvas API smoke"
 fi
 
+configure_build_proxy
+
 cleanup() {
   local status=$?
   if ((status != 0)); then
@@ -71,11 +113,19 @@ step "Validating Compose configuration"
 "${COMPOSE[@]}" --profile app config --quiet
 
 step "Building the current application Dockerfile"
-"${COMPOSE[@]}" --profile app build app
+docker build \
+  --file "$PROJECT_ROOT/deploy/local/Dockerfile" \
+  --tag "$APP_IMAGE" \
+  --network "${CANVAS_TEST_BUILD_NETWORK:-default}" \
+  --build-arg "KK_STUDIO_BUILD_HTTP_PROXY=${CANVAS_TEST_BUILD_HTTP_PROXY:-}" \
+  --build-arg "KK_STUDIO_BUILD_HTTPS_PROXY=${CANVAS_TEST_BUILD_HTTPS_PROXY:-}" \
+  --build-arg "KK_STUDIO_BUILD_NO_PROXY=${CANVAS_TEST_BUILD_NO_PROXY:-}" \
+  --build-arg "KK_STUDIO_MAVEN_BUILD_OPTS=${CANVAS_TEST_BUILD_MAVEN_OPTS:-}" \
+  "$PROJECT_ROOT"
 
 step "Starting isolated dependencies and waiting for health checks"
 if [[ "$WITH_APP" == "true" ]]; then
-  "${COMPOSE[@]}" --profile app up -d --wait
+  "${COMPOSE[@]}" --profile app up -d --wait --no-build
 else
   "${COMPOSE[@]}" up -d --wait
 fi

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 #
 # kk-studio app image.
 #
@@ -26,9 +27,24 @@ ENV NPM_CONFIG_FETCH_RETRIES=5 \
 # not need (target dirs, frontend node_modules/dist, IDE files, secrets, etc.).
 COPY . .
 
-# Build the Fat JAR with embedded React assets. Tests are skipped on purpose:
-# the Fat JAR is a runtime artifact, and tests run in dedicated CI steps.
-RUN mvn -Pdistribution -pl web -am -DskipTests -B -ntp clean package \
+# Build the Fat JAR with embedded React assets. BuildKit caches downloaded Maven
+# and npm artifacts across source changes and failed network attempts; `-U`
+# retries any transient resolution failure recorded in the cache. Tests are
+# skipped because they run in dedicated CI steps.
+ARG KK_STUDIO_BUILD_HTTP_PROXY=""
+ARG KK_STUDIO_BUILD_HTTPS_PROXY=""
+ARG KK_STUDIO_BUILD_NO_PROXY=""
+ARG KK_STUDIO_MAVEN_BUILD_OPTS=""
+RUN --mount=type=cache,id=kk-studio-maven,target=/root/.m2/repository,sharing=locked \
+    --mount=type=cache,id=kk-studio-npm,target=/root/.npm,sharing=locked \
+    HTTP_PROXY="${KK_STUDIO_BUILD_HTTP_PROXY}" \
+    HTTPS_PROXY="${KK_STUDIO_BUILD_HTTPS_PROXY}" \
+    NO_PROXY="${KK_STUDIO_BUILD_NO_PROXY}" \
+    http_proxy="${KK_STUDIO_BUILD_HTTP_PROXY}" \
+    https_proxy="${KK_STUDIO_BUILD_HTTPS_PROXY}" \
+    no_proxy="${KK_STUDIO_BUILD_NO_PROXY}" \
+    MAVEN_OPTS="${MAVEN_OPTS:-} ${KK_STUDIO_MAVEN_BUILD_OPTS}" \
+      mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package \
     && cp web/target/kk-studio-web-*.jar /build/app.jar
 
 # ---------- runtime ----------

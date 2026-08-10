@@ -22,7 +22,7 @@
 脚本依次执行：
 
 1. `docker compose config --quiet`；
-2. build 当前应用 Dockerfile；
+2. 通过显式 `docker build` 构建当前应用 Dockerfile；
 3. 启动依赖并等待 healthcheck；
 4. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的
    `ffmpeg` / `ffprobe`；
@@ -76,6 +76,15 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 
 宿主端口可分别通过 `CANVAS_TEST_PG_PORT`、`CANVAS_TEST_MINIO_PORT`、
 `CANVAS_TEST_MOCK_PORT`、`CANVAS_TEST_APP_PORT` 覆盖。
+
+应用镜像构建使用 BuildKit Maven/npm cache。脚本会继承标准
+`HTTP_PROXY` / `HTTPS_PROXY`（含小写形式）；当代理是宿主 loopback 地址时，build
+阶段使用 host network，并为 Maven 显式生成 Java proxy 参数，代理值不会进入 runtime
+镜像。可通过 `CANVAS_TEST_BUILD_HTTP_PROXY`、`CANVAS_TEST_BUILD_HTTPS_PROXY`、
+`CANVAS_TEST_BUILD_NO_PROXY`、`CANVAS_TEST_BUILD_NETWORK` 和
+`CANVAS_TEST_BUILD_MAVEN_OPTS` 覆盖；带认证或非标准 URL 的代理应显式提供后两项。
+脚本不委托 Compose 构建镜像，因为部分 Docker Compose/BuildKit 组合会静默忽略
+`build.network=host`；构建完成后以 `docker compose up --no-build` 启动同名镜像。
 
 ## 注入 mock routes
 
