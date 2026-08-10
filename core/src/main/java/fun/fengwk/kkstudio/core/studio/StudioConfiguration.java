@@ -5,6 +5,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
+import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionConfigCodec;
+import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasCommandDedupMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasGroupMapper;
@@ -30,6 +32,8 @@ public class StudioConfiguration {
       CanvasCommandDedupMapper commandDedupMapper,
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository functionRunRepository,
+      CanvasFunctionConfigCodec functionConfigCodec,
+      CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
       PostgresqlSequenceIdGenerator idGenerator) {
     return new DurableCanvasService(
@@ -42,6 +46,8 @@ public class StudioConfiguration {
         commandDedupMapper,
         resourceRepository,
         functionRunRepository,
+        functionConfigCodec,
+        functionModelRegistry,
         objectMapper,
         idGenerator);
   }

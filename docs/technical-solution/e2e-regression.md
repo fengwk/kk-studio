@@ -6,9 +6,10 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **65** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。Canvas
+当前注册 **66** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。Canvas
 Resource reserve contract 需要 backend 已启用 S3，并通过 `--with-canvas-storage` 显式
-执行；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
+执行；免费 fake Function 完整链路还需通过 `--with-canvas-function` 显式开启 fake
+model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
 由 `scripts/e2e.sh --ui` 另行附加，不计入这 65 个 Node API case。
 
 ## 1. 入口与开关
@@ -20,6 +21,7 @@ Resource reserve contract 需要 backend 已启用 S3，并通过 `--with-canvas
 ./scripts/e2e.sh --real --with-branch    # L3 同 Session 分支
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
 ./scripts/e2e.sh --with-canvas-storage   # Canvas Resource reserve（需 S3 配置）
+./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
 ./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
 ./scripts/e2e.sh --ui                    # Playwright UI smoke
 ./scripts/e2e.sh --list
@@ -42,6 +44,7 @@ npm --prefix frontend run e2e:docs
 --with-tools
 --with-branch
 --with-canvas-storage
+--with-canvas-function
 --only CASE_ID
 --level L1|L2|L3|L4
 --list
@@ -67,7 +70,7 @@ npm --prefix frontend run e2e:docs
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 58，默认 57）
+### L1（注册 59，默认 57）
 
 ```text
 seed.structured_model_config
@@ -128,6 +131,7 @@ config.agent.invalid.unknown_subagent
 config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
 canvas.storage_upload_contract
+canvas.function_fake_runtime
 ```
 
 L1 的关键语义断言：
@@ -152,6 +156,9 @@ L1 的关键语义断言：
   bucket/key，并包含签名覆盖的 `If-None-Match: *`；TEXT 与客户端注入 key 均返回
   400。完整 create-only PUT 拒绝覆盖、finalize、original/preview 字节链路由
   `deploy/test` MinIO smoke 和后端定向测试覆盖。
+- `canvas.function_fake_runtime` 仅在 `--with-canvas-function` 下执行：显式注册
+  `fake-image`，验证 Function node 创建、start/poll、成功 Resource 原子替换、
+  `graphRevision` 不变、公开 run DTO 无 `stateJson`，以及 preview signed GET。
 
 ### L2/L3/L4（7）
 

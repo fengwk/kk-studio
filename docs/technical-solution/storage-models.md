@@ -96,7 +96,7 @@ Goal 不使用独立表。`plugins/goal` 把每次完整状态快照写成当前
 | `canvas_node` | ResourceNode、规范化唯一名称、transform、可选 Group/Function |
 | `canvas_node_resource` | Node 当前有序 Resource 关系；Node 删除时级联，Resource 保留 |
 | `canvas_link` | `(canvas_id, source_node_id, target_node_id)` 可见性边；节点删除级联 |
-| `canvas_function_run` | Function 节点当前/最后一次 Run |
+| `canvas_function_run` | Function 节点当前/最后一次 Run；node/run FOR UPDATE，checkpoint 与 terminal 只按 `node_id + request_id + RUNNING` 条件更新 |
 | `canvas_resource` | Canvas 内 immutable Resource 内容与 metadata |
 | `canvas_upload` | finalize 前的上传声明与过期事实 |
 | `canvas_command_dedup` | `(canvas_id, command_id)`、request hash、applied revision 与创建时间 |

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.studio.canvas;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -8,7 +9,18 @@ public interface CanvasFunctionRunRepository {
 
   Optional<CanvasFunctionRun> findByNodeId(long nodeId);
 
+  Optional<CanvasFunctionRun> findByNodeIdForUpdate(long nodeId);
+
   List<CanvasFunctionRun> findByCanvasId(long canvasId);
 
-  void save(CanvasFunctionRun run);
+  List<CanvasFunctionRun> findRunning();
+
+  void insertRunning(CanvasFunctionRun run);
+
+  boolean replaceTerminalWithRunning(CanvasFunctionRun run);
+
+  boolean checkpoint(
+      long nodeId, String requestId, String stateJson, String stage, Instant updatedAt);
+
+  boolean transitionTerminal(CanvasFunctionRun run);
 }

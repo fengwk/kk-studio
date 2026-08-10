@@ -36,6 +36,19 @@ public interface CanvasLinkMapper extends BaseMapper {
       })
   List<CanvasLinkDO> listByCanvas(@Param("canvasId") long canvasId);
 
+  @Select(
+      """
+      select count(*)
+      from canvas_link
+      where canvas_id = #{canvasId}
+        and source_node_id = #{sourceNodeId}
+        and target_node_id = #{targetNodeId}
+      """)
+  int exists(
+      @Param("canvasId") long canvasId,
+      @Param("sourceNodeId") long sourceNodeId,
+      @Param("targetNodeId") long targetNodeId);
+
   @Delete(
       "delete from canvas_link where canvas_id = #{canvasId}"
           + " and source_node_id = #{sourceNodeId} and target_node_id = #{targetNodeId}")

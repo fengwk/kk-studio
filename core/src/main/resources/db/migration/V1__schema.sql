@@ -280,12 +280,20 @@ create table canvas_function_run (
     error        text,
     updated_at   timestamptz(3) not null default current_timestamp,
     constraint ck_canvas_function_run_node_id_pos check (node_id > 0),
-    constraint ck_canvas_function_run_request_id_nonblank check (btrim(request_id) <> ''),
+    constraint ck_canvas_function_run_request_id check (
+        btrim(request_id) <> ''
+        and request_id = btrim(request_id)
+        and request_id !~ '[[:cntrl:]]'
+    ),
     constraint ck_canvas_function_run_status check (
         status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
     ),
     constraint ck_canvas_function_run_state_object check (jsonb_typeof(state_json) = 'object')
 );
+
+create index idx_canvas_function_run_running
+    on canvas_function_run (node_id)
+    where status = 'RUNNING';
 
 create table canvas_command_dedup (
     canvas_id        bigint         not null,

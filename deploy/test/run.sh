@@ -117,6 +117,7 @@ if [[ "$WITH_APP" == "true" ]]; then
     python3 - <<'PY'
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -199,6 +200,72 @@ preview = json_call(
 )
 assert "bucket" not in preview and "key" not in preview
 with urllib.request.urlopen(preview["url"], timeout=30) as response:
+    body = response.read()
+    assert response.status == 200
+    assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
+
+snapshot = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/commands",
+    {
+        "expectedRevision": "0",
+        "commandId": "container-function-node",
+        "commands": [
+            {
+                "type": "CREATE_FUNCTION_NODE",
+                "name": "generated",
+                "modelKey": "fake-image",
+                "configJson": json.dumps(
+                    {
+                        "prompt": {
+                            "segments": [
+                                {"type": "TEXT", "text": "free deterministic image"}
+                            ]
+                        },
+                        "parameters": {"ratio": "16:9"},
+                    },
+                    separators=(",", ":"),
+                ),
+                "transform": {"x": 0, "y": 0, "width": 100, "height": 80},
+            }
+        ],
+    },
+)
+function_node = next(node for node in snapshot["nodes"] if node["name"] == "generated")
+assert snapshot["document"]["graphRevision"] == "1"
+started = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/runs",
+    {"requestId": "container-fake-image"},
+)
+assert started["requestId"] == "container-fake-image"
+for _ in range(120):
+    current = json_call(
+        "GET",
+        f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/run",
+    )
+    if current["status"] != "RUNNING":
+        break
+    time.sleep(0.25)
+else:
+    raise AssertionError("fake-image FunctionRun did not reach terminal state")
+assert current["status"] == "SUCCEEDED", current
+assert "stateJson" not in current
+
+generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
+generated_node = next(
+    node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
+)
+assert generated_snapshot["document"]["graphRevision"] == "1"
+assert len(generated_node["resources"]) == 1
+generated_resource = generated_node["resources"][0]
+assert generated_resource["kind"] == "IMAGE"
+assert generated_resource["name"] == "generated.png"
+generated_preview = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/resources/{generated_resource['id']}/preview-url",
+)
+with urllib.request.urlopen(generated_preview["url"], timeout=30) as response:
     body = response.read()
     assert response.status == 200
     assert body.startswith(b"RIFF") and b"WEBP" in body[:16]

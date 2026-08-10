@@ -57,6 +57,13 @@ public interface CanvasNodeMapper extends BaseMapper {
   @ResultMap("canvasNodeMap")
   CanvasNodeDO getById(@Param("canvasId") long canvasId, @Param("id") long id);
 
+  @Select(
+      "select "
+          + COLUMNS
+          + " from canvas_node where id = #{id} and canvas_id = #{canvasId} for update")
+  @ResultMap("canvasNodeMap")
+  CanvasNodeDO getByIdForUpdate(@Param("canvasId") long canvasId, @Param("id") long id);
+
   @Select("select " + COLUMNS + " from canvas_node where id = #{id}")
   @ResultMap("canvasNodeMap")
   CanvasNodeDO getByGlobalId(@Param("id") long id);

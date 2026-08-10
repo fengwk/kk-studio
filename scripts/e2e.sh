@@ -34,6 +34,7 @@ REBUILD=false
 WITH_TOOLS=false
 WITH_BRANCH=false
 WITH_CANVAS_STORAGE=false
+WITH_CANVAS_FUNCTION=false
 REAL=false
 WITH_UI=false
 LIST_ONLY=false
@@ -51,6 +52,7 @@ Options:
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource reserve contract (backend S3 config required)
+  --with-canvas-function Enable free fake Canvas Function E2E (implies storage + rebuild)
   --ui              Enable Playwright UI smoke (screenshots in report)
   --only <caseId>   Run one case id (repeatable)
   --level <Lx>      Filter by level L1/L2/L3/L4 (repeatable)
@@ -75,6 +77,13 @@ while [ $# -gt 0 ]; do
     --with-tools) WITH_TOOLS=true; shift ;;
     --with-branch) WITH_BRANCH=true; REAL=true; shift ;;
     --with-canvas-storage) WITH_CANVAS_STORAGE=true; shift ;;
+    --with-canvas-function)
+      WITH_CANVAS_FUNCTION=true
+      WITH_CANVAS_STORAGE=true
+      REBUILD=true
+      export KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true
+      shift
+      ;;
     --ui) WITH_UI=true; shift ;;
     --only) ONLY_ARGS+=(--only "$2"); shift 2 ;;
     --level) LEVEL_ARGS+=(--level "$2"); shift 2 ;;
@@ -119,6 +128,7 @@ if [ "$REAL" = "true" ]; then MATRIX_ARGS+=(--real); fi
 if [ "$WITH_TOOLS" = "true" ]; then MATRIX_ARGS+=(--with-tools); fi
 if [ "$WITH_BRANCH" = "true" ]; then MATRIX_ARGS+=(--with-branch); fi
 if [ "$WITH_CANVAS_STORAGE" = "true" ]; then MATRIX_ARGS+=(--with-canvas-storage); fi
+if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then MATRIX_ARGS+=(--with-canvas-function); fi
 MATRIX_ARGS+=("${ONLY_ARGS[@]}")
 MATRIX_ARGS+=("${LEVEL_ARGS[@]}")
 
