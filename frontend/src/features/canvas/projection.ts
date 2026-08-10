@@ -1,38 +1,99 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { CanvasLink, CanvasNode } from '@/features/canvas/types'
+import type { CanvasSnapshot, Link } from '@/features/canvas/domain'
+import type {
+  CanvasFlowNodeData,
+  CanvasNodeCallbacks,
+} from '@/features/canvas/types'
+import type {
+  CanvasFunctionModelDTO,
+  DecimalString,
+} from '@/shared/api/contracts/studio'
 
-export type CanvasFlowNodeData = {
-  domain: CanvasNode
-} & Record<string, unknown>
-
-export type CanvasFlowNode = Node<CanvasFlowNodeData, CanvasNode['type']>
+export type CanvasFlowNode = Node<CanvasFlowNodeData, 'resource' | 'group'>
 export type CanvasFlowEdge = Edge
 
-/** 将领域节点投影到 React Flow 视图模型，避免 RF 类型泄漏到持久化层。 */
-export function projectNodes(nodes: CanvasNode[], selectedIds: string[]): CanvasFlowNode[] {
+export function projectNodes(
+  snapshot: CanvasSnapshot,
+  selectedIds: string[],
+  models: CanvasFunctionModelDTO[],
+  callbacks: CanvasNodeCallbacks,
+  positionDrafts: Readonly<Record<string, { x: number; y: number }>> = {},
+): CanvasFlowNode[] {
   const selected = new Set(selectedIds)
-  return nodes.map((node) => ({
-    id: node.id,
-    type: node.type,
-    position: { x: node.x, y: node.y },
-    selected: selected.has(node.id),
-    style: { width: node.width, height: node.height },
-    measured: { width: node.width, height: node.height },
-    data: { domain: node },
-    zIndex: node.type === 'frame' ? 0 : 1,
+  const modelByKey = new Map(models.map((model) => [model.key, model]))
+  const groupDrafts = new Map(snapshot.groups.map((group) => {
+    const id = groupFlowId(group.id)
+    const position = positionDrafts[id]
+    return [group.id, position ? {
+      x: position.x,
+      y: position.y,
+      deltaX: position.x - group.transform.x,
+      deltaY: position.y - group.transform.y,
+    } : null] as const
   }))
+  const groups: CanvasFlowNode[] = snapshot.groups.map((group) => {
+    const draft = groupDrafts.get(group.id)
+    return {
+      id: groupFlowId(group.id),
+      type: 'group',
+      position: draft
+        ? { x: draft.x, y: draft.y }
+        : { x: group.transform.x, y: group.transform.y },
+      selected: selected.has(groupFlowId(group.id)),
+      style: { width: group.transform.width, height: group.transform.height },
+      measured: { width: group.transform.width, height: group.transform.height },
+      data: { kind: 'group', group },
+      zIndex: -1,
+    }
+  })
+  const nodes: CanvasFlowNode[] = snapshot.resourceNodes.map((node) => {
+    const ownDraft = positionDrafts[node.id]
+    const groupDraft = node.groupId ? groupDrafts.get(node.groupId) : null
+    const position = ownDraft
+      ?? (groupDraft
+        ? {
+          x: node.transform.x + groupDraft.deltaX,
+          y: node.transform.y + groupDraft.deltaY,
+        }
+        : { x: node.transform.x, y: node.transform.y })
+    return {
+      id: node.id,
+      type: 'resource',
+      position,
+      selected: selected.has(node.id),
+      style: { width: node.transform.width, height: node.transform.height },
+      measured: { width: node.transform.width, height: node.transform.height },
+      data: {
+        kind: 'resource',
+        node,
+        model: node.function ? modelByKey.get(node.function.modelKey) ?? null : null,
+        callbacks,
+      },
+      zIndex: 1,
+    }
+  })
+  return [...groups, ...nodes]
 }
 
-export function projectEdges(links: CanvasLink[]): CanvasFlowEdge[] {
+export function projectEdges(links: Link[]): CanvasFlowEdge[] {
   return links.map((link) => ({
-    id: link.id,
-    source: link.source,
-    target: link.target,
+    id: `${link.sourceNodeId}->${link.targetNodeId}`,
+    source: link.sourceNodeId,
+    target: link.targetNodeId,
     sourceHandle: 'out',
     targetHandle: 'in',
     type: 'default',
-    focusable: false,
-    selectable: false,
-    interactionWidth: 8,
+    focusable: true,
+    selectable: true,
+    interactionWidth: 18,
   }))
+}
+
+export function groupFlowId(groupId: string): string {
+  return `group:${groupId}`
+}
+
+export function groupIdFromFlowId(flowId: string): DecimalString | null {
+  const groupId = flowId.startsWith('group:') ? flowId.slice('group:'.length) : ''
+  return /^[1-9][0-9]*$/.test(groupId) ? groupId as DecimalString : null
 }

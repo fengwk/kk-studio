@@ -59,6 +59,18 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
       <button className="dock-send" type="button" aria-label={t('canvas.agent.send')} onClick={sendAgent}>
         <SendIcon />
       </button>
+      {Object.entries(state.uploadProgress).length > 0 ? (
+        <div className="upload-progress-list" aria-live="polite">
+          {Object.entries(state.uploadProgress).map(([name, progress]) => (
+            <span key={name}>
+              {name.split(':')[0]}
+              {' '}
+              {Math.round(progress * 100)}
+              %
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }

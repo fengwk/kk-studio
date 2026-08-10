@@ -3,7 +3,7 @@ export interface ResultEnvelope<T> {
   code: string
   message: string
   data: T
-  errors?: Record<string, unknown>
+  errors?: Record<string, unknown> | null
 }
 
 export interface PageResult<T> {

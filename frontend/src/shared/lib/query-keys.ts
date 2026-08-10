@@ -34,5 +34,7 @@ export const queryKeys = {
   },
   studio: {
     canvases: ['studio', 'canvases'] as const,
+    canvas: (canvasId: string) => ['studio', 'canvas', canvasId] as const,
+    canvasModels: ['studio', 'canvas-function-models'] as const,
   },
 }

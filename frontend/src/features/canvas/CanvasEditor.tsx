@@ -3,8 +3,30 @@ import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasEditor() {
-  const { state, openLibrary, setHelpOpen, setToast } = useCanvasRuntime()
+  const { state, snapshot, openLibrary, snapshotQuery } = useCanvasRuntime()
   const { t } = useI18n()
+
+  if (snapshotQuery.isError) {
+    const notFound = (snapshotQuery.error as { status?: number }).status === 404
+    return (
+      <section className="canvas-editor-state danger" role="alert">
+        <h2>{notFound ? '画布不存在' : '画布加载失败'}</h2>
+        <p>{(snapshotQuery.error as Error).message}</p>
+        <div>
+          <button type="button" onClick={openLibrary}>返回画布库</button>
+          {!notFound ? <button type="button" onClick={() => void snapshotQuery.refetch()}>重试</button> : null}
+        </div>
+      </section>
+    )
+  }
+  if (snapshotQuery.isLoading || !snapshot) {
+    return (
+      <section className="canvas-editor-state" role="status">
+        <span className="canvas-spinner" />
+        正在加载画布…
+      </section>
+    )
+  }
 
   return (
     <section className="view editor-view active" id="editorView" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
@@ -16,31 +38,13 @@ export function CanvasEditor() {
         </button>
         <span className="header-divider" />
         <div className="document-title">
-          <strong>竞品研究与产品方案</strong>
+          <strong>{snapshot.document.title}</strong>
           <span id="saveState" aria-live="polite">
-            {state.saveState === 'saving' ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
+            {state.commandPending ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
           </span>
         </div>
         <div className="editor-actions">
-          <button
-            type="button"
-            id="helpButton"
-            aria-label={t('canvas.editor.help')}
-            onClick={(event) => setHelpOpen(true, event.currentTarget)}
-          >
-            ?
-          </button>
-          <button type="button" id="shareButton" onClick={() => setToast(t('canvas.toast.editor.share'))}>{t('canvas.editor.share')}</button>
-          <button type="button" id="exportButton" onClick={() => setToast(t('canvas.toast.editor.export'))}>{t('canvas.editor.export')}</button>
-          <button
-            className="icon-button"
-            type="button"
-            id="editorMoreButton"
-            aria-label={t('canvas.editor.more')}
-            onClick={() => setToast(t('canvas.toast.editor.more'))}
-          >
-            ···
-          </button>
+          <span className="revision-pill">r{snapshot.document.graphRevision}</span>
         </div>
       </header>
       <CanvasStage />

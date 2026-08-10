@@ -65,7 +65,7 @@ axiosClient.interceptors.response.use(
           envelope.message || translate('shared.requestFailed'),
           envelope.status,
           envelope.code,
-          envelope.errors,
+          envelope.errors ?? undefined,
         ),
       )
     }
@@ -75,7 +75,7 @@ axiosClient.interceptors.response.use(
     const envelope = error?.response?.data as Partial<ResultEnvelope<unknown>> | undefined
     const message = envelope?.message || error?.message || translate('shared.requestFailed')
     return Promise.reject(
-      new ApiError(message, error?.response?.status, envelope?.code, envelope?.errors),
+      new ApiError(message, error?.response?.status, envelope?.code, envelope?.errors ?? undefined),
     )
   },
 )

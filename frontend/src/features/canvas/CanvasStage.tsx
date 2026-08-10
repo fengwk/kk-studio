@@ -6,20 +6,25 @@ import {
   ReactFlowProvider,
   SelectionMode,
   useReactFlow,
+  type Connection,
+  type Edge,
   type NodeChange,
   type OnSelectionChangeParams,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
-import { CanvasGenerationWorkbench } from '@/features/canvas/CanvasGenerationWorkbench'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
-import { MAX_ZOOM, MIN_ZOOM } from '@/features/canvas/data'
-import { computeSelectionToolbarPosition, selectionBounds, viewportsEqual } from '@/features/canvas/geometry'
+import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
+import type { CanvasPositionUpdate } from '@/features/canvas/types'
+import {
+  MAX_CANVAS_ZOOM,
+  MIN_CANVAS_ZOOM,
+} from '@/features/canvas/viewport-storage'
 import { useI18n } from '@/shared/i18n'
 
 function StageInner() {
@@ -27,7 +32,9 @@ function StageInner() {
   const { t } = useI18n()
   const {
     state,
-    stageMetrics,
+    snapshot: snapshotDTO,
+    models,
+    nodeCallbacks,
     stageElementRef,
     fitViewRef,
     focusSelectionRef,
@@ -36,154 +43,186 @@ function StageInner() {
     setViewport,
     setSelection,
     moveNodes,
-    activateGenerator,
-    setToast,
-    setContextMode,
-    openThread,
+    commitTransforms,
+    setTool,
+    createLink,
+    deleteLink,
+    deleteSelection,
+    createGroup,
+    ungroupSelection,
+    uploadFiles,
     focusAgentDock,
-    consumePendingFit,
   } = runtime
-
+  const snapshot = useMemo(
+    () => snapshotDTO ? projectCanvasSnapshot(snapshotDTO) : null,
+    [snapshotDTO],
+  )
   const containerRef = useRef<HTMLElement | null>(null)
   const dockWrapRef = useRef<HTMLDivElement | null>(null)
-  const lastEmittedViewportRef = useRef(state.viewport)
-  const { fitView, getViewport, zoomTo, setViewport: setFlowViewport } = useReactFlow()
-  const nodes = useMemo(() => projectNodes(state.nodes, state.selectedIds), [state.nodes, state.selectedIds])
-  const edges = useMemo(() => projectEdges(state.links), [state.links])
+  const lastViewportRef = useRef(state.viewport)
+  const { fitView, getViewport, setViewport: setFlowViewport, zoomTo } = useReactFlow()
+
+  const nodes = useMemo(
+    () => snapshot
+      ? projectNodes(snapshot, state.selectedIds, models, nodeCallbacks, state.positionDrafts)
+      : [],
+    [models, nodeCallbacks, snapshot, state.positionDrafts, state.selectedIds],
+  )
+  const edges = useMemo(
+    () => snapshot ? projectEdges(snapshot.links) : [],
+    [snapshot],
+  )
 
   const publishMetrics = useCallback(() => {
-    const el = containerRef.current
-    if (!el) {
+    const element = containerRef.current
+    if (!element) {
       return
     }
-    const rect = el.getBoundingClientRect()
-    const dock = dockWrapRef.current
-    const dockTop = dock
-      ? Math.max(0, dock.getBoundingClientRect().top - rect.top)
-      : Math.max(0, rect.height - 96)
+    const rect = element.getBoundingClientRect()
+    const dockTop = dockWrapRef.current
+      ? dockWrapRef.current.getBoundingClientRect().top - rect.top
+      : rect.height - 96
     setStageMetrics({
-      width: rect.width || el.clientWidth || 960,
-      height: rect.height || el.clientHeight || 640,
-      dockTop,
+      width: rect.width || 960,
+      height: rect.height || 640,
+      dockTop: Math.max(120, dockTop),
     })
   }, [setStageMetrics])
 
   useEffect(() => {
     publishMetrics()
-    const el = containerRef.current
-    if (!el || typeof ResizeObserver === 'undefined') {
+    if (!containerRef.current || typeof ResizeObserver === 'undefined') {
       return
     }
-    const observer = new ResizeObserver(() => publishMetrics())
-    observer.observe(el)
+    const observer = new ResizeObserver(publishMetrics)
+    observer.observe(containerRef.current)
     if (dockWrapRef.current) {
       observer.observe(dockWrapRef.current)
     }
     return () => observer.disconnect()
-  }, [publishMetrics, state.threadOpen, state.addMenuOpen, state.messages.length])
+  }, [publishMetrics, state.threadOpen, state.addMenuOpen])
 
-  // 仅应用程序化的领域视口变更；忽略相等值以避免 RF 更新循环。
   useEffect(() => {
-    if (viewportsEqual(state.viewport, lastEmittedViewportRef.current)) {
+    const next = state.viewport
+    const previous = lastViewportRef.current
+    if (
+      Math.abs(next.x - previous.x) < 0.001
+      && Math.abs(next.y - previous.y) < 0.001
+      && Math.abs(next.zoom - previous.zoom) < 0.001
+    ) {
       return
     }
-    lastEmittedViewportRef.current = state.viewport
-    void setFlowViewport({
-      x: state.viewport.x,
-      y: state.viewport.y,
-      zoom: state.viewport.scale,
-    })
+    lastViewportRef.current = next
+    void setFlowViewport(next)
   }, [setFlowViewport, state.viewport])
 
   useEffect(() => {
-    const syncFromFlow = () => {
+    const sync = () => {
       const viewport = getViewport()
-      const next = { x: viewport.x, y: viewport.y, scale: viewport.zoom }
-      lastEmittedViewportRef.current = next
+      const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
+      lastViewportRef.current = next
       setViewport(next)
     }
     fitViewRef.current = () => {
-      void fitView({ padding: 0.18, duration: 0 }).then(syncFromFlow)
+      void fitView({ padding: 0.16, duration: 0 }).then(sync)
     }
     focusSelectionRef.current = () => {
       const selected = nodes.filter((node) => node.selected)
-      const task = selected.length === 0
-        ? fitView({ padding: 0.18, duration: 0 })
-        : fitView({ nodes: selected, padding: 0.25, duration: 0 })
-      void task.then(syncFromFlow)
+      void fitView({
+        nodes: selected.length > 0 ? selected : undefined,
+        padding: 0.22,
+        duration: 0,
+      }).then(sync)
     }
-    zoomRef.current = (scale: number) => {
-      void zoomTo(scale).then(syncFromFlow)
+    zoomRef.current = (zoom) => {
+      void zoomTo(zoom).then(sync)
     }
-    consumePendingFit()
     return () => {
       fitViewRef.current = null
       focusSelectionRef.current = null
       zoomRef.current = null
     }
-  }, [
-    consumePendingFit,
-    fitView,
-    fitViewRef,
-    focusSelectionRef,
-    getViewport,
-    nodes,
-    setViewport,
-    zoomRef,
-    zoomTo,
-  ])
+  }, [fitView, fitViewRef, focusSelectionRef, getViewport, nodes, setViewport, zoomRef, zoomTo])
 
-  const emitViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
-    const next = { x: viewport.x, y: viewport.y, scale: viewport.zoom }
-    if (viewportsEqual(next, lastEmittedViewportRef.current)) {
+  const handleNodesChange = useCallback((changes: NodeChange[]) => {
+    if (!snapshot) {
       return
     }
-    lastEmittedViewportRef.current = next
+    const positions = extractPositionUpdates(changes)
+    const updates: CanvasPositionUpdate[] = []
+    for (const position of positions) {
+      if (position.id.startsWith('group:')) {
+        const group = snapshot.groups.find((item) => `group:${item.id}` === position.id)
+        if (group) {
+          updates.push({
+            id: position.id,
+            kind: 'group',
+            transform: {
+              ...group.transform,
+              x: position.x,
+              y: position.y,
+            },
+          })
+        }
+        continue
+      }
+      const node = snapshot.resourceNodes.find((item) => item.id === position.id)
+      if (node) {
+        updates.push({
+          id: position.id,
+          kind: 'resource',
+          transform: {
+            ...node.transform,
+            x: position.x,
+            y: position.y,
+          },
+        })
+      }
+    }
+    if (updates.length > 0) {
+      moveNodes(updates)
+      if (positions.some((position) => !position.dragging)) {
+        commitTransforms()
+      }
+    }
+  }, [commitTransforms, moveNodes, snapshot])
+
+  const validConnection = useCallback((connection: Connection | Edge) => {
+    if (!snapshot || !connection.source || !connection.target || connection.source === connection.target) {
+      return false
+    }
+    const source = snapshot.resourceNodes.find((node) => node.id === connection.source)
+    const target = snapshot.resourceNodes.find((node) => node.id === connection.target)
+    return Boolean(source && source.resources.length > 0 && target?.function)
+  }, [snapshot])
+
+  const emitViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
+    const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
+    lastViewportRef.current = next
     setViewport(next)
   }, [setViewport])
 
-  const handleSelectionChange = useCallback((params: OnSelectionChangeParams) => {
-    setSelection(params.nodes.map((node) => node.id))
-  }, [setSelection])
-
-  // 受控节点契约：在拖拽过程中将 RF 位置变更应用到领域坐标。
-  const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    const updates = extractPositionUpdates(changes)
-    if (updates.length > 0) {
-      moveNodes(updates)
-    }
-  }, [moveNodes])
-
-  const selectedNodes = useMemo(
-    () => state.nodes.filter((node) => state.selectedIds.includes(node.id)),
-    [state.nodes, state.selectedIds],
-  )
-  const toolbarPosition = useMemo(() => {
-    const bounds = selectionBounds(selectedNodes)
-    if (!bounds) {
-      return null
-    }
-    return computeSelectionToolbarPosition({
-      bounds,
-      viewport: state.viewport,
-      stageWidth: stageMetrics.width || 960,
-    })
-  }, [selectedNodes, stageMetrics.width, state.viewport])
-
-  const stageClass = [
-    'canvas-stage',
-    state.tool === 'hand' ? 'hand-tool' : '',
-  ].filter(Boolean).join(' ')
-
   return (
     <section
-      className={stageClass}
+      className={`canvas-stage ${state.tool === 'hand' ? 'hand-tool' : ''}`}
       id="canvasStage"
       tabIndex={0}
       aria-label={t('canvas.stage.ariaLabel')}
-      ref={(node) => {
-        containerRef.current = node
-        stageElementRef.current = node
+      ref={(element) => {
+        containerRef.current = element
+        stageElementRef.current = element
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('Files')) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }
+      }}
+      onDrop={(event) => {
+        if (event.dataTransfer.files.length > 0) {
+          event.preventDefault()
+          void uploadFiles(event.dataTransfer.files)
+        }
       }}
     >
       <div className="canvas-flow">
@@ -191,9 +230,9 @@ function StageInner() {
           nodes={nodes}
           edges={edges}
           nodeTypes={canvasNodeTypes}
-          minZoom={MIN_ZOOM}
-          maxZoom={MAX_ZOOM}
-          defaultViewport={{ x: state.viewport.x, y: state.viewport.y, zoom: state.viewport.scale }}
+          minZoom={MIN_CANVAS_ZOOM}
+          maxZoom={MAX_CANVAS_ZOOM}
+          defaultViewport={state.viewport}
           selectionOnDrag={state.tool === 'select'}
           selectionMode={SelectionMode.Partial}
           panOnDrag={state.tool === 'hand' ? true : [1, 2]}
@@ -206,38 +245,43 @@ function StageInner() {
           zoomActivationKeyCode={['Meta', 'Control']}
           multiSelectionKeyCode="Shift"
           deleteKeyCode={null}
-          nodesConnectable={false}
-          edgesFocusable={false}
+          nodesConnectable
+          edgesFocusable
+          edgesReconnectable={false}
           elementsSelectable={state.tool === 'select'}
+          onlyRenderVisibleElements
+          isValidConnection={validConnection}
+          onConnect={(connection) => {
+            if (connection.source && connection.target && validConnection(connection)) {
+              const source = snapshot?.resourceNodes.find((node) => node.id === connection.source)
+              const target = snapshot?.resourceNodes.find((node) => node.id === connection.target)
+              if (source && target) {
+                createLink(source.id, target.id)
+              }
+            }
+          }}
+          onEdgesDelete={(deleted) => {
+            for (const edge of deleted) {
+              const link = snapshot?.links.find((item) => (
+                item.sourceNodeId === edge.source && item.targetNodeId === edge.target
+              ))
+              if (link) {
+                deleteLink(link.sourceNodeId, link.targetNodeId)
+              }
+            }
+          }}
           onNodesChange={handleNodesChange}
-          onMove={(_event, viewport) => {
-            emitViewport(viewport)
+          onNodeDragStop={() => commitTransforms()}
+          onMove={(_event, viewport) => emitViewport(viewport)}
+          onMoveEnd={(_event, viewport) => emitViewport(viewport)}
+          onSelectionChange={(params: OnSelectionChangeParams) => {
+            setSelection(params.nodes.map((node) => node.id))
           }}
-          onMoveEnd={(_event, viewport) => {
-            emitViewport(viewport)
-          }}
-          onSelectionChange={handleSelectionChange}
-          onNodeClick={(event, node) => {
-            if (state.tool !== 'select') {
-              return
-            }
-            if (event.shiftKey) {
-              const exists = state.selectedIds.includes(node.id)
-              setSelection(
-                exists
-                  ? state.selectedIds.filter((id) => id !== node.id)
-                  : [...state.selectedIds, node.id],
-              )
-            } else {
-              setSelection([node.id])
-            }
-            if (node.type === 'generator') {
-              activateGenerator(node.id, false)
-            }
+          onNodeClick={(_event, node) => {
+            setSelection([node.id])
           }}
           onPaneClick={() => {
             setSelection([])
-            activateGenerator(null)
           }}
           proOptions={{ hideAttribution: true }}
         >
@@ -261,73 +305,32 @@ function StageInner() {
         </ReactFlow>
       </div>
 
-      {toolbarPosition && state.selectedIds.length > 0 ? (
-        <div
-          className="selection-toolbar"
-          role="toolbar"
-          aria-label={t('canvas.stage.selectionToolbar')}
-          style={{ left: toolbarPosition.left, top: toolbarPosition.top }}
-        >
-          <button type="button" onClick={() => setToast(t('canvas.toast.stage.edit'))}>{t('canvas.stage.edit')}</button>
-          <button
-            type="button"
-            onClick={() => {
-              setContextMode('selection')
-              if (state.messages.length > 0) {
-                openThread()
-              }
-              focusAgentDock()
-              setToast(t('canvas.toast.stage.agent'))
-            }}
-          >
-            {t('canvas.stage.agent')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setContextMode('selection')
-              setToast(t('canvas.toast.stage.addContext', { count: state.selectedIds.length }))
-            }}
-          >
-            {t('canvas.stage.addContext')}
-          </button>
-          <span />
-          <button
-            type="button"
-            aria-label={t('canvas.stage.moreObjects')}
-            onClick={() => setToast(t('canvas.toast.stage.moreObjects'))}
-          >
-            ···
-          </button>
+      {state.selectedIds.length > 0 ? (
+        <div className="selection-toolbar" role="toolbar" aria-label="选区操作">
+          <button type="button" onClick={createGroup}>分组</button>
+          <button type="button" onClick={ungroupSelection}>移出分组</button>
+          <button type="button" onClick={focusAgentDock}>交给 Agent</button>
+          <button type="button" className="danger" onClick={deleteSelection}>删除</button>
         </div>
       ) : null}
 
-      <CanvasGenerationWorkbench />
-
       <div className="canvas-hint">
         <kbd>Space</kbd>
-        {' '}
-        {t('canvas.stage.hint.pan')}
-        {' '}
-        ·
-        {' '}
+        {' 平移 · '}
         <kbd>V / H / T</kbd>
-        {' '}
-        {t('canvas.stage.hint.tools')}
-        {' '}
-        ·
-        {' '}
+        {' 工具 · '}
         <kbd>⌘ K</kbd>
-        {' '}
-        {t('canvas.stage.hint.invokeAgent')}
+        {' Agent'}
       </div>
 
       <div className="canvas-controls">
         <div className="zoom-controls" role="group" aria-label={t('canvas.stage.zoomControls')}>
-          <button type="button" aria-label={t('canvas.stage.zoomOut')} onClick={() => zoomRef.current?.(Math.max(MIN_ZOOM, state.viewport.scale / 1.15))}>−</button>
-          <button type="button" aria-label={t('canvas.stage.fitAll')} title={t('canvas.stage.fitTitle')} onClick={() => fitViewRef.current?.()}>⊙</button>
-          <button type="button" title={t('canvas.stage.zoom100Title')} onClick={() => zoomRef.current?.(1)}>100%</button>
-          <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_ZOOM, state.viewport.scale * 1.15))}>＋</button>
+          <button type="button" aria-label={t('canvas.stage.zoomOut')} onClick={() => zoomRef.current?.(Math.max(MIN_CANVAS_ZOOM, state.viewport.zoom / 1.15))}>−</button>
+          <button type="button" aria-label={t('canvas.stage.fitAll')} onClick={() => fitViewRef.current?.()}>⊙</button>
+          <button type="button" onClick={() => zoomRef.current?.(1)}>100%</button>
+          <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_CANVAS_ZOOM, state.viewport.zoom * 1.15))}>＋</button>
+          <button type="button" aria-pressed={state.tool === 'select'} onClick={() => setTool('select')}>V</button>
+          <button type="button" aria-pressed={state.tool === 'hand'} onClick={() => setTool('hand')}>H</button>
         </div>
       </div>
 

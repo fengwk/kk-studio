@@ -9,13 +9,13 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasLibraryView() {
-  const { openEditor, setResearchOpen, setToast } = useCanvasRuntime()
+  const { openEditor, setToast } = useCanvasRuntime()
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
   const canvasesQuery = useQuery({
     queryKey: queryKeys.studio.canvases,
-    queryFn: () => listCanvases(),
+    queryFn: ({ signal }) => listCanvases({ signal }),
   })
 
   const createMutation = useMutation({
@@ -23,7 +23,7 @@ export function CanvasLibraryView() {
     onSuccess: async (created) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvases })
       setToast(t('canvas.toast.library.created', { title: created.title }))
-      openEditor()
+      openEditor(created.id)
     },
     onError: (error: Error) => {
       setToast(error.message || t('canvas.toast.library.createError'))
@@ -48,15 +48,6 @@ export function CanvasLibraryView() {
             </h1>
             <p>{t('canvas.library.description')}</p>
           </div>
-          <button
-            className="text-button"
-            type="button"
-            onClick={(event) => setResearchOpen(true, event.currentTarget)}
-          >
-            {t('canvas.library.researchLink')}
-            {' '}
-            <span>↗</span>
-          </button>
         </div>
 
         <section className="canvas-library" aria-labelledby="canvasTitle">
@@ -72,6 +63,7 @@ export function CanvasLibraryView() {
           {canvasesQuery.isError ? (
             <div className="state-block danger" role="alert">
               {t('canvas.library.loadError', { message: (canvasesQuery.error as Error).message })}
+              <button type="button" onClick={() => void canvasesQuery.refetch()}>重试</button>
             </div>
           ) : null}
 
@@ -97,7 +89,7 @@ export function CanvasLibraryView() {
                 className="project-card"
                 onClick={() => {
                   setToast(t('canvas.toast.library.open', { title: canvas.title }))
-                  openEditor()
+                  openEditor(canvas.id)
                 }}
               >
                 <div className="project-preview research-preview">
@@ -109,7 +101,7 @@ export function CanvasLibraryView() {
                 <small>
                   {t('canvas.library.revision')}
                   {' '}
-                  {canvas.revision}
+                  {canvas.graphRevision}
                 </small>
                 <div className="project-footer">
                   <span>{t('canvas.library.realCanvas')}</span>
@@ -121,6 +113,12 @@ export function CanvasLibraryView() {
               </button>
             ))}
           </div>
+          {!canvasesQuery.isLoading && !canvasesQuery.isError && canvases.length === 0 ? (
+            <div className="canvas-empty-state">
+              <strong>还没有画布</strong>
+              <p>创建一个空白画布，开始组织资源与 Function。</p>
+            </div>
+          ) : null}
         </section>
       </div>
     </section>
