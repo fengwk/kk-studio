@@ -365,12 +365,20 @@ export function useCanvasController() {
     selectedIds: string[],
     selectedLinks: CanvasLocalState['selectedLinks'] = [],
   ) => {
-    setState((current) => ({
-      ...current,
-      selectedIds,
-      selectedLinks,
-      addMenuOpen: false,
-    }))
+    setState((current) => {
+      if (
+        !current.addMenuOpen
+        && sameSelection(current.selectedIds, selectedIds, current.selectedLinks, selectedLinks)
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        selectedIds,
+        selectedLinks,
+        addMenuOpen: false,
+      }
+    })
   }, [])
 
   const renameNode = useCallback((nodeId: DecimalString, name: string) => {
@@ -976,6 +984,21 @@ function removeSubmittedDrafts(
     }
   }
   return next
+}
+
+function sameSelection(
+  currentIds: string[],
+  nextIds: string[],
+  currentLinks: CanvasLocalState['selectedLinks'],
+  nextLinks: CanvasLocalState['selectedLinks'],
+): boolean {
+  return currentIds.length === nextIds.length
+    && currentIds.every((id, index) => id === nextIds[index])
+    && currentLinks.length === nextLinks.length
+    && currentLinks.every((link, index) => (
+      link.sourceNodeId === nextLinks[index]?.sourceNodeId
+      && link.targetNodeId === nextLinks[index]?.targetNodeId
+    ))
 }
 
 function patchSnapshotRun(

@@ -292,6 +292,28 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(within(alert).getByRole('button', { name: '返回画布库' })).toBeInTheDocument()
   })
 
+  it('keeps React Flow selection publication stable for an unchanged empty selection', async () => {
+    // React Flow effects depend on callback identity, so unchanged selection must not cause a render loop.
+    installBackend()
+    const user = userEvent.setup()
+    renderCanvasPage()
+
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    const flow = flowHarness.current as {
+      nodes: unknown[]
+      onSelectionChange: (params: { nodes: unknown[]; edges: unknown[] }) => void
+    }
+    const initialNodes = flow.nodes
+    const initialHandler = flow.onSelectionChange
+
+    act(() => initialHandler({ nodes: [], edges: [] }))
+
+    const current = flowHarness.current as typeof flow
+    expect(current.onSelectionChange).toBe(initialHandler)
+    expect(current.nodes).toBe(initialNodes)
+  })
+
   it('completes drop upload as reserve -> direct PUT -> complete -> CREATE_RESOURCE_NODE', async () => {
     const { commandBodies } = installBackend()
     const user = userEvent.setup()

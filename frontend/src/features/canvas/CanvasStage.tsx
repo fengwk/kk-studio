@@ -217,6 +217,16 @@ function StageInner() {
     setViewport(next)
   }, [setViewport])
 
+  const handleSelectionChange = useCallback((params: OnSelectionChangeParams) => {
+    setSelection(
+      params.nodes.map((node) => node.id),
+      params.edges.map((edge) => ({
+        sourceNodeId: edge.source as DecimalString,
+        targetNodeId: edge.target as DecimalString,
+      })),
+    )
+  }, [setSelection])
+
   return (
     <section
       className={`canvas-stage ${state.tool === 'hand' ? 'hand-tool' : ''}`}
@@ -289,15 +299,7 @@ function StageInner() {
           onNodeDragStop={() => commitTransforms()}
           onMove={(_event, viewport) => emitViewport(viewport)}
           onMoveEnd={(_event, viewport) => emitViewport(viewport)}
-          onSelectionChange={(params: OnSelectionChangeParams) => {
-            setSelection(
-              params.nodes.map((node) => node.id),
-              params.edges.map((edge) => ({
-                sourceNodeId: edge.source as DecimalString,
-                targetNodeId: edge.target as DecimalString,
-              })),
-            )
-          }}
+          onSelectionChange={handleSelectionChange}
           onNodeClick={(event, node) => {
             if (!event.shiftKey) {
               setSelection([node.id])
