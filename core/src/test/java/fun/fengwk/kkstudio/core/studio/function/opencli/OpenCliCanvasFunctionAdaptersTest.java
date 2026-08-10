@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -577,6 +578,374 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     assertThrows(IllegalStateException.class, () -> adapter.execute(context, run));
     verify(client, never()).execute(any(), anyLong());
+  }
+
+  @Test
+  void gptRecoveryPollsToSuccessAndAllNonSuccessTerminalStatusesFailWithoutResubmission() {
+    for (ExecutionStatus status :
+        List.of(ExecutionStatus.FAILED, ExecutionStatus.TIMED_OUT, ExecutionStatus.CANCELLED)) {
+      OpenCliHubClient client = mock(OpenCliHubClient.class);
+      GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
+      when(client.getExecution("existing", 0))
+          .thenReturn(new Execution("existing", status, "", "", List.of()));
+      CanvasFunctionFrozenRun run =
+          run(
+              adapter.models().get(0),
+              List.of(new TextSegment("draw")),
+              Map.of("ratio", "auto"),
+              List.of(),
+              "GPT_IMAGE_POLLING",
+              Map.of("executionId", "existing", "uploads", List.of()));
+
+      OpenCliHubException error =
+          assertThrows(
+              OpenCliHubException.class,
+              () -> adapter.execute(new RecordingContext(Map.of()), run));
+      assertTrue(error.getMessage().contains(status.name()));
+      verify(client, never()).execute(any(), anyLong());
+    }
+
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
+    ExecutionResource output =
+        new ExecutionResource("x.png", "image/png", 1L, null, "/api/resources/x.png");
+    when(client.getExecution(anyString(), anyInt()))
+        .thenAnswer(
+            invocation ->
+                invocation.<Integer>getArgument(1) == 0
+                    ? new Execution("existing", ExecutionStatus.RUNNING, "", "", List.of())
+                    : new Execution(
+                        "existing", ExecutionStatus.SUCCEEDED, "", "", List.of(output)));
+    when(client.openResource(output))
+        .thenReturn(
+            new HubResourceStream(new ByteArrayInputStream(new byte[] {1}), 1L, "image/png"));
+    CanvasFunctionFrozenRun run =
+        run(
+            adapter.models().get(0),
+            List.of(new TextSegment("draw")),
+            Map.of("ratio", "auto"),
+            List.of(),
+            "GPT_IMAGE_POLLING",
+            Map.of("executionId", "existing", "uploads", List.of()));
+
+    assertEquals(List.of(900L), adapter.execute(new RecordingContext(Map.of()), run));
+    verify(client).getExecution("existing", 120);
+
+    CanvasFunctionFrozenRun noExecution =
+        run(
+            adapter.models().get(0),
+            List.of(new TextSegment("draw")),
+            Map.of("ratio", "auto"),
+            List.of(),
+            "QUEUED",
+            Map.of());
+    adapter.cancel(noExecution);
+    verify(client, never()).cancelPendingBestEffort(anyString());
+  }
+
+  @Test
+  void seedanceSubmissionRecoveryUsesNotFoundAsRetryThenMaterializesReadyVideo() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+    when(client.getExecution("submit-existing", 0))
+        .thenReturn(
+            new Execution(
+                "submit-existing",
+                ExecutionStatus.SUCCEEDED,
+                "{\"status\":\"submitted\",\"submitted\":true,"
+                    + "\"assetId\":\"0123456789abcdef\"}",
+                "",
+                List.of()));
+    when(client.execute(any(), anyLong()))
+        .thenReturn(
+            new Execution("status-1", ExecutionStatus.PENDING, "", "", List.of()),
+            new Execution("status-2", ExecutionStatus.PENDING, "", "", List.of()));
+    when(client.getExecution("status-1", 0))
+        .thenReturn(
+            new Execution(
+                "status-1",
+                ExecutionStatus.SUCCEEDED,
+                "{\"status\":\"not_found\"}",
+                "",
+                List.of()));
+    ExecutionResource output =
+        new ExecutionResource("video.mp4", "video/mp4", 1L, null, "/api/resources/video.mp4");
+    when(client.getExecution("status-2", 0))
+        .thenReturn(
+            new Execution(
+                "status-2",
+                ExecutionStatus.SUCCEEDED,
+                "{\"status\":\"ready\",\"downloaded\":true}",
+                "",
+                List.of(output)));
+    when(client.openResource(output))
+        .thenReturn(
+            new HubResourceStream(new ByteArrayInputStream(new byte[] {8}), 1L, "video/mp4"));
+    CanvasFunctionFrozenRun run =
+        run(
+            adapter.models().get(0),
+            List.of(new TextSegment("x")),
+            Map.of("ratio", "16:9", "duration", 5),
+            List.of(),
+            "SEEDANCE_SUBMISSION_POLLING",
+            Map.of("executionId", "submit-existing", "uploads", List.of()));
+    RecordingContext context = new RecordingContext(Map.of());
+
+    assertEquals(List.of(900L), adapter.execute(context, run));
+    verify(client, times(2)).execute(any(), anyLong());
+    assertTrue(context.stages.contains("SEEDANCE_STATUS_WAITING"));
+    assertEquals("SEEDANCE_MATERIALIZING", context.stages.get(context.stages.size() - 1));
+  }
+
+  @Test
+  void seedanceRejectsMalformedSubmissionAndStatusShapesAndHubTerminalFailures() {
+    for (String stdout :
+        List.of(
+            "{\"status\":\"submitted\",\"submitted\":false," + "\"assetId\":\"0123456789abcdef\"}",
+            "{\"status\":\"submitted\",\"submitted\":true,\"assetId\":\"bad\"}",
+            "[]",
+            "not-json")) {
+      OpenCliHubClient client = mock(OpenCliHubClient.class);
+      SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+      when(client.getExecution("submit-existing", 0))
+          .thenReturn(
+              new Execution("submit-existing", ExecutionStatus.SUCCEEDED, stdout, "", List.of()));
+      CanvasFunctionFrozenRun run =
+          run(
+              adapter.models().get(0),
+              List.of(new TextSegment("x")),
+              Map.of("ratio", "16:9", "duration", 5),
+              List.of(),
+              "SEEDANCE_SUBMISSION_POLLING",
+              Map.of("executionId", "submit-existing", "uploads", List.of()));
+      assertThrows(
+          OpenCliHubException.class, () -> adapter.execute(new RecordingContext(Map.of()), run));
+      verify(client, never()).execute(any(), anyLong());
+    }
+
+    for (String stdout :
+        List.of(
+            "[]",
+            "[{\"status\":\"ready\"},{\"status\":\"ready\"}]",
+            "{}",
+            "{\"status\":\"ready\",\"downloaded\":false}",
+            "{\"status\":\"ready\",\"downloaded\":true}",
+            "{\"status\":\"unknown\"}")) {
+      OpenCliHubClient client = mock(OpenCliHubClient.class);
+      SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+      when(client.getExecution("status-existing", 0))
+          .thenReturn(
+              new Execution("status-existing", ExecutionStatus.SUCCEEDED, stdout, "", List.of()));
+      assertThrows(
+          OpenCliHubException.class,
+          () ->
+              adapter.execute(
+                  new RecordingContext(Map.of()),
+                  seedanceStatusRun(adapter, "status-existing", Instant.now().toString())));
+    }
+
+    for (ExecutionStatus status :
+        List.of(ExecutionStatus.FAILED, ExecutionStatus.TIMED_OUT, ExecutionStatus.CANCELLED)) {
+      OpenCliHubClient client = mock(OpenCliHubClient.class);
+      SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+      when(client.getExecution("status-existing", 0))
+          .thenReturn(new Execution("status-existing", status, "", "", List.of()));
+      assertThrows(
+          OpenCliHubException.class,
+          () ->
+              adapter.execute(
+                  new RecordingContext(Map.of()),
+                  seedanceStatusRun(adapter, "status-existing", Instant.now().toString())));
+    }
+  }
+
+  @Test
+  void seedanceCheckpointDeadlineAndInterruptedSleepFailBeforeAnyStatusSubmission() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            adapter.execute(
+                new RecordingContext(Map.of()), seedanceStatusRun(adapter, null, null)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            adapter.execute(
+                new RecordingContext(Map.of()),
+                seedanceStatusRun(adapter, null, "not-an-instant")));
+
+    SeedanceCanvasFunctionAdapter interrupted =
+        seedanceAdapter(
+            client,
+            ignored -> {
+              throw new InterruptedException("stop");
+            });
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            interrupted.execute(
+                new RecordingContext(Map.of()),
+                seedanceStatusRun(interrupted, null, Instant.now().toString())));
+    assertTrue(Thread.currentThread().isInterrupted());
+    Thread.interrupted();
+    verify(client, never()).execute(any(), anyLong());
+  }
+
+  @Test
+  void adapterPreflightRejectsUnsupportedKindsMetadataAndCheckpointUploadMismatch() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    GptImage2CanvasFunctionAdapter gpt = gptAdapter(client);
+    CanvasFunctionFrozenReference video =
+        reference(
+            10L,
+            0,
+            100L,
+            CanvasResourceKind.VIDEO,
+            "video.mp4",
+            "video/mp4",
+            "{\"container\":\"mp4\",\"videoCodec\":\"h264\",\"durationMs\":2000}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            gpt.preflight(
+                run(
+                    gpt.models().get(0),
+                    List.of(new TextSegment("x")),
+                    Map.of("ratio", "auto"),
+                    List.of(video),
+                    "QUEUED",
+                    Map.of())));
+
+    SeedanceCanvasFunctionAdapter seedance = seedanceAdapter(client, ignored -> {});
+    CanvasFunctionFrozenReference text =
+        reference(11L, 0, 101L, CanvasResourceKind.TEXT, "text.txt", "text/plain", "{}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedance.preflight(
+                run(
+                    seedance.models().get(0),
+                    List.of(new TextSegment("x")),
+                    Map.of("ratio", "16:9", "duration", 5),
+                    List.of(text),
+                    "QUEUED",
+                    Map.of())));
+    CanvasFunctionFrozenReference malformedAudio =
+        reference(
+            12L,
+            0,
+            102L,
+            CanvasResourceKind.AUDIO,
+            "audio.wav",
+            "audio/wav",
+            "{\"container\":\"wav\",\"codec\":\"mp3\",\"durationMs\":\"bad\"}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            seedance.preflight(
+                run(
+                    seedance.models().get(0),
+                    List.of(new TextSegment("x")),
+                    Map.of("ratio", "16:9", "duration", 5),
+                    List.of(malformedAudio),
+                    "QUEUED",
+                    Map.of())));
+
+    Map<String, Object> mismatched = new LinkedHashMap<>();
+    mismatched.put("executionId", "existing");
+    mismatched.put(
+        "uploads", List.of(Map.of("resourceId", "999", "resourcePath", "/resources/a.png")));
+    CanvasFunctionFrozenRun recovery =
+        run(
+            gpt.models().get(0),
+            List.of(new TextSegment("x")),
+            Map.of("ratio", "auto"),
+            List.of(image(10L, 0, 100L, "a.png")),
+            "GPT_IMAGE_POLLING",
+            mismatched);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> gpt.execute(new RecordingContext(Map.of()), recovery));
+    verify(client, never()).getExecution(anyString(), anyInt());
+  }
+
+  @Test
+  void adaptersWrapMaterializedHubResourceCloseFailures() {
+    InputStream closeFailure =
+        new ByteArrayInputStream(new byte[] {1}) {
+          @Override
+          public void close() throws IOException {
+            throw new IOException("close failed");
+          }
+        };
+    OpenCliHubClient gptClient = mock(OpenCliHubClient.class);
+    GptImage2CanvasFunctionAdapter gpt = gptAdapter(gptClient);
+    ExecutionResource imageOutput =
+        new ExecutionResource("x.png", "image/png", 1L, null, "/api/resources/x.png");
+    when(gptClient.getExecution("gpt-existing", 0))
+        .thenReturn(
+            new Execution("gpt-existing", ExecutionStatus.SUCCEEDED, "", "", List.of(imageOutput)));
+    when(gptClient.openResource(imageOutput))
+        .thenReturn(new HubResourceStream(closeFailure, 1L, "image/png"));
+    CanvasFunctionFrozenRun gptRun =
+        run(
+            gpt.models().get(0),
+            List.of(new TextSegment("x")),
+            Map.of("ratio", "auto"),
+            List.of(),
+            "GPT_IMAGE_POLLING",
+            Map.of("executionId", "gpt-existing", "uploads", List.of()));
+    assertThrows(
+        UncheckedIOException.class, () -> gpt.execute(new RecordingContext(Map.of()), gptRun));
+
+    InputStream videoCloseFailure =
+        new ByteArrayInputStream(new byte[] {1}) {
+          @Override
+          public void close() throws IOException {
+            throw new IOException("close failed");
+          }
+        };
+    OpenCliHubClient seedanceClient = mock(OpenCliHubClient.class);
+    SeedanceCanvasFunctionAdapter seedance = seedanceAdapter(seedanceClient, ignored -> {});
+    ExecutionResource videoOutput =
+        new ExecutionResource("x.mp4", "video/mp4", 1L, null, "/api/resources/x.mp4");
+    when(seedanceClient.getExecution("seedance-existing", 0))
+        .thenReturn(
+            new Execution(
+                "seedance-existing",
+                ExecutionStatus.SUCCEEDED,
+                "{\"status\":\"ready\",\"downloaded\":true}",
+                "",
+                List.of(videoOutput)));
+    when(seedanceClient.openResource(videoOutput))
+        .thenReturn(new HubResourceStream(videoCloseFailure, 1L, "video/mp4"));
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            seedance.execute(
+                new RecordingContext(Map.of()),
+                seedanceStatusRun(seedance, "seedance-existing", Instant.now().toString())));
+  }
+
+  private static CanvasFunctionFrozenRun seedanceStatusRun(
+      SeedanceCanvasFunctionAdapter adapter, String executionId, String pollStartedAt) {
+    Map<String, Object> state = new LinkedHashMap<>();
+    state.put("uploads", List.of());
+    state.put("assetId", "0123456789abcdef");
+    if (executionId != null) {
+      state.put("executionId", executionId);
+    }
+    if (pollStartedAt != null) {
+      state.put("pollStartedAt", pollStartedAt);
+    }
+    return run(
+        adapter.models().get(0),
+        List.of(new TextSegment("x")),
+        Map.of("ratio", "16:9", "duration", 5),
+        List.of(),
+        executionId == null ? "SEEDANCE_STATUS_WAITING" : "SEEDANCE_STATUS_POLLING",
+        state);
   }
 
   private static void assertNoHubManagedArguments(List<String> argv) {
