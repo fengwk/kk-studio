@@ -59,8 +59,6 @@ body = {
         "0",
         "--retry",
         "0",
-        "--format",
-        "json",
     ],
     "timeoutMillis": 600000,
 }

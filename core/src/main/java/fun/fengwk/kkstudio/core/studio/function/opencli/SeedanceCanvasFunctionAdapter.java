@@ -310,8 +310,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     argv.add("1");
     argv.add("--retry");
     argv.add(Integer.toString(properties.getRetry()));
-    argv.add("--format");
-    argv.add("json");
     return List.copyOf(argv);
   }
 
@@ -330,9 +328,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         "--limit",
         "1",
         "--max_pages",
-        "5",
-        "--format",
-        "json");
+        "5");
   }
 
   private Execution awaitHubExecution(

@@ -131,7 +131,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             "--timeout",
             "900"),
         tokens.subList(3, tokens.size()));
-    assertFalse(tokens.contains("--op"));
+    assertNoHubManagedArguments(tokens);
     assertEquals(List.of(100L, 101L), context.openedResourceIds);
     assertEquals("GPT_IMAGE_MATERIALIZING", context.stages.get(context.stages.size() - 1));
     assertEquals("image/png", context.materializedMediaType);
@@ -368,9 +368,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             "--submit",
             "1",
             "--retry",
-            "2",
-            "--format",
-            "json"),
+            "2"),
         argv.getAllValues().get(0));
     List<String> expectedStatus =
         List.of(
@@ -387,11 +385,10 @@ class OpenCliCanvasFunctionAdaptersTest {
             "--limit",
             "1",
             "--max_pages",
-            "5",
-            "--format",
-            "json");
+            "5");
     assertEquals(expectedStatus, argv.getAllValues().get(1));
     assertEquals(expectedStatus, argv.getAllValues().get(2));
+    argv.getAllValues().forEach(OpenCliCanvasFunctionAdaptersTest::assertNoHubManagedArguments);
     assertEquals(List.of(5L, 5L), sleeps);
     assertEquals("video/mp4", context.materializedMediaType);
     assertArrayEquals(new byte[] {4, 5, 6}, context.materialized);
@@ -580,6 +577,12 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     assertThrows(IllegalStateException.class, () -> adapter.execute(context, run));
     verify(client, never()).execute(any(), anyLong());
+  }
+
+  private static void assertNoHubManagedArguments(List<String> argv) {
+    for (String token : List.of("--format", "-f", "--profile", "--op")) {
+      assertFalse(argv.contains(token), () -> "Hub-managed argument must be absent: " + token);
+    }
   }
 
   private static GptImage2CanvasFunctionAdapter gptAdapter(OpenCliHubClient client) {
