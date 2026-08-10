@@ -257,10 +257,10 @@
 
 .canvas-feature .editor-header {
   display: flex;
-  height: 50px;
-  flex: 0 0 50px;
+  height: 44px;
+  flex: 0 0 44px;
   align-items: center;
-  padding: 0 14px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
   background: var(--stage-bg);
 }
@@ -286,14 +286,14 @@
 
 .canvas-feature .document-title strong {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .canvas-feature .document-title span {
   color: var(--green);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .canvas-feature .editor-actions {
@@ -412,7 +412,7 @@
 
 .canvas-feature .resource-count {
   color: var(--fg-dim);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .canvas-feature .resource-node-body {
@@ -420,6 +420,7 @@
   flex: 1;
   overflow: auto;
   background: var(--stage-bg);
+  font-size: 12px;
 }
 
 .canvas-feature .resource-viewer {
@@ -490,7 +491,7 @@
   border-radius: 5px;
   color: white;
   background: rgba(0, 0, 0, 0.68);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .canvas-feature .media-error {
@@ -501,7 +502,7 @@
   border-radius: 5px;
   color: var(--danger, #ff8b8b);
   background: rgba(0, 0, 0, 0.7);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .canvas-feature .canvas-markdown-resource {
@@ -510,7 +511,7 @@
   overflow: auto;
   color: var(--fg);
   background: var(--surface);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -571,7 +572,7 @@
 .canvas-feature .resource-index-more,
 .canvas-feature .resource-index-count {
   color: var(--fg-dim);
-  font-size: 9px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -586,7 +587,7 @@
   border-top: 1px solid var(--line);
   color: var(--fg-muted);
   background: var(--surface-soft);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .canvas-feature .function-footer .run-status {
@@ -605,7 +606,7 @@
 
 .canvas-feature .resource-node-footer button {
   color: var(--green);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .canvas-feature .resource-empty {
@@ -673,8 +674,8 @@
 }
 
 .canvas-feature .react-flow__minimap {
-  right: 150px !important;
-  bottom: 12px !important;
+  right: 12px !important;
+  bottom: 56px !important;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--surface) !important;
@@ -999,10 +1000,10 @@
 
 .canvas-feature .agent-dock-wrap {
   position: absolute;
-  bottom: 18px;
+  bottom: 16px;
   left: 50%;
   z-index: 14;
-  width: min(720px, calc(100% - 40px));
+  width: min(720px, calc(100% - 32px));
   transform: translateX(-50%);
 }
 
@@ -1060,6 +1061,7 @@
   outline: 0;
   color: var(--fg);
   background: transparent;
+  font-size: 13px;
   line-height: 19px;
 }
 
@@ -1205,7 +1207,7 @@
 
 .canvas-feature .canvas-controls {
   position: absolute;
-  right: 13px;
+  right: 12px;
   bottom: 12px;
   z-index: 8;
 }
@@ -1219,12 +1221,12 @@
 }
 
 .canvas-feature .zoom-controls button {
-  min-width: 29px;
-  height: 29px;
+  min-width: 32px;
+  height: 32px;
   padding: 0 6px;
   border-right: 1px solid var(--line-strong);
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .canvas-feature .zoom-controls button:last-child {
@@ -1282,6 +1284,20 @@
   .canvas-feature .project-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .canvas-feature .canvas-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .canvas-feature .react-flow__minimap {
+    display: none !important;
+  }
+
+  .canvas-feature .canvas-controls {
+    bottom: 80px;
+  }
 }
 
 @media (max-width: 700px) {
@@ -1302,20 +1318,24 @@
     display: none;
   }
 
-  .canvas-feature .react-flow__minimap {
-    display: none !important;
-  }
-
   .canvas-feature .agent-dock-wrap {
-    bottom: 12px;
-    width: calc(100% - 24px);
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    transform: none;
   }
 
   .canvas-feature .canvas-controls {
-    bottom: 78px;
+    bottom: 72px;
   }
 
-  .canvas-feature .canvas-hint {
+  .canvas-feature .zoom-controls button {
+    min-width: 36px;
+    height: 36px;
+  }
+
+  .canvas-feature .revision-pill {
     display: none;
   }
 
@@ -1344,6 +1364,12 @@
 
   .canvas-feature .canvas-text-dialog textarea {
     min-height: 220px;
+  }
+}
+
+@media (min-width: 1800px) {
+  .canvas-feature .agent-dock-wrap {
+    width: min(840px, calc(100% - 48px));
   }
 }
 

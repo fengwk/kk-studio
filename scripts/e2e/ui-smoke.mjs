@@ -424,6 +424,31 @@ async function main(argv) {
     } else {
       await createButton.click()
     }
+    // 创建路径在 mutation 成功后导航，因此先等编辑器挂载再断言 URL。
+    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+    assert(
+      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
+    )
+    const resetZoom = page.getByRole('button', {
+      name: /^(Reset zoom to 100%|重置缩放为 100%)$/,
+    })
+    await resetZoom.waitFor({ state: 'visible' })
+    assert((await resetZoom.textContent())?.trim() === '100%', 'canvas reset zoom is not 100%')
+    await page.reload({ waitUntil: 'networkidle' })
+    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+    assert(
+      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      `canvas reload pathname invalid: ${new URL(page.url()).pathname}`,
+    )
+    await page.goBack({ waitUntil: 'networkidle' })
+    assert(new URL(page.url()).pathname === '/canvas', `canvas back pathname invalid: ${page.url()}`)
+    await expectVisibleText(page, '你的画布')
+    await page.goForward({ waitUntil: 'networkidle' })
+    assert(
+      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      `canvas forward pathname invalid: ${new URL(page.url()).pathname}`,
+    )
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
     await shot(caseArt, 'canvas-editor')
     expectNoFatal(pageErrors, consoleErrors)

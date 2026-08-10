@@ -21,6 +21,7 @@ import type {
 } from '@/features/canvas/types'
 import {
   DEFAULT_CANVAS_VIEWPORT,
+  hasStoredCanvasViewport,
   loadCanvasViewport,
   saveCanvasViewport,
   type StoredCanvasViewport,
@@ -49,15 +50,17 @@ import { queryKeys } from '@/shared/lib/query-keys'
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
 const NODE_SIZE: CanvasTransformDTO = { x: 120, y: 120, width: 320, height: 260 }
 
-export function useCanvasController() {
+export function useCanvasController(initialCanvasId?: DecimalString) {
   const queryClient = useQueryClient()
-  const [state, setState] = useState<CanvasLocalState>({
-    view: 'library',
-    canvasId: null,
+  const [state, setState] = useState<CanvasLocalState>(() => ({
+    view: initialCanvasId ? 'editor' : 'library',
+    canvasId: initialCanvasId ?? null,
     selectedIds: [],
     selectedLinks: [],
     positionDrafts: {},
-    viewport: { ...DEFAULT_CANVAS_VIEWPORT },
+    viewport: initialCanvasId
+      ? loadCanvasViewport(initialCanvasId)
+      : { ...DEFAULT_CANVAS_VIEWPORT },
     tool: 'select',
     toast: null,
     addMenuOpen: false,
@@ -70,7 +73,10 @@ export function useCanvasController() {
     commandPending: false,
     conflictMessage: null,
     textEditor: null,
-  })
+  }))
+  const [initialFitPending, setInitialFitPending] = useState(
+    () => Boolean(initialCanvasId && !hasStoredCanvasViewport(initialCanvasId)),
+  )
   const [stageMetrics, setStageMetrics] = useState(DEFAULT_STAGE)
   const fitViewRef = useRef<(() => void) | null>(null)
   const focusSelectionRef = useRef<(() => void) | null>(null)
@@ -209,6 +215,7 @@ export function useCanvasController() {
     pendingFunctionConfigsRef.current.clear()
     reservedNodeAliasesRef.current.clear()
     queueRef.current = null
+    setInitialFitPending(!hasStoredCanvasViewport(canvasId))
     setState((current) => ({
       ...current,
       view: 'editor',
@@ -230,6 +237,7 @@ export function useCanvasController() {
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
     reservedNodeAliasesRef.current.clear()
+    setInitialFitPending(false)
     setState((current) => ({
       ...current,
       view: 'library',
@@ -359,6 +367,10 @@ export function useCanvasController() {
       }
       return { ...current, viewport }
     })
+  }, [])
+
+  const completeInitialFit = useCallback(() => {
+    setInitialFitPending(false)
   }, [])
 
   const setSelection = useCallback((
@@ -934,6 +946,8 @@ export function useCanvasController() {
     modelsQuery,
     models: modelsQuery.data ?? [],
     nodeCallbacks,
+    initialFitPending,
+    completeInitialFit,
     openEditor,
     openLibrary,
     setToast,

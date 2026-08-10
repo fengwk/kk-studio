@@ -23,6 +23,7 @@ registerCase({
       prompt: { segments: [{ type: 'TEXT', text: 'free deterministic image' }] },
       parameters: { ratio: '16:9' },
     })
+    const expectedTransform = { x: 100, y: 100, width: 320, height: 260 }
     const { json: commandJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/commands`,
@@ -35,7 +36,7 @@ registerCase({
             name: 'generated',
             modelKey: 'fake-image',
             configJson,
-            transform: { x: 0, y: 0, width: 100, height: 80 },
+            transform: expectedTransform,
           },
         ],
       },
@@ -43,6 +44,11 @@ registerCase({
     const created = envelopeData(commandJson)
     const node = created.nodes.find((item) => item.name === 'generated')
     assert(node && created.document.graphRevision === '1', JSON.stringify(created))
+    assert(
+      Object.keys(node.transform).length === Object.keys(expectedTransform).length
+        && Object.entries(expectedTransform).every(([key, value]) => node.transform[key] === value),
+      JSON.stringify(node.transform),
+    )
 
     const { json: startJson } = await ctx.call(
       'POST',

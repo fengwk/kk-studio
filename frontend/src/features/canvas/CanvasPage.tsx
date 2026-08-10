@@ -1,31 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
-import { useLocation } from 'react-router'
+import { useState } from 'react'
+import { Navigate, useParams } from 'react-router'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
 import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import type { DecimalString } from '@/shared/api/contracts/studio'
 import '@/features/canvas/canvas.css'
 
 function CanvasPageBody() {
-  const { state, openLibrary } = useCanvasRuntime()
-  const location = useLocation()
-  const seenLocationKeyRef = useRef<string | null>(null)
-
-  // 同路由下的 Canvas 首页链接会发出新的 location key，但不会重新挂载当前 feature。
-  useEffect(() => {
-    if (seenLocationKeyRef.current === null) {
-      seenLocationKeyRef.current = location.key
-      return
-    }
-    if (location.key === seenLocationKeyRef.current) {
-      return
-    }
-    seenLocationKeyRef.current = location.key
-    if (location.pathname.startsWith('/canvas')) {
-      openLibrary()
-    }
-  }, [location.key, location.pathname, openLibrary])
+  const { state } = useCanvasRuntime()
 
   return (
     <div className={`canvas-feature ${state.view === 'editor' ? 'canvas-editor-active' : ''}`}>
@@ -36,13 +20,22 @@ function CanvasPageBody() {
 }
 
 export function CanvasPage() {
+  const { canvasId } = useParams<{ canvasId?: string }>()
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   }))
 
+  if (canvasId !== undefined && !/^[1-9][0-9]*$/.test(canvasId)) {
+    return <Navigate to="/canvas" replace />
+  }
+  const initialCanvasId = canvasId as DecimalString | undefined
+
   return (
     <QueryClientProvider client={queryClient}>
-      <CanvasRuntimeProvider>
+      <CanvasRuntimeProvider
+        key={initialCanvasId ?? 'library'}
+        initialCanvasId={initialCanvasId}
+      >
         <CanvasPageBody />
       </CanvasRuntimeProvider>
     </QueryClientProvider>

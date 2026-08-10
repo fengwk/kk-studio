@@ -101,6 +101,10 @@ export const canvasCatalog = {
     'en-US': 'Fit all content',
     'zh-CN': '适应全部内容',
   },
+  'canvas.stage.resetZoom': {
+    'en-US': 'Reset zoom to 100%',
+    'zh-CN': '重置缩放为 100%',
+  },
   'canvas.stage.zoomIn': {
     'en-US': 'Zoom in',
     'zh-CN': '放大',

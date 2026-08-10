@@ -1,10 +1,13 @@
+import { useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasEditor() {
-  const { state, snapshot, openLibrary, snapshotQuery } = useCanvasRuntime()
+  const { state, snapshot, snapshotQuery } = useCanvasRuntime()
   const { t } = useI18n()
+  const navigate = useNavigate()
+  const openLibrary = () => navigate('/canvas')
 
   if (snapshotQuery.isError) {
     const notFound = (snapshotQuery.error as { status?: number }).status === 404

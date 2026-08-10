@@ -4,30 +4,44 @@ export interface StoredCanvasViewport {
   zoom: number
 }
 
-export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 80, y: 20, zoom: 0.6 }
+export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom: 1 }
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 1.45
 
 export function canvasViewportStorageKey(canvasId: string): string {
-  return `kkstudio.canvas.viewport.v1:${canvasId}`
+  return `kkstudio.canvas.viewport.v2:${canvasId}`
+}
+
+export function hasStoredCanvasViewport(
+  canvasId: string,
+  storage: Pick<Storage, 'getItem'> = localStorage,
+): boolean {
+  return readCanvasViewport(canvasId, storage) !== null
 }
 
 export function loadCanvasViewport(
   canvasId: string,
   storage: Pick<Storage, 'getItem'> = localStorage,
 ): StoredCanvasViewport {
-  const raw = storage.getItem(canvasViewportStorageKey(canvasId))
-  if (!raw) {
-    return { ...DEFAULT_CANVAS_VIEWPORT }
-  }
+  return readCanvasViewport(canvasId, storage) ?? { ...DEFAULT_CANVAS_VIEWPORT }
+}
+
+function readCanvasViewport(
+  canvasId: string,
+  storage: Pick<Storage, 'getItem'>,
+): StoredCanvasViewport | null {
   try {
+    const raw = storage.getItem(canvasViewportStorageKey(canvasId))
+    if (!raw) {
+      return null
+    }
     const value = JSON.parse(raw) as Partial<StoredCanvasViewport>
     if (
       !Number.isFinite(value.x)
       || !Number.isFinite(value.y)
       || !Number.isFinite(value.zoom)
     ) {
-      return { ...DEFAULT_CANVAS_VIEWPORT }
+      return null
     }
     return {
       x: value.x as number,
@@ -35,7 +49,7 @@ export function loadCanvasViewport(
       zoom: clampCanvasZoom(value.zoom as number),
     }
   } catch {
-    return { ...DEFAULT_CANVAS_VIEWPORT }
+    return null
   }
 }
 

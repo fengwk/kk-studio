@@ -24,5 +24,6 @@ export const canvasExtension: TrustedReactExtension = {
   id: 'builtin.canvas',
   pages: [
     { id: 'canvas.home', path: 'canvas', component: CanvasRoutePage, priority: 90 },
+    { id: 'canvas.editor', path: 'canvas/:canvasId', component: CanvasRoutePage, priority: 90 },
   ],
 }

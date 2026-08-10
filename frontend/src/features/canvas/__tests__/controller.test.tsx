@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useState, type PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
+import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasSnapshotDTO,
@@ -144,6 +145,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     revision = 0n
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => snapshot(revision.toString()))
@@ -217,6 +219,20 @@ describe('useCanvasController real snapshot runtime', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it('starts an initial canvas in editor mode and queries its snapshot immediately', async () => {
+    // Direct routes must not wait for an in-memory openEditor transition before loading data.
+    localStorage.removeItem(canvasViewportStorageKey('1'))
+    const { result } = renderHook(() => useCanvasController('1'), { wrapper: Wrapper })
+
+    expect(result.current.state.view).toBe('editor')
+    expect(result.current.state.canvasId).toBe('1')
+    expect(result.current.initialFitPending).toBe(true)
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    expect(getCanvas).toHaveBeenCalledWith('1', expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
   })
 
   it('drives commands, local UI state, uploads, and keyboard actions from one server snapshot', async () => {

@@ -1,17 +1,29 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasPage } from '@/features/canvas/CanvasPage'
+import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import type {
   CanvasCommandDTO,
   CanvasDocumentDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
+import { setLocale } from '@/shared/i18n'
 
 const flowHarness = vi.hoisted(() => ({
   current: null as unknown,
+  nodesInitialized: true,
+  viewport: { x: 0, y: 0, zoom: 1 },
+  fitView: vi.fn(async () => true),
+  setViewport: vi.fn(async () => undefined),
+  zoomTo: vi.fn(async () => undefined),
 }))
 
 vi.mock('@xyflow/react', () => ({
@@ -40,11 +52,12 @@ vi.mock('@xyflow/react', () => ({
   SelectionMode: { Partial: 'partial' },
   Handle: () => null,
   Position: { Left: 'left', Right: 'right' },
+  useNodesInitialized: () => flowHarness.nodesInitialized,
   useReactFlow: () => ({
-    fitView: vi.fn(async () => undefined),
-    getViewport: () => ({ x: 80, y: 20, zoom: 0.6 }),
-    setViewport: vi.fn(async () => undefined),
-    zoomTo: vi.fn(async () => undefined),
+    fitView: flowHarness.fitView,
+    getViewport: () => flowHarness.viewport,
+    setViewport: flowHarness.setViewport,
+    zoomTo: flowHarness.zoomTo,
   }),
 }))
 
@@ -208,15 +221,38 @@ function installBackend(options: BackendOptions = {}) {
   return { commandBodies, createBodies, snapshots }
 }
 
-function renderCanvasPage() {
+function PathnameProbe() {
+  const location = useLocation()
+  return <output data-testid="pathname">{location.pathname}</output>
+}
+
+function renderCanvasPage(initialEntries = ['/canvas']) {
   return render(
-    <MemoryRouter>
-      <CanvasPage />
+    <MemoryRouter initialEntries={initialEntries}>
+      <PathnameProbe />
+      <Routes>
+        <Route path="/canvas" element={<CanvasPage />} />
+        <Route path="/canvas/:canvasId" element={<CanvasPage />} />
+      </Routes>
     </MemoryRouter>,
   )
 }
 
 describe('CanvasPage real list/create/load integration', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setLocale('zh-CN')
+    flowHarness.current = null
+    flowHarness.nodesInitialized = true
+    flowHarness.viewport = { x: 0, y: 0, zoom: 1 }
+    flowHarness.fitView.mockReset()
+    flowHarness.fitView.mockResolvedValue(true)
+    flowHarness.setViewport.mockReset()
+    flowHarness.setViewport.mockResolvedValue(undefined)
+    flowHarness.zoomTo.mockReset()
+    flowHarness.zoomTo.mockResolvedValue(undefined)
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -224,9 +260,11 @@ describe('CanvasPage real list/create/load integration', () => {
   it('loads the authoritative snapshot and sends typed text/function commands', async () => {
     const { commandBodies } = installBackend()
     const user = userEvent.setup()
+    flowHarness.viewport = { x: 24, y: 36, zoom: 0.9 }
     renderCanvasPage()
 
     await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas/1')
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
     expect(screen.getByText('r0')).toBeInTheDocument()
 
@@ -237,6 +275,22 @@ describe('CanvasPage real list/create/load integration', () => {
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => {
       expect(commandBodies.some((body) => body.commands[0]?.type === 'CREATE_TEXT_NODE')).toBe(true)
+    })
+    // An empty canvas waits for its first measured node, then performs the initial fit exactly once.
+    await waitFor(() => {
+      expect(flowHarness.fitView).toHaveBeenCalledOnce()
+    })
+    expect(flowHarness.fitView).toHaveBeenCalledWith({
+      padding: 0.18,
+      maxZoom: 1,
+      duration: 0,
+    })
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(canvasViewportStorageKey('1')) ?? '')).toEqual({
+        x: 24,
+        y: 36,
+        zoom: 0.9,
+      })
     })
 
     await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
@@ -259,8 +313,10 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(await screen.findByText('还没有画布')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '创建新画布' }))
 
+    // 导航发生在 create mutation 成功回调中，因此先等编辑器就绪再断言 URL。
     expect(await screen.findByText('未命名画布')).toBeInTheDocument()
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas/2')
     expect(createBodies).toEqual([{ title: '未命名画布' }])
   })
 
@@ -286,10 +342,114 @@ describe('CanvasPage real list/create/load integration', () => {
     renderCanvasPage()
 
     await user.click(await screen.findByRole('button', { name: /已删除画布/ }))
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas/404')
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('画布不存在')
     expect(within(alert).queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
-    expect(within(alert).getByRole('button', { name: '返回画布库' })).toBeInTheDocument()
+    await user.click(within(alert).getByRole('button', { name: '返回画布库' }))
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas')
+    expect(await screen.findByText('你的画布')).toBeInTheDocument()
+  })
+
+  it('loads a direct editor URL and derives the zoom label from the live viewport', async () => {
+    // A direct route is refresh-equivalent: it queries the snapshot without a library click.
+    installBackend()
+    renderCanvasPage(['/canvas/1'])
+
+    expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas/1')
+    const resetZoom = screen.getByRole('button', { name: '重置缩放为 100%' })
+    expect(resetZoom).toHaveTextContent('100%')
+
+    act(() => {
+      ;(flowHarness.current as {
+        onMove: (
+          event: unknown,
+          viewport: { x: number; y: number; zoom: number },
+        ) => void
+      }).onMove(null, { x: 12, y: 18, zoom: 0.74 })
+    })
+    expect(resetZoom).toHaveTextContent('74%')
+  })
+
+  it.each(['/canvas/0', '/canvas/01', '/canvas/-1', '/canvas/not-a-number'])(
+    'redirects invalid canvas id %s to the library',
+    async (path) => {
+      // Invalid decimal ids are rejected before any editor snapshot request can start.
+      installBackend()
+      renderCanvasPage([path])
+
+      expect(await screen.findByText('你的画布')).toBeInTheDocument()
+      expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas')
+      const canvasId = path.slice('/canvas/'.length)
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => (
+        String(url) === `/api/canvases/${canvasId}`
+      ))).toBe(false)
+    },
+  )
+
+  it('restores a valid persisted viewport without running the initial fit', async () => {
+    // A measured node must not override a viewport explicitly restored for this canvas.
+    const { snapshots } = installBackend()
+    const current = snapshots.get('1') as CanvasSnapshotDTO
+    snapshots.set('1', {
+      ...current,
+      nodes: [{
+        id: '10',
+        canvasId: '1',
+        name: 'note',
+        transform: { x: 100, y: 100, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    localStorage.setItem(
+      canvasViewportStorageKey('1'),
+      JSON.stringify({ x: 30, y: -20, zoom: 0.7 }),
+    )
+
+    renderCanvasPage(['/canvas/1'])
+
+    expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重置缩放为 100%' })).toHaveTextContent('70%')
+    expect(flowHarness.fitView).not.toHaveBeenCalled()
+    expect((flowHarness.current as {
+      defaultViewport: { x: number; y: number; zoom: number }
+    }).defaultViewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
+  })
+
+  it('caps manual fit and focus zoom at their readable visual scales', async () => {
+    // UI and keyboard paths exercise the real React Flow options rather than a pure helper.
+    installBackend()
+    localStorage.setItem(
+      canvasViewportStorageKey('1'),
+      JSON.stringify({ x: 0, y: 0, zoom: 1 }),
+    )
+    const user = userEvent.setup()
+    renderCanvasPage(['/canvas/1'])
+    const stage = await screen.findByLabelText(/无限画布/)
+
+    await user.click(screen.getByRole('button', { name: '适应全部内容' }))
+    expect(flowHarness.fitView).toHaveBeenNthCalledWith(1, {
+      padding: 0.18,
+      maxZoom: 1,
+      duration: 0,
+    })
+
+    act(() => {
+      stage.focus()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
+    })
+    await waitFor(() => {
+      expect(flowHarness.fitView).toHaveBeenNthCalledWith(2, {
+        nodes: undefined,
+        padding: 0.22,
+        maxZoom: 1.15,
+        duration: 0,
+      })
+    })
   })
 
   it('keeps React Flow selection publication stable for an unchanged empty selection', async () => {
