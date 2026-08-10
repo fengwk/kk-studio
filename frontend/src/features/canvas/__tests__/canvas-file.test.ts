@@ -17,12 +17,15 @@ describe('Canvas file descriptor fallback', () => {
     expect(canvasFileDescriptor({ name, type: '' })).toEqual({ kind, mediaType })
   })
 
-  it('prefers a supplied browser MIME and rejects unknown binary files', () => {
-    // Browser-provided media types remain authoritative while arbitrary binaries stay unsupported.
-    expect(canvasFileDescriptor({ name: 'capture.bin', type: 'image/avif' })).toEqual({
+  it('uses the accepted extension as authority and rejects unsupported files', () => {
+    // Browsers may omit or mislabel MIME; reserve accepts only the explicit v1 extension allowlist.
+    expect(canvasFileDescriptor({ name: 'capture.HEIC', type: 'image/jpeg' })).toEqual({
       kind: 'IMAGE',
-      mediaType: 'image/avif',
+      mediaType: 'image/heic',
     })
+    expect(canvasFileDescriptor({ name: 'capture.bin', type: 'image/avif' })).toBeNull()
     expect(canvasFileDescriptor({ name: 'capture.bin', type: 'application/octet-stream' })).toBeNull()
+    expect(canvasFileDescriptor({ name: 'capture', type: 'image/png' })).toBeNull()
+    expect(canvasFileDescriptor({ name: '', type: '' })).toBeNull()
   })
 })

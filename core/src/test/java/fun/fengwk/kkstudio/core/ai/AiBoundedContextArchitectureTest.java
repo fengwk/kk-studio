@@ -17,7 +17,7 @@ class AiBoundedContextArchitectureTest {
   void coreAiUsesOnlyExplicitBoundedContextRoots() throws IOException {
     // 精确的包根能暴露任何恢复出的遗留包或未审视的跨域桶。
     assertEquals(
-        Set.of("catalog", "chat", "environment", "error", "image", "runtime"),
+        Set.of("catalog", "chat", "environment", "error", "runtime"),
         directDirectoryNames(
             repositoryRoot().resolve("core/src/main/java/fun/fengwk/kkstudio/core/ai")));
   }

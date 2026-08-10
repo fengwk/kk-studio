@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Resource } from '@/features/canvas/domain'
-import { CanvasResourceMedia } from '@/features/canvas/nodes/CanvasResourceMedia'
+import {
+  CanvasResourceMedia,
+  CanvasResourceThumbnail,
+} from '@/features/canvas/nodes/CanvasResourceMedia'
 import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
@@ -160,5 +163,25 @@ describe('Canvas lazy resource media', () => {
     expect(screen.getByRole('list')).toHaveTextContent('safe list')
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+  })
+
+  it('uses local AUDIO/TEXT thumbnail icons without signing preview URLs', () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <CanvasResourceThumbnail resource={resource('AUDIO')} />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('♪')).toBeInTheDocument()
+
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <CanvasResourceThumbnail resource={resource('TEXT')} />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('T')).toBeInTheDocument()
+    expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
   })
 })

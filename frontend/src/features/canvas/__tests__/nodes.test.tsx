@@ -143,6 +143,45 @@ describe('Canvas resource/group node renderers', () => {
     expect(screen.getByText(/8796093022207/)).toBeInTheDocument()
   })
 
+  it.each([
+    ['12', '12 B'],
+    ['1024', '1 KB'],
+    ['1536', '1.5 KB'],
+    ['invalid', 'invalid'],
+  ])('formats resource size %s without lossy number conversion', (size, expected) => {
+    const view = renderResourceNode(resourceNode({
+      id: `size-${size}`,
+      resources: [resource('IMAGE', { id: `resource-${size}`, size })],
+    }))
+    expect(screen.getByText(expected)).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it('navigates resources beyond the four visible thumbnails', async () => {
+    const user = userEvent.setup()
+    const resources = Array.from({ length: 5 }, (_, index) => resource('IMAGE', {
+      id: `${20 + index}`,
+      name: `image-${index}.png`,
+      size: '1024',
+    }))
+    renderResourceNode(resourceNode({ resources }))
+    const previous = screen.getByRole('button', { name: '上一个资源' })
+    const next = screen.getByRole('button', { name: '下一个资源' })
+    expect(previous).toBeDisabled()
+
+    await user.click(next)
+    await user.click(next)
+    await user.click(next)
+    await user.click(next)
+    expect(screen.getByText('5 / 5')).toBeInTheDocument()
+    expect(next).toBeDisabled()
+
+    await user.click(previous)
+    expect(screen.getByText('4 / 5')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '查看资源 2' }))
+    expect(screen.getByText('2 / 5')).toBeInTheDocument()
+  })
+
   it('renders Function/run state and both reference handles without a generation panel', () => {
     const view = renderResourceNode(resourceNode({
       resources: [],
@@ -162,6 +201,12 @@ describe('Canvas resource/group node renderers', () => {
     expect(screen.getByText('FAILED')).toBeInTheDocument()
     expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
     expect(view.container.querySelector('.generation-panel')).toBeNull()
+  })
+
+  it('renders the generic empty-resource state without a model descriptor', () => {
+    renderResourceNode(resourceNode({ resources: [] }))
+    expect(screen.getAllByText('✦')).toHaveLength(2)
+    expect(screen.getByText('暂无资源')).toBeInTheDocument()
   })
 
   it('supports rename and text edit callbacks', async () => {
@@ -186,6 +231,23 @@ describe('Canvas resource/group node renderers', () => {
     expect(callbacks.editTextNode).toHaveBeenCalledWith(node)
     fireEvent.click(screen.getByRole('button', { name: '编辑 Markdown' }))
     expect(callbacks.editTextNode).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels an in-progress rename on Escape', async () => {
+    const user = userEvent.setup()
+    const callbacks = {
+      renameNode: vi.fn(),
+      editTextNode: vi.fn(),
+    }
+    renderResourceNode(resourceNode({ name: 'Original' }), callbacks)
+
+    await user.click(screen.getByRole('button', { name: 'Original' }))
+    const input = screen.getByRole('textbox', { name: '节点名称' })
+    await user.type(input, ' changed')
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.getByRole('button', { name: 'Original' })).toBeInTheDocument()
+    expect(callbacks.renameNode).not.toHaveBeenCalled()
   })
 
   it('renders a world-coordinate group card', () => {
@@ -217,5 +279,52 @@ describe('Canvas resource/group node renderers', () => {
       </ReactFlowProvider>,
     )
     expect(screen.getByText('Group title')).toBeInTheDocument()
+  })
+
+  it('fails closed when a renderer receives the other node-data discriminator', () => {
+    const ResourceComponent = canvasNodeTypes.resource
+    const GroupComponent = canvasNodeTypes.group
+    const group: Group = {
+      id: '4',
+      canvasId: '1',
+      title: 'Group title',
+      transform: { x: 0, y: 0, width: 500, height: 400 },
+    }
+    const commonProps = {
+      id: 'mismatch',
+      selected: false,
+      dragging: false,
+      zIndex: 0,
+      selectable: true,
+      deletable: true,
+      draggable: true,
+      isConnectable: false,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+    }
+    const resourceView = render(
+      <ResourceComponent {...({
+        ...commonProps,
+        type: 'resource',
+        data: { kind: 'group', group },
+      } as NodeProps<CanvasFlowNode>)} />,
+    )
+    expect(resourceView.container).toBeEmptyDOMElement()
+    resourceView.unmount()
+
+    const node = resourceNode()
+    const groupView = render(
+      <GroupComponent {...({
+        ...commonProps,
+        type: 'group',
+        data: {
+          kind: 'resource',
+          node,
+          model: null,
+          callbacks: { renameNode: vi.fn(), editTextNode: vi.fn() },
+        },
+      } as NodeProps<CanvasFlowNode>)} />,
+    )
+    expect(groupView.container).toBeEmptyDOMElement()
   })
 })

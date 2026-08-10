@@ -693,6 +693,11 @@ class OpenCliCanvasFunctionAdaptersTest {
     }
 
     @Override
+    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
     public long materializeTarget(
         long targetResourceId, String mediaType, long size, InputStream content) {
       try {
