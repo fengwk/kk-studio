@@ -2,6 +2,7 @@ import type { Edge, Node } from '@xyflow/react'
 import type { CanvasSnapshot, Link } from '@/features/canvas/domain'
 import type {
   CanvasFlowNodeData,
+  CanvasLinkSelection,
   CanvasNodeCallbacks,
 } from '@/features/canvas/types'
 import type {
@@ -75,7 +76,13 @@ export function projectNodes(
   return [...groups, ...nodes]
 }
 
-export function projectEdges(links: Link[]): CanvasFlowEdge[] {
+export function projectEdges(
+  links: Link[],
+  selectedLinks: CanvasLinkSelection[] = [],
+): CanvasFlowEdge[] {
+  const selected = new Set(selectedLinks.map((link) => (
+    `${link.sourceNodeId}->${link.targetNodeId}`
+  )))
   return links.map((link) => ({
     id: `${link.sourceNodeId}->${link.targetNodeId}`,
     source: link.sourceNodeId,
@@ -85,6 +92,7 @@ export function projectEdges(links: Link[]): CanvasFlowEdge[] {
     type: 'default',
     focusable: true,
     selectable: true,
+    selected: selected.has(`${link.sourceNodeId}->${link.targetNodeId}`),
     interactionWidth: 18,
   }))
 }

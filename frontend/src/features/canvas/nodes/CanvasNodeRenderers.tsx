@@ -1,7 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import { memo, useEffect, useState } from 'react'
-import type { Resource, ResourceNode } from '@/features/canvas/domain'
+import type { ResourceNode } from '@/features/canvas/domain'
+import {
+  CanvasResourceMedia,
+  CanvasResourceThumbnail,
+} from '@/features/canvas/nodes/CanvasResourceMedia'
 import type { CanvasFlowNodeData } from '@/features/canvas/types'
 
 type CanvasFlowNode = Node<CanvasFlowNodeData, 'resource' | 'group'>
@@ -44,11 +48,16 @@ const ResourceNodeView = memo(function ResourceNodeView({
   const { node, model, callbacks } = data
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(node.name)
-  const visibleResources = node.resources.slice(0, 4)
+  const [resourceIndex, setResourceIndex] = useState(0)
+  const resource = node.resources[resourceIndex] ?? node.resources[0]
 
   useEffect(() => {
     setName(node.name)
   }, [node.name])
+
+  useEffect(() => {
+    setResourceIndex((current) => Math.min(current, Math.max(0, node.resources.length - 1)))
+  }, [node.resources.length])
 
   return (
     <article
@@ -95,17 +104,15 @@ const ResourceNodeView = memo(function ResourceNodeView({
       </header>
 
       <div className="resource-node-body">
-        {visibleResources.length > 0 ? (
-          <div className="resource-summary-list">
-            {visibleResources.map((resource) => (
-              <ResourceSummary key={resource.id} resource={resource} />
-            ))}
-            {node.resources.length > visibleResources.length ? (
-              <div className="resource-summary-more">
-                +
-                {node.resources.length - visibleResources.length}
-                {' 个资源'}
-              </div>
+        {resource ? (
+          <div className="resource-viewer">
+            <CanvasResourceMedia resource={resource} />
+            {node.resources.length > 1 ? (
+              <ResourceIndexSwitcher
+                node={node}
+                activeIndex={resourceIndex}
+                onChange={setResourceIndex}
+              />
             ) : null}
           </div>
         ) : (
@@ -120,25 +127,73 @@ const ResourceNodeView = memo(function ResourceNodeView({
         <FunctionFooter node={node} modelLabel={model?.label ?? node.function.modelKey} />
       ) : (
         <footer className="resource-node-footer">
-          <span>{node.resources[0]?.mediaType ?? 'Resource'}</span>
-          <span>{node.resources[0] ? formatBytes(node.resources[0].size) : ''}</span>
+          {resource?.kind === 'TEXT' ? (
+            <button type="button" onClick={() => callbacks.editTextNode(node)}>
+              编辑 Markdown
+            </button>
+          ) : (
+            <span>{resource?.mediaType ?? 'Resource'}</span>
+          )}
+          <span>{resource ? formatBytes(resource.size) : ''}</span>
         </footer>
       )}
     </article>
   )
 })
 
-function ResourceSummary({ resource }: { resource: Resource }) {
-  const detail = resource.kind === 'TEXT'
-    ? resource.text?.replace(/\s+/g, ' ').trim() || '空文本'
-    : mediaDetail(resource)
+function ResourceIndexSwitcher({
+  node,
+  activeIndex,
+  onChange,
+}: {
+  node: ResourceNode
+  activeIndex: number
+  onChange: (index: number) => void
+}) {
+  const visibleResources = node.resources.slice(0, 4)
   return (
-    <div className="resource-summary" data-kind={resource.kind}>
-      <span className="resource-summary-icon">{kindIcon(resource.kind)}</span>
-      <div>
-        <strong>{resource.name}</strong>
-        <small>{detail}</small>
+    <div className="resource-index-switcher" aria-label="资源索引切换">
+      <button
+        type="button"
+        aria-label="上一个资源"
+        disabled={activeIndex === 0}
+        onClick={() => onChange(activeIndex - 1)}
+      >
+        ‹
+      </button>
+      <div className="resource-index-thumbnails">
+        {visibleResources.map((resource, index) => (
+          <button
+            key={resource.id}
+            type="button"
+            className={index === activeIndex ? 'active' : ''}
+            aria-label={`查看资源 ${index + 1}`}
+            aria-pressed={index === activeIndex}
+            onClick={() => onChange(index)}
+          >
+            <CanvasResourceThumbnail resource={resource} />
+          </button>
+        ))}
+        {node.resources.length > visibleResources.length ? (
+          <span className="resource-index-more">
+            +
+            {node.resources.length - visibleResources.length}
+          </span>
+        ) : null}
       </div>
+      <span className="resource-index-count">
+        {activeIndex + 1}
+        {' / '}
+        {node.resources.length}
+      </span>
+      <button
+        type="button"
+        aria-label="下一个资源"
+        disabled={activeIndex >= node.resources.length - 1}
+        onClick={() => onChange(activeIndex + 1)}
+      >
+        ›
+      </button>
     </div>
   )
 }
@@ -189,28 +244,6 @@ function kindIcon(kind: string | undefined): string {
     return 'T'
   }
   return '✦'
-}
-
-function mediaDetail(resource: Resource): string {
-  const width = finiteNumber(resource.metadata.width)
-  const height = finiteNumber(resource.metadata.height)
-  const durationMs = finiteNumber(resource.metadata.durationMs)
-  if (width !== null && height !== null) {
-    return `${width} × ${height} · ${formatBytes(resource.size)}`
-  }
-  if (durationMs !== null) {
-    return `${formatDuration(durationMs)} · ${formatBytes(resource.size)}`
-  }
-  return `${resource.mediaType} · ${formatBytes(resource.size)}`
-}
-
-function finiteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function formatDuration(durationMs: number): string {
-  const seconds = Math.round(durationMs / 1000)
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 function formatBytes(size: string): string {

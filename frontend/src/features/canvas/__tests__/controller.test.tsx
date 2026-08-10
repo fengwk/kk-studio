@@ -9,19 +9,25 @@ import type {
 } from '@/shared/api/contracts/studio'
 import {
   applyCanvasCommands,
+  cancelCanvasFunctionRun,
   completeCanvasUpload,
   getCanvas,
+  getCanvasFunctionRun,
   listCanvasFunctionModels,
   reserveCanvasUpload,
+  startCanvasFunctionRun,
   uploadCanvasFile,
 } from '@/shared/api/studio-service'
 
 vi.mock('@/shared/api/studio-service', () => ({
   applyCanvasCommands: vi.fn(),
+  cancelCanvasFunctionRun: vi.fn(),
   completeCanvasUpload: vi.fn(),
   getCanvas: vi.fn(),
+  getCanvasFunctionRun: vi.fn(),
   listCanvasFunctionModels: vi.fn(),
   reserveCanvasUpload: vi.fn(),
+  startCanvasFunctionRun: vi.fn(),
   uploadCanvasFile: vi.fn(),
 }))
 
@@ -59,8 +65,24 @@ function snapshot(revision = '0'): CanvasSnapshotDTO {
       name: 'Function',
       transform: { x: 400, y: 30, width: 320, height: 260 },
       groupId: '4',
-      resources: [],
-      function: { modelKey: 'fake-image', configJson: '{}' },
+      resources: [{
+        id: '30',
+        canvasId: '1',
+        kind: 'IMAGE',
+        mediaType: 'image/png',
+        name: 'old-output.png',
+        size: '3',
+        textContent: null,
+        metadataJson: '{}',
+        createdAt: '2026-08-10T00:00:00Z',
+      }],
+      function: {
+        modelKey: 'fake-image',
+        configJson: JSON.stringify({
+          prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
+          parameters: { ratio: 'AUTO' },
+        }),
+      },
       run: null,
     }, {
       id: '5',
@@ -111,6 +133,7 @@ describe('useCanvasController real snapshot runtime', () => {
   let commands: ApplyCanvasCommandsRequestDTO[]
 
   beforeEach(() => {
+    vi.clearAllMocks()
     revision = 0n
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => snapshot(revision.toString()))
@@ -156,6 +179,30 @@ describe('useCanvasController real snapshot runtime', () => {
       metadataJson: '{}',
       createdAt: '2026-08-10T00:00:00Z',
     })
+    vi.mocked(startCanvasFunctionRun).mockResolvedValue({
+      nodeId: '3',
+      requestId: 'request-started',
+      status: 'RUNNING',
+      stage: 'QUEUED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:00Z',
+    })
+    vi.mocked(getCanvasFunctionRun).mockResolvedValue({
+      nodeId: '3',
+      requestId: 'request-started',
+      status: 'FAILED',
+      stage: 'FAILED',
+      error: 'fake failure',
+      updatedAt: '2026-08-10T00:00:01Z',
+    })
+    vi.mocked(cancelCanvasFunctionRun).mockResolvedValue({
+      nodeId: '3',
+      requestId: 'request-started',
+      status: 'CANCELLED',
+      stage: 'CANCELLED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:02Z',
+    })
   })
 
   afterEach(() => {
@@ -176,7 +223,6 @@ describe('useCanvasController real snapshot runtime', () => {
       request.commands[0]?.type === 'RENAME_NODE'
     ))).toBe(true))
 
-    vi.spyOn(window, 'prompt').mockReturnValue('updated')
     act(() => result.current.nodeCallbacks.editTextNode(
       result.current.snapshot ? {
         ...result.current.snapshot.nodes[0],
@@ -197,6 +243,12 @@ describe('useCanvasController real snapshot runtime', () => {
         throw new Error('missing snapshot')
       })(),
     ))
+    act(() => {
+      result.current.setTextEditorDraft({ markdown: 'updated' })
+    })
+    act(() => {
+      result.current.saveTextEditor()
+    })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'UPDATE_TEXT_NODE'
     ))).toBe(true))
@@ -205,6 +257,9 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.createTextNode()
       result.current.createFunctionNode('IMAGE')
       result.current.createFunctionNode('VIDEO')
+    })
+    act(() => {
+      result.current.saveTextEditor()
     })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_FUNCTION_NODE'
@@ -303,5 +358,113 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => result.current.openLibrary())
     expect(result.current.state.view).toBe('library')
+  })
+
+  it('flushes debounced config before UUID start, polls only run state, preserves old output on failure, and cancels', async () => {
+    // The call order and unchanged Resource id prove config/run orchestration never introduces a second snapshot.
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor('1'))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+
+    act(() => {
+      result.current.scheduleFunctionConfig('3', 'fake-image', {
+        prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+    await act(async () => {
+      await result.current.startFunctionRun('3')
+    })
+
+    expect(commands.at(-1)?.commands).toEqual([{
+      type: 'UPDATE_FUNCTION',
+      nodeId: '3',
+      modelKey: 'fake-image',
+      configJson: JSON.stringify({
+        prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
+        parameters: { ratio: 'AUTO' },
+      }),
+    }])
+    expect(startCanvasFunctionRun).toHaveBeenCalledWith(
+      '1',
+      '3',
+      { requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i) },
+    )
+    expect(vi.mocked(applyCanvasCommands).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(startCanvasFunctionRun).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    )
+
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run?.status).toBe('FAILED')
+    })
+    expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.resources[0]?.id).toBe('30')
+    expect(getCanvasFunctionRun).toHaveBeenCalledWith('1', '3', expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }))
+
+    await act(async () => {
+      await result.current.cancelFunctionRun('3', 'request-started')
+    })
+    expect(cancelCanvasFunctionRun).toHaveBeenCalledWith(
+      '1',
+      '3',
+      { requestId: 'request-started' },
+    )
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run?.status).toBe('CANCELLED')
+    })
+  })
+
+  it('refetches the authoritative snapshot after a successful polled run', async () => {
+    // Success is complete only when the snapshot query replaces old output with backend materialized resources.
+    vi.mocked(getCanvasFunctionRun).mockResolvedValue({
+      nodeId: '3',
+      requestId: 'request-started',
+      status: 'SUCCEEDED',
+      stage: 'SUCCEEDED',
+      error: null,
+      updatedAt: '2026-08-10T00:00:01Z',
+    })
+    vi.mocked(getCanvas).mockImplementation(async () => {
+      const current = snapshot(revision.toString())
+      if (vi.mocked(getCanvas).mock.calls.length < 2) {
+        return current
+      }
+      return {
+        ...current,
+        nodes: current.nodes.map((node) => node.id === '3' ? {
+          ...node,
+          resources: [{
+            id: '31',
+            canvasId: '1',
+            kind: 'IMAGE',
+            mediaType: 'image/png',
+            name: 'new-output.png',
+            size: '4',
+            textContent: null,
+            metadataJson: '{}',
+            createdAt: '2026-08-10T00:00:01Z',
+          }],
+          run: {
+            nodeId: '3',
+            requestId: 'request-started',
+            status: 'SUCCEEDED',
+            stage: 'SUCCEEDED',
+            error: null,
+            updatedAt: '2026-08-10T00:00:01Z',
+          },
+        } : node),
+      }
+    })
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor('1'))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    await act(async () => {
+      await result.current.startFunctionRun('3')
+    })
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.resources[0]?.id).toBe('31')
+    })
+    expect(getCanvas).toHaveBeenCalledTimes(2)
   })
 })

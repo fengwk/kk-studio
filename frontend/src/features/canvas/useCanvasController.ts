@@ -1,7 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
 import type { ResourceNode } from '@/features/canvas/domain'
+import { createDefaultFunctionConfig } from '@/features/canvas/generation'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
 import type {
   AddMenuAction,
@@ -10,6 +11,7 @@ import type {
   CanvasNodeCallbacks,
   CanvasPositionUpdate,
   CanvasTool,
+  PendingFunctionConfig,
   StageMetrics,
 } from '@/features/canvas/types'
 import {
@@ -21,16 +23,21 @@ import {
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   CanvasCommandDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionConfigDTO,
+  CanvasFunctionRunDTO,
   CanvasResourceKind,
+  CanvasSnapshotDTO,
   CanvasTransformDTO,
   DecimalString,
 } from '@/shared/api/contracts/studio'
 import {
+  cancelCanvasFunctionRun,
   completeCanvasUpload,
   getCanvas,
+  getCanvasFunctionRun,
   listCanvasFunctionModels,
   reserveCanvasUpload,
+  startCanvasFunctionRun,
   uploadCanvasFile,
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -44,6 +51,7 @@ export function useCanvasController() {
     view: 'library',
     canvasId: null,
     selectedIds: [],
+    selectedLinks: [],
     positionDrafts: {},
     viewport: { ...DEFAULT_CANVAS_VIEWPORT },
     tool: 'select',
@@ -57,6 +65,7 @@ export function useCanvasController() {
     uploadProgress: {},
     commandPending: false,
     conflictMessage: null,
+    textEditor: null,
   })
   const [stageMetrics, setStageMetrics] = useState(DEFAULT_STAGE)
   const fitViewRef = useRef<(() => void) | null>(null)
@@ -70,6 +79,8 @@ export function useCanvasController() {
   const transformTimerRef = useRef<number | null>(null)
   const pendingNodeTransformsRef = useRef(new Map<DecimalString, CanvasTransformDTO>())
   const pendingGroupMovesRef = useRef(new Map<DecimalString, { x: number; y: number }>())
+  const pendingFunctionConfigsRef = useRef(new Map<DecimalString, PendingFunctionConfig>())
+  const functionConfigTimersRef = useRef(new Map<DecimalString, number>())
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
@@ -81,6 +92,57 @@ export function useCanvasController() {
     queryFn: ({ signal }) => listCanvasFunctionModels({ signal }),
     enabled: state.view === 'editor',
   })
+  const runningNodeIds = useMemo(
+    () => snapshotQuery.data?.nodes
+      .filter((node) => node.run?.status === 'RUNNING')
+      .map((node) => node.id) ?? [],
+    [snapshotQuery.data?.nodes],
+  )
+  const runQueries = useQueries({
+    queries: runningNodeIds.map((nodeId) => ({
+      queryKey: state.canvasId
+        ? queryKeys.studio.canvasRun(state.canvasId, nodeId)
+        : ['studio', 'canvas-run', 'none', nodeId],
+      queryFn: ({ signal }: { signal: AbortSignal }) => (
+        getCanvasFunctionRun(state.canvasId as DecimalString, nodeId, { signal })
+      ),
+      enabled: state.view === 'editor' && Boolean(state.canvasId),
+      refetchInterval: 800,
+      retry: false,
+    })),
+  })
+  const polledRuns = runQueries
+    .map((query) => query.data)
+    .filter((run): run is CanvasFunctionRunDTO => Boolean(run))
+  const polledRunSignature = polledRuns
+    .map((run) => (
+      `${run.nodeId}:${run.requestId}:${run.status}:${run.stage}:${run.error ?? ''}:${run.updatedAt}`
+    ))
+    .join('|')
+
+  useEffect(() => {
+    if (!state.canvasId || polledRuns.length === 0) {
+      return
+    }
+    const canvasId = state.canvasId
+    let succeeded = false
+    queryClient.setQueryData<CanvasSnapshotDTO>(
+      queryKeys.studio.canvas(canvasId),
+      (current) => {
+        let next = current
+        for (const run of polledRuns) {
+          next = patchSnapshotRun(next, run)
+          succeeded ||= run.status === 'SUCCEEDED'
+        }
+        return next
+      },
+    )
+    if (succeeded) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
+    }
+    // The signature tracks endpoint state without making the query result array an effect dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [polledRunSignature, queryClient, state.canvasId])
 
   useEffect(() => {
     if (!snapshotQuery.data || !state.canvasId) {
@@ -117,6 +179,10 @@ export function useCanvasController() {
     if (transformTimerRef.current !== null) {
       window.clearTimeout(transformTimerRef.current)
     }
+    for (const timer of functionConfigTimersRef.current.values()) {
+      window.clearTimeout(timer)
+    }
+    functionConfigTimersRef.current.clear()
   }, [])
 
   const setToast = useCallback((toast: string) => {
@@ -130,15 +196,22 @@ export function useCanvasController() {
     }
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
+    for (const timer of functionConfigTimersRef.current.values()) {
+      window.clearTimeout(timer)
+    }
+    functionConfigTimersRef.current.clear()
+    pendingFunctionConfigsRef.current.clear()
     queueRef.current = null
     setState((current) => ({
       ...current,
       view: 'editor',
       canvasId,
       selectedIds: [],
+      selectedLinks: [],
       positionDrafts: {},
       viewport: loadCanvasViewport(canvasId),
       conflictMessage: null,
+      textEditor: null,
     }))
   }, [])
 
@@ -149,15 +222,16 @@ export function useCanvasController() {
     }
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
-    queueRef.current = null
     setState((current) => ({
       ...current,
       view: 'library',
       canvasId: null,
       selectedIds: [],
+      selectedLinks: [],
       positionDrafts: {},
       addMenuOpen: false,
       threadOpen: false,
+      textEditor: null,
     }))
   }, [])
 
@@ -279,10 +353,14 @@ export function useCanvasController() {
     })
   }, [])
 
-  const setSelection = useCallback((selectedIds: string[]) => {
+  const setSelection = useCallback((
+    selectedIds: string[],
+    selectedLinks: CanvasLocalState['selectedLinks'] = [],
+  ) => {
     setState((current) => ({
       ...current,
       selectedIds,
+      selectedLinks,
       addMenuOpen: false,
     }))
   }, [])
@@ -300,12 +378,16 @@ export function useCanvasController() {
     if (resource?.kind !== 'TEXT') {
       return
     }
-    const markdown = window.prompt('编辑 Markdown', resource.text ?? '')
-    if (markdown === null) {
-      return
-    }
-    void executeCommands([{ type: 'UPDATE_TEXT_NODE', nodeId: node.id, markdown }]).catch(() => undefined)
-  }, [executeCommands])
+    setState((current) => ({
+      ...current,
+      textEditor: {
+        mode: 'edit',
+        nodeId: node.id,
+        name: node.name,
+        markdown: resource.text ?? '',
+      },
+    }))
+  }, [])
 
   const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
     renameNode,
@@ -322,13 +404,49 @@ export function useCanvasController() {
   }, [snapshotQuery.data?.nodes.length])
 
   const createTextNode = useCallback(() => {
-    void executeCommands([{
-      type: 'CREATE_TEXT_NODE',
-      name: '文本',
-      markdown: '# 新文本\n\n双击节点编辑 Markdown。',
-      transform: nextTransform(),
-    }]).catch(() => undefined)
-  }, [executeCommands, nextTransform])
+    setState((current) => ({
+      ...current,
+      textEditor: {
+        mode: 'create',
+        nodeId: null,
+        name: '文本',
+        markdown: '# 新文本\n\n在这里编写 Markdown。',
+      },
+    }))
+  }, [])
+
+  const setTextEditorDraft = useCallback((patch: { name?: string; markdown?: string }) => {
+    setState((current) => current.textEditor ? {
+      ...current,
+      textEditor: { ...current.textEditor, ...patch },
+    } : current)
+  }, [])
+
+  const closeTextEditor = useCallback(() => {
+    setState((current) => ({ ...current, textEditor: null }))
+  }, [])
+
+  const saveTextEditor = useCallback(() => {
+    const editor = state.textEditor
+    if (!editor || !editor.name.trim() || !editor.markdown.trim()) {
+      return
+    }
+    const command: CanvasCommandDTO = editor.mode === 'create'
+      ? {
+        type: 'CREATE_TEXT_NODE',
+        name: editor.name.trim(),
+        markdown: editor.markdown,
+        transform: nextTransform(),
+      }
+      : {
+        type: 'UPDATE_TEXT_NODE',
+        nodeId: editor.nodeId,
+        markdown: editor.markdown,
+      }
+    void executeCommands([command]).then(() => {
+      setState((current) => ({ ...current, textEditor: null }))
+    }).catch(() => undefined)
+  }, [executeCommands, nextTransform, state.textEditor])
 
   const createFunctionNode = useCallback((outputKind: 'IMAGE' | 'VIDEO') => {
     const model = modelsQuery.data?.find((item) => item.outputKind === outputKind && item.available)
@@ -396,6 +514,15 @@ export function useCanvasController() {
       groupId,
       memberNodeIds,
     }))
+    for (const id of state.selectedIds) {
+      const groupId = groupIdFromFlowId(id)
+      if (groupId && !commands.some((command) => (
+        (command.type === 'UNGROUP' || command.type === 'DELETE_GROUP')
+        && command.groupId === groupId
+      ))) {
+        commands.push({ type: 'DELETE_GROUP', groupId })
+      }
+    }
     if (commands.length === 0) {
       setToast('当前选区没有已分组的成员。')
       return
@@ -485,6 +612,13 @@ export function useCanvasController() {
         commands.push({ type: 'DELETE_NODE', nodeId: id as DecimalString })
       }
     }
+    for (const link of state.selectedLinks) {
+      commands.push({
+        type: 'DELETE_LINK',
+        sourceNodeId: link.sourceNodeId,
+        targetNodeId: link.targetNodeId,
+      })
+    }
     if (commands.length === 0) {
       return
     }
@@ -492,9 +626,15 @@ export function useCanvasController() {
       setState((current) => ({
         ...current,
         selectedIds: [],
+        selectedLinks: [],
       }))
     }).catch(() => undefined)
-  }, [executeCommands, snapshotQuery.data?.nodes, state.selectedIds])
+  }, [
+    executeCommands,
+    snapshotQuery.data?.nodes,
+    state.selectedIds,
+    state.selectedLinks,
+  ])
 
   const createLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
     void executeCommands([{ type: 'CREATE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
@@ -503,6 +643,90 @@ export function useCanvasController() {
   const deleteLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
     void executeCommands([{ type: 'DELETE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
   }, [executeCommands])
+
+  const flushFunctionConfig = useCallback(async (nodeId: DecimalString) => {
+    const timer = functionConfigTimersRef.current.get(nodeId)
+    if (timer !== undefined) {
+      window.clearTimeout(timer)
+      functionConfigTimersRef.current.delete(nodeId)
+    }
+    const pending = pendingFunctionConfigsRef.current.get(nodeId)
+    if (!pending) {
+      return
+    }
+    pendingFunctionConfigsRef.current.delete(nodeId)
+    await executeCommands([{
+      type: 'UPDATE_FUNCTION',
+      nodeId: pending.nodeId,
+      modelKey: pending.modelKey,
+      configJson: JSON.stringify(pending.config),
+    }])
+  }, [executeCommands])
+
+  const scheduleFunctionConfig = useCallback((
+    nodeId: DecimalString,
+    modelKey: string,
+    config: CanvasFunctionConfigDTO,
+  ) => {
+    pendingFunctionConfigsRef.current.set(nodeId, { nodeId, modelKey, config })
+    const existing = functionConfigTimersRef.current.get(nodeId)
+    if (existing !== undefined) {
+      window.clearTimeout(existing)
+    }
+    const timer = window.setTimeout(() => {
+      functionConfigTimersRef.current.delete(nodeId)
+      void flushFunctionConfig(nodeId).catch(() => undefined)
+    }, 320)
+    functionConfigTimersRef.current.set(nodeId, timer)
+  }, [flushFunctionConfig])
+
+  const publishRun = useCallback((run: CanvasFunctionRunDTO) => {
+    if (!state.canvasId) {
+      return
+    }
+    const canvasId = state.canvasId
+    queryClient.setQueryData<CanvasFunctionRunDTO>(
+      queryKeys.studio.canvasRun(canvasId, run.nodeId),
+      run,
+    )
+    queryClient.setQueryData<CanvasSnapshotDTO>(
+      queryKeys.studio.canvas(canvasId),
+      (current) => patchSnapshotRun(current, run),
+    )
+    if (run.status === 'SUCCEEDED') {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
+    }
+  }, [queryClient, state.canvasId])
+
+  const startFunctionRun = useCallback(async (nodeId: DecimalString) => {
+    if (!state.canvasId) {
+      return
+    }
+    try {
+      await flushFunctionConfig(nodeId)
+      const run = await startCanvasFunctionRun(state.canvasId, nodeId, {
+        requestId: crypto.randomUUID(),
+      })
+      publishRun(run)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '启动生成失败')
+    }
+  }, [flushFunctionConfig, publishRun, setToast, state.canvasId])
+
+  const cancelFunctionRun = useCallback(async (
+    nodeId: DecimalString,
+    requestId: string,
+  ) => {
+    if (!state.canvasId || !requestId) {
+      return
+    }
+    try {
+      const run = await cancelCanvasFunctionRun(state.canvasId, nodeId, { requestId })
+      publishRun(run)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '取消生成失败')
+    }
+  }, [publishRun, setToast, state.canvasId])
 
   const setAgentPrompt = useCallback((agentPrompt: string) => {
     setState((current) => ({ ...current, agentPrompt }))
@@ -591,6 +815,7 @@ export function useCanvasController() {
     closeOverlays: () => {
       closeAddMenu()
       collapseThread()
+      closeTextEditor()
     },
   })
 
@@ -621,7 +846,14 @@ export function useCanvasController() {
     deleteLink,
     deleteSelection,
     createTextNode,
+    setTextEditorDraft,
+    closeTextEditor,
+    saveTextEditor,
     createFunctionNode,
+    scheduleFunctionConfig,
+    flushFunctionConfig,
+    startFunctionRun,
+    cancelFunctionRun,
     createGroup,
     ungroupSelection,
     uploadFiles,
@@ -673,23 +905,6 @@ function fallbackMediaType(kind: Exclude<CanvasResourceKind, 'TEXT'>): string {
   return 'audio/mpeg'
 }
 
-function createDefaultFunctionConfig(model: CanvasFunctionModelDTO) {
-  const parameters: Record<string, string | number> = {}
-  for (const parameter of model.parameters) {
-    if (parameter.defaultValue !== null) {
-      parameters[parameter.key] = parameter.defaultValue
-    } else if (parameter.type === 'ENUM' && parameter.options[0] !== undefined) {
-      parameters[parameter.key] = parameter.options[0]
-    } else if (parameter.type === 'INTEGER' && parameter.min !== null) {
-      parameters[parameter.key] = parameter.min
-    }
-  }
-  return {
-    prompt: { segments: [{ type: 'TEXT' as const, text: '' }] },
-    parameters,
-  }
-}
-
 function removeSubmittedDrafts(
   current: Record<string, { x: number; y: number }>,
   submitted: Record<string, { x: number; y: number }>,
@@ -702,6 +917,32 @@ function removeSubmittedDrafts(
     }
   }
   return next
+}
+
+function patchSnapshotRun(
+  snapshot: CanvasSnapshotDTO | undefined,
+  run: CanvasFunctionRunDTO,
+): CanvasSnapshotDTO | undefined {
+  if (!snapshot) {
+    return snapshot
+  }
+  const nodeIndex = snapshot.nodes.findIndex((node) => node.id === run.nodeId)
+  if (nodeIndex < 0) {
+    return snapshot
+  }
+  const currentRun = snapshot.nodes[nodeIndex]?.run
+  if (
+    currentRun?.requestId === run.requestId
+    && currentRun.status === run.status
+    && currentRun.stage === run.stage
+    && currentRun.error === run.error
+    && currentRun.updatedAt === run.updatedAt
+  ) {
+    return snapshot
+  }
+  const nodes = [...snapshot.nodes]
+  nodes[nodeIndex] = { ...nodes[nodeIndex], run }
+  return { ...snapshot, nodes }
 }
 
 export type CanvasController = ReturnType<typeof useCanvasController>

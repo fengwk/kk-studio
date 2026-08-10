@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -6,6 +7,21 @@ import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { ResourceFlowNodeData } from '@/features/canvas/types'
+
+vi.mock('@/shared/api/studio-service', () => ({
+  getCanvasResourceOriginalUrl: vi.fn(async () => ({
+    method: 'GET',
+    url: 'https://s3.example/original',
+    headers: {},
+    expiresAt: '2026-08-10T00:15:00Z',
+  })),
+  getCanvasResourcePreviewUrl: vi.fn(async () => ({
+    method: 'GET',
+    url: 'https://s3.example/preview',
+    headers: {},
+    expiresAt: '2026-08-10T00:15:00Z',
+  })),
+}))
 
 const transform = { x: 20, y: 30, width: 320, height: 260 }
 
@@ -80,9 +96,13 @@ function renderResourceNode(node: ResourceNode, callbacks = {
   return {
     callbacks,
     ...render(
-      <ReactFlowProvider>
-        <Component {...props} />
-      </ReactFlowProvider>,
+      <QueryClientProvider client={new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })}>
+        <ReactFlowProvider>
+          <Component {...props} />
+        </ReactFlowProvider>
+      </QueryClientProvider>,
     ),
   }
 }
@@ -101,8 +121,10 @@ describe('Canvas resource/group node renderers', () => {
         id: `${fixtures.indexOf(fixture) + 2}`,
         resources: [fixture],
       }))
-      expect(screen.getByText(fixture.name)).toBeInTheDocument()
-      expect(view.container.querySelector('.resource-summary')).toHaveAttribute('data-kind', fixture.kind)
+      expect(view.container.querySelector('.resource-node')).toHaveAttribute('data-resource-kind', fixture.kind)
+      if (fixture.kind === 'TEXT') {
+        expect(screen.getByText('hello world')).toBeInTheDocument()
+      }
       expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(1)
       view.unmount()
     }
@@ -116,9 +138,9 @@ describe('Canvas resource/group node renderers', () => {
     }))
     renderResourceNode(resourceNode({ resources }))
 
-    expect(screen.getAllByText(/image-/)).toHaveLength(4)
-    expect(screen.getByText('+1 个资源')).toBeInTheDocument()
-    expect(screen.getAllByText(/8796093022207/)).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: /查看资源/ })).toHaveLength(4)
+    expect(screen.getByText('+1')).toBeInTheDocument()
+    expect(screen.getByText(/8796093022207/)).toBeInTheDocument()
   })
 
   it('renders Function/run state and both reference handles without a generation panel', () => {
@@ -162,6 +184,8 @@ describe('Canvas resource/group node renderers', () => {
 
     fireEvent.doubleClick(screen.getByText('note'))
     expect(callbacks.editTextNode).toHaveBeenCalledWith(node)
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Markdown' }))
+    expect(callbacks.editTextNode).toHaveBeenCalledTimes(2)
   })
 
   it('renders a world-coordinate group card', () => {

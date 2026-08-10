@@ -403,8 +403,16 @@ async function main(argv) {
     assert(body.trim().length > 20, 'environments page body empty')
   })
 
+  await run('ui.canvas.page_loads', 'Canvas 库可打开且显示真实创建入口', async (caseArt) => {
+    await goto('/canvas')
+    await expectVisibleText(page, '你的画布')
+    await page.getByRole('button', { name: '创建新画布' }).waitFor({ state: 'visible' })
+    await shot(caseArt, 'canvas-library')
+    expectNoFatal(pageErrors, consoleErrors)
+  })
+
   await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {
-    for (const p of ['/chats', '/agents', '/models', '/providers', '/environments', '/chats']) {
+    for (const p of ['/chats', '/canvas', '/agents', '/models', '/providers', '/environments', '/chats']) {
       await goto(p)
       expectNoFatal(pageErrors, consoleErrors)
     }
