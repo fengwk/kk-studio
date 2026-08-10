@@ -7,26 +7,21 @@ import { useI18n } from '@/shared/i18n'
 export function CanvasAgentThread() {
   const {
     state,
-    run,
     contextCount,
     contextDescription,
     setContextMode,
-    resetDemo,
     collapseThread,
-    runAction,
-    consumeThreadScroll,
   } = useCanvasRuntime()
   const { t } = useI18n()
 
   const messagesRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!state.forceThreadScroll || !messagesRef.current) {
+    if (!state.threadOpen || !messagesRef.current) {
       return
     }
     messagesRef.current.scrollTop = messagesRef.current.scrollHeight
-    consumeThreadScroll()
-  }, [state.forceThreadScroll, state.messages, consumeThreadScroll])
+  }, [state.messages, state.threadOpen])
 
   return (
     <section
@@ -59,19 +54,13 @@ export function CanvasAgentThread() {
           </button>
         </div>
         <div className="thread-actions">
-          <button className="thread-reset" type="button" onClick={resetDemo}>{t('canvas.agent.reset')}</button>
           <button className="collapse-thread" type="button" aria-label={t('canvas.agent.collapse')} onClick={collapseThread}>⌄</button>
         </div>
       </div>
       <p className="context-description">{contextDescription}</p>
       <div className="thread-messages" ref={messagesRef} aria-live="polite">
         {state.messages.map((message, index) => (
-          <CanvasAgentMessage
-            key={`${message.kind}-${index}`}
-            message={message}
-            run={run}
-            onRunAction={runAction}
-          />
+          <CanvasAgentMessage key={`${message.kind}-${index}`} message={message} />
         ))}
       </div>
     </section>

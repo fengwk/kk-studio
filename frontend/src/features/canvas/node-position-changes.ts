@@ -6,12 +6,13 @@ export interface PositionChangeLike {
   type: string
   id?: string
   position?: { x: number; y: number } | null
+  dragging?: boolean
 }
 
 export function extractPositionUpdates(
   changes: ReadonlyArray<PositionChangeLike>,
-): Array<{ id: string; x: number; y: number }> {
-  const updates: Array<{ id: string; x: number; y: number }> = []
+): Array<{ id: string; x: number; y: number; dragging: boolean }> {
+  const updates: Array<{ id: string; x: number; y: number; dragging: boolean }> = []
   for (const change of changes) {
     if (change.type !== 'position' || !change.position || !change.id) {
       continue
@@ -20,6 +21,7 @@ export function extractPositionUpdates(
       id: change.id,
       x: change.position.x,
       y: change.position.y,
+      dragging: Boolean(change.dragging),
     })
   }
   return updates

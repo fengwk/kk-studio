@@ -1,448 +1,707 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import {
-  canvasReducer,
-  createInitialCanvasState,
-  getActiveGenerator,
-  getContextDescription,
-} from '@/features/canvas/reducer'
-import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
-import { useCanvasTimers } from '@/features/canvas/useCanvasTimers'
-import { useI18n } from '@/shared/i18n'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
+import type { ResourceNode } from '@/features/canvas/domain'
+import { groupIdFromFlowId } from '@/features/canvas/projection'
 import type {
   AddMenuAction,
   AgentContextMode,
+  CanvasLocalState,
+  CanvasNodeCallbacks,
+  CanvasPositionUpdate,
   CanvasTool,
-  CanvasViewport,
-  GenerationMode,
-  LibraryFilter,
-  ResearchTab,
   StageMetrics,
 } from '@/features/canvas/types'
+import {
+  DEFAULT_CANVAS_VIEWPORT,
+  loadCanvasViewport,
+  saveCanvasViewport,
+  type StoredCanvasViewport,
+} from '@/features/canvas/viewport-storage'
+import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
+import type {
+  CanvasCommandDTO,
+  CanvasFunctionModelDTO,
+  CanvasResourceKind,
+  CanvasTransformDTO,
+  DecimalString,
+} from '@/shared/api/contracts/studio'
+import {
+  completeCanvasUpload,
+  getCanvas,
+  listCanvasFunctionModels,
+  reserveCanvasUpload,
+  uploadCanvasFile,
+} from '@/shared/api/studio-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
+const NODE_SIZE: CanvasTransformDTO = { x: 120, y: 120, width: 320, height: 260 }
 
 export function useCanvasController() {
-  const [state, dispatch] = useReducer(canvasReducer, undefined, createInitialCanvasState)
-  const { t } = useI18n()
-  const [stageMetrics, setStageMetricsState] = useState<StageMetrics>(DEFAULT_STAGE)
-  const stageMetricsRef = useRef<StageMetrics>(DEFAULT_STAGE)
+  const queryClient = useQueryClient()
+  const [state, setState] = useState<CanvasLocalState>({
+    view: 'library',
+    canvasId: null,
+    selectedIds: [],
+    positionDrafts: {},
+    viewport: { ...DEFAULT_CANVAS_VIEWPORT },
+    tool: 'select',
+    toast: null,
+    addMenuOpen: false,
+    addMenuIndex: 0,
+    threadOpen: false,
+    agentPrompt: '',
+    contextMode: 'selection',
+    messages: [],
+    uploadProgress: {},
+    commandPending: false,
+    conflictMessage: null,
+  })
+  const [stageMetrics, setStageMetrics] = useState(DEFAULT_STAGE)
   const fitViewRef = useRef<(() => void) | null>(null)
   const focusSelectionRef = useRef<(() => void) | null>(null)
   const zoomRef = useRef<((scale: number) => void) | null>(null)
-  const pendingFitRef = useRef(false)
   const stageElementRef = useRef<HTMLElement | null>(null)
   const agentPromptRef = useRef<HTMLTextAreaElement | null>(null)
-  const generationPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const dockAddRef = useRef<HTMLButtonElement | null>(null)
-  const helpOpenerRef = useRef<HTMLElement | null>(null)
-  const researchOpenerRef = useRef<HTMLElement | null>(null)
-  const helpCloseRef = useRef<HTMLButtonElement | null>(null)
-  const researchCloseRef = useRef<HTMLButtonElement | null>(null)
-  const helpDialogRef = useRef<HTMLDialogElement | null>(null)
+  const queueRef = useRef<CanvasCommandQueue | null>(null)
+  const pendingCommandCountRef = useRef(0)
+  const transformTimerRef = useRef<number | null>(null)
+  const pendingNodeTransformsRef = useRef(new Map<DecimalString, CanvasTransformDTO>())
+  const pendingGroupMovesRef = useRef(new Map<DecimalString, { x: number; y: number }>())
 
-  const { showToast, stopRunTimer } = useCanvasTimers({
-    state,
-    dispatch,
-    stageMetricsRef,
+  const snapshotQuery = useQuery({
+    queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
+    queryFn: ({ signal }) => getCanvas(state.canvasId as DecimalString, { signal }),
+    enabled: state.view === 'editor' && Boolean(state.canvasId),
+  })
+  const modelsQuery = useQuery({
+    queryKey: queryKeys.studio.canvasModels,
+    queryFn: ({ signal }) => listCanvasFunctionModels({ signal }),
+    enabled: state.view === 'editor',
   })
 
   useEffect(() => {
-    if (state.focusAgentPromptToken > 0) {
-      agentPromptRef.current?.focus()
-    }
-  }, [state.focusAgentPromptToken])
-  useEffect(() => {
-    if (state.focusGenerationPromptToken <= 0) {
+    if (!snapshotQuery.data || !state.canvasId) {
       return
     }
-    // Prompt 会随 token 更新在生成器面板挂载后渲染；需要在布局完成后再聚焦。
-    const id = window.requestAnimationFrame(() => {
-      generationPromptRef.current?.focus()
-    })
-    return () => window.cancelAnimationFrame(id)
-  }, [state.focusGenerationPromptToken])
+    const snapshot = snapshotQuery.data
+    if (!queueRef.current) {
+      const canvasId = state.canvasId
+      queueRef.current = new CanvasCommandQueue(canvasId, {
+        initialSnapshot: snapshot,
+        onSnapshot: (next) => {
+          queryClient.setQueryData(queryKeys.studio.canvas(canvasId), next)
+        },
+      })
+    } else {
+      const authoritative = queueRef.current.replaceSnapshot(snapshot)
+      if (authoritative !== snapshot) {
+        queryClient.setQueryData(queryKeys.studio.canvas(state.canvasId), authoritative)
+      }
+    }
+  }, [queryClient, snapshotQuery.data, state.canvasId])
 
-  const activeGenerator = useMemo(() => getActiveGenerator(state), [state])
-  const run = useMemo(() => {
-    const node = state.nodes.find((item) => item.type === 'run')
-    return node && node.type === 'run' ? node : undefined
-  }, [state.nodes])
-  const context = getContextDescription(state, t)
+  useEffect(() => {
+    if (!state.toast) {
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setState((current) => ({ ...current, toast: null }))
+    }, 2600)
+    return () => window.clearTimeout(timer)
+  }, [state.toast])
 
-  const setStageMetrics = useCallback((metrics: StageMetrics) => {
-    stageMetricsRef.current = metrics
-    setStageMetricsState((previous) => (
-      previous.width === metrics.width
-      && previous.height === metrics.height
-      && previous.dockTop === metrics.dockTop
-        ? previous
-        : metrics
-    ))
+  useEffect(() => () => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+    }
   }, [])
 
-  const requestFitView = useCallback(() => {
-    pendingFitRef.current = true
-    window.requestAnimationFrame(() => {
-      if (fitViewRef.current) {
-        pendingFitRef.current = false
-        fitViewRef.current()
+  const setToast = useCallback((toast: string) => {
+    setState((current) => ({ ...current, toast }))
+  }, [])
+
+  const openEditor = useCallback((canvasId: DecimalString) => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+      transformTimerRef.current = null
+    }
+    pendingNodeTransformsRef.current.clear()
+    pendingGroupMovesRef.current.clear()
+    queueRef.current = null
+    setState((current) => ({
+      ...current,
+      view: 'editor',
+      canvasId,
+      selectedIds: [],
+      positionDrafts: {},
+      viewport: loadCanvasViewport(canvasId),
+      conflictMessage: null,
+    }))
+  }, [])
+
+  const openLibrary = useCallback(() => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+      transformTimerRef.current = null
+    }
+    pendingNodeTransformsRef.current.clear()
+    pendingGroupMovesRef.current.clear()
+    queueRef.current = null
+    setState((current) => ({
+      ...current,
+      view: 'library',
+      canvasId: null,
+      selectedIds: [],
+      positionDrafts: {},
+      addMenuOpen: false,
+      threadOpen: false,
+    }))
+  }, [])
+
+  const executeCommands = useCallback(async (commands: CanvasCommandDTO[]) => {
+    const queue = queueRef.current
+    if (!queue) {
+      throw new Error('Canvas snapshot is not ready')
+    }
+    pendingCommandCountRef.current += 1
+    setState((current) => ({ ...current, commandPending: true, conflictMessage: null }))
+    try {
+      return await queue.enqueue(commands)
+    } catch (error) {
+      if (error instanceof CanvasCommandConflictError) {
+        setState((current) => ({
+          ...current,
+          conflictMessage: error.message,
+          toast: '画布已在其他位置更新，请检查最新内容后重试。',
+        }))
+      } else {
+        setState((current) => ({
+          ...current,
+          toast: error instanceof Error ? error.message : '画布操作失败',
+        }))
+      }
+      throw error
+    } finally {
+      pendingCommandCountRef.current -= 1
+      if (pendingCommandCountRef.current === 0) {
+        setState((current) => ({ ...current, commandPending: false }))
+      }
+    }
+  }, [])
+
+  const flushTransforms = useCallback(() => {
+    transformTimerRef.current = null
+    const commands: CanvasCommandDTO[] = []
+    const submittedDrafts: Record<string, { x: number; y: number }> = {}
+    const updates = [...pendingNodeTransformsRef.current].map(([nodeId, transform]) => ({
+      nodeId,
+      transform,
+    }))
+    for (const [nodeId, transform] of pendingNodeTransformsRef.current) {
+      submittedDrafts[nodeId] = { x: transform.x, y: transform.y }
+    }
+    pendingNodeTransformsRef.current.clear()
+    for (const [groupId, position] of pendingGroupMovesRef.current) {
+      commands.push({ type: 'MOVE_GROUP', groupId, ...position })
+      submittedDrafts[`group:${groupId}`] = position
+    }
+    pendingGroupMovesRef.current.clear()
+    if (updates.length > 0) {
+      commands.push({ type: 'UPDATE_NODE_TRANSFORMS', updates })
+    }
+    if (commands.length > 0) {
+      void executeCommands(commands)
+        .catch(() => undefined)
+        .finally(() => {
+          setState((current) => ({
+            ...current,
+            positionDrafts: removeSubmittedDrafts(current.positionDrafts, submittedDrafts),
+          }))
+        })
+    }
+  }, [executeCommands])
+
+  const scheduleTransformFlush = useCallback(() => {
+    if (transformTimerRef.current !== null) {
+      window.clearTimeout(transformTimerRef.current)
+    }
+    transformTimerRef.current = window.setTimeout(flushTransforms, 180)
+  }, [flushTransforms])
+
+  const moveNodes = useCallback((updates: CanvasPositionUpdate[]) => {
+    const snapshot = snapshotQuery.data
+    if (!snapshot) {
+      return
+    }
+    setState((current) => {
+      const positionDrafts = { ...current.positionDrafts }
+      for (const update of updates) {
+        if (update.kind === 'group') {
+          const groupId = groupIdFromFlowId(update.id)
+          if (!groupId) {
+            continue
+          }
+          const group = snapshot.groups.find((item) => item.id === groupId)
+          if (!group) {
+            continue
+          }
+          const position = {
+            x: update.transform.x,
+            y: update.transform.y,
+          }
+          positionDrafts[update.id] = position
+          pendingGroupMovesRef.current.set(groupId, position)
+        } else {
+          positionDrafts[update.id] = {
+            x: update.transform.x,
+            y: update.transform.y,
+          }
+          pendingNodeTransformsRef.current.set(update.id as DecimalString, update.transform)
+        }
+      }
+      return { ...current, positionDrafts }
+    })
+  }, [snapshotQuery.data])
+
+  const commitTransforms = useCallback(() => {
+    scheduleTransformFlush()
+  }, [scheduleTransformFlush])
+
+  const setViewport = useCallback((viewport: StoredCanvasViewport) => {
+    setState((current) => {
+      if (current.canvasId) {
+        saveCanvasViewport(current.canvasId, viewport)
+      }
+      return { ...current, viewport }
+    })
+  }, [])
+
+  const setSelection = useCallback((selectedIds: string[]) => {
+    setState((current) => ({
+      ...current,
+      selectedIds,
+      addMenuOpen: false,
+    }))
+  }, [])
+
+  const renameNode = useCallback((nodeId: DecimalString, name: string) => {
+    const normalized = name.trim()
+    if (!normalized) {
+      return
+    }
+    void executeCommands([{ type: 'RENAME_NODE', nodeId, name: normalized }]).catch(() => undefined)
+  }, [executeCommands])
+
+  const editTextNode = useCallback((node: ResourceNode) => {
+    const resource = node.resources[0]
+    if (resource?.kind !== 'TEXT') {
+      return
+    }
+    const markdown = window.prompt('编辑 Markdown', resource.text ?? '')
+    if (markdown === null) {
+      return
+    }
+    void executeCommands([{ type: 'UPDATE_TEXT_NODE', nodeId: node.id, markdown }]).catch(() => undefined)
+  }, [executeCommands])
+
+  const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
+    renameNode,
+    editTextNode,
+  }), [editTextNode, renameNode])
+
+  const nextTransform = useCallback((): CanvasTransformDTO => {
+    const count = snapshotQuery.data?.nodes.length ?? 0
+    return {
+      ...NODE_SIZE,
+      x: 100 + (count % 4) * 360,
+      y: 100 + Math.floor(count / 4) * 300,
+    }
+  }, [snapshotQuery.data?.nodes.length])
+
+  const createTextNode = useCallback(() => {
+    void executeCommands([{
+      type: 'CREATE_TEXT_NODE',
+      name: '文本',
+      markdown: '# 新文本\n\n双击节点编辑 Markdown。',
+      transform: nextTransform(),
+    }]).catch(() => undefined)
+  }, [executeCommands, nextTransform])
+
+  const createFunctionNode = useCallback((outputKind: 'IMAGE' | 'VIDEO') => {
+    const model = modelsQuery.data?.find((item) => item.outputKind === outputKind && item.available)
+      ?? modelsQuery.data?.find((item) => item.outputKind === outputKind)
+    if (!model || !model.available) {
+      setToast(model?.unavailableReason || `没有可用的${outputKind === 'IMAGE' ? '图片' : '视频'}模型`)
+      return
+    }
+    const config = createDefaultFunctionConfig(model)
+    config.prompt.segments = [{ type: 'TEXT', text: outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频' }]
+    void executeCommands([{
+      type: 'CREATE_FUNCTION_NODE',
+      name: outputKind === 'IMAGE' ? '图片生成' : '视频生成',
+      modelKey: model.key,
+      configJson: JSON.stringify(config),
+      transform: nextTransform(),
+    }]).catch(() => undefined)
+  }, [executeCommands, modelsQuery.data, nextTransform, setToast])
+
+  const createGroup = useCallback(() => {
+    const snapshot = snapshotQuery.data
+    const members = snapshot?.nodes.filter((node) => state.selectedIds.includes(node.id) && !node.groupId) ?? []
+    if (members.length === 0) {
+      setToast('请先选择未分组的资源节点。')
+      return
+    }
+    const memberTransforms = members.map((node) => {
+      const draft = state.positionDrafts[node.id]
+      return draft ? { ...node.transform, ...draft } : node.transform
+    })
+    const minX = Math.min(...memberTransforms.map((transform) => transform.x)) - 32
+    const minY = Math.min(...memberTransforms.map((transform) => transform.y)) - 52
+    const maxX = Math.max(...memberTransforms.map((transform) => transform.x + transform.width)) + 32
+    const maxY = Math.max(...memberTransforms.map((transform) => transform.y + transform.height)) + 32
+    void executeCommands([{
+      type: 'CREATE_GROUP',
+      title: '分组',
+      transform: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+      memberNodeIds: members.map((node) => node.id),
+    }]).catch(() => undefined)
+  }, [
+    executeCommands,
+    setToast,
+    snapshotQuery.data,
+    state.positionDrafts,
+    state.selectedIds,
+  ])
+
+  const ungroupSelection = useCallback(() => {
+    const snapshot = snapshotQuery.data
+    if (!snapshot) {
+      return
+    }
+    const byGroup = new Map<DecimalString, DecimalString[]>()
+    for (const node of snapshot.nodes) {
+      if (!node.groupId || !state.selectedIds.includes(node.id)) {
+        continue
+      }
+      const members = byGroup.get(node.groupId) ?? []
+      members.push(node.id)
+      byGroup.set(node.groupId, members)
+    }
+    const commands: CanvasCommandDTO[] = [...byGroup].map(([groupId, memberNodeIds]) => ({
+      type: 'UNGROUP',
+      groupId,
+      memberNodeIds,
+    }))
+    if (commands.length === 0) {
+      setToast('当前选区没有已分组的成员。')
+      return
+    }
+    void executeCommands(commands).catch(() => undefined)
+  }, [executeCommands, setToast, snapshotQuery.data, state.selectedIds])
+
+  const uploadFiles = useCallback(async (files: FileList | File[]) => {
+    if (!state.canvasId) {
+      return
+    }
+    const canvasId = state.canvasId
+    for (const file of Array.from(files)) {
+      const kind = fileKind(file)
+      const localId = `${file.name}:${file.lastModified}:${file.size}`
+      if (!kind) {
+        setToast(`不支持的文件类型：${file.name}`)
+        continue
+      }
+      try {
+        setState((current) => ({
+          ...current,
+          uploadProgress: { ...current.uploadProgress, [localId]: 0.1 },
+        }))
+        const reservation = await reserveCanvasUpload(canvasId, {
+          kind,
+          filename: file.name,
+          mediaType: file.type || fallbackMediaType(kind),
+          size: String(file.size) as DecimalString,
+        })
+        setState((current) => ({
+          ...current,
+          uploadProgress: { ...current.uploadProgress, [localId]: 0.35 },
+        }))
+        await uploadCanvasFile(reservation, file)
+        setState((current) => ({
+          ...current,
+          uploadProgress: { ...current.uploadProgress, [localId]: 0.8 },
+        }))
+        const resource = await completeCanvasUpload(canvasId, reservation.uploadId)
+        await executeCommands([{
+          type: 'CREATE_RESOURCE_NODE',
+          name: file.name,
+          resourceIds: [resource.id],
+          transform: nextTransform(),
+        }])
+        setState((current) => {
+          const progress = { ...current.uploadProgress }
+          delete progress[localId]
+          return { ...current, uploadProgress: progress, toast: `已上传 ${file.name}` }
+        })
+      } catch (error) {
+        setState((current) => {
+          const progress = { ...current.uploadProgress }
+          delete progress[localId]
+          return {
+            ...current,
+            uploadProgress: progress,
+            toast: error instanceof Error ? error.message : `上传 ${file.name} 失败`,
+          }
+        })
+      }
+    }
+  }, [executeCommands, nextTransform, setToast, state.canvasId])
+
+  const handleAddAction = useCallback((action: AddMenuAction) => {
+    setState((current) => ({ ...current, addMenuOpen: false }))
+    if (action === 'text-resource') {
+      createTextNode()
+    } else if (action === 'image-function') {
+      createFunctionNode('IMAGE')
+    } else if (action === 'video-function') {
+      createFunctionNode('VIDEO')
+    } else if (action === 'group') {
+      createGroup()
+    }
+  }, [createFunctionNode, createGroup, createTextNode])
+
+  const deleteSelection = useCallback(() => {
+    const commands: CanvasCommandDTO[] = []
+    const nodeIds = new Set(snapshotQuery.data?.nodes.map((node) => node.id) ?? [])
+    for (const id of state.selectedIds) {
+      const groupId = groupIdFromFlowId(id)
+      if (groupId) {
+        commands.push({ type: 'DELETE_GROUP', groupId })
+      } else if (nodeIds.has(id as DecimalString)) {
+        commands.push({ type: 'DELETE_NODE', nodeId: id as DecimalString })
+      }
+    }
+    if (commands.length === 0) {
+      return
+    }
+    void executeCommands(commands).then(() => {
+      setState((current) => ({
+        ...current,
+        selectedIds: [],
+      }))
+    }).catch(() => undefined)
+  }, [executeCommands, snapshotQuery.data?.nodes, state.selectedIds])
+
+  const createLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
+    void executeCommands([{ type: 'CREATE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
+  }, [executeCommands])
+
+  const deleteLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
+    void executeCommands([{ type: 'DELETE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
+  }, [executeCommands])
+
+  const setAgentPrompt = useCallback((agentPrompt: string) => {
+    setState((current) => ({ ...current, agentPrompt }))
+  }, [])
+
+  const sendAgent = useCallback(() => {
+    setState((current) => {
+      const text = current.agentPrompt.trim()
+      if (!text) {
+        return { ...current, toast: '请输入要交给 Agent 的任务。' }
+      }
+      return {
+        ...current,
+        agentPrompt: '',
+        threadOpen: true,
+        messages: [
+          ...current.messages,
+          { kind: 'user', text },
+          {
+            kind: 'agent',
+            text: '我已读取当前真实 ResourceNode 选区。Canvas v1 暂不把文本生成 Function 接入后端；现有 Agent 最后回答仍会保留在此处。',
+          },
+        ],
       }
     })
   }, [])
 
-  const consumePendingFit = useCallback(() => {
-    if (!pendingFitRef.current) {
-      return
-    }
-    pendingFitRef.current = false
-    fitViewRef.current?.()
+  const contextNodes = useMemo(() => {
+    const nodes = snapshotQuery.data?.nodes ?? []
+    return state.contextMode === 'whole'
+      ? nodes
+      : nodes.filter((node) => state.selectedIds.includes(node.id))
+  }, [snapshotQuery.data?.nodes, state.contextMode, state.selectedIds])
+  const contextDescription = contextNodes.length === 0
+    ? '尚未选择 ResourceNode。'
+    : contextNodes.map((node) => {
+        const kinds = [...new Set(node.resources.map((resource) => resource.kind))].join('/')
+        return `${node.name}（${kinds || node.function?.modelKey || 'Function'}，${node.resources.length} 个资源）`
+      }).join('；')
+
+  const setContextMode = useCallback((contextMode: AgentContextMode) => {
+    setState((current) => ({ ...current, contextMode }))
   }, [])
-
-  const openEditor = useCallback(() => {
-    dispatch({ type: 'set-view', view: 'editor' })
-    requestFitView()
-  }, [requestFitView])
-
-  const openLibrary = useCallback(() => {
-    dispatch({ type: 'set-view', view: 'library' })
+  const setTool = useCallback((tool: CanvasTool) => {
+    setState((current) => ({ ...current, tool }))
   }, [])
-
-  const handleAddAction = useCallback((action: AddMenuAction) => {
-    dispatch({ type: 'handle-add-action', action, stage: stageMetricsRef.current })
-    // 仅针对延后的 file/frame 动作恢复 Dock "+" 焦点；生成器通过 token 聚焦 Prompt。
-    if (action === 'file' || action === 'frame') {
-      window.requestAnimationFrame(() => dockAddRef.current?.focus())
-    }
-  }, [])
-
-  const createGenerator = useCallback((mode: GenerationMode) => {
-    dispatch({ type: 'create-generator', mode, stage: stageMetricsRef.current })
-  }, [])
-
-  const createTextNode = useCallback(() => {
-    dispatch({ type: 'create-text-node', stage: stageMetricsRef.current })
-  }, [])
-
-  const setViewport = useCallback((viewport: CanvasViewport) => {
-    dispatch({ type: 'set-viewport', viewport })
-  }, [])
-
-  const setSelection = useCallback((ids: string[]) => {
-    dispatch({ type: 'set-selection', ids })
-  }, [])
-
-  const moveNodes = useCallback((updates: Array<{ id: string; x: number; y: number }>) => {
-    dispatch({ type: 'move-nodes', updates })
-  }, [])
-
-  const activateGenerator = useCallback((id: string | null, focusPrompt = false) => {
-    dispatch({ type: 'activate-generator', id, focusPrompt })
-  }, [])
-
-  const closeGenerator = useCallback((restoreFocus = false) => {
-    const generatorId = state.activeGeneratorId
-    dispatch({ type: 'activate-generator', id: null })
-    if (!restoreFocus || !generatorId) {
-      return
-    }
-    window.requestAnimationFrame(() => {
-      stageElementRef.current
-        ?.querySelector<HTMLElement>(`.react-flow__node[data-id="${generatorId}"] .node-generator`)
-        ?.focus({ preventScroll: true })
-    })
-  }, [state.activeGeneratorId])
-
-  const setGenerationPrompt = useCallback((value: string) => {
-    dispatch({ type: 'set-generation-prompt', value })
-    dispatch({ type: 'mark-generator-draft-from-prompt' })
-  }, [])
-
-  const commitGenerationPrompt = useCallback(() => {
-    dispatch({ type: 'mark-generator-draft-from-prompt' })
-  }, [])
-
-  const toggleGenerationExpanded = useCallback(() => {
-    dispatch({ type: 'toggle-generation-expanded' })
-  }, [])
-
-  const setGenerationCapability = useCallback((capability: string) => {
-    dispatch({ type: 'set-generation-capability', capability })
-  }, [])
-
-  const cycleParameter = useCallback((index: number) => {
-    dispatch({ type: 'cycle-parameter', index })
-  }, [])
-
-  const toggleReference = useCallback((index: number) => {
-    dispatch({ type: 'toggle-reference', index })
-  }, [])
-
-  const submitGeneration = useCallback(() => {
-    dispatch({ type: 'submit-generation' })
-  }, [])
-
-  const setAgentPrompt = useCallback((value: string) => {
-    dispatch({ type: 'set-agent-prompt', value })
-  }, [])
-
-  const sendAgent = useCallback(() => {
-    dispatch({ type: 'send-agent-message' })
-  }, [])
-
   const toggleAddMenu = useCallback(() => {
-    dispatch({ type: 'set-add-menu-open', open: !state.addMenuOpen })
-  }, [state.addMenuOpen])
-
-  const closeAddMenu = useCallback((restoreFocus = true) => {
-    dispatch({ type: 'set-add-menu-open', open: false })
-    if (restoreFocus) {
-      window.requestAnimationFrame(() => dockAddRef.current?.focus())
-    }
+    setState((current) => ({
+      ...current,
+      addMenuOpen: !current.addMenuOpen,
+      threadOpen: false,
+    }))
   }, [])
-
-  const setAddMenuIndex = useCallback((index: number) => {
-    dispatch({ type: 'set-add-menu-index', index })
+  const closeAddMenu = useCallback(() => {
+    setState((current) => ({ ...current, addMenuOpen: false, addMenuIndex: 0 }))
   }, [])
-
-  const setContextMode = useCallback((mode: AgentContextMode) => {
-    dispatch({ type: 'set-context-mode', mode })
+  const setAddMenuIndex = useCallback((addMenuIndex: number) => {
+    setState((current) => ({ ...current, addMenuIndex }))
   }, [])
-
-  const resetDemo = useCallback(() => {
-    stopRunTimer()
-    dispatch({ type: 'reset-demo' })
-    requestFitView()
-  }, [requestFitView, stopRunTimer])
-
-  const collapseThread = useCallback(() => {
-    dispatch({ type: 'set-thread-open', open: false })
-    window.requestAnimationFrame(() => dockAddRef.current?.focus())
-  }, [])
-
   const openThread = useCallback(() => {
-    dispatch({ type: 'set-thread-open', open: true })
+    setState((current) => ({
+      ...current,
+      threadOpen: true,
+      addMenuOpen: false,
+    }))
   }, [])
-
-  const runAction = useCallback((action: 'pause' | 'resume' | 'retry') => {
-    if (action === 'pause') {
-      dispatch({ type: 'pause-agent-run' })
-    } else if (action === 'resume') {
-      dispatch({ type: 'resume-agent-run' })
-    } else {
-      dispatch({ type: 'retry-agent-run' })
-    }
+  const collapseThread = useCallback(() => {
+    setState((current) => ({ ...current, threadOpen: false }))
   }, [])
-
-  const consumeThreadScroll = useCallback(() => {
-    dispatch({ type: 'consume-thread-scroll' })
-  }, [])
-
-  const setIdea = useCallback((idea: string) => {
-    dispatch({ type: 'set-idea', idea })
-  }, [])
-
-  const createFromIdea = useCallback(() => {
-    dispatch({ type: 'open-editor-from-idea' })
-    // 仅在 idea 有效且编辑器将打开时进行 fit。
-    if (state.idea.trim()) {
-      requestFitView()
-    }
-  }, [requestFitView, state.idea])
-
-  const selectTemplate = useCallback((template: string) => {
-    dispatch({ type: 'set-selected-template', template })
-  }, [])
-
-  const setLibraryFilter = useCallback((filter: LibraryFilter) => {
-    dispatch({ type: 'set-library-filter', filter })
-  }, [])
-
-  const setResearchOpen = useCallback((
-    open: boolean,
-    opener?: HTMLElement | null,
-    restoreFocus = true,
-  ) => {
-    if (open) {
-      researchOpenerRef.current = opener ?? (document.activeElement as HTMLElement | null)
-      dispatch({ type: 'set-research-open', open: true })
-      window.requestAnimationFrame(() => researchCloseRef.current?.focus())
-      return
-    }
-    dispatch({ type: 'set-research-open', open: false })
-    const focusTarget = restoreFocus ? researchOpenerRef.current : null
-    researchOpenerRef.current = null
-    window.requestAnimationFrame(() => focusTarget?.focus())
-  }, [])
-
-  const setResearchTab = useCallback((tab: ResearchTab) => {
-    dispatch({ type: 'set-research-tab', tab })
-  }, [])
-
-  const setHelpOpen = useCallback((
-    open: boolean,
-    opener?: HTMLElement | null,
-    restoreFocus = true,
-  ) => {
-    const dialog = helpDialogRef.current
-    if (open) {
-      helpOpenerRef.current = opener ?? (document.activeElement as HTMLElement | null)
-      dispatch({ type: 'set-help-open', open: true })
-      window.requestAnimationFrame(() => {
-        if (dialog && !dialog.open) {
-          dialog.showModal()
-        }
-        helpCloseRef.current?.focus()
-      })
-      return
-    }
-    if (dialog?.open) {
-      dialog.close()
-    }
-    dispatch({ type: 'set-help-open', open: false })
-    const focusTarget = restoreFocus ? helpOpenerRef.current : null
-    helpOpenerRef.current = null
-    window.requestAnimationFrame(() => focusTarget?.focus())
-  }, [])
-
-  const setTool = useCallback((tool: CanvasTool, silent = false) => {
-    dispatch({ type: 'set-tool', tool, silent })
-  }, [])
-
   const focusAgentDock = useCallback(() => {
-    dispatch({ type: 'focus-agent-prompt' })
-  }, [])
-
-  const clearSelection = useCallback(() => {
-    dispatch({ type: 'clear-selection' })
-  }, [])
-
-  const deleteSelection = useCallback(() => {
-    dispatch({ type: 'delete-selection' })
-  }, [])
+    openThread()
+    window.requestAnimationFrame(() => agentPromptRef.current?.focus())
+  }, [openThread])
 
   useCanvasKeyboard({
-    state,
+    view: state.view,
     stageElementRef,
     fitViewRef,
     focusSelectionRef,
     zoomRef,
-    setHelpOpen,
-    setResearchOpen,
-    closeGenerator,
-    closeAddMenu,
-    collapseThread,
-    clearSelection,
+    clearSelection: () => setSelection([]),
     deleteSelection,
     focusAgentPrompt: focusAgentDock,
     setTool,
     createTextNode,
+    closeOverlays: () => {
+      closeAddMenu()
+      collapseThread()
+    },
   })
 
-  return useMemo(() => ({
+  return {
     state,
-    activeGenerator,
-    run,
-    contextCount: context.count,
-    contextDescription: context.description,
+    snapshot: snapshotQuery.data ?? null,
     stageMetrics,
+    setStageMetrics,
     fitViewRef,
     focusSelectionRef,
     zoomRef,
     stageElementRef,
     agentPromptRef,
-    generationPromptRef,
     dockAddRef,
-    helpDialogRef,
-    helpCloseRef,
-    researchCloseRef,
-    openLibrary,
+    snapshotQuery,
+    modelsQuery,
+    models: modelsQuery.data ?? [],
+    nodeCallbacks,
     openEditor,
-    setIdea,
-    createFromIdea,
-    selectTemplate,
-    setLibraryFilter,
-    setResearchOpen,
-    setResearchTab,
-    setHelpOpen,
-    setToast: showToast,
-    setStageMetrics,
+    openLibrary,
+    setToast,
     setViewport,
     setSelection,
     moveNodes,
-    activateGenerator,
-    closeGenerator,
-    setGenerationPrompt,
-    commitGenerationPrompt,
-    toggleGenerationExpanded,
-    setGenerationCapability,
-    cycleParameter,
-    toggleReference,
-    submitGeneration,
-    setAgentPrompt,
-    sendAgent,
+    commitTransforms,
+    setTool,
+    createLink,
+    deleteLink,
+    deleteSelection,
+    createTextNode,
+    createFunctionNode,
+    createGroup,
+    ungroupSelection,
+    uploadFiles,
+    handleAddAction,
     toggleAddMenu,
     closeAddMenu,
     setAddMenuIndex,
-    handleAddAction,
-    createGenerator,
-    setContextMode,
-    resetDemo,
-    collapseThread,
-    openThread,
-    runAction,
-    consumeThreadScroll,
-    setTool,
-    focusAgentDock,
-    consumePendingFit,
-    requestFitView,
-  }), [
-    state,
-    activeGenerator,
-    run,
-    context.count,
-    context.description,
-    stageMetrics,
-    openLibrary,
-    openEditor,
-    setIdea,
-    createFromIdea,
-    selectTemplate,
-    setLibraryFilter,
-    setResearchOpen,
-    setResearchTab,
-    setHelpOpen,
-    showToast,
-    setStageMetrics,
-    setViewport,
-    setSelection,
-    moveNodes,
-    activateGenerator,
-    closeGenerator,
-    setGenerationPrompt,
-    commitGenerationPrompt,
-    toggleGenerationExpanded,
-    setGenerationCapability,
-    cycleParameter,
-    toggleReference,
-    submitGeneration,
     setAgentPrompt,
     sendAgent,
-    toggleAddMenu,
-    closeAddMenu,
-    setAddMenuIndex,
-    handleAddAction,
-    createGenerator,
-    setContextMode,
-    resetDemo,
-    collapseThread,
     openThread,
-    runAction,
-    consumeThreadScroll,
-    setTool,
+    collapseThread,
     focusAgentDock,
-    consumePendingFit,
-    requestFitView,
-  ])
+    setContextMode,
+    contextCount: contextNodes.length,
+    contextDescription,
+  }
+}
+
+function fileKind(file: File): Exclude<CanvasResourceKind, 'TEXT'> | null {
+  if (file.type.startsWith('image/')) {
+    return 'IMAGE'
+  }
+  if (file.type.startsWith('video/')) {
+    return 'VIDEO'
+  }
+  if (file.type.startsWith('audio/')) {
+    return 'AUDIO'
+  }
+  const extension = file.name.split('.').at(-1)?.toLowerCase()
+  if (extension && ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(extension)) {
+    return 'IMAGE'
+  }
+  if (extension && ['mp4', 'mov'].includes(extension)) {
+    return 'VIDEO'
+  }
+  if (extension && ['wav', 'mp3'].includes(extension)) {
+    return 'AUDIO'
+  }
+  return null
+}
+
+function fallbackMediaType(kind: Exclude<CanvasResourceKind, 'TEXT'>): string {
+  if (kind === 'IMAGE') {
+    return 'image/jpeg'
+  }
+  if (kind === 'VIDEO') {
+    return 'video/mp4'
+  }
+  return 'audio/mpeg'
+}
+
+function createDefaultFunctionConfig(model: CanvasFunctionModelDTO) {
+  const parameters: Record<string, string | number> = {}
+  for (const parameter of model.parameters) {
+    if (parameter.defaultValue !== null) {
+      parameters[parameter.key] = parameter.defaultValue
+    } else if (parameter.type === 'ENUM' && parameter.options[0] !== undefined) {
+      parameters[parameter.key] = parameter.options[0]
+    } else if (parameter.type === 'INTEGER' && parameter.min !== null) {
+      parameters[parameter.key] = parameter.min
+    }
+  }
+  return {
+    prompt: { segments: [{ type: 'TEXT' as const, text: '' }] },
+    parameters,
+  }
+}
+
+function removeSubmittedDrafts(
+  current: Record<string, { x: number; y: number }>,
+  submitted: Record<string, { x: number; y: number }>,
+): Record<string, { x: number; y: number }> {
+  const next = { ...current }
+  for (const [id, position] of Object.entries(submitted)) {
+    const draft = next[id]
+    if (draft?.x === position.x && draft.y === position.y) {
+      delete next[id]
+    }
+  }
+  return next
 }
 
 export type CanvasController = ReturnType<typeof useCanvasController>

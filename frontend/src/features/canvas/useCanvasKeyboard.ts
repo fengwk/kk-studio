@@ -1,45 +1,34 @@
 import { useEffect, type RefObject } from 'react'
-import type { CanvasDocumentState, CanvasTool } from '@/features/canvas/types'
+import type { CanvasTool, CanvasView } from '@/features/canvas/types'
 
 type KeyboardApi = {
-  state: Pick<
-    CanvasDocumentState,
-    'view' | 'helpOpen' | 'researchOpen' | 'activeGeneratorId' | 'addMenuOpen' | 'threadOpen'
-  >
+  view: CanvasView
   stageElementRef: RefObject<HTMLElement | null>
   fitViewRef: RefObject<(() => void) | null>
   focusSelectionRef: RefObject<(() => void) | null>
   zoomRef: RefObject<((scale: number) => void) | null>
-  setHelpOpen: (open: boolean, opener?: HTMLElement | null, restoreFocus?: boolean) => void
-  setResearchOpen: (open: boolean, opener?: HTMLElement | null, restoreFocus?: boolean) => void
-  closeGenerator: (restoreFocus?: boolean) => void
-  closeAddMenu: (restoreFocus?: boolean) => void
-  collapseThread: () => void
   clearSelection: () => void
   deleteSelection: () => void
   focusAgentPrompt: () => void
   setTool: (tool: CanvasTool, silent?: boolean) => void
   createTextNode: () => void
+  closeOverlays: () => void
 }
 
 /** 编辑器键盘快捷键与焦点恢复，与主 controller 主体分离。 */
 export function useCanvasKeyboard(api: KeyboardApi) {
   const {
-    state,
+    view,
     stageElementRef,
     fitViewRef,
     focusSelectionRef,
     zoomRef,
-    setHelpOpen,
-    setResearchOpen,
-    closeGenerator,
-    closeAddMenu,
-    collapseThread,
     clearSelection,
     deleteSelection,
     focusAgentPrompt,
     setTool,
     createTextNode,
+    closeOverlays,
   } = api
 
   useEffect(() => {
@@ -53,39 +42,24 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       const modifier = event.metaKey || event.ctrlKey
 
       if (modifier && event.key.toLowerCase() === 'k') {
-        if (state.view !== 'editor') {
+        if (view !== 'editor') {
           return
         }
         event.preventDefault()
-        if (state.helpOpen) {
-          setHelpOpen(false, undefined, false)
-        }
-        if (state.researchOpen) {
-          setResearchOpen(false, undefined, false)
-        }
         focusAgentPrompt()
         return
       }
 
       if (event.key === 'Escape') {
-        if (state.helpOpen) {
-          setHelpOpen(false)
-        } else if (state.researchOpen) {
-          setResearchOpen(false)
-        } else if (state.activeGeneratorId) {
-          closeGenerator(true)
-        } else if (state.addMenuOpen) {
-          closeAddMenu(true)
-        } else if (state.threadOpen) {
-          collapseThread()
-        } else if (state.view === 'editor') {
+        closeOverlays()
+        if (view === 'editor') {
           clearSelection()
           stageElementRef.current?.focus({ preventScroll: true })
         }
         return
       }
 
-      if (state.view !== 'editor') {
+      if (view !== 'editor') {
         return
       }
 
@@ -96,7 +70,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
         return
       }
 
-      if (isTyping || isButton || state.helpOpen || state.researchOpen) {
+      if (isTyping || isButton) {
         return
       }
 
@@ -125,24 +99,15 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     return () => window.removeEventListener('keydown', handleKeyboard)
   }, [
     clearSelection,
-    closeAddMenu,
-    closeGenerator,
-    collapseThread,
+    closeOverlays,
     createTextNode,
     deleteSelection,
     fitViewRef,
     focusAgentPrompt,
     focusSelectionRef,
-    setHelpOpen,
-    setResearchOpen,
     setTool,
     stageElementRef,
-    state.activeGeneratorId,
-    state.addMenuOpen,
-    state.helpOpen,
-    state.researchOpen,
-    state.threadOpen,
-    state.view,
+    view,
     zoomRef,
   ])
 }
