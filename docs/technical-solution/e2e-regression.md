@@ -55,6 +55,34 @@ npm --prefix frontend run e2e:docs
 
 默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，默认测试模型是 `minimax/MiniMax-M2.7`。
 
+本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL 与 MinIO，只连接本机
+S3-compatible endpoint：
+
+```bash
+docker compose -f deploy/test/compose.yaml up -d --wait
+
+env \
+  JAVA_HOME_21="$JAVA_HOME_21" \
+  KK_STUDIO_DB_URL=jdbc:postgresql://127.0.0.1:15432/canvas_test \
+  KK_STUDIO_DB_USER=canvas_test \
+  KK_STUDIO_DB_PASSWORD=canvas_test_only \
+  KK_STUDIO_STORAGE_S3_ENABLED=true \
+  KK_STUDIO_STORAGE_S3_ENDPOINT=http://127.0.0.1:19000 \
+  KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=http://127.0.0.1:19000 \
+  KK_STUDIO_STORAGE_S3_REGION=us-east-1 \
+  KK_STUDIO_STORAGE_S3_BUCKET=canvas-test \
+  KK_STUDIO_STORAGE_S3_ACCESS_KEY=canvas-test \
+  KK_STUDIO_STORAGE_S3_SECRET_KEY=canvas-test-only \
+  MANAGEMENT_HEALTH_REDIS_ENABLED=false \
+  ./scripts/e2e.sh --with-canvas-function --ui
+
+docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
+```
+
+该命令选择 59 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
+Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
+rebuild；不得为这条回归追加 `--real`。
+
 ## 2. 分层
 
 | 层级 | 开关 | 成本 | 覆盖 |
@@ -220,7 +248,9 @@ ui.chat.blank_workspace_shell
 
 其中 `ui.canvas.page_loads` 验证 `/canvas` 可达、真实 Canvas library 渲染及创建入口可用；
 Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime 隔离。
-`--real` 额外执行 `ui.chat.blank_first_send_real`。
+`--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
+宿主 `DISPLAY` 与 `WAYLAND_DISPLAY`，避免混合桌面环境导致 compositor 停帧；`--headed`
+保留宿主显示环境。
 
 ## 4. API 契约与验证方式
 
