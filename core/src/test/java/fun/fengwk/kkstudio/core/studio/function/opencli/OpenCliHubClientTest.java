@@ -98,6 +98,31 @@ class OpenCliHubClientTest {
   }
 
   @Test
+  void canonicalizesChineseAndSupplementaryFilenameToAsciiWhilePreservingExtension() {
+    AtomicReference<String> requestBody = new AtomicReference<>();
+    server.createContext(
+        "/api/resources/uploads",
+        exchange -> {
+          requestBody.set(
+              new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.ISO_8859_1));
+          respond(
+              exchange,
+              201,
+              """
+              {"status":201,"code":"CREATED","success":true,"data":{"items":[{
+                "resourcePath":"/resources/2026-08-10/upload-test/____.png"
+              }]}}
+              """);
+        });
+
+    OpenCliHubClient.UploadedResource uploaded =
+        client.upload("参考😀图.png", "image/png", 1L, new ByteArrayInputStream(new byte[] {1}));
+
+    assertEquals("/resources/2026-08-10/upload-test/____.png", uploaded.resourcePath());
+    assertTrue(requestBody.get().contains("filename=\"____.png\""));
+  }
+
+  @Test
   void sendsExecutePollsStrictStatusesAndCancelsOnlyPending() {
     AtomicReference<JsonNode> executeBody = new AtomicReference<>();
     AtomicInteger cancelCalls = new AtomicInteger();
