@@ -360,6 +360,109 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(result.current.state.view).toBe('library')
   })
 
+  it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {
+    // Queue-owned snapshots plus in-flight reservations cover both synchronous clicks and sequential files.
+    let current = snapshot()
+    let resourceId = 90n
+    vi.mocked(getCanvas).mockImplementation(async () => current)
+    vi.mocked(completeCanvasUpload).mockImplementation(async () => {
+      resourceId += 1n
+      return {
+        id: resourceId.toString() as `${bigint}`,
+        canvasId: '1',
+        kind: 'IMAGE',
+        mediaType: 'image/heic',
+        name: 'same.heic',
+        size: '3',
+        textContent: null,
+        metadataJson: '{}',
+        createdAt: '2026-08-10T00:00:00Z',
+      }
+    })
+    vi.mocked(applyCanvasCommands).mockImplementation(async (_canvasId, request) => {
+      commands.push(request)
+      let nodes = current.nodes
+      for (const command of request.commands) {
+        if (
+          command.type === 'CREATE_FUNCTION_NODE'
+          || command.type === 'CREATE_TEXT_NODE'
+          || command.type === 'CREATE_RESOURCE_NODE'
+        ) {
+          nodes = [...nodes, {
+            id: String(nodes.length + 10) as `${bigint}`,
+            canvasId: '1',
+            name: command.name,
+            transform: command.transform,
+            groupId: null,
+            resources: [],
+            function: command.type === 'CREATE_FUNCTION_NODE'
+              ? { modelKey: command.modelKey, configJson: command.configJson }
+              : null,
+            run: null,
+          }]
+        }
+      }
+      revision += 1n
+      current = {
+        ...current,
+        document: { ...current.document, graphRevision: revision.toString() as `${bigint}` },
+        nodes,
+      }
+      return current
+    })
+
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor('1'))
+    await waitFor(() => expect(result.current.models).toHaveLength(1))
+
+    act(() => {
+      result.current.createFunctionNode('IMAGE')
+      result.current.createFunctionNode('IMAGE')
+    })
+    await waitFor(() => expect(commands.filter((request) => (
+      request.commands[0]?.type === 'CREATE_FUNCTION_NODE'
+    ))).toHaveLength(2))
+
+    act(() => {
+      result.current.createTextNode()
+      result.current.setTextEditorDraft({ name: '  图片生成  ' })
+    })
+    act(() => result.current.saveTextEditor())
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'CREATE_TEXT_NODE'
+    ))).toBe(true))
+
+    await act(async () => {
+      await result.current.uploadFiles([
+        new File(['one'], 'same.heic'),
+        new File(['two'], 'same.heic'),
+      ])
+    })
+
+    const aliases = commands.flatMap((request) => request.commands.flatMap((command) => (
+      command.type === 'CREATE_FUNCTION_NODE'
+      || command.type === 'CREATE_TEXT_NODE'
+      || command.type === 'CREATE_RESOURCE_NODE'
+        ? [command.name]
+        : []
+    )))
+    expect(aliases).toEqual([
+      '图片生成',
+      '图片生成 2',
+      '图片生成 3',
+      'same.heic',
+      'same.heic 2',
+    ])
+    expect(reserveCanvasUpload).toHaveBeenNthCalledWith(1, '1', expect.objectContaining({
+      kind: 'IMAGE',
+      mediaType: 'image/heic',
+    }))
+    expect(reserveCanvasUpload).toHaveBeenNthCalledWith(2, '1', expect.objectContaining({
+      kind: 'IMAGE',
+      mediaType: 'image/heic',
+    }))
+  })
+
   it('flushes debounced config before UUID start, polls only run state, preserves old output on failure, and cancels', async () => {
     // The call order and unchanged Resource id prove config/run orchestration never introduces a second snapshot.
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })

@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
+import { generationPanelPosition } from '@/features/canvas/generation-panel-position'
 import {
   canInsertReference,
   createDefaultFunctionConfig,
@@ -16,33 +24,54 @@ import {
   type ReferenceCandidate,
 } from '@/features/canvas/generation'
 import { CanvasResourceThumbnail } from '@/features/canvas/nodes/CanvasResourceMedia'
+import type { StageMetrics } from '@/features/canvas/types'
+import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type {
   CanvasFunctionConfigDTO,
   CanvasFunctionModelDTO,
+  CanvasTransformDTO,
   PromptSegmentDTO,
 } from '@/shared/api/contracts/studio'
+
+export interface CanvasGenerationPanelAnchor {
+  node: CanvasTransformDTO
+  viewport: StoredCanvasViewport
+  stage: StageMetrics
+}
 
 export function CanvasGenerationPanel({
   snapshot,
   node,
+  anchor,
 }: {
   snapshot: CanvasSnapshot
   node: ResourceNode
+  anchor?: CanvasGenerationPanelAnchor
 }) {
   const runtime = useCanvasRuntime()
   const { flushFunctionConfig } = runtime
-  const initialModel = modelForNode(runtime.models, node)
-  const [modelKey, setModelKey] = useState(initialModel?.key ?? node.function?.modelKey ?? '')
-  const model = runtime.models.find((item) => item.key === modelKey) ?? initialModel
+  const sourceModel = modelForNode(runtime.models, node)
+  const [modelKey, setModelKey] = useState(sourceModel?.key ?? node.function?.modelKey ?? '')
+  const model = runtime.models.find((item) => item.key === modelKey) ?? sourceModel
   const [config, setConfig] = useState<CanvasFunctionConfigDTO>(() => (
-    initialModel && node.function
-      ? parseFunctionConfig(node.function.configJson, initialModel)
-      : initialModel
-        ? createDefaultFunctionConfig(initialModel)
+    sourceModel && node.function
+      ? parseFunctionConfig(node.function.configJson, sourceModel)
+      : sourceModel
+        ? createDefaultFunctionConfig(sourceModel)
         : { prompt: { segments: [{ type: 'TEXT', text: '' }] }, parameters: {} }
   ))
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
+  const [panelSize, setPanelSize] = useState({ width: 760, height: 190 })
+  const panelRef = useRef<HTMLElement | null>(null)
+  const inputRefs = useRef(new Map<number, HTMLInputElement>())
   const cursorRef = useRef<PromptCursor>({ segmentIndex: 0, offset: 0 })
+  const pendingFocusRef = useRef<PromptCursor | null>(null)
+  // Every local edit gets a monotonic revision and semantic source identity.
+  // Matching snapshots acknowledge that revision; only genuinely external sources may replace a newer draft.
+  const draftRevisionRef = useRef(0)
+  const dirtyRef = useRef(false)
+  const sourceRef = useRef<{ identity: string; modelSignature: string } | null>(null)
+  const localSourceRevisionsRef = useRef(new Map<string, number>())
   const candidates = useMemo(
     () => model ? referenceCandidates(snapshot, node.id, model) : [],
     [model, node.id, snapshot],
@@ -54,10 +83,119 @@ export function CanvasGenerationPanel({
     ])),
     [candidates],
   )
+  const referencedKeys = useMemo(() => new Set(config.prompt.segments
+    .filter((segment): segment is Extract<PromptSegmentDTO, { type: 'REFERENCE' }> => (
+      segment.type === 'REFERENCE'
+    ))
+    .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
+  const panelPosition = useMemo(() => (
+    anchor && anchor.stage.width > 700
+      ? generationPanelPosition({
+        node: anchor.node,
+        viewport: anchor.viewport,
+        stage: anchor.stage,
+        panel: panelSize,
+      })
+      : null
+  ), [anchor, panelSize])
+  const panelStyle: CSSProperties | undefined = panelPosition ? {
+    bottom: 'auto',
+    left: panelPosition.left,
+    top: panelPosition.top,
+    transform: 'none',
+  } : undefined
 
   useEffect(() => () => {
     void flushFunctionConfig(node.id)
   }, [flushFunctionConfig, node.id])
+
+  useLayoutEffect(() => {
+    const element = panelRef.current
+    if (!element) {
+      return
+    }
+    const publish = () => {
+      const rect = element.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setPanelSize((current) => (
+          current.width === rect.width && current.height === rect.height
+            ? current
+            : { width: rect.width, height: rect.height }
+        ))
+      }
+    }
+    publish()
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const observer = new ResizeObserver(publish)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useLayoutEffect(() => {
+    const pending = pendingFocusRef.current
+    if (!pending) {
+      return
+    }
+    const input = inputRefs.current.get(pending.segmentIndex)
+    if (!input) {
+      return
+    }
+    input.focus()
+    input.setSelectionRange(pending.offset, pending.offset)
+    cursorRef.current = pending
+    pendingFocusRef.current = null
+  }, [config.prompt.segments])
+
+  const sourceConfig = useMemo(() => (
+    node.function && sourceModel
+      ? parseFunctionConfig(node.function.configJson, sourceModel)
+      : null
+  ), [node.function, sourceModel])
+  const sourceIdentity = node.function && sourceConfig
+    ? functionSourceIdentity(node.function.modelKey, sourceConfig)
+    : ''
+  const sourceModelSignature = sourceModel ? JSON.stringify(sourceModel) : ''
+  useEffect(() => {
+    if (!node.function || !sourceModel || !sourceConfig) {
+      return
+    }
+    const previous = sourceRef.current
+    if (
+      previous?.identity === sourceIdentity
+      && previous.modelSignature === sourceModelSignature
+    ) {
+      return
+    }
+    sourceRef.current = {
+      identity: sourceIdentity,
+      modelSignature: sourceModelSignature,
+    }
+    const acknowledgedRevision = localSourceRevisionsRef.current.get(sourceIdentity)
+    if (acknowledgedRevision !== undefined) {
+      for (const [identity, revision] of localSourceRevisionsRef.current) {
+        if (revision <= acknowledgedRevision) {
+          localSourceRevisionsRef.current.delete(identity)
+        }
+      }
+      if (dirtyRef.current && draftRevisionRef.current > acknowledgedRevision) {
+        return
+      }
+    } else {
+      localSourceRevisionsRef.current.clear()
+    }
+    setModelKey(node.function.modelKey)
+    setConfig(sourceConfig)
+    cursorRef.current = { segmentIndex: 0, offset: 0 }
+    dirtyRef.current = false
+  }, [
+    node.function,
+    sourceIdentity,
+    sourceConfig,
+    sourceModel,
+    sourceModelSignature,
+  ])
 
   useEffect(() => {
     if (!model) {
@@ -76,16 +214,21 @@ export function CanvasGenerationPanel({
   }
 
   const activeModel = model
-  const outputKind = initialModel?.outputKind ?? activeModel.outputKind
+  const outputKind = sourceModel?.outputKind ?? activeModel.outputKind
   const modelOptions = runtime.models.filter((item) => item.outputKind === outputKind)
   const running = node.run?.status === 'RUNNING'
   const promptValid = Boolean(promptVisibleText(config.prompt.segments).trim())
 
   function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
     setConfig(next)
-    if (promptVisibleText(next.prompt.segments).trim()) {
-      runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
-    }
+    const revision = draftRevisionRef.current + 1
+    draftRevisionRef.current = revision
+    dirtyRef.current = true
+    localSourceRevisionsRef.current.set(
+      functionSourceIdentity(nextModelKey, next),
+      revision,
+    )
+    runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
   }
 
   function updatePrompt(segments: PromptSegmentDTO[]) {
@@ -101,14 +244,34 @@ export function CanvasGenerationPanel({
       return
     }
     const next = insertReferenceAtCursor(config.prompt.segments, cursorRef.current, candidate)
+    const nextCursor = {
+      segmentIndex: Math.min(cursorRef.current.segmentIndex + 2, next.length - 1),
+      offset: 0,
+    }
+    cursorRef.current = nextCursor
+    pendingFocusRef.current = nextCursor
     updatePrompt(next)
     setMentionMenuOpen(false)
+  }
+
+  function removeReferenceAt(
+    segmentIndex: number,
+    focus: PromptCursor | null = null,
+  ) {
+    if (focus) {
+      cursorRef.current = focus
+      pendingFocusRef.current = focus
+    }
+    updatePrompt(removePromptSegment(config.prompt.segments, segmentIndex))
   }
 
   return (
     <section
       className="generation-panel"
       aria-label="Function 生成面板"
+      data-placement={panelPosition?.placement}
+      ref={panelRef}
+      style={panelStyle}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
@@ -117,10 +280,15 @@ export function CanvasGenerationPanel({
           <button
             key={referenceKey(candidate.nodeId, candidate.index)}
             type="button"
-            className="generation-reference"
+            className={`generation-reference ${
+              referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
+                ? 'referenced'
+                : ''
+            }`}
             onClick={() => insertCandidate(candidate)}
             title={candidate.label}
             aria-label={`插入参考 ${candidate.label}`}
+            aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
           >
             <CanvasResourceThumbnail resource={candidate.resource} />
             <span>{candidate.label}</span>
@@ -136,6 +304,13 @@ export function CanvasGenerationPanel({
             <input
               key={`text:${index}`}
               type="text"
+              ref={(element) => {
+                if (element) {
+                  inputRefs.current.set(index, element)
+                } else {
+                  inputRefs.current.delete(index)
+                }
+              }}
               value={segment.text}
               aria-label={`提示词片段 ${index + 1}`}
               placeholder={config.prompt.segments.length === 1 ? '描述你想生成的内容，输入 @ 引用资源' : ''}
@@ -164,6 +339,34 @@ export function CanvasGenerationPanel({
                 }
                 updatePrompt(updateTextSegment(config.prompt.segments, index, text))
               }}
+              onKeyDown={(event) => {
+                const start = event.currentTarget.selectionStart ?? 0
+                const end = event.currentTarget.selectionEnd ?? start
+                if (
+                  event.key === 'Backspace'
+                  && start === 0
+                  && end === 0
+                  && config.prompt.segments[index - 1]?.type === 'REFERENCE'
+                ) {
+                  event.preventDefault()
+                  const previousText = config.prompt.segments[index - 2]
+                  removeReferenceAt(index - 1, {
+                    segmentIndex: Math.max(0, index - 2),
+                    offset: previousText?.type === 'TEXT' ? previousText.text.length : 0,
+                  })
+                } else if (
+                  event.key === 'Delete'
+                  && start === segment.text.length
+                  && end === start
+                  && config.prompt.segments[index + 1]?.type === 'REFERENCE'
+                ) {
+                  event.preventDefault()
+                  removeReferenceAt(index + 1, {
+                    segmentIndex: index,
+                    offset: segment.text.length,
+                  })
+                }
+              }}
             />
           ) : (
             <button
@@ -171,7 +374,13 @@ export function CanvasGenerationPanel({
               type="button"
               className="prompt-mention"
               aria-label={`删除 ${candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}[${segment.index}]`}`}
-              onClick={() => updatePrompt(removePromptSegment(config.prompt.segments, index))}
+              onClick={() => removeReferenceAt(index)}
+              onKeyDown={(event) => {
+                if (event.key === 'Delete' || event.key === 'Backspace') {
+                  event.preventDefault()
+                  removeReferenceAt(index)
+                }
+              }}
             >
               {candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label
                 ?? `@${segment.nodeId}[${segment.index}]`}
@@ -256,15 +465,26 @@ export function CanvasGenerationPanel({
                 aria-label={parameter.label}
                 min={parameter.min ?? undefined}
                 max={parameter.max ?? undefined}
+                step={1}
                 value={Number(config.parameters[parameter.key] ?? parameter.min ?? 0)}
                 disabled={running}
-                onChange={(event) => updateConfig({
-                  ...config,
-                  parameters: {
-                    ...config.parameters,
-                    [parameter.key]: Number(event.target.value),
-                  },
-                })}
+                onChange={(event) => {
+                  const value = Number(event.target.value)
+                  if (
+                    !Number.isInteger(value)
+                    || (parameter.min !== null && value < parameter.min)
+                    || (parameter.max !== null && value > parameter.max)
+                  ) {
+                    return
+                  }
+                  updateConfig({
+                    ...config,
+                    parameters: {
+                      ...config.parameters,
+                      [parameter.key]: value,
+                    },
+                  })
+                }}
               />
             )}
           </label>
@@ -307,4 +527,13 @@ function modelForNode(
   node: ResourceNode,
 ): CanvasFunctionModelDTO | null {
   return models.find((model) => model.key === node.function?.modelKey) ?? null
+}
+
+function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfigDTO): string {
+  return `${modelKey}\u0000${JSON.stringify({
+    prompt: config.prompt,
+    parameters: Object.fromEntries(Object.entries(config.parameters).sort(([left], [right]) => (
+      left.localeCompare(right)
+    ))),
+  })}`
 }

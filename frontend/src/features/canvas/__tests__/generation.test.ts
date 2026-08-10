@@ -130,6 +130,24 @@ describe('Canvas structured generation config', () => {
       prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
       parameters: { ratio: '16:9', count: 1 },
     })
+    expect(parseFunctionConfig(JSON.stringify({
+      prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
+      parameters: {
+        ratio: 'unsupported',
+        count: 9,
+        unknown: 'must be removed',
+      },
+    }), imageModel).parameters).toEqual({
+      ratio: 'AUTO',
+      count: 1,
+    })
+    expect(parseFunctionConfig(JSON.stringify({
+      prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
+      parameters: { ratio: 1, count: 2.5 },
+    }), imageModel).parameters).toEqual({
+      ratio: 'AUTO',
+      count: 1,
+    })
     expect(parseFunctionConfig('null', imageModel)).toEqual(createDefaultFunctionConfig(imageModel))
     expect(parseFunctionConfig('{"prompt":[],"parameters":{}}', imageModel)).toEqual(
       createDefaultFunctionConfig(imageModel),

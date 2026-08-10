@@ -463,6 +463,74 @@ describe('CanvasPage real list/create/load integration', () => {
     await waitFor(() => expect(commandBodies.some((body) => (
       body.commands[0]?.type === 'DELETE_GROUP'
     ))).toBe(true))
+
+    act(() => {
+      flow.onSelectionChange({ nodes: [{ id: '10' }, { id: '11' }], edges: [] })
+      ;(flow as typeof flow & {
+        onNodeClick: (event: { shiftKey: boolean }, node: { id: string }) => void
+      }).onNodeClick({ shiftKey: true }, { id: '11' })
+    })
+    await waitFor(() => {
+      const latest = flowHarness.current as {
+        nodes: Array<{ id: string; selected?: boolean }>
+      }
+      expect(latest.nodes.filter((node) => node.selected).map((node) => node.id)).toEqual([
+        '10',
+        '11',
+      ])
+    })
+  })
+
+  it('keeps the generation input focused while its debounced config snapshot is adopted', async () => {
+    // A stable node key must survive UPDATE_FUNCTION echoes so continuous typing is not interrupted.
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get('1') as CanvasSnapshotDTO
+    snapshots.set('1', {
+      ...current,
+      nodes: [{
+        id: '11',
+        canvasId: '1',
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'start' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: {
+          nodes: Array<{ id: string }>
+          edges: Array<{ source: string; target: string }>
+        }) => void
+      }).onSelectionChange({ nodes: [{ id: '11' }], edges: [] })
+    })
+
+    const input = await screen.findByRole('textbox', { name: '提示词片段 1' })
+    await user.click(input)
+    await user.type(input, ' one')
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'UPDATE_FUNCTION'
+    ))).toBe(true), { timeout: 1_500 })
+    expect(input).toHaveFocus()
+    expect(input).toHaveValue('start one')
+    await user.type(input, ' two')
+    expect(input).toHaveValue('start one two')
+    expect(input).toHaveFocus()
+    await waitFor(() => expect(commandBodies.filter((body) => (
+      body.commands[0]?.type === 'UPDATE_FUNCTION'
+    ))).toHaveLength(2), { timeout: 1_500 })
   })
 })
 
@@ -528,6 +596,14 @@ function applyCommands(
         function: null,
         run: null,
       }]
+    } else if (command.type === 'UPDATE_FUNCTION') {
+      nodes = nodes.map((node) => node.id === command.nodeId ? {
+        ...node,
+        function: {
+          modelKey: command.modelKey,
+          configJson: command.configJson,
+        },
+      } : node)
     }
   }
   return {
