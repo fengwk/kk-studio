@@ -30,7 +30,7 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   /** name 的 UTF-8 字节上限。 */
   public static final int MAX_NAME_UTF8_BYTES = 512;
 
-  /** preview 的 UTF-8 字节上限（由 ResourceMessageContent 使用）。 */
+  /** ResourceToolContent / ResourceMessageContent preview 的 UTF-8 字节上限。 */
   public static final int MAX_PREVIEW_UTF8_BYTES = 16384;
 
   private static final Pattern MEDIA_TYPE_PATTERN =

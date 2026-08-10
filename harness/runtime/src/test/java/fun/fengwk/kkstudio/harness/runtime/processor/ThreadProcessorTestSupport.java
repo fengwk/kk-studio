@@ -537,6 +537,61 @@ final class ThreadProcessorTestSupport {
         });
   }
 
+  /** 仅推进 Thread 的 durable 时间/revision，保持 head 与 policy 不变。 */
+  static void touchThreadTimestamp(InMemoryHarnessStore store, long threadId, Instant updatedAt) {
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          tx.updateThread(thread.touchRevision(updatedAt));
+          return null;
+        });
+  }
+
+  /** 通过 Store validator 合法推进 ModelInvocation.updatedAt，保持 invocation 事实不变。 */
+  static void touchModelTimestamp(InMemoryHarnessStore store, long modelId, Instant updatedAt) {
+    transitionModel(
+        store,
+        modelId,
+        model ->
+            new ModelInvocation(
+                model.id(),
+                model.threadId(),
+                model.turnStartEntryId(),
+                model.basisHeadEntryId(),
+                model.request(),
+                model.status(),
+                model.attempt(),
+                model.streamCheckpoint(),
+                model.result(),
+                model.error(),
+                model.resultEntryId(),
+                model.createdAt(),
+                updatedAt));
+  }
+
+  /** 通过 Store validator 合法推进 ToolInvocation.updatedAt，保持 invocation 事实不变。 */
+  static void touchToolTimestamp(InMemoryHarnessStore store, long toolId, Instant updatedAt) {
+    transitionTool(
+        store,
+        toolId,
+        tool ->
+            new ToolInvocation(
+                tool.id(),
+                tool.modelInvocationId(),
+                tool.assistantEntryId(),
+                tool.ordinal(),
+                tool.request(),
+                tool.status(),
+                tool.attempt(),
+                tool.approval(),
+                tool.result(),
+                tool.effects(),
+                tool.error(),
+                tool.resultEntryId(),
+                tool.createdAt(),
+                updatedAt));
+  }
+
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED 并挂载自定义结果（用于 mapper 回滚类测试）。 */
   static void succeedToolWith(InMemoryHarnessStore store, long toolId, ToolResult result) {
     succeedToolWith(store, toolId, result, ToolEffectBatch.EMPTY);

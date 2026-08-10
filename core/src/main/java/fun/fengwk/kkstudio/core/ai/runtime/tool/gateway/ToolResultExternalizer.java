@@ -32,20 +32,25 @@ import java.util.regex.Pattern;
  *
  * <p>所有 {@link BinaryToolContent}（daemon wire 解码后的瞬时字节）与超过 {@link #INLINE_RESULT_UTF8_BYTES} 内联阈值的
  * Text/Json content 都写入注入的 {@link ResourceStore} 并替换为 {@link ResourceToolContent}；已有规范 Resource
- * 引用原样透传。外部化是 all-or-nothing：先对全部 content 做确定性校验并计算写计划（第一个 put 之前不产生任何 存储副作用），再执行写入—— 计划阶段用 {@link
- * ResourceRef#utf8LengthUpTo} 做 bounded UTF-8 长度测量（严格 Resource 语义：未配对 surrogate 确定性拒绝， 不物化任何 UTF-8
- * byte[]）逐项校验 {@code resourceMaxBytes} 上限，超限即确定性拒绝；对每个待存项流式计算 SHA-256（Text/Json 走严格 UTF-8
- * 流式编码摘要，Binary 一次一项拷贝），经无副作用的 {@link ResourceStore#reference} 计划精确 ResourceRef，构造「外部化后 + terminate
- * 归一 false」的精确投影 {@link ToolResult} 并用 {@link ToolResultJsonCodec#exceedsEncodedUtf8Bytes} 验证
- * canonical JSON ≤ {@link ToolResultSizeLimits#MAX_TERMINAL_RESULT_UTF8_BYTES}——即 Runtime
- * 持久化前会做的同一校验，全部在第一个 put 之前完成。 编码只发生在写入循环里、一次一项；每次 put 返回的引用必须与计划引用精确相等，不等即存储契约违反。确定性非法输入（含 store 的
- * {@link IllegalArgumentException}）返回 {@link Outcome.Invalid}；store 存储/IO 失败或契约违反（外部 Tool 可能已完成） 返回
- * {@link Outcome.StoreFailed}，调用方映射为 onUnknown 而非可重试协议失败。
+ * 引用（含 preview）原样透传。Text/Json 外部化时附带至多 16 KiB 的 UTF-8 安全 preview：完整内容能容纳时原样保留，否则使用确定性前缀和截断标记；Binary
+ * preview 保持 null。外部化是 all-or-nothing：先对全部 content 做确定性校验并计算写计划（第一个 put 之前不产生任何 存储副作用），再执行写入——
+ * 计划阶段用 {@link ResourceRef#utf8LengthUpTo} 做 bounded UTF-8 长度测量（严格 Resource 语义：未配对 surrogate 确定性拒绝，
+ * 不物化任何 UTF-8 byte[]）逐项校验 {@code resourceMaxBytes} 上限，超限即确定性拒绝；对每个待存项流式计算 SHA-256（Text/Json 走严格
+ * UTF-8 流式编码摘要，Binary 一次一项拷贝），经无副作用的 {@link ResourceStore#reference} 计划精确 ResourceRef，构造「外部化后 +
+ * terminate 归一 false」的精确投影 {@link ToolResult} 并用 {@link
+ * ToolResultJsonCodec#exceedsEncodedUtf8Bytes} 验证 canonical JSON ≤ {@link
+ * ToolResultSizeLimits#MAX_TERMINAL_RESULT_UTF8_BYTES}——即 Runtime 持久化前会做的同一校验，全部在第一个 put 之前完成。
+ * 编码只发生在写入循环里、一次一项；每次 put 返回的引用必须与计划引用精确相等，不等即存储契约违反。确定性非法输入（含 store 的 {@link
+ * IllegalArgumentException}）返回 {@link Outcome.Invalid}；store 存储/IO 失败或契约违反（外部 Tool 可能已完成） 返回 {@link
+ * Outcome.StoreFailed}，调用方映射为 onUnknown 而非可重试协议失败。
  */
 final class ToolResultExternalizer {
 
   /** 单条 Text/Json content 的内联 UTF-8 字节阈值；超过则外部化为 ResourceToolContent。 */
   static final int INLINE_RESULT_UTF8_BYTES = 8 * 1024;
+
+  /** 超过 preview 上限时追加的稳定 ASCII 标记；标记本身计入 16 KiB 上限。 */
+  static final String PREVIEW_TRUNCATION_MARKER = "\n[preview truncated]";
 
   static final String INVALID_RESULT_KIND = "INVALID_RESULT";
   static final String RESOURCE_STORE_FAILED_KIND = "RESOURCE_STORE_FAILED";
@@ -105,7 +110,7 @@ final class ToolResultExternalizer {
             new IllegalStateException(
                 "resource store returned a different reference than planned; outcome cannot be confirmed"));
       }
-      contents.add(new ResourceToolContent(returned));
+      contents.add(new ResourceToolContent(returned, store.preview()));
     }
     return Outcome.success(
         new ToolResult(
@@ -135,7 +140,7 @@ final class ToolResultExternalizer {
         ResourceRef planned =
             resourceStore.reference(
                 binary.mediaType(), name, binary.size(), sha256(binary.content()));
-        plan.add(new Action.Store(planned, binary));
+        plan.add(new Action.Store(planned, binary, null));
         projected.add(new ResourceToolContent(planned));
       } else if (content instanceof ResourceToolContent resource) {
         // 已有规范 Resource 引用直接透传，不做二次外部化。
@@ -160,8 +165,9 @@ final class ToolResultExternalizer {
           ResourceRef planned =
               resourceStore.reference(
                   mediaType, name, utf8Length, sha256Utf8(text, "content at index " + index));
-          plan.add(new Action.Store(planned, content));
-          projected.add(new ResourceToolContent(planned));
+          String preview = preview(text, utf8Length);
+          plan.add(new Action.Store(planned, content, preview));
+          projected.add(new ResourceToolContent(planned, preview));
         }
       }
     }
@@ -225,6 +231,45 @@ final class ToolResultExternalizer {
     }
     throw new IllegalArgumentException(
         "unsupported tool content: " + content.getClass().getSimpleName());
+  }
+
+  /**
+   * 生成 deterministic UTF-8 安全 preview：完整内容不超过上限时原样返回；否则按 code point 截取可容纳前缀并追加稳定标记。
+   *
+   * <p>{@code utf8Length} 已由计划阶段按严格 Unicode 语义完整计算；本方法只扫描至 preview 边界，不编码完整字符串。
+   */
+  private static String preview(String text, int utf8Length) {
+    if (utf8Length <= ResourceRef.MAX_PREVIEW_UTF8_BYTES) {
+      return text;
+    }
+    int markerBytes =
+        ResourceRef.utf8Length(PREVIEW_TRUNCATION_MARKER, "preview truncation marker");
+    int prefixMaxBytes = ResourceRef.MAX_PREVIEW_UTF8_BYTES - markerBytes;
+    int prefixBytes = 0;
+    int end = 0;
+    while (end < text.length()) {
+      int codePoint = text.codePointAt(end);
+      int codePointBytes = utf8Bytes(codePoint);
+      if (codePointBytes > prefixMaxBytes - prefixBytes) {
+        break;
+      }
+      prefixBytes += codePointBytes;
+      end += Character.charCount(codePoint);
+    }
+    return text.substring(0, end) + PREVIEW_TRUNCATION_MARKER;
+  }
+
+  private static int utf8Bytes(int codePoint) {
+    if (codePoint <= 0x7F) {
+      return 1;
+    }
+    if (codePoint <= 0x7FF) {
+      return 2;
+    }
+    if (codePoint <= 0xFFFF) {
+      return 3;
+    }
+    return 4;
   }
 
   private static String sha256(byte[] content) {
@@ -309,13 +354,13 @@ final class ToolResultExternalizer {
     }
   }
 
-  /** 写计划：内联保留 / 透传已有资源 / 写入 store（计划引用精确，source 在写入循环内才编码为字节）。 */
+  /** 写计划：内联保留 / 透传已有资源 / 写入 store（计划引用和 preview 精确，source 在写入循环内才编码为字节）。 */
   private sealed interface Action permits Action.Inline, Action.KeepResource, Action.Store {
 
     record Inline(ToolContent content) implements Action {}
 
     record KeepResource(ResourceToolContent content) implements Action {}
 
-    record Store(ResourceRef planned, ToolContent source) implements Action {}
+    record Store(ResourceRef planned, ToolContent source, String preview) implements Action {}
   }
 }

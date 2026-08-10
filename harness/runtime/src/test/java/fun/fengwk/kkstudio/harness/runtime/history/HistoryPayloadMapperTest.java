@@ -179,7 +179,7 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
-  void toolResultPayloadSucceededMapsResourceContentPreservingRefAndNullPreview() {
+  void toolResultPayloadSucceededMapsResourceContentPreservingRefAndPreview() {
     ResourceRef resource =
         new ResourceRef(
             "file:///report.txt",
@@ -190,13 +190,17 @@ class HistoryPayloadMapperTest {
     ToolInvocation invocation =
         succeededInvocation(
             new ToolResult(
-                "call-1", List.of(new ResourceToolContent(resource)), false, "{}", false));
+                "call-1",
+                List.of(new ResourceToolContent(resource, "complete preview")),
+                false,
+                "{}",
+                false));
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     ResourceMessageContent mapped = (ResourceMessageContent) result.contents().get(0);
     assertEquals(resource, mapped.resource());
-    assertNull(mapped.preview());
+    assertEquals("complete preview", mapped.preview());
   }
 
   @Test

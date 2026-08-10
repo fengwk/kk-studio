@@ -63,7 +63,7 @@ class ToolResultJsonCodecTest {
     assertEquals("{}", decoded.detailsJson());
   }
 
-  /** Resource 内容在所有可选字段均有值时支持 round-trip。 */
+  /** Resource 内容在所有引用字段和 preview 均有值时支持 round-trip。 */
   @Test
   void roundTripsResourceContentWithAllFields() {
     ResourceRef resource =
@@ -77,9 +77,15 @@ class ToolResultJsonCodecTest {
         ToolResultJsonCodec.decode(
             ToolResultJsonCodec.encode(
                 new ToolResult(
-                    "call", List.of(new ResourceToolContent(resource)), false, "{}", false)));
+                    "call",
+                    List.of(new ResourceToolContent(resource, "hello preview")),
+                    false,
+                    "{}",
+                    false)));
 
-    assertEquals(resource, ((ResourceToolContent) decoded.contents().getFirst()).resource());
+    ResourceToolContent decodedResource = (ResourceToolContent) decoded.contents().getFirst();
+    assertEquals(resource, decodedResource.resource());
+    assertEquals("hello preview", decodedResource.preview());
   }
 
   /** Resource 内容编码为扁平的精确字段，缺失的可选字段使用 JSON null。 */
@@ -100,6 +106,35 @@ class ToolResultJsonCodecTest {
             + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
             + "\"name\":null,\"size\":null,\"sha256\":null}],\"error\":false,\"details\":{}}",
         ToolResultJsonCodec.encode(source));
+    assertNull(
+        ((ResourceToolContent)
+                ToolResultJsonCodec.decode(ToolResultJsonCodec.encode(source))
+                    .contents()
+                    .getFirst())
+            .preview());
+  }
+
+  /** 旧的无 preview payload 与显式 null preview 都保持可解码，canonical null-preview 编码仍不新增字段。 */
+  @Test
+  void decodesOptionalResourcePreviewBackwardCompatibly() {
+    String oldPayload =
+        "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
+            + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
+            + "\"name\":null,\"size\":null,\"sha256\":null}],\"error\":false,\"details\":{}}";
+    String explicitNullPayload =
+        "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
+            + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
+            + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":null}],"
+            + "\"error\":false,\"details\":{}}";
+
+    assertNull(
+        ((ResourceToolContent) ToolResultJsonCodec.decode(oldPayload).contents().getFirst())
+            .preview());
+    assertNull(
+        ((ResourceToolContent)
+                ToolResultJsonCodec.decode(explicitNullPayload).contents().getFirst())
+            .preview());
+    assertEquals(oldPayload, ToolResultJsonCodec.encode(ToolResultJsonCodec.decode(oldPayload)));
   }
 
   /** 严格 decode 拒绝缺失、类型错误或额外的 Resource 字段。 */
@@ -147,6 +182,13 @@ class ToolResultJsonCodecTest {
                 "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
                     + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
                     + "\"name\":null,\"size\":null,\"sha256\":null,\"extra\":1}],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
+                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
+                    + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":5}],\"error\":false,\"details\":{}}"));
     // 非法 URI / mediaType 由 ResourceRef 构造校验在 codec 边界同样生效。
     assertThrows(
         IllegalArgumentException.class,
@@ -340,7 +382,8 @@ class ToolResultJsonCodecTest {
                         "text/plain",
                         "a.txt",
                         5L,
-                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")),
+                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                    "preview 你好"),
                 new ResourceToolContent(
                     new ResourceRef("https://example.com/b", "text/plain", null, null, null))),
             true,

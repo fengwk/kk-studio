@@ -161,6 +161,15 @@ class CodingToolsTest {
     assertTrue(streaming.partials.size() >= 1);
     assertTrue(text(streaming.result).contains("firstsecond"));
 
+    RecordingListener ansi =
+        invokeAsync(
+            bash,
+            "{\"command\":\"printf '\\\\033[31mpassed\\\\033[0m\\\\n'\"}",
+            Duration.ofSeconds(2));
+    assertTrue(ansi.await());
+    assertTrue(text(ansi.result).contains("passed"));
+    assertFalse(ansi.result.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
+
     RecordingListener timeout =
         invokeAsync(bash, "{\"command\":\"sleep 2\"}", Duration.ofMillis(50));
     assertTrue(timeout.await());
@@ -224,15 +233,15 @@ class CodingToolsTest {
     assertEquals(7, GrepTool.requestedTimeoutSeconds(explicit));
     assertEquals(
         Duration.ofSeconds(15),
-        GrepTool.effectiveProcessTimeout(
+        GrepTool.effectiveSearchTimeout(
             Duration.ofHours(1), GrepTool.requestedTimeoutSeconds(absent)));
     assertEquals(
         Duration.ofSeconds(2),
-        GrepTool.effectiveProcessTimeout(
+        GrepTool.effectiveSearchTimeout(
             Duration.ofSeconds(2), GrepTool.requestedTimeoutSeconds(absent)));
     assertEquals(
         Duration.ofSeconds(7),
-        GrepTool.effectiveProcessTimeout(
+        GrepTool.effectiveSearchTimeout(
             Duration.ofSeconds(30), GrepTool.requestedTimeoutSeconds(explicit)));
     assertThrows(
         IllegalArgumentException.class,
@@ -240,17 +249,17 @@ class CodingToolsTest {
             GrepTool.requestedTimeoutSeconds(
                 AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
 
-    assertEquals(Duration.ofHours(1), FindTool.effectiveProcessTimeout(Duration.ZERO, absent));
+    assertEquals(Duration.ofHours(1), FindTool.effectiveSearchTimeout(Duration.ZERO, absent));
     assertEquals(
-        Duration.ofMinutes(2), FindTool.effectiveProcessTimeout(Duration.ofMinutes(2), absent));
+        Duration.ofMinutes(2), FindTool.effectiveSearchTimeout(Duration.ofMinutes(2), absent));
     assertEquals(
-        Duration.ofSeconds(7), FindTool.effectiveProcessTimeout(Duration.ofMinutes(2), explicit));
+        Duration.ofSeconds(7), FindTool.effectiveSearchTimeout(Duration.ofMinutes(2), explicit));
     assertEquals(
-        Duration.ofSeconds(2), FindTool.effectiveProcessTimeout(Duration.ofSeconds(2), explicit));
+        Duration.ofSeconds(2), FindTool.effectiveSearchTimeout(Duration.ofSeconds(2), explicit));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            FindTool.effectiveProcessTimeout(
+            FindTool.effectiveSearchTimeout(
                 Duration.ofMinutes(2),
                 AbstractCodingTool.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
   }
@@ -261,14 +270,7 @@ class CodingToolsTest {
 
   private CodingToolsConfig config(int lines, int bytes) {
     return new CodingToolsConfig(
-        environmentRoot,
-        environmentRoot,
-        lines,
-        bytes,
-        "bash",
-        "rg",
-        "fd",
-        new InMemoryResourceStore());
+        environmentRoot, environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
   }
 
   private ToolExecutionRequest request(Tool tool, String arguments) {

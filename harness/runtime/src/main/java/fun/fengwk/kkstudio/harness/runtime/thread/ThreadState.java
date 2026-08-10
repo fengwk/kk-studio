@@ -10,8 +10,8 @@ import java.util.Objects;
  * snapshot revision。Session、environment、status、open turn、runnable flag、 execution epoch 与 processor
  * lease 刻意省略；session 与 environment 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
- * <p>所有状态变更都通过下方纯转换方法执行；任何对外可见的变更都会把 {@code revision} 严格 +1。Store 必须在每次 {@code updateThread} 写入前调用
- * {@link #validateTransition}，从而把直接构造 record 的 场景限制在持久化解码。
+ * <p>所有状态变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，任何对外可见的变更都会把 {@code revision}
+ * 严格 +1。Store 仍必须在每次 {@code updateThread} 写入前调用 {@link #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ThreadState(
     long id,
@@ -86,7 +86,7 @@ public record ThreadState(
             Math.addExact(nextCommandSequence, (long) count),
             Math.addExact(revision, 1L),
             createdAt,
-            requireNow(now));
+            effectiveMutationTime(now));
     validateTransition(this, next);
     return next;
   }
@@ -104,7 +104,7 @@ public record ThreadState(
             nextCommandSequence,
             Math.addExact(revision, 1L),
             createdAt,
-            requireNow(now));
+            effectiveMutationTime(now));
     validateTransition(this, next);
     return next;
   }
@@ -119,12 +119,13 @@ public record ThreadState(
             nextCommandSequence,
             Math.addExact(revision, 1L),
             createdAt,
-            requireNow(now));
+            effectiveMutationTime(now));
     validateTransition(this, next);
     return next;
   }
 
-  private static Instant requireNow(Instant now) {
-    return Objects.requireNonNull(now, "now");
+  private Instant effectiveMutationTime(Instant now) {
+    Instant candidate = Objects.requireNonNull(now, "now");
+    return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 }

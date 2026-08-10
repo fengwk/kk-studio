@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,11 +26,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -136,12 +133,19 @@ class CodingToolsEdgeTest {
     List<ToolContent> truncated =
         OutputLimiter.limit(
             "😀x".getBytes(StandardCharsets.UTF_8), "text/plain", config(2, 4, store));
+    List<ToolContent> ansi =
+        OutputLimiter.limit(
+            "\u001b[31mpassed\u001b[0m".getBytes(StandardCharsets.UTF_8),
+            "text/plain",
+            config(2, 64, store));
     List<ToolContent> binary =
         OutputLimiter.limit(new byte[] {1, 0, 2}, "application/octet-stream", exact);
 
     assertEquals("ab\nc", text(untruncated));
     assertTrue(text(truncated).contains("Output truncated"));
     assertFalse(text(truncated).contains("�"));
+    assertEquals("\u001b[31mpassed\u001b[0m", text(ansi));
+    assertEquals(1, ansi.size());
     ResourceToolContent resource = (ResourceToolContent) truncated.get(1);
     assertArrayEquals(
         "😀x".getBytes(StandardCharsets.UTF_8), store.get(resource.resource().sha256()));
@@ -210,9 +214,7 @@ class CodingToolsEdgeTest {
       "kkstudio.daemon.default-workdir",
       "kkstudio.daemon.resource-directory",
       "kkstudio.daemon.max-resource-bytes",
-      "kkstudio.daemon.bash",
-      "kkstudio.daemon.rg",
-      "kkstudio.daemon.fd"
+      "kkstudio.daemon.bash"
     };
     String[] old = new String[names.length];
     Path legacyRoot = Files.createDirectory(environmentRoot.resolve("legacy-root"));
@@ -225,8 +227,6 @@ class CodingToolsEdgeTest {
       System.setProperty(names[2], environmentRoot.resolve("local-resources").toString());
       System.setProperty(names[3], "4");
       System.setProperty(names[4], "custom-bash");
-      System.setProperty(names[5], "custom-rg");
-      System.setProperty(names[6], "custom-fd");
       CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties(environmentRoot);
       assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
       assertEquals(environmentRoot.toRealPath(), properties.defaultWorkdir());
@@ -257,14 +257,7 @@ class CodingToolsEdgeTest {
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot,
-                environmentRoot,
-                0,
-                1,
-                "bash",
-                "rg",
-                "fd",
-                new InMemoryResourceStore()));
+                environmentRoot, environmentRoot, 0, 1, "bash", new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -274,21 +267,12 @@ class CodingToolsEdgeTest {
                 1,
                 1,
                 "bash",
-                "rg",
-                "fd",
                 new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot,
-                environmentRoot,
-                1,
-                1,
-                "",
-                "rg",
-                "fd",
-                new InMemoryResourceStore()));
+                environmentRoot, environmentRoot, 1, 1, "", new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -298,8 +282,6 @@ class CodingToolsEdgeTest {
                 1,
                 1,
                 "bash",
-                "rg",
-                "fd",
                 new InMemoryResourceStore()));
   }
 
@@ -332,82 +314,6 @@ class CodingToolsEdgeTest {
   }
 
   @Test
-  void scriptedSearchesCoverOptionsErrorsAndProcessCleanup() throws Exception {
-    assumePosix();
-    Path visible = environmentRoot.resolve("visible.txt");
-    Files.writeString(visible, "content");
-    String longLine = "x".repeat(600);
-    Path rg =
-        script("rg", "printf '%s\\n' '" + visible + ":1: " + longLine + "' 'file.txt:2: alpha'\n");
-    Path fd = script("fd", "printf '%s\\n' './dir/a.txt' './dir/b.txt'\n");
-    InMemoryResourceStore store = new InMemoryResourceStore();
-    GrepTool grep = new GrepTool(config(2000, 50 * 1024, store, rg, fd));
-    FindTool find = new FindTool(config(2000, 50 * 1024, store, rg, fd));
-
-    ToolResult literal =
-        invoke(
-            grep,
-            "{\"pattern\":\"Alpha\",\"path\":\".\",\"literal\":true,\"ignore_case\":true,\"multiline\":true,\"include\":\"*.txt\",\"limit\":10}");
-    assertTrue(text(literal).contains("visible.txt:1:"));
-    assertFalse(text(literal).contains(environmentRoot.toString()));
-    assertTrue(text(literal).contains("line truncated to 500 chars"));
-    ResourceToolContent grepResource =
-        (ResourceToolContent)
-            literal.contents().stream()
-                .filter(ResourceToolContent.class::isInstance)
-                .findFirst()
-                .orElseThrow();
-    assertTrue(
-        new String(store.get(grepResource.resource().sha256()), StandardCharsets.UTF_8)
-            .contains(longLine));
-
-    ToolResult found = invoke(find, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
-    assertTrue(text(found).contains("dir/a.txt"));
-    assertTrue(text(found).contains("results limit reached"));
-    assertTrue(found.contents().stream().anyMatch(ResourceToolContent.class::isInstance));
-
-    Path argumentFile = environmentRoot.resolve("fd-arguments.txt");
-    Path exactFd =
-        script(
-            "fd-exact",
-            "printf '%s\\n' \"$@\" > '" + argumentFile + "'\nprintf '%s\\n' './dir/only.txt'\n");
-    FindTool exactFind = new FindTool(config(2000, 50 * 1024, store, rg, exactFd));
-    ToolResult exact = invoke(exactFind, "{\"pattern\":\"dir/*.txt\",\"path\":\".\",\"limit\":1}");
-    assertFalse(text(exact).contains("results limit reached"));
-    assertTrue(Files.readString(argumentFile).contains("--full-path"));
-
-    GrepTool missing =
-        new GrepTool(
-            config(
-                2000,
-                50 * 1024,
-                new InMemoryResourceStore(),
-                environmentRoot.resolve("missing-rg"),
-                fd));
-    assertTrue(text(invoke(missing, "{\"pattern\":\"x\",\"path\":\".\"}")).contains("unavailable"));
-    Path failing = script("failing", "echo bad >&2\nexit 2\n");
-    GrepTool nonZero =
-        new GrepTool(config(2000, 50 * 1024, new InMemoryResourceStore(), failing, fd));
-    assertTrue(text(invoke(nonZero, "{\"pattern\":\"x\",\"path\":\".\"}")).contains("bad"));
-    FindTool missingFind =
-        new FindTool(
-            config(
-                2000,
-                50 * 1024,
-                new InMemoryResourceStore(),
-                rg,
-                environmentRoot.resolve("missing-fd")));
-    assertTrue(
-        text(invoke(missingFind, "{\"pattern\":\"*\",\"path\":\".\"}")).contains("unavailable"));
-    FindTool failingFind =
-        new FindTool(config(2000, 50 * 1024, new InMemoryResourceStore(), rg, failing));
-    assertTrue(text(invoke(failingFind, "{\"pattern\":\"*\",\"path\":\".\"}")).contains("bad"));
-    assertTrue(
-        text(invoke(find, "{\"pattern\":\"*\",\"path\":\"visible.txt\"}"))
-            .contains("must be a directory"));
-  }
-
-  @Test
   void bashReportsStartupAndNonZeroFailuresWithoutDuplicateTerminalCallbacks() throws Exception {
     BashTool missing =
         new BashTool(
@@ -417,8 +323,6 @@ class CodingToolsEdgeTest {
                 10,
                 100,
                 "missing-bash",
-                "rg",
-                "fd",
                 new InMemoryResourceStore()));
     assertTrue(text(invoke(missing, "{\"command\":\"echo x\"}")).contains("missing-bash"));
     BashTool bash = new BashTool(config());
@@ -456,63 +360,12 @@ class CodingToolsEdgeTest {
     assertEquals(1, listener.completions);
   }
 
-  @Test
-  void scriptedSubprocessTimeoutAndCancellationReachOneTerminalResult() throws Exception {
-    assumePosix();
-    Path sleeper = script("sleep", "sleep 5\n");
-    GrepTool grep =
-        new GrepTool(config(2000, 50 * 1024, new InMemoryResourceStore(), sleeper, sleeper));
-    ToolResult timedOut = invoke(grep, "{\"pattern\":\"x\",\"path\":\".\",\"timeout_seconds\":1}");
-    assertTrue(text(timedOut).contains("timed out"));
-    FindTool find =
-        new FindTool(config(2000, 50 * 1024, new InMemoryResourceStore(), sleeper, sleeper));
-    ToolResult findTimedOut =
-        invoke(find, "{\"pattern\":\"*\",\"path\":\".\",\"timeout_seconds\":1}");
-    assertTrue(text(findTimedOut).contains("timed out"));
-
-    RecordingListener listener =
-        invokeAsync(
-            grep, "{\"pattern\":\"x\",\"path\":\".\",\"timeout_seconds\":10}", Duration.ZERO);
-    listener.handle.cancel();
-    assertTrue(listener.await());
-    assertEquals(1, listener.completions);
-    assertTrue(text(listener.result).contains("Operation cancelled"));
-  }
-
   private CodingToolsConfig config() {
     return config(2000, 50 * 1024, new InMemoryResourceStore());
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return config(lines, bytes, store, Path.of("rg"), Path.of("fd"));
-  }
-
-  private CodingToolsConfig config(int lines, int bytes, ResourceStore store, Path rg, Path fd) {
-    return new CodingToolsConfig(
-        environmentRoot,
-        environmentRoot,
-        lines,
-        bytes,
-        "bash",
-        rg.toString(),
-        fd.toString(),
-        store);
-  }
-
-  private Path script(String name, String body) throws IOException {
-    Path script = environmentRoot.resolve(name + "-script");
-    Files.writeString(script, "#!/bin/sh\n" + body);
-    Files.setPosixFilePermissions(
-        script,
-        Set.of(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.OWNER_EXECUTE));
-    return script;
-  }
-
-  private static void assumePosix() {
-    Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().contains("win"));
+    return new CodingToolsConfig(environmentRoot, environmentRoot, lines, bytes, "bash", store);
   }
 
   private ToolResult invoke(Tool tool, String arguments) throws Exception {

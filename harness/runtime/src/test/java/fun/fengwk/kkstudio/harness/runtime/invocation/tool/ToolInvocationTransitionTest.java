@@ -122,6 +122,16 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
+  void requestApprovalUsesTheClampedTimestampForRequestAndInvocation() {
+    ToolInvocation stored = withUpdatedAt(ready(0, null), T2);
+
+    // approval.requestedAt 与 invocation.updatedAt 必须来自同一个 durable effective timestamp。
+    ToolInvocation next = stored.requestApproval("needs ok", T1);
+    assertEquals(T2, next.approval().requestedAt());
+    assertEquals(T2, next.updatedAt());
+  }
+
+  @Test
   void decideApprovalAllowsBackToReady() {
     ToolInvocation next =
         waiting().decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T1);
@@ -231,6 +241,15 @@ class ToolInvocationTransitionTest {
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).succeed(result(), T1));
     assertThrows(
         IllegalArgumentException.class, () -> dispatching(0, allowed()).succeed(result(), T1));
+  }
+
+  @Test
+  void terminalTransitionClampsWallClockRollbackToCurrentUpdatedAt() {
+    ToolInvocation stored = withUpdatedAt(running(1, allowed()), T2);
+
+    ToolInvocation next = stored.succeed(result(), T1);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, next.status());
+    assertEquals(T2, next.updatedAt());
   }
 
   @Test

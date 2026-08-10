@@ -35,7 +35,9 @@ final class OutputLimiter {
     int scan = Math.min(bytes.length, 8192);
     for (int index = 0; index < scan; index++) {
       int value = bytes[index] & 0xff;
-      if (value == 0 || (value < 0x09) || (value > 0x0d && value < 0x20)) {
+      // ESC 是 ANSI terminal 文本的控制前缀；把它判成 binary 会让常见测试输出只剩资源标签，
+      // 模型无法读取实际结果。NUL 与其余非空白 C0 控制字符仍按 binary 处理。
+      if (value == 0 || (value < 0x09) || (value > 0x0d && value < 0x20 && value != 0x1b)) {
         return true;
       }
     }

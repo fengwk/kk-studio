@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Objects;
 
@@ -38,6 +39,23 @@ public final class EnvironmentPathBoundary {
     Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
     if (!Files.exists(candidate)) {
       throw new IllegalArgumentException("path does not exist: " + display(rawPath));
+    }
+    return canonicalExisting(candidate, "path");
+  }
+
+  /** 解析搜索目标，并拒绝从 environment root 到目标的任意符号链接段。 */
+  Path existingWithoutSymlinks(String rawPath, Path workdir) {
+    Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
+    if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IllegalArgumentException("path does not exist: " + display(rawPath));
+    }
+    Path current = environmentRoot;
+    for (Path segment : environmentRoot.relativize(candidate)) {
+      current = current.resolve(segment);
+      if (Files.isSymbolicLink(current)) {
+        throw new IllegalArgumentException(
+            "path must not traverse symbolic links: " + display(rawPath));
+      }
     }
     return canonicalExisting(candidate, "path");
   }

@@ -202,6 +202,28 @@ class ToolProcessorCallbackTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
+  /** RUNNING 后 wall clock 回拨到 invocation 创建时间之前，Tool terminal 仍落地并 complete TOOL Work。 */
+  @Test
+  void successTerminalSurvivesClockRollbackAndCompletesToolWork() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    fixture.clock.set(ToolProcessorTestSupport.NOW.minusSeconds(1));
+
+    fixture
+        .gateway
+        .listener(fixture.toolInvocationId)
+        .onSucceeded(
+            ToolProcessorTestSupport.successResult("call-1", new TextToolContent("answer")));
+
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
+    assertEquals(ToolProcessorTestSupport.NOW, tool.updatedAt());
+    assertEquals(
+        ToolProcessorTestSupport.NOW,
+        ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).updatedAt());
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
   /** 成功终态在 THREAD Work 已被消费后仍按升序重建 THREAD Work，不能卡在 RUNNING。 */
   @Test
   void successRecreatesConsumedThreadWork() {
