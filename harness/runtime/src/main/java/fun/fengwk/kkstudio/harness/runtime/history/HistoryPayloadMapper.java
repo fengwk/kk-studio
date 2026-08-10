@@ -33,8 +33,8 @@ import java.util.Objects;
  * <p>只做类型化映射，不做任何持久化决策：{@link ProviderResponse} 投影为 ASSISTANT {@link MessagePayload}（内容顺序为
  * thinking、text、tool calls，全部为空时回退为空 text，metadata 直接快照 usage/cost）；terminal Model 错误投影为 {@link
  * AssistantErrorPayload}（code 使用 {@code error.kind().name()}）；terminal {@link ToolInvocation} 投影为
- * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link ToolContent} 映射为对应 {@link
- * AgentMessageContent} 并回退空 text，error 标志原样保留，Binary / 未知 content 显式 {@link
+ * TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link ToolContent}（含 Resource
+ * preview）映射为对应 {@link AgentMessageContent} 并回退空 text，error 标志原样保留，Binary / 未知 content 显式 {@link
  * IllegalArgumentException} 失败而不是静默丢失；非成功使用 error message + {@link ToolInvocationErrorJsonCodec}
  * 详情且 error=true，metadata.status 精确映射 invocation terminal status）；history normalization 的 synthetic
  * 结果固定为 UNKNOWN / HISTORY_CUT / "No result provided"，不关联任何 ToolInvocation。
@@ -146,7 +146,7 @@ public final class HistoryPayloadMapper {
       } else if (toolContent instanceof JsonToolContent json) {
         contents.add(new JsonMessageContent(json.json()));
       } else if (toolContent instanceof ResourceToolContent resource) {
-        contents.add(new ResourceMessageContent(resource.resource(), null));
+        contents.add(new ResourceMessageContent(resource.resource(), resource.preview()));
       } else {
         // BinaryToolContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(

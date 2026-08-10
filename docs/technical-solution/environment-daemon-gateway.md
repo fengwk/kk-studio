@@ -68,7 +68,7 @@ READY payload 是严格版本化/类型化的能力对象（`DaemonCapabilities`
 
 READY 不上报 workdir 或其它本地路径，并禁止 SKILL.md 正文、headers/environment 值、命令、URL 与完整工具 schema；完整 schema 只通过固定 `mcp_list_tools` 桥接工具按需返回。公共 `GET /api/ai/environment` 也不投影 operatingSystem/timeZone/note。READY 每个连接恰好一次；Gateway 必须先 `updateCapabilities` 再 `markReady`，而 registry 的 `markReady` 会拒绝 null capabilities；`HEARTBEAT` 刷新 `lastSeen`；断线时 registry 移除该名称。固定目录版本为 `EnvironmentToolCatalog.version()`，首个 READY 之后不重新协商；`DaemonToolRegistry` 与目录按名称、版本、schema、prompt、side effect 和 timeout 完全一致，启动时校验后冻结。
 
-**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用，已存在 active 时新 INVOKE 确定性失败（`environmentName already has an active remote tool invocation`）。发送 CANCEL 只做幂等取消请求；active 槽位在 terminal callback 或连接 cleanup 时释放。
+**并发约束**：每个 Environment 同时最多 1 个 active remote invocation——`EnvironmentDaemonGateway` 以 `activeByEnvironment` 登记 in-flight 调用。已存在 active 时，同 Environment 的并发 sibling 在发送任何 wire INVOKE 前返回 typed `RemoteToolBusyException`；`CoreToolGateway` 把它映射为带配置延迟的 `ToolGateway.Busy`，Harness 将调用重新调度并以 retry 序列化，而不是写入 terminal failure。不同 Environment 的 active 槽位互相独立，可以并发执行。发送 CANCEL 只做幂等取消请求，不立即释放槽位；active 槽位仍在 COMPLETED / FAILED / CANCELLED terminal callback 或连接 cleanup 时释放。
 
 只读查询：
 
@@ -180,8 +180,8 @@ Daemon 回调使用连续 sequence；相同 sequence 的完全相同 envelope �
 
 `ACK` / `ERROR` 只描述 transport，不单独改写 durable 状态。`DaemonToolResultCodec` 使用严格 JSON shape；Gateway 的 COMPLETED 解码会把 Resource 引用读回并校验为瞬时 Binary 内容，**不直接形成最终 durable file URI**：
 
-- daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容产生 Resource（daemon 侧 `resourceStore.store` 落盘并返回 ref）；
-- core 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（CoreToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等，durable 只保存 ResourceRef JSON。
+- daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容产生 Resource（daemon 侧 `resourceStore.store` 落盘并返回 ref）；ANSI terminal 文本中的 ESC 不单独触发二进制判定，常见彩色测试输出仍以可读 Text 投影；
+- core 对 Text/Json >8KB 及 Binary 内容统一在 `ToolResultExternalizer`（CoreToolGateway callback bridge）外部化：先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 与计划精确相等。Text/Json 的 durable `ResourceToolContent` 同时携带最多 16 KiB 的 UTF-8 安全 preview（能完整容纳时原样保留，否则稳定前缀加截断标记）；Binary preview 为 null。codec 继续接受旧的无 preview Resource JSON。
 
 terminal CAS 成功后请求 owning Thread Work；CAS 失败表示 ownership 已丢失，仅丢弃本地 handle。
 
@@ -202,4 +202,6 @@ lsp_goto_definition, lsp_workspace_symbols, lsp_java_decompile
 
 另由 `McpBridgeTools.registerAll` 注册固定桥接工具 `mcp_list_tools` / `mcp_call_tool`（见「本地 MCP server」），Environment 固定目录共 11 个工具。动态 MCP 工具绝不进入该目录。
 
-静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.workdir()` 构造 coding 配置，`CodingToolsConfig.environmentRoot/defaultWorkdir` 都等于该 canonical 目录；旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。其它 coding executable/resource 系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。
+静态 Tool prompt 资源位于 `harness/tool/src/main/resources/.../environment/prompts/`。LSP bridge 协议为 JSON stdin/stdout；未配置 bridge 时不得伪造成功结果。`DaemonMain` 只以 `DaemonConfig.workdir()` 构造 coding 配置，`CodingToolsConfig.environmentRoot/defaultWorkdir` 都等于该 canonical 目录；旧 `kkstudio.daemon.environment-root` / `kkstudio.daemon.default-workdir` 系统属性不再读取。
+
+`grep` / `find` 由 Java 21 NIO、regex 与仓库内 glob/`.gitignore` 规则实现，不启动 `rg`、`fd`、`grep` 或 `find` 子进程，也不读取对应 executable 系统属性。搜索不会跟随符号链接，硬排除 `.git`，按 workdir 相对 POSIX 路径稳定排序，并从 environment root 到搜索目录逐层应用 `.gitignore`；被忽略目录在加载后代规则前剪枝。目录 grep 跳过二进制或不可读文件，直接二进制目标返回错误。`bash`、可选 LSP bridge、`javap` 与 resource 相关系统属性保持有效。默认 preview 上限为 2000 行 / 50KB，超出部分外部化为 ResourceRef。

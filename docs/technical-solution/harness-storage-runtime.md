@@ -145,7 +145,8 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 - 每个 `HarnessRuntime` 方法恰好一个事务；snapshot 单事务一致读取。
 - Tool success 的 `result + effects + SUCCEEDED` 由同一次 `updateToolInvocations` 原子提交；effects 校验必须早于 Resource externalize 与该 durable update。
 - Tool terminal apply 只经 `ToolOutcomeAppender`：按 effects 顺序追加 CUSTOM，再追加 Tool Result、推进 head 并把 `result_entry_id` 指向 Tool Result；正常 apply 与 Stop 共用该实现。
-- Stop 额外把时间戳 clamp 到最新锁定 durable fact，容忍本地时钟回拨与节点间 skew。
+- Stop 与未决 Approval 决策把 mutation 时间戳 clamp 到最新锁定 durable fact，容忍本地时钟回拨与节点间 skew；对应 Work
+  request/lease 仍使用未抬升的本地调度时钟。
 - 丢失/过期 lease 的 callback 通过 token/attempt/terminal CAS 拒绝，绝不产生带 durable mutation 的 LOST 提交。
 
 ## 9. 故障语义

@@ -22,6 +22,7 @@ flowchart TD
     A --> L[environment-daemon-gateway.md<br/>Environment Daemon Gateway v2]
     A --> M[prompt-to-resource.md<br/>Prompt 到 Resource 数据流]
     A --> P[e2e-regression.md<br/>E2E 回归矩阵与报告]
+    A --> R[docker-reliability-stack.md<br/>Docker Reliability 隔离栈]
 ```
 
 ## 阅读顺序
@@ -43,6 +44,7 @@ flowchart TD
 | 13 | [environment-daemon-gateway.md](environment-daemon-gateway.md) | Environment registry、Daemon v2 与 Resource 边界 |
 | 14 | [prompt-to-resource.md](prompt-to-resource.md) | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 | 15 | [e2e-regression.md](e2e-regression.md) | E2E case、开关、验证与报告 |
+| 16 | [docker-reliability-stack.md](docker-reliability-stack.md) | Docker 隔离拓扑、锚点快照、case 与清理 |
 
 ## 贯穿约束
 

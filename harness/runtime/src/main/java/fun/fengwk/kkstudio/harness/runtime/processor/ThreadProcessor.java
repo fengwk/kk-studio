@@ -103,6 +103,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * apply：数量 / ordinal 前缀 / ownership / 全部 terminal 且全部未挂 result 任一违反即抛错回滚。每次原子应用 Thread
  * head/revision 只 +1；Model / Tool processor 不写 Entry/head。
  *
+ * <p>durable mutation 时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、
+ * complete、request 与 reschedule 始终使用未抬升的本地 lease clock，避免未来 durable 时间改变 lease 语义。
+ *
  * <p>自动压缩：无 open turn / continuation 待续且无 queued 输入时，按最新已关闭非压缩 turn 的 usage（providerTotalTokens
  * 优先，否则 categorizedTokens）与冻结 contextWindow 做阈值触发（{@code > max(0, contextWindow -
  * reserveTokens)}），或按 terminal OVERFLOW 错误触发 overflow 压缩；压缩 turn 复用同一 MODEL invocation + Work
@@ -575,6 +578,8 @@ public final class ThreadProcessor {
       // 决策与执行同事务，理论不可达；防御性回到循环重新决策。
       return new LoopStep.Continue();
     }
+    Instant mutationNow =
+        durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
     long sessionId = path.root().sessionId();
     long parentId = path.head().id();
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
@@ -592,8 +597,8 @@ public final class ThreadProcessor {
                         compactionRequest, response.text(), path)
                     : payloadMapper.assistantPayload(response, model.request().toolBindings())
                 : payloadMapper.assistantErrorPayload(model.error()),
-            now));
-    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, now));
+            mutationNow));
+    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
     long head = resultEntryId;
     List<ToolInvocation> invocations = List.of();
     if (succeeded && compactionRequest != null) {
@@ -610,7 +615,7 @@ public final class ThreadProcessor {
               resultEntryId,
               new TurnEndPayload(
                   model.turnStartEntryId(), TurnEndOutcome.COMPLETED, continueModel, null, null),
-              now));
+              mutationNow));
       head = turnEndId;
     } else if (succeeded && response.toolCalls().isEmpty()) {
       long turnEndId = tx.nextId();
@@ -621,7 +626,7 @@ public final class ThreadProcessor {
               resultEntryId,
               new TurnEndPayload(
                   model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
-              now));
+              mutationNow));
       head = turnEndId;
     } else if (succeeded) {
       List<ProviderToolCall> calls = response.toolCalls();
@@ -656,8 +661,8 @@ public final class ThreadProcessor {
                 ToolEffectBatch.EMPTY,
                 conflict,
                 null,
-                now,
-                now));
+                mutationNow,
+                mutationNow));
       }
       tx.insertToolInvocations(materialized);
       invocations = materialized;
@@ -674,10 +679,10 @@ public final class ThreadProcessor {
                   false,
                   TurnEndReason.TURN_FAILED,
                   null),
-              now));
+              mutationNow));
       head = turnEndId;
     }
-    tx.updateThread(thread.advanceHead(head, thread.yoloEnabled(), now));
+    tx.updateThread(thread.advanceHead(head, thread.yoloEnabled(), mutationNow));
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
@@ -727,12 +732,17 @@ public final class ThreadProcessor {
             "tool siblings changed under lock for assistant entry " + assistant.id());
       }
     }
+    Instant mutationNow =
+        durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
+    for (ToolInvocation sibling : siblings) {
+      mutationNow = durableMutationTime(mutationNow, sibling.updatedAt());
+    }
     long sessionId = path.root().sessionId();
     long parentId = path.head().id();
     List<ToolInvocation> updated = new ArrayList<>(siblings.size());
     for (ToolInvocation sibling : siblings) {
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, now);
+          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, mutationNow);
       updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }
@@ -744,9 +754,9 @@ public final class ThreadProcessor {
             parentId,
             new TurnEndPayload(
                 model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
-            now));
+            mutationNow));
     tx.updateToolInvocations(updated);
-    tx.updateThread(thread.advanceHead(turnEndId, thread.yoloEnabled(), now));
+    tx.updateThread(thread.advanceHead(turnEndId, thread.yoloEnabled(), mutationNow));
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
@@ -797,9 +807,17 @@ public final class ThreadProcessor {
     }
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed, config.leaseConfig(), now);
+    Instant planNow = durableMutationTime(now, thread.updatedAt(), path.head().createdAt());
     TurnPlan plan =
         planBuilder.build(
-            thread.id(), path, thread.yoloEnabled(), reason, queued, tx::nextId, now, preparation);
+            thread.id(),
+            path,
+            thread.yoloEnabled(),
+            reason,
+            queued,
+            tx::nextId,
+            planNow,
+            preparation);
     return new LoopStep.Plan(plan);
   }
 
@@ -872,9 +890,13 @@ public final class ThreadProcessor {
     if (!snapshotMatches(plan, queued)) {
       return CommitOutcome.LOST;
     }
+    Instant mutationNow = durableMutationTime(now, thread.updatedAt());
+    for (Entry entry : plan.candidateEntries()) {
+      mutationNow = durableMutationTime(mutationNow, entry.createdAt());
+    }
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
-      tx.insertEntry(entry);
+      tx.insertEntry(withCreatedAt(entry, mutationNow));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
@@ -884,7 +906,7 @@ public final class ThreadProcessor {
     Long invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
-          thread.advanceHead(plan.candidateHeadEntryId(), plan.finalYoloEnabled(), now);
+          thread.advanceHead(plan.candidateHeadEntryId(), plan.finalYoloEnabled(), mutationNow);
       tx.updateThread(advanced);
       invocationId = tx.nextId();
       tx.insertModelInvocation(
@@ -900,8 +922,8 @@ public final class ThreadProcessor {
               null,
               null,
               null,
-              now,
-              now));
+              mutationNow,
+              mutationNow));
     } else {
       TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
       long errorEntryId = tx.nextId();
@@ -911,7 +933,7 @@ public final class ThreadProcessor {
               plan.sessionId(),
               plan.candidateHeadEntryId(),
               new AssistantErrorPayload(rejected.error()),
-              now));
+              mutationNow));
       long turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -924,8 +946,8 @@ public final class ThreadProcessor {
                   false,
                   TurnEndReason.TURN_FAILED,
                   null),
-              now));
-      tx.updateThread(thread.advanceHead(turnEndId, plan.finalYoloEnabled(), now));
+              mutationNow));
+      tx.updateThread(thread.advanceHead(turnEndId, plan.finalYoloEnabled(), mutationNow));
     }
     // final fence 最后执行：损失抛内部信号，整事务回滚（零 durable mutation 的 LOST）。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
@@ -967,6 +989,23 @@ public final class ThreadProcessor {
       }
     }
     return withinCutoff == plan.plannedCommands().size();
+  }
+
+  /** 将 wall-clock 样本抬升到所有已锁定 durable 事实的时间下界。 */
+  private static Instant durableMutationTime(Instant candidate, Instant... floors) {
+    Instant effective = Objects.requireNonNull(candidate, "candidate");
+    for (Instant floor : floors) {
+      Instant requiredFloor = Objects.requireNonNull(floor, "floor");
+      if (effective.isBefore(requiredFloor)) {
+        effective = requiredFloor;
+      }
+    }
+    return effective;
+  }
+
+  private static Entry withCreatedAt(Entry entry, Instant createdAt) {
+    return new Entry(
+        entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
   }
 
   /** 在冻结 request 的 tool bindings 中按 descriptor name 匹配 call name。 */

@@ -167,6 +167,16 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
+  void transitionMethodsClampWallClockRollbackToCurrentUpdatedAt() {
+    ModelInvocation stored = withUpdatedAt(running(1, null), T2);
+
+    // Provider terminal callback 可携带早于 durable 行的 wall-clock 样本，但不能让 updatedAt 回退。
+    ModelInvocation next = stored.succeed(response(), T1);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, next.status());
+    assertEquals(T2, next.updatedAt());
+  }
+
+  @Test
   void failTerminatesFromReadyAndRunningKeepingAttempt() {
     assertEquals(ModelInvocationStatus.FAILED, ready(0).fail(error(), T1).status());
     assertEquals(0, ready(0).fail(error(), T1).attempt());

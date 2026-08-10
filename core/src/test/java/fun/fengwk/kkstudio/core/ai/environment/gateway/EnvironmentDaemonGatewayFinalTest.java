@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolUnavailableException;
@@ -195,6 +196,28 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
+  void invokeWithDescriptorDriftThrowsUnavailableBeforeWireSend() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-descriptor-drift");
+    ToolDescriptor current = fixture.descriptor;
+    ToolDescriptor drifted =
+        new ToolDescriptor(
+            current.name(),
+            current.version(),
+            current.type(),
+            current.description() + " drifted",
+            current.rendererKey(),
+            current.inputSchema(),
+            current.sideEffect(),
+            current.timeout());
+
+    assertThrows(
+        RemoteToolUnavailableException.class,
+        () -> fixture.gateway.invoke(ENVIRONMENT_NAME, request(drifted), new RecordingListener()));
+    assertEquals(List.of(DaemonMessageType.WELCOME), messageTypes(connection.envelopes()));
+  }
+
+  @Test
   void invalidInvokePayloadDoesNotReserveEnvironmentSlot() {
     Fixture fixture = fixture();
     FakeConnection connection = fixture.connectReady("connection-invalid-payload");
@@ -213,6 +236,83 @@ class EnvironmentDaemonGatewayFinalTest {
     assertNotNull(handle);
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
+        messageTypes(connection.envelopes()));
+  }
+
+  /** 同一 Environment 的第二个 admission 是 typed Busy，不能发第二个 INVOKE 或覆盖首个 active。 */
+  @Test
+  void sameEnvironmentSecondInvokeIsBusyWithoutWireSendOrActiveOverwrite() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-busy");
+    RecordingListener firstListener = new RecordingListener();
+    RecordingListener secondListener = new RecordingListener();
+    fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), firstListener);
+
+    assertThrows(
+        RemoteToolBusyException.class,
+        () ->
+            fixture.gateway.invoke(
+                ENVIRONMENT_NAME,
+                request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+                secondListener));
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
+        messageTypes(connection.envelopes()));
+
+    fixture.gateway.receive(connection.connectionId(), completed(2, resultPayload("first")));
+    assertEquals("first", ((TextToolContent) firstListener.completed.contents().getFirst()).text());
+    assertNull(secondListener.completed);
+    assertNull(secondListener.error);
+
+    ToolExecutionHandle next =
+        fixture.gateway.invoke(
+            ENVIRONMENT_NAME,
+            request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+            secondListener);
+    assertNotNull(next);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
+        messageTypes(connection.envelopes()));
+  }
+
+  /** CANCEL 请求本身不释放槽位；收到 CANCELLED terminal 后，下一次 admission 才能开始。 */
+  @Test
+  void cancelledTerminalReleasesEnvironmentSlotForNextInvoke() {
+    Fixture fixture = fixture();
+    FakeConnection connection = fixture.connectReady("connection-cancel-release");
+    ToolExecutionHandle first =
+        fixture.gateway.invoke(
+            ENVIRONMENT_NAME, request(fixture.descriptor), new RecordingListener());
+    first.cancel();
+
+    assertThrows(
+        RemoteToolBusyException.class,
+        () ->
+            fixture.gateway.invoke(
+                ENVIRONMENT_NAME,
+                request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+                new RecordingListener()));
+    fixture.gateway.receive(
+        connection.connectionId(),
+        envelope(
+            ENVIRONMENT_NAME,
+            DaemonMessageType.CANCELLED,
+            Long.toString(INVOCATION_ID),
+            2,
+            "{\"reason\":\"stop\"}"));
+
+    ToolExecutionHandle next =
+        fixture.gateway.invoke(
+            ENVIRONMENT_NAME,
+            request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+            new RecordingListener());
+    assertNotNull(next);
+    assertEquals(
+        List.of(
+            DaemonMessageType.WELCOME,
+            DaemonMessageType.INVOKE,
+            DaemonMessageType.CANCEL,
+            DaemonMessageType.INVOKE),
         messageTypes(connection.envelopes()));
   }
 
@@ -583,7 +683,7 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   @Test
-  void distinctNamesRouteInvokeAndSkillLoadByExactName() {
+  void distinctNamesRemainConcurrentAndRouteByExactName() {
     Fixture fixture = fixture();
     FakeConnection connectionA = fixture.connectReady("connection-a");
     FakeConnection connectionB = new FakeConnection("connection-b");
@@ -594,6 +694,7 @@ class EnvironmentDaemonGatewayFinalTest {
 
     RecordingListener listenerA = new RecordingListener();
     RecordingListener listenerB = new RecordingListener();
+    // A 尚未 terminal 时 B 仍可发送 INVOKE，证明 active 槽位按 Environment 隔离。
     fixture.gateway.invoke(ENVIRONMENT_NAME, request(fixture.descriptor), listenerA);
     fixture.gateway.invoke(OTHER_ENVIRONMENT_NAME, request(fixture.descriptor), listenerB);
     assertEquals(
@@ -632,11 +733,21 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private ToolExecutionRequest request(ToolDescriptor descriptor, Duration timeout) {
+    return request(descriptor, timeout, INVOCATION_ID, "provider-call");
+  }
+
+  private ToolExecutionRequest request(
+      ToolDescriptor descriptor, long invocationId, String toolCallId) {
+    return request(descriptor, Duration.ofSeconds(30), invocationId, toolCallId);
+  }
+
+  private ToolExecutionRequest request(
+      ToolDescriptor descriptor, Duration timeout, long invocationId, String toolCallId) {
     return new ToolExecutionRequest(
         descriptor,
-        new ToolCall("provider-call", descriptor.name(), "{\"path\":\"README.md\"}"),
+        new ToolCall(toolCallId, descriptor.name(), "{\"path\":\"README.md\"}"),
         timeout,
-        new ToolExecutionContext(INVOCATION_ID, 7001L));
+        new ToolExecutionContext(invocationId, 7001L));
   }
 
   private String resultPayload(String text) {

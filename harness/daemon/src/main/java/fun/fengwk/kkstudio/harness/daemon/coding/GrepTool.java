@@ -9,26 +9,26 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
-/** 通过可配置的 ripgrep 搜索 environment 文件，同时保留其 gitignore 语义。 */
+/** 使用 Java NIO 与 regex 搜索 environment 文件，并遵守分层 {@code .gitignore}。 */
 public final class GrepTool extends AbstractCodingTool {
 
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
   static final int DEFAULT_TIMEOUT_SECONDS = 15;
   static final int MAX_TIMEOUT_SECONDS = 3600;
-  private static final Pattern LOCATION_PATTERN = Pattern.compile("^(.*?):(\\d+):(.*)$");
 
   public GrepTool(CodingToolsConfig config) {
     super(config, EnvironmentToolCatalog.require("grep"));
@@ -37,75 +37,106 @@ public final class GrepTool extends AbstractCodingTool {
   @Override
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    String pattern = string(args, "pattern");
+    String sourcePattern = string(args, "pattern");
     Path workdir = boundary.workdir(optionalString(args, "workdir"));
-    Path path = boundary.existing(string(args, "path"), workdir);
+    Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
     Duration timeout =
-        effectiveProcessTimeout(request.effectiveTimeout(), requestedTimeoutSeconds(args));
-    List<String> command = new ArrayList<>();
-    command.add(config.rgExecutable());
-    command.add("--line-number");
-    command.add("--with-filename");
-    command.add("--color=never");
-    command.add("--hidden");
-    command.add("--no-messages");
-    if (optionalBoolean(args, "ignore_case")) {
-      command.add("--ignore-case");
-    }
-    if (optionalBoolean(args, "literal")) {
-      command.add("--fixed-strings");
-    }
-    if (optionalBoolean(args, "multiline")) {
-      command.add("--multiline");
-    }
-    String include = optionalString(args, "include");
-    if (include != null) {
-      command.add("--glob");
-      command.add(include);
-    }
-    command.add("--");
-    command.add(pattern);
-    Path relativePath = workdir.relativize(path);
-    command.add(relativePath.toString().isEmpty() ? "." : relativePath.toString());
-    Process process;
-    try {
-      process =
-          new ProcessBuilder(command).directory(workdir.toFile()).redirectErrorStream(true).start();
-    } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "ripgrep executable is unavailable: " + config.rgExecutable(), error);
-    }
-    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-    Thread reader = new Thread(() -> copy(process.getInputStream(), bytes), "daemon-grep-reader");
-    reader.setDaemon(true);
-    reader.start();
-    try {
-      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-        terminate(process);
-        reader.join();
-        throw new IllegalArgumentException(
-            "grep timed out after " + timeout.toMillis() + " milliseconds");
+        effectiveSearchTimeout(request.effectiveTimeout(), requestedTimeoutSeconds(args));
+    SearchControl control = SearchControl.start(timeout, execution, "grep");
+    boolean multiline = optionalBoolean(args, "multiline");
+    control.check();
+    Pattern pattern =
+        compilePattern(
+            sourcePattern,
+            optionalBoolean(args, "literal"),
+            optionalBoolean(args, "ignore_case"),
+            multiline);
+    IncludePattern include = IncludePattern.compile(optionalString(args, "include"));
+    control.check();
+    boolean directFile = Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS);
+    List<Path> files = searchFiles(path, directFile, control);
+    files =
+        files.stream().sorted(Comparator.comparing(file -> displayPath(workdir, file))).toList();
+
+    List<String> completeLines = new ArrayList<>();
+    Path includeRoot = directFile ? path.getParent() : path;
+    for (Path file : files) {
+      control.check();
+      String includePath = SearchFiles.toPosix(includeRoot.relativize(file));
+      if (!include.matches(includePath, file.getFileName().toString())) {
+        continue;
       }
-      reader.join();
-    } catch (InterruptedException error) {
-      terminate(process);
-      reader.join();
-      throw error;
+      byte[] bytes;
+      try {
+        bytes = SearchFiles.readAllBytes(file, control);
+      } catch (IOException | SecurityException error) {
+        if (directFile) {
+          throw new IllegalArgumentException("path is not readable: " + displayPath(workdir, file));
+        }
+        continue;
+      }
+      TextFileCodec.Decoded decoded;
+      try {
+        decoded = TextFileCodec.decode(bytes);
+      } catch (IllegalArgumentException error) {
+        if (!"file appears to be binary".equals(error.getMessage())) {
+          throw error;
+        }
+        if (directFile) {
+          throw new IllegalArgumentException(
+              "file appears to be binary: " + displayPath(workdir, file));
+        }
+        continue;
+      }
+      TextLines text = TextLines.from(decoded.text());
+      List<Integer> matchingLines =
+          multiline
+              ? matchingMultilineLines(pattern, text, control)
+              : matchingSingleLines(pattern, text, control);
+      String displayPath = displayPath(workdir, file);
+      for (int lineNumber : matchingLines) {
+        control.check();
+        completeLines.add(
+            displayPath + ":" + lineNumber + ":" + text.lines().get(lineNumber - 1).content());
+      }
     }
-    if (execution.isCancelled()) {
-      throw new InterruptedException();
-    }
-    String output = bytes.toString(StandardCharsets.UTF_8);
-    if (process.exitValue() > 1) {
-      throw new IllegalArgumentException(output.isBlank() ? "ripgrep failed" : output.strip());
-    }
-    if (output.isBlank()) {
+    if (completeLines.isEmpty()) {
       return success(request.call().id(), "No matches found");
     }
+    return result(request.call().id(), completeLines, limit);
+  }
 
-    List<String> completeLines =
-        List.of(output.split("\\R")).stream().map(line -> normalizeLine(line, workdir)).toList();
+  static int requestedTimeoutSeconds(JsonNode args) {
+    return optionalPositiveInt(
+        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
+  }
+
+  static Duration effectiveSearchTimeout(Duration invocationTimeout, int requestedTimeoutSeconds) {
+    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
+    Duration requestedTimeout = Duration.ofSeconds(requestedTimeoutSeconds);
+    return invocationTimeout.isZero() || invocationTimeout.compareTo(requestedTimeout) > 0
+        ? requestedTimeout
+        : invocationTimeout;
+  }
+
+  private List<Path> searchFiles(Path path, boolean directFile, SearchControl control)
+      throws Exception {
+    if (directFile) {
+      if (!Files.isReadable(path)) {
+        throw new IllegalArgumentException("path is not readable: " + path);
+      }
+      control.check();
+      return SearchFiles.isGitMetadata(config.environmentRoot(), path) ? List.of() : List.of(path);
+    }
+    if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+      throw new IllegalArgumentException("path must be a regular file or directory");
+    }
+    return SearchFiles.collect(config.environmentRoot(), path, control);
+  }
+
+  private ToolResult result(String callId, List<String> completeLines, int limit)
+      throws IOException {
     boolean resultLimited = completeLines.size() > limit;
     List<String> previewLines =
         new ArrayList<>(completeLines.subList(0, Math.min(limit, completeLines.size())));
@@ -141,40 +172,82 @@ public final class GrepTool extends AbstractCodingTool {
       contents.add(
           new ResourceToolContent(config.resourceStore().store(completeBytes, "text/plain")));
     }
-    return new ToolResult(request.call().id(), contents, false, "{}", false);
+    return new ToolResult(callId, contents, false, "{}", false);
   }
 
-  static int requestedTimeoutSeconds(JsonNode args) {
-    return optionalPositiveInt(
-        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
-  }
-
-  static Duration effectiveProcessTimeout(Duration invocationTimeout, int requestedTimeoutSeconds) {
-    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
-    Duration requestedTimeout = Duration.ofSeconds(requestedTimeoutSeconds);
-    return invocationTimeout.isZero() || invocationTimeout.compareTo(requestedTimeout) > 0
-        ? requestedTimeout
-        : invocationTimeout;
-  }
-
-  private String normalizeLine(String line, Path workdir) {
-    Matcher matcher = LOCATION_PATTERN.matcher(line);
-    if (!matcher.matches()) {
-      return line;
+  private static Pattern compilePattern(
+      String source, boolean literal, boolean ignoreCase, boolean multiline) {
+    int flags = 0;
+    if (ignoreCase) {
+      flags |= Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     }
-    String displayPath = matcher.group(1);
+    if (multiline) {
+      flags |= Pattern.MULTILINE;
+    }
     try {
-      Path resultPath = Path.of(displayPath);
-      if (resultPath.isAbsolute()) {
-        Path normalized = resultPath.normalize();
-        if (normalized.startsWith(config.environmentRoot())) {
-          displayPath = workdir.relativize(normalized).toString();
-        }
-      }
-    } catch (RuntimeException ignored) {
-      // 当路径无法在当前平台表示时，保留子进程输出。
+      return Pattern.compile(literal ? Pattern.quote(source) : source, flags);
+    } catch (PatternSyntaxException error) {
+      throw new IllegalArgumentException("Invalid regex: " + error.getDescription(), error);
     }
-    return displayPath.replace('\\', '/') + ":" + matcher.group(2) + ":" + matcher.group(3);
+  }
+
+  private static List<Integer> matchingSingleLines(
+      Pattern pattern, TextLines text, SearchControl control) throws InterruptedException {
+    List<Integer> matches = new ArrayList<>();
+    for (int index = 0; index < text.lines().size(); index++) {
+      control.check();
+      if (pattern.matcher(text.lines().get(index).content()).find()) {
+        matches.add(index + 1);
+      }
+    }
+    return matches;
+  }
+
+  private static List<Integer> matchingMultilineLines(
+      Pattern pattern, TextLines text, SearchControl control) throws InterruptedException {
+    if (text.lines().isEmpty()) {
+      return List.of();
+    }
+    boolean[] matched = new boolean[text.lines().size()];
+    Matcher matcher = pattern.matcher(text.text());
+    while (true) {
+      control.check();
+      if (!matcher.find()) {
+        break;
+      }
+      int start = lineIndex(text.lines(), matcher.start());
+      int coveredEnd = matcher.end() > matcher.start() ? matcher.end() - 1 : matcher.start();
+      int end = lineIndex(text.lines(), coveredEnd);
+      for (int index = start; index <= end; index++) {
+        matched[index] = true;
+      }
+    }
+    List<Integer> matches = new ArrayList<>();
+    for (int index = 0; index < matched.length; index++) {
+      if (matched[index]) {
+        matches.add(index + 1);
+      }
+    }
+    return matches;
+  }
+
+  private static int lineIndex(List<Line> lines, int offset) {
+    int bounded = Math.max(0, offset);
+    int low = 0;
+    int high = lines.size() - 1;
+    while (low < high) {
+      int middle = (low + high + 1) >>> 1;
+      if (lines.get(middle).startOffset() <= bounded) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return low;
+  }
+
+  private static String displayPath(Path workdir, Path file) {
+    return SearchFiles.toPosix(workdir.relativize(file));
   }
 
   private static String truncateLine(String line) {
@@ -185,16 +258,37 @@ public final class GrepTool extends AbstractCodingTool {
     return line.substring(0, end) + "... (line truncated to 500 chars)";
   }
 
-  private static void copy(InputStream input, ByteArrayOutputStream output) {
-    try (input) {
-      input.transferTo(output);
-    } catch (IOException ignored) {
-      // 父进程会把进程失败与超时转换为结构化的 tool errors。
+  private record IncludePattern(boolean pathPattern, GlobPattern pattern) {
+
+    private static IncludePattern compile(String source) {
+      return source == null
+          ? new IncludePattern(false, null)
+          : new IncludePattern(source.indexOf('/') >= 0, GlobPattern.compile(source));
+    }
+
+    private boolean matches(String path, String basename) {
+      return pattern == null || pattern.matches(pathPattern ? path : basename);
     }
   }
 
-  private static void terminate(Process process) {
-    process.toHandle().descendants().forEach(child -> child.destroyForcibly());
-    process.destroyForcibly();
+  private record TextLines(String text, List<Line> lines) {
+
+    private static TextLines from(String source) {
+      String normalized = source.replace("\r\n", "\n").replace('\r', '\n');
+      if (normalized.isEmpty()) {
+        return new TextLines(normalized, List.of());
+      }
+      String[] contents = normalized.split("\n", -1);
+      int count = normalized.endsWith("\n") ? contents.length - 1 : contents.length;
+      List<Line> lines = new ArrayList<>(count);
+      int offset = 0;
+      for (int index = 0; index < count; index++) {
+        lines.add(new Line(offset, contents[index]));
+        offset += contents[index].length() + 1;
+      }
+      return new TextLines(normalized, List.copyOf(lines));
+    }
   }
+
+  private record Line(int startOffset, String content) {}
 }

@@ -12,8 +12,6 @@ public record CodingToolsConfig(
     int previewMaxLines,
     int previewMaxBytes,
     String bashExecutable,
-    String rgExecutable,
-    String fdExecutable,
     ResourceStore resourceStore,
     String lspBridgeCommand,
     String javapExecutable) {
@@ -37,8 +35,6 @@ public record CodingToolsConfig(
       throw new IllegalArgumentException("preview output limits must be positive");
     }
     bashExecutable = requireNonBlank(bashExecutable, "bashExecutable");
-    rgExecutable = requireNonBlank(rgExecutable, "rgExecutable");
-    fdExecutable = requireNonBlank(fdExecutable, "fdExecutable");
     resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
     lspBridgeCommand = blankToNull(lspBridgeCommand);
     javapExecutable =
@@ -56,8 +52,6 @@ public record CodingToolsConfig(
       int previewMaxLines,
       int previewMaxBytes,
       String bashExecutable,
-      String rgExecutable,
-      String fdExecutable,
       ResourceStore resourceStore) {
     this(
         environmentRoot,
@@ -65,8 +59,6 @@ public record CodingToolsConfig(
         previewMaxLines,
         previewMaxBytes,
         bashExecutable,
-        rgExecutable,
-        fdExecutable,
         resourceStore,
         null,
         DEFAULT_JAVAP_EXECUTABLE);
@@ -86,8 +78,6 @@ public record CodingToolsConfig(
         DEFAULT_PREVIEW_MAX_LINES,
         DEFAULT_PREVIEW_MAX_BYTES,
         System.getProperty("kkstudio.daemon.bash", "bash"),
-        System.getProperty("kkstudio.daemon.rg", "rg"),
-        System.getProperty("kkstudio.daemon.fd", "fd"),
         new LocalFileResourceStore(
             resourceDirectory,
             parsePositiveLong(
