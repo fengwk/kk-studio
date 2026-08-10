@@ -402,16 +402,19 @@ public class OpenCliHubClient {
     int slash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
     String basename = (slash >= 0 ? normalized.substring(slash + 1) : normalized).strip();
     StringBuilder safe = new StringBuilder(Math.min(basename.length(), 128));
-    for (int index = 0; index < basename.length() && safe.length() < 128; index++) {
-      char character = basename.charAt(index);
-      if (Character.isLetterOrDigit(character)
-          || character == '.'
-          || character == '_'
-          || character == '-') {
-        safe.append(character);
+    for (int index = 0; index < basename.length() && safe.length() < 128; ) {
+      int codePoint = basename.codePointAt(index);
+      if ((codePoint >= 'A' && codePoint <= 'Z')
+          || (codePoint >= 'a' && codePoint <= 'z')
+          || (codePoint >= '0' && codePoint <= '9')
+          || codePoint == '.'
+          || codePoint == '_'
+          || codePoint == '-') {
+        safe.append((char) codePoint);
       } else {
         safe.append('_');
       }
+      index += Character.charCount(codePoint);
     }
     String result = safe.toString();
     if (result.isBlank() || ".".equals(result) || "..".equals(result)) {
