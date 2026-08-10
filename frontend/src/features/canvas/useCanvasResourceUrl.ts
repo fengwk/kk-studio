@@ -8,6 +8,7 @@ import {
 import { queryKeys } from '@/shared/lib/query-keys'
 
 type ResourceUrlKind = 'preview' | 'original'
+const LAZY_VIEWPORT_MARGIN = 160
 
 interface ResourceUrlOptions {
   canvasId: DecimalString
@@ -15,6 +16,21 @@ interface ResourceUrlOptions {
   kind: ResourceUrlKind
   enabled?: boolean
   lazy?: boolean
+}
+
+function isNearViewport(element: HTMLElement) {
+  if (element.getClientRects().length === 0) {
+    return false
+  }
+  const rect = element.getBoundingClientRect()
+  const width = document.documentElement.clientWidth || window.innerWidth
+  const height = document.documentElement.clientHeight || window.innerHeight
+  return (
+    rect.bottom >= -LAZY_VIEWPORT_MARGIN
+    && rect.right >= -LAZY_VIEWPORT_MARGIN
+    && rect.top <= height + LAZY_VIEWPORT_MARGIN
+    && rect.left <= width + LAZY_VIEWPORT_MARGIN
+  )
 }
 
 /** 媒体 URL 查询只在可见或用户明确请求后启用，observer 在换节点和卸载时断开。 */
@@ -25,39 +41,47 @@ export function useCanvasResourceUrl({
   enabled = true,
   lazy = false,
 }: ResourceUrlOptions) {
+  const visibilityKey = `${canvasId}:${resourceId}:${kind}:${lazy}`
   const observerRef = useRef<IntersectionObserver | null>(null)
-  const [visible, setVisible] = useState(!lazy)
+  const [visibility, setVisibility] = useState({
+    key: visibilityKey,
+    visible: !lazy,
+  })
+  const visible = visibility.key === visibilityKey ? visibility.visible : !lazy
   const targetRef = useCallback((element: HTMLElement | null) => {
     observerRef.current?.disconnect()
     observerRef.current = null
     if (!element || !lazy) {
       if (element) {
-        setVisible(true)
+        setVisibility({ key: visibilityKey, visible: true })
       }
       return
     }
     if (typeof IntersectionObserver === 'undefined') {
-      setVisible(true)
+      setVisibility({ key: visibilityKey, visible: true })
+      return
+    }
+    if (isNearViewport(element)) {
+      setVisibility({ key: visibilityKey, visible: true })
       return
     }
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
-        setVisible(true)
+        setVisibility({ key: visibilityKey, visible: true })
         observer.disconnect()
         observerRef.current = null
       }
-    }, { rootMargin: '160px' })
+    }, { rootMargin: `${LAZY_VIEWPORT_MARGIN}px` })
     observer.observe(element)
     observerRef.current = observer
-  }, [lazy])
+  }, [lazy, visibilityKey])
 
   useEffect(() => {
-    setVisible(!lazy)
     return () => {
       observerRef.current?.disconnect()
       observerRef.current = null
     }
-  }, [canvasId, lazy, resourceId])
+  }, [visibilityKey])
 
   const query = useQuery({
     queryKey: kind === 'preview'
