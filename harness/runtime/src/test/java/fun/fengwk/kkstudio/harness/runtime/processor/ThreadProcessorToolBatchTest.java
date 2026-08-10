@@ -22,6 +22,9 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tooledRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.toolsByAssistant;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchModelTimestamp;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchToolTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionTool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
@@ -64,6 +67,7 @@ import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.time.Instant;
 import java.util.List;
 
 /** ThreadProcessor Tool sibling batch：原子 ordinal 回写、错误 payload、blocker 与不变量违反回滚。 */
@@ -118,6 +122,48 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             .orElseThrow();
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+  }
+
+  /**
+   * Tool batch 新建的 effects/result/TURN_END 以及随后 continuation 事实不得早于已锁定 Thread/Model/Tool durable
+   * floors；raw lease clock 仍保持回拨后的本地样本。
+   */
+  @Test
+  void toolTerminalApplyUsesAllDurableFloorsWithoutClampingLeaseClock() {
+    Fixture fixture = fixture();
+    var chain =
+        seedToolChain(
+            fixture.store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.SUCCEEDED));
+    Instant threadFloor = NOW.plusSeconds(120);
+    Instant modelFloor = NOW.plusSeconds(121);
+    Instant toolFloor = NOW.plusSeconds(122);
+    touchThreadTimestamp(fixture.store, chain.turn().threadId(), threadFloor);
+    touchModelTimestamp(fixture.store, chain.modelInvocationId(), modelFloor);
+    touchToolTimestamp(fixture.store, chain.toolInvocationIds().getFirst(), toolFloor);
+    requestThreadWork(fixture.store, chain.turn().threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest()));
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, chain.turn().threadId())));
+
+    EntryPath durablePath = path(fixture.store, chain.turn().threadId());
+    for (Entry entry : durablePath.entries().subList(4, durablePath.entries().size())) {
+      assertEquals(toolFloor, entry.createdAt());
+    }
+    assertEquals(toolFloor, tool(fixture.store, chain.toolInvocationIds().getFirst()).updatedAt());
+    assertEquals(toolFloor, thread(fixture.store, chain.turn().threadId()).updatedAt());
+    Entry continuation = durablePath.head();
+    ModelInvocation continuationModel =
+        inTx(
+                fixture,
+                tx -> tx.findModelInvocationByTurn(chain.turn().threadId(), continuation.id()))
+            .orElseThrow();
+    assertEquals(toolFloor, continuationModel.createdAt());
+    assertEquals(toolFloor, continuationModel.updatedAt());
   }
 
   @Test

@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
@@ -75,8 +76,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * binding/arguments。{@link #start} 按冻结 binding 的 {@link ToolType} 路由：PLATFORM 走 {@link
  * ToolFactories} 精确 name/version + descriptor equality 后提交注入的 {@link ExecutorService}
  * 执行；ENVIRONMENT 只按 {@code binding.environmentName()} 经 {@link RemoteToolTransport} 发送。missing
- * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；本地 executor 拒绝映射
- * Overloaded（正整毫秒延迟）；发送不确定 / 提交结果不确定映射 Indeterminate。
+ * capability / 发送前目标不可用（离线/未 READY/心跳过期）都依据可证明的未接受映射 Rejected；同 Environment 已有 active remote
+ * invocation 映射 Busy，由 Harness 按配置延迟重试并序列化 sibling；本地 executor 拒绝映射 Overloaded（正整毫秒延迟）；发送不确定 /
+ * 提交结果不确定映射 Indeterminate。
  *
  * <p>回调桥（{@link GatedToolExecutionListener}）：两阶段激活——{@code start()} 绝不打开回调 gate（Tool 的同步回调只进缓冲），
  * {@link ToolGateway.Handle#activate()} 由 Processor 在 attach + durable markRunning 后调用，直接打开 gate +
@@ -489,7 +491,7 @@ public final class CoreToolGateway implements ToolGateway {
 
   /**
    * ENVIRONMENT：只按冻结 {@code binding.environmentName()} 路由。能力缺失 / descriptor 漂移 / 发送前目标不可用（离线、未
-   * READY、心跳过期）都是确定性 Rejected；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
+   * READY、心跳过期）都是确定性 Rejected；同 Environment 的瞬时容量冲突是 Busy；发送不确定 / 未知异常是 Indeterminate（可能已开始，绝不能抛）。
    */
   private StartResult startEnvironment(Execution execution, Listener listener) {
     ToolDescriptor bindingDescriptor = execution.request().binding().descriptor();
@@ -535,6 +537,10 @@ public final class CoreToolGateway implements ToolGateway {
     try {
       transportHandle =
           remoteTransport.invoke(execution.request().binding().environmentName(), request, bridge);
+    } catch (RemoteToolBusyException busy) {
+      // 同 Environment 已有 active remote invocation：INVOKE 肯定未发送，由 Harness 按固定延迟重新 admission，
+      // 不创建 durable error。
+      return new ToolGateway.Busy(config.busyRetryDelay());
     } catch (RemoteToolUnavailableException unavailable) {
       // 发送前目标不可用（路由缺失/未注册/未 READY/心跳过期）：肯定未开始，且当前分支配置下重试不会改变结论——
       // 确定性拒绝，让模型看到 durable 错误结果并继续收敛。

@@ -21,6 +21,7 @@ public interface RemoteToolTransport {
    *
    * @param environmentName 目标 Environment 的 canonical 逻辑路由名称。
    * @return 可取消句柄；CANCEL 映射为远程 CANCEL 消息
+   * @throws RemoteToolBusyException 发送前目标存在瞬时容量冲突，INVOKE 未发出，可稍后重试 admission
    * @throws RemoteToolUnavailableException 发送前目标不可用，INVOKE 未发出
    * @throws RemoteToolSendUncertainException 发送结果不确定（可能已投递）
    */

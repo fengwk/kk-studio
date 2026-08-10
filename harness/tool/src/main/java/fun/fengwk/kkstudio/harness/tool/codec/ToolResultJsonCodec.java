@@ -115,6 +115,9 @@ public final class ToolResultJsonCodec {
       writeNullableText(generator, "name", resource.name());
       writeNullableLong(generator, "size", resource.size());
       writeNullableText(generator, "sha256", resource.sha256());
+      if (value.preview() != null) {
+        generator.writeStringField("preview", value.preview());
+      }
     } else {
       throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
     }
@@ -225,6 +228,9 @@ public final class ToolResultJsonCodec {
       putNullableText(node, "name", resource.name());
       putNullableLong(node, "size", resource.size());
       putNullableText(node, "sha256", resource.sha256());
+      if (value.preview() != null) {
+        node.put("preview", value.preview());
+      }
     } else {
       throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
     }
@@ -248,7 +254,11 @@ public final class ToolResultJsonCodec {
         }
       }
       case "resource" -> {
-        requireFields(node, "type", "uri", "mediaType", "name", "size", "sha256");
+        if (node.has("preview")) {
+          requireFields(node, "type", "uri", "mediaType", "name", "size", "sha256", "preview");
+        } else {
+          requireFields(node, "type", "uri", "mediaType", "name", "size", "sha256");
+        }
         JsonNode size = node.get("size");
         if (!size.isNull() && (!size.isIntegralNumber() || !size.canConvertToLong())) {
           throw new IllegalArgumentException("size must be an integer or null");
@@ -259,7 +269,8 @@ public final class ToolResultJsonCodec {
                 text(node, "mediaType"),
                 textOrNull(node, "name"),
                 size.isNull() ? null : size.longValue(),
-                textOrNull(node, "sha256")));
+                textOrNull(node, "sha256")),
+            node.has("preview") ? textOrNull(node, "preview") : null);
       }
       default -> throw new IllegalArgumentException("unknown tool content type: " + type);
     };

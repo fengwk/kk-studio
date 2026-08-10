@@ -19,6 +19,8 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tooledRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.toolsByAssistant;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchModelTimestamp;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -154,6 +157,44 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(assistant.id(), thread(fixture.store, baseline.threadId()).headEntryId());
     assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+  }
+
+  /**
+   * terminal apply 的 durable 时间取已锁定 Thread/path/Model 下界；即使该下界已越过 raw leaseUntil，也不能把 lease
+   * ownership 时钟一起抬升。
+   */
+  @Test
+  void modelTerminalApplyUsesDurableFloorsWithoutClampingLeaseClock() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    long modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse(List.of("call-1"), "bash"),
+            null);
+    Instant threadFloor = NOW.plusSeconds(120);
+    Instant modelFloor = NOW.plusSeconds(121);
+    touchThreadTimestamp(fixture.store, baseline.threadId(), threadFloor);
+    touchModelTimestamp(fixture.store, modelId, modelFloor);
+    requestThreadWork(fixture.store, baseline.threadId());
+
+    assertEquals(
+        ThreadProcessResult.SUSPENDED,
+        fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
+
+    EntryPath durablePath = path(fixture.store, baseline.threadId());
+    Entry assistant = durablePath.head();
+    assertEquals(modelFloor, assistant.createdAt());
+    assertEquals(modelFloor, model(fixture.store, modelId).updatedAt());
+    assertEquals(modelFloor, thread(fixture.store, baseline.threadId()).updatedAt());
+    ToolInvocation child = toolsByAssistant(fixture.store, assistant.id()).getFirst();
+    assertEquals(modelFloor, child.createdAt());
+    assertEquals(modelFloor, child.updatedAt());
   }
 
   @Test

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.tool.daemon.DaemonToolResultCodec;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolBusyException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolCancelledException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolFailedException;
 import fun.fengwk.kkstudio.harness.tool.remote.RemoteToolSendUncertainException;
@@ -57,7 +58,8 @@ import java.util.regex.Pattern;
  * BindResult.Replaced}），本类把被替换的旧连接状态恰好清理一次（连接关闭、active remote 按不确定收敛、 pending skill load
  * 失败），绝不触碰新持有者。不拥有持久的 ToolInvocation claim/lease/terminal/retry 生命周期。持久化执行 由 Runtime {@code
  * ToolProcessor} 负责；本类提供 core 侧 {@link RemoteToolTransport}，并把 daemon 回调转发给注册的 Tool listener，严格校验
- * environment/connection/invocation 归属。
+ * environment/connection/invocation 归属。每个 Environment 的单一 active remote 槽位只负责 wire ownership；同
+ * Environment 的并发 sibling 在发送前返回 {@link RemoteToolBusyException}，由 Harness retry 序列化，不在本类排队。
  */
 @Service
 public class EnvironmentDaemonGateway
@@ -168,7 +170,7 @@ public class EnvironmentDaemonGateway
             unavailableMessage(environmentName, request.call().toolName()));
       }
       if (activeByEnvironment.containsKey(environmentName)) {
-        throw new RemoteToolUnavailableException(
+        throw new RemoteToolBusyException(
             environmentName + " already has an active remote tool invocation");
       }
       ToolDescriptor capability =

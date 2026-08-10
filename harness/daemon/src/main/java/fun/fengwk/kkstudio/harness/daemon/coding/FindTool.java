@@ -9,20 +9,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 
-/** 通过可配置的 fd 或 fdfind 查找尊重 gitignore 的 environment-root 相对路径。 */
+/** 使用 Java NIO 查找遵守分层 {@code .gitignore} 的 environment 文件。 */
 public final class FindTool extends AbstractCodingTool {
 
   static final int MAX_TIMEOUT_SECONDS = 3600;
@@ -34,68 +29,44 @@ public final class FindTool extends AbstractCodingTool {
   @Override
   ToolResult run(ToolExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path path =
-        boundary.existing(string(args, "path"), boundary.workdir(optionalString(args, "workdir")));
-    if (!Files.isDirectory(path)) {
-      throw new IllegalArgumentException("path must be a directory");
-    }
+    Path workdir = boundary.workdir(optionalString(args, "workdir"));
+    Path path = boundary.existingWithoutSymlinks(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
-    Duration timeout = effectiveProcessTimeout(request.effectiveTimeout(), args);
-    String pattern = string(args, "pattern");
-    List<String> command = new ArrayList<>();
-    command.add(config.fdExecutable());
-    command.add("--glob");
-    command.add("--color=never");
-    command.add("--hidden");
-    command.add("--no-require-git");
-    if (pattern.contains("/") || pattern.contains(File.separator)) {
-      command.add("--full-path");
-    }
-    command.add("--");
-    command.add(pattern);
-    command.add(".");
-    Process process;
-    try {
-      process =
-          new ProcessBuilder(command).directory(path.toFile()).redirectErrorStream(true).start();
-    } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "fd executable is unavailable: " + config.fdExecutable(), error);
-    }
-    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-    Thread reader = new Thread(() -> copy(process.getInputStream(), bytes), "daemon-find-reader");
-    reader.setDaemon(true);
-    reader.start();
-    try {
-      if (!process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
-        terminate(process);
-        reader.join();
-        throw new IllegalArgumentException(
-            "find timed out after " + timeout.toMillis() + " milliseconds");
+    Duration timeout = effectiveSearchTimeout(request.effectiveTimeout(), args);
+    SearchControl control = SearchControl.start(timeout, execution, "find");
+    String sourcePattern = string(args, "pattern");
+    boolean pathPattern = sourcePattern.indexOf('/') >= 0;
+    control.check();
+    GlobPattern pattern = GlobPattern.compile(sourcePattern);
+    control.check();
+    List<String> completeLines = new ArrayList<>();
+    for (Path file : SearchFiles.collect(config.environmentRoot(), path, control)) {
+      control.check();
+      String searchRelative = SearchFiles.toPosix(path.relativize(file));
+      String basename = file.getFileName().toString();
+      if (pattern.matches(pathPattern ? searchRelative : basename)) {
+        completeLines.add(SearchFiles.toPosix(workdir.relativize(file)));
       }
-      reader.join();
-    } catch (InterruptedException error) {
-      terminate(process);
-      reader.join();
-      throw error;
     }
-    if (execution.isCancelled()) {
-      throw new InterruptedException();
-    }
-    String output = bytes.toString(StandardCharsets.UTF_8);
-    if (process.exitValue() != 0) {
-      throw new IllegalArgumentException(output.isBlank() ? "fd failed" : output.strip());
-    }
-    if (output.isBlank()) {
+    completeLines.sort(Comparator.naturalOrder());
+    if (completeLines.isEmpty()) {
       return success(request.call().id(), "No files found matching pattern");
     }
-    List<String> lines = new ArrayList<>();
-    for (String line : output.split("\\R")) {
-      if (!line.isBlank()) {
-        lines.add(line.replace('\\', '/').replaceFirst("^\\./", ""));
-      }
+    return result(request.call().id(), completeLines, limit);
+  }
+
+  static Duration effectiveSearchTimeout(Duration invocationTimeout, JsonNode args) {
+    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
+    Duration outerTimeout = invocationTimeout.isZero() ? Duration.ofHours(1) : invocationTimeout;
+    if (!args.has("timeout_seconds")) {
+      return outerTimeout;
     }
-    List<String> completeLines = List.copyOf(lines);
+    Duration requestedTimeout =
+        Duration.ofSeconds(optionalPositiveInt(args, "timeout_seconds", 1, MAX_TIMEOUT_SECONDS));
+    return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
+  }
+
+  private ToolResult result(String callId, List<String> completeLines, int limit) throws Exception {
     boolean limited = completeLines.size() > limit;
     List<String> previewLines =
         new ArrayList<>(completeLines.subList(0, Math.min(limit, completeLines.size())));
@@ -105,7 +76,7 @@ public final class FindTool extends AbstractCodingTool {
     }
     if (!limited) {
       return new ToolResult(
-          request.call().id(),
+          callId,
           OutputLimiter.limit(
               String.join("\n", previewLines).getBytes(StandardCharsets.UTF_8),
               "text/plain",
@@ -130,30 +101,6 @@ public final class FindTool extends AbstractCodingTool {
                 .store(
                     String.join("\n", completeLines).getBytes(StandardCharsets.UTF_8),
                     "text/plain")));
-    return new ToolResult(request.call().id(), contents, false, "{}", false);
-  }
-
-  static Duration effectiveProcessTimeout(Duration invocationTimeout, JsonNode args) {
-    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
-    Duration outerTimeout = invocationTimeout.isZero() ? Duration.ofHours(1) : invocationTimeout;
-    if (!args.has("timeout_seconds")) {
-      return outerTimeout;
-    }
-    Duration requestedTimeout =
-        Duration.ofSeconds(optionalPositiveInt(args, "timeout_seconds", 1, MAX_TIMEOUT_SECONDS));
-    return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
-  }
-
-  private static void copy(InputStream input, ByteArrayOutputStream output) {
-    try (input) {
-      input.transferTo(output);
-    } catch (IOException ignored) {
-      // 父进程会把进程失败与超时转换为结构化的 tool errors。
-    }
-  }
-
-  private static void terminate(Process process) {
-    process.toHandle().descendants().forEach(child -> child.destroyForcibly());
-    process.destroyForcibly();
+    return new ToolResult(callId, contents, false, "{}", false);
   }
 }
