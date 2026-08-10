@@ -412,11 +412,20 @@ async function main(argv) {
     assert(body.trim().length > 20, 'environments page body empty')
   })
 
-  await run('ui.canvas.page_loads', 'Canvas 库可打开且显示真实创建入口', async (caseArt) => {
+  await run('ui.canvas.page_loads', 'Canvas 库与编辑器可打开', async (caseArt) => {
     await goto('/canvas')
     await expectVisibleText(page, '你的画布')
-    await page.getByRole('button', { name: '创建新画布' }).waitFor({ state: 'visible' })
+    const createButton = page.getByRole('button', { name: '创建新画布' })
+    await createButton.waitFor({ state: 'visible' })
     await shot(caseArt, 'canvas-library')
+    const existingCanvas = page.locator('.project-card:not(.create-card)').first()
+    if (await existingCanvas.count() > 0) {
+      await existingCanvas.click()
+    } else {
+      await createButton.click()
+    }
+    await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+    await shot(caseArt, 'canvas-editor')
     expectNoFatal(pageErrors, consoleErrors)
   })
 
