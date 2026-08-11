@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.Map;
 
 /**
@@ -256,6 +257,55 @@ public class S3PresignServiceTest {
       assertEquals("ok.bin", resp.getKey());
       assertNull(resp.getHeaders().get("Content-Type"), "GET presign should not sign Content-Type");
       assertFalse(resp.getUrl().isEmpty());
+    }
+  }
+
+  /** 浏览器直传 PUT：签名必须同时携带 If-None-Match: * 与 x-amz-checksum-sha256，且校验和出现在 signed headers。 */
+  @Test
+  public void testPresignChecksummedCreateOnlyUploadIncludesChecksumAndIfNoneMatch() {
+    String checksum = Base64.getEncoder().encodeToString(new byte[32]);
+    try (TestContext context = newTestContext()) {
+      S3PresignedResponseDTO resp =
+          context.service.presignChecksummedCreateOnlyUpload(
+              "uploads/demo.bin", "application/octet-stream", checksum, 120L);
+
+      assertEquals("PUT", resp.getMethod());
+      assertEquals("uploads/demo.bin", resp.getKey());
+      assertEquals("*", getHeader(resp, "if-none-match"));
+      assertEquals(checksum, getHeader(resp, "x-amz-checksum-sha256"));
+      assertEquals("application/octet-stream", getHeader(resp, "content-type"));
+      assertTrue(
+          resp.getUrl().toLowerCase().contains("x-amz-checksum-sha256"),
+          "checksum header must be signed into the URL, got: " + resp.getUrl());
+      assertTrue(
+          resp.getUrl().toLowerCase().contains("if-none-match"),
+          "If-None-Match must be signed into the URL, got: " + resp.getUrl());
+      assertFalse(hasHeader(resp, "host"));
+    }
+  }
+
+  /** 校验和必须是可解码且恰好 32 字节的 base64，否则在签名前拒绝。 */
+  @Test
+  public void testPresignRejectsInvalidChecksum() {
+    try (TestContext context = newTestContext()) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin", "text/plain", "   ", 120L));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin", "text/plain", "not-base64!", 120L));
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              context.service.presignChecksummedCreateOnlyUpload(
+                  "uploads/a.bin",
+                  "text/plain",
+                  Base64.getEncoder().encodeToString(new byte[31]),
+                  120L));
     }
   }
 

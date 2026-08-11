@@ -670,3 +670,134 @@ alter table canvas_link
 alter table canvas_function_run
     add constraint fk_canvas_function_run_node foreign key (node_id)
     references canvas_node (id) on delete cascade;
+
+------------------------------------------------------------------------------
+-- 6. Global blob storage
+--
+-- storage_blob is the deduplicated immutable content address of the global
+-- storage foundation. sha256+size_bytes uniquely identify one content in the
+-- ACTIVE state (partial unique index); width/height/duration_ms are immutable
+-- media facts written once at complete time (nullable until probed). ref_count
+-- counts live owner references (a READY upload plus later Canvas/Harness
+-- consumers): ACTIVE rows always hold ref_count > 0, DELETING is terminal with
+-- ref_count = 0 and keeps the row as cleanup evidence until its S3 objects are
+-- removed and the row is conditionally deleted.
+--
+-- storage_upload is the per-upload contract between the browser and the
+-- server: blob_id NULL means PENDING (the client must PUT the content to the
+-- deterministic key uploads/{uploadId}/original), non-NULL means READY.
+-- candidate_blob_id is the server-pre-assigned blob id for the PENDING->READY
+-- transition; it deliberately has no FK because the blob row is only created
+-- at complete time. The only FK (blob_id -> storage_blob) is ON DELETE
+-- RESTRICT: counted references must never be removed by a CASCADE.
+------------------------------------------------------------------------------
+
+create table storage_blob (
+    id            uuid           primary key,
+    sha256        char(64)       not null,
+    size_bytes    bigint         not null,
+    media_type    varchar(256)   not null,
+    width         integer,
+    height        integer,
+    duration_ms   bigint,
+    ref_count     bigint         not null default 0,
+    state         varchar(16)    not null default 'ACTIVE',
+    created_at    timestamptz(3) not null default current_timestamp,
+    updated_at    timestamptz(3) not null default current_timestamp,
+    constraint ck_storage_blob_sha256 check (sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_blob_size_nonneg check (size_bytes >= 0),
+    constraint ck_storage_blob_media_type_nonblank check (btrim(media_type) <> ''),
+    constraint ck_storage_blob_dimensions_pair check ((width is null) = (height is null)),
+    constraint ck_storage_blob_dimensions_positive check (
+        width is null or (width > 0 and height > 0)
+    ),
+    constraint ck_storage_blob_duration_positive check (duration_ms is null or duration_ms > 0),
+    constraint ck_storage_blob_state_ref_count check (
+        (state = 'ACTIVE' and ref_count > 0) or (state = 'DELETING' and ref_count = 0)
+    )
+);
+
+create unique index uk_storage_blob_active_hash
+    on storage_blob (sha256, size_bytes)
+    where state = 'ACTIVE';
+
+create table storage_upload (
+    id                  uuid           primary key,
+    candidate_blob_id   uuid           not null,
+    blob_id             uuid,
+    filename            varchar(512)   not null,
+    declared_media_type varchar(256)   not null,
+    declared_size       bigint         not null,
+    declared_sha256     char(64)       not null,
+    expires_at          timestamptz(3) not null,
+    created_at          timestamptz(3) not null default current_timestamp,
+    constraint uk_storage_upload_candidate unique (candidate_blob_id),
+    constraint ck_storage_upload_filename_nonblank check (btrim(filename) <> ''),
+    constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
+    constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
+    constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_upload_expiry check (expires_at > created_at),
+    constraint fk_storage_upload_blob foreign key (blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+create index idx_storage_upload_expiry
+    on storage_upload (expires_at, id);
+
+comment on table storage_blob is
+    'Deduplicated immutable content address of the global blob storage: one'
+    ' ACTIVE row per (sha256, size_bytes) content, with immutable media facts'
+    ' and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
+
+comment on column storage_blob.id is
+    'Blob id (uuid): deterministic S3 keys are derived from it'
+    ' (blobs/{id}/original, blobs/{id}/preview.webp), never persisted.';
+comment on column storage_blob.sha256 is 'Lowercase hex SHA-256 of the original content (64 chars).';
+comment on column storage_blob.size_bytes is 'Original content size in bytes (non-negative).';
+comment on column storage_blob.media_type is
+    'Canonical media type probed at complete time (not the client declaration).';
+comment on column storage_blob.width is
+    'Immutable pixel width probed at complete time; null when not probed.';
+comment on column storage_blob.height is
+    'Immutable pixel height probed at complete time; null when not probed.';
+comment on column storage_blob.duration_ms is
+    'Immutable media duration in milliseconds probed at complete time; null for still media.';
+comment on column storage_blob.ref_count is
+    'Live owner reference count: READY uploads and later Canvas/Harness consumers.';
+comment on column storage_blob.state is
+    'Lifecycle state: ACTIVE (ref_count > 0) or DELETING (terminal, ref_count = 0).';
+comment on column storage_blob.created_at is 'Row creation time (timestamptz, millisecond precision).';
+comment on column storage_blob.updated_at is
+    'Application-managed last write time (timestamptz, millisecond precision).';
+
+comment on index uk_storage_blob_active_hash is
+    'Content dedup: at most one ACTIVE blob row per (sha256, size_bytes);'
+    ' DELETING rows stay outside the key so a new upload of the same content can proceed.';
+
+comment on table storage_upload is
+    'Per-upload contract: blob_id NULL = PENDING (client PUTs to'
+    ' uploads/{uploadId}/original), non-NULL = READY (blob is retained for this upload).';
+
+comment on column storage_upload.id is
+    'Upload id (uuid): the deterministic temp key uploads/{id}/original is derived from it.';
+comment on column storage_upload.candidate_blob_id is
+    'Server-pre-assigned blob id for the PENDING->READY transition (no FK: the'
+    ' blob row is created at complete time).';
+comment on column storage_upload.blob_id is
+    'Referenced blob while READY (FK RESTRICT); NULL while PENDING. The READY'
+    ' upload holds exactly one reference to this blob.';
+comment on column storage_upload.filename is 'Client-declared original filename (non-blank, <= 512 chars).';
+comment on column storage_upload.declared_media_type is 'Client-declared media type (non-blank, <= 256 chars).';
+comment on column storage_upload.declared_size is 'Client-declared content size in bytes (non-negative).';
+comment on column storage_upload.declared_sha256 is 'Client-declared lowercase hex SHA-256 (64 chars).';
+comment on column storage_upload.expires_at is
+    'Cleanup deadline: PENDING temp objects and rows, or READY rows plus the'
+    ' upload reference, are removed after this instant.';
+comment on column storage_upload.created_at is 'Row creation time (timestamptz, millisecond precision).';
+
+comment on index uk_storage_upload_candidate is
+    'Every upload pre-assigns a distinct candidate blob id so PENDING rows can'
+    ' never collide on the future blob identity.';
+comment on index idx_storage_upload_expiry is
+    'Expiry sweep: opportunistic SKIP LOCKED batches and startup recovery scan'
+    ' expired uploads oldest-first in bounded batches.';

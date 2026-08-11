@@ -43,4 +43,22 @@ public interface S3PresignService {
    * @return 包含 URL、调用方必须显式设置的 headers 与过期时间的预签名响应
    */
   S3PresignedResponseDTO presignDownload(String key, Long expiresInSeconds);
+
+  /**
+   * 为携带客户端 SHA-256 校验和的 create-only PUT 生成预签名响应（浏览器直传）。
+   *
+   * <p>签名同时包含 {@code If-None-Match: *}（目标 key 已存在时拒绝 PUT）与 {@code x-amz-checksum-sha256}（浏览器必须原样回传
+   * base64 编码的原始 SHA-256 摘要）， 对象存储据此在写入时校验内容并持久化校验和，服务端随后可通过 checksum mode HEAD 复核。
+   *
+   * @param key 对象键（不要求规范化，服务端会统一校验）
+   * @param contentType 可选 content type；空白视为未提供，非空时校验并规范化后参与签名
+   * @param checksumSha256Base64 必填：base64 编码的原始 SHA-256 摘要（解码后必须恰好 32 字节）
+   * @param expiresInSeconds 可选过期秒数；{@code null} 使用服务端默认，显式值必须在允许范围内
+   * @return 包含 URL、调用方必须显式设置的 headers 与过期时间的预签名响应
+   */
+  default S3PresignedResponseDTO presignChecksummedCreateOnlyUpload(
+      String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
+    throw new UnsupportedOperationException(
+        "presignChecksummedCreateOnlyUpload is not supported by this implementation");
+  }
 }

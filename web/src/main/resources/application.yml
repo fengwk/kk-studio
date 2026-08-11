@@ -62,6 +62,9 @@ convention:
       locale: ${convention.i18n.locale}
 
 kk-studio:
+  storage:
+    # 全局 Blob 存储：上传默认有效期（秒），过期后由机会式批次与启动恢复回收。
+    upload-expires-seconds: ${KK_STUDIO_STORAGE_UPLOAD_EXPIRES_SECONDS:3600}
   canvas:
     function:
       minimax-h3:

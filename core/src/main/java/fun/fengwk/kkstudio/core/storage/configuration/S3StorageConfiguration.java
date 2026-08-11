@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.util.Assert;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -18,6 +19,15 @@ import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3PresignServiceImpl;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.S3StorageServiceImpl;
+import fun.fengwk.kkstudio.core.storage.StorageStartupRecovery;
+import fun.fengwk.kkstudio.core.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.core.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.core.storage.service.impl.HeadOnlyStorageMediaProbe;
+import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobManager;
+import fun.fengwk.kkstudio.core.storage.service.impl.StorageUploadServiceImpl;
 
 import java.net.URI;
 
@@ -30,7 +40,7 @@ import java.net.URI;
  * @author fengwk
  */
 @ConditionalOnProperty(prefix = "kk-studio.storage.s3", name = "enabled", havingValue = "true")
-@EnableConfigurationProperties(S3StorageProperties.class)
+@EnableConfigurationProperties({S3StorageProperties.class, StorageProperties.class})
 @Configuration
 public class S3StorageConfiguration {
 
@@ -80,6 +90,55 @@ public class S3StorageConfiguration {
   public S3PresignService s3PresignService(
       S3StorageProperties properties, S3Presigner s3Presigner) {
     return new S3PresignServiceImpl(properties, s3Presigner);
+  }
+
+  /** 默认媒体事实探针：只记录 HEAD 元数据；后续 Canvas 媒体集成可替换为 Ffmpeg 实现。 */
+  @Bean
+  @ConditionalOnMissingBean(StorageMediaProbe.class)
+  public StorageMediaProbe storageMediaProbe() {
+    return new HeadOnlyStorageMediaProbe();
+  }
+
+  /** blob 生命周期管理器：retain/release 为 MANDATORY 事务方法，零引用后 afterCommit 回收 S3 对象。 */
+  @Bean
+  @ConditionalOnMissingBean(StorageBlobManager.class)
+  public StorageBlobManager storageBlobManager(
+      StorageBlobRepository blobRepository,
+      S3StorageService s3StorageService,
+      S3PresignService s3PresignService) {
+    return new PostgresqlStorageBlobManager(blobRepository, s3StorageService, s3PresignService);
+  }
+
+  /** 上传契约服务：reserve/complete/delete 与机会式过期回收。 */
+  @Bean
+  @ConditionalOnMissingBean(StorageUploadService.class)
+  public StorageUploadService storageUploadService(
+      StorageUploadRepository uploadRepository,
+      StorageBlobRepository blobRepository,
+      StorageBlobManager blobManager,
+      S3StorageService s3StorageService,
+      S3PresignService s3PresignService,
+      StorageMediaProbe mediaProbe,
+      S3StorageProperties s3Properties,
+      StorageProperties storageProperties,
+      PlatformTransactionManager transactionManager) {
+    return new StorageUploadServiceImpl(
+        uploadRepository,
+        blobRepository,
+        blobManager,
+        s3StorageService,
+        s3PresignService,
+        mediaProbe,
+        s3Properties,
+        storageProperties,
+        transactionManager);
+  }
+
+  /** 启动一次性恢复：过期上传回收 + DELETING blob 清扫，无周期性后台线程。 */
+  @Bean
+  public StorageStartupRecovery storageStartupRecovery(
+      StorageUploadService storageUploadService, StorageBlobManager storageBlobManager) {
+    return new StorageStartupRecovery(storageUploadService, storageBlobManager);
   }
 
   private S3Configuration newS3Configuration() {
