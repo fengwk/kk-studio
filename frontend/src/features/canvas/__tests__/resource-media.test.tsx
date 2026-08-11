@@ -34,7 +34,7 @@ class IntersectionObserverFake {
   takeRecords = () => []
 }
 
-function resource(kind: Resource['kind']): Resource {
+function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Resource {
   return {
     id: '20',
     canvasId: '1',
@@ -49,8 +49,15 @@ function resource(kind: Resource['kind']): Resource {
     name: `${kind.toLowerCase()}.asset`,
     size: '3',
     text: kind === 'TEXT' ? '# Markdown title\n\n- safe list' : null,
-    metadata: kind === 'AUDIO' ? { durationMs: 65_000 } : {},
+    metadata: kind === 'IMAGE'
+      ? { width: 1122, height: 1402 }
+      : kind === 'VIDEO'
+        ? { width: 1920, height: 1080, durationMs: 65_000 }
+        : kind === 'AUDIO'
+          ? { durationMs: 65_000 }
+          : {},
     createdAt: '2026-08-10T00:00:00Z',
+    ...overrides,
   }
 }
 
@@ -97,12 +104,19 @@ describe('Canvas lazy resource media', () => {
       isIntersecting: true,
       target: observe.mock.calls[0]?.[0] as Element,
     } as IntersectionObserverEntry], {} as IntersectionObserver)
-    expect(await screen.findByRole('img', { name: 'image.asset' })).toHaveAttribute(
+    const image = await screen.findByRole('img', { name: 'image.asset' })
+    expect(image).toHaveAttribute(
       'src',
       'https://s3.example/preview.webp',
     )
+    // Metadata gives the browser the original aspect ratio before the lazy thumbnail decodes.
+    expect(image).toHaveAttribute('width', '1122')
+    expect(image).toHaveAttribute('height', '1402')
+    expect(image).toHaveAttribute('draggable', 'false')
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
+    const fetchOriginal = screen.getByRole('button', { name: '获取原图 image.asset' })
+    expect(fetchOriginal.closest('.media-original-actions')).toHaveClass('nodrag')
+    fireEvent.click(fetchOriginal)
     expect(await screen.findByRole('link', { name: '打开原图 image.asset' })).toHaveAttribute(
       'href',
       'https://s3.example/original',
@@ -155,9 +169,12 @@ describe('Canvas lazy resource media', () => {
       'https://s3.example/original',
     )
     expect(screen.queryByLabelText('播放 video.asset')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '播放视频 video.asset' }))
+    const playVideo = screen.getByRole('button', { name: '播放视频 video.asset' })
+    expect(playVideo).toHaveClass('nodrag')
+    fireEvent.click(playVideo)
     const video = await screen.findByLabelText('播放 video.asset')
     expect(video).toHaveAttribute('src', 'https://s3.example/original')
+    expect(video).toHaveClass('nodrag', 'nowheel')
     view.unmount()
     expect(video).not.toHaveAttribute('src')
   })
@@ -173,11 +190,15 @@ describe('Canvas lazy resource media', () => {
       'audio.asset',
     )
     expect(screen.queryByLabelText('播放音频 audio.asset')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /加载音频/ }))
-    expect(await screen.findByLabelText('播放音频 audio.asset')).toHaveAttribute(
+    const loadAudio = screen.getByRole('button', { name: /加载音频/ })
+    expect(loadAudio).toHaveClass('nodrag')
+    fireEvent.click(loadAudio)
+    const audio = await screen.findByLabelText('播放音频 audio.asset')
+    expect(audio).toHaveAttribute(
       'src',
       'https://s3.example/original',
     )
+    expect(audio).toHaveClass('nodrag', 'nowheel')
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
   })
 

@@ -415,6 +415,11 @@ async function main(argv) {
   await run('ui.canvas.page_loads', 'Canvas 库与编辑器可打开', async (caseArt) => {
     await goto('/canvas')
     await expectVisibleText(page, '你的画布')
+    // Library 路由保留全局顶栏。
+    assert(
+      await page.locator('.topbar').isVisible(),
+      'canvas library must keep the global topbar',
+    )
     const createButton = page.getByRole('button', { name: '创建新画布' })
     await createButton.waitFor({ state: 'visible' })
     await shot(caseArt, 'canvas-library')
@@ -430,15 +435,95 @@ async function main(argv) {
       /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
       `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
     )
+    // 编辑器沉浸：无全局顶栏、挂 canvas-immersive class，Chat 面板默认收起。
+    assert(
+      await page.locator('.topbar').count() === 0,
+      'canvas editor must not render the global topbar',
+    )
+    assert(
+      await page.locator('.app-frame.canvas-immersive').count() === 1,
+      'canvas editor must carry the canvas-immersive root class',
+    )
+    assert(
+      await page.locator('#agentPanel').count() === 0,
+      'Chat panel must be collapsed by default',
+    )
+    assert(
+      await page.locator('.agent-composer').count() === 0,
+      'collapsed Canvas must not render a bottom composer',
+    )
+    assert(
+      await page.locator('.canvas-back-button.sidebar-icon-btn').count() === 1,
+      'canvas back control must reuse the Chat workspace icon-button grammar',
+    )
     const resetZoom = page.getByRole('button', {
       name: /^(Reset zoom to 100%|重置缩放为 100%)$/,
     })
     await resetZoom.waitFor({ state: 'visible' })
-    const fittedZoom = Number.parseInt((await resetZoom.textContent())?.trim() ?? '', 10)
+    const fittedZoomText = (await resetZoom.textContent())?.trim() ?? ''
+    const fittedZoom = Number.parseInt(fittedZoomText, 10)
     assert(
       Number.isInteger(fittedZoom) && fittedZoom >= 25 && fittedZoom <= 200,
       `canvas fitted zoom is invalid: ${await resetZoom.textContent()}`,
     )
+    // header「Chat / 对话」toggle 展开/收起右侧 aside。
+    const threadToggle = page.getByRole('button', {
+      name: /^(Toggle the Chat panel|切换对话面板)$/,
+    })
+    await threadToggle.click()
+    await page.locator('#agentPanel').waitFor({ state: 'visible', timeout: 10_000 })
+    assert(
+      (await threadToggle.getAttribute('aria-expanded')) === 'true',
+      'thread toggle must report aria-expanded=true when the panel is open',
+    )
+    assert(
+      (await resetZoom.textContent())?.trim() === fittedZoomText,
+      'opening the Agent panel must not change canvas zoom',
+    )
+    const panel = page.locator('#agentPanel')
+    const initialPanelBox = await panel.boundingBox()
+    assert(
+      initialPanelBox?.width >= 440,
+      `Chat panel must default wider than the legacy 360px: ${initialPanelBox?.width}`,
+    )
+    const resizeHandle = page.getByRole('separator', {
+      name: /^(Resize the Chat panel|调整对话面板宽度)$/,
+    })
+    const resizeBox = await resizeHandle.boundingBox()
+    assert(resizeBox, 'Chat panel resize handle is missing')
+    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(resizeBox.x - 72, resizeBox.y + resizeBox.height / 2, { steps: 4 })
+    await page.mouse.up()
+    const resizedPanelBox = await panel.boundingBox()
+    assert(
+      resizedPanelBox?.width >= (initialPanelBox?.width ?? 0) + 60,
+      `Chat panel did not grow from its left edge: ${JSON.stringify({ initialPanelBox, resizedPanelBox })}`,
+    )
+    assert(
+      (await resetZoom.textContent())?.trim() === fittedZoomText,
+      'resizing the Chat panel must not change canvas zoom',
+    )
+    await shot(caseArt, 'canvas-agent-panel')
+    await threadToggle.click()
+    await page.locator('#agentPanel').waitFor({ state: 'detached', timeout: 10_000 })
+    assert(
+      (await resetZoom.textContent())?.trim() === fittedZoomText,
+      'closing the Chat panel must restore the same canvas zoom',
+    )
+    assert(
+      await page.locator('.agent-composer').count() === 0,
+      'closing Chat must not reveal a bottom composer',
+    )
+    // 左侧居中 add launcher 仍可打开/关闭菜单。
+    const addLauncher = page.getByRole('button', {
+      name: /^(Add resource, Function, or group|添加资源、Function 或分组)$/,
+    })
+    await addLauncher.click()
+    await page.getByRole('menu').waitFor({ state: 'visible', timeout: 10_000 })
+    await shot(caseArt, 'canvas-add-menu')
+    await page.keyboard.press('Escape')
+    await page.getByRole('menu').waitFor({ state: 'hidden', timeout: 10_000 })
     await resetZoom.click()
     await page.waitForFunction(() => {
       const button = document.querySelector(

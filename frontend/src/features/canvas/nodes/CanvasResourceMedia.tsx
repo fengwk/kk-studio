@@ -1,3 +1,8 @@
+import {
+  Download,
+  ExternalLink,
+  LoaderCircle,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
@@ -16,6 +21,7 @@ export function CanvasResourceMedia({ resource }: { resource: Resource }) {
 }
 
 export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
+  const dimensions = resourceDimensions(resource)
   const {
     targetRef,
     url,
@@ -29,7 +35,15 @@ export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
   return (
     <span className="canvas-resource-thumbnail" ref={targetRef} data-kind={resource.kind}>
       {url ? (
-        <img src={url} alt="" loading="lazy" decoding="async" />
+        <img
+          src={url}
+          alt=""
+          width={dimensions?.width}
+          height={dimensions?.height}
+          draggable={false}
+          loading="lazy"
+          decoding="async"
+        />
       ) : (
         <span aria-hidden="true">{resourceIcon(resource.kind)}</span>
       )}
@@ -43,6 +57,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   const [playRequested, setPlayRequested] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const hasPreview = resource.kind === 'IMAGE' || resource.kind === 'VIDEO'
+  const dimensions = resourceDimensions(resource)
   const {
     targetRef: previewTargetRef,
     url: previewUrl,
@@ -80,6 +95,9 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           <img
             src={previewUrl}
             alt={resource.name}
+            width={dimensions?.width}
+            height={dimensions?.height}
+            draggable={false}
             loading="lazy"
             decoding="async"
           />
@@ -118,6 +136,10 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
               }
             }}
             src={originalUrl}
+            width={dimensions?.width}
+            height={dimensions?.height}
+            className="nodrag nowheel"
+            draggable={false}
             controls
             autoPlay
             playsInline
@@ -127,7 +149,15 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
         ) : (
           <>
             {previewUrl ? (
-              <img src={previewUrl} alt="" loading="lazy" decoding="async" />
+              <img
+                src={previewUrl}
+                alt=""
+                width={dimensions?.width}
+                height={dimensions?.height}
+                draggable={false}
+                loading="lazy"
+                decoding="async"
+              />
             ) : (
               <MediaPlaceholder
                 loading={previewLoading}
@@ -138,7 +168,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             )}
             <button
               type="button"
-              className="media-play-button"
+              className="media-play-button nodrag"
               disabled={originalLoading}
               onClick={() => {
                 setPlayRequested(true)
@@ -177,6 +207,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             }
           }}
           src={originalUrl}
+          className="nodrag nowheel"
           controls
           preload="metadata"
           aria-label={t('canvas.media.playAudio', { name: resource.name })}
@@ -184,7 +215,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
       ) : (
         <button
           type="button"
-          className="audio-load-button"
+          className="audio-load-button nodrag"
           disabled={originalLoading}
           onClick={() => {
             setPlayRequested(true)
@@ -236,24 +267,40 @@ function OriginalActions({
   onRequest: () => void
 }) {
   return (
-    <div className="media-original-actions">
+    <div className="media-original-actions nodrag">
       {url ? (
         <>
-          <a href={url} target="_blank" rel="noreferrer" aria-label={`${openLabel} ${resource.name}`}>
-            {openLabel}
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            title={openLabel}
+            aria-label={`${openLabel} ${resource.name}`}
+          >
+            <ExternalLink aria-hidden="true" />
           </a>
-          <a href={url} download={resource.name} aria-label={`${downloadLabel} ${resource.name}`}>
-            {downloadLabel}
+          <a
+            href={url}
+            download={resource.name}
+            title={downloadLabel}
+            aria-label={`${downloadLabel} ${resource.name}`}
+          >
+            <Download aria-hidden="true" />
           </a>
         </>
       ) : (
         <button
           type="button"
           disabled={loading}
+          title={loading ? signingLabel : requestLabel}
           onClick={onRequest}
-          aria-label={`${requestLabel} ${resource.name}`}
+          aria-label={`${loading ? signingLabel : requestLabel} ${resource.name}`}
         >
-          {loading ? signingLabel : requestLabel}
+          {loading ? (
+            <LoaderCircle className="media-action-spinner" aria-hidden="true" />
+          ) : (
+            <Download aria-hidden="true" />
+          )}
         </button>
       )}
       {error ? <span className="media-error">{signFailedLabel}</span> : null}
@@ -301,6 +348,14 @@ function resourceIcon(kind: Resource['kind']): string {
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function resourceDimensions(resource: Resource): { width: number; height: number } | null {
+  const width = finiteNumber(resource.metadata.width)
+  const height = finiteNumber(resource.metadata.height)
+  return width !== null && width > 0 && height !== null && height > 0
+    ? { width, height }
+    : null
 }
 
 function formatDuration(durationMs: number): string {

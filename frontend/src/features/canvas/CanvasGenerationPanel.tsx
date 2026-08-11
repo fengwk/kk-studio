@@ -92,7 +92,7 @@ export function CanvasGenerationPanel({
     ))
     .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
   const panelPosition = useMemo(() => (
-    anchor && anchor.stage.width > 900
+    anchor
       ? (() => {
         const compactDesktop = anchor.stage.width <= 1600
         return generationPanelPosition({

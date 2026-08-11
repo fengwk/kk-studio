@@ -188,7 +188,7 @@ describe('useCanvasController real snapshot runtime', () => {
       name: 'upload.png',
       size: '3',
       textContent: null,
-      metadataJson: '{}',
+      metadataJson: '{"width":1122,"height":1402}',
       createdAt: '2026-08-10T00:00:00Z',
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
@@ -330,6 +330,12 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_RESOURCE_NODE'
     ))).toBe(true)
+    const uploadedNode = commands
+      .flatMap((request) => request.commands)
+      .find((command) => command.type === 'CREATE_RESOURCE_NODE')
+    expect(uploadedNode).toMatchObject({
+      transform: { width: 256, height: 344 },
+    })
 
     act(() => {
       result.current.createLink('2', '3')
@@ -342,23 +348,27 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(commands.some((request) => (
       request.commands.some((command) => command.type === 'DELETE_GROUP')
     ))).toBe(true))
+    const deleteNodeCommandCount = commands.filter((request) => (
+      request.commands.some((command) => command.type === 'DELETE_NODE')
+    )).length
+    act(() => result.current.nodeCallbacks.deleteNode('2'))
+    await waitFor(() => expect(commands.filter((request) => (
+      request.commands.some((command) => command.type === 'DELETE_NODE')
+    ))).toHaveLength(deleteNodeCommandCount + 1))
 
     act(() => {
       result.current.setAgentPrompt('')
       result.current.sendAgent()
       result.current.setAgentPrompt('inspect')
       result.current.sendAgent()
-      result.current.setContextMode('whole')
       result.current.toggleAddMenu()
       result.current.closeAddMenu()
       result.current.setAddMenuIndex(2)
       result.current.openThread()
       result.current.collapseThread()
-      result.current.setTool('hand')
       result.current.setViewport({ x: 1, y: 2, zoom: 0.5 })
     })
     expect(result.current.state.messages).toHaveLength(2)
-    expect(result.current.contextCount).toBe(3)
     expect(result.current.state.viewport).toEqual({ x: 1, y: 2, zoom: 0.5 })
 
     const fit = vi.fn()
@@ -371,8 +381,6 @@ describe('useCanvasController real snapshot runtime', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '0' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'v' }))
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'h' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 't' }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))

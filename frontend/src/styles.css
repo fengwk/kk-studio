@@ -4471,7 +4471,8 @@ div.is-error {
   font-weight: 500;
 }
 
-.chat-immersive .stage {
+.chat-immersive .stage,
+.canvas-immersive .stage {
   min-height: 100%;
 }
 

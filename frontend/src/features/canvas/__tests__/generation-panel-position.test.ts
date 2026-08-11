@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { generationPanelPosition } from '@/features/canvas/generation-panel-position'
 
 describe('generationPanelPosition', () => {
-  it('prefers a fully contained right placement next to the node', () => {
+  it('places the workbench directly below the node when space is available', () => {
     // Exact screen coordinates prove the overlay follows React Flow transforms.
     expect(generationPanelPosition({
       node: { x: 500, y: 80, width: 320, height: 260 },
@@ -10,9 +10,9 @@ describe('generationPanelPosition', () => {
       stage: { width: 1000, height: 800, dockTop: 720 },
       panel: { width: 400, height: 140 },
     })).toEqual({
-      left: 462,
-      top: 60,
-      placement: 'right',
+      left: 290,
+      top: 202,
+      placement: 'below',
     })
   })
 
@@ -23,7 +23,7 @@ describe('generationPanelPosition', () => {
       stage: { width: 1000, height: 800, dockTop: 720 },
       panel: { width: 560, height: 180 },
     })).toEqual({
-      left: 80,
+      left: 200,
       top: 352,
       placement: 'below',
     })
@@ -37,22 +37,22 @@ describe('generationPanelPosition', () => {
       stage: { width: 1000, height: 760, dockTop: 650 },
       panel: { width: 500, height: 180 },
     })).toEqual({
-      left: 110,
+      left: 200,
       top: 228,
       placement: 'above',
     })
   })
 
-  it('falls back to the left side for a tall node near the right edge', () => {
+  it('falls back above for a tall node without usable space below', () => {
     expect(generationPanelPosition({
       node: { x: 900, y: 40, width: 320, height: 600 },
       viewport: { x: 0, y: 0, zoom: 1 },
       stage: { width: 1600, height: 700, dockTop: 650 },
       panel: { width: 560, height: 180 },
     })).toEqual({
-      left: 328,
-      top: 40,
-      placement: 'left',
+      left: 900,
+      top: 12,
+      placement: 'above',
     })
   })
 

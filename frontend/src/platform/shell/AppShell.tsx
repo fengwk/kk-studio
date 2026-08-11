@@ -25,12 +25,19 @@ function isChatWorkspaceRoute(pathname: string) {
   return /^\/chats\/[^/]+/.test(pathname)
 }
 
+/** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（正整数），`/canvas` Library 保留全局顶栏。 */
+function isCanvasWorkspaceRoute(pathname: string) {
+  return /^\/canvas\/[1-9][0-9]*\/?$/.test(pathname)
+}
+
 export function AppShell({ children }: PropsWithChildren) {
   const location = useLocation()
   const { t } = useI18n()
   const canvasMode = location.pathname.startsWith('/canvas')
   const toolsMode = isToolsRoute(location.pathname)
   const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
+  const canvasWorkspaceMode = isCanvasWorkspaceRoute(location.pathname)
+  const immersive = chatWorkspaceMode || canvasWorkspaceMode
   const aiActive = !canvasMode && !toolsMode && isAiRoute(location.pathname)
   const [navOpen, setNavOpen] = useState(false)
   const navToggleRef = useRef<HTMLButtonElement>(null)
@@ -55,10 +62,10 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div
-      className={`app-frame${chatWorkspaceMode ? ' chat-immersive' : ''}`}
+      className={`app-frame${chatWorkspaceMode ? ' chat-immersive' : ''}${canvasWorkspaceMode ? ' canvas-immersive' : ''}`}
       data-nav-open={navOpen ? 'true' : 'false'}
     >
-      {!chatWorkspaceMode ? (
+      {!immersive ? (
         <header className="topbar">
           <div className="topbar-left">
             <Link

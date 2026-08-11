@@ -4,7 +4,9 @@ import { createRef, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasAddMenu } from '@/features/canvas/agent/CanvasAddMenu'
 import { CanvasAgentComposer } from '@/features/canvas/agent/CanvasAgentComposer'
+import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
 import { CanvasAgentThread } from '@/features/canvas/agent/CanvasAgentThread'
+import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import {
   CanvasRuntimeContext,
   useCanvasRuntime,
@@ -20,13 +22,11 @@ const INITIAL_STATE: CanvasLocalState = {
   selectedLinks: [],
   positionDrafts: {},
   viewport: { x: 0, y: 0, zoom: 1 },
-  tool: 'select',
   toast: null,
   addMenuOpen: false,
   addMenuIndex: 0,
   threadOpen: false,
   agentPrompt: '',
-  contextMode: 'selection',
   messages: [],
   uploadProgress: {},
   commandPending: false,
@@ -35,6 +35,7 @@ const INITIAL_STATE: CanvasLocalState = {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   setLocale('zh-CN')
 })
 
@@ -105,14 +106,23 @@ describe('Canvas add menu', () => {
     expect(menu).toHaveAttribute('aria-hidden', 'true')
     expect(within(menu).getAllByRole('menuitem', { hidden: true })[0]).toHaveAttribute('tabindex', '-1')
   })
+
+  it('localizes every visible menu item in English', () => {
+    setLocale('en-US')
+    renderHarness(<CanvasAddMenu menuId="canvas-add-menu" />, { addMenuOpen: true })
+
+    expect(screen.getByRole('menuitem', { name: /Image resource/ })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /Video generation/ })).toBeInTheDocument()
+    expect(screen.queryByText('图片资源')).not.toBeInTheDocument()
+  })
 })
 
 describe('Canvas agent composer', () => {
   // Enter 必须避开 Shift 换行和 IME composing，上传进度则保持纯本地呈现。
-  it('autosizes, edits, sends, toggles add menu and renders upload progress', async () => {
+  it('autosizes, edits, sends and renders upload progress without an add launcher', async () => {
     const user = userEvent.setup()
     const harness = renderHarness(
-      <CanvasAgentComposer menuId="canvas-add-menu" />,
+      <CanvasAgentComposer />,
       {
         agentPrompt: 'first',
         uploadProgress: { 'clip.mp4:1:5': 0.456 },
@@ -126,6 +136,9 @@ describe('Canvas agent composer', () => {
     })
     expect(textarea).toHaveStyle({ height: '104px', overflowY: 'auto' })
     expect(screen.getByText(/clip.mp4 46%/)).toBeInTheDocument()
+    expect(document.querySelector('.agent-composer')).toHaveClass('panel')
+    // add launcher 已移入 CanvasToolRail，composer 不再渲染加号按钮。
+    expect(screen.queryByRole('button', { name: /添加资源/ })).not.toBeInTheDocument()
 
     fireEvent.change(textarea, { target: { value: 'draft' } })
     expect(harness.controller.setAgentPrompt).toHaveBeenLastCalledWith('draft')
@@ -136,14 +149,12 @@ describe('Canvas agent composer', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, isComposing: false })
     expect(harness.controller.sendAgent).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole('button', { name: /添加资源/ }))
-    expect(harness.controller.toggleAddMenu).toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: '发送给 Agent' }))
     expect(harness.controller.sendAgent).toHaveBeenCalledTimes(2)
   })
 
   it('uses minimum height and omits progress when no textarea measurement or upload exists', () => {
-    const harness = renderHarness(<CanvasAgentComposer menuId="canvas-add-menu" />)
+    const harness = renderHarness(<CanvasAgentComposer />)
     const textarea = screen.getByRole('textbox', { name: /向 Agent/ })
     expect(textarea).toHaveStyle({ height: '37px', overflowY: 'hidden' })
     expect(document.querySelector('.upload-progress-list')).not.toBeInTheDocument()
@@ -152,14 +163,14 @@ describe('Canvas agent composer', () => {
     harness.rerender({ agentPrompt: 'detached' })
     expect(screen.getByRole('textbox', { name: /向 Agent/ })).toBeInTheDocument()
   })
+
 })
 
 describe('Canvas agent thread', () => {
-  // Thread 展开时应滚到底部，并让 selection/whole 上下文及折叠动作都可达。
-  it('renders messages, scrolls, switches context and collapses', async () => {
-    const user = userEvent.setup()
+  // 普通聊天不隐式绑定 Canvas 选区，只负责消息滚动与呈现。
+  it('renders messages and scrolls without an implicit context switcher', () => {
     const scrollHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(240)
-    const harness = renderHarness(
+    renderHarness(
       <CanvasAgentThread />,
       {
         threadOpen: true,
@@ -169,30 +180,119 @@ describe('Canvas agent thread', () => {
         ],
       },
     )
-    const thread = screen.getByLabelText('Canvas Agent 消息')
+    const thread = screen.getByLabelText('Canvas 对话消息')
     const messages = thread.querySelector('.thread-messages') as HTMLDivElement
     expect(messages.scrollTop).toBe(240)
     expect(screen.getByText('用户消息')).toHaveClass('user')
     expect(screen.getByText('Agent 消息')).not.toHaveClass('user')
-    expect(screen.getByText('2')).toBeInTheDocument()
-    expect(screen.getByText('selection context')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: /整张画布/ }))
-    expect(harness.controller.setContextMode).toHaveBeenCalledWith('whole')
-    await user.click(screen.getByRole('button', { name: /当前选区/ }))
-    expect(harness.controller.setContextMode).toHaveBeenCalledWith('selection')
-    await user.click(screen.getByRole('button', { name: '收起 Agent 消息' }))
-    expect(harness.controller.collapseThread).toHaveBeenCalled()
-
-    harness.rerender({ threadOpen: true, contextMode: 'whole' })
-    expect(screen.getByRole('button', { name: /整张画布/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: /当前选区|整张画布/ })).not.toBeInTheDocument()
     scrollHeight.mockRestore()
   })
 
   it('stays inert and does not attempt scrolling while closed', () => {
     renderHarness(<CanvasAgentThread />)
-    const thread = screen.getByLabelText('Canvas Agent 消息', { selector: '[hidden]' })
+    const thread = screen.getByLabelText('Canvas 对话消息', { selector: '[hidden]' })
     expect(thread).toHaveAttribute('aria-hidden', 'true')
+  })
+})
+
+describe('Canvas agent panel', () => {
+  it('renders one panel-level collapse action only while the conversation is open', async () => {
+    const user = userEvent.setup()
+    const harness = renderHarness(<CanvasAgentDock />, { threadOpen: true })
+
+    expect(screen.getByLabelText('Canvas 对话面板')).toBeInTheDocument()
+    const collapse = screen.getAllByRole('button', { name: '收起对话面板' })
+    expect(collapse).toHaveLength(1)
+    await user.click(collapse[0]!)
+    expect(harness.controller.collapseThread).toHaveBeenCalledOnce()
+
+    harness.rerender({ threadOpen: false })
+    expect(screen.queryByLabelText('Canvas 对话面板')).not.toBeInTheDocument()
+  })
+
+  it('resizes from the left edge with pointer and keyboard input', () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_400 })
+    const harness = renderHarness(<CanvasAgentDock />, { threadOpen: true })
+    const panel = screen.getByLabelText('Canvas 对话面板')
+    const resize = screen.getByRole('separator', { name: '调整对话面板宽度' })
+
+    expect(panel).toHaveStyle({ '--agent-panel-width': '480px' })
+    fireEvent.pointerMove(resize, { pointerId: 99, clientX: 100 })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '480px' })
+    fireEvent.pointerDown(resize, { pointerId: 1, clientX: 800 })
+    fireEvent.pointerMove(resize, { pointerId: 1, clientX: 720 })
+    fireEvent.pointerUp(resize, { pointerId: 1, clientX: 720 })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '560px' })
+
+    fireEvent.keyDown(resize, { key: 'ArrowRight' })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '536px' })
+    fireEvent.keyDown(resize, { key: 'ArrowLeft' })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '560px' })
+    fireEvent.keyDown(resize, { key: 'Home' })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '360px' })
+    fireEvent.keyDown(resize, { key: 'End' })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '720px' })
+    fireEvent.keyDown(resize, { key: 'PageDown' })
+    expect(panel).toHaveStyle({ '--agent-panel-width': '720px' })
+    expect(localStorage.getItem('kkstudio.canvas.chat-panel-width.v1')).toBe('720')
+
+    fireEvent.pointerDown(resize, { pointerId: 2, clientX: 800 })
+    expect(document.body).toHaveClass('canvas-chat-panel-resizing')
+    fireEvent.pointerCancel(resize, { pointerId: 2 })
+    expect(document.body).not.toHaveClass('canvas-chat-panel-resizing')
+    fireEvent.lostPointerCapture(resize, { pointerId: 2 })
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1_024 })
+    fireEvent(window, new Event('resize'))
+    expect(panel).toHaveStyle({ '--agent-panel-width': '544px' })
+
+    harness.rerender({ threadOpen: false })
+    expect(screen.queryByRole('separator', { name: '调整对话面板宽度' })).not.toBeInTheDocument()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+  })
+})
+
+describe('Canvas tool rail', () => {
+  it('separates the centered add launcher from bottom-left zoom controls', async () => {
+    const user = userEvent.setup()
+    const fitAll = vi.fn()
+    const zoomTo = vi.fn()
+    const harness = renderHarness(<CanvasToolRail />, {}, {
+      fitViewRef: { current: fitAll },
+      zoomRef: { current: zoomTo },
+    })
+
+    const rail = document.querySelector('.canvas-tool-rail') as HTMLElement
+    expect(rail).not.toBeNull()
+    // 专用 18px 图标类，避免命中全局 .plus-icon {44px}。
+    expect(rail.querySelector('.canvas-plus-icon')).not.toBeNull()
+    expect(rail.querySelector('.plus-icon')).toBeNull()
+    expect(document.querySelector('.canvas-zoom-controls')).not.toBeNull()
+
+    const add = screen.getByRole('button', { name: /添加资源/ })
+    expect(add).toHaveAttribute('aria-expanded', 'false')
+    expect(add.getAttribute('aria-controls')).toBeTruthy()
+    await user.click(add)
+    expect(harness.controller.toggleAddMenu).toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: '适应全部内容' }))
+    expect(fitAll).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '缩小' }))
+    expect(zoomTo).toHaveBeenCalledWith(expect.any(Number))
+    expect(screen.queryByText('V')).not.toBeInTheDocument()
+    expect(screen.queryByText('H')).not.toBeInTheDocument()
+  })
+
+  it('keeps the add menu keyboard navigation reachable from the rail launcher', () => {
+    const harness = renderHarness(<CanvasToolRail />, { addMenuOpen: true, addMenuIndex: 0 })
+    const menu = screen.getByRole('menu')
+    expect(screen.getByRole('menuitem', { name: /图片资源/ })).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(harness.controller.setAddMenuIndex).toHaveBeenCalledWith(1)
+    harness.rerender({ addMenuOpen: true, addMenuIndex: 1 })
+    expect(screen.getByRole('menuitem', { name: /视频资源/ })).toHaveFocus()
   })
 })
 
@@ -211,6 +311,7 @@ describe('Canvas runtime context boundary', () => {
 function renderHarness(
   children: ReactNode,
   initialState: Partial<CanvasLocalState> = {},
+  extraController: Record<string, unknown> = {},
 ) {
   const agentPromptRef = createRef<HTMLTextAreaElement>()
   const dockAddRef = createRef<HTMLButtonElement>()
@@ -222,7 +323,6 @@ function renderHarness(
     setAgentPrompt: vi.fn(),
     sendAgent: vi.fn(),
     toggleAddMenu: vi.fn(),
-    setContextMode: vi.fn(),
     collapseThread: vi.fn(),
   }
   let state = { ...INITIAL_STATE, ...initialState }
@@ -231,9 +331,8 @@ function renderHarness(
     state,
     agentPromptRef,
     dockAddRef,
-    contextCount: 2,
-    contextDescription: 'selection context',
     ...actions,
+    ...extraController,
   } as unknown as CanvasController
 
   const value = () => ({

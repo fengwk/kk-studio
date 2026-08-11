@@ -7,9 +7,7 @@ import type {
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type { Group, ResourceNode } from '@/features/canvas/domain'
 
-export type CanvasTool = 'select' | 'hand'
 export type CanvasView = 'library' | 'editor'
-export type AgentContextMode = 'selection' | 'whole'
 export type AddMenuAction =
   | 'image-resource'
   | 'video-resource'
@@ -39,13 +37,11 @@ export interface CanvasLocalState {
   selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>
   viewport: StoredCanvasViewport
-  tool: CanvasTool
   toast: string | null
   addMenuOpen: boolean
   addMenuIndex: number
   threadOpen: boolean
   agentPrompt: string
-  contextMode: AgentContextMode
   messages: CanvasThreadMessage[]
   uploadProgress: Record<string, number>
   commandPending: boolean
@@ -56,6 +52,7 @@ export interface CanvasLocalState {
 export interface CanvasNodeCallbacks {
   renameNode: (nodeId: DecimalString, name: string) => void
   editTextNode: (node: ResourceNode) => void
+  deleteNode: (nodeId: DecimalString) => void
 }
 
 export interface PendingFunctionConfig {
