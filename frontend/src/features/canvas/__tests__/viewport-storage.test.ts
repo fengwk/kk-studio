@@ -22,7 +22,7 @@ describe('canvas viewport storage', () => {
     expect(loadCanvasViewport('2', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
     expect(hasStoredCanvasViewport('1', storage)).toBe(true)
     expect(values.has(canvasViewportStorageKey('1'))).toBe(true)
-    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v3:1')
+    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v5:1')
   })
 
   it('falls back for malformed or non-finite persisted values', () => {

@@ -3,17 +3,22 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { AddMenuAction } from '@/features/canvas/types'
 import { useI18n } from '@/shared/i18n'
 
-const MENU_ITEMS: Array<{ action: AddMenuAction; label: string; icon: string; accept?: string }> = [
-  { action: 'image-resource', label: '图片资源', icon: '▧', accept: 'image/jpeg,image/png,image/webp,image/heic,image/heif' },
-  { action: 'video-resource', label: '视频资源', icon: '▶', accept: 'video/mp4,video/quicktime' },
-  { action: 'audio-resource', label: '音频资源', icon: '♪', accept: 'audio/wav,audio/mpeg' },
-  { action: 'text-resource', label: '文本资源', icon: 'T' },
-  { action: 'image-function', label: '图片生成', icon: '✦' },
-  { action: 'video-function', label: '视频生成', icon: '✧' },
-  { action: 'group', label: '分组', icon: '□' },
+const MENU_ITEMS: Array<{
+  action: AddMenuAction
+  labelKey: string
+  icon: string
+  accept?: string
+}> = [
+  { action: 'image-resource', labelKey: 'canvas.add.imageResource', icon: '▧', accept: 'image/jpeg,image/png,image/webp,image/heic,image/heif' },
+  { action: 'video-resource', labelKey: 'canvas.add.videoResource', icon: '▶', accept: 'video/mp4,video/quicktime' },
+  { action: 'audio-resource', labelKey: 'canvas.add.audioResource', icon: '♪', accept: 'audio/wav,audio/mpeg' },
+  { action: 'text-resource', labelKey: 'canvas.add.textResource', icon: 'T' },
+  { action: 'image-function', labelKey: 'canvas.add.imageFunction', icon: '✦' },
+  { action: 'video-function', labelKey: 'canvas.add.videoFunction', icon: '✧' },
+  { action: 'group', labelKey: 'canvas.add.group', icon: '□' },
 ]
 
-/** 由 agent dock 组合的上弹式 add 菜单，支持键盘导航。 */
+/** 由 CanvasToolRail 组合的上弹式 add 菜单，支持键盘导航。 */
 export function CanvasAddMenu({ menuId }: { menuId: string }) {
   const {
     state,
@@ -100,7 +105,7 @@ export function CanvasAddMenu({ menuId }: { menuId: string }) {
           onMouseEnter={() => setAddMenuIndex(index)}
         >
           <span className="add-menu-icon">{item.icon}</span>
-          <span>{item.label}</span>
+          <span>{t(item.labelKey)}</span>
         </button>
       ))}
       <input

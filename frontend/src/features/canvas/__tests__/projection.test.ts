@@ -113,11 +113,49 @@ describe('Canvas snapshot projection', () => {
     })
   })
 
+  it('normalizes media node dimensions from the original aspect ratio', () => {
+    // Existing persisted 320x260 media nodes should immediately adopt the content-first visual size.
+    const snapshot = projectCanvasSnapshot({
+      ...snapshotDTO,
+      nodes: [{
+        ...snapshotDTO.nodes[0],
+        id: '6',
+        groupId: null,
+        function: null,
+        run: null,
+        resources: [{
+          ...snapshotDTO.nodes[0].resources[0],
+          id: '60',
+          metadataJson: '{"width":1122,"height":1402}',
+        }],
+      }],
+      groups: [],
+      links: [],
+    })
+    expect(snapshot.resourceNodes[0]?.transform).toEqual({
+      x: 20,
+      y: 30,
+      width: 256,
+      height: 344,
+    })
+
+    const nodes = projectNodes(snapshot, [], [], {
+      renameNode: vi.fn(),
+      editTextNode: vi.fn(),
+      deleteNode: vi.fn(),
+    })
+    expect(nodes[0]).toMatchObject({
+      style: { width: 256, height: 344 },
+      measured: { width: 256, height: 344 },
+    })
+  })
+
   it('keeps groups in world coordinates and applies group drafts to members without parent transforms', () => {
     const snapshot = projectCanvasSnapshot(snapshotDTO)
     const callbacks = {
       renameNode: vi.fn(),
       editTextNode: vi.fn(),
+      deleteNode: vi.fn(),
     }
     const nodes = projectNodes(snapshot, ['2'], [], callbacks, {
       'group:4': { x: 100, y: -20 },
@@ -138,6 +176,7 @@ describe('Canvas snapshot projection', () => {
       position: { x: 120, y: 10 },
       zIndex: 1,
     })
+    expect(member).not.toHaveProperty('dragHandle')
     expect(member).not.toHaveProperty('parentId')
     expect(outside?.position).toEqual({ x: 600, y: 30 })
   })

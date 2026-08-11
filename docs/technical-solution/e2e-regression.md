@@ -248,9 +248,12 @@ ui.provider.create_edit_delete_flow
 ui.chat.blank_workspace_shell
 ```
 
-其中 `ui.canvas.page_loads` 验证 `/canvas` library 可达，点击或创建后进入正整数
-`/canvas/:canvasId`，首屏 fit 产生的动态缩放值位于合法区间，点击缩放值可重置为
-`100%` 且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
+其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入正整数
+`/canvas/:canvasId`：编辑器无全局顶栏且挂 `canvas-immersive` class；Chat 面板默认收起且底部不渲染
+composer，点击 header「Chat / 对话」toggle 展开/收起；默认面板宽于 360px，左边缘拖拽调宽后 zoom
+保持不变；add launcher（左侧中部功能轨）仍可打开菜单，V/H 按钮不展示，缩放控制位于左下；首屏 fit
+产生的动态缩放值位于合法区间，Chat 面板展开/收起不改变该缩放值，点击缩放值可重置为 `100%`
+且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
 Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime
 隔离。
 `--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除

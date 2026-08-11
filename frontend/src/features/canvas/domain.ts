@@ -1,10 +1,12 @@
 import type {
   CanvasFunctionRunStatus,
+  CanvasResourceDTO,
   CanvasResourceKind,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
   DecimalString,
 } from '@/shared/api/contracts/studio'
+import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 export interface CanvasDocument {
   id: DecimalString
@@ -74,28 +76,38 @@ export interface CanvasSnapshot {
 export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapshot {
   return {
     document: { ...snapshot.document },
-    resourceNodes: snapshot.nodes.map((node) => ({
-      ...node,
-      transform: { ...node.transform },
-      resources: node.resources.map((resource) => ({
-        id: resource.id,
-        canvasId: resource.canvasId,
-        kind: resource.kind,
-        mediaType: resource.mediaType,
-        name: resource.name,
-        size: resource.size,
-        text: resource.textContent,
-        metadata: parseMetadata(resource.metadataJson),
-        createdAt: resource.createdAt,
-      })),
-      function: node.function ? { ...node.function } : null,
-      run: node.run ? { ...node.run } : null,
-    })),
+    resourceNodes: snapshot.nodes.map((node) => {
+      const projected: ResourceNode = {
+        ...node,
+        transform: { ...node.transform },
+        resources: node.resources.map(projectCanvasResource),
+        function: node.function ? { ...node.function } : null,
+        run: node.run ? { ...node.run } : null,
+      }
+      return {
+        ...projected,
+        transform: { ...projected.transform, ...resourceNodeSize(projected) },
+      }
+    }),
     groups: snapshot.groups.map((group) => ({
       ...group,
       transform: { ...group.transform },
     })),
     links: snapshot.links.map((link) => ({ ...link })),
+  }
+}
+
+export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
+  return {
+    id: resource.id,
+    canvasId: resource.canvasId,
+    kind: resource.kind,
+    mediaType: resource.mediaType,
+    name: resource.name,
+    size: resource.size,
+    text: resource.textContent,
+    metadata: parseMetadata(resource.metadataJson),
+    createdAt: resource.createdAt,
   }
 }
 

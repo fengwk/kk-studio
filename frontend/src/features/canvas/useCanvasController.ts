@@ -2,20 +2,23 @@ import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
-import type { ResourceNode } from '@/features/canvas/domain'
+import {
+  projectCanvasResource,
+  projectCanvasSnapshot,
+  type ResourceNode,
+} from '@/features/canvas/domain'
 import { createDefaultFunctionConfig } from '@/features/canvas/generation'
 import {
   normalizeNodeAlias,
   uniqueNodeAlias,
 } from '@/features/canvas/node-alias'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
+import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 import type {
   AddMenuAction,
-  AgentContextMode,
   CanvasLocalState,
   CanvasNodeCallbacks,
   CanvasPositionUpdate,
-  CanvasTool,
   PendingFunctionConfig,
   StageMetrics,
 } from '@/features/canvas/types'
@@ -61,13 +64,11 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     viewport: initialCanvasId
       ? loadCanvasViewport(initialCanvasId)
       : { ...DEFAULT_CANVAS_VIEWPORT },
-    tool: 'select',
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,
     threadOpen: false,
     agentPrompt: '',
-    contextMode: 'selection',
     messages: [],
     uploadProgress: {},
     commandPending: false,
@@ -417,11 +418,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     }))
   }, [])
 
-  const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
-    renameNode,
-    editTextNode,
-  }), [editTextNode, renameNode])
-
   const availableNodeNames = useCallback(() => {
     const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
     return [
@@ -450,12 +446,15 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     }
   }, [])
 
-  const nextTransform = useCallback((): CanvasTransformDTO => {
+  const nextTransform = useCallback((
+    size: Pick<CanvasTransformDTO, 'width' | 'height'> = NODE_SIZE,
+  ): CanvasTransformDTO => {
     const count = (queueRef.current?.currentSnapshot() ?? snapshotQuery.data)?.nodes.length ?? 0
     return {
       ...NODE_SIZE,
+      ...size,
       x: 100 + (count % 4) * 360,
-      y: 100 + Math.floor(count / 4) * 300,
+      y: 100 + Math.floor(count / 4) * 380,
     }
   }, [snapshotQuery.data])
 
@@ -535,8 +534,10 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   ])
 
   const createGroup = useCallback(() => {
-    const snapshot = snapshotQuery.data
-    const members = snapshot?.nodes.filter((node) => state.selectedIds.includes(node.id) && !node.groupId) ?? []
+    const snapshot = snapshotQuery.data ? projectCanvasSnapshot(snapshotQuery.data) : null
+    const members = snapshot?.resourceNodes.filter(
+      (node) => state.selectedIds.includes(node.id) && !node.groupId,
+    ) ?? []
     if (members.length === 0) {
       setToast('请先选择未分组的资源节点。')
       return
@@ -632,12 +633,17 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
         }))
         const resource = await completeCanvasUpload(canvasId, reservation.uploadId)
         const alias = reserveNodeAlias(file.name)
+        const projectedResource = projectCanvasResource(resource)
+        const transform = nextTransform(resourceNodeSize({
+          transform: NODE_SIZE,
+          resources: [projectedResource],
+        }))
         try {
           await executeCommands([{
             type: 'CREATE_RESOURCE_NODE',
             name: alias,
             resourceIds: [resource.id],
-            transform: nextTransform(),
+            transform,
           }])
         } finally {
           releaseNodeAlias(alias)
@@ -759,6 +765,28 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     return trackedFlush
   }, [executeCommands])
 
+  const deleteNode = useCallback((nodeId: DecimalString) => {
+    void flushFunctionConfig(nodeId)
+      .catch(() => undefined)
+      .then(() => executeCommands([{ type: 'DELETE_NODE', nodeId }]))
+      .then(() => {
+        setState((current) => ({
+          ...current,
+          selectedIds: current.selectedIds.filter((id) => id !== nodeId),
+          selectedLinks: current.selectedLinks.filter((link) => (
+            link.sourceNodeId !== nodeId && link.targetNodeId !== nodeId
+          )),
+        }))
+      })
+      .catch(() => undefined)
+  }, [executeCommands, flushFunctionConfig])
+
+  const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
+    renameNode,
+    editTextNode,
+    deleteNode,
+  }), [deleteNode, editTextNode, renameNode])
+
   const scheduleFunctionConfig = useCallback((
     nodeId: DecimalString,
     modelKey: string,
@@ -859,32 +887,13 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
           { kind: 'user', text },
           {
             kind: 'agent',
-            text: '我已读取当前真实 ResourceNode 选区。Canvas v1 暂不把文本生成 Function 接入后端；现有 Agent 最后回答仍会保留在此处。',
+            text: '已收到。Canvas Chat 当前保留本地消息，后续可通过 @节点 显式引用需要处理的节点。',
           },
         ],
       }
     })
   }, [])
 
-  const contextNodes = useMemo(() => {
-    const nodes = snapshotQuery.data?.nodes ?? []
-    return state.contextMode === 'whole'
-      ? nodes
-      : nodes.filter((node) => state.selectedIds.includes(node.id))
-  }, [snapshotQuery.data?.nodes, state.contextMode, state.selectedIds])
-  const contextDescription = contextNodes.length === 0
-    ? '尚未选择 ResourceNode。'
-    : contextNodes.map((node) => {
-        const kinds = [...new Set(node.resources.map((resource) => resource.kind))].join('/')
-        return `${node.name}（${kinds || node.function?.modelKey || 'Function'}，${node.resources.length} 个资源）`
-      }).join('；')
-
-  const setContextMode = useCallback((contextMode: AgentContextMode) => {
-    setState((current) => ({ ...current, contextMode }))
-  }, [])
-  const setTool = useCallback((tool: CanvasTool) => {
-    setState((current) => ({ ...current, tool }))
-  }, [])
   const toggleAddMenu = useCallback(() => {
     setState((current) => ({
       ...current,
@@ -922,7 +931,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     clearSelection: () => setSelection([]),
     deleteSelection,
     focusAgentPrompt: focusAgentDock,
-    setTool,
     createTextNode,
     closeOverlays: () => {
       closeAddMenu()
@@ -955,7 +963,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     setSelection,
     moveNodes,
     commitTransforms,
-    setTool,
     createLink,
     deleteLink,
     deleteSelection,
@@ -980,9 +987,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     openThread,
     collapseThread,
     focusAgentDock,
-    setContextMode,
-    contextCount: contextNodes.length,
-    contextDescription,
   }
 }
 

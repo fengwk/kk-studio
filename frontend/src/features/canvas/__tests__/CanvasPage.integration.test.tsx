@@ -254,6 +254,7 @@ describe('CanvasPage real list/create/load integration', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -285,6 +286,7 @@ describe('CanvasPage real list/create/load integration', () => {
       maxZoom: 1.6,
       duration: 0,
     })
+    // 底部不再覆盖 composer，因此初始 fit 直接采用 React Flow 的居中结果。
     await waitFor(() => {
       expect(JSON.parse(localStorage.getItem(canvasViewportStorageKey('1')) ?? '')).toEqual({
         x: 24,
@@ -372,6 +374,19 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(resetZoom).toHaveTextContent('74%')
   })
 
+  it('uses the same icon-only back control as the AI Chat workspace', async () => {
+    installBackend()
+    const user = userEvent.setup()
+    renderCanvasPage(['/canvas/1'])
+
+    await screen.findByLabelText(/无限画布/)
+    const back = screen.getByRole('link', { name: '返回画布库' })
+    expect(back).toHaveClass('sidebar-icon-btn', 'canvas-back-button')
+    expect(back).toHaveAttribute('href', '/canvas')
+    await user.click(back)
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/canvas')
+  })
+
   it.each(['/canvas/0', '/canvas/01', '/canvas/-1', '/canvas/not-a-number'])(
     'redirects invalid canvas id %s to the library',
     async (path) => {
@@ -420,6 +435,107 @@ describe('CanvasPage real list/create/load integration', () => {
     }).defaultViewport).toEqual({ x: 30, y: -20, zoom: 0.7 })
   })
 
+  it('collapses the Chat panel by default and toggles it from the editor header', async () => {
+    // 默认只展示画布；普通聊天输入仅在右侧面板内存在。
+    const user = userEvent.setup()
+    installBackend()
+    renderCanvasPage(['/canvas/1'])
+
+    await screen.findByLabelText(/无限画布/)
+    expect(screen.queryByLabelText('Canvas 对话面板')).not.toBeInTheDocument()
+    expect(document.querySelector('.agent-composer')).toBeNull()
+
+    const toggle = screen.getByRole('button', { name: /切换对话面板/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveAttribute('aria-controls', 'agentPanel')
+
+    await user.click(toggle)
+    expect(await screen.findByLabelText('Canvas 对话面板')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /切换对话面板/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(document.querySelector('.agent-composer.panel')).not.toBeNull()
+    expect(screen.getByRole('button', { name: '收起对话面板' })).toBeInTheDocument()
+
+    await user.click(toggle)
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Canvas 对话面板')).not.toBeInTheDocument()
+    })
+    expect(document.querySelector('.agent-composer')).toBeNull()
+  })
+
+  it('keeps the canvas zoom stable while the Agent panel changes available width', async () => {
+    // The panel may translate the viewport to preserve world center, but opening it must not resize cards.
+    const makeRect = (width: number, height: number, x = 0, y = 0) => ({
+      x,
+      y,
+      width,
+      height,
+      top: y,
+      right: x + width,
+      bottom: y + height,
+      left: x,
+      toJSON: () => ({}),
+    }) as DOMRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.classList.contains('canvas-flow-wrap')) {
+        return makeRect(document.querySelector('#agentPanel') ? 788 : 1_268, 699, 0, 44)
+      }
+      return makeRect(0, 0)
+    })
+    const { snapshots } = installBackend()
+    const current = snapshots.get('1') as CanvasSnapshotDTO
+    snapshots.set('1', {
+      ...current,
+      nodes: [{
+        id: '10',
+        canvasId: '1',
+        name: 'note',
+        transform: { x: 100, y: 80, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    localStorage.setItem(
+      canvasViewportStorageKey('1'),
+      JSON.stringify({ x: 20, y: 50, zoom: 0.9 }),
+    )
+    const user = userEvent.setup()
+    renderCanvasPage(['/canvas/1'])
+
+    await screen.findByLabelText(/无限画布/)
+    expect(flowHarness.fitView).not.toHaveBeenCalled()
+    flowHarness.setViewport.mockClear()
+
+    const toggle = screen.getByRole('button', { name: /切换对话面板/ })
+    await user.click(toggle)
+    await waitFor(() => {
+      expect(flowHarness.setViewport).toHaveBeenCalledWith({ x: -220, y: 50, zoom: 0.9 })
+    })
+    expect(flowHarness.fitView).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '重置缩放为 100%' })).toHaveTextContent('90%')
+
+    act(() => {
+      ;(flowHarness.current as {
+        onMove: (
+          event: unknown,
+          viewport: { x: number; y: number; zoom: number },
+        ) => void
+      }).onMove(null, { x: -100, y: 70, zoom: 1.1 })
+    })
+    expect(screen.getByRole('button', { name: '重置缩放为 100%' })).toHaveTextContent('110%')
+    flowHarness.setViewport.mockClear()
+
+    await user.click(toggle)
+    await waitFor(() => {
+      expect(flowHarness.setViewport).toHaveBeenLastCalledWith({ x: 140, y: 70, zoom: 1.1 })
+    })
+    expect(screen.getByRole('button', { name: '重置缩放为 100%' })).toHaveTextContent('110%')
+  })
+
   it('caps manual fit and focus zoom at their readable visual scales', async () => {
     // UI and keyboard paths exercise the real React Flow options rather than a pure helper.
     installBackend()
@@ -438,12 +554,20 @@ describe('CanvasPage real list/create/load integration', () => {
       duration: 0,
     })
 
+    await user.click(screen.getByRole('button', { name: /切换对话面板/ }))
+    await user.click(screen.getByRole('button', { name: '适应全部内容' }))
+    expect(flowHarness.fitView).toHaveBeenNthCalledWith(2, {
+      padding: 0.08,
+      maxZoom: 1.6,
+      duration: 0,
+    })
+
     act(() => {
       stage.focus()
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }))
     })
     await waitFor(() => {
-      expect(flowHarness.fitView).toHaveBeenNthCalledWith(2, {
+      expect(flowHarness.fitView).toHaveBeenNthCalledWith(3, {
         nodes: undefined,
         padding: 0.22,
         maxZoom: 1.8,
@@ -565,8 +689,8 @@ describe('CanvasPage real list/create/load integration', () => {
     })
   })
 
-  it('restricts links to Resource -> Function and wires link/group deletion UI', async () => {
-    // React Flow callbacks prove selection toolbar and keyboard operations emit typed graph commands.
+  it('keeps graph commands available without rendering a selection toolbar', async () => {
+    // Selection remains useful for keyboard deletion and the add-menu group action without extra chrome.
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get('1') as CanvasSnapshotDTO
     snapshots.set('1', {
@@ -606,7 +730,7 @@ describe('CanvasPage real list/create/load integration', () => {
         },
         run: null,
       }],
-      // A real group gives the selection toolbar measurable world bounds to anchor to.
+      // A real group exercises selection-driven group deletion without extra toolbar chrome.
       groups: [{
         id: '99',
         canvasId: '1',
@@ -637,18 +761,20 @@ describe('CanvasPage real list/create/load integration', () => {
       nodes: [],
       edges: [{ source: '10', target: '11' }],
     }))
-    await user.click(screen.getByRole('button', { name: '删除' }))
+    expect(screen.queryByRole('toolbar', { name: '选区操作' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Delete' })
     await waitFor(() => expect(commandBodies.some((body) => (
       body.commands[0]?.type === 'DELETE_LINK'
     ))).toBe(true))
 
     act(() => flow.onSelectionChange({ nodes: [{ id: '10' }], edges: [] }))
-    await user.click(screen.getByRole('button', { name: '分组' }))
+    await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
+    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /分组/ }))
     await waitFor(() => expect(commandBodies.some((body) => (
       body.commands[0]?.type === 'CREATE_GROUP'
     ))).toBe(true))
     act(() => flow.onSelectionChange({ nodes: [{ id: 'group:99' }], edges: [] }))
-    await user.click(screen.getByRole('button', { name: '解散 / 移出分组' }))
+    fireEvent.keyDown(window, { key: 'Delete' })
     await waitFor(() => expect(commandBodies.some((body) => (
       body.commands[0]?.type === 'DELETE_GROUP'
     ))).toBe(true))
@@ -697,6 +823,7 @@ describe('CanvasPage real list/create/load integration', () => {
     renderCanvasPage()
     await user.click(await screen.findByRole('button', { name: /真实画布/ }))
     await screen.findByLabelText(/无限画布/)
+    expect(screen.getByTestId('minimap')).toBeInTheDocument()
     act(() => {
       ;(flowHarness.current as {
         onSelectionChange: (params: {
@@ -707,6 +834,8 @@ describe('CanvasPage real list/create/load integration', () => {
     })
 
     const input = await screen.findByRole('textbox', { name: '提示词片段 1' })
+    expect(screen.queryByTestId('minimap')).not.toBeInTheDocument()
+    expect(screen.queryByRole('toolbar', { name: '选区操作' })).not.toBeInTheDocument()
     await user.click(input)
     await user.type(input, ' one')
     await waitFor(() => expect(commandBodies.some((body) => (

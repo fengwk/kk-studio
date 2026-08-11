@@ -1,17 +1,15 @@
 import { useEffect } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
-import { PlusIcon, SendIcon } from '@/features/canvas/icons'
+import { SendIcon } from '@/features/canvas/icons'
 import { useI18n } from '@/shared/i18n'
 
-/** Dock 组合器：add 触发器 + prompt + send，与 ChatComposer 边界对齐。 */
-export function CanvasAgentComposer({ menuId }: { menuId: string }) {
+/** Chat panel prompt 组合器；add launcher 独立位于左侧功能轨。 */
+export function CanvasAgentComposer() {
   const {
     state,
     agentPromptRef,
-    dockAddRef,
     setAgentPrompt,
     sendAgent,
-    toggleAddMenu,
   } = useCanvasRuntime()
   const { t } = useI18n()
 
@@ -30,18 +28,7 @@ export function CanvasAgentComposer({ menuId }: { menuId: string }) {
   }, [agentPromptRef, state.agentPrompt])
 
   return (
-    <div className="agent-dock" id="agentDock">
-      <button
-        className="dock-add"
-        type="button"
-        ref={dockAddRef}
-        aria-label={t('canvas.add.ariaLabel')}
-        aria-expanded={state.addMenuOpen}
-        aria-controls={menuId}
-        onClick={toggleAddMenu}
-      >
-        <PlusIcon />
-      </button>
+    <div className="agent-composer panel" id="agentDock">
       <textarea
         ref={agentPromptRef}
         rows={1}

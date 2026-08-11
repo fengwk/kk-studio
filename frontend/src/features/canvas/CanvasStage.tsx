@@ -18,24 +18,23 @@ import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
+import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
-import {
-  selectionToolbarPosition,
-  selectionWorldBounds,
-} from '@/features/canvas/selection-toolbar-position'
 import type { CanvasPositionUpdate } from '@/features/canvas/types'
 import {
   MAX_CANVAS_ZOOM,
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
+import { preserveCanvasWorldCenter } from '@/features/canvas/viewport-framing'
 import type { DecimalString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
 const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
+const PANEL_FIT = { padding: 0.08, maxZoom: 1.6, duration: 0 }
 const FOCUS_SELECTION_FIT = { padding: 0.22, maxZoom: 1.8, duration: 0 }
 
 function StageInner() {
@@ -56,14 +55,9 @@ function StageInner() {
     setSelection,
     moveNodes,
     commitTransforms,
-    setTool,
     createLink,
     deleteLink,
-    deleteSelection,
-    createGroup,
-    ungroupSelection,
     uploadFiles,
-    focusAgentDock,
     initialFitPending,
     completeInitialFit,
   } = runtime
@@ -72,10 +66,10 @@ function StageInner() {
     [snapshotDTO],
   )
   const containerRef = useRef<HTMLElement | null>(null)
-  const dockWrapRef = useRef<HTMLDivElement | null>(null)
   const lastViewportRef = useRef(state.viewport)
   const initialFitStartedRef = useRef(false)
   const mountedRef = useRef(true)
+  const flowWidthRef = useRef<number | null>(null)
   const { fitView, getViewport, setViewport: setFlowViewport, zoomTo } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
 
@@ -101,60 +95,16 @@ function StageInner() {
     ? nodes.find((node) => node.id === selectedFunctionNode.id)
     : null
 
-  // 选区工具条锚点：选中节点（edge-only 时含端点）的 world bounds 投影到 screen space。
-  const selectedFlowNodes = useMemo(() => {
-    const ids = new Set(state.selectedIds)
-    for (const link of state.selectedLinks) {
-      ids.add(link.sourceNodeId)
-      ids.add(link.targetNodeId)
-    }
-    return nodes.filter((node) => ids.has(node.id))
-  }, [nodes, state.selectedIds, state.selectedLinks])
-  const selectionBounds = useMemo(
-    () => selectionWorldBounds(selectedFlowNodes),
-    [selectedFlowNodes],
-  )
-  const toolbarPosition = useMemo(() => (
-    selectionBounds
-      ? (() => {
-        const mediumFunctionPanel = Boolean(
-          selectedFunctionNode
-          && stageMetrics.width > 900
-          && stageMetrics.width <= 1600
-        )
-        return selectionToolbarPosition({
-          bounds: selectionBounds,
-          viewport: state.viewport,
-          stage: {
-            width: mediumFunctionPanel && stageMetrics.width > 1180
-              ? stageMetrics.width - 140
-              : stageMetrics.width,
-            height: mediumFunctionPanel
-              ? stageMetrics.dockTop + 8
-              : Math.min(stageMetrics.height, stageMetrics.dockTop - 8),
-          },
-          toolbar: mediumFunctionPanel ? { width: 360, height: 37 } : undefined,
-          gap: mediumFunctionPanel ? 8 : undefined,
-          padding: mediumFunctionPanel ? 8 : undefined,
-          preferBelow: mediumFunctionPanel,
-        })
-      })()
-      : null
-  ), [selectedFunctionNode, selectionBounds, stageMetrics, state.viewport])
-
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
     if (!element) {
       return
     }
     const rect = element.getBoundingClientRect()
-    const dockTop = dockWrapRef.current
-      ? dockWrapRef.current.getBoundingClientRect().top - rect.top
-      : rect.height - 96
     setStageMetrics({
       width: rect.width || 960,
       height: rect.height || 640,
-      dockTop: Math.max(120, dockTop),
+      dockTop: Math.max(120, rect.height - 16),
     })
   }, [setStageMetrics])
 
@@ -165,11 +115,8 @@ function StageInner() {
     }
     const observer = new ResizeObserver(publishMetrics)
     observer.observe(containerRef.current)
-    if (dockWrapRef.current) {
-      observer.observe(dockWrapRef.current)
-    }
     return () => observer.disconnect()
-  }, [publishMetrics, state.threadOpen, state.addMenuOpen])
+  }, [publishMetrics, state.threadOpen])
 
   useEffect(() => {
     const next = state.viewport
@@ -184,6 +131,29 @@ function StageInner() {
     lastViewportRef.current = next
     void setFlowViewport(next)
   }, [setFlowViewport, state.viewport])
+
+  // Chat panel 开关或拖拽调宽只平移 viewport，不得隐式改变用户的 zoom。
+  useEffect(() => {
+    const width = containerRef.current?.getBoundingClientRect().width ?? stageMetrics.width
+    const previousWidth = flowWidthRef.current
+    flowWidthRef.current = width
+    if (previousWidth === null) {
+      return
+    }
+    if (Math.abs(width - previousWidth) < 1) {
+      return
+    }
+    const next = preserveCanvasWorldCenter(state.viewport, previousWidth, width)
+    lastViewportRef.current = next
+    void setFlowViewport(next)
+    setViewport(next)
+  }, [
+    setFlowViewport,
+    setViewport,
+    stageMetrics.width,
+    state.threadOpen,
+    state.viewport,
+  ])
 
   const syncViewport = useCallback(() => {
     const viewport = getViewport()
@@ -213,7 +183,7 @@ function StageInner() {
       return
     }
     initialFitStartedRef.current = true
-    void fitView(INITIAL_FIT).then((fitted) => {
+    void fitView(state.threadOpen ? PANEL_FIT : INITIAL_FIT).then((fitted) => {
       if (!mountedRef.current) {
         return
       }
@@ -221,21 +191,45 @@ function StageInner() {
         initialFitStartedRef.current = false
         return
       }
-      syncViewport()
+      const fittedViewport = getViewport()
+      const next = {
+        x: fittedViewport.x,
+        y: fittedViewport.y,
+        zoom: fittedViewport.zoom,
+      }
+      lastViewportRef.current = next
+      void setFlowViewport(next)
+      setViewport(next)
       completeInitialFit()
     })
   }, [
     completeInitialFit,
     fitView,
+    getViewport,
     initialFitPending,
     nodes.length,
     nodesInitialized,
-    syncViewport,
+    setFlowViewport,
+    setViewport,
+    state.threadOpen,
   ])
 
   useEffect(() => {
     fitViewRef.current = () => {
-      void fitView(INITIAL_FIT).then(syncViewport)
+      void fitView(state.threadOpen ? PANEL_FIT : INITIAL_FIT).then((fitted) => {
+        if (!fitted) {
+          return
+        }
+        const fittedViewport = getViewport()
+        const next = {
+          x: fittedViewport.x,
+          y: fittedViewport.y,
+          zoom: fittedViewport.zoom,
+        }
+        lastViewportRef.current = next
+        void setFlowViewport(next)
+        setViewport(next)
+      })
     }
     focusSelectionRef.current = () => {
       const selected = nodes.filter((node) => node.selected)
@@ -252,7 +246,19 @@ function StageInner() {
       focusSelectionRef.current = null
       zoomRef.current = null
     }
-  }, [fitView, fitViewRef, focusSelectionRef, nodes, syncViewport, zoomRef, zoomTo])
+  }, [
+    fitView,
+    fitViewRef,
+    focusSelectionRef,
+    getViewport,
+    nodes,
+    setFlowViewport,
+    setViewport,
+    state.threadOpen,
+    syncViewport,
+    zoomRef,
+    zoomTo,
+  ])
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     if (!snapshot) {
@@ -324,12 +330,11 @@ function StageInner() {
 
   return (
     <section
-      className={`canvas-stage ${state.tool === 'hand' ? 'hand-tool' : ''}`}
+      className={`canvas-stage${state.threadOpen ? ' agent-panel-open' : ''}`}
       id="canvasStage"
       tabIndex={0}
       aria-label={t('canvas.stage.ariaLabel')}
       ref={(element) => {
-        containerRef.current = element
         stageElementRef.current = element
       }}
       onDragOver={(event) => {
@@ -345,174 +350,115 @@ function StageInner() {
         }
       }}
     >
-      <div className="canvas-flow">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={canvasNodeTypes}
-          minZoom={MIN_CANVAS_ZOOM}
-          maxZoom={MAX_CANVAS_ZOOM}
-          defaultViewport={state.viewport}
-          selectionOnDrag={state.tool === 'select'}
-          selectionMode={SelectionMode.Partial}
-          panOnDrag={state.tool === 'hand' ? true : [1, 2]}
-          nodesDraggable={state.tool === 'select'}
-          panActivationKeyCode="Space"
-          panOnScroll
-          zoomOnScroll={false}
-          zoomOnPinch
-          zoomOnDoubleClick={false}
-          zoomActivationKeyCode={['Meta', 'Control']}
-          multiSelectionKeyCode="Shift"
-          deleteKeyCode={null}
-          nodesConnectable
-          edgesFocusable
-          edgesReconnectable={false}
-          elementsSelectable={state.tool === 'select'}
-          onlyRenderVisibleElements
-          isValidConnection={validConnection}
-          onConnect={(connection) => {
-            if (connection.source && connection.target && validConnection(connection)) {
-              const source = snapshot?.resourceNodes.find((node) => node.id === connection.source)
-              const target = snapshot?.resourceNodes.find((node) => node.id === connection.target)
-              if (source && target) {
-                createLink(source.id, target.id)
+      <div
+        className="canvas-flow-wrap"
+        ref={(element) => {
+          containerRef.current = element
+        }}
+      >
+        <div className="canvas-flow">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={canvasNodeTypes}
+            minZoom={MIN_CANVAS_ZOOM}
+            maxZoom={MAX_CANVAS_ZOOM}
+            defaultViewport={state.viewport}
+            selectionOnDrag
+            selectionMode={SelectionMode.Partial}
+            panOnDrag={[1, 2]}
+            nodesDraggable
+            panActivationKeyCode="Space"
+            panOnScroll
+            zoomOnScroll={false}
+            zoomOnPinch
+            zoomOnDoubleClick={false}
+            zoomActivationKeyCode={['Meta', 'Control']}
+            multiSelectionKeyCode="Shift"
+            deleteKeyCode={null}
+            nodesConnectable
+            edgesFocusable
+            edgesReconnectable={false}
+            elementsSelectable
+            isValidConnection={validConnection}
+            onConnect={(connection) => {
+              if (connection.source && connection.target && validConnection(connection)) {
+                const source = snapshot?.resourceNodes.find((node) => node.id === connection.source)
+                const target = snapshot?.resourceNodes.find((node) => node.id === connection.target)
+                if (source && target) {
+                  createLink(source.id, target.id)
+                }
               }
-            }
-          }}
-          onEdgesDelete={(deleted) => {
-            for (const edge of deleted) {
-              const link = snapshot?.links.find((item) => (
-                item.sourceNodeId === edge.source && item.targetNodeId === edge.target
-              ))
-              if (link) {
-                deleteLink(link.sourceNodeId, link.targetNodeId)
+            }}
+            onEdgesDelete={(deleted) => {
+              for (const edge of deleted) {
+                const link = snapshot?.links.find((item) => (
+                  item.sourceNodeId === edge.source && item.targetNodeId === edge.target
+                ))
+                if (link) {
+                  deleteLink(link.sourceNodeId, link.targetNodeId)
+                }
               }
-            }
-          }}
-          onNodesChange={handleNodesChange}
-          onNodeDragStop={() => commitTransforms()}
-          onMove={(_event, viewport) => emitViewport(viewport)}
-          onMoveEnd={(_event, viewport) => emitViewport(viewport)}
-          onSelectionChange={handleSelectionChange}
-          onNodeClick={(event, node) => {
-            if (!event.shiftKey) {
-              setSelection([node.id])
-            }
-          }}
-          onPaneClick={() => {
-            setSelection([])
-          }}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background
-            id="canvas-dots"
-            variant={BackgroundVariant.Dots}
-            gap={18}
-            size={0.75}
-            color={CANVAS_THEME.stageDot}
-            bgColor={CANVAS_THEME.stageBg}
+            }}
+            onNodesChange={handleNodesChange}
+            onNodeDragStop={() => commitTransforms()}
+            onMove={(_event, viewport) => emitViewport(viewport)}
+            onMoveEnd={(_event, viewport) => emitViewport(viewport)}
+            onSelectionChange={handleSelectionChange}
+            onNodeClick={(event, node) => {
+              if (!event.shiftKey) {
+                setSelection([node.id])
+              }
+            }}
+            onPaneClick={() => {
+              setSelection([])
+            }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background
+              id="canvas-dots"
+              variant={BackgroundVariant.Dots}
+              gap={18}
+              size={0.75}
+              color={CANVAS_THEME.stageDot}
+              bgColor={CANVAS_THEME.stageBg}
+            />
+            {!selectedFunctionNode ? (
+              <MiniMap
+                className="canvas-minimap"
+                pannable
+                zoomable
+                ariaLabel={t('canvas.stage.minimap')}
+                bgColor={CANVAS_THEME.stageBg}
+                maskColor="rgba(13,15,14,0.55)"
+                nodeColor={CANVAS_THEME.minimapNode}
+                style={{ width: 120, height: 78 }}
+              />
+            ) : null}
+          </ReactFlow>
+        </div>
+
+        {snapshot && selectedFunctionNode ? (
+          <CanvasGenerationPanel
+            key={selectedFunctionNode.id}
+            snapshot={snapshot}
+            node={selectedFunctionNode}
+            anchor={selectedFunctionFlowNode ? {
+              node: {
+                ...selectedFunctionNode.transform,
+                x: selectedFunctionFlowNode.position.x,
+                y: selectedFunctionFlowNode.position.y,
+              },
+              viewport: state.viewport,
+              stage: stageMetrics,
+            } : undefined}
           />
-          <MiniMap
-            className="canvas-minimap"
-            pannable
-            zoomable
-            ariaLabel={t('canvas.stage.minimap')}
-            maskColor="rgba(13,15,14,0.55)"
-            nodeColor={CANVAS_THEME.minimapNode}
-            style={{ width: 120, height: 78 }}
-          />
-        </ReactFlow>
+        ) : null}
+
+        <CanvasToolRail />
       </div>
 
-      {toolbarPosition && (state.selectedIds.length > 0 || state.selectedLinks.length > 0) ? (
-        <div
-          className="selection-toolbar"
-          role="toolbar"
-          aria-label={t('canvas.stage.selectionToolbar')}
-          data-placement={toolbarPosition.placement}
-          style={{ left: toolbarPosition.left, top: toolbarPosition.top }}
-        >
-          {state.selectedIds.length > 0 ? (
-            <>
-              <button type="button" onClick={createGroup}>{t('canvas.stage.group')}</button>
-              <button type="button" onClick={ungroupSelection}>{t('canvas.stage.ungroup')}</button>
-              <button type="button" onClick={focusAgentDock}>{t('canvas.stage.agent')}</button>
-            </>
-          ) : null}
-          <button type="button" className="danger" onClick={deleteSelection}>{t('canvas.stage.delete')}</button>
-        </div>
-      ) : null}
-
-      {snapshot && selectedFunctionNode ? (
-        <CanvasGenerationPanel
-          key={selectedFunctionNode.id}
-          snapshot={snapshot}
-          node={selectedFunctionNode}
-          anchor={selectedFunctionFlowNode ? {
-            node: {
-              ...selectedFunctionNode.transform,
-              x: selectedFunctionFlowNode.position.x,
-              y: selectedFunctionFlowNode.position.y,
-            },
-            viewport: state.viewport,
-            stage: stageMetrics,
-          } : undefined}
-        />
-      ) : null}
-
-      <div className="canvas-hint">
-        <kbd>Space</kbd>
-        {' '}
-        {t('canvas.stage.hint.pan')}
-        {' '}
-        ·
-        {' '}
-        <kbd>V / H / T</kbd>
-        {' '}
-        {t('canvas.stage.hint.tools')}
-        {' '}
-        ·
-        {' '}
-        <kbd>⌘ K</kbd>
-        {' '}
-        {t('canvas.stage.hint.invokeAgent')}
-      </div>
-
-      <div className="canvas-controls">
-        <div className="zoom-controls" role="group" aria-label={t('canvas.stage.zoomControls')}>
-          <button type="button" aria-label={t('canvas.stage.zoomOut')} onClick={() => zoomRef.current?.(Math.max(MIN_CANVAS_ZOOM, state.viewport.zoom / 1.15))}>−</button>
-          <button type="button" aria-label={t('canvas.stage.fitAll')} onClick={() => fitViewRef.current?.()}>⊙</button>
-          <button
-            type="button"
-            aria-label={t('canvas.stage.resetZoom')}
-            onClick={() => zoomRef.current?.(1)}
-          >
-            {`${Math.round(state.viewport.zoom * 100)}%`}
-          </button>
-          <button type="button" aria-label={t('canvas.stage.zoomIn')} onClick={() => zoomRef.current?.(Math.min(MAX_CANVAS_ZOOM, state.viewport.zoom * 1.15))}>＋</button>
-        </div>
-        <div className="tool-controls" role="group" aria-label={t('canvas.stage.toolControls')}>
-          <button
-            type="button"
-            aria-label={t('canvas.stage.toolSelect')}
-            aria-pressed={state.tool === 'select'}
-            onClick={() => setTool('select')}
-          >
-            V
-          </button>
-          <button
-            type="button"
-            aria-label={t('canvas.stage.toolHand')}
-            aria-pressed={state.tool === 'hand'}
-            onClick={() => setTool('hand')}
-          >
-            H
-          </button>
-        </div>
-      </div>
-
-      <CanvasAgentDock dockWrapRef={dockWrapRef} />
+      <CanvasAgentDock />
       <CanvasTextEditor />
     </section>
   )

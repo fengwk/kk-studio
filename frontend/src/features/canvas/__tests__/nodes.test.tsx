@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
@@ -64,6 +64,7 @@ function resourceNode(overrides: Partial<ResourceNode> = {}): ResourceNode {
 function renderResourceNode(node: ResourceNode, callbacks = {
   renameNode: vi.fn(),
   editTextNode: vi.fn(),
+  deleteNode: vi.fn(),
 }) {
   const Component = canvasNodeTypes.resource
   const data: ResourceFlowNodeData = {
@@ -131,7 +132,7 @@ describe('Canvas resource/group node renderers', () => {
     }
   })
 
-  it('caps the visible resource list at four and keeps bigint sizes as decimal strings', () => {
+  it('caps the visible resource list at four', () => {
     const resources = Array.from({ length: 5 }, (_, index) => resource('IMAGE', {
       id: `${20 + index}`,
       name: `image-${index}`,
@@ -141,21 +142,6 @@ describe('Canvas resource/group node renderers', () => {
 
     expect(screen.getAllByRole('button', { name: /查看资源/ })).toHaveLength(4)
     expect(screen.getByText('+1')).toBeInTheDocument()
-    expect(screen.getByText(/8796093022207/)).toBeInTheDocument()
-  })
-
-  it.each([
-    ['12', '12 B'],
-    ['1024', '1 KB'],
-    ['1536', '1.5 KB'],
-    ['invalid', 'invalid'],
-  ])('formats resource size %s without lossy number conversion', (size, expected) => {
-    const view = renderResourceNode(resourceNode({
-      id: `size-${size}`,
-      resources: [resource('IMAGE', { id: `resource-${size}`, size })],
-    }))
-    expect(screen.getByText(expected)).toBeInTheDocument()
-    view.unmount()
   })
 
   it('navigates resources beyond the four visible thumbnails', async () => {
@@ -221,9 +207,22 @@ describe('Canvas resource/group node renderers', () => {
     expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
   })
 
+  it('renders a ready Function with the content-fit run-status badge class', () => {
+    // 徽标样式由 .function-footer .run-status 显式重置全局 .run-status 的固定尺寸。
+    const view = renderResourceNode(resourceNode({
+      resources: [],
+      function: { modelKey: 'fake-image', configJson: '{}' },
+      run: null,
+    }))
+    const badge = view.container.querySelector('.function-footer .run-status')
+    expect(badge).not.toBeNull()
+    expect(badge).toHaveClass('run-status', 'ready')
+    expect(badge).toHaveTextContent('就绪')
+  })
+
   it('renders the generic empty-resource state without a model descriptor', () => {
     renderResourceNode(resourceNode({ resources: [] }))
-    expect(screen.getAllByText('✦')).toHaveLength(2)
+    expect(screen.getAllByText('✦')).toHaveLength(1)
     expect(screen.getByText('暂无资源')).toBeInTheDocument()
   })
 
@@ -232,6 +231,7 @@ describe('Canvas resource/group node renderers', () => {
     const callbacks = {
       renameNode: vi.fn(),
       editTextNode: vi.fn(),
+      deleteNode: vi.fn(),
     }
     const node = resourceNode({
       name: 'Note',
@@ -239,7 +239,7 @@ describe('Canvas resource/group node renderers', () => {
     })
     renderResourceNode(node, callbacks)
 
-    await user.click(screen.getByRole('button', { name: 'Note' }))
+    await user.click(screen.getByRole('button', { name: '编辑「Note」的名称' }))
     const input = screen.getByRole('textbox', { name: '节点名称' })
     await user.clear(input)
     await user.type(input, 'Renamed{Enter}')
@@ -256,16 +256,39 @@ describe('Canvas resource/group node renderers', () => {
     const callbacks = {
       renameNode: vi.fn(),
       editTextNode: vi.fn(),
+      deleteNode: vi.fn(),
     }
     renderResourceNode(resourceNode({ name: 'Original' }), callbacks)
 
-    await user.click(screen.getByRole('button', { name: 'Original' }))
+    await user.click(screen.getByRole('button', { name: '编辑「Original」的名称' }))
     const input = screen.getByRole('textbox', { name: '节点名称' })
     await user.type(input, ' changed')
     fireEvent.keyDown(input, { key: 'Escape' })
 
-    expect(screen.getByRole('button', { name: 'Original' })).toBeInTheDocument()
+    expect(screen.getByText('Original')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑「Original」的名称' })).toBeInTheDocument()
     expect(callbacks.renameNode).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicit second confirmation before deleting a node', async () => {
+    const user = userEvent.setup()
+    const callbacks = {
+      renameNode: vi.fn(),
+      editTextNode: vi.fn(),
+      deleteNode: vi.fn(),
+    }
+    renderResourceNode(resourceNode({ name: 'Disposable' }), callbacks)
+
+    const deleteAction = screen.getByRole('button', { name: '删除节点「Disposable」' })
+    await user.click(deleteAction)
+    const dialog = screen.getByRole('alertdialog', { name: '删除「Disposable」？' })
+    expect(callbacks.deleteNode).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(deleteAction)
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认删除' }))
+    expect(callbacks.deleteNode).toHaveBeenCalledWith('2')
   })
 
   it('renders a world-coordinate group card', () => {
@@ -339,23 +362,29 @@ describe('Canvas resource/group node renderers', () => {
           kind: 'resource',
           node,
           model: null,
-          callbacks: { renameNode: vi.fn(), editTextNode: vi.fn() },
+          callbacks: { renameNode: vi.fn(), editTextNode: vi.fn(), deleteNode: vi.fn() },
         },
       } as NodeProps<CanvasFlowNode>)} />,
     )
     expect(groupView.container).toBeEmptyDOMElement()
   })
 
-  it('restores the card grammar with an inset preview, kind label, and rename title', () => {
+  it('uses a compact content-first shell for media nodes', () => {
     const view = renderResourceNode(resourceNode({
       name: 'Vision board',
       resources: [resource('IMAGE', { metadata: { width: 1024, height: 768 } })],
     }))
+    expect(view.container.querySelector('.resource-node-titlebar')).not.toHaveClass(
+      'resource-node-drag-handle',
+    )
     expect(view.container.querySelector('.resource-node-content')).not.toBeNull()
-    expect(view.container.querySelector('.resource-node-preview')).not.toBeNull()
-    expect(screen.getByText('图片参考')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Vision board' })).toBeInTheDocument()
-    expect(view.container.querySelector('.resource-node-footer')).not.toBeNull()
+    expect(view.container.querySelector('.resource-node-preview')).not.toHaveClass('nodrag')
+    expect(screen.getByText('Vision board')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '编辑「Vision board」的名称' })).toHaveClass('nodrag')
+    expect(screen.getByRole('button', { name: '删除节点「Vision board」' })).toHaveClass('nodrag')
+    expect(view.container.querySelector('.media-original-actions')).toHaveClass('nodrag')
+    expect(view.container.querySelector('.resource-node.compact-media-node')).not.toBeNull()
+    expect(view.container.querySelector('.resource-node-footer')).toBeNull()
   })
 
   it('extracts a real Function summary from the prompt config', () => {
@@ -381,7 +410,8 @@ describe('Canvas resource/group node renderers', () => {
     const imageView = renderResourceNode(resourceNode({
       resources: [resource('IMAGE', { metadata: { width: 1024, height: 768 } })],
     }))
-    expect(screen.getByText('Image reference')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit the name of Resource node' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete node Resource node' })).toBeInTheDocument()
     imageView.unmount()
 
     const textView = renderResourceNode(resourceNode({

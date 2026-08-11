@@ -3,7 +3,7 @@
 export function PlusIcon() {
   return (
     <svg
-      className="plus-icon"
+      className="canvas-plus-icon"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

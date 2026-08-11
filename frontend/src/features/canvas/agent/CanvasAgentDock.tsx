@@ -1,25 +1,139 @@
-import { useId, type RefObject } from 'react'
-import { CanvasAddMenu } from '@/features/canvas/agent/CanvasAddMenu'
+import { ChevronRight } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react'
 import { CanvasAgentComposer } from '@/features/canvas/agent/CanvasAgentComposer'
 import { CanvasAgentThread } from '@/features/canvas/agent/CanvasAgentThread'
+import {
+  agentPanelWidthBounds,
+  clampAgentPanelWidth,
+  loadAgentPanelWidth,
+  saveAgentPanelWidth,
+} from '@/features/canvas/agent-panel-width'
+import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
+import { useI18n } from '@/shared/i18n'
 
 /**
- * Canvas Agent 面板外壳。
- * 仅做组合 —— thread、add menu、composer 保持模块化，
- * 类似 ChatPanel + ChatTranscript + ChatComposer 以及 pi 的按消息类型组件。
+ * Canvas Chat 右侧面板。
+ * 仅做组合 —— thread、composer 保持模块化，类似 ChatPanel + ChatComposer 的边界。
+ * 左边缘支持指针和键盘调宽；threadOpen=false 时完全不渲染。
  */
-export function CanvasAgentDock({
-  dockWrapRef,
-}: {
-  dockWrapRef: RefObject<HTMLDivElement | null>
-}) {
-  const menuId = useId()
+export function CanvasAgentDock() {
+  const { state, collapseThread } = useCanvasRuntime()
+  const { t } = useI18n()
+  const [panelWidth, setPanelWidth] = useState(() => loadAgentPanelWidth(window.innerWidth))
+  const resizeRef = useRef<{
+    pointerId: number
+    startX: number
+    startWidth: number
+  } | null>(null)
+
+  useEffect(() => {
+    const handleResize = () => {
+      setPanelWidth((current) => clampAgentPanelWidth(current, window.innerWidth))
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
+    saveAgentPanelWidth(panelWidth, window.innerWidth)
+  }, [panelWidth])
+
+  useEffect(() => () => {
+    document.body.classList.remove('canvas-chat-panel-resizing')
+  }, [])
+
+  if (!state.threadOpen) {
+    return null
+  }
+
+  const widthBounds = agentPanelWidthBounds(window.innerWidth)
+  const finishResize = () => {
+    if (!resizeRef.current) {
+      return
+    }
+    resizeRef.current = null
+    document.body.classList.remove('canvas-chat-panel-resizing')
+  }
 
   return (
-    <div className="agent-dock-wrap" id="agentDockWrap" ref={dockWrapRef}>
+    <aside
+      className="agent-panel"
+      id="agentPanel"
+      aria-label={t('canvas.agent.panelAria')}
+      style={{ '--agent-panel-width': `${panelWidth}px` } as CSSProperties}
+    >
+      <div
+        className="agent-panel-resize-handle"
+        role="separator"
+        tabIndex={0}
+        aria-label={t('canvas.agent.resize')}
+        aria-orientation="vertical"
+        aria-valuemin={widthBounds.min}
+        aria-valuemax={widthBounds.max}
+        aria-valuenow={panelWidth}
+        onPointerDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          resizeRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: panelWidth,
+          }
+          event.currentTarget.setPointerCapture?.(event.pointerId)
+          document.body.classList.add('canvas-chat-panel-resizing')
+        }}
+        onPointerMove={(event) => {
+          const resize = resizeRef.current
+          if (!resize || resize.pointerId !== event.pointerId) {
+            return
+          }
+          event.preventDefault()
+          setPanelWidth(clampAgentPanelWidth(
+            resize.startWidth + resize.startX - event.clientX,
+            window.innerWidth,
+          ))
+        }}
+        onPointerUp={finishResize}
+        onPointerCancel={finishResize}
+        onLostPointerCapture={finishResize}
+        onKeyDown={(event) => {
+          let nextWidth: number | null = null
+          if (event.key === 'ArrowLeft') {
+            nextWidth = panelWidth + 24
+          } else if (event.key === 'ArrowRight') {
+            nextWidth = panelWidth - 24
+          } else if (event.key === 'Home') {
+            nextWidth = widthBounds.min
+          } else if (event.key === 'End') {
+            nextWidth = widthBounds.max
+          }
+          if (nextWidth === null) {
+            return
+          }
+          event.preventDefault()
+          const next = clampAgentPanelWidth(nextWidth, window.innerWidth)
+          setPanelWidth(next)
+          saveAgentPanelWidth(next, window.innerWidth)
+        }}
+      />
+      <header className="agent-panel-head">
+        <strong>{t('canvas.editor.thread')}</strong>
+        <button
+          className="collapse-thread"
+          type="button"
+          aria-label={t('canvas.agent.collapse')}
+          onClick={collapseThread}
+        >
+          <ChevronRight aria-hidden="true" />
+        </button>
+      </header>
       <CanvasAgentThread />
-      <CanvasAddMenu menuId={menuId} />
-      <CanvasAgentComposer menuId={menuId} />
-    </div>
+      <CanvasAgentComposer />
+    </aside>
   )
 }

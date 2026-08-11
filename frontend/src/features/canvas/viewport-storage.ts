@@ -8,9 +8,9 @@ export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom:
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
-// v3 丢弃了本轮回归期间写入的 v2 视口：首次进入会重新 initial fit 到新布局。
+// v5 丢弃 v4 视口：移除底部 composer，并允许右侧 Chat panel 动态调宽。
 export function canvasViewportStorageKey(canvasId: string): string {
-  return `kkstudio.canvas.viewport.v3:${canvasId}`
+  return `kkstudio.canvas.viewport.v5:${canvasId}`
 }
 
 export function hasStoredCanvasViewport(
