@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.lang.reflect.Proxy;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 
 /** decideToolApproval 加锁：规范加锁顺序、锁定的行基准与锁漂移不变量。 */
@@ -46,9 +48,9 @@ class HarnessRuntimeApprovalLockingTest {
     runtime = new HarnessRuntime(store, clock);
   }
 
-  private ToolApprovalCommand allow(long threadId, long toolId) {
+  private ToolApprovalCommand allow(UUID threadId, UUID toolId) {
     return new ToolApprovalCommand(
-        threadId, toolId, ToolApprovalDecision.ALLOWED, "decision-1", "alice", null);
+        threadId, toolId, ToolApprovalDecision.ALLOWED, TestIds.id(1), "alice", null);
   }
 
   /**
@@ -169,7 +171,7 @@ class HarnessRuntimeApprovalLockingTest {
             new ToolApproval(
                 true,
                 ToolApprovalDecision.ALLOWED,
-                "decision-1",
+                TestIds.id(1),
                 "alice",
                 null,
                 current.approval().requestedAt(),
@@ -208,7 +210,7 @@ class HarnessRuntimeApprovalLockingTest {
     // 伪造当前 assistant 的 siblings 为另一把工具（满足分类器序/归属不变量）：目标工具不在其中。
     ToolInvocation otherSibling =
         new ToolInvocation(
-            987L,
+            TestIds.id(987),
             current.modelInvocationId(),
             current.assistantEntryId(),
             current.ordinal(),
@@ -275,7 +277,7 @@ class HarnessRuntimeApprovalLockingTest {
     ToolInvocation detachedTool =
         new ToolInvocation(
             current.id(),
-            999L, // 伪造：同 id 但 modelInvocationId 改变。
+            TestIds.id(999), // 伪造：同 id 但 modelInvocationId 改变。
             current.assistantEntryId(),
             current.ordinal(),
             current.request(),
@@ -340,7 +342,7 @@ class HarnessRuntimeApprovalLockingTest {
     ModelInvocation foreignModel =
         new ModelInvocation(
             model.id(),
-            999L, // 伪造：同 id 但 threadId 属于另一线程。
+            TestIds.id(999), // 伪造：同 id 但 threadId 属于另一线程。
             model.turnStartEntryId(),
             model.basisHeadEntryId(),
             model.request(),

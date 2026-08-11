@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 覆盖：构造期绑定 sessionId 与正整数校验；policy 由调用方显式传入（null 拒绝），disabled/UNKNOWN/UNSUPPORTED/AUTOMATIC/NONE
@@ -35,16 +36,17 @@ import java.util.Set;
  */
 class PromptCacheRequestFinalizerTest {
 
-  private static final long SESSION_ID = 99L;
+  private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000063");
 
   @Test
   void bindsSessionIdAndRejectsInvalid() {
-    assertThrows(IllegalArgumentException.class, () -> new PromptCacheRequestFinalizer(0L));
-    assertThrows(IllegalArgumentException.class, () -> new PromptCacheRequestFinalizer(-1L));
+    assertThrows(NullPointerException.class, () -> new PromptCacheRequestFinalizer(null));
     // 验证构造期 sessionId 绑定：两个不同 sessionId 的 finalizer 必须在同一 request 上产生不同 affinity key。
     ProviderRequest request = requestWith(ProviderCacheControl.none(), List.of(), List.of());
-    PromptCacheRequestFinalizer a = new PromptCacheRequestFinalizer(101L);
-    PromptCacheRequestFinalizer b = new PromptCacheRequestFinalizer(202L);
+    PromptCacheRequestFinalizer a =
+        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
+    PromptCacheRequestFinalizer b =
+        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
     assertNotEquals(
         a.apply(request, affinityPolicy()).cacheControl().affinityKey(),
         b.apply(request, affinityPolicy()).cacheControl().affinityKey());
@@ -123,8 +125,10 @@ class PromptCacheRequestFinalizerTest {
 
   @Test
   void affinityDifferentSessionYieldsDifferentKey() {
-    PromptCacheRequestFinalizer a = new PromptCacheRequestFinalizer(101L);
-    PromptCacheRequestFinalizer b = new PromptCacheRequestFinalizer(202L);
+    PromptCacheRequestFinalizer a =
+        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-000000000065"));
+    PromptCacheRequestFinalizer b =
+        new PromptCacheRequestFinalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
     ProviderRequest request =
         requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
     String keyA = a.apply(request, affinityPolicy()).cacheControl().affinityKey();

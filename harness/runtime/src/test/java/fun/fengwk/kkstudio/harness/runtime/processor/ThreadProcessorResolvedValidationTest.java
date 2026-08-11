@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Resolved 请求与 candidate branch 事实的机械一致性校验：任何不一致都是 Resolver 契约 / 编程错误，抛 ISE 且零 Entry / Command /
@@ -74,7 +75,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   private void assertMismatchRollsBack(BranchSettings mismatchedSettings, boolean requestedYolo) {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -94,9 +95,11 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     assertEquals(1L, thread(fixture.store, baseline.threadId()).revision());
     assertEquals(baseline.rootEntryId(), thread(fixture.store, baseline.threadId()).headEntryId());
     // 零 Invocation mutation：candidate TURN_START 下不存在任何 ModelInvocation。
-    long candidateTurnStartId = fixture.resolver.lastPath.entries().get(1).id();
+    UUID candidateTurnStartIdUuid = fixture.resolver.lastPath.entries().get(1).id();
     assertTrue(
-        inTx(fixture, tx -> tx.findModelInvocationByTurn(baseline.threadId(), candidateTurnStartId))
+        inTx(
+                fixture,
+                tx -> tx.findModelInvocationByTurn(baseline.threadId(), candidateTurnStartIdUuid))
             .isEmpty());
     // 未被 reschedule / complete / 转 rejection：Work 行仍带 claim lease。
     Work threadWork =

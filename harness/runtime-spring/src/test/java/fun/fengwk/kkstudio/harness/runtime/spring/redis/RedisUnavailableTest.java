@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.spring.redis;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,8 +54,8 @@ class RedisUnavailableTest {
             () ->
                 sink.append(
                     new RealtimeEvent.ModelDelta(
-                        1L,
-                        42L,
+                        id(1L),
+                        id(42L),
                         1,
                         1L,
                         new ProviderStreamEvent.TextDelta("hi"),
@@ -68,7 +69,8 @@ class RedisUnavailableTest {
         new RedisRealtimeEventTail(
             stringRedisTemplate, new RedisRealtimeConfig(), new RealtimeEventJsonCodec());
     RuntimeException thrown =
-        assertThrows(RuntimeException.class, () -> tail.readAfter(1L, "0-0", 10, Duration.ZERO));
+        assertThrows(
+            RuntimeException.class, () -> tail.readAfter(id(1L), "0-0", 10, Duration.ZERO));
     assertRedisRelated(thrown);
   }
 

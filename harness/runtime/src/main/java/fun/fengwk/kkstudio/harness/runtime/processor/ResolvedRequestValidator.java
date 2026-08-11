@@ -112,11 +112,11 @@ final class ResolvedRequestValidator {
       throw new IllegalStateException(
           "resolved compaction tokensBefore does not match plan preparation");
     }
-    if (compaction.firstKeptEntryId() != preparation.firstKeptEntryId()) {
+    if (!compaction.firstKeptEntryId().equals(preparation.firstKeptEntryId())) {
       throw new IllegalStateException(
           "resolved compaction firstKeptEntryId does not match plan preparation");
     }
-    if (compaction.cutEntryId() != preparation.cutEntryId()) {
+    if (!compaction.cutEntryId().equals(preparation.cutEntryId())) {
       throw new IllegalStateException(
           "resolved compaction cutEntryId does not match plan preparation");
     }

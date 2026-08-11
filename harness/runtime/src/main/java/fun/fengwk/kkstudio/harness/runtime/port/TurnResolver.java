@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 同步、无副作用、事务外的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelInvocationRequest}。
@@ -24,7 +25,7 @@ public interface TurnResolver {
 
   /** 解析一次 turn；临时基础设施失败以异常表达，由调用方 reschedule。 */
   Result resolve(
-      long threadId,
+      UUID threadId,
       EntryPath path,
       boolean yoloEnabled,
       CompactionPreparation compactionPreparation);

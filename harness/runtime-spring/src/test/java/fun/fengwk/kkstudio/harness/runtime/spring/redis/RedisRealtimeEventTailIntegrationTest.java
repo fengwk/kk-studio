@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.spring.redis;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -45,65 +47,65 @@ class RedisRealtimeEventTailIntegrationTest {
 
   @Test
   void initialCursorIsAStableConcreteLiveEdge() {
-    assertEquals("0-0", tail.initialCursor(21L));
-    appendModelDelta(21L, "one");
-    appendModelDelta(21L, "two");
-    List<Record> retained = tail.readAfter(21L, "0-0", 10, Duration.ZERO);
-    assertEquals(retained.get(1).id(), tail.initialCursor(21L));
-    assertThrows(IllegalArgumentException.class, () -> tail.initialCursor(0L));
+    assertEquals("0-0", tail.initialCursor(id(21L)));
+    appendModelDelta(id(21L), "one");
+    appendModelDelta(id(21L), "two");
+    List<Record> retained = tail.readAfter(id(21L), "0-0", 10, Duration.ZERO);
+    assertEquals(retained.get(1).id(), tail.initialCursor(id(21L)));
+    assertThrows(NullPointerException.class, () -> tail.initialCursor(null));
   }
 
   @Test
   void readsOnlyRecordsAfterExclusiveCursor() {
-    appendModelDelta(11L, "one");
-    appendModelDelta(11L, "two");
+    appendModelDelta(id(11L), "one");
+    appendModelDelta(id(11L), "two");
 
-    List<Record> firstPage = tail.readAfter(11L, "0-0", 10, Duration.ZERO);
+    List<Record> firstPage = tail.readAfter(id(11L), "0-0", 10, Duration.ZERO);
     assertEquals(2, firstPage.size());
-    assertEquals(CODEC.encode(modelDelta(11L, "one")), firstPage.get(0).payloadJson());
+    assertEquals(CODEC.encode(modelDelta(id(11L), "one")), firstPage.get(0).payloadJson());
 
-    List<Record> secondPage = tail.readAfter(11L, firstPage.get(0).id(), 10, Duration.ZERO);
+    List<Record> secondPage = tail.readAfter(id(11L), firstPage.get(0).id(), 10, Duration.ZERO);
     assertEquals(1, secondPage.size());
     assertEquals(firstPage.get(1).id(), secondPage.get(0).id());
-    assertEquals(CODEC.encode(modelDelta(11L, "two")), secondPage.get(0).payloadJson());
+    assertEquals(CODEC.encode(modelDelta(id(11L), "two")), secondPage.get(0).payloadJson());
   }
 
   @Test
   void countLimitsPageSizeAndPagingContinuesFromCursor() {
-    appendModelDelta(12L, "frag-0");
-    appendModelDelta(12L, "frag-1");
-    appendModelDelta(12L, "frag-2");
+    appendModelDelta(id(12L), "frag-0");
+    appendModelDelta(id(12L), "frag-1");
+    appendModelDelta(id(12L), "frag-2");
 
-    List<Record> firstPage = tail.readAfter(12L, "0-0", 2, Duration.ZERO);
+    List<Record> firstPage = tail.readAfter(id(12L), "0-0", 2, Duration.ZERO);
     assertEquals(2, firstPage.size());
-    assertEquals(CODEC.encode(modelDelta(12L, "frag-0")), firstPage.get(0).payloadJson());
+    assertEquals(CODEC.encode(modelDelta(id(12L), "frag-0")), firstPage.get(0).payloadJson());
 
-    List<Record> rest = tail.readAfter(12L, firstPage.get(1).id(), 10, Duration.ZERO);
+    List<Record> rest = tail.readAfter(id(12L), firstPage.get(1).id(), 10, Duration.ZERO);
     assertEquals(1, rest.size());
-    assertEquals(CODEC.encode(modelDelta(12L, "frag-2")), rest.get(0).payloadJson());
+    assertEquals(CODEC.encode(modelDelta(id(12L), "frag-2")), rest.get(0).payloadJson());
   }
 
   @Test
   void legacyCursorsStartFromRetainedWindow() {
-    appendModelDelta(13L, "one");
-    appendModelDelta(13L, "two");
+    appendModelDelta(id(13L), "one");
+    appendModelDelta(id(13L), "two");
 
-    assertEquals(2, tail.readAfter(13L, null, 10, Duration.ZERO).size());
-    assertEquals(2, tail.readAfter(13L, "", 10, Duration.ZERO).size());
-    assertEquals(2, tail.readAfter(13L, "0", 10, Duration.ZERO).size());
+    assertEquals(2, tail.readAfter(id(13L), null, 10, Duration.ZERO).size());
+    assertEquals(2, tail.readAfter(id(13L), "", 10, Duration.ZERO).size());
+    assertEquals(2, tail.readAfter(id(13L), "0", 10, Duration.ZERO).size());
   }
 
   @Test
   void liveEdgeDoesNotReplayRetainedRecords() {
-    appendModelDelta(14L, "one");
-    appendModelDelta(14L, "two");
-    String liveEdge = tail.initialCursor(14L);
-    assertTrue(tail.readAfter(14L, liveEdge, 10, Duration.ZERO).isEmpty());
+    appendModelDelta(id(14L), "one");
+    appendModelDelta(id(14L), "two");
+    String liveEdge = tail.initialCursor(id(14L));
+    assertTrue(tail.readAfter(id(14L), liveEdge, 10, Duration.ZERO).isEmpty());
   }
 
   @Test
   void stableCursorDoesNotLoseWritesBetweenEmptyReads() {
-    long threadId = 101L;
+    UUID threadId = id(101L);
     String cursor = tail.initialCursor(threadId);
     assertEquals("0-0", cursor);
     assertTrue(tail.readAfter(threadId, cursor, 10, Duration.ZERO).isEmpty());
@@ -117,7 +119,7 @@ class RedisRealtimeEventTailIntegrationTest {
 
   @Test
   void blockingReadReturnsRecordsAppendedWhileWaiting() throws Exception {
-    long threadId = 15L;
+    UUID threadId = id(15L);
     String cursor = tail.initialCursor(threadId);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -139,7 +141,8 @@ class RedisRealtimeEventTailIntegrationTest {
   @Timeout(5)
   void blockingReadTimesOutEmptyWhenNothingArrives() {
     long start = System.nanoTime();
-    List<Record> records = tail.readAfter(16L, tail.initialCursor(16L), 10, Duration.ofMillis(300));
+    List<Record> records =
+        tail.readAfter(id(16L), tail.initialCursor(id(16L)), 10, Duration.ofMillis(300));
     long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
     assertTrue(records.isEmpty());
     assertTrue(
@@ -149,7 +152,7 @@ class RedisRealtimeEventTailIntegrationTest {
 
   @Test
   void rejectsRecordsMissingEventFieldWithoutHidingTheFailure() {
-    long threadId = 17L;
+    UUID threadId = id(17L);
     template.opsForStream().add(CONFIG.key(threadId), Map.of("other", "not-an-event"));
     sink.append(modelDelta(threadId, "later"));
     assertThrows(
@@ -158,20 +161,20 @@ class RedisRealtimeEventTailIntegrationTest {
 
   @Test
   void rejectsMalformedNonCanonicalOrExtraFieldRecords() {
-    long malformedThread = 171L;
+    UUID malformedThread = id(171L);
     template.opsForStream().add(CONFIG.key(malformedThread), Map.of("event", "{"));
     assertThrows(
         IllegalArgumentException.class,
         () -> tail.readAfter(malformedThread, "0-0", 10, Duration.ZERO));
 
-    long nonCanonicalThread = 172L;
+    UUID nonCanonicalThread = id(172L);
     String canonical = CODEC.encode(modelDelta(nonCanonicalThread, "valid"));
     template.opsForStream().add(CONFIG.key(nonCanonicalThread), Map.of("event", " " + canonical));
     assertThrows(
         IllegalArgumentException.class,
         () -> tail.readAfter(nonCanonicalThread, "0-0", 10, Duration.ZERO));
 
-    long extraFieldThread = 173L;
+    UUID extraFieldThread = id(173L);
     template
         .opsForStream()
         .add(
@@ -184,44 +187,50 @@ class RedisRealtimeEventTailIntegrationTest {
 
   @Test
   void returnedListsAreImmutable() {
-    appendModelDelta(18L, "one");
-    List<Record> records = tail.readAfter(18L, "0-0", 10, Duration.ZERO);
+    appendModelDelta(id(18L), "one");
+    List<Record> records = tail.readAfter(id(18L), "0-0", 10, Duration.ZERO);
     assertEquals(1, records.size());
     assertThrows(UnsupportedOperationException.class, () -> records.add(new Record("1-0", "{}")));
     assertThrows(UnsupportedOperationException.class, () -> records.remove(0));
 
-    List<Record> empty = tail.readAfter(18L, tail.initialCursor(18L), 10, Duration.ZERO);
+    List<Record> empty = tail.readAfter(id(18L), tail.initialCursor(id(18L)), 10, Duration.ZERO);
     assertTrue(empty.isEmpty());
     assertThrows(UnsupportedOperationException.class, () -> empty.add(new Record("1-0", "{}")));
   }
 
   @Test
   void readAfterRejectsInvalidArguments() {
-    appendModelDelta(19L, "one");
+    appendModelDelta(id(19L), "one");
+    assertThrows(NullPointerException.class, () -> tail.readAfter(null, "0-0", 10, Duration.ZERO));
     assertThrows(
-        IllegalArgumentException.class, () -> tail.readAfter(0L, "0-0", 10, Duration.ZERO));
+        IllegalArgumentException.class, () -> tail.readAfter(id(19L), "0-0", 0, Duration.ZERO));
     assertThrows(
-        IllegalArgumentException.class, () -> tail.readAfter(19L, "0-0", 0, Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class, () -> tail.readAfter(19L, "0-0", -1, Duration.ZERO));
-    assertThrows(NullPointerException.class, () -> tail.readAfter(19L, "0-0", 10, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> tail.readAfter(19L, "0-0", 10, Duration.ofMillis(-1)));
+        IllegalArgumentException.class, () -> tail.readAfter(id(19L), "0-0", -1, Duration.ZERO));
+    assertThrows(NullPointerException.class, () -> tail.readAfter(id(19L), "0-0", 10, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> tail.readAfter(19L, "0-0", 10, Duration.ofNanos(1_500_000)));
+        () -> tail.readAfter(id(19L), "0-0", 10, Duration.ofMillis(-1)));
     assertThrows(
-        IllegalArgumentException.class, () -> tail.readAfter(19L, "bad-cursor", 10, Duration.ZERO));
-    assertThrows(IllegalArgumentException.class, () -> tail.readAfter(19L, "$", 10, Duration.ZERO));
+        IllegalArgumentException.class,
+        () -> tail.readAfter(id(19L), "0-0", 10, Duration.ofNanos(1_500_000)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> tail.readAfter(id(19L), "bad-cursor", 10, Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class, () -> tail.readAfter(id(19L), "$", 10, Duration.ZERO));
   }
 
-  private void appendModelDelta(long threadId, String text) {
+  private void appendModelDelta(UUID threadId, String text) {
     sink.append(modelDelta(threadId, text));
   }
 
-  private static RealtimeEvent.ModelDelta modelDelta(long threadId, String text) {
+  private static RealtimeEvent.ModelDelta modelDelta(UUID threadId, String text) {
     return new RealtimeEvent.ModelDelta(
-        threadId, threadId * 100L, 1, 1L, new ProviderStreamEvent.TextDelta(text), NOW);
+        threadId,
+        id(threadId.getLeastSignificantBits() * 100L),
+        1,
+        1L,
+        new ProviderStreamEvent.TextDelta(text),
+        NOW);
   }
 }

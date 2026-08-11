@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** ThreadCommand identity、derived-state 与 durable marker 不变量。 */
 class ThreadCommandTest {
@@ -21,7 +23,7 @@ class ThreadCommandTest {
   @Test
   void derivesStateWithoutPersistingStatusOrAppliedAt() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null);
-    ThreadCommand applied = command(2L, 1L, 2L, 99L, null);
+    ThreadCommand applied = command(2L, 1L, 2L, id(99), null);
     ThreadCommand cancelled = command(3L, 1L, 3L, null, CANCELLED);
 
     assertEquals(ThreadCommandState.QUEUED, queued.state());
@@ -33,7 +35,6 @@ class ThreadCommandTest {
     assertTrue(cancelled.state().isTerminal());
     assertEquals(
         List.of(
-            "id",
             "threadId",
             "sequence",
             "payload",
@@ -48,43 +49,35 @@ class ThreadCommandTest {
 
   @Test
   void rejectsInvalidIdentitySequenceAndTerminalMarkers() {
-    assertThrows(IllegalArgumentException.class, () -> command(0L, 1L, 1L, null, null));
-    assertThrows(IllegalArgumentException.class, () -> command(1L, 0L, 1L, null, null));
     assertThrows(IllegalArgumentException.class, () -> command(1L, 1L, 0L, null, null));
+    assertThrows(IllegalArgumentException.class, () -> command(1L, 1L, -1L, null, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ThreadCommand(id(1L), 1L, payload(), null, null, null, CREATED));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), " client", null, null, CREATED));
+        () -> new ThreadCommand(id(1L), 0L, payload(), id(99L), null, null, CREATED));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), " ", null, null, CREATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), "c".repeat(129), null, null, CREATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), "client", 0L, null, CREATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), "client", 99L, CANCELLED, CREATED));
+        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), id(99L), CANCELLED, CREATED));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadCommand(
-                1L, 1L, 1L, payload(), "client", null, CREATED.minusSeconds(1), CREATED));
+                id(1L), 1L, payload(), id(99L), null, CREATED.minusSeconds(1), CREATED));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadCommand(1L, 1L, 1L, payload(), "client", null, null, null));
+        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), null, null, null));
   }
 
   @Test
   void consumeTransitionsQueuedToAppliedWithConsumedTurnStart() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null);
-    ThreadCommand consumed = queued.consume(99L);
+    ThreadCommand consumed = queued.consume(id(99));
     assertEquals(ThreadCommandState.APPLIED, consumed.state());
-    assertEquals(99L, consumed.consumedTurnStartEntryId());
+    assertEquals(id(99), consumed.consumedTurnStartEntryId());
     assertNull(consumed.cancelledAt());
     // identity 不变
-    assertEquals(queued.id(), consumed.id());
     assertEquals(queued.threadId(), consumed.threadId());
     assertEquals(queued.sequence(), consumed.sequence());
     assertEquals(queued.payload(), consumed.payload());
@@ -103,34 +96,26 @@ class ThreadCommandTest {
 
   @Test
   void terminalCommandsRejectFurtherTransitions() {
-    ThreadCommand applied = command(1L, 1L, 1L, 99L, null);
+    ThreadCommand applied = command(1L, 1L, 1L, id(99), null);
     ThreadCommand cancelled = command(2L, 1L, 2L, null, CANCELLED);
-    assertThrows(IllegalStateException.class, () -> applied.consume(100L));
+    assertThrows(IllegalStateException.class, () -> applied.consume(id(100)));
     assertThrows(IllegalStateException.class, () -> applied.cancel(CANCELLED));
-    assertThrows(IllegalStateException.class, () -> cancelled.consume(100L));
+    assertThrows(IllegalStateException.class, () -> cancelled.consume(id(100)));
     assertThrows(IllegalStateException.class, () -> cancelled.cancel(CANCELLED.plusSeconds(1)));
   }
 
   @Test
   void consumeRejectsNonPositiveTurnStartAndCancelRejectsPastTime() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null);
-    assertThrows(IllegalArgumentException.class, () -> queued.consume(0L));
-    assertThrows(IllegalArgumentException.class, () -> queued.consume(-1L));
+    assertThrows(NullPointerException.class, () -> queued.consume(null));
     assertThrows(IllegalArgumentException.class, () -> queued.cancel(CREATED.minusSeconds(1)));
     assertThrows(NullPointerException.class, () -> queued.cancel(null));
   }
 
   private static ThreadCommand command(
-      long id, long threadId, long sequence, Long consumedTurnStartEntryId, Instant cancelledAt) {
+      long id, long threadId, long sequence, UUID consumedTurnStartEntryId, Instant cancelledAt) {
     return new ThreadCommand(
-        id,
-        threadId,
-        sequence,
-        payload(),
-        "client-" + id,
-        consumedTurnStartEntryId,
-        cancelledAt,
-        CREATED);
+        id(threadId), sequence, payload(), id(id), consumedTurnStartEntryId, cancelledAt, CREATED);
   }
 
   private static ThreadCommandPayload payload() {

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -25,12 +26,12 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -198,7 +199,7 @@ class ToolProcessorRecoveryTest {
             tool.succeed(
                 ToolProcessorTestSupport.successResult("call-1", new TextToolContent("ok")),
                 ToolProcessorTestSupport.NOW));
-    long resultEntryId =
+    UUID resultEntryId =
         ToolProcessorTestSupport.insertToolResultEntry(
             fixture.store, fixture.baseline, ToolProcessorTestSupport.NOW);
     ToolProcessorTestSupport.transition(
@@ -641,7 +642,7 @@ class ToolProcessorRecoveryTest {
   @Test
   void abandonDuringHeartbeatStartupBouncesWithoutStartingGateway() {
     AtomicReference<ToolProcessor> processorRef = new AtomicReference<>();
-    AtomicLong cancelId = new AtomicLong();
+    AtomicReference<UUID> cancelId = new AtomicReference<>();
     ScheduledExecutorService base = ToolProcessorTestSupport.newScheduler();
     schedulers.add(base);
     ScheduledExecutorService hooked =
@@ -770,7 +771,7 @@ class ToolProcessorRecoveryTest {
     assertTrue(fixture.sink.events.isEmpty());
 
     assertFalse(fixture.processor.cancel(fixture.toolInvocationId));
-    assertThrows(IllegalArgumentException.class, () -> fixture.processor.cancel(0));
+    assertThrows(NullPointerException.class, () -> fixture.processor.cancel(null));
   }
 
   /** close 取消全部本地 execution；durable 行保持 RUNNING 等待 lease 恢复。 */
@@ -989,7 +990,7 @@ class ToolProcessorRecoveryTest {
         tool ->
             tool.decideApproval(
                 ToolApprovalDecision.DENIED,
-                "decision-1",
+                id(1L),
                 "actor",
                 "no",
                 ToolProcessorTestSupport.NOW,
@@ -1101,7 +1102,7 @@ class ToolProcessorRecoveryTest {
   void cancelWithLostWorkDuringHeartbeatStartupReturnsLost() {
     AtomicReference<ToolProcessor> processorRef = new AtomicReference<>();
     AtomicReference<ToolProcessorTestSupport.Fixture> fixtureRef = new AtomicReference<>();
-    AtomicLong cancelId = new AtomicLong();
+    AtomicReference<UUID> cancelId = new AtomicReference<>();
     ScheduledExecutorService base = ToolProcessorTestSupport.newScheduler();
     schedulers.add(base);
     ScheduledExecutorService hooked =

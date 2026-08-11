@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /** durable Tool approval 状态的严格、确定性 JSON codec。 */
 public final class ToolApprovalJsonCodec {
@@ -50,7 +51,7 @@ public final class ToolApprovalJsonCodec {
     boolean required = InvocationJsonSupport.bool(node, "required", CONTEXT);
     ToolApprovalDecision decision =
         InvocationJsonSupport.nullableEnum(node, "decision", ToolApprovalDecision.class, CONTEXT);
-    String decisionId = InvocationJsonSupport.nullableText(node, "decisionId", CONTEXT);
+    UUID decisionId = InvocationJsonSupport.nullableUuid(node, "decisionId", CONTEXT);
     String actor = InvocationJsonSupport.nullableText(node, "actor", CONTEXT);
     String reason = InvocationJsonSupport.nullableText(node, "reason", CONTEXT);
     Instant requestedAt = InvocationJsonSupport.nullableInstant(node, "requestedAt", CONTEXT);

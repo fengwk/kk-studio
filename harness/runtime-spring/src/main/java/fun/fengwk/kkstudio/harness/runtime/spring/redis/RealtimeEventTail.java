@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.spring.redis;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Transport-facing realtime event tail，供 Web SSE 等传输层读取 Redis realtime overlay。
@@ -17,18 +18,18 @@ public interface RealtimeEventTail {
    *
    * <p>新订阅故意从 live edge 开始而非重放 retained 历史：遗漏的 durable 或 safe-stream 数据由 snapshot 修复。
    */
-  String initialCursor(long threadId);
+  String initialCursor(UUID threadId);
 
   /**
    * 读取严格晚于 {@code afterId} 的 records；返回列表不可变。{@code block} 必须非负，为正时最多阻塞等待该时长 （Redis 按整毫秒计时），为零时不阻塞。
    */
-  List<Record> readAfter(long threadId, String afterId, int count, Duration block);
+  List<Record> readAfter(UUID threadId, String afterId, int count, Duration block);
 
   /**
    * 把 SSE resume cursor 归一化为 canonical realtime stream cursor {@code ms-seq}。
    *
    * <p>{@code null}、空串或 {@code "0"} 变为 {@code "0-0"}（retained window 起点）；其他值必须是 {@code
-   * digits-digits} 形式。Redis 的瞬时 {@code "$"} offset 不属于可重用 cursor，必须通过 {@link #initialCursor(long)}
+   * digits-digits} 形式。Redis 的瞬时 {@code "$"} offset 不属于可重用 cursor，必须通过 {@link #initialCursor(UUID)}
    * 转换为具体 ID。
    */
   static String normalizeAfterId(String afterId) {

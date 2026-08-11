@@ -31,7 +31,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.LongConsumer;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
@@ -50,13 +51,13 @@ import java.util.function.LongConsumer;
 @Slf4j
 public final class HarnessRuntime {
 
-  private static final LongConsumer NO_OP_CANCELLER = ignored -> {};
+  private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
 
   private final HarnessStore store;
   private final Clock clock;
   private final StopControl stopControl;
-  private final LongConsumer modelExecutionCanceller;
-  private final LongConsumer toolExecutionCanceller;
+  private final Consumer<UUID> modelExecutionCanceller;
+  private final Consumer<UUID> toolExecutionCanceller;
 
   /** 创建完整 Runtime facade，包含 durable Stop commit 之后的 process-local execution 取消能力。 */
   public HarnessRuntime(
@@ -81,8 +82,8 @@ public final class HarnessRuntime {
   HarnessRuntime(
       HarnessStore store,
       Clock clock,
-      LongConsumer modelExecutionCanceller,
-      LongConsumer toolExecutionCanceller) {
+      Consumer<UUID> modelExecutionCanceller,
+      Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.stopControl = new StopControl(store, this.clock);
@@ -105,10 +106,10 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           Instant now = clock.instant();
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          Session session = new Session(sessionId, command.title(), now);
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          Session session = new Session(sessionId, now);
           Entry rootEntry =
               new Entry(
                   rootEntryId,
@@ -195,7 +196,7 @@ public final class HarnessRuntime {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "thread " + command.threadId() + " does not exist"));
-          if (thread.headEntryId() == command.targetEntryId()) {
+          if (thread.headEntryId().equals(command.targetEntryId())) {
             return thread;
           }
           if (thread.revision() != command.expectedRevision()) {
@@ -216,7 +217,7 @@ public final class HarnessRuntime {
                           new HarnessRuntimeNotFoundException(
                               "entry " + command.targetEntryId() + " does not exist"));
           EntryPath targetPath = tx.loadEntryPath(command.targetEntryId());
-          if (targetPath.root().sessionId() != headPath.root().sessionId()) {
+          if (!targetPath.root().sessionId().equals(headPath.root().sessionId())) {
             throw conflict(
                 HarnessRuntimeConflictException.Reason.MOVE_TARGET_CROSS_SESSION,
                 "target entry "
@@ -292,7 +293,7 @@ public final class HarnessRuntime {
           }
           ModelInvocation probeModel =
               tx.findModelInvocation(probe.modelInvocationId()).orElse(null);
-          if (probeModel == null || probeModel.threadId() != command.threadId()) {
+          if (probeModel == null || !probeModel.threadId().equals(command.threadId())) {
             throw approvalNotApplicable(
                 "tool invocation "
                     + probe.id()
@@ -322,7 +323,7 @@ public final class HarnessRuntime {
     if (commit.modelExecutionId() != null) {
       cancelLocalExecution(modelExecutionCanceller, "Model", commit.modelExecutionId());
     }
-    for (long toolExecutionId : commit.toolExecutionIds()) {
+    for (UUID toolExecutionId : commit.toolExecutionIds()) {
       cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
     }
     return commit.result();
@@ -336,7 +337,8 @@ public final class HarnessRuntime {
    * ModelInvocation / Tool siblings：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露任何东西， Model context
    * 仅暴露 Model，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生 状态。
    */
-  public ThreadSnapshot getThreadSnapshot(long threadId) {
+  public ThreadSnapshot getThreadSnapshot(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
           ThreadState thread =
@@ -397,7 +399,7 @@ public final class HarnessRuntime {
   /** 新 batch 入队：CAS 游标、可选 SET_ENVIRONMENT admission、insert + reserve + Work。 */
   private static List<ThreadCommand> enqueueNewBatch(
       HarnessStore.Transaction tx, ThreadCommandBatch batch, ThreadState thread, Instant now) {
-    if (thread.headEntryId() != batch.expectedHeadEntryId()
+    if (!thread.headEntryId().equals(batch.expectedHeadEntryId())
         || thread.nextCommandSequence() != batch.expectedNextCommandSequence()) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR,
@@ -414,7 +416,6 @@ public final class HarnessRuntime {
       NewThreadCommand request = batch.commands().get(i);
       inserted.add(
           new ThreadCommand(
-              tx.nextId(),
               thread.id(),
               nextSequence + i,
               request.payload(),
@@ -485,7 +486,7 @@ public final class HarnessRuntime {
                             + probe.modelInvocationId()
                             + " could not be locked for approval replay of tool "
                             + probe.id()));
-    if (model.threadId() != command.threadId()) {
+    if (!model.threadId().equals(command.threadId())) {
       throw approvalNotApplicable(
           "tool invocation " + probe.id() + " does not belong to thread " + command.threadId());
     }
@@ -497,7 +498,7 @@ public final class HarnessRuntime {
                         "tool invocation "
                             + probe.id()
                             + " could not be locked for approval replay"));
-    if (tool.modelInvocationId() != probe.modelInvocationId()) {
+    if (!tool.modelInvocationId().equals(probe.modelInvocationId())) {
       throw new IllegalStateException(
           "tool invocation " + tool.id() + " changed its model attachment during approval replay");
     }
@@ -539,7 +540,7 @@ public final class HarnessRuntime {
     }
     ToolInvocation tool = null;
     for (ToolInvocation sibling : active.siblings()) {
-      if (sibling.id() == probe.id()) {
+      if (sibling.id().equals(probe.id())) {
         tool = sibling;
         break;
       }
@@ -586,31 +587,31 @@ public final class HarnessRuntime {
     return right.isAfter(left) ? right : left;
   }
 
-  private static LongConsumer modelExecutionCanceller(ModelProcessor processor) {
+  private static Consumer<UUID> modelExecutionCanceller(ModelProcessor processor) {
     Objects.requireNonNull(processor, "modelProcessor");
     return processor::cancel;
   }
 
-  private static LongConsumer toolExecutionCanceller(ToolProcessor processor) {
+  private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
     Objects.requireNonNull(processor, "toolProcessor");
     return processor::cancel;
   }
 
   private static void cancelLocalExecution(
-      LongConsumer canceller, String executionType, long invocationId) {
+      Consumer<UUID> canceller, String executionType, UUID invocationId) {
     try {
       canceller.accept(invocationId);
-    } catch (RuntimeException failure) {
+    } catch (RuntimeException error) {
       log.warn(
-          "cannot cancel process-local {} execution {} after durable Stop commit",
+          "failed to cancel local {} execution {} after durable stop",
           executionType,
           invocationId,
-          failure);
+          error);
     }
   }
 
-  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
-    return conflict(HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
+  private static String contextName(ThreadContext context) {
+    return context.getClass().getSimpleName();
   }
 
   private static HarnessRuntimeConflictException conflict(
@@ -618,7 +619,8 @@ public final class HarnessRuntime {
     return new HarnessRuntimeConflictException(reason, message);
   }
 
-  private static String contextName(ThreadContext context) {
-    return context.getClass().getSimpleName();
+  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
+    return new HarnessRuntimeConflictException(
+        HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
   }
 }

@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
@@ -32,6 +33,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -132,7 +134,7 @@ class HarnessRuntimeSnapshotTest {
   void anotherThreadOwningTheAssistantExposesNoModelOrTools() {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
-    long otherThread = seedThreadAt(store, baseline.assistantEntryId());
+    UUID otherThread = seedThreadAt(store, baseline.assistantEntryId());
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(otherThread);
     assertNull(snapshot.model());
     assertTrue(snapshot.toolSiblings().isEmpty());
@@ -150,7 +152,8 @@ class HarnessRuntimeSnapshotTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "a"), userMessageCommand("cid-2", "b"))));
+            List.of(
+                userMessageCommand(TestIds.id(1), "a"), userMessageCommand(TestIds.id(2), "b"))));
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(
         List.of(1L, 2L), snapshot.queuedCommands().stream().map(c -> c.sequence()).toList());
@@ -168,7 +171,8 @@ class HarnessRuntimeSnapshotTest {
 
   @Test
   void missingThreadIsNotFound() {
-    assertThrows(HarnessRuntimeNotFoundException.class, () -> runtime.getThreadSnapshot(999L));
+    assertThrows(
+        HarnessRuntimeNotFoundException.class, () -> runtime.getThreadSnapshot(TestIds.id(999)));
   }
 
   @Test
@@ -201,7 +205,7 @@ class HarnessRuntimeSnapshotTest {
                         baseline.threadId(),
                         baseline.rootEntryId(),
                         1,
-                        List.of(userMessageCommand("cid-1", "a"))));
+                        List.of(userMessageCommand(TestIds.id(1), "a"))));
               });
       snapshotFuture.get();
       assertEquals(1, enqueueFuture.get().size());
@@ -211,7 +215,7 @@ class HarnessRuntimeSnapshotTest {
     // 终态快照必然看到已入队命令（InMemory monitor 串行化保证线性一致）。
     ThreadSnapshot finalSnapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(1, finalSnapshot.queuedCommands().size());
-    assertEquals("cid-1", finalSnapshot.queuedCommands().get(0).clientCommandId());
+    assertEquals(TestIds.id(1), finalSnapshot.queuedCommands().get(0).clientCommandId());
   }
 
   /**

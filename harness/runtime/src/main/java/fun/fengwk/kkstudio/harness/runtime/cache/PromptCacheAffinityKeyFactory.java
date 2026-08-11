@@ -19,6 +19,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 派生稳定的 Prompt Cache affinity key。
@@ -43,17 +44,15 @@ public final class PromptCacheAffinityKeyFactory {
   private static final String VERSION = "pc1";
 
   /**
-   * 为单次请求派生 affinity key。sessionId 必须为正整数。
+   * 为单次请求派生 affinity key。
    *
-   * @param sessionId 数据库 session 资源 ID，正整数
+   * @param sessionId durable session UUID
    * @param request 不可为 null，且其 model 不能为空
    * @return 形如 {@code pc1-<Base64URL-无padding>} 的字符串
    */
-  public String create(long sessionId, ProviderRequest request) {
+  public String create(UUID sessionId, ProviderRequest request) {
     Objects.requireNonNull(request, "request");
-    if (sessionId <= 0) {
-      throw new IllegalArgumentException("sessionId must be positive");
-    }
+    Objects.requireNonNull(sessionId, "sessionId");
     ModelDescriptor model = Objects.requireNonNull(request.model(), "request.model()");
     List<ProviderMessage> messages =
         Objects.requireNonNull(request.messages(), "request.messages()");
@@ -63,13 +62,13 @@ public final class PromptCacheAffinityKeyFactory {
   }
 
   private static byte[] digest(
-      long sessionId,
+      UUID sessionId,
       ModelDescriptor model,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
     MessageDigest md = newMessageDigest();
     writeField(md, 'V', "version", VERSION);
-    writeField(md, 'S', "sessionId", Long.toString(sessionId));
+    writeField(md, 'S', "sessionId", sessionId.toString());
     writeField(md, 'P', "providerName", model.providerName());
     writeField(md, 'M', "modelName", model.modelName());
     writeLeadingSystemMessages(md, messages);

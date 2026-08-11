@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 /** ThreadProcessor claim 与 admission：非 THREAD claim、duplicate / stale claim 一律 LOST no-op。 */
 class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
@@ -44,7 +45,11 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   void rejectsNonThreadClaim() {
     Fixture fixture = fixture();
     ClaimedWork modelClaim =
-        new ClaimedWork(new WorkTarget(WorkTargetType.MODEL, 1L), 1L, "token", NOW.plusSeconds(60));
+        new ClaimedWork(
+            new WorkTarget(WorkTargetType.MODEL, new UUID(0L, 1L)),
+            1L,
+            "token",
+            NOW.plusSeconds(60));
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(modelClaim));
   }
 
@@ -52,7 +57,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   void duplicateClaimAfterCompletionIsLostNoOp() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -96,7 +101,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
   void duplicateDeliveryWhileProcessingIsLostNoOp() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -193,7 +198,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
     Fixture fixture = fixture(1, claimLosingStore(real, 3));
     var baseline = seedOpenInputTurn(real);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             real,
             baseline.threadId(),
@@ -226,7 +231,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
     Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
     var baseline = seedBaseline(real);
-    long userCommand =
+    UUID userCommand =
         seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());
@@ -247,7 +252,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
     Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 3));
     var baseline = seedBaseline(real);
-    long userCommand =
+    UUID userCommand =
         seedCommand(real, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(real, baseline.threadId());
     ClaimedWork claim = claimThreadWork(real, baseline.threadId());

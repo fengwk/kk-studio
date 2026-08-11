@@ -71,6 +71,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -109,14 +110,14 @@ final class ToolProcessorTestSupport {
 
   /** 一次最小合法 Tool 链的持久 id 快照。 */
   record Baseline(
-      long sessionId,
-      long rootEntryId,
-      long turnStartEntryId,
-      long userEntryId,
-      long assistantEntryId,
-      long threadId) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID userEntryId,
+      UUID assistantEntryId,
+      UUID threadId) {}
 
-  record Seeded(long modelInvocationId, long toolInvocationId) {}
+  record Seeded(UUID modelInvocationId, UUID toolInvocationId) {}
 
   static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
@@ -126,8 +127,8 @@ final class ToolProcessorTestSupport {
     final ScheduledExecutorService scheduler;
     final ToolInvocationRequest request;
     final Baseline baseline;
-    final long modelInvocationId;
-    final long toolInvocationId;
+    final UUID modelInvocationId;
+    final UUID toolInvocationId;
     final ToolProcessor processor;
 
     Fixture(
@@ -187,13 +188,13 @@ final class ToolProcessorTestSupport {
   static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long userEntryId = tx.nextId();
-          long assistantEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           tx.insertEntry(
@@ -217,7 +218,7 @@ final class ToolProcessorTestSupport {
                   userEntryId,
                   assistantPayload("call-1"),
                   now.plusMillis(3)));
-          tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1, 0, now, now));
+          tx.insertThread(new ThreadState(threadId, turnStartEntryId, false, 1L, 0L, now, now));
           return new Baseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
         });
@@ -235,8 +236,8 @@ final class ToolProcessorTestSupport {
       Instant now) {
     return store.transaction(
         tx -> {
-          long modelId = tx.nextId();
-          long toolId = tx.nextId();
+          UUID modelId = tx.nextId();
+          UUID toolId = tx.nextId();
           tx.lockThread(baseline.threadId());
           ModelInvocationRequest modelRequest = modelRequest(yoloEnabled);
           tx.insertModelInvocation(
@@ -293,10 +294,10 @@ final class ToolProcessorTestSupport {
   }
 
   /** 在 ASSISTANT 下插入匹配的 TOOL result Entry 并返回其 id（供 resultEntryId 链接场景）。 */
-  static long insertToolResultEntry(InMemoryHarnessStore store, Baseline baseline, Instant now) {
+  static UUID insertToolResultEntry(InMemoryHarnessStore store, Baseline baseline, Instant now) {
     return store.transaction(
         tx -> {
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertEntry(
               new Entry(
                   id,
@@ -308,18 +309,18 @@ final class ToolProcessorTestSupport {
         });
   }
 
-  static ClaimedWork claim(InMemoryHarnessStore store, long toolInvocationId, Instant now) {
+  static ClaimedWork claim(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     return claim(store, toolInvocationId, now, "token-" + toolInvocationId);
   }
 
   static ClaimedWork claim(
-      InMemoryHarnessStore store, long toolInvocationId, Instant now, String token) {
+      InMemoryHarnessStore store, UUID toolInvocationId, Instant now, String token) {
     return claim(store, toolInvocationId, now, token, now.plusSeconds(60));
   }
 
   static ClaimedWork claim(
       InMemoryHarnessStore store,
-      long toolInvocationId,
+      UUID toolInvocationId,
       Instant now,
       String token,
       Instant leaseUntil) {
@@ -330,7 +331,7 @@ final class ToolProcessorTestSupport {
 
   static void transition(
       InMemoryHarnessStore store,
-      long toolInvocationId,
+      UUID toolInvocationId,
       Function<ToolInvocation, ToolInvocation> transition) {
     store.transaction(
         tx -> {
@@ -344,7 +345,7 @@ final class ToolProcessorTestSupport {
    * READY(null approval) -&gt; DISPATCHING 前置：approval 引入必须经过 READY -&gt; READY 的 not-required
    * 步骤（aggregate transition rule），因此分两步写。
    */
-  static void toDispatched(InMemoryHarnessStore store, long toolInvocationId, Instant now) {
+  static void toDispatched(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     transition(store, toolInvocationId, tool -> tool.markApprovalNotRequired(now));
     transition(store, toolInvocationId, tool -> tool.beginDispatch(now));
   }
@@ -353,20 +354,20 @@ final class ToolProcessorTestSupport {
    * READY(null approval) -&gt; RUNNING(attempt 1) 前置：not-required -&gt; beginDispatch -&gt;
    * markRunning。
    */
-  static void toRunning(InMemoryHarnessStore store, long toolInvocationId, Instant now) {
+  static void toRunning(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     toDispatched(store, toolInvocationId, now);
     transition(store, toolInvocationId, tool -> tool.markRunning(now));
   }
 
-  static ToolInvocation tool(InMemoryHarnessStore store, long toolInvocationId) {
+  static ToolInvocation tool(InMemoryHarnessStore store, UUID toolInvocationId) {
     return store.transaction(tx -> tx.findToolInvocation(toolInvocationId)).orElseThrow();
   }
 
-  static ModelInvocation model(InMemoryHarnessStore store, long modelInvocationId) {
+  static ModelInvocation model(InMemoryHarnessStore store, UUID modelInvocationId) {
     return store.transaction(tx -> tx.findModelInvocation(modelInvocationId)).orElseThrow();
   }
 
-  static ThreadState thread(InMemoryHarnessStore store, long threadId) {
+  static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
@@ -374,7 +375,7 @@ final class ToolProcessorTestSupport {
     return store.transaction(tx -> tx.findWork(target)).orElse(null);
   }
 
-  static Work toolWork(InMemoryHarnessStore store, long toolInvocationId) {
+  static Work toolWork(InMemoryHarnessStore store, UUID toolInvocationId) {
     return work(store, new WorkTarget(WorkTargetType.TOOL, toolInvocationId));
   }
 
@@ -408,7 +409,7 @@ final class ToolProcessorTestSupport {
         });
   }
 
-  static Work threadWork(InMemoryHarnessStore store, long threadId) {
+  static Work threadWork(InMemoryHarnessStore store, UUID threadId) {
     return work(store, new WorkTarget(WorkTargetType.THREAD, threadId));
   }
 
@@ -528,7 +529,7 @@ final class ToolProcessorTestSupport {
   }
 
   private static EntryPayload toolResultPayload(
-      long assistantEntryId, int ordinal, String toolCallId) {
+      UUID assistantEntryId, int ordinal, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
@@ -546,7 +547,8 @@ final class ToolProcessorTestSupport {
 
   /** 从 WAITING_APPROVAL 推进为 READY + ALLOWED decision（completed approval 前置）。 */
   static ToolInvocation decideAllowed(ToolInvocation tool, Instant now) {
-    return tool.decideApproval(ToolApprovalDecision.ALLOWED, "decision-1", "actor", "ok", now, now);
+    return tool.decideApproval(
+        ToolApprovalDecision.ALLOWED, new UUID(0L, 1L), "actor", "ok", now, now);
   }
 
   static ScheduledExecutorService newScheduler() {
@@ -565,7 +567,7 @@ final class ToolProcessorTestSupport {
     final LinkedList<Object> startResults = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
     final List<PreflightCall> preflightCalls = new CopyOnWriteArrayList<>();
-    final ConcurrentHashMap<Long, Listener> listeners = new ConcurrentHashMap<>();
+    final ConcurrentHashMap<UUID, Listener> listeners = new ConcurrentHashMap<>();
     volatile Consumer<Listener> beforeStartReturn;
     volatile Consumer<PreflightCall> preflightHook;
     volatile int preflightCallsCount;
@@ -643,7 +645,7 @@ final class ToolProcessorTestSupport {
       return (StartResult) result;
     }
 
-    Listener listener(long invocationId) {
+    Listener listener(UUID invocationId) {
       return listeners.get(invocationId);
     }
   }

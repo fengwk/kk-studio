@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 不可变 Stop 结果。
@@ -11,7 +12,7 @@ import java.util.Objects;
  * Status#REPLAYED} 标识先前已停止的 TURN_END，而返回的 Thread 可能已指向更新的 Turn。
  */
 public record StopResult(
-    Status status, ThreadState thread, Long stoppedTurnEndEntryId, int cancelledCommandCount) {
+    Status status, ThreadState thread, UUID stoppedTurnEndEntryId, int cancelledCommandCount) {
 
   public StopResult {
     status = Objects.requireNonNull(status, "status");
@@ -23,8 +24,8 @@ public record StopResult(
       if (stoppedTurnEndEntryId != null) {
         throw new IllegalArgumentException("IDLE must not carry a stopped TURN_END id");
       }
-    } else if (stoppedTurnEndEntryId == null || stoppedTurnEndEntryId <= 0) {
-      throw new IllegalArgumentException("STOPPED/REPLAYED require a positive stopped TURN_END id");
+    } else if (stoppedTurnEndEntryId == null) {
+      throw new IllegalArgumentException("STOPPED/REPLAYED require a stopped TURN_END id");
     }
     if (status == Status.REPLAYED && cancelledCommandCount != 0) {
       throw new IllegalArgumentException("REPLAYED must not cancel commands");

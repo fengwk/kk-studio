@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,7 +18,14 @@ class CompactionPayloadTest {
   void acceptsFullHistoryAndTurnPrefixCanonicalShapes() {
     CompactionPayload full =
         new CompactionPayload(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "full", 2L, 4L, null);
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "full",
+            id(2L),
+            id(4L),
+            null);
     assertEquals(EntryType.COMPACTION, full.type());
     assertTrue(full.complete());
     assertNull(full.turnPrefixStartEntryId());
@@ -29,12 +37,12 @@ class CompactionPayloadTest {
             500L,
             false,
             "history",
-            2L,
-            4L,
-            3L);
+            id(2L),
+            id(4L),
+            id(3L));
     assertEquals(CompactionPhase.HISTORY, history.phase());
     assertEquals(CompactionTrigger.OVERFLOW, history.trigger());
-    assertEquals(3L, history.turnPrefixStartEntryId());
+    assertEquals(id(3L), history.turnPrefixStartEntryId());
 
     CompactionPayload prefix =
         new CompactionPayload(
@@ -43,9 +51,9 @@ class CompactionPayloadTest {
             0L,
             true,
             "prefix",
-            2L,
-            4L,
-            3L);
+            id(2L),
+            id(4L),
+            id(3L));
     assertEquals(0L, prefix.tokensBefore());
   }
 
@@ -55,12 +63,26 @@ class CompactionPayloadTest {
         IllegalArgumentException.class,
         () ->
             new CompactionPayload(
-                CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, true, "x", 2L, 4L, 3L));
+                CompactionPhase.HISTORY,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                true,
+                "x",
+                id(2L),
+                id(4L),
+                id(3L)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, false, "x", 2L, 4L, null));
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                false,
+                "x",
+                id(2L),
+                id(4L),
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -70,9 +92,9 @@ class CompactionPayloadTest {
                 500L,
                 false,
                 "x",
-                2L,
-                4L,
-                3L));
+                id(2L),
+                id(4L),
+                id(3L)));
   }
 
   @Test
@@ -86,8 +108,8 @@ class CompactionPayloadTest {
                 500L,
                 false,
                 "x",
-                2L,
-                4L,
+                id(2L),
+                id(4L),
                 null));
     assertThrows(
         IllegalArgumentException.class,
@@ -98,14 +120,21 @@ class CompactionPayloadTest {
                 500L,
                 true,
                 "x",
-                2L,
-                4L,
+                id(2L),
+                id(4L),
                 null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "x", 2L, 4L, 3L));
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                true,
+                "x",
+                id(2L),
+                id(4L),
+                id(3L)));
   }
 
   @Test
@@ -114,22 +143,26 @@ class CompactionPayloadTest {
         IllegalArgumentException.class,
         () ->
             new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, " ", 2L, 4L, null));
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                true,
+                " ",
+                id(2L),
+                id(4L),
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, -1L, true, "x", 2L, 4L, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "x", 0L, 4L, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionPayload(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "x", 2L, -3L, null));
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                -1L,
+                true,
+                "x",
+                id(2L),
+                id(4L),
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -139,8 +172,8 @@ class CompactionPayloadTest {
                 500L,
                 true,
                 "x",
-                2L,
-                4L,
-                -1L));
+                id(2L),
+                id(4L),
+                null));
   }
 }

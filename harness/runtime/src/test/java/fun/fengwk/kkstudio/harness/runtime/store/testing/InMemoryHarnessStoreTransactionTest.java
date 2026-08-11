@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,12 +32,13 @@ class InMemoryHarnessStoreTransactionTest {
 
   @Test
   void commitsChangesAndMakesThemVisibleToLaterTransactions() {
+    UUID sessionId = TestIds.id(1);
     store.transaction(
         tx -> {
-          tx.insertSession(session(1));
+          tx.insertSession(session(sessionId));
           return null;
         });
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isPresent()));
   }
 
   @Test
@@ -47,60 +49,62 @@ class InMemoryHarnessStoreTransactionTest {
   @Test
   void rollsBackOnRuntimeExceptionAndRethrowsTheSameInstance() {
     RuntimeException failure = new IllegalStateException("boom");
+    UUID sessionId = TestIds.id(1);
     RuntimeException thrown =
         assertThrows(
             RuntimeException.class,
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(sessionId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
   }
 
   @Test
   void rollsBackOnError() {
     Error failure = new AssertionError("boom");
+    UUID sessionId = TestIds.id(1);
     Error thrown =
         assertThrows(
             Error.class,
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(sessionId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
   }
 
   @Test
   void nextIdStartsAtOneAndIncreasesAcrossCommittedTransactions() {
-    assertEquals(1L, store.transaction(HarnessStore.Transaction::nextId));
-    assertEquals(2L, store.transaction(HarnessStore.Transaction::nextId));
-    assertEquals(3L, store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(1), store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(2), store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(3), store.transaction(HarnessStore.Transaction::nextId));
   }
 
   @Test
   void nextIdIsRestoredAfterRollback() {
-    assertEquals(1L, store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(1), store.transaction(HarnessStore.Transaction::nextId));
     assertThrows(
         RuntimeException.class,
         () ->
             store.transaction(
                 tx -> {
-                  assertEquals(2L, tx.nextId());
+                  assertEquals(TestIds.id(2), tx.nextId());
                   throw new IllegalStateException("boom");
                 }));
-    assertEquals(2L, store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(2), store.transaction(HarnessStore.Transaction::nextId));
   }
 
   @Test
   void nextIdOverflowAbortsTheTransactionAndKeepsTheCounter() {
     InMemoryHarnessStore seeded = new InMemoryHarnessStore(Long.MAX_VALUE - 1);
-    assertEquals(Long.MAX_VALUE, seeded.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(TestIds.id(Long.MAX_VALUE), seeded.transaction(HarnessStore.Transaction::nextId));
     assertThrows(
         ArithmeticException.class, () -> seeded.transaction(HarnessStore.Transaction::nextId));
   }
@@ -108,10 +112,11 @@ class InMemoryHarnessStoreTransactionTest {
   @Test
   void transactionHandleIsRejectedAfterCommit() {
     HarnessStore.Transaction escaped = store.transaction(tx -> tx);
+    UUID sessionId = TestIds.id(1);
     assertThrows(IllegalStateException.class, escaped::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(1)));
-    assertThrows(IllegalStateException.class, () -> escaped.findSession(1));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(1));
+    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(sessionId)));
+    assertThrows(IllegalStateException.class, () -> escaped.findSession(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(sessionId));
   }
 
   @Test
@@ -126,7 +131,8 @@ class InMemoryHarnessStoreTransactionTest {
                   throw new IllegalStateException("boom");
                 }));
     assertThrows(IllegalStateException.class, escaped[0]::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(1));
+    UUID sessionId = TestIds.id(1);
+    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(sessionId));
   }
 
   @Test
@@ -138,7 +144,8 @@ class InMemoryHarnessStoreTransactionTest {
                 CompletableFuture.supplyAsync(
                         () ->
                             assertThrows(
-                                IllegalStateException.class, () -> tx.insertSession(session(1))),
+                                IllegalStateException.class,
+                                () -> tx.insertSession(session(TestIds.id(1)))),
                         executor)
                     .join();
             assertEquals(
@@ -146,7 +153,7 @@ class InMemoryHarnessStoreTransactionTest {
             return null;
           });
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(1)).isEmpty()));
   }
 
   @Test
@@ -157,12 +164,12 @@ class InMemoryHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(TestIds.id(1)));
                       store.transaction(inner -> null);
                       return null;
                     }));
     assertEquals("nested transactions are not supported", thrown.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(1)).isEmpty()));
   }
 
   @Test

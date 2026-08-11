@@ -70,6 +70,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.UnaryOperator;
 
 /**
@@ -97,7 +98,7 @@ public abstract class HarnessStoreInvocationContract {
   void modelAndToolTimestampsRejectSubMillisecondPrecision() {
     ModelInvocation model =
         modelInvocation(
-            1,
+            TestIds.id(1),
             baseline.threadId(),
             baseline.turnStartEntryId(),
             baseline.turnStartEntryId(),
@@ -129,9 +130,17 @@ public abstract class HarnessStoreInvocationContract {
                   tx.insertModelInvocation(nonCanonicalModel);
                 }));
 
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     ToolInvocation tool =
-        toolInvocation(10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            null,
+            T2);
     ToolInvocation nonCanonicalTool =
         new ToolInvocation(
             tool.id(),
@@ -160,7 +169,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -177,7 +186,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          2,
+                          TestIds.id(2),
                           baseline.threadId(),
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
@@ -192,10 +201,13 @@ public abstract class HarnessStoreInvocationContract {
                     tx.findModelInvocationByTurn(baseline.threadId(), baseline.turnStartEntryId()))
             .isPresent());
     assertTrue(
-        store.transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), 42)).isEmpty());
+        store
+            .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), TestIds.id(42)))
+            .isEmpty());
     boolean hasTurnInvocation =
         store.transaction(tx -> tx.hasModelInvocationForTurn(baseline.turnStartEntryId()));
-    boolean hasMissingTurnInvocation = store.transaction(tx -> tx.hasModelInvocationForTurn(42));
+    boolean hasMissingTurnInvocation =
+        store.transaction(tx -> tx.hasModelInvocationForTurn(TestIds.id(42)));
     assertTrue(hasTurnInvocation);
     assertFalse(hasMissingTurnInvocation);
   }
@@ -210,8 +222,8 @@ public abstract class HarnessStoreInvocationContract {
                 tx ->
                     tx.insertModelInvocation(
                         modelInvocation(
-                            1,
-                            999,
+                            TestIds.id(1),
+                            TestIds.id(999),
                             baseline.turnStartEntryId(),
                             baseline.turnStartEntryId(),
                             ModelInvocationStatus.READY,
@@ -227,7 +239,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          2,
+                          TestIds.id(2),
                           baseline.threadId(),
                           baseline.rootEntryId(),
                           baseline.rootEntryId(),
@@ -245,10 +257,10 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          3,
+                          TestIds.id(3),
                           baseline.threadId(),
                           baseline.turnStartEntryId(),
-                          999,
+                          TestIds.id(999),
                           ModelInvocationStatus.READY,
                           null,
                           T1));
@@ -268,7 +280,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(other.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          1,
+                          TestIds.id(1),
                           other.threadId(),
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
@@ -283,7 +295,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  2,
+                  TestIds.id(2),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -296,7 +308,7 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelInvocationRequiresTurnStartOnBasisPath() {
     // 同一 ROOT 下的第二个 TURN_START 形成独立 branch
-    long turnStartB =
+    UUID turnStartB =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
     // turnStartB 不在 basis path [root, turnStartA] 上
     assertThrows(
@@ -308,7 +320,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          1,
+                          TestIds.id(1),
                           baseline.threadId(),
                           turnStartB,
                           baseline.turnStartEntryId(),
@@ -323,7 +335,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  3,
+                  TestIds.id(3),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -336,39 +348,39 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelResultEntryTypeAndUniquenessAreEnforced() {
     // 链 A：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
-    long userEntryId =
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantEntryId =
+    UUID assistantEntryId =
         insertChildEntry(store, baseline.sessionId(), userEntryId, assistantPayload("call-1"));
-    long toolResultEntryId =
+    UUID toolResultEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
             assistantEntryId,
             toolResultPayload(assistantEntryId, 0, "call-1"));
     // 链 B：root -> turnStartB -> userB -> errorB
-    long turnStartB =
+    UUID turnStartB =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
-    long userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
-    long errorEntryId =
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID errorEntryId =
         insertChildEntry(store, baseline.sessionId(), userB, assistantErrorPayload());
     // 链 C：root -> turnStartC -> userC -> abortedC
-    long turnStartC =
+    UUID turnStartC =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
-    long userC = insertChildEntry(store, baseline.sessionId(), turnStartC, userMessagePayload());
-    long abortedEntryId =
+    UUID userC = insertChildEntry(store, baseline.sessionId(), turnStartC, userMessagePayload());
+    UUID abortedEntryId =
         insertChildEntry(store, baseline.sessionId(), userC, assistantAbortedPayload());
 
     // ROOT / USER MESSAGE / TOOL MESSAGE 不允许作为 result entry 类型
-    for (long rejected : List.of(baseline.rootEntryId(), userEntryId, toolResultEntryId)) {
+    for (UUID rejected : List.of(baseline.rootEntryId(), userEntryId, toolResultEntryId)) {
       assertThrows(
           IllegalArgumentException.class,
           () ->
               inTransaction(
                   store,
                   tx -> {
-                    long id = tx.nextId();
+                    UUID id = tx.nextId();
                     tx.lockThread(baseline.threadId());
                     tx.insertModelInvocation(
                         modelInvocation(
@@ -394,31 +406,43 @@ public abstract class HarnessStoreInvocationContract {
 
     // assistant / assistant-error / assistant-aborted 在其自身 turn/branch 上被接受
     insertTerminalModel(
-        4,
+        TestIds.id(4),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
         ModelInvocationStatus.CANCELLED,
         assistantEntryId,
         T1);
-    long thread5 =
+    UUID thread5 =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, turnStartB));
               return id;
             });
     insertTerminalModel(
-        5, thread5, turnStartB, turnStartB, ModelInvocationStatus.CANCELLED, errorEntryId, T2);
-    long thread6 =
+        TestIds.id(5),
+        thread5,
+        turnStartB,
+        turnStartB,
+        ModelInvocationStatus.CANCELLED,
+        errorEntryId,
+        T2);
+    UUID thread6 =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, turnStartC));
               return id;
             });
     insertTerminalModel(
-        6, thread6, turnStartC, turnStartC, ModelInvocationStatus.CANCELLED, abortedEntryId, T3);
+        TestIds.id(6),
+        thread6,
+        turnStartC,
+        turnStartC,
+        ModelInvocationStatus.CANCELLED,
+        abortedEntryId,
+        T3);
 
     // resultEntryId 在所有 model invocation 之间全局唯一
     assertThrows(
@@ -427,21 +451,21 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long thread7 = tx.nextId();
+                  UUID thread7 = tx.nextId();
                   tx.insertThread(thread(thread7, baseline.turnStartEntryId()));
                   tx.insertModelInvocation(
                       modelInvocation(
-                          7,
+                          TestIds.id(7),
                           thread7,
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
                           ModelInvocationStatus.READY,
                           null,
                           T4));
-                  tx.lockModelInvocation(7);
+                  tx.lockModelInvocation(TestIds.id(7));
                   tx.updateModelInvocation(
                       modelInvocation(
-                          7,
+                          TestIds.id(7),
                           thread7,
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
@@ -454,10 +478,10 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelResultEntryMustBeOnTheBasisPathAndInTheSameTurn() {
     // 链 B：root -> turnStartB -> userB -> assistantB
-    long turnStartB =
+    UUID turnStartB =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
-    long userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
-    long assistantB = insertChildEntry(store, baseline.sessionId(), userB, assistantPayload());
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID assistantB = insertChildEntry(store, baseline.sessionId(), userB, assistantPayload());
     // 同 session 中跨 turn 的 result 会被拒绝
     assertThrows(
         IllegalArgumentException.class,
@@ -465,7 +489,7 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
@@ -489,18 +513,18 @@ public abstract class HarnessStoreInvocationContract {
                 }));
     // 跨 session 的 result 会被拒绝
     Baseline other = seedThreadBaseline(store);
-    long otherTurnStart =
+    UUID otherTurnStart =
         insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
-    long otherUser =
+    UUID otherUser =
         insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
-    long otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
+    UUID otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
@@ -527,12 +551,12 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void modelResultEntryMustBeABasisPathDescendantNotAnAncestor() {
     // 链：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
-    long userA =
+    UUID userA =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantA =
+    UUID assistantA =
         insertChildEntry(store, baseline.sessionId(), userA, assistantPayload("call-1"));
-    long toolResultA =
+    UUID toolResultA =
         insertChildEntry(
             store, baseline.sessionId(), assistantA, toolResultPayload(assistantA, 0, "call-1"));
     // 将 thread head 迁到 tool result 并在那里创建 model
@@ -550,7 +574,7 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
@@ -577,10 +601,10 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
     // 链：root -> turnStartA -> userA -> assistantA
-    long userA =
+    UUID userA =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
+    UUID assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
     // terminal invocation 不带关联 result entry
     inTransaction(
         store,
@@ -588,17 +612,17 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
                   ModelInvocationStatus.READY,
                   null,
                   T1));
-          ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+          ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -606,14 +630,15 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   locked.createdAt()));
         });
-    ModelInvocation committed = store.transaction(tx -> tx.findModelInvocation(1).orElseThrow());
+    ModelInvocation committed =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
     // 将 thread head 迁移到另一个 session 中无关 branch
     Baseline other = seedThreadBaseline(store);
-    long otherTurnStart =
+    UUID otherTurnStart =
         insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
-    long otherUser =
+    UUID otherUser =
         insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
-    long otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
+    UUID otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
     inTransaction(
         store,
         tx -> {
@@ -625,7 +650,7 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockModelInvocation(1);
+          tx.lockModelInvocation(TestIds.id(1));
           tx.updateModelInvocation(committed);
         });
     // relocation 之后附加 basis/turn path 之外的 entry 仍会被拒绝
@@ -635,19 +660,20 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+                  ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
                   tx.updateModelInvocation(locked.attachResultEntry(otherAssistant, T3));
                 }));
     // relocation 之后在原始 turn 上附加 result entry 仍合法
     inTransaction(
         store,
         tx -> {
-          ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+          ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(locked.attachResultEntry(assistantA, T3));
         });
-    Long committedResultEntryId =
-        store.transaction(tx -> tx.findModelInvocation(1).orElseThrow().resultEntryId());
-    assertEquals(assistantA, committedResultEntryId.longValue());
+    UUID committedResultEntryId =
+        store.transaction(
+            tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow().resultEntryId());
+    assertEquals(assistantA, committedResultEntryId);
   }
 
   @Test
@@ -658,7 +684,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -666,15 +692,15 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   T1));
         });
-    long userEntryId =
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantEntryId =
+    UUID assistantEntryId =
         insertChildEntry(store, baseline.sessionId(), userEntryId, assistantPayload());
     inTransaction(
         store,
         tx -> {
-          ModelInvocation locked = tx.lockModelInvocation(1).orElseThrow();
+          ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(
               modelInvocation(
                   locked.id(),
@@ -685,7 +711,8 @@ public abstract class HarnessStoreInvocationContract {
                   assistantEntryId,
                   locked.createdAt()));
         });
-    ModelInvocation committed = store.transaction(tx -> tx.findModelInvocation(1).orElseThrow());
+    ModelInvocation committed =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
     assertEquals(ModelInvocationStatus.CANCELLED, committed.status());
     assertEquals(assistantEntryId, committed.resultEntryId());
   }
@@ -698,7 +725,7 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -706,7 +733,8 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   T1));
         });
-    ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(1).orElseThrow());
+    ModelInvocation stored =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
 
     // 未持有锁
     assertThrows(
@@ -719,13 +747,13 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockModelInvocation(1);
+                  tx.lockModelInvocation(TestIds.id(1));
                   tx.updateModelInvocation(
                       new ModelInvocation(
                           stored.id(),
                           stored.threadId(),
                           stored.turnStartEntryId(),
-                          stored.basisHeadEntryId() + 1,
+                          TestIds.id(888), // changed basisHeadEntryId
                           stored.request(),
                           stored.status(),
                           stored.attempt(),
@@ -743,7 +771,7 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockModelInvocation(1);
+                  tx.lockModelInvocation(TestIds.id(1));
                   tx.updateModelInvocation(
                       new ModelInvocation(
                           stored.id(),
@@ -764,8 +792,9 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void findAndLockModelInvocationReturnEmptyForMissingIds() {
-    assertTrue(store.<Boolean>transaction(tx -> tx.findModelInvocation(1).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.lockModelInvocation(1).isEmpty()));
+    UUID missingId = TestIds.id(1);
+    assertTrue(store.<Boolean>transaction(tx -> tx.findModelInvocation(missingId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.lockModelInvocation(missingId).isEmpty()));
   }
 
   @Test
@@ -780,7 +809,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          1,
+                          TestIds.id(1),
                           baseline.threadId(),
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
@@ -797,7 +826,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       new ModelInvocation(
-                          2,
+                          TestIds.id(2),
                           baseline.threadId(),
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
@@ -812,7 +841,7 @@ public abstract class HarnessStoreInvocationContract {
                           T1));
                 }));
     // tool insert 时拒绝非 READY status / 正 attempt / 非 null approval
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -822,8 +851,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                10,
-                                1,
+                                TestIds.id(10),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 0,
                                 "call-1",
@@ -839,8 +868,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             new ToolInvocation(
-                                11,
-                                1,
+                                TestIds.id(11),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 0,
                                 toolRequest("call-1"),
@@ -861,8 +890,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             new ToolInvocation(
-                                12,
-                                1,
+                                TestIds.id(12),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 0,
                                 toolRequest("call-1"),
@@ -881,13 +910,20 @@ public abstract class HarnessStoreInvocationContract {
           tx.insertToolInvocations(
               List.of(
                   toolInvocation(
-                      13, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2)));
+                      TestIds.id(13),
+                      TestIds.id(1),
+                      assistantEntryId,
+                      0,
+                      "call-1",
+                      ToolInvocationStatus.READY,
+                      null,
+                      T2)));
           tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
           tx.updateToolInvocations(
               List.of(
                   toolInvocation(
-                      13,
-                      1,
+                      TestIds.id(13),
+                      TestIds.id(1),
                       assistantEntryId,
                       0,
                       "call-1",
@@ -904,12 +940,12 @@ public abstract class HarnessStoreInvocationContract {
    * 仅接受初始状态；terminal apply 走 update）。
    */
   private void insertTerminalModel(
-      long id,
-      long threadId,
-      long turnStartEntryId,
-      long basisHeadEntryId,
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisHeadEntryId,
       ModelInvocationStatus status,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant createdAt) {
     inTransaction(
         store,
@@ -942,13 +978,13 @@ public abstract class HarnessStoreInvocationContract {
    * 仅接受初始状态；terminal apply 走 update）。
    */
   private void insertTerminalTool(
-      long id,
-      long modelInvocationId,
-      long assistantEntryId,
+      UUID id,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
       int ordinal,
       String toolCallId,
       ToolInvocationStatus status,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant createdAt) {
     inTransaction(
         store,
@@ -978,7 +1014,7 @@ public abstract class HarnessStoreInvocationContract {
         });
   }
 
-  private ToolInvocation updateTool(long invocationId, UnaryOperator<ToolInvocation> transition) {
+  private ToolInvocation updateTool(UUID invocationId, UnaryOperator<ToolInvocation> transition) {
     return store.transaction(
         tx -> {
           ToolInvocation current = tx.lockToolInvocation(invocationId).orElseThrow();
@@ -989,18 +1025,18 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 合法 turn 链 TURN_START -> USER -> ASSISTANT(call-1..call-3)，并附带一个 terminal model result。 */
-  private long seedAssistantAndModel() {
-    long userEntryId =
+  private UUID seedAssistantAndModel() {
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantEntryId =
+    UUID assistantEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
             userEntryId,
             assistantPayload("call-1", "call-2", "call-3"));
     insertTerminalModel(
-        1,
+        TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
@@ -1012,17 +1048,24 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void reversedToolBatchIsCanonicalizedAndReverseSiblingLockIsRejected() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        11, 1, assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2),
-                    toolInvocation(
-                        10,
+                        TestIds.id(11),
+                        TestIds.id(1),
+                        assistantEntryId,
                         1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        null,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(10),
+                        TestIds.id(1),
                         assistantEntryId,
                         0,
                         "call-1",
@@ -1035,30 +1078,30 @@ public abstract class HarnessStoreInvocationContract {
     assertEquals(List.of(0, 1), stored.stream().map(ToolInvocation::ordinal).toList());
     store.transaction(
         tx -> {
-          tx.lockToolInvocation(11).orElseThrow();
-          assertThrows(IllegalStateException.class, () -> tx.lockToolInvocation(10));
+          tx.lockToolInvocation(TestIds.id(11)).orElseThrow();
+          assertThrows(IllegalStateException.class, () -> tx.lockToolInvocation(TestIds.id(10)));
           return null;
         });
   }
 
   @Test
   void toolWorkRequiresItsOwningThreadLock() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10,
-                        1,
+                        TestIds.id(10),
+                        TestIds.id(1),
                         assistantEntryId,
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
                         null,
                         T2))));
-    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, 10);
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, TestIds.id(10));
 
     assertThrows(
         IllegalStateException.class, () -> inTransaction(store, tx -> tx.requestWork(target, T2)));
@@ -1074,17 +1117,17 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void toolArgumentsJsonPreservesItsExactLexicalForm() {
     String argumentsJson = "{   }";
-    long userEntryId =
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantEntryId =
+    UUID assistantEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
             userEntryId,
             assistantPayloadWithArguments("call-1", argumentsJson));
     insertTerminalModel(
-        1,
+        TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
@@ -1093,8 +1136,8 @@ public abstract class HarnessStoreInvocationContract {
         T1);
     ToolInvocation invocation =
         new ToolInvocation(
-            10,
-            1,
+            TestIds.id(10),
+            TestIds.id(1),
             assistantEntryId,
             0,
             toolRequest("call-1", argumentsJson),
@@ -1109,19 +1152,28 @@ public abstract class HarnessStoreInvocationContract {
 
     inTransaction(store, tx -> tx.insertToolInvocations(List.of(invocation)));
 
-    ToolInvocation stored = store.transaction(tx -> tx.findToolInvocation(10)).orElseThrow();
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
     assertEquals(argumentsJson, stored.request().call().argumentsJson());
   }
 
   @Test
   void successfulToolEffectsRoundTripAsOneTerminalFact() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     ToolInvocation ready =
-        toolInvocation(10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            null,
+            T2);
     inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
-    updateTool(10, tool -> tool.markApprovalNotRequired(T2));
-    updateTool(10, tool -> tool.beginDispatch(T2));
-    updateTool(10, tool -> tool.markRunning(T2));
+    updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
+    updateTool(TestIds.id(10), tool -> tool.beginDispatch(T2));
+    updateTool(TestIds.id(10), tool -> tool.markRunning(T2));
     ToolEffectBatch effects =
         new ToolEffectBatch(
             List.of(
@@ -1130,9 +1182,10 @@ public abstract class HarnessStoreInvocationContract {
     ToolResult result =
         new ToolResult(
             "call-1", List.of(new TextToolContent("ok")), false, "{\"done\":true}", false);
-    updateTool(10, tool -> tool.succeed(result, effects, T3));
+    updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));
 
-    ToolInvocation stored = store.transaction(tx -> tx.findToolInvocation(10)).orElseThrow();
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
     assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
     assertEquals(result, stored.result());
     assertEquals(effects, stored.effects());
@@ -1140,11 +1193,27 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void caughtLateToolInsertValidationFailureDoesNotCommitAnEarlierBatchItem() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     ToolInvocation first =
-        toolInvocation(10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            null,
+            T2);
     ToolInvocation duplicateOrdinal =
-        toolInvocation(11, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            TestIds.id(11),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            null,
+            T2);
 
     store.transaction(
         tx -> {
@@ -1164,17 +1233,24 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void caughtLateToolUpdateValidationFailureDoesNotCommitAnEarlierBatchItem() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2),
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        null,
+                        T2),
                     toolInvocation(
-                        11,
-                        1,
+                        TestIds.id(11),
+                        TestIds.id(1),
                         assistantEntryId,
                         1,
                         "call-2",
@@ -1187,10 +1263,24 @@ public abstract class HarnessStoreInvocationContract {
           tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
           ToolInvocation valid =
               toolInvocation(
-                  10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.CANCELLED, null, T2);
+                  TestIds.id(10),
+                  TestIds.id(1),
+                  assistantEntryId,
+                  0,
+                  "call-1",
+                  ToolInvocationStatus.CANCELLED,
+                  null,
+                  T2);
           ToolInvocation forgedIdentity =
               toolInvocation(
-                  11, 1, assistantEntryId, 2, "call-3", ToolInvocationStatus.READY, null, T2);
+                  TestIds.id(11),
+                  TestIds.id(1),
+                  assistantEntryId,
+                  2,
+                  "call-3",
+                  ToolInvocationStatus.READY,
+                  null,
+                  T2);
           try {
             tx.updateToolInvocations(List.of(valid, forgedIdentity));
           } catch (IllegalArgumentException ignored) {
@@ -1210,7 +1300,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolInvocationRequiresModelInvocationAndAssistantMessageEntry() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     // 缺少 model invocation
     assertThrows(
         IllegalArgumentException.class,
@@ -1221,8 +1311,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                10,
-                                999,
+                                TestIds.id(10),
+                                TestIds.id(999),
                                 assistantEntryId,
                                 0,
                                 "call-1",
@@ -1234,13 +1324,13 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void toolAssistantEntryMustBeAnAssistantMessage() {
     // 一个 result 为 ASSISTANT_ERROR entry 的 model：合法的 model result，但不是 assistant MESSAGE 来源
-    long userEntryId =
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long errorEntryId =
+    UUID errorEntryId =
         insertChildEntry(store, baseline.sessionId(), userEntryId, assistantErrorPayload());
     insertTerminalModel(
-        1,
+        TestIds.id(1),
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
@@ -1256,8 +1346,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                10,
-                                1,
+                                TestIds.id(10),
+                                TestIds.id(1),
                                 errorEntryId,
                                 0,
                                 "call-1",
@@ -1270,10 +1360,10 @@ public abstract class HarnessStoreInvocationContract {
   void toolInvocationRequiresModelResultEntryEqualsAssistantEntry() {
     // model result 是 assistantA，从 assistantB 发起 tool 会被拒绝
     seedAssistantAndModel();
-    long turnStartB =
+    UUID turnStartB =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
-    long userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
-    long assistantB =
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID assistantB =
         insertChildEntry(store, baseline.sessionId(), userB, assistantPayload("call-1"));
     assertThrows(
         IllegalArgumentException.class,
@@ -1284,8 +1374,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                10,
-                                1,
+                                TestIds.id(10),
+                                TestIds.id(1),
                                 assistantB,
                                 0,
                                 "call-1",
@@ -1296,15 +1386,15 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolInvocationUniqueKeysAreEnforced() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        12,
-                        1,
+                        TestIds.id(12),
+                        TestIds.id(1),
                         assistantEntryId,
                         0,
                         "call-1",
@@ -1321,8 +1411,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                13,
-                                1,
+                                TestIds.id(13),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 0,
                                 "call-2",
@@ -1339,8 +1429,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                12,
-                                1,
+                                TestIds.id(12),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 1,
                                 "call-2",
@@ -1351,7 +1441,7 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolRequestCallMustExactlyMatchTheAssistantToolCallAtTheSameOrdinal() {
-    long assistantEntryId = seedAssistantAndModel(); // assistant calls: call-1, call-2, call-3
+    UUID assistantEntryId = seedAssistantAndModel(); // assistant calls: call-1, call-2, call-3
     // 同 ordinal 处 call id 不匹配
     assertThrows(
         IllegalArgumentException.class,
@@ -1362,8 +1452,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                10,
-                                1,
+                                TestIds.id(10),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 1,
                                 "call-other",
@@ -1380,8 +1470,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         List.of(
                             toolInvocation(
-                                11,
-                                1,
+                                TestIds.id(11),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 5,
                                 "call-5",
@@ -1399,8 +1489,8 @@ public abstract class HarnessStoreInvocationContract {
                         List.of(
                             withRendererKey(
                                 toolInvocation(
-                                    13,
-                                    1,
+                                    TestIds.id(13),
+                                    TestIds.id(1),
                                     assistantEntryId,
                                     0,
                                     "call-1",
@@ -1415,8 +1505,8 @@ public abstract class HarnessStoreInvocationContract {
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        12,
-                        1,
+                        TestIds.id(12),
+                        TestIds.id(1),
                         assistantEntryId,
                         1,
                         "call-2",
@@ -1427,8 +1517,8 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolResultEntryMustBeMatchingToolMessage() {
-    long assistantEntryId = seedAssistantAndModel();
-    long resultEntryId0 =
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID resultEntryId0 =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1436,8 +1526,15 @@ public abstract class HarnessStoreInvocationContract {
             toolResultPayload(assistantEntryId, 0, "call-1", ToolResultStatus.CANCELLED));
     // 匹配的 result link 被接受
     insertTerminalTool(
-        10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.CANCELLED, resultEntryId0, T2);
-    long rendererMismatchResult =
+        TestIds.id(10),
+        TestIds.id(1),
+        assistantEntryId,
+        0,
+        "call-1",
+        ToolInvocationStatus.CANCELLED,
+        resultEntryId0,
+        T2);
+    UUID rendererMismatchResult =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1448,8 +1545,8 @@ public abstract class HarnessStoreInvocationContract {
         IllegalArgumentException.class,
         () ->
             insertTerminalTool(
-                11,
-                1,
+                TestIds.id(11),
+                TestIds.id(1),
                 assistantEntryId,
                 1,
                 "call-2",
@@ -1463,12 +1560,12 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertToolInvocations(
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               1,
                               "call-2",
@@ -1479,7 +1576,7 @@ public abstract class HarnessStoreInvocationContract {
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               1,
                               "call-2",
@@ -1487,13 +1584,13 @@ public abstract class HarnessStoreInvocationContract {
                               assistantEntryId,
                               T3)));
                 }));
-    long resultEntryId1 =
+    UUID resultEntryId1 =
         insertChildEntry(
             store,
             baseline.sessionId(),
             resultEntryId0,
             toolResultPayload(assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED));
-    long resultEntryId2 =
+    UUID resultEntryId2 =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1506,12 +1603,12 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertToolInvocations(
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               2,
                               "call-3",
@@ -1522,7 +1619,7 @@ public abstract class HarnessStoreInvocationContract {
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               2,
                               "call-3",
@@ -1537,12 +1634,12 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertToolInvocations(
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               1,
                               "call-other",
@@ -1553,7 +1650,7 @@ public abstract class HarnessStoreInvocationContract {
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               1,
                               "call-other",
@@ -1563,14 +1660,21 @@ public abstract class HarnessStoreInvocationContract {
                 }));
     // 匹配的 result entry 被接受
     insertTerminalTool(
-        14, 1, assistantEntryId, 2, "call-3", ToolInvocationStatus.CANCELLED, resultEntryId2, T5);
+        TestIds.id(14),
+        TestIds.id(1),
+        assistantEntryId,
+        2,
+        "call-3",
+        ToolInvocationStatus.CANCELLED,
+        resultEntryId2,
+        T5);
   }
 
   @Test
   void toolResultStatusMustExactlyMapTheInvocationStatus() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     // SUCCEEDED 的 ToolResult 不能关联 CANCELLED 的 invocation
-    long succeededResultEntryId =
+    UUID succeededResultEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1582,12 +1686,12 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertToolInvocations(
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               0,
                               "call-1",
@@ -1598,7 +1702,7 @@ public abstract class HarnessStoreInvocationContract {
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               0,
                               "call-1",
@@ -1607,15 +1711,15 @@ public abstract class HarnessStoreInvocationContract {
                               T2)));
                 }));
     // 匹配的 status 被接受
-    long cancelledResultEntryId =
+    UUID cancelledResultEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
             succeededResultEntryId,
             toolResultPayload(assistantEntryId, 1, "call-2", ToolResultStatus.CANCELLED));
     insertTerminalTool(
-        12,
-        1,
+        TestIds.id(12),
+        TestIds.id(1),
         assistantEntryId,
         1,
         "call-2",
@@ -1626,8 +1730,8 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolResultEntryMustNotBeSynthetic() {
-    long assistantEntryId = seedAssistantAndModel();
-    long syntheticResultEntryId =
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID syntheticResultEntryId =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1639,12 +1743,12 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertToolInvocations(
                       List.of(
                           toolInvocation(
                               id,
-                              1,
+                              TestIds.id(1),
                               assistantEntryId,
                               0,
                               "call-1",
@@ -1668,19 +1772,33 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void loadToolInvocationsByAssistantEntryIdReturnsOrdinalOrder() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10, 1, assistantEntryId, 2, "call-3", ToolInvocationStatus.READY, null, T2),
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        2,
+                        "call-3",
+                        ToolInvocationStatus.READY,
+                        null,
+                        T2),
                     toolInvocation(
-                        11, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2),
+                        TestIds.id(11),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        null,
+                        T2),
                     toolInvocation(
-                        12,
-                        1,
+                        TestIds.id(12),
+                        TestIds.id(1),
                         assistantEntryId,
                         1,
                         "call-2",
@@ -1698,14 +1816,14 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void lockToolInvocationsByAssistantEntryIdAllowsBatchTerminalUpdate() {
-    long assistantEntryId = seedAssistantAndModel();
-    long resultEntryId0 =
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID resultEntryId0 =
         insertChildEntry(
             store,
             baseline.sessionId(),
             assistantEntryId,
             toolResultPayload(assistantEntryId, 0, "call-1", ToolResultStatus.CANCELLED));
-    long resultEntryId1 =
+    UUID resultEntryId1 =
         insertChildEntry(
             store,
             baseline.sessionId(),
@@ -1717,10 +1835,17 @@ public abstract class HarnessStoreInvocationContract {
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2),
+                        TestIds.id(10),
+                        TestIds.id(1),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        null,
+                        T2),
                     toolInvocation(
-                        11,
-                        1,
+                        TestIds.id(11),
+                        TestIds.id(1),
                         assistantEntryId,
                         1,
                         "call-2",
@@ -1735,7 +1860,7 @@ public abstract class HarnessStoreInvocationContract {
               List.of(
                   toolInvocation(
                       locked.get(0).id(),
-                      1,
+                      TestIds.id(1),
                       assistantEntryId,
                       locked.get(0).ordinal(),
                       locked.get(0).request().call().id(),
@@ -1744,7 +1869,7 @@ public abstract class HarnessStoreInvocationContract {
                       locked.get(0).createdAt()),
                   toolInvocation(
                       locked.get(1).id(),
-                      1,
+                      TestIds.id(1),
                       assistantEntryId,
                       locked.get(1).ordinal(),
                       locked.get(1).request().call().id(),
@@ -1752,7 +1877,7 @@ public abstract class HarnessStoreInvocationContract {
                       resultEntryId1,
                       locked.get(1).createdAt())));
         });
-    List<Long> resultEntries =
+    List<UUID> resultEntries =
         store.transaction(
             tx ->
                 tx.loadToolInvocationsByAssistantEntryId(assistantEntryId).stream()
@@ -1763,22 +1888,23 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void updateToolInvocationsRequiresLockAndStableIdentity() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10,
-                        1,
+                        TestIds.id(10),
+                        TestIds.id(1),
                         assistantEntryId,
                         0,
                         "call-1",
                         ToolInvocationStatus.READY,
                         null,
                         T2))));
-    ToolInvocation stored = store.transaction(tx -> tx.findToolInvocation(10).orElseThrow());
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10)).orElseThrow());
 
     // 未持有锁
     assertThrows(
@@ -1813,15 +1939,15 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void toolListResultsAreImmutableAndNullElementsAreRejected() {
-    long assistantEntryId = seedAssistantAndModel();
+    UUID assistantEntryId = seedAssistantAndModel();
     inTransaction(
         store,
         tx ->
             tx.insertToolInvocations(
                 List.of(
                     toolInvocation(
-                        10,
-                        1,
+                        TestIds.id(10),
+                        TestIds.id(1),
                         assistantEntryId,
                         0,
                         "call-1",
@@ -1835,7 +1961,14 @@ public abstract class HarnessStoreInvocationContract {
         () ->
             loaded.add(
                 toolInvocation(
-                    11, 1, assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2)));
+                    TestIds.id(11),
+                    TestIds.id(1),
+                    assistantEntryId,
+                    1,
+                    "call-2",
+                    ToolInvocationStatus.READY,
+                    null,
+                    T2)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -1845,8 +1978,8 @@ public abstract class HarnessStoreInvocationContract {
                     tx.insertToolInvocations(
                         Arrays.asList(
                             toolInvocation(
-                                11,
-                                1,
+                                TestIds.id(11),
+                                TestIds.id(1),
                                 assistantEntryId,
                                 1,
                                 "call-2",
@@ -1859,11 +1992,11 @@ public abstract class HarnessStoreInvocationContract {
   // ---- 压缩调用 ----
 
   /** 关闭 baseline INPUT turn 并开一个 COMPACTION turn（head 推进到其 TURN_START）。 */
-  private long openCompactionTurn() {
+  private UUID openCompactionTurn() {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          long userEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   userEntryId,
@@ -1871,11 +2004,11 @@ public abstract class HarnessStoreInvocationContract {
                   baseline.turnStartEntryId(),
                   userMessagePayload(),
                   T1));
-          long assistantEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
-          long endEntryId = tx.nextId();
+          UUID endEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   endEntryId,
@@ -1884,7 +2017,7 @@ public abstract class HarnessStoreInvocationContract {
                   new TurnEndPayload(
                       baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
                   T1));
-          long start = tx.nextId();
+          UUID start = tx.nextId();
           tx.insertEntry(
               new Entry(
                   start,
@@ -1900,11 +2033,11 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 在打开的 COMPACTION turn（head == turnStart）下插入 READY compaction invocation，返回 model id。 */
-  private long insertCompactionInvocation(long turnStart, ModelInvocationRequest request) {
+  private UUID insertCompactionInvocation(UUID turnStart, ModelInvocationRequest request) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -1925,14 +2058,14 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 完整压缩 turn 种子：openCompactionTurn + READY invocation + SUCCEEDED result（元数据/引用按需校验）。 */
-  private long seedCompletedCompactionTurn(
+  private UUID seedCompletedCompactionTurn(
       ModelInvocationRequest request, CompactionPayload resultPayload) {
-    long turnStart = openCompactionTurn();
-    long modelId = insertCompactionInvocation(turnStart, request);
+    UUID turnStart = openCompactionTurn();
+    UUID modelId = insertCompactionInvocation(turnStart, request);
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          long resultEntryId = tx.nextId();
+          UUID resultEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(resultEntryId, baseline.sessionId(), turnStart, resultPayload, T2));
           ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
@@ -1969,7 +2102,7 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   private static ModelInvocationRequest compactionRequest(
-      CompactionPhase phase, long firstKeptEntryId, long cutEntryId, Long turnPrefixStartEntryId) {
+      CompactionPhase phase, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
     ModelInvocationRequest base = modelRequest();
     return new ModelInvocationRequest(
         base.environmentName(),
@@ -1989,12 +2122,20 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionInvocationAcceptsSucceededResultWithExactFrozenMetadata() {
-    ModelInvocationRequest request = compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
+    ModelInvocationRequest request =
+        compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
     CompactionPayload result =
         new CompactionPayload(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 5L, null);
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "summary",
+            TestIds.id(2),
+            TestIds.id(5),
+            null);
 
-    long modelId = seedCompletedCompactionTurn(request, result);
+    UUID modelId = seedCompletedCompactionTurn(request, result);
 
     ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, stored.status());
@@ -2003,21 +2144,29 @@ public abstract class HarnessStoreInvocationContract {
 
   @Test
   void compactionResultRejectsNonSucceededStatusAndMetadataDrift() {
-    ModelInvocationRequest request = compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
+    ModelInvocationRequest request =
+        compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
     CompactionPayload result =
         new CompactionPayload(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 5L, null);
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "summary",
+            TestIds.id(2),
+            TestIds.id(5),
+            null);
 
     // FAILED invocation 携带 COMPACTION result -> 拒绝。
-    long turnStart = openCompactionTurn();
-    long modelId = insertCompactionInvocation(turnStart, request);
+    UUID turnStart = openCompactionTurn();
+    UUID modelId = insertCompactionInvocation(turnStart, request);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             store.transaction(
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  long resultEntryId = tx.nextId();
+                  UUID resultEntryId = tx.nextId();
                   tx.insertEntry(
                       new Entry(resultEntryId, baseline.sessionId(), turnStart, result, T2));
                   ModelInvocation locked = tx.lockModelInvocation(modelId).orElseThrow();
@@ -2037,9 +2186,9 @@ public abstract class HarnessStoreInvocationContract {
             500L,
             true,
             "summary",
-            2L,
-            5L,
-            3L);
+            TestIds.id(2),
+            TestIds.id(5),
+            TestIds.id(3));
     assertThrows(
         IllegalArgumentException.class, () -> seedCompletedCompactionTurn(request, drifted));
   }
@@ -2051,30 +2200,30 @@ public abstract class HarnessStoreInvocationContract {
         IllegalArgumentException.class,
         () ->
             seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.FULL, 2L, 999L, null),
+                compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(999), null),
                 new CompactionPayload(
                     CompactionPhase.FULL,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "summary",
-                    2L,
-                    999L,
+                    TestIds.id(2),
+                    TestIds.id(999),
                     null)));
     // firstKept 与 cut 都存在且位于 result 前，但 firstKept > cut 仍拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.FULL, 5L, 2L, null),
+                compactionRequest(CompactionPhase.FULL, TestIds.id(5), TestIds.id(2), null),
                 new CompactionPayload(
                     CompactionPhase.FULL,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "summary",
-                    5L,
-                    2L,
+                    TestIds.id(5),
+                    TestIds.id(2),
                     null)));
     // firstKept 是 result Entry 自身（不位于 result 之前）-> 拒绝。
     assertThrows(
@@ -2083,10 +2232,10 @@ public abstract class HarnessStoreInvocationContract {
             store.transaction(
                 tx -> {
                   ModelInvocationRequest request =
-                      compactionRequest(CompactionPhase.FULL, 2L, 5L, null);
-                  long turnStart = seedCompactionTurnWithReadyInvocation(tx, request);
-                  long modelId = lastModelId(tx, turnStart);
-                  long resultEntryId = tx.nextId();
+                      compactionRequest(CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null);
+                  UUID turnStart = seedCompactionTurnWithReadyInvocation(tx, request);
+                  UUID modelId = lastModelId(tx, turnStart);
+                  UUID resultEntryId = tx.nextId();
                   tx.insertEntry(
                       new Entry(
                           resultEntryId,
@@ -2099,7 +2248,7 @@ public abstract class HarnessStoreInvocationContract {
                               true,
                               "summary",
                               resultEntryId,
-                              5L,
+                              TestIds.id(5),
                               null),
                           T2));
                   ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
@@ -2117,37 +2266,39 @@ public abstract class HarnessStoreInvocationContract {
         IllegalArgumentException.class,
         () ->
             seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.TURN_PREFIX, 2L, 5L, 5L),
+                compactionRequest(
+                    CompactionPhase.TURN_PREFIX, TestIds.id(2), TestIds.id(5), TestIds.id(5)),
                 new CompactionPayload(
                     CompactionPhase.TURN_PREFIX,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "summary",
-                    2L,
-                    5L,
-                    5L)));
+                    TestIds.id(2),
+                    TestIds.id(5),
+                    TestIds.id(5))));
     // prefix 不在 result 路径上。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             seedCompletedCompactionTurn(
-                compactionRequest(CompactionPhase.TURN_PREFIX, 2L, 5L, 999L),
+                compactionRequest(
+                    CompactionPhase.TURN_PREFIX, TestIds.id(2), TestIds.id(5), TestIds.id(999)),
                 new CompactionPayload(
                     CompactionPhase.TURN_PREFIX,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "summary",
-                    2L,
-                    5L,
-                    999L)));
+                    TestIds.id(2),
+                    TestIds.id(5),
+                    TestIds.id(999))));
   }
 
   @Test
   void turnStartReasonMustMatchCompactionPurpose() {
     // 普通（非压缩）invocation 不能挂在 COMPACTION TURN_START 下。
-    long compactionTurnStart = openCompactionTurn();
+    UUID compactionTurnStart = openCompactionTurn();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -2157,7 +2308,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       modelInvocation(
-                          42,
+                          TestIds.id(42),
                           baseline.threadId(),
                           compactionTurnStart,
                           compactionTurnStart,
@@ -2176,11 +2327,12 @@ public abstract class HarnessStoreInvocationContract {
                   tx.lockThread(baseline.threadId());
                   tx.insertModelInvocation(
                       new ModelInvocation(
-                          43,
+                          TestIds.id(43),
                           baseline.threadId(),
                           baseline.turnStartEntryId(),
                           baseline.turnStartEntryId(),
-                          compactionRequest(CompactionPhase.FULL, 2L, 5L, null),
+                          compactionRequest(
+                              CompactionPhase.FULL, TestIds.id(2), TestIds.id(5), null),
                           ModelInvocationStatus.READY,
                           0,
                           null,
@@ -2193,10 +2345,10 @@ public abstract class HarnessStoreInvocationContract {
   }
 
   /** 在给定事务内：开 COMPACTION turn 链 + READY compaction invocation，返回 turnStart id。 */
-  private long seedCompactionTurnWithReadyInvocation(
+  private UUID seedCompactionTurnWithReadyInvocation(
       HarnessStore.Transaction tx, ModelInvocationRequest request) {
     tx.lockThread(baseline.threadId());
-    long userEntryId = tx.nextId();
+    UUID userEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
             userEntryId,
@@ -2204,10 +2356,10 @@ public abstract class HarnessStoreInvocationContract {
             baseline.turnStartEntryId(),
             userMessagePayload(),
             T1));
-    long assistantEntryId = tx.nextId();
+    UUID assistantEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
-    long endEntryId = tx.nextId();
+    UUID endEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
             endEntryId,
@@ -2216,7 +2368,7 @@ public abstract class HarnessStoreInvocationContract {
             new TurnEndPayload(
                 baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
             T1));
-    long start = tx.nextId();
+    UUID start = tx.nextId();
     tx.insertEntry(
         new Entry(
             start,
@@ -2225,7 +2377,7 @@ public abstract class HarnessStoreInvocationContract {
             new TurnStartPayload(TurnStartReason.COMPACTION, StoreTestSupport.branchSettings()),
             T1));
     tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, false, T2));
-    long modelId = tx.nextId();
+    UUID modelId = tx.nextId();
     tx.insertModelInvocation(
         new ModelInvocation(
             modelId,
@@ -2244,7 +2396,7 @@ public abstract class HarnessStoreInvocationContract {
     return start;
   }
 
-  private long lastModelId(HarnessStore.Transaction tx, long turnStart) {
+  private UUID lastModelId(HarnessStore.Transaction tx, UUID turnStart) {
     return tx.findModelInvocationByTurn(baseline.threadId(), turnStart).orElseThrow().id();
   }
 }

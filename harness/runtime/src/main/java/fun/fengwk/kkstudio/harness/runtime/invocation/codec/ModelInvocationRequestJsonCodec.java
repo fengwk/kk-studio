@@ -119,14 +119,14 @@ public final class ModelInvocationRequestJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("phase", compaction.phase().name());
     node.put("trigger", compaction.trigger().name());
-    // tokensBefore 是数值（decode 用 nonNegativeLong 要求 integral number）；ids 是规范十进制字符串。
+    // tokensBefore 是数值（decode 用 nonNegativeLong 要求 integral number）；ids 是规范 UUID 字符串。
     node.put("tokensBefore", compaction.tokensBefore());
-    node.put("firstKeptEntryId", Long.toString(compaction.firstKeptEntryId()));
-    node.put("cutEntryId", Long.toString(compaction.cutEntryId()));
+    node.put("firstKeptEntryId", compaction.firstKeptEntryId().toString());
+    node.put("cutEntryId", compaction.cutEntryId().toString());
     if (compaction.turnPrefixStartEntryId() == null) {
       node.putNull("turnPrefixStartEntryId");
     } else {
-      node.put("turnPrefixStartEntryId", Long.toString(compaction.turnPrefixStartEntryId()));
+      node.put("turnPrefixStartEntryId", compaction.turnPrefixStartEntryId().toString());
     }
     return node;
   }
@@ -146,44 +146,9 @@ public final class ModelInvocationRequestJsonCodec {
         InvocationJsonSupport.requiredEnum(node, "phase", CompactionPhase.class, "compaction"),
         InvocationJsonSupport.requiredEnum(node, "trigger", CompactionTrigger.class, "compaction"),
         InvocationJsonSupport.nonNegativeLong(node, "tokensBefore", "compaction"),
-        canonicalPositiveId(node, "firstKeptEntryId"),
-        canonicalPositiveId(node, "cutEntryId"),
-        nullableCanonicalPositiveId(node, "turnPrefixStartEntryId"));
-  }
-
-  private static long canonicalPositiveId(ObjectNode node, String field) {
-    String text = InvocationJsonSupport.text(node, field, "compaction");
-    long value;
-    try {
-      value = Long.parseLong(text);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(
-          "compaction." + field + " must be a decimal string", error);
-    }
-    if (value <= 0 || !Long.toString(value).equals(text)) {
-      throw new IllegalArgumentException(
-          "compaction." + field + " must be a canonical positive decimal string");
-    }
-    return value;
-  }
-
-  private static Long nullableCanonicalPositiveId(ObjectNode node, String field) {
-    String text = InvocationJsonSupport.nullableText(node, field, "compaction");
-    if (text == null) {
-      return null;
-    }
-    long value;
-    try {
-      value = Long.parseLong(text);
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(
-          "compaction." + field + " must be a decimal string", error);
-    }
-    if (value <= 0 || !Long.toString(value).equals(text)) {
-      throw new IllegalArgumentException(
-          "compaction." + field + " must be a canonical positive decimal string");
-    }
-    return value;
+        InvocationJsonSupport.requiredUuid(node, "firstKeptEntryId", "compaction"),
+        InvocationJsonSupport.requiredUuid(node, "cutEntryId", "compaction"),
+        InvocationJsonSupport.nullableUuid(node, "turnPrefixStartEntryId", "compaction"));
   }
 
   private static ObjectNode encodeSkill(SkillBinding skill) {

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.request;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -17,6 +18,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** ToolInvocation 纯 transition 方法以及共享的 transition 校验。 */
 class ToolInvocationTransitionTest {
@@ -58,11 +60,11 @@ class ToolInvocationTransitionTest {
       ToolApproval approval,
       ToolResult result,
       ToolInvocationError error,
-      Long resultEntryId) {
+      UUID resultEntryId) {
     return new ToolInvocation(
-        1L,
-        1L,
-        1L,
+        id(1L),
+        id(1L),
+        id(1L),
         0,
         request("bash", "{}"),
         status,
@@ -81,12 +83,12 @@ class ToolInvocationTransitionTest {
 
   private static ToolApproval allowed() {
     return new ToolApproval(
-        true, ToolApprovalDecision.ALLOWED, "d-1", "actor", null, REQUESTED, DECIDED);
+        true, ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED, DECIDED);
   }
 
   private static ToolApproval denied() {
     return new ToolApproval(
-        true, ToolApprovalDecision.DENIED, "d-2", "actor", null, REQUESTED, DECIDED);
+        true, ToolApprovalDecision.DENIED, id(2L), "actor", null, REQUESTED, DECIDED);
   }
 
   private static ToolResult result() {
@@ -134,10 +136,10 @@ class ToolInvocationTransitionTest {
   @Test
   void decideApprovalAllowsBackToReady() {
     ToolInvocation next =
-        waiting().decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T1);
+        waiting().decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T1);
     assertEquals(ToolInvocationStatus.READY, next.status());
     assertEquals(ToolApprovalDecision.ALLOWED, next.approval().decision());
-    assertEquals("d-1", next.approval().decisionId());
+    assertEquals(id(1L), next.approval().decisionId());
     assertEquals(REQUESTED, next.approval().requestedAt());
     assertEquals(DECIDED, next.approval().decidedAt());
     assertNull(next.error());
@@ -148,7 +150,7 @@ class ToolInvocationTransitionTest {
     ToolInvocation next =
         waiting()
             .decideApproval(
-                ToolApprovalDecision.DENIED, "d-2", "actor", "not allowed", DECIDED, T1);
+                ToolApprovalDecision.DENIED, id(2L), "actor", "not allowed", DECIDED, T1);
     assertEquals(ToolInvocationStatus.FAILED, next.status());
     assertEquals(ToolApprovalDecision.DENIED, next.approval().decision());
     assertEquals("DENIED", next.error().kind());
@@ -159,10 +161,10 @@ class ToolInvocationTransitionTest {
   @Test
   void decideApprovalIsExactIdempotentAndConflictsOnRewrites() {
     ToolInvocation decided =
-        waiting().decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T1);
+        waiting().decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T1);
     // 完全相同的 decision payload 重放是 idempotent 的
     ToolInvocation replay =
-        decided.decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T2);
+        decided.decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T2);
     assertEquals(decided.approval(), replay.approval());
     assertEquals(ToolInvocationStatus.READY, replay.status());
     // 相同 decisionId 但不同 payload 视为冲突
@@ -170,19 +172,20 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             decided.decideApproval(
-                ToolApprovalDecision.ALLOWED, "d-1", "other-actor", null, DECIDED, T2));
+                ToolApprovalDecision.ALLOWED, id(1L), "other-actor", null, DECIDED, T2));
     // 已存在但不同的 decision 视为冲突
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            decided.decideApproval(ToolApprovalDecision.DENIED, "d-9", "actor", null, DECIDED, T2));
+            decided.decideApproval(
+                ToolApprovalDecision.DENIED, id(9L), "actor", null, DECIDED, T2));
     // DENIED 终态下的 replay 也是 idempotent 的：每个 decision 事实都保持冻结，只有
     // invocation 的 updatedAt 前进到 replay 时间
     ToolInvocation deniedTerminal =
-        waiting().decideApproval(ToolApprovalDecision.DENIED, "d-2", "actor", null, DECIDED, T1);
+        waiting().decideApproval(ToolApprovalDecision.DENIED, id(2L), "actor", null, DECIDED, T1);
     ToolInvocation deniedReplay =
         deniedTerminal.decideApproval(
-            ToolApprovalDecision.DENIED, "d-2", "actor", null, DECIDED, T2);
+            ToolApprovalDecision.DENIED, id(2L), "actor", null, DECIDED, T2);
     assertEquals(deniedTerminal.status(), deniedReplay.status());
     assertEquals(deniedTerminal.attempt(), deniedReplay.attempt());
     assertEquals(deniedTerminal.approval(), deniedReplay.approval());
@@ -193,7 +196,7 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ready(0, null)
-                .decideApproval(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED, T1));
+                .decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T1));
   }
 
   @Test
@@ -260,9 +263,9 @@ class ToolInvocationTransitionTest {
     ToolInvocation succeeded = running(1, allowed()).succeed(result(), effects, T1);
     assertEquals(effects, succeeded.effects());
 
-    ToolInvocation attached = succeeded.attachResultEntry(99L, T2);
+    ToolInvocation attached = succeeded.attachResultEntry(id(99L), T2);
     assertEquals(effects, attached.effects());
-    assertEquals(99L, attached.resultEntryId());
+    assertEquals(id(99L), attached.resultEntryId());
 
     ToolEffectBatch changed =
         new ToolEffectBatch(
@@ -291,9 +294,9 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             new ToolInvocation(
-                2L,
-                1L,
-                1L,
+                id(2L),
+                id(1L),
+                id(1L),
                 0,
                 request("bash", "{}"),
                 ToolInvocationStatus.FAILED,
@@ -309,9 +312,9 @@ class ToolInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             new ToolInvocation(
-                3L,
-                1L,
-                1L,
+                id(3L),
+                id(1L),
+                id(1L),
                 0,
                 request("bash", "{}"),
                 ToolInvocationStatus.RUNNING,
@@ -392,9 +395,9 @@ class ToolInvocationTransitionTest {
   void undecidedDecisionMustMatchItsStatus() {
     ToolInvocation stored = waiting();
     ToolApproval allowedDecision =
-        stored.approval().decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+        stored.approval().decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
     ToolApproval deniedDecision =
-        stored.approval().decide(ToolApprovalDecision.DENIED, "d-2", "actor", null, DECIDED);
+        stored.approval().decide(ToolApprovalDecision.DENIED, id(2L), "actor", null, DECIDED);
     // ALLOWED 必须恢复为 READY，DENIED 必须以 FAILED 终止
     assertThrows(
         IllegalArgumentException.class,
@@ -437,13 +440,14 @@ class ToolInvocationTransitionTest {
 
   @Test
   void attachResultEntryLinksOnlyOnTerminal() {
-    ToolInvocation attached = succeeded(1).attachResultEntry(99L, T1);
-    assertEquals(99L, attached.resultEntryId());
+    ToolInvocation attached = succeeded(1).attachResultEntry(id(99L), T1);
+    assertEquals(id(99L), attached.resultEntryId());
     assertEquals(result(), attached.result());
-    assertThrows(IllegalArgumentException.class, () -> ready(0, null).attachResultEntry(1L, T1));
+    assertThrows(
+        IllegalArgumentException.class, () -> ready(0, null).attachResultEntry(id(1L), T1));
     assertThrows(
         IllegalArgumentException.class,
-        () -> succeeded(1).attachResultEntry(99L, T1).attachResultEntry(100L, T2));
+        () -> succeeded(1).attachResultEntry(id(99L), T1).attachResultEntry(id(100L), T2));
   }
 
   @Test
@@ -452,7 +456,7 @@ class ToolInvocationTransitionTest {
     ToolInvocation.validateTransition(stored, stored);
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(stored, withId(stored, 2L)));
+        () -> ToolInvocation.validateTransition(stored, withId(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(stored, withRequest(stored)));
@@ -508,7 +512,7 @@ class ToolInvocationTransitionTest {
     // 已决定 approval 即使 decision 相同但 reason 不同也视为不可变
     ToolApproval otherAllowed =
         new ToolApproval(
-            true, ToolApprovalDecision.ALLOWED, "d-1", "actor", "new reason", REQUESTED, DECIDED);
+            true, ToolApprovalDecision.ALLOWED, id(1L), "actor", "new reason", REQUESTED, DECIDED);
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(ready(0, allowed()), ready(0, otherAllowed)));
@@ -535,16 +539,17 @@ class ToolInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(succeeded, changedResult));
-    ToolInvocation attached = succeeded.attachResultEntry(99L, T1);
+    ToolInvocation attached = succeeded.attachResultEntry(id(99L), T1);
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(attached, withResultEntry(attached, null)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(attached, attached.attachResultEntry(100L, T2)));
+        () ->
+            ToolInvocation.validateTransition(attached, attached.attachResultEntry(id(100L), T2)));
   }
 
-  private static ToolInvocation withId(ToolInvocation source, long id) {
+  private static ToolInvocation withId(ToolInvocation source, UUID id) {
     return new ToolInvocation(
         id,
         source.modelInvocationId(),
@@ -629,7 +634,7 @@ class ToolInvocationTransitionTest {
         updatedAt);
   }
 
-  private static ToolInvocation withResultEntry(ToolInvocation source, Long resultEntryId) {
+  private static ToolInvocation withResultEntry(ToolInvocation source, UUID resultEntryId) {
     return new ToolInvocation(
         source.id(),
         source.modelInvocationId(),

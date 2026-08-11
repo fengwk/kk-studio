@@ -21,10 +21,10 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -733,7 +733,7 @@ class ToolProcessorPreflightTest {
   @Test
   void cancelDuringHeartbeatStartupInPreflightPathReschedules() {
     AtomicReference<ToolProcessor> processorRef = new AtomicReference<>();
-    AtomicLong cancelId = new AtomicLong();
+    AtomicReference<UUID> cancelId = new AtomicReference<>();
     ScheduledExecutorService base = ToolProcessorTestSupport.newScheduler();
     schedulers.add(base);
     ScheduledExecutorService hooked =

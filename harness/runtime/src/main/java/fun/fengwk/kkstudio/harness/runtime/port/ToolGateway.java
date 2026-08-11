@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Tool 执行 admission 端口：preflight 权限判定与 execution 提交。
@@ -38,22 +39,16 @@ public interface ToolGateway {
    * ToolExecutionContext 需要的持久线程所有权。
    */
   record Execution(
-      long invocationId,
-      long threadId,
-      long assistantEntryId,
+      UUID invocationId,
+      UUID threadId,
+      UUID assistantEntryId,
       int proposedAttempt,
       ToolInvocationRequest request) {
 
     public Execution {
-      if (invocationId <= 0) {
-        throw new IllegalArgumentException("invocationId must be positive");
-      }
-      if (threadId <= 0) {
-        throw new IllegalArgumentException("threadId must be positive");
-      }
-      if (assistantEntryId <= 0) {
-        throw new IllegalArgumentException("assistantEntryId must be positive");
-      }
+      Objects.requireNonNull(invocationId, "invocationId");
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(assistantEntryId, "assistantEntryId");
       if (proposedAttempt <= 0) {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }

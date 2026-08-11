@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /** durable Invocation value codec 共享的 feature-local 严格 JSON 原语。 */
 final class InvocationJsonSupport {
@@ -176,6 +177,27 @@ final class InvocationJsonSupport {
     }
   }
 
+  static UUID nullableUuid(ObjectNode node, String field, String context) {
+    String value = nullableText(node, field, context);
+    if (value == null) {
+      return null;
+    }
+    try {
+      return UUID.fromString(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID string", error);
+    }
+  }
+
+  static UUID requiredUuid(ObjectNode node, String field, String context) {
+    UUID value = nullableUuid(node, field, context);
+    if (value == null) {
+      throw new IllegalArgumentException(context + " must declare non-null " + field);
+    }
+    return value;
+  }
+
   static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {
     String value = nullableText(node, field, context);
     return value == null ? null : new EnvironmentName(value);
@@ -207,6 +229,10 @@ final class InvocationJsonSupport {
   }
 
   static void putNullable(ObjectNode node, String field, Instant value) {
+    putNullable(node, field, value == null ? null : value.toString());
+  }
+
+  static void putNullable(ObjectNode node, String field, UUID value) {
     putNullable(node, field, value == null ? null : value.toString());
   }
 

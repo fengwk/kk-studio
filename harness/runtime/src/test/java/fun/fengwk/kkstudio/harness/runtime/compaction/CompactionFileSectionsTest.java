@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,6 +37,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * CompactionFileSections 契约：从被摘要范围重算 read/write/edit 文件清单，modified 覆盖 read、字典序去重、HISTORY 阶段 只覆盖到
@@ -43,7 +45,6 @@ import java.util.List;
  */
 class CompactionFileSectionsTest {
 
-  private static final long SESSION = 100L;
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
       new BranchSettings(
@@ -66,7 +67,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te1, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
 
     String sections = CompactionFileSections.sections(path.path(), request);
 
@@ -89,7 +90,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te1, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
 
     assertEquals(
         "<read-files>\nkept.txt\n</read-files>",
@@ -115,7 +116,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, 2L, te2, ts2);
+            CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), id(ts2));
 
     assertEquals(
         "<read-files>\nhistory.txt\n</read-files>",
@@ -136,12 +137,12 @@ class CompactionFileSectionsTest {
 
     CompactionRequest missingCut =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, 999L, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(999L), null);
     IllegalStateException cutError =
         assertThrows(
             IllegalStateException.class,
             () -> CompactionFileSections.sections(path.path(), missingCut));
-    assertTrue(cutError.getMessage().contains("999"), cutError.getMessage());
+    assertTrue(cutError.getMessage().contains(id(999L).toString()), cutError.getMessage());
   }
 
   @Test
@@ -154,7 +155,7 @@ class CompactionFileSectionsTest {
     path.assistant("read", "legacy.txt");
     path.toolResults();
     long te1 = path.turnEnd(ts1);
-    path.compactionComplete(2L, te1, null); // 第一次 FULL 压缩
+    path.compactionComplete(id(2L), id(te1), null); // 第一次 FULL 压缩
     long ts2 = path.turnStart();
     path.user("u2");
     long asst2 = path.assistant("read", "new.txt");
@@ -164,7 +165,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te2, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), null);
 
     assertEquals(
         "<read-files>\nlegacy.txt\nnew.txt\n</read-files>",
@@ -180,7 +181,7 @@ class CompactionFileSectionsTest {
     path.assistant("read", "a.txt");
     path.toolResults();
     long te1 = path.turnEnd(ts1);
-    path.compactionComplete(2L, te1, null);
+    path.compactionComplete(id(2L), id(te1), null);
     long ts2 = path.turnStart();
     path.user("u2");
     path.assistant("write", "a.txt");
@@ -190,7 +191,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te2, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te2), null);
 
     assertEquals(
         "<modified-files>\na.txt\n</modified-files>",
@@ -210,7 +211,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te1, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
 
     assertEquals(
         "<read-files>\nkept.txt\n</read-files>",
@@ -242,7 +243,7 @@ class CompactionFileSectionsTest {
 
     CompactionRequest withFiles =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, te1, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(te1), null);
     assertEquals(
         "summary\n\n<read-files>\na.txt\n</read-files>",
         CompactionFileSections.append(path.path(), withFiles, "summary"));
@@ -258,7 +259,7 @@ class CompactionFileSectionsTest {
     clean.turnStart();
     CompactionRequest cleanRequest =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, cleanTe, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(cleanTe), null);
     assertEquals("summary", CompactionFileSections.append(clean.path(), cleanRequest, "summary"));
   }
 
@@ -268,40 +269,40 @@ class CompactionFileSectionsTest {
     private long nextId = 1L;
 
     PathBuilder root() {
-      entries.add(new Entry(nextId++, SESSION, null, new RootPayload(SETTINGS), BASE));
+      entries.add(new Entry(id(nextId++), SESSION_ID, null, new RootPayload(SETTINGS), BASE));
       return this;
     }
 
     long turnStart() {
-      long id = nextId++;
+      long cur = nextId++;
       entries.add(
           new Entry(
-              id,
-              SESSION,
+              id(cur),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
               BASE));
-      return id;
+      return cur;
     }
 
     long user(String text) {
-      long id = nextId++;
+      long cur = nextId++;
       entries.add(
           new Entry(
-              id,
-              SESSION,
+              id(cur),
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))),
                   null,
                   null),
               BASE));
-      return id;
+      return cur;
     }
 
     /** ASSISTANT 携带成对 (toolName, path) 的工具调用（bash 无 path 也会按此构造）。 */
     long assistant(String... namePathPairs) {
-      long id = nextId++;
+      long cur = nextId++;
       List<AgentMessageContent> contents = new ArrayList<>();
       for (int i = 0; i < namePathPairs.length; i += 2) {
         contents.add(
@@ -314,8 +315,8 @@ class CompactionFileSectionsTest {
       contents.add(new TextMessageContent("assistant reply"));
       entries.add(
           new Entry(
-              id,
-              SESSION,
+              id(cur),
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
@@ -333,12 +334,12 @@ class CompactionFileSectionsTest {
                           BigDecimal.ZERO)),
                   null),
               BASE));
-      return id;
+      return cur;
     }
 
     /** 为最后一个（assistant）Entry 的每个 call 追加严格 ordinal 前缀的 TOOL result。 */
     PathBuilder toolResults() {
-      long assistantEntryId = entries.get(entries.size() - 1).id();
+      UUID assistantEntryId = entries.get(entries.size() - 1).id();
       int ordinal = 0;
       for (AgentMessageContent content :
           ((MessagePayload) entries.get(entries.size() - 1).payload()).message().contents()) {
@@ -347,8 +348,8 @@ class CompactionFileSectionsTest {
         }
         entries.add(
             new Entry(
-                nextId++,
-                SESSION,
+                id(nextId++),
+                SESSION_ID,
                 parentId(),
                 new MessagePayload(
                     new AgentMessage(
@@ -375,31 +376,31 @@ class CompactionFileSectionsTest {
     }
 
     long turnEnd(long turnStartEntryId) {
-      long id = nextId++;
+      long cur = nextId++;
       entries.add(
           new Entry(
-              id,
-              SESSION,
+              id(cur),
+              SESSION_ID,
               parentId(),
-              new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+              new TurnEndPayload(id(turnStartEntryId), TurnEndOutcome.COMPLETED, false, null, null),
               BASE));
-      return id;
+      return cur;
     }
 
     /** 完成压缩 turn：[TURN_START(COMPACTION), COMPACTION payload, TURN_END]。 */
-    long compactionComplete(long firstKeptEntryId, long cutEntryId, Long turnPrefixStartEntryId) {
+    long compactionComplete(UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
               BASE));
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              SESSION_ID,
               parentId(),
               new CompactionPayload(
                   CompactionPhase.FULL,
@@ -414,10 +415,10 @@ class CompactionFileSectionsTest {
       long endId = nextId++;
       entries.add(
           new Entry(
-              endId,
-              SESSION,
+              id(endId),
+              SESSION_ID,
               parentId(),
-              new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, false, null, null),
+              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, false, null, null),
               BASE));
       return endId;
     }
@@ -426,8 +427,10 @@ class CompactionFileSectionsTest {
       return new EntryPath(List.copyOf(entries));
     }
 
-    private long parentId() {
+    private UUID parentId() {
       return entries.get(entries.size() - 1).id();
     }
   }
+
+  private static final UUID SESSION_ID = id(100L);
 }

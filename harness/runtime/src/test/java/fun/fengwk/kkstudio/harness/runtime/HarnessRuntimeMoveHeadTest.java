@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -37,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /** moveHead：no-op replay、revision CAS、跨 session / 静默期 / continuation-obligation 守卫。 */
 class HarnessRuntimeMoveHeadTest {
@@ -59,7 +61,7 @@ class HarnessRuntimeMoveHeadTest {
     assertEquals(baseline.rootEntryId(), result.headEntryId());
     assertEquals(0L, result.revision());
     // 即使存在 queued command 也先走 no-op 分支。
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     ThreadState resultWithQueued =
         runtime.moveHead(new MoveHeadCommand(baseline.threadId(), baseline.rootEntryId(), 42));
     assertEquals(0L, resultWithQueued.revision());
@@ -68,7 +70,7 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void staleRevisionConflicts() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    UUID target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -83,7 +85,7 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void movedThreadUsesTheTimestampCapturedAfterTheThreadLock() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    UUID target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     TestClock clock = new TestClock(T0);
     HarnessRuntime lockedRuntime =
         new HarnessRuntime(storeAdvancingClockOnThreadLock(store, clock, T1), clock);
@@ -98,16 +100,16 @@ class HarnessRuntimeMoveHeadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     assertThrows(
         HarnessRuntimeNotFoundException.class,
-        () -> runtime.moveHead(new MoveHeadCommand(999L, baseline.rootEntryId(), 0)));
+        () -> runtime.moveHead(new MoveHeadCommand(TestIds.id(999), baseline.rootEntryId(), 0)));
     assertThrows(
         HarnessRuntimeNotFoundException.class,
-        () -> runtime.moveHead(new MoveHeadCommand(baseline.threadId(), 999L, 0)));
+        () -> runtime.moveHead(new MoveHeadCommand(baseline.threadId(), TestIds.id(999), 0)));
   }
 
   @Test
   void crossSessionTargetConflicts() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long foreignRoot = seedForeignRoot(store);
+    UUID foreignRoot = seedForeignRoot(store);
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -118,8 +120,8 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void queuedCommandsBlockMoveHead() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    UUID target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -180,7 +182,7 @@ class HarnessRuntimeMoveHeadTest {
   void movingAwayFromContinuationDueIsAllowedAndPreservesYolo() {
     HarnessRuntimeTestSupport.ContinuationBaseline continuation =
         seedContinuationChain(store, true);
-    long threadId = seedYoloThreadAt(store, continuation.turnEndEntryId());
+    UUID threadId = seedYoloThreadAt(store, continuation.turnEndEntryId());
     ThreadState moved =
         runtime.moveHead(new MoveHeadCommand(threadId, continuation.rootEntryId(), 0));
     assertEquals(continuation.rootEntryId(), moved.headEntryId());
@@ -203,7 +205,7 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void historicalOpenTurnPrefixIsAnAllowedTarget() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long openTurnStart = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    UUID openTurnStart = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     ThreadState moved =
         runtime.moveHead(new MoveHeadCommand(baseline.threadId(), openTurnStart, 0));
     assertEquals(openTurnStart, moved.headEntryId());
@@ -215,10 +217,10 @@ class HarnessRuntimeMoveHeadTest {
     HarnessRuntimeTestSupport.ToolBaseline tool = seedToolBaseline(store);
     setWaitingApproval(store, tool);
     // 同一 Session 的第二 Thread 指向 ROOT；目标为第一 Thread 的 Assistant head（历史 open prefix）。
-    long secondThread =
+    UUID secondThread =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, tool.rootEntryId()));
               return id;
             });
@@ -231,7 +233,7 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void moveHeadNeverRequestsWorkAndForceDeletesThreadWorkAsFence() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    UUID target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     runtime.moveHead(new MoveHeadCommand(baseline.threadId(), target, 0));
     // 无 Work 被请求。
     assertTrue(
@@ -241,7 +243,7 @@ class HarnessRuntimeMoveHeadTest {
 
     // 预置 THREAD Work（模拟 speculative Resolver mailbox）：move 后最后强制删除。
     HarnessRuntimeTestSupport.Baseline fenced = seedBaseline(store);
-    long fencedTarget = seedChildTurnStart(store, fenced.sessionId(), fenced.rootEntryId());
+    UUID fencedTarget = seedChildTurnStart(store, fenced.sessionId(), fenced.rootEntryId());
     seedThreadWork(store, fenced.threadId());
     runtime.moveHead(new MoveHeadCommand(fenced.threadId(), fencedTarget, 0));
     assertTrue(
@@ -252,7 +254,7 @@ class HarnessRuntimeMoveHeadTest {
   @Test
   void moveHeadKeepsLatestNextCommandSequenceOnAnyMove() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    long target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+    UUID target = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     // 先入队 4 条命令推进 nextCommandSequence（revision 1），再取消它们解除 queued 阻塞。
     runtime.enqueueCommands(
         new ThreadCommandBatch(
@@ -260,10 +262,10 @@ class HarnessRuntimeMoveHeadTest {
             baseline.rootEntryId(),
             1,
             List.of(
-                userMessageCommand("c1", "a"),
-                userMessageCommand("c2", "b"),
-                userMessageCommand("c3", "c"),
-                userMessageCommand("c4", "d"))));
+                userMessageCommand(TestIds.id(1), "a"),
+                userMessageCommand(TestIds.id(2), "b"),
+                userMessageCommand(TestIds.id(3), "c"),
+                userMessageCommand(TestIds.id(4), "d"))));
     store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -279,8 +281,10 @@ class HarnessRuntimeMoveHeadTest {
 
   @Test
   void moveHeadValidationRejectsBadRequestFields() {
-    assertThrows(IllegalArgumentException.class, () -> new MoveHeadCommand(0, 1, 0));
-    assertThrows(IllegalArgumentException.class, () -> new MoveHeadCommand(1, 0, 0));
-    assertThrows(IllegalArgumentException.class, () -> new MoveHeadCommand(1, 1, -1));
+    assertThrows(NullPointerException.class, () -> new MoveHeadCommand(null, TestIds.id(1), 0));
+    assertThrows(NullPointerException.class, () -> new MoveHeadCommand(TestIds.id(1), null, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new MoveHeadCommand(TestIds.id(1), TestIds.id(1), -1));
   }
 }

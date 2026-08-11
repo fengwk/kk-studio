@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,6 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -40,10 +42,10 @@ class PostgresqlHarnessStoreTransactionTest {
   void commitsChangesAndMakesThemVisibleToLaterTransactions() {
     store.transaction(
         tx -> {
-          tx.insertSession(session(1));
+          tx.insertSession(session(id(1L)));
           return null;
         });
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
   }
 
   @Test
@@ -60,11 +62,11 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -76,11 +78,11 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -93,43 +95,46 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
-  void nextIdStartsAtOneAndSequenceGapsSurviveRollback() {
-    assertEquals(1L, store.transaction(HarnessStore.Transaction::nextId));
+  void nextIdDelegatesToTheInjectedGeneratorAndGapsSurviveRollback() {
+    assertEquals(id(1L), store.transaction(HarnessStore.Transaction::nextId));
     assertThrows(
         RuntimeException.class,
         () ->
             store.transaction(
                 tx -> {
-                  assertEquals(2L, tx.nextId());
+                  assertEquals(id(2L), tx.nextId());
                   throw new IllegalStateException("boom");
                 }));
-    assertEquals(3L, store.transaction(HarnessStore.Transaction::nextId));
+    assertEquals(id(3L), store.transaction(HarnessStore.Transaction::nextId));
   }
 
   @Test
-  void nextIdExhaustionIsReportedAsArithmeticException() {
-    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
-    jdbc.queryForObject(
-        "select setval('harness_runtime_id_seq', 9223372036854775807, true)", Long.class);
+  void nullGeneratorResultIsRejectedAsIllegalState() {
+    PostgresqlHarnessStore nullGeneratorStore =
+        new PostgresqlHarnessStore(
+            PostgresqlHarnessStoreFixture.dataSource(),
+            new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()),
+            () -> null);
     assertThrows(
-        ArithmeticException.class, () -> store.transaction(HarnessStore.Transaction::nextId));
+        IllegalStateException.class,
+        () -> nullGeneratorStore.transaction(HarnessStore.Transaction::nextId));
   }
 
   @Test
   void transactionHandleIsRejectedAfterCommit() {
     HarnessStore.Transaction escaped = store.transaction(tx -> tx);
     assertThrows(IllegalStateException.class, escaped::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(1)));
-    assertThrows(IllegalStateException.class, () -> escaped.findSession(1));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(1));
+    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(id(1L))));
+    assertThrows(IllegalStateException.class, () -> escaped.findSession(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(id(1L)));
   }
 
   @Test
@@ -144,7 +149,7 @@ class PostgresqlHarnessStoreTransactionTest {
                   throw new IllegalStateException("boom");
                 }));
     assertThrows(IllegalStateException.class, escaped[0]::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(1));
+    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(id(1L)));
   }
 
   @Test
@@ -156,7 +161,8 @@ class PostgresqlHarnessStoreTransactionTest {
                 CompletableFuture.supplyAsync(
                         () ->
                             assertThrows(
-                                IllegalStateException.class, () -> tx.insertSession(session(1))),
+                                IllegalStateException.class,
+                                () -> tx.insertSession(session(id(1L)))),
                         executor)
                     .join();
             assertEquals(
@@ -164,7 +170,7 @@ class PostgresqlHarnessStoreTransactionTest {
             return null;
           });
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -175,12 +181,12 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       store.transaction(inner -> null);
                       return null;
                     }));
     assertEquals("nested transactions are not supported", thrown.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -196,12 +202,12 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
+                      tx.insertSession(session(id(1L)));
                       return null;
                     }));
     assertTrue(thrown.getMessage().contains("integrity constraint"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -212,16 +218,16 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       try {
-                        tx.insertSession(session(1));
+                        tx.insertSession(session(id(1L)));
                       } catch (IllegalArgumentException ignored) {
                         // PostgreSQL 已中止该事务：正常返回不再合法。
                       }
                       return "must not commit";
                     }));
     assertTrue(thrown.getMessage().contains("integrity constraint"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
@@ -236,9 +242,9 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(1));
+                      tx.insertSession(session(id(1L)));
                       try {
-                        tx.findEntry(1);
+                        tx.findEntry(id(1L));
                       } catch (DataAccessException failure) {
                         caught.set(failure);
                       }
@@ -246,15 +252,14 @@ class PostgresqlHarnessStoreTransactionTest {
                     }));
 
     assertSame(caught.get(), thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
   }
 
   @Test
-  void storeCommitIsIndependentFromAnOuterSpringTransaction() {
+  void storeJoinsAnOuterSpringTransactionAndRollsBackWithIt() {
     TransactionTemplate outer =
         new TransactionTemplate(
             new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()));
-    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
 
     assertThrows(
         IllegalStateException.class,
@@ -263,16 +268,19 @@ class PostgresqlHarnessStoreTransactionTest {
                 status -> {
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(1));
+                        tx.insertSession(session(id(1L)));
                         return null;
                       });
-                  jdbc.update(
-                      "insert into harness_session (id, title, created_at) values (2, null, now())");
+                  store.transaction(
+                      tx -> {
+                        tx.insertSession(session(id(2L)));
+                        return null;
+                      });
                   throw new IllegalStateException("rollback outer");
                 }));
 
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isPresent()));
-    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(2).isPresent()));
+    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
+    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(2L)).isPresent()));
   }
 
   @Test
@@ -285,7 +293,7 @@ class PostgresqlHarnessStoreTransactionTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(1));
+                        tx.insertSession(session(id(1L)));
                         bothInside.countDown();
                         await(release);
                         return null;
@@ -295,7 +303,7 @@ class PostgresqlHarnessStoreTransactionTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(2));
+                        tx.insertSession(session(id(2L)));
                         bothInside.countDown();
                         await(release);
                         return null;
@@ -305,13 +313,27 @@ class PostgresqlHarnessStoreTransactionTest {
       first.get(10, TimeUnit.SECONDS);
       second.get(10, TimeUnit.SECONDS);
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isPresent()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(2).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(2L)).isPresent()));
   }
 
   @Test
-  void publicDataSourceConstructorRejectsNull() {
-    assertThrows(NullPointerException.class, () -> new PostgresqlHarnessStore(null));
+  void publicConstructorRejectsNullArguments() {
+    DataSourceTransactionManager transactionManager =
+        new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource());
+    assertThrows(
+        NullPointerException.class,
+        () -> new PostgresqlHarnessStore(null, transactionManager, () -> UUID.randomUUID()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PostgresqlHarnessStore(
+                PostgresqlHarnessStoreFixture.dataSource(), null, () -> UUID.randomUUID()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PostgresqlHarnessStore(
+                PostgresqlHarnessStoreFixture.dataSource(), transactionManager, null));
   }
 
   private static void await(CountDownLatch latch) {

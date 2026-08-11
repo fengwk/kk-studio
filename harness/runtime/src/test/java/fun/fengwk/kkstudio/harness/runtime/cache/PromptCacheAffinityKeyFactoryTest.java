@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 关注：固定 pc1- 前缀、43 字符 Base64URL 无 padding 输出；动态 USER/ASSISTANT/TOOL history 不影响 key；资源标识或 stable
@@ -36,15 +37,14 @@ import java.util.List;
  */
 class PromptCacheAffinityKeyFactoryTest {
 
-  private static final long SESSION_ID = 42L;
+  private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-00000000002a");
 
   private final PromptCacheAffinityKeyFactory factory = new PromptCacheAffinityKeyFactory();
 
   @Test
   void rejectsInvalidArguments() {
     ProviderRequest request = baseRequest();
-    assertThrows(IllegalArgumentException.class, () -> factory.create(0L, request));
-    assertThrows(IllegalArgumentException.class, () -> factory.create(-1L, request));
+    assertThrows(NullPointerException.class, () -> factory.create(null, request));
     assertThrows(NullPointerException.class, () -> factory.create(SESSION_ID, null));
   }
 
@@ -274,7 +274,9 @@ class PromptCacheAffinityKeyFactoryTest {
 
   @Test
   void sessionIdChangeChangesKey() {
-    assertNotEquals(factory.create(1L, baseRequest()), factory.create(2L, baseRequest()));
+    assertNotEquals(
+        factory.create(UUID.fromString("00000000-0000-0000-0000-000000000001"), baseRequest()),
+        factory.create(UUID.fromString("00000000-0000-0000-0000-000000000002"), baseRequest()));
   }
 
   @Test
@@ -332,7 +334,8 @@ class PromptCacheAffinityKeyFactoryTest {
     ProviderRequest base = baseRequest();
     String baseKey = factory.create(SESSION_ID, base);
     // 修改 sessionId 让该差异出现在 digest 而不是 cacheControl。
-    assertNotEquals(baseKey, factory.create(SESSION_ID + 1, base));
+    assertNotEquals(
+        baseKey, factory.create(UUID.fromString("00000000-0000-0000-0000-00000000002b"), base));
     // 修改 modelName 后缀（"m1" -> "m1x"）必须切 key。
     assertNotEquals(
         baseKey, factory.create(SESSION_ID, baseRequestWithModel(model("provider", "m1x"))));
@@ -498,20 +501,20 @@ class PromptCacheAffinityKeyFactoryTest {
   }
 
   private static List<ProviderMessage> appendDynamic(
-      List<ProviderMessage> prefix, ProviderMessage dynamic) {
-    List<ProviderMessage> messages = new ArrayList<>(prefix);
-    messages.add(dynamic);
-    return List.copyOf(messages);
+      List<ProviderMessage> messages, ProviderMessage extra) {
+    List<ProviderMessage> out = new ArrayList<>(messages);
+    out.add(extra);
+    return out;
   }
 
-  private static ModelDescriptor model(String providerName, String modelName) {
+  private static ModelDescriptor model(String provider, String model) {
     return new ModelDescriptor(
-        providerName,
-        modelName,
+        provider,
+        model,
         true,
         false,
         new ModelPricing(
-            "USD",
+            "CNY",
             "tier-1",
             "default",
             BigDecimal.ONE,

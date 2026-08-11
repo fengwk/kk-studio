@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 /** Work mailbox 协议：target 存在性、lost wake、due 排序、lease fence 与 rollback。 */
 public abstract class HarnessStoreWorkContract {
@@ -69,12 +70,12 @@ public abstract class HarnessStoreWorkContract {
   }
 
   private static void lockWorkOwner(HarnessStore.Transaction tx, WorkTarget target) {
-    long threadId =
+    UUID threadId =
         switch (target.type()) {
           case THREAD -> target.id();
           case MODEL -> tx.findModelInvocation(target.id()).orElseThrow().threadId();
           case TOOL -> {
-            long modelInvocationId =
+            UUID modelInvocationId =
                 tx.findToolInvocation(target.id()).orElseThrow().modelInvocationId();
             yield tx.findModelInvocation(modelInvocationId).orElseThrow().threadId();
           }
@@ -88,16 +89,20 @@ public abstract class HarnessStoreWorkContract {
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.THREAD, 1), T0)));
+                store,
+                tx -> tx.requestWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(1)), T0)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.MODEL, 1), T0)));
+                store,
+                tx -> tx.requestWork(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1)), T0)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            inTransaction(store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.TOOL, 1), T0)));
+            inTransaction(
+                store,
+                tx -> tx.requestWork(new WorkTarget(WorkTargetType.TOOL, TestIds.id(1)), T0)));
   }
 
   @Test
@@ -109,7 +114,7 @@ public abstract class HarnessStoreWorkContract {
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -118,7 +123,7 @@ public abstract class HarnessStoreWorkContract {
                   T1));
         });
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, 1);
+    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, TestIds.id(1));
 
     assertThrows(
         IllegalStateException.class,
@@ -146,7 +151,7 @@ public abstract class HarnessStoreWorkContract {
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -159,15 +164,15 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.lockModelInvocation(1).orElseThrow();
+                  tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
                   tx.lockThread(baseline.threadId());
                   return null;
                 }));
 
-    long higherThreadId =
+    UUID higherThreadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               return id;
             });
@@ -276,7 +281,7 @@ public abstract class HarnessStoreWorkContract {
           tx.lockThread(baseline.threadId());
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  TestIds.id(1),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -285,7 +290,7 @@ public abstract class HarnessStoreWorkContract {
                   T1));
         });
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, 1);
+    WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, TestIds.id(1));
     inTransaction(
         store,
         tx -> {
@@ -302,17 +307,17 @@ public abstract class HarnessStoreWorkContract {
   @Test
   void claimNextWorkIsOrderedByAvailableAtThenTargetId() {
     Baseline baseline = seedThreadBaseline(store);
-    long thread2 =
+    UUID thread2 =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               return id;
             });
-    long thread3 =
+    UUID thread3 =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               return id;
             });
@@ -404,7 +409,7 @@ public abstract class HarnessStoreWorkContract {
     assertThrows(
         IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim, T2)));
     // 对从未存在 work 的 target 的 claim 也是 lost ownership
-    WorkTarget never = new WorkTarget(WorkTargetType.THREAD, 42);
+    WorkTarget never = new WorkTarget(WorkTargetType.THREAD, TestIds.id(42));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -563,7 +568,7 @@ public abstract class HarnessStoreWorkContract {
 
   @Test
   void findAndLockWorkReturnEmptyForMissingTargets() {
-    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, 1);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, TestIds.id(1));
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.lockWork(target).isEmpty()));
   }
@@ -588,7 +593,7 @@ public abstract class HarnessStoreWorkContract {
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
     // 对从未存在 work 的 target 的 claim 即 lost ownership
-    WorkTarget never = new WorkTarget(WorkTargetType.THREAD, 42);
+    WorkTarget never = new WorkTarget(WorkTargetType.THREAD, TestIds.id(42));
     assertTrue(
         store
             .transaction(
@@ -653,7 +658,7 @@ public abstract class HarnessStoreWorkContract {
 
   @Test
   void deleteWorkReturnsFalseForMissingTargetsAndRollsBackWithTheTransaction() {
-    WorkTarget missing = new WorkTarget(WorkTargetType.THREAD, 42);
+    WorkTarget missing = new WorkTarget(WorkTargetType.THREAD, TestIds.id(42));
     assertFalse(store.<Boolean>transaction(tx -> tx.deleteWork(missing)));
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());

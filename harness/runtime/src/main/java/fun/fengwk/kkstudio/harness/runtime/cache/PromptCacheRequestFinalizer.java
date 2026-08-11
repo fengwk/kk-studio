@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * ModelInvocationPlanner 在冻结 {@link ProviderRequest} 时的唯一 cache control 派生点。
@@ -35,18 +36,15 @@ import java.util.Set;
  */
 public final class PromptCacheRequestFinalizer {
 
-  private final long sessionId;
+  private final UUID sessionId;
   private final PromptCacheAffinityKeyFactory keyFactory;
 
-  public PromptCacheRequestFinalizer(long sessionId, PromptCacheAffinityKeyFactory keyFactory) {
-    if (sessionId <= 0) {
-      throw new IllegalArgumentException("sessionId must be positive");
-    }
-    this.sessionId = sessionId;
+  public PromptCacheRequestFinalizer(UUID sessionId, PromptCacheAffinityKeyFactory keyFactory) {
+    this.sessionId = Objects.requireNonNull(sessionId, "sessionId");
     this.keyFactory = Objects.requireNonNull(keyFactory, "keyFactory");
   }
 
-  public PromptCacheRequestFinalizer(long sessionId) {
+  public PromptCacheRequestFinalizer(UUID sessionId) {
     this(sessionId, new PromptCacheAffinityKeyFactory());
   }
 

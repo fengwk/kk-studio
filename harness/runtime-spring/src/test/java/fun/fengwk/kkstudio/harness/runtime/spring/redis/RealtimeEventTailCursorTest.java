@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.spring.redis;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -9,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail.Record
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 /** RealtimeEventTail 的 initial cursor、cursor 归一化与 Record 契约。 */
 class RealtimeEventTailCursorTest {
@@ -16,19 +18,19 @@ class RealtimeEventTailCursorTest {
   private static final RealtimeEventTail TAIL =
       new RealtimeEventTail() {
         @Override
-        public String initialCursor(long threadId) {
+        public String initialCursor(UUID threadId) {
           return "123-0";
         }
 
         @Override
-        public List<Record> readAfter(long threadId, String afterId, int count, Duration block) {
+        public List<Record> readAfter(UUID threadId, String afterId, int count, Duration block) {
           return List.of();
         }
       };
 
   @Test
   void initialCursorIsAConcreteStableId() {
-    assertEquals("123-0", TAIL.initialCursor(1L));
+    assertEquals("123-0", TAIL.initialCursor(id(1L)));
   }
 
   @Test

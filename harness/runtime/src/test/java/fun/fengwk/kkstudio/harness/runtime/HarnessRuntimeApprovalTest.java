@@ -23,12 +23,14 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,9 +50,9 @@ class HarnessRuntimeApprovalTest {
     runtime = new HarnessRuntime(store, clock);
   }
 
-  private ToolApprovalCommand allow(long threadId, long toolId) {
+  private ToolApprovalCommand allow(UUID threadId, UUID toolId) {
     return new ToolApprovalCommand(
-        threadId, toolId, ToolApprovalDecision.ALLOWED, "decision-1", "alice", null);
+        threadId, toolId, ToolApprovalDecision.ALLOWED, TestIds.id(1), "alice", null);
   }
 
   @Test
@@ -63,7 +65,7 @@ class HarnessRuntimeApprovalTest {
 
     assertEquals(ToolInvocationStatus.READY, decided.status());
     assertEquals(ToolApprovalDecision.ALLOWED, decided.approval().decision());
-    assertEquals("decision-1", decided.approval().decisionId());
+    assertEquals(TestIds.id(1), decided.approval().decisionId());
     assertEquals("alice", decided.approval().actor());
     assertEquals(T5, decided.approval().decidedAt());
     assertEquals(0, decided.attempt());
@@ -98,7 +100,7 @@ class HarnessRuntimeApprovalTest {
                 baseline.threadId(),
                 baseline.toolId(),
                 ToolApprovalDecision.DENIED,
-                "decision-1",
+                TestIds.id(1),
                 "bob",
                 "not now"));
 
@@ -200,7 +202,7 @@ class HarnessRuntimeApprovalTest {
                         baseline.threadId(),
                         baseline.toolId(),
                         ToolApprovalDecision.DENIED,
-                        "decision-1",
+                        TestIds.id(1),
                         "alice",
                         null)));
     assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentDecision.reason());
@@ -214,7 +216,7 @@ class HarnessRuntimeApprovalTest {
                         baseline.threadId(),
                         baseline.toolId(),
                         ToolApprovalDecision.ALLOWED,
-                        "decision-2",
+                        TestIds.id(2),
                         "alice",
                         null)));
     assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentId.reason());
@@ -228,7 +230,7 @@ class HarnessRuntimeApprovalTest {
                         baseline.threadId(),
                         baseline.toolId(),
                         ToolApprovalDecision.ALLOWED,
-                        "decision-1",
+                        TestIds.id(1),
                         "mallory",
                         null)));
     assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentActor.reason());
@@ -242,7 +244,7 @@ class HarnessRuntimeApprovalTest {
                         baseline.threadId(),
                         baseline.toolId(),
                         ToolApprovalDecision.ALLOWED,
-                        "decision-1",
+                        TestIds.id(1),
                         "alice",
                         "changed my mind")));
     assertEquals(Reason.APPROVAL_DECISION_MISMATCH, differentReason.reason());
@@ -252,7 +254,7 @@ class HarnessRuntimeApprovalTest {
   void wrongThreadOrMissingRowsAreApprovalNotApplicable() {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
-    long otherThread = seedThreadAt(store, baseline.assistantEntryId());
+    UUID otherThread = seedThreadAt(store, baseline.assistantEntryId());
 
     HarnessRuntimeConflictException wrongThread =
         assertThrows(
@@ -263,13 +265,13 @@ class HarnessRuntimeApprovalTest {
     HarnessRuntimeConflictException missingThread =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.decideToolApproval(allow(999L, baseline.toolId())));
+            () -> runtime.decideToolApproval(allow(TestIds.id(999), baseline.toolId())));
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, missingThread.reason());
 
     HarnessRuntimeConflictException missingTool =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.decideToolApproval(allow(baseline.threadId(), 999L)));
+            () -> runtime.decideToolApproval(allow(baseline.threadId(), TestIds.id(999))));
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, missingTool.reason());
   }
 
@@ -374,27 +376,43 @@ class HarnessRuntimeApprovalTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     assertThrows(
         NullPointerException.class,
-        () -> new ToolApprovalCommand(baseline.threadId(), 1L, null, "d", "a", null));
+        () ->
+            new ToolApprovalCommand(
+                baseline.threadId(), TestIds.id(1), null, TestIds.id(1), "a", null));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolApprovalCommand(
+                baseline.threadId(), TestIds.id(1), ToolApprovalDecision.ALLOWED, null, "a", null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolApprovalCommand(
-                baseline.threadId(), 1L, ToolApprovalDecision.ALLOWED, " ", "a", null));
+                baseline.threadId(),
+                TestIds.id(1),
+                ToolApprovalDecision.ALLOWED,
+                TestIds.id(1),
+                " a ",
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolApprovalCommand(
-                baseline.threadId(), 1L, ToolApprovalDecision.ALLOWED, "d", " a ", null));
+                baseline.threadId(),
+                TestIds.id(1),
+                ToolApprovalDecision.ALLOWED,
+                TestIds.id(1),
+                "a",
+                "r".repeat(1025)));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ToolApprovalCommand(
-                baseline.threadId(), 1L, ToolApprovalDecision.ALLOWED, "d", "a", "r".repeat(1025)));
+                null, TestIds.id(1), ToolApprovalDecision.ALLOWED, TestIds.id(1), "a", null));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolApprovalCommand(0, 1L, ToolApprovalDecision.ALLOWED, "d", "a", null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolApprovalCommand(1L, 0, ToolApprovalDecision.ALLOWED, "d", "a", null));
+        NullPointerException.class,
+        () ->
+            new ToolApprovalCommand(
+                TestIds.id(1), null, ToolApprovalDecision.ALLOWED, TestIds.id(1), "a", null));
   }
 }

@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.util.List;
 
@@ -94,7 +95,7 @@ class ModelInvocationRequestJsonCodecTest {
         encoded.substring(0, encoded.indexOf('{', 1)));
   }
 
-  /** 压缩请求 wire：tokensBefore 是数值（nonNegativeLong），ids 是规范十进制字符串。 */
+  /** 压缩请求 wire：tokensBefore 是数值（nonNegativeLong），ids 是规范 UUID 字符串。 */
   @Test
   void roundTripsCompactionRequestWithNumericTokensBefore() {
     ModelInvocationRequest base = environmentModelRequest();
@@ -107,13 +108,19 @@ class ModelInvocationRequestJsonCodecTest {
             false,
             100_000,
             new CompactionRequest(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, 4L, null));
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                500L,
+                TestIds.id(2L),
+                TestIds.id(4L),
+                null));
 
     String encoded = codec.encode(request);
     assertTrue(
         encoded.contains(
             "\"compaction\":{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\","
-                + "\"tokensBefore\":500,\"firstKeptEntryId\":\"2\",\"cutEntryId\":\"4\","
+                + "\"tokensBefore\":500,\"firstKeptEntryId\":\"00000000-0000-0000-0000-000000000002\","
+                + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
                 + "\"turnPrefixStartEntryId\":null}"),
         encoded);
     assertEquals(request, codec.decode(encoded));

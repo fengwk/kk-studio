@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,7 +31,7 @@ import java.util.List;
 class HistoryEntryPayloadTest {
 
   private static final ToolResultMetadata TOOL_METADATA =
-      new ToolResultMetadata(2L, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null);
+      new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null);
 
   @Test
   void messagePayloadEnforcesRoleMetadataMatrix() {
@@ -76,7 +77,8 @@ class HistoryEntryPayloadTest {
             new MessagePayload(
                 toolMessage("call-1"),
                 null,
-                new ToolResultMetadata(2L, "call-9", 0, ToolResultStatus.SUCCEEDED, false, null)));
+                new ToolResultMetadata(
+                    id(2L), "call-9", 0, ToolResultStatus.SUCCEEDED, false, null)));
     assertThrows(
         IllegalArgumentException.class, () -> new MessagePayload(system("system"), null, null));
     assertThrows(NullPointerException.class, () -> new MessagePayload(null, null, null));
@@ -315,177 +317,174 @@ class HistoryEntryPayloadTest {
   void toolResultMetadataValidatesSyntheticRuleAndCanonicalValues() {
     ToolResultMetadata synthetic =
         new ToolResultMetadata(
-            2L, "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT);
+            id(2L), "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT);
     assertEquals(ToolResultReason.HISTORY_CUT, synthetic.reason());
     assertTrue(synthetic.synthetic());
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResultMetadata(0L, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
+        NullPointerException.class,
+        () -> new ToolResultMetadata(null, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolResultMetadata(2L, " ", 0, ToolResultStatus.SUCCEEDED, false, null));
+        () -> new ToolResultMetadata(id(2L), " ", 0, ToolResultStatus.SUCCEEDED, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolResultMetadata(2L, " call", 0, ToolResultStatus.SUCCEEDED, false, null));
+        () -> new ToolResultMetadata(id(2L), " call", 0, ToolResultStatus.SUCCEEDED, false, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                2L, "c".repeat(257), 0, ToolResultStatus.SUCCEEDED, false, null));
+                id(2L), "c".repeat(257), 0, ToolResultStatus.SUCCEEDED, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolResultMetadata(2L, "call-1", -1, ToolResultStatus.SUCCEEDED, false, null));
+        () ->
+            new ToolResultMetadata(id(2L), "call-1", -1, ToolResultStatus.SUCCEEDED, false, null));
     assertThrows(
         NullPointerException.class,
-        () -> new ToolResultMetadata(2L, "call-1", 0, null, false, null));
+        () -> new ToolResultMetadata(id(2L), "call-1", 0, null, false, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                2L, "call-1", 0, ToolResultStatus.SUCCEEDED, true, ToolResultReason.HISTORY_CUT));
+                id(2L),
+                "call-1",
+                0,
+                ToolResultStatus.SUCCEEDED,
+                true,
+                ToolResultReason.HISTORY_CUT));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolResultMetadata(2L, "call-1", 0, ToolResultStatus.UNKNOWN, true, null));
+        () -> new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.UNKNOWN, true, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                2L, "call-1", 0, ToolResultStatus.UNKNOWN, false, ToolResultReason.HISTORY_CUT));
+                id(2L),
+                "call-1",
+                0,
+                ToolResultStatus.UNKNOWN,
+                false,
+                ToolResultReason.HISTORY_CUT));
   }
 
   @Test
   void turnEndPayloadEnforcesOutcomeMatrix() {
     assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, true, null, null),
-        new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, true, null, null));
+        new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, true, null, null),
+        new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, true, null, null));
     assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, null, null),
-        new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, null, null));
+        new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, null),
+        new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, null));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, TurnEndReason.CANCELLED, null));
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.COMPLETED, false, TurnEndReason.CANCELLED, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, null, "close-1"));
+        () -> new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, id(8L)));
 
     assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-        new TurnEndPayload(7L, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null));
+        new TurnEndPayload(id(7L), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+        new TurnEndPayload(id(7L), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.FAILED, false, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.FAILED, false, TurnEndReason.USER_STOP, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.FAILED, false, TurnEndReason.CANCELLED, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.FAILED, true, TurnEndReason.TURN_FAILED, null));
+        () -> new TurnEndPayload(id(7L), TurnEndOutcome.FAILED, false, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new TurnEndPayload(
-                7L, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, "close-1"));
+                id(7L), TurnEndOutcome.FAILED, false, TurnEndReason.USER_STOP, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.FAILED, false, TurnEndReason.CANCELLED, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.FAILED, true, TurnEndReason.TURN_FAILED, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, id(8L)));
 
     assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "stop-1"),
-        new TurnEndPayload(7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "stop-1"));
+        new TurnEndPayload(id(7L), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(8L)),
+        new TurnEndPayload(id(7L), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(8L)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new TurnEndPayload(
-                7L, TurnEndOutcome.STOPPED, false, TurnEndReason.CANCELLED, "stop-1"));
+                id(7L), TurnEndOutcome.STOPPED, false, TurnEndReason.CANCELLED, id(8L)));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, " "));
+        NullPointerException.class,
+        () ->
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new TurnEndPayload(
-                7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, " stop"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new TurnEndPayload(
-                7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(257)));
-    // 恰好 256 字符是 durable 上限：合法。
+                id(7L), TurnEndOutcome.STOPPED, true, TurnEndReason.USER_STOP, id(8L)));
+
     assertEquals(
         new TurnEndPayload(
-            7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(256)),
+            id(7L), TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null),
         new TurnEndPayload(
-            7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "s".repeat(256)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new TurnEndPayload(
-                7L, TurnEndOutcome.STOPPED, true, TurnEndReason.USER_STOP, "stop-1"));
-
+            id(7L), TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null));
     assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null),
-        new TurnEndPayload(7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null));
-    assertEquals(
-        new TurnEndPayload(7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, "close-1"),
         new TurnEndPayload(
-            7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, "close-1"));
+            id(7L), TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, id(8L)),
+        new TurnEndPayload(
+            id(7L), TurnEndOutcome.CANCELLED, false, TurnEndReason.CANCELLED, id(8L)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new TurnEndPayload(7L, TurnEndOutcome.CANCELLED, false, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new TurnEndPayload(7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.USER_STOP, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new TurnEndPayload(
-                7L, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, " close"));
+        () -> new TurnEndPayload(id(7L), TurnEndOutcome.CANCELLED, false, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new TurnEndPayload(
-                7L, TurnEndOutcome.CANCELLED, true, TurnEndReason.HISTORY_CUT, null));
+                id(7L), TurnEndOutcome.CANCELLED, false, TurnEndReason.USER_STOP, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnEndPayload(
+                id(7L), TurnEndOutcome.CANCELLED, true, TurnEndReason.HISTORY_CUT, null));
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new TurnEndPayload(0L, TurnEndOutcome.COMPLETED, false, null, null));
-    assertThrows(NullPointerException.class, () -> new TurnEndPayload(7L, null, false, null, null));
+        NullPointerException.class,
+        () -> new TurnEndPayload(null, TurnEndOutcome.COMPLETED, false, null, null));
+    assertThrows(
+        NullPointerException.class, () -> new TurnEndPayload(id(7L), null, false, null, null));
   }
 
   @Test
   void entryValidatesIdsParentsAndNonNullFields() {
     assertEquals(
-        EntryType.ROOT, new Entry(1L, 1L, null, new RootPayload(SETTINGS), TIME).payload().type());
+        EntryType.ROOT,
+        new Entry(id(1L), id(1L), null, new RootPayload(SETTINGS), TIME).payload().type());
     assertEquals(
         EntryType.TURN_START,
-        new Entry(2L, 1L, 1L, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME)
+        new Entry(
+                id(2L), id(1L), id(1L), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME)
             .payload()
             .type());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new Entry(0L, 1L, null, new RootPayload(SETTINGS), TIME));
+        () -> new Entry(id(1L), id(1L), id(2L), new RootPayload(SETTINGS), TIME));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new Entry(1L, 0L, null, new RootPayload(SETTINGS), TIME));
+        () ->
+            new Entry(
+                id(2L), id(1L), null, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME));
+    assertThrows(NullPointerException.class, () -> new Entry(id(1L), id(1L), null, null, TIME));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new Entry(1L, 1L, 2L, new RootPayload(SETTINGS), TIME));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new Entry(2L, 1L, null, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new Entry(2L, 1L, 0L, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), TIME));
-    assertThrows(NullPointerException.class, () -> new Entry(1L, 1L, null, null, TIME));
-    assertThrows(
-        NullPointerException.class, () -> new Entry(1L, 1L, null, new RootPayload(SETTINGS), null));
+        NullPointerException.class,
+        () -> new Entry(id(1L), id(1L), null, new RootPayload(SETTINGS), null));
   }
 
   @Test

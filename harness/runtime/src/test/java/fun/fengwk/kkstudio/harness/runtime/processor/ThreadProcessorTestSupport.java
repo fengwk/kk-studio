@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -83,6 +84,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -118,40 +120,40 @@ final class ThreadProcessorTestSupport {
   // ids / fixtures（标识 / 测试基座）
   // -----------------------------------------------------------------------------------------------
 
-  record Baseline(long sessionId, long rootEntryId, long threadId) {}
+  record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
   record OpenTurnBaseline(
-      long sessionId, long rootEntryId, long turnStartEntryId, long userEntryId, long threadId) {}
+      UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
 
   record ClosedTurnBaseline(
-      long sessionId,
-      long rootEntryId,
-      long turnStartEntryId,
-      long userEntryId,
-      long assistantEntryId,
-      long turnEndEntryId,
-      long threadId) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID userEntryId,
+      UUID assistantEntryId,
+      UUID turnEndEntryId,
+      UUID threadId) {}
 
   record HistoricalBaseline(
-      long sessionId,
-      long rootEntryId,
-      long turnStartEntryId,
-      long userEntryId,
-      long assistantEntryId,
-      long headEntryId,
-      long threadId) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID userEntryId,
+      UUID assistantEntryId,
+      UUID headEntryId,
+      UUID threadId) {}
 
   /** Session + ROOT + Thread（head 指向 ROOT）。 */
   static Baseline seedBaseline(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertThread(new ThreadState(threadId, rootEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(new ThreadState(threadId, rootEntryId, false, 1L, 0L, NOW, NOW));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -160,12 +162,12 @@ final class ThreadProcessorTestSupport {
   static OpenTurnBaseline seedOpenInputTurn(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long userEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -178,7 +180,7 @@ final class ThreadProcessorTestSupport {
           tx.insertEntry(
               new Entry(
                   userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-          tx.insertThread(new ThreadState(threadId, userEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(new ThreadState(threadId, userEntryId, false, 1L, 0L, NOW, NOW));
           return new OpenTurnBaseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
@@ -188,14 +190,14 @@ final class ThreadProcessorTestSupport {
   static ClosedTurnBaseline seedClosedTurn(InMemoryHarnessStore store, boolean continueModel) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long userEntryId = tx.nextId();
-          long assistantEntryId = tx.nextId();
-          long turnEndEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID turnEndEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -219,7 +221,7 @@ final class ThreadProcessorTestSupport {
                   new TurnEndPayload(
                       turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
                   NOW));
-          tx.insertThread(new ThreadState(threadId, turnEndEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(new ThreadState(threadId, turnEndEntryId, false, 1L, 0L, NOW, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -242,13 +244,13 @@ final class ThreadProcessorTestSupport {
     }
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long userEntryId = tx.nextId();
-          long assistantEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -267,9 +269,9 @@ final class ThreadProcessorTestSupport {
           }
           tx.insertEntry(
               new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
-          long headEntryId = assistantEntryId;
+          UUID headEntryId = assistantEntryId;
           for (int ordinal = 0; ordinal < presentResults; ordinal++) {
-            long resultId = tx.nextId();
+            UUID resultId = tx.nextId();
             tx.insertEntry(
                 new Entry(
                     resultId,
@@ -279,7 +281,7 @@ final class ThreadProcessorTestSupport {
                     NOW));
             headEntryId = resultId;
           }
-          tx.insertThread(new ThreadState(threadId, headEntryId, false, 1, 0, NOW, NOW));
+          tx.insertThread(new ThreadState(threadId, headEntryId, false, 1L, 0L, NOW, NOW));
           return new HistoricalBaseline(
               sessionId,
               rootEntryId,
@@ -293,34 +295,40 @@ final class ThreadProcessorTestSupport {
 
   /** 在已有 Session 上新建第二个 Thread，head 指向共享的历史 assistant Entry。 */
   static HistoricalBaseline seedSecondThreadAtHistoricalAssistant(
-      InMemoryHarnessStore store, long sessionId, long assistantEntryId) {
+      InMemoryHarnessStore store, UUID sessionId, UUID assistantEntryId) {
     return store.transaction(
         tx -> {
-          long threadId = tx.nextId();
-          tx.insertThread(new ThreadState(threadId, assistantEntryId, false, 1, 0, NOW, NOW));
+          UUID threadId = tx.nextId();
+          tx.insertThread(new ThreadState(threadId, assistantEntryId, false, 1L, 0L, NOW, NOW));
           return new HistoricalBaseline(
-              sessionId, -1L, -1L, -1L, assistantEntryId, assistantEntryId, threadId);
+              sessionId,
+              TestIds.id(1_000_000L),
+              TestIds.id(1_000_001L),
+              TestIds.id(1_000_002L),
+              assistantEntryId,
+              assistantEntryId,
+              threadId);
         });
   }
 
   /** 插入一条 QUEUED Command（sequence 取自 Thread.nextCommandSequence）并推进 Thread 序列。 */
-  static long seedCommand(InMemoryHarnessStore store, long threadId, ThreadCommandPayload payload) {
+  static UUID seedCommand(InMemoryHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          long id = tx.nextId();
+          UUID clientCommandId = tx.nextId();
           long sequence = thread.nextCommandSequence();
           tx.insertCommands(
               List.of(
                   new ThreadCommand(
-                      id, threadId, sequence, payload, "client-" + id, null, null, NOW)));
+                      threadId, sequence, payload, clientCommandId, null, null, NOW)));
           tx.updateThread(thread.reserveCommandSequences(1, NOW));
-          return id;
+          return clientCommandId;
         });
   }
 
   /** 在一条已存在 Thread 上请求 THREAD Work（模拟 enqueue 侧）。 */
-  static void requestThreadWork(InMemoryHarnessStore store, long threadId) {
+  static void requestThreadWork(InMemoryHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
@@ -332,9 +340,9 @@ final class ThreadProcessorTestSupport {
   /** 原子种子一条完整 Tool 链：open Turn + ASSISTANT(calls) + terminal ModelInvocation + ToolInvocation。 */
   record ToolChain(
       OpenTurnBaseline turn,
-      long assistantEntryId,
-      long modelInvocationId,
-      List<Long> toolInvocationIds) {}
+      UUID assistantEntryId,
+      UUID modelInvocationId,
+      List<UUID> toolInvocationIds) {}
 
   static ToolChain seedToolChain(
       InMemoryHarnessStore store,
@@ -345,7 +353,7 @@ final class ThreadProcessorTestSupport {
       throw new IllegalArgumentException("toolStatuses must match callIds");
     }
     OpenTurnBaseline turn = seedOpenInputTurn(store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             store,
             turn.threadId(),
@@ -355,11 +363,11 @@ final class ThreadProcessorTestSupport {
             tooledRequest(List.of("bash")),
             successResponse(callIds, "bash"),
             null);
-    long assistantEntryId = insertAssistantWithCalls(store, turn, callIds);
+    UUID assistantEntryId = insertAssistantWithCalls(store, turn, callIds);
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
-    List<Long> toolIds = new ArrayList<>();
+    List<UUID> toolIds = new ArrayList<>();
     for (int ordinal = 0; ordinal < callIds.size(); ordinal++) {
       toolIds.add(
           seedToolInvocation(
@@ -374,12 +382,12 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 在 open Turn 的 head 后插入 ASSISTANT(calls) Entry 并推进 Thread head（seedToolChain 的构成片段）。 */
-  static long insertAssistantWithCalls(
+  static UUID insertAssistantWithCalls(
       InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
     return store.transaction(
         tx -> {
           tx.lockThread(turn.threadId());
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertEntry(
               new Entry(id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
           tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, false, NOW));
@@ -391,20 +399,20 @@ final class ThreadProcessorTestSupport {
    * 插入 READY ModelInvocation（basis 必须等于 Thread 当前 head）并把状态推进到 {@code status}（terminal 且
    * resultEntryId 仍 null）。
    */
-  static long seedModelInvocation(
+  static UUID seedModelInvocation(
       InMemoryHarnessStore store,
-      long threadId,
-      long turnStartEntryId,
-      long basisEntryId,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisEntryId,
       ModelInvocationStatus status,
       ModelInvocationRequest request,
       ProviderResponse response,
       ModelInvocationError error) {
-    long modelId =
+    UUID modelId =
         store.transaction(
             tx -> {
               tx.lockThread(threadId);
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -442,17 +450,17 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 插入 READY ToolInvocation 并把状态推进到 {@code status}（terminal 且 resultEntryId 仍 null）。 */
-  static long seedToolInvocation(
+  static UUID seedToolInvocation(
       InMemoryHarnessStore store,
-      long modelInvocationId,
-      long assistantEntryId,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
       int ordinal,
       String callId,
       ToolInvocationStatus status) {
-    long toolId =
+    UUID toolId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertToolInvocations(
                   List.of(
                       new ToolInvocation(
@@ -497,16 +505,16 @@ final class ThreadProcessorTestSupport {
     return toolId;
   }
 
-  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, long threadId) {
+  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId) {
     return claimThreadWork(store, threadId, NOW);
   }
 
-  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, long threadId, Instant now) {
+  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId, Instant now) {
     return claimThreadWork(store, threadId, now, now.plusSeconds(60));
   }
 
   static ClaimedWork claimThreadWork(
-      InMemoryHarnessStore store, long threadId, Instant now, Instant leaseUntil) {
+      InMemoryHarnessStore store, UUID threadId, Instant now, Instant leaseUntil) {
     return store
         .transaction(
             tx -> tx.claimNextWork(WorkTargetType.THREAD, now, "token-" + threadId, leaseUntil))
@@ -518,7 +526,7 @@ final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static void transitionModel(
-      InMemoryHarnessStore store, long modelId, Function<ModelInvocation, ModelInvocation> f) {
+      InMemoryHarnessStore store, UUID modelId, Function<ModelInvocation, ModelInvocation> f) {
     store.transaction(
         tx -> {
           ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
@@ -528,7 +536,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static void transitionTool(
-      InMemoryHarnessStore store, long toolId, Function<ToolInvocation, ToolInvocation> f) {
+      InMemoryHarnessStore store, UUID toolId, Function<ToolInvocation, ToolInvocation> f) {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -538,7 +546,7 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 仅推进 Thread 的 durable 时间/revision，保持 head 与 policy 不变。 */
-  static void touchThreadTimestamp(InMemoryHarnessStore store, long threadId, Instant updatedAt) {
+  static void touchThreadTimestamp(InMemoryHarnessStore store, UUID threadId, Instant updatedAt) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -548,7 +556,7 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 通过 Store validator 合法推进 ModelInvocation.updatedAt，保持 invocation 事实不变。 */
-  static void touchModelTimestamp(InMemoryHarnessStore store, long modelId, Instant updatedAt) {
+  static void touchModelTimestamp(InMemoryHarnessStore store, UUID modelId, Instant updatedAt) {
     transitionModel(
         store,
         modelId,
@@ -570,7 +578,7 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 通过 Store validator 合法推进 ToolInvocation.updatedAt，保持 invocation 事实不变。 */
-  static void touchToolTimestamp(InMemoryHarnessStore store, long toolId, Instant updatedAt) {
+  static void touchToolTimestamp(InMemoryHarnessStore store, UUID toolId, Instant updatedAt) {
     transitionTool(
         store,
         toolId,
@@ -593,47 +601,47 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED 并挂载自定义结果（用于 mapper 回滚类测试）。 */
-  static void succeedToolWith(InMemoryHarnessStore store, long toolId, ToolResult result) {
+  static void succeedToolWith(InMemoryHarnessStore store, UUID toolId, ToolResult result) {
     succeedToolWith(store, toolId, result, ToolEffectBatch.EMPTY);
   }
 
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED，并原子附带自定义结果与 effects。 */
   static void succeedToolWith(
-      InMemoryHarnessStore store, long toolId, ToolResult result, ToolEffectBatch effects) {
+      InMemoryHarnessStore store, UUID toolId, ToolResult result, ToolEffectBatch effects) {
     transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
     transitionTool(store, toolId, t -> t.beginDispatch(NOW));
     transitionTool(store, toolId, t -> t.markRunning(NOW));
     transitionTool(store, toolId, t -> t.succeed(result, effects, NOW));
   }
 
-  static ThreadState thread(InMemoryHarnessStore store, long threadId) {
+  static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
-  static EntryPath path(InMemoryHarnessStore store, long threadId) {
+  static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
   }
 
-  static Entry entry(InMemoryHarnessStore store, long entryId) {
+  static Entry entry(InMemoryHarnessStore store, UUID entryId) {
     return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
   }
 
-  static ModelInvocation model(InMemoryHarnessStore store, long modelId) {
+  static ModelInvocation model(InMemoryHarnessStore store, UUID modelId) {
     return store.transaction(tx -> tx.findModelInvocation(modelId)).orElseThrow();
   }
 
-  static ToolInvocation tool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation tool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(tx -> tx.findToolInvocation(toolId)).orElseThrow();
   }
 
-  static List<ToolInvocation> toolsByAssistant(InMemoryHarnessStore store, long assistantEntryId) {
+  static List<ToolInvocation> toolsByAssistant(InMemoryHarnessStore store, UUID assistantEntryId) {
     return store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
   }
 
-  static ThreadCommand command(InMemoryHarnessStore store, long threadId, long commandId) {
+  static ThreadCommand command(InMemoryHarnessStore store, UUID threadId, UUID clientCommandId) {
     return store
-        .transaction(tx -> tx.findCommandByClientId(threadId, "client-" + commandId))
+        .transaction(tx -> tx.findCommandByClientId(threadId, clientCommandId))
         .orElseThrow();
   }
 
@@ -671,7 +679,7 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 真实 ToolResult MESSAGE payload（非 synthetic，status SUCCEEDED）。 */
-  static EntryPayload realToolResultPayload(long assistantEntryId, int ordinal, String callId) {
+  static EntryPayload realToolResultPayload(UUID assistantEntryId, int ordinal, String callId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             callId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
@@ -775,22 +783,22 @@ final class ThreadProcessorTestSupport {
     // 形状：turn1（短消息，作为可摘要历史）+ turn2（长 USER 消息 + 带 usage 的短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
-    long[] modelIdHolder = new long[1];
+    UUID[] modelIdHolder = new UUID[1];
     ClosedTurnBaseline baseline =
         store.transaction(
             tx -> {
-              long sessionId = tx.nextId();
-              long rootEntryId = tx.nextId();
-              long turnStartEntryId = tx.nextId(); // turn1 TURN_START
-              long userEntryId = tx.nextId(); // turn1 USER
-              long assistantEntryId = tx.nextId(); // turn1 ASSISTANT
-              long turnEndEntryId = tx.nextId(); // turn1 TURN_END
-              long secondTurnStartId = tx.nextId(); // turn2 TURN_START
-              long secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
-              long secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
-              long secondTurnEndId = tx.nextId(); // turn2 TURN_END
-              long threadId = tx.nextId();
-              tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+              UUID sessionId = tx.nextId();
+              UUID rootEntryId = tx.nextId();
+              UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+              UUID userEntryId = tx.nextId(); // turn1 USER
+              UUID assistantEntryId = tx.nextId(); // turn1 ASSISTANT
+              UUID turnEndEntryId = tx.nextId(); // turn1 TURN_END
+              UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
+              UUID secondUserEntryId = tx.nextId(); // turn2 USER（长消息）
+              UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
+              UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
+              UUID threadId = tx.nextId();
+              tx.insertSession(new Session(sessionId, NOW));
               tx.insertEntry(
                   new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
               // turn1：短消息。
@@ -846,7 +854,8 @@ final class ThreadProcessorTestSupport {
                           null),
                       NOW));
               // Thread head 停在 turn2 USER：invocation 的 basis 必须是插入时刻的 head（与真实流程一致）。
-              tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
+              tx.insertThread(
+                  new ThreadState(threadId, secondUserEntryId, false, 1L, 0L, NOW, NOW));
               modelIdHolder[0] = tx.nextId();
               tx.insertModelInvocation(
                   new ModelInvocation(
@@ -895,7 +904,7 @@ final class ThreadProcessorTestSupport {
                   threadId);
             });
     // 插入后推进到 SUCCEEDED 并挂上 assistant 结果（与 seedModelInvocation 相同的状态机路径）。
-    long modelId = modelIdHolder[0];
+    UUID modelId = modelIdHolder[0];
     transitionModel(store, modelId, m -> m.beginDispatch(NOW));
     transitionModel(store, modelId, m -> m.markRunning(NOW));
     transitionModel(store, modelId, m -> m.succeed(successResponse(List.of(), "bash"), NOW));
@@ -1028,7 +1037,7 @@ final class ThreadProcessorTestSupport {
     RuntimeException failure;
     Runnable onResolve;
     boolean autoConsistent;
-    long lastThreadId;
+    UUID lastThreadId;
     EntryPath lastPath;
     boolean lastYoloEnabled;
     CompactionPreparation lastPreparation;
@@ -1036,7 +1045,7 @@ final class ThreadProcessorTestSupport {
 
     @Override
     public Result resolve(
-        long threadId, EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
+        UUID threadId, EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
       calls++;
       lastThreadId = threadId;
       lastPath = path;

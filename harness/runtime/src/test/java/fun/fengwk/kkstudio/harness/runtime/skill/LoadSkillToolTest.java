@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.tool.execution.ToolExecutionRequest;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -41,7 +42,9 @@ class LoadSkillToolTest {
         new SkillBodyLoader.SkillBodyLoadResult.Loaded("dev", "# Skill\n\nDo the thing.\n");
     LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
 
-    ToolResult result = execute(tool, 42, "{\"name\":\"dev\"}");
+    ToolResult result =
+        execute(
+            tool, UUID.fromString("00000000-0000-0000-0000-00000000002a"), "{\"name\":\"dev\"}");
     assertFalse(result.error());
     assertEquals("# Skill\n\nDo the thing.\n", ((TextToolContent) result.contents().get(0)).text());
     assertEquals(PLATFORM, loader.environmentName);
@@ -58,11 +61,17 @@ class LoadSkillToolTest {
             "dev", "platform is offline; dev is unavailable");
     LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
 
-    ToolResult unselected = execute(tool, 1, "{\"name\":\"missing\"}");
+    ToolResult unselected =
+        execute(
+            tool,
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            "{\"name\":\"missing\"}");
     assertTrue(unselected.error());
     assertTrue(text(unselected).contains("unknown or unselected skill"));
 
-    ToolResult offline = execute(tool, 1, "{\"name\":\"dev\"}");
+    ToolResult offline =
+        execute(
+            tool, UUID.fromString("00000000-0000-0000-0000-000000000001"), "{\"name\":\"dev\"}");
     assertTrue(offline.error());
     assertTrue(text(offline).contains("offline"));
   }
@@ -75,7 +84,11 @@ class LoadSkillToolTest {
     RecordingBodyLoader loader = new RecordingBodyLoader();
     LoadSkillTool tool = new LoadSkillTool(lookup, loader, Duration.ofSeconds(2));
 
-    ToolResult result = execute(tool, 1, "{\"name\":\"platform-only\"}");
+    ToolResult result =
+        execute(
+            tool,
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            "{\"name\":\"platform-only\"}");
 
     assertTrue(result.error());
     assertTrue(text(result).contains("has no Environment body"));
@@ -101,7 +114,8 @@ class LoadSkillToolTest {
     assertTrue(result.get().error());
     assertTrue(text(result.get()).contains("durable execution context"));
 
-    ToolResult blank = execute(tool, 1, "{\"name\":\"  \"}");
+    ToolResult blank =
+        execute(tool, UUID.fromString("00000000-0000-0000-0000-000000000001"), "{\"name\":\"  \"}");
     assertTrue(blank.error());
   }
 
@@ -109,7 +123,7 @@ class LoadSkillToolTest {
     return ((TextToolContent) result.contents().get(0)).text();
   }
 
-  private static ToolResult execute(LoadSkillTool tool, long threadId, String args)
+  private static ToolResult execute(LoadSkillTool tool, UUID threadId, String args)
       throws InterruptedException {
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
@@ -118,7 +132,8 @@ class LoadSkillToolTest {
             tool.descriptor(),
             new ToolCall("c1", "load_skill", args),
             Duration.ofSeconds(2),
-            new ToolExecutionContext(7L, threadId)),
+            new ToolExecutionContext(
+                UUID.fromString("00000000-0000-0000-0000-000000000007"), threadId)),
         completeListener(result, latch));
     assertTrue(latch.await(2, TimeUnit.SECONDS));
     return result.get();

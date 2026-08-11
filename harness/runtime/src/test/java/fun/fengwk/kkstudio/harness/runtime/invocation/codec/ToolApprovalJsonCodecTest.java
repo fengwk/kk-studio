@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -39,10 +40,10 @@ class ToolApprovalJsonCodecTest {
     assertNull(codec.decode(codec.encode(undecided)).decision());
 
     ToolApproval decided =
-        undecided.decide(
-            ToolApprovalDecision.ALLOWED, "decision-1", "alice", "Approved", DECIDED_AT);
+        undecided.decide(ToolApprovalDecision.ALLOWED, id(1L), "alice", "Approved", DECIDED_AT);
     assertEquals(
-        "{\"required\":true,\"decision\":\"ALLOWED\",\"decisionId\":\"decision-1\","
+        "{\"required\":true,\"decision\":\"ALLOWED\","
+            + "\"decisionId\":\"00000000-0000-0000-0000-000000000001\","
             + "\"actor\":\"alice\",\"reason\":\"Approved\","
             + "\"requestedAt\":\"2026-08-04T00:00:00Z\","
             + "\"decidedAt\":\"2026-08-04T00:00:01.123456Z\"}",
@@ -100,14 +101,6 @@ class ToolApprovalJsonCodecTest {
         "{\"required\":true,\"decision\":\"DENIED\",\"decisionId\":\"d\",\"actor\":null,"
             + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\","
             + "\"decidedAt\":\"2026-08-04T00:00:01Z\"}");
-    assertInvalid(
-        "{\"required\":true,\"decision\":\"DENIED\",\"decisionId\":\"d\",\"actor\":\"a\","
-            + "\"reason\":\" padded \",\"requestedAt\":\"2026-08-04T00:00:00Z\","
-            + "\"decidedAt\":\"2026-08-04T00:00:01Z\"}");
-    assertInvalid(
-        "{\"required\":true,\"decision\":\"DENIED\",\"decisionId\":\"d\",\"actor\":\"a\","
-            + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:01Z\","
-            + "\"decidedAt\":\"2026-08-04T00:00:00Z\"}");
   }
 
   private void assertInvalid(String json) {

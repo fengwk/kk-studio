@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 压缩 Model 调用的冻结元数据（与正常调用区分的唯一 durable 事实）。
@@ -17,9 +18,9 @@ public record CompactionRequest(
     CompactionPhase phase,
     CompactionTrigger trigger,
     long tokensBefore,
-    long firstKeptEntryId,
-    long cutEntryId,
-    Long turnPrefixStartEntryId) {
+    UUID firstKeptEntryId,
+    UUID cutEntryId,
+    UUID turnPrefixStartEntryId) {
 
   public CompactionRequest {
     phase = Objects.requireNonNull(phase, "phase");
@@ -27,15 +28,8 @@ public record CompactionRequest(
     if (tokensBefore < 0) {
       throw new IllegalArgumentException("tokensBefore must not be negative");
     }
-    if (firstKeptEntryId <= 0) {
-      throw new IllegalArgumentException("firstKeptEntryId must be positive");
-    }
-    if (cutEntryId <= 0) {
-      throw new IllegalArgumentException("cutEntryId must be positive");
-    }
-    if (turnPrefixStartEntryId != null && turnPrefixStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnPrefixStartEntryId must be positive");
-    }
+    Objects.requireNonNull(firstKeptEntryId, "firstKeptEntryId");
+    Objects.requireNonNull(cutEntryId, "cutEntryId");
     if (phase == CompactionPhase.FULL) {
       if (turnPrefixStartEntryId != null) {
         throw new IllegalArgumentException("FULL compaction must not carry turnPrefixStartEntryId");

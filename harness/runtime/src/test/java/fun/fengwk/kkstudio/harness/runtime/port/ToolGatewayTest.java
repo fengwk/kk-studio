@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 /** ToolGateway public contract：preflight outcomes、admission certainty 与 value validation。 */
 class ToolGatewayTest {
@@ -41,25 +42,36 @@ class ToolGatewayTest {
   @Test
   void executionFreezesTheKeyAndTheRequest() {
     ToolGateway.Execution execution =
-        new ToolGateway.Execution(9L, 7L, 11L, 2, PortTestData.toolRequest());
-    assertEquals(9L, execution.invocationId());
-    assertEquals(7L, execution.threadId());
-    assertEquals(11L, execution.assistantEntryId());
+        new ToolGateway.Execution(
+            UUID.fromString("00000000-0000-0000-0000-000000000009"),
+            UUID.fromString("00000000-0000-0000-0000-000000000007"),
+            UUID.fromString("00000000-0000-0000-0000-00000000000b"),
+            2,
+            PortTestData.toolRequest());
+    assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000009"), execution.invocationId());
+    assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000007"), execution.threadId());
+    assertEquals(
+        UUID.fromString("00000000-0000-0000-0000-00000000000b"), execution.assistantEntryId());
     assertEquals(2, execution.proposedAttempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(0L, 1L, 1L, 1, PortTestData.toolRequest()));
+        () ->
+            new ToolGateway.Execution(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                0,
+                PortTestData.toolRequest()));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 0L, 1L, 1, PortTestData.toolRequest()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 1L, 0L, 1, PortTestData.toolRequest()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolGateway.Execution(1L, 1L, 1L, 0, PortTestData.toolRequest()));
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Execution(1L, 1L, 1L, 1, null));
+        NullPointerException.class,
+        () ->
+            new ToolGateway.Execution(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                1,
+                null));
   }
 
   @Test
@@ -159,7 +171,13 @@ class ToolGatewayTest {
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest(), true));
     ToolGateway.StartResult result =
         gateway.start(
-            new ToolGateway.Execution(5L, 3L, 7L, 1, PortTestData.toolRequest()), noopListener());
+            new ToolGateway.Execution(
+                UUID.fromString("00000000-0000-0000-0000-000000000005"),
+                UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                UUID.fromString("00000000-0000-0000-0000-000000000007"),
+                1,
+                PortTestData.toolRequest()),
+            noopListener());
     assertTrue(result instanceof ToolGateway.Started);
   }
 

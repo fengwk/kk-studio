@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * queued Thread command harvest 的纯 reducer。
@@ -13,20 +14,18 @@ import java.util.Objects;
 public final class CommandHarvestReducer {
 
   public CommandHarvestResult reduce(
-      long threadId,
+      UUID threadId,
       BranchSettings baseSettings,
       boolean yoloEnabled,
       List<ThreadCommand> eligibleCommands) {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+    Objects.requireNonNull(threadId, "threadId");
     BranchSettings settings = Objects.requireNonNull(baseSettings, "baseSettings");
     Objects.requireNonNull(eligibleCommands, "eligibleCommands");
 
     long previousSequence = 0L;
     for (ThreadCommand command : eligibleCommands) {
       Objects.requireNonNull(command, "eligibleCommands[]");
-      if (command.threadId() != threadId) {
+      if (!command.threadId().equals(threadId)) {
         throw new IllegalArgumentException(
             "command threadId " + command.threadId() + " does not match " + threadId);
       }
