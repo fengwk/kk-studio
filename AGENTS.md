@@ -1,6 +1,7 @@
 # Current AGENTS.md Maintenance
 
 - 本文件只记录最小必要的仓库级约束；禁止写背景说明、过程描述和长篇约定，新增内容必须足够稳定且影响整个仓库。
+- **Design and coding principles: Less is More.**
 
 ## Repository Conventions
 
