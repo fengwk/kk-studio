@@ -50,6 +50,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /** PostgreSQL 上的 Canvas v1 command、CAS、幂等和聚合快照覆盖。 */
 @Import(DurableCanvasServiceTest.TestAdapterConfiguration.class)
@@ -425,6 +426,13 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
   }
 
   @Test
+  void snapshotNeverMixesFunctionRunAndResourceGenerations() throws Exception {
+    // 两个锁点分别夹住 run/resource 查询，证明任一提交交错都只能返回同一代事实。
+    assertStableSnapshotAcrossFunctionCommit("canvas_function_run", "run-lock");
+    assertStableSnapshotAcrossFunctionCommit("canvas_node_resource", "resource-lock");
+  }
+
+  @Test
   void uploadRepositoryPersistsOnlyUploadFactsWithoutGraphApi() {
     assertTrue(queryService.findSnapshot(-1).isEmpty());
     assertTrue(queryService.findSnapshot(Long.MAX_VALUE).isEmpty());
@@ -485,6 +493,135 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
             Instant.now());
     resourceRepository.add(resource);
     return resource;
+  }
+
+  private void assertStableSnapshotAcrossFunctionCommit(String lockedTable, String suffix)
+      throws Exception {
+    CanvasDocument canvas = commandService.createCanvas("snapshot-" + suffix);
+    CanvasSnapshot created =
+        apply(
+            canvas,
+            0,
+            "function-" + suffix,
+            new CanvasCommand.CreateFunctionNode("function-" + suffix, "m", FUNCTION_CONFIG, T));
+    long nodeId = created.nodes().get(0).id();
+    CanvasResource oldResource =
+        addResource(canvas.id(), CanvasResourceKind.IMAGE, "old-" + suffix + ".png");
+    CanvasResource newResource =
+        addResource(canvas.id(), CanvasResourceKind.IMAGE, "new-" + suffix + ".png");
+    replaceNodeResource(canvas.id(), nodeId, oldResource.id());
+    runRepository.insertRunning(
+        new CanvasFunctionRun(
+            nodeId,
+            "request-" + suffix,
+            CanvasFunctionRunStatus.RUNNING,
+            "QUEUED",
+            "{\"stage\":\"QUEUED\"}",
+            null,
+            Instant.now()));
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try (Connection updater = PostgresSchemaSupport.newConnection()) {
+      updater.setAutoCommit(false);
+      execute(updater, "lock table " + lockedTable + " in access exclusive mode");
+      replaceNodeResource(updater, canvas.id(), nodeId, newResource.id());
+      try (PreparedStatement statement =
+          updater.prepareStatement(
+              """
+              update canvas_function_run
+              set status = 'SUCCEEDED',
+                  state_json = cast(? as jsonb),
+                  error = null,
+                  updated_at = current_timestamp
+              where node_id = ?
+              """)) {
+        statement.setString(1, "{\"stage\":\"SUCCEEDED\"}");
+        statement.setLong(2, nodeId);
+        assertEquals(1, statement.executeUpdate());
+      }
+
+      Future<CanvasSnapshot> read =
+          executor.submit(() -> queryService.findSnapshot(canvas.id()).orElseThrow());
+      assertTrue(awaitBlockedQuery(lockedTable), "snapshot query did not reach " + lockedTable);
+      updater.commit();
+
+      CanvasSnapshot snapshot = read.get(5, TimeUnit.SECONDS);
+      CanvasResourceNode node = snapshot.nodes().get(0);
+      assertNotNull(node.run());
+      if (node.run().status() == CanvasFunctionRunStatus.RUNNING) {
+        assertEquals(
+            List.of(oldResource.id()), node.resources().stream().map(CanvasResource::id).toList());
+      } else {
+        assertEquals(CanvasFunctionRunStatus.SUCCEEDED, node.run().status());
+        assertEquals(
+            List.of(newResource.id()), node.resources().stream().map(CanvasResource::id).toList());
+      }
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  private void replaceNodeResource(long canvasId, long nodeId, long resourceId) throws Exception {
+    try (Connection connection = PostgresSchemaSupport.newConnection()) {
+      replaceNodeResource(connection, canvasId, nodeId, resourceId);
+    }
+  }
+
+  private void replaceNodeResource(
+      Connection connection, long canvasId, long nodeId, long resourceId) throws Exception {
+    try (PreparedStatement delete =
+            connection.prepareStatement(
+                "delete from canvas_node_resource where canvas_id = ? and node_id = ?");
+        PreparedStatement insert =
+            connection.prepareStatement(
+                """
+                insert into canvas_node_resource (canvas_id, node_id, resource_index, resource_id)
+                values (?, ?, 0, ?)
+                """)) {
+      delete.setLong(1, canvasId);
+      delete.setLong(2, nodeId);
+      delete.executeUpdate();
+      insert.setLong(1, canvasId);
+      insert.setLong(2, nodeId);
+      insert.setLong(3, resourceId);
+      insert.executeUpdate();
+    }
+  }
+
+  private boolean awaitBlockedQuery(String table) throws Exception {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (System.nanoTime() - deadline < 0L) {
+      try (Connection connection = PostgresSchemaSupport.newConnection();
+          PreparedStatement statement =
+              connection.prepareStatement(
+                  """
+                  select exists (
+                      select 1
+                      from pg_stat_activity
+                      where datname = current_database()
+                        and pid <> pg_backend_pid()
+                        and state = 'active'
+                        and wait_event_type = 'Lock'
+                        and query ilike ?
+                  )
+                  """)) {
+        statement.setString(1, "%" + table + "%");
+        try (ResultSet resultSet = statement.executeQuery()) {
+          resultSet.next();
+          if (resultSet.getBoolean(1)) {
+            return true;
+          }
+        }
+      }
+      Thread.sleep(10L);
+    }
+    return false;
+  }
+
+  private void execute(Connection connection, String sql) throws Exception {
+    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+      statement.execute();
+    }
   }
 
   private Object race(

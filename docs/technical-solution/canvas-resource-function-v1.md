@@ -304,6 +304,8 @@ DELETE_GROUP
 ```
 
 `graphRevision` 只由成功的用户 Graph Command batch 递增一次。
+聚合 snapshot 在读取前后同时核对 `graphRevision` 与有序 FunctionRun 列表；任一事实在
+多查询装配期间变化就重读，避免返回终态 Run 与另一代 Resource/Graph 的混合结果。
 
 `UNGROUP` 携带 `groupId + memberNodeIds`，只解除指定成员；`DELETE_GROUP`
 先解除全部成员再删除 Group。

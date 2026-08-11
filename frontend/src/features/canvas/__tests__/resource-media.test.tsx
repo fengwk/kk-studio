@@ -181,6 +181,34 @@ describe('Canvas lazy resource media', () => {
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
   })
 
+  it('lets the user retry a transient original signing failure', async () => {
+    // useQuery 的一次自动重试耗尽后，原件按钮仍必须能显式重新签名。
+    vi.mocked(getCanvasResourceOriginalUrl)
+      .mockRejectedValueOnce(new Error('temporary'))
+      .mockRejectedValueOnce(new Error('temporary'))
+      .mockResolvedValueOnce({
+        method: 'GET',
+        url: 'https://s3.example/recovered-original',
+        headers: {},
+        expiresAt: '2026-08-10T00:15:00Z',
+      })
+    renderMedia(resource('IMAGE'))
+
+    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
+    await waitFor(
+      () => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledTimes(2),
+      { timeout: 4_000 },
+    )
+    await screen.findByText('原件签名失败', {}, { timeout: 4_000 })
+    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
+
+    expect(await screen.findByRole('link', { name: '打开原图 image.asset' })).toHaveAttribute(
+      'href',
+      'https://s3.example/recovered-original',
+    )
+    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledTimes(3)
+  })
+
   it('reuses the safe MarkdownRenderer for TEXT resources', () => {
     // Heading/list semantics demonstrate TEXT is rendered rather than injected as raw HTML.
     renderMedia(resource('TEXT'))
