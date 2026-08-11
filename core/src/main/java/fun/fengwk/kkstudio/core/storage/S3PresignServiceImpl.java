@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.core.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
 
 import java.time.Duration;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +55,18 @@ public class S3PresignServiceImpl implements S3PresignService {
   public S3PresignedResponseDTO presignCreateOnlyUpload(
       String key, String contentType, Long expiresInSeconds) {
     PutObjectRequest putRequest = newPutObjectRequest(key, contentType).ifNoneMatch("*").build();
+    return presignUpload(putRequest, expiresInSeconds);
+  }
+
+  @Override
+  public S3PresignedResponseDTO presignChecksummedCreateOnlyUpload(
+      String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
+    validateChecksumSha256Base64(checksumSha256Base64);
+    PutObjectRequest putRequest =
+        newPutObjectRequest(key, contentType)
+            .ifNoneMatch("*")
+            .checksumSHA256(checksumSha256Base64)
+            .build();
     return presignUpload(putRequest, expiresInSeconds);
   }
 
@@ -113,6 +126,19 @@ public class S3PresignServiceImpl implements S3PresignService {
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("contentType must be a valid media type", e);
     }
+  }
+
+  private void validateChecksumSha256Base64(String checksumSha256Base64) {
+    Assert.hasText(checksumSha256Base64, "checksumSha256Base64 must not be blank");
+    byte[] decoded;
+    try {
+      decoded = Base64.getDecoder().decode(checksumSha256Base64);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("checksumSha256Base64 must be valid base64", e);
+    }
+    Assert.isTrue(
+        decoded.length == 32,
+        "checksumSha256Base64 must decode to a 32-byte SHA-256 digest, got " + decoded.length);
   }
 
   private Duration resolveExpires(Long expiresInSeconds) {

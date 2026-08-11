@@ -55,7 +55,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_command",
           "harness_model_invocation",
           "harness_tool_invocation",
-          "harness_work");
+          "harness_work",
+          "storage_blob",
+          "storage_upload");
 
   /** 精确的 runtime-spring 执行协议；只有这些表能使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
@@ -251,6 +253,30 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
+    assertColumns(
+        "storage_blob",
+        "id",
+        "sha256",
+        "size_bytes",
+        "media_type",
+        "width",
+        "height",
+        "duration_ms",
+        "ref_count",
+        "state",
+        "created_at",
+        "updated_at");
+    assertColumns(
+        "storage_upload",
+        "id",
+        "candidate_blob_id",
+        "blob_id",
+        "filename",
+        "declared_media_type",
+        "declared_size",
+        "declared_sha256",
+        "expires_at",
+        "created_at");
   }
 
   @Test
@@ -414,6 +440,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
     assertColumnType("timestamp with time zone", "canvas_upload", "expires_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
+    assertColumnType("timestamp with time zone", "storage_blob", "created_at");
+    assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
+    assertColumnType("timestamp with time zone", "storage_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "storage_upload", "created_at");
   }
 
   @Test
@@ -787,7 +817,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",
-            "uk_harness_tool_invocation_result"),
+            "uk_harness_tool_invocation_result",
+            "uk_storage_blob_active_hash",
+            "uk_storage_upload_candidate"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
