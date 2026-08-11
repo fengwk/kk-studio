@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Clock;
@@ -41,13 +42,13 @@ class HarnessRuntimeStopConcurrencyTest {
     ToolApprovalCommand approval = allow(baseline);
     runtime.decideToolApproval(approval);
 
-    StopResult stopped = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 2));
+    StopResult stopped = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 2));
     ToolInvocation replay = runtime.decideToolApproval(approval);
 
     assertEquals(StopResult.Status.STOPPED, stopped.status());
     assertEquals(ToolInvocationStatus.CANCELLED, replay.status());
     assertEquals(ToolApprovalDecision.ALLOWED, replay.approval().decision());
-    assertEquals("decision-1", replay.approval().decisionId());
+    assertEquals(TestIds.id(1), replay.approval().decisionId());
   }
 
   @Test
@@ -57,7 +58,7 @@ class HarnessRuntimeStopConcurrencyTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
 
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -82,7 +83,8 @@ class HarnessRuntimeStopConcurrencyTest {
       Future<Attempt> stop =
           pool.submit(
               attempt(
-                  barrier, () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1))));
+                  barrier,
+                  () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1))));
       Future<Attempt> approval =
           pool.submit(attempt(barrier, () -> runtime.decideToolApproval(allow(baseline))));
       Attempt stopAttempt = stop.get();
@@ -115,7 +117,9 @@ class HarnessRuntimeStopConcurrencyTest {
     try {
       Future<Attempt> stop =
           pool.submit(
-              attempt(barrier, () -> runtime.stop(new StopCommand(chain.threadId(), "stop-1", 1))));
+              attempt(
+                  barrier,
+                  () -> runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1))));
       Future<Attempt> move =
           pool.submit(
               attempt(
@@ -151,7 +155,7 @@ class HarnessRuntimeStopConcurrencyTest {
         baseline.threadId(),
         baseline.toolId(),
         ToolApprovalDecision.ALLOWED,
-        "decision-1",
+        TestIds.id(1),
         "alice",
         null);
   }

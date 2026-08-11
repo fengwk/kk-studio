@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 从 Provider / invocation 事实到 immutable history Entry payload 的聚焦纯 mapper。
@@ -116,7 +117,7 @@ public final class HistoryPayloadMapper {
    * HISTORY_CUT，稳定 "No result provided" 错误内容；不关联任何 ToolInvocation。
    */
   public MessagePayload syntheticHistoryCutToolResult(
-      long assistantEntryId, int ordinal, ToolCallMessageContent call) {
+      UUID assistantEntryId, int ordinal, ToolCallMessageContent call) {
     Objects.requireNonNull(call, "call");
     ToolResultMessageContent content =
         new ToolResultMessageContent(

@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTes
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.error;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.request;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.response;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** ModelInvocation 纯 transition 方法以及共享的 transition 校验。 */
 class ModelInvocationTransitionTest {
@@ -55,12 +57,12 @@ class ModelInvocationTransitionTest {
       StreamCheckpoint streamCheckpoint,
       ProviderResponse result,
       ModelInvocationError error,
-      Long resultEntryId) {
+      UUID resultEntryId) {
     return new ModelInvocation(
-        1L,
-        1L,
-        1L,
-        1L,
+        id(1L),
+        id(1L),
+        id(1L),
+        id(1L),
         request(),
         status,
         attempt,
@@ -291,15 +293,15 @@ class ModelInvocationTransitionTest {
 
   @Test
   void attachResultEntryLinksOnlyOnTerminalAndClearsTheCheckpoint() {
-    ModelInvocation attached = succeeded(1).attachResultEntry(99L, T1);
-    assertEquals(99L, attached.resultEntryId());
+    ModelInvocation attached = succeeded(1).attachResultEntry(id(99L), T1);
+    assertEquals(id(99L), attached.resultEntryId());
     // 从携带 checkpoint 的终态 attach 时会清掉它并保留其他全部事实
     ModelInvocation terminalWithCheckpoint =
         new ModelInvocation(
-            1L,
-            1L,
-            1L,
-            1L,
+            id(1L),
+            id(1L),
+            id(1L),
+            id(1L),
             request(),
             ModelInvocationStatus.SUCCEEDED,
             1,
@@ -309,15 +311,14 @@ class ModelInvocationTransitionTest {
             null,
             CREATED,
             CREATED);
-    ModelInvocation attachedWithCheckpoint = terminalWithCheckpoint.attachResultEntry(99L, T2);
-    assertEquals(99L, attachedWithCheckpoint.resultEntryId());
+    ModelInvocation attachedWithCheckpoint = terminalWithCheckpoint.attachResultEntry(id(99L), T2);
+    assertEquals(id(99L), attachedWithCheckpoint.resultEntryId());
     assertNull(attachedWithCheckpoint.streamCheckpoint());
     assertEquals(response(), attachedWithCheckpoint.result());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).attachResultEntry(1L, T1));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).attachResultEntry(id(1L), T1));
     assertThrows(
         IllegalArgumentException.class,
-        () -> succeeded(1).attachResultEntry(99L, T1).attachResultEntry(100L, T2));
-    assertThrows(IllegalArgumentException.class, () -> succeeded(1).attachResultEntry(0L, T1));
+        () -> succeeded(1).attachResultEntry(id(99L), T1).attachResultEntry(id(100L), T2));
   }
 
   @Test
@@ -365,16 +366,16 @@ class ModelInvocationTransitionTest {
     ModelInvocation stored = withUpdatedAt(ready(0), T1);
     assertThrows(
         IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, withId(stored, 2L)));
+        () -> ModelInvocation.validateTransition(stored, withId(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, withThread(stored, 2L)));
+        () -> ModelInvocation.validateTransition(stored, withThread(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, withTurnStart(stored, 2L)));
+        () -> ModelInvocation.validateTransition(stored, withTurnStart(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, withBasis(stored, 2L)));
+        () -> ModelInvocation.validateTransition(stored, withBasis(stored, id(2L))));
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(stored, withRequest(stored)));
@@ -496,10 +497,11 @@ class ModelInvocationTransitionTest {
             ModelInvocation.validateTransition(
                 failed, invocation(ModelInvocationStatus.FAILED, 2, null, null, error(), null)));
     // resultEntryId 只能从 null 开始 attach；正数值冻结
-    ModelInvocation attached = succeeded(1).attachResultEntry(99L, T1);
+    ModelInvocation attached = succeeded(1).attachResultEntry(id(99L), T1);
     assertThrows(
         IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(attached, attached.attachResultEntry(100L, T2)));
+        () ->
+            ModelInvocation.validateTransition(attached, attached.attachResultEntry(id(100L), T2)));
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(attached, withResultEntry(attached, null)));
@@ -564,7 +566,7 @@ class ModelInvocationTransitionTest {
         null);
   }
 
-  private static ModelInvocation withId(ModelInvocation source, long id) {
+  private static ModelInvocation withId(ModelInvocation source, UUID id) {
     return new ModelInvocation(
         id,
         source.threadId(),
@@ -581,7 +583,7 @@ class ModelInvocationTransitionTest {
         source.updatedAt());
   }
 
-  private static ModelInvocation withThread(ModelInvocation source, long threadId) {
+  private static ModelInvocation withThread(ModelInvocation source, UUID threadId) {
     return new ModelInvocation(
         source.id(),
         threadId,
@@ -598,7 +600,7 @@ class ModelInvocationTransitionTest {
         source.updatedAt());
   }
 
-  private static ModelInvocation withTurnStart(ModelInvocation source, long turnStartEntryId) {
+  private static ModelInvocation withTurnStart(ModelInvocation source, UUID turnStartEntryId) {
     return new ModelInvocation(
         source.id(),
         source.threadId(),
@@ -615,7 +617,7 @@ class ModelInvocationTransitionTest {
         source.updatedAt());
   }
 
-  private static ModelInvocation withBasis(ModelInvocation source, long basisHeadEntryId) {
+  private static ModelInvocation withBasis(ModelInvocation source, UUID basisHeadEntryId) {
     return new ModelInvocation(
         source.id(),
         source.threadId(),
@@ -683,7 +685,7 @@ class ModelInvocationTransitionTest {
         updatedAt);
   }
 
-  private static ModelInvocation withResultEntry(ModelInvocation source, Long resultEntryId) {
+  private static ModelInvocation withResultEntry(ModelInvocation source, UUID resultEntryId) {
     return new ModelInvocation(
         source.id(),
         source.threadId(),

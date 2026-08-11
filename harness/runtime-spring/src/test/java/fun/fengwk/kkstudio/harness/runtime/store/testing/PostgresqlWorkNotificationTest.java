@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.spring.postgresql.PostgresqlWorkListener;
@@ -40,6 +41,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -199,7 +201,7 @@ class PostgresqlWorkNotificationTest {
     assertCaughtNotifyFailureRollsBackStaleCompletion();
   }
 
-  private void requestWork(long threadId, WorkTarget target, Instant requestedAt) {
+  private void requestWork(UUID threadId, WorkTarget target, Instant requestedAt) {
     inTransaction(
         store,
         tx -> {
@@ -313,8 +315,12 @@ class PostgresqlWorkNotificationTest {
   }
 
   private static HarnessStore notifyFailingStore() {
+    DataSource failingDataSource =
+        interceptNotifyPreparation(PostgresqlHarnessStoreFixture.dataSource());
     return new PostgresqlHarnessStore(
-        interceptNotifyPreparation(PostgresqlHarnessStoreFixture.dataSource()));
+        failingDataSource,
+        new DataSourceTransactionManager(failingDataSource),
+        PostgresqlHarnessStoreFixture.idGenerator());
   }
 
   private static DataSource interceptNotifyPreparation(DataSource delegate) {

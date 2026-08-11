@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 一次 Tool invocation 的 durable 当前状态。
@@ -18,9 +19,9 @@ import java.util.Objects;
  * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ToolInvocation(
-    long id,
-    long modelInvocationId,
-    long assistantEntryId,
+    UUID id,
+    UUID modelInvocationId,
+    UUID assistantEntryId,
     int ordinal,
     ToolInvocationRequest request,
     ToolInvocationStatus status,
@@ -29,15 +30,15 @@ public record ToolInvocation(
     ToolResult result,
     ToolEffectBatch effects,
     ToolInvocationError error,
-    Long resultEntryId,
+    UUID resultEntryId,
     Instant createdAt,
     Instant updatedAt) {
 
   /** 构造不携带 branch effects 的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
   public ToolInvocation(
-      long id,
-      long modelInvocationId,
-      long assistantEntryId,
+      UUID id,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
       int ordinal,
       ToolInvocationRequest request,
       ToolInvocationStatus status,
@@ -45,7 +46,7 @@ public record ToolInvocation(
       ToolApproval approval,
       ToolResult result,
       ToolInvocationError error,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant createdAt,
       Instant updatedAt) {
     this(
@@ -66,15 +67,9 @@ public record ToolInvocation(
   }
 
   public ToolInvocation {
-    if (id <= 0) {
-      throw new IllegalArgumentException("invocation id must be positive");
-    }
-    if (modelInvocationId <= 0) {
-      throw new IllegalArgumentException("modelInvocationId must be positive");
-    }
-    if (assistantEntryId <= 0) {
-      throw new IllegalArgumentException("assistantEntryId must be positive");
-    }
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(modelInvocationId, "modelInvocationId");
+    Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     if (ordinal < 0) {
       throw new IllegalArgumentException("ordinal must not be negative");
     }
@@ -123,9 +118,9 @@ public record ToolInvocation(
   }
 
   private static void requireStableIdentity(ToolInvocation stored, ToolInvocation next) {
-    if (stored.id() != next.id()
-        || stored.modelInvocationId() != next.modelInvocationId()
-        || stored.assistantEntryId() != next.assistantEntryId()
+    if (!stored.id().equals(next.id())
+        || !stored.modelInvocationId().equals(next.modelInvocationId())
+        || !stored.assistantEntryId().equals(next.assistantEntryId())
         || stored.ordinal() != next.ordinal()
         || !stored.request().equals(next.request())
         || !stored.createdAt().equals(next.createdAt())) {
@@ -254,13 +249,12 @@ public record ToolInvocation(
         || !Objects.equals(stored.error(), next.error())) {
       throw new IllegalArgumentException("terminal tool invocation facts must not change");
     }
-    Long storedResultEntryId = stored.resultEntryId();
-    Long nextResultEntryId = next.resultEntryId();
+    UUID storedResultEntryId = stored.resultEntryId();
+    UUID nextResultEntryId = next.resultEntryId();
     if (storedResultEntryId == null) {
-      if (nextResultEntryId != null && nextResultEntryId <= 0) {
-        throw new IllegalArgumentException("terminal resultEntryId must be positive");
-      }
-    } else if (!storedResultEntryId.equals(nextResultEntryId)) {
+      return;
+    }
+    if (!Objects.equals(storedResultEntryId, nextResultEntryId)) {
       throw new IllegalArgumentException("terminal resultEntryId must not change");
     }
   }
@@ -307,7 +301,7 @@ public record ToolInvocation(
    */
   public ToolInvocation decideApproval(
       ToolApprovalDecision decision,
-      String decisionId,
+      UUID decisionId,
       String actor,
       String reason,
       Instant decidedAt,
@@ -500,7 +494,7 @@ public record ToolInvocation(
   }
 
   /** Terminal -&gt; 同一 terminal 状态，并链接 ToolResult Entry；其他 terminal 事实保持不变。 */
-  public ToolInvocation attachResultEntry(long resultEntryId, Instant now) {
+  public ToolInvocation attachResultEntry(UUID resultEntryId, Instant now) {
     return withState(status, attempt, approval, result, effects, error, resultEntryId, now);
   }
 
@@ -512,7 +506,7 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant now) {
     ToolInvocation next =
         new ToolInvocation(
@@ -551,14 +545,11 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
-      Long resultEntryId,
+      UUID resultEntryId,
       ToolInvocationRequest request) {
     boolean terminal = status.isTerminal();
     if (!terminal && resultEntryId != null) {
       throw new IllegalArgumentException("resultEntryId is only allowed on terminal states");
-    }
-    if (terminal && resultEntryId != null && resultEntryId <= 0) {
-      throw new IllegalArgumentException("terminal resultEntryId must be positive");
     }
     if (status == ToolInvocationStatus.WAITING_APPROVAL) {
       if (approval == null || !approval.required() || !approval.isUndecided()) {

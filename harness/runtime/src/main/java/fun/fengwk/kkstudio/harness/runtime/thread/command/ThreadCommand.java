@@ -2,38 +2,30 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 不可变的 durable Thread mailbox command aggregate。
  *
- * <p>生命周期 state 由两个 nullable terminal marker 派生；不存储 status 或 appliedAt 投影。
+ * <p>身份为 {@code (threadId, sequence)}，不携带 surrogate id。生命周期 state 由两个 nullable terminal marker
+ * 派生；不存储 status 或 appliedAt 投影。
  */
 public record ThreadCommand(
-    long id,
-    long threadId,
+    UUID threadId,
     long sequence,
     ThreadCommandPayload payload,
-    String clientCommandId,
-    Long consumedTurnStartEntryId,
+    UUID clientCommandId,
+    UUID consumedTurnStartEntryId,
     Instant cancelledAt,
     Instant createdAt) {
 
   public ThreadCommand {
-    if (id <= 0) {
-      throw new IllegalArgumentException("command id must be positive");
-    }
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+    Objects.requireNonNull(threadId, "threadId");
     if (sequence <= 0) {
       throw new IllegalArgumentException("sequence must be positive");
     }
     payload = Objects.requireNonNull(payload, "payload");
-    clientCommandId =
-        CommandValueValidation.requireCanonicalName(clientCommandId, "clientCommandId");
-    if (consumedTurnStartEntryId != null && consumedTurnStartEntryId <= 0) {
-      throw new IllegalArgumentException("consumedTurnStartEntryId must be positive");
-    }
+    Objects.requireNonNull(clientCommandId, "clientCommandId");
     if (consumedTurnStartEntryId != null && cancelledAt != null) {
       throw new IllegalArgumentException(
           "consumedTurnStartEntryId and cancelledAt must not both be present");
@@ -62,17 +54,15 @@ public record ThreadCommand(
 
   /**
    * 纯 QUEUED -&gt; APPLIED 迁移：附加消费该 command 的 TURN_START Entry id 并清空 cancel marker。 只有 QUEUED 状态的
-   * command 可被 consume；{@code turnStartEntryId} 必须为正。
+   * command 可被 consume；{@code turnStartEntryId} 不得为 null。
    */
-  public ThreadCommand consume(long turnStartEntryId) {
+  public ThreadCommand consume(UUID turnStartEntryId) {
     if (state() != ThreadCommandState.QUEUED) {
       throw new IllegalStateException("only QUEUED commands can be consumed");
     }
-    if (turnStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnStartEntryId must be positive");
-    }
+    Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
     return new ThreadCommand(
-        id, threadId, sequence, payload, clientCommandId, turnStartEntryId, null, createdAt);
+        threadId, sequence, payload, clientCommandId, turnStartEntryId, null, createdAt);
   }
 
   /**
@@ -88,6 +78,6 @@ public record ThreadCommand(
       throw new IllegalArgumentException("cancelledAt must not precede createdAt");
     }
     return new ThreadCommand(
-        id, threadId, sequence, payload, clientCommandId, null, cancelledAt, createdAt);
+        threadId, sequence, payload, clientCommandId, null, cancelledAt, createdAt);
   }
 }

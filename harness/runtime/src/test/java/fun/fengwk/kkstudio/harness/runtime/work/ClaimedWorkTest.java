@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -10,25 +11,29 @@ import java.time.Instant;
 /** ClaimedWork record snapshot 与构造器不变量。 */
 class ClaimedWorkTest {
 
-  private static final WorkTarget TARGET = new WorkTarget(WorkTargetType.TOOL, 7L);
-  private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
-
   @Test
   void acceptsValidSnapshotFacts() {
-    ClaimedWork snapshot = new ClaimedWork(TARGET, 1L, "token-1", T0.plusSeconds(30));
+    ClaimedWork snapshot =
+        new ClaimedWork(
+            new WorkTarget(WorkTargetType.TOOL, id(7L)),
+            1L,
+            "token-1",
+            Instant.parse("2026-01-01T00:00:30Z"));
 
-    assertEquals(TARGET, snapshot.target());
+    assertEquals(new WorkTarget(WorkTargetType.TOOL, id(7L)), snapshot.target());
     assertEquals(1L, snapshot.claimedWakeVersion());
     assertEquals("token-1", snapshot.leaseToken());
-    assertEquals(T0.plusSeconds(30), snapshot.leaseUntil());
+    assertEquals(Instant.parse("2026-01-01T00:00:30Z"), snapshot.leaseUntil());
   }
 
   @Test
   void rejectsInvalidSnapshotFacts() {
-    assertThrows(NullPointerException.class, () -> new ClaimedWork(null, 1L, "t", T0));
-    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(TARGET, 0L, "t", T0));
-    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(TARGET, -1L, "t", T0));
-    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(TARGET, 1L, " ", T0));
-    assertThrows(NullPointerException.class, () -> new ClaimedWork(TARGET, 1L, "t", null));
+    Instant t0 = Instant.parse("2026-01-01T00:00:00Z");
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, id(7L));
+    assertThrows(NullPointerException.class, () -> new ClaimedWork(null, 1L, "t", t0));
+    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(target, 0L, "t", t0));
+    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(target, -1L, "t", t0));
+    assertThrows(IllegalArgumentException.class, () -> new ClaimedWork(target, 1L, " ", t0));
+    assertThrows(NullPointerException.class, () -> new ClaimedWork(target, 1L, "t", null));
   }
 }

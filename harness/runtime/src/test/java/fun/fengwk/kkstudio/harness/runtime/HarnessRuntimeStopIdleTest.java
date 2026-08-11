@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -45,7 +46,7 @@ class HarnessRuntimeStopIdleTest {
   @Test
   void idleWithoutCommandsOrWorkIsZeroEffect() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, result.status());
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(0L, result.thread().revision());
@@ -55,9 +56,9 @@ class HarnessRuntimeStopIdleTest {
   @Test
   void idleWithQueuedCommandsCancelsAllAtOneNowAndBumpsRevisionExactlyOnce() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("a"), "cid-1");
-    seedQueuedCommand(store, baseline.threadId(), 2L, 2L, userMessagePayload("b"), "cid-2");
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
+    seedQueuedCommand(store, baseline.threadId(), 2L, userMessagePayload("b"), TestIds.id(2));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, result.status());
     assertEquals(2, result.cancelledCommandCount());
     assertEquals(1L, result.thread().revision());
@@ -73,7 +74,8 @@ class HarnessRuntimeStopIdleTest {
       ThreadCommand command =
           store.transaction(
               tx ->
-                  tx.findCommandByClientId(baseline.threadId(), id == 1 ? "cid-1" : "cid-2")
+                  tx.findCommandByClientId(
+                          baseline.threadId(), id == 1 ? TestIds.id(1) : TestIds.id(2))
                       .orElseThrow());
       assertEquals(ThreadCommandState.CANCELLED, command.state());
       assertEquals(T3, command.cancelledAt());
@@ -84,7 +86,7 @@ class HarnessRuntimeStopIdleTest {
   void idleWorkOnlyDeletionDoesNotBumpRevision() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedThreadWork(store, baseline.threadId());
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, result.status());
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(0L, result.thread().revision());
@@ -98,9 +100,9 @@ class HarnessRuntimeStopIdleTest {
   @Test
   void idleWithCommandsAndWorkBumpsRevisionAndDeletesTheWorkRow() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("a"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(1, result.cancelledCommandCount());
     assertEquals(1L, result.thread().revision());
     assertFalse(
@@ -110,7 +112,7 @@ class HarnessRuntimeStopIdleTest {
             .isPresent());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "cid-1").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
   }
 
@@ -118,18 +120,18 @@ class HarnessRuntimeStopIdleTest {
   @Test
   void deleteFailureRollsBackCommandsRevisionAndWorkDeletion() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("a"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     HarnessRuntime failingRuntime =
         new HarnessRuntime(storeFailingDeleteWork(store), Clock.fixed(T3, ZoneOffset.UTC));
     assertThrows(
         IllegalStateException.class,
-        () -> failingRuntime.stop(new StopCommand(baseline.threadId(), "stop-1", 0)));
+        () -> failingRuntime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.revision());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "cid-1").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.QUEUED, command.state());
     assertTrue(
         store

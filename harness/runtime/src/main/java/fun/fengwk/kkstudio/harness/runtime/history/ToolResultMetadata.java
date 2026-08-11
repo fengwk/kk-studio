@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * ToolResult MESSAGE 的稳定 metadata。
@@ -11,7 +12,7 @@ import java.util.Objects;
  * synthetic 结果不允许携带 reason。
  */
 public record ToolResultMetadata(
-    long assistantEntryId,
+    UUID assistantEntryId,
     String toolCallId,
     int ordinal,
     ToolResultStatus status,
@@ -21,9 +22,7 @@ public record ToolResultMetadata(
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
   public ToolResultMetadata {
-    if (assistantEntryId <= 0) {
-      throw new IllegalArgumentException("assistantEntryId must be positive");
-    }
+    Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     toolCallId = requireCanonicalName(toolCallId, "toolCallId");
     if (ordinal < 0) {
       throw new IllegalArgumentException("ordinal must be >= 0");

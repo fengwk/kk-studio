@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Redis Stream {@link RealtimeEventTail} 实现：初始化返回稳定的具体 live-edge ID，后续提供 exclusive read-after
@@ -42,7 +43,8 @@ public final class RedisRealtimeEventTail implements RealtimeEventTail {
   }
 
   @Override
-  public String initialCursor(long threadId) {
+  public String initialCursor(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
     String key = config.key(threadId);
     List<MapRecord<String, Object, Object>> records =
         stringRedisTemplate
@@ -55,10 +57,8 @@ public final class RedisRealtimeEventTail implements RealtimeEventTail {
   }
 
   @Override
-  public List<Record> readAfter(long threadId, String afterId, int count, Duration block) {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+  public List<Record> readAfter(UUID threadId, String afterId, int count, Duration block) {
+    Objects.requireNonNull(threadId, "threadId");
     if (count <= 0) {
       throw new IllegalArgumentException("count must be positive");
     }

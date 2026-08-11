@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 只用于短期 UI 重放的非 durable projection event。
@@ -16,7 +17,7 @@ import java.util.Objects;
  */
 public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, RealtimeEvent.ToolPartial {
 
-  long threadId();
+  UUID threadId();
 
   Subject subject();
 
@@ -25,12 +26,10 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
   Instant createdAt();
 
   /** durable subject 的不可变 identity：Invocation kind + durable id。 */
-  record Subject(SubjectKind kind, long id) {
+  record Subject(SubjectKind kind, UUID id) {
     public Subject {
       kind = Objects.requireNonNull(kind, "kind");
-      if (id <= 0) {
-        throw new IllegalArgumentException("subject id must be positive");
-      }
+      Objects.requireNonNull(id, "id");
     }
   }
 
@@ -45,8 +44,8 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
    * ModelInvocation。
    */
   record ModelDelta(
-      long threadId,
-      long modelInvocationId,
+      UUID threadId,
+      UUID modelInvocationId,
       int attempt,
       long sequence,
       ProviderStreamEvent delta,
@@ -54,12 +53,8 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
       implements RealtimeEvent {
 
     public ModelDelta {
-      if (threadId <= 0) {
-        throw new IllegalArgumentException("threadId must be positive");
-      }
-      if (modelInvocationId <= 0) {
-        throw new IllegalArgumentException("modelInvocationId must be positive");
-      }
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(modelInvocationId, "modelInvocationId");
       if (attempt <= 0) {
         throw new IllegalArgumentException("attempt must be positive");
       }
@@ -85,13 +80,12 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
 
   /** ToolInvocation attempt 发出的 best-effort partial result。 */
   record ToolPartial(
-      long threadId, long toolInvocationId, int attempt, ToolResult partial, Instant createdAt)
+      UUID threadId, UUID toolInvocationId, int attempt, ToolResult partial, Instant createdAt)
       implements RealtimeEvent {
 
     public ToolPartial {
-      if (threadId <= 0 || toolInvocationId <= 0) {
-        throw new IllegalArgumentException("threadId and toolInvocationId must be positive");
-      }
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(toolInvocationId, "toolInvocationId");
       if (attempt <= 0) {
         throw new IllegalArgumentException("attempt must be positive");
       }

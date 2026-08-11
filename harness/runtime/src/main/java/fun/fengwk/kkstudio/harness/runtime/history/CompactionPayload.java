@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 自动压缩 turn 的 durable 摘要结果 payload（仅作为 COMPACTION turn 的 assistant result）。
@@ -19,9 +20,9 @@ public record CompactionPayload(
     long tokensBefore,
     boolean complete,
     String summaryText,
-    long firstKeptEntryId,
-    long cutEntryId,
-    Long turnPrefixStartEntryId)
+    UUID firstKeptEntryId,
+    UUID cutEntryId,
+    UUID turnPrefixStartEntryId)
     implements EntryPayload {
 
   public CompactionPayload {
@@ -33,15 +34,8 @@ public record CompactionPayload(
     if (summaryText == null || summaryText.isBlank()) {
       throw new IllegalArgumentException("summaryText must not be blank");
     }
-    if (firstKeptEntryId <= 0) {
-      throw new IllegalArgumentException("firstKeptEntryId must be positive");
-    }
-    if (cutEntryId <= 0) {
-      throw new IllegalArgumentException("cutEntryId must be positive");
-    }
-    if (turnPrefixStartEntryId != null && turnPrefixStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnPrefixStartEntryId must be positive");
-    }
+    Objects.requireNonNull(firstKeptEntryId, "firstKeptEntryId");
+    Objects.requireNonNull(cutEntryId, "cutEntryId");
     if (phase == CompactionPhase.FULL) {
       if (turnPrefixStartEntryId != null) {
         throw new IllegalArgumentException("FULL compaction must not carry turnPrefixStartEntryId");

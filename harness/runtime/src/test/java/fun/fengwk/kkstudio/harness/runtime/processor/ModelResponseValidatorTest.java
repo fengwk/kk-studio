@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** ModelResponseValidator 直接单元测试：工具可见性 / arguments JSON / stopReason 语义与压缩调用约束。 */
 class ModelResponseValidatorTest {
@@ -292,7 +293,12 @@ class ModelResponseValidatorTest {
         false,
         100_000,
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 10_000L, 2L, 5L, null));
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            10_000L,
+            new UUID(0L, 2L),
+            new UUID(0L, 5L),
+            null));
   }
 
   private static ProviderResponse response(

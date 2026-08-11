@@ -64,7 +64,7 @@ final class TurnPathValidator {
           entry.payload().type() + " entry must be inside an open TURN_START");
     }
     if (payload instanceof TurnEndPayload end) {
-      if (end.turnStartEntryId() != openTurnStart.id()) {
+      if (!end.turnStartEntryId().equals(openTurnStart.id())) {
         throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
       }
       switch (end.outcome()) {
@@ -225,7 +225,7 @@ final class TurnPathValidator {
       throw new IllegalArgumentException(
           "tool result toolCallId must match the assistant tool call");
     }
-    if (metadata.assistantEntryId() != assistantResultEntry.id()) {
+    if (!metadata.assistantEntryId().equals(assistantResultEntry.id())) {
       throw new IllegalArgumentException(
           "tool result assistantEntryId must match its assistant entry");
     }

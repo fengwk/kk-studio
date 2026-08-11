@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -11,10 +12,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class ClaimAdmissionGuard {
 
-  private final ConcurrentHashMap<Long, String> tokens = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, String> tokens = new ConcurrentHashMap<>();
 
   /** 尝试为 invocation 抢占 admission；返回 false 表示同一 claim 已在处理中。 */
-  boolean tryAdmit(long invocationId, String token) {
+  boolean tryAdmit(UUID invocationId, String token) {
     AtomicBoolean admitted = new AtomicBoolean();
     tokens.compute(
         invocationId,
@@ -28,7 +29,7 @@ final class ClaimAdmissionGuard {
     return admitted.get();
   }
 
-  void release(long invocationId, String token) {
+  void release(UUID invocationId, String token) {
     tokens.remove(invocationId, token);
   }
 }

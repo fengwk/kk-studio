@@ -53,7 +53,7 @@ final class ThreadContextLock {
                                 + " could not be locked for thread "
                                 + thread.id()));
         if (model.resultEntryId() != null
-            && model.resultEntryId() == thread.headEntryId()
+            && model.resultEntryId().equals(thread.headEntryId())
             && path.head().payload() instanceof MessagePayload message
             && message.message().role() == AgentMessageRole.ASSISTANT) {
           siblings = tx.lockToolInvocationsByAssistantEntryId(path.head().id());

@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -47,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Stop 在 TOOL_ACTIVE 上：每个 sibling 按自身状态收敛（WAITING_APPROVAL/READY 转 CANCELLED， DISPATCHING/RUNNING 转
@@ -72,7 +74,7 @@ class HarnessRuntimeStopToolTest {
   @Test
   void statusMatrixConvergesEverySiblingByItsOwnStatus() {
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 7);
-    List<Long> ids = baseline.toolIds();
+    List<UUID> ids = baseline.toolIds();
     inTransaction(
         store,
         tx -> {
@@ -94,11 +96,11 @@ class HarnessRuntimeStopToolTest {
     retryReadyTool(store, ids.get(6));
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
-    for (long id : ids) {
+    for (UUID id : ids) {
       seedToolWork(store, id);
     }
 
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(0, result.cancelledCommandCount());
     assertEquals(2L, result.thread().revision());
@@ -125,7 +127,7 @@ class HarnessRuntimeStopToolTest {
     TurnEndPayload end = (TurnEndPayload) turnEnd.payload();
     assertEquals(TurnEndOutcome.STOPPED, end.outcome());
     assertEquals(TurnEndReason.USER_STOP, end.reason());
-    assertEquals("STOP/" + baseline.threadId() + "/stop-1", end.closeRequestId());
+    assertEquals(TestIds.id(1), end.closeRequestId());
     assertEquals(baseline.turnStartEntryId(), end.turnStartEntryId());
     assertEquals(turnEnd.id(), stored.headEntryId());
 
@@ -185,7 +187,7 @@ class HarnessRuntimeStopToolTest {
             .transaction(
                 tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
             .isPresent());
-    for (long id : ids) {
+    for (UUID id : ids) {
       assertFalse(
           store
               .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, id)))
@@ -209,7 +211,7 @@ class HarnessRuntimeStopToolTest {
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1)));
+            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
     assertEquals(Reason.TERMINAL_APPLY_PENDING, error.reason());
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
@@ -235,13 +237,13 @@ class HarnessRuntimeStopToolTest {
             .isPresent());
   }
 
-  private ToolInvocation storedTool(long toolId) {
+  private ToolInvocation storedTool(UUID toolId) {
     return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
   }
 
   /** invocation 追加的 ToolResult MESSAGE entry 中唯一的文本块。 */
   private String resultText(ToolInvocation tool) {
-    long resultEntryId = tool.resultEntryId();
+    UUID resultEntryId = tool.resultEntryId();
     Entry entry = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
     MessagePayload payload = (MessagePayload) entry.payload();
     ToolResultMessageContent content =

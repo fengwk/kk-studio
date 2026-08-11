@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 一次压缩 turn 的完整切分准备（transient，不持久化）。
@@ -19,9 +20,9 @@ public record CompactionPreparation(
     CompactionTrigger trigger,
     long tokensBefore,
     long contextWindow,
-    long firstKeptEntryId,
-    long cutEntryId,
-    Long turnPrefixStartEntryId,
+    UUID firstKeptEntryId,
+    UUID cutEntryId,
+    UUID turnPrefixStartEntryId,
     String previousSummary,
     List<AgentMessage> messagesToSummarize) {
 
@@ -34,15 +35,8 @@ public record CompactionPreparation(
     if (contextWindow <= 0) {
       throw new IllegalArgumentException("contextWindow must be positive");
     }
-    if (firstKeptEntryId <= 0) {
-      throw new IllegalArgumentException("firstKeptEntryId must be positive");
-    }
-    if (cutEntryId <= 0) {
-      throw new IllegalArgumentException("cutEntryId must be positive");
-    }
-    if (turnPrefixStartEntryId != null && turnPrefixStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnPrefixStartEntryId must be positive");
-    }
+    Objects.requireNonNull(firstKeptEntryId, "firstKeptEntryId");
+    Objects.requireNonNull(cutEntryId, "cutEntryId");
     if (phase == CompactionPhase.FULL) {
       if (turnPrefixStartEntryId != null) {
         throw new IllegalArgumentException(

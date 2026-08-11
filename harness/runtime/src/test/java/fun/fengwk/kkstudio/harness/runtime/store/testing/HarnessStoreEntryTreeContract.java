@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseli
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.List;
+import java.util.UUID;
 
 /** Session / Entry tree / Thread schema 约束，以及 root-to-head path 的加载。 */
 public abstract class HarnessStoreEntryTreeContract {
@@ -57,19 +58,21 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   @Test
-  void sessionTitlePreservesValidSurroundingWhitespace() {
-    Session session = new Session(1, "  visible title  ", T0);
+  void sessionRoundTripPreservesCreatedAt() {
+    UUID sessionId = TestIds.id(1);
+    Session session = session(sessionId);
     inTransaction(store, tx -> tx.insertSession(session));
-    assertEquals(session, store.transaction(tx -> tx.findSession(1).orElseThrow()));
+    assertEquals(session, store.transaction(tx -> tx.findSession(sessionId).orElseThrow()));
   }
 
   @Test
   void sessionEntryAndThreadTimestampsRejectSubMillisecondPrecision() {
-    Session session = new Session(1, "session", T0.plusNanos(1));
+    UUID sessionId = TestIds.id(1);
+    Session session = new Session(sessionId, T0.plusNanos(1));
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.insertSession(session)));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(1).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
 
     Baseline baseline = seedThreadBaseline(store);
     assertThrows(
@@ -80,26 +83,32 @@ public abstract class HarnessStoreEntryTreeContract {
                 tx ->
                     tx.insertEntry(
                         turnStartEntry(
-                            100, baseline.sessionId(), baseline.rootEntryId(), T1.plusNanos(1)))));
+                            TestIds.id(100),
+                            baseline.sessionId(),
+                            baseline.rootEntryId(),
+                            T1.plusNanos(1)))));
     ThreadState thread =
-        new ThreadState(101, baseline.rootEntryId(), false, 1, 0, T0.plusNanos(1), T0.plusNanos(1));
+        new ThreadState(
+            TestIds.id(101), baseline.rootEntryId(), false, 1, 0, T0.plusNanos(1), T0.plusNanos(1));
     assertThrows(
         IllegalArgumentException.class, () -> inTransaction(store, tx -> tx.insertThread(thread)));
   }
 
   @Test
   void duplicateSessionIdIsRejected() {
-    inTransaction(store, tx -> tx.insertSession(session(1)));
+    UUID sessionId = TestIds.id(1);
+    inTransaction(store, tx -> tx.insertSession(session(sessionId)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertSession(session(1))));
+        () -> inTransaction(store, tx -> tx.insertSession(session(sessionId))));
   }
 
   @Test
   void rootEntryRequiresExistingSession() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertEntry(rootEntry(1, 999))));
+        () ->
+            inTransaction(store, tx -> tx.insertEntry(rootEntry(TestIds.id(1), TestIds.id(999)))));
   }
 
   @Test
@@ -107,7 +116,9 @@ public abstract class HarnessStoreEntryTreeContract {
     Baseline baseline = seedThreadBaseline(store);
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertEntry(rootEntry(100, baseline.sessionId()))));
+        () ->
+            inTransaction(
+                store, tx -> tx.insertEntry(rootEntry(TestIds.id(100), baseline.sessionId()))));
   }
 
   @Test
@@ -118,9 +129,9 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  long sessionId = tx.nextId();
+                  UUID sessionId = tx.nextId();
                   tx.insertSession(session(sessionId));
-                  tx.insertEntry(turnStartEntry(5, sessionId, 1, T1));
+                  tx.insertEntry(turnStartEntry(TestIds.id(5), sessionId, TestIds.id(1), T1));
                 }));
   }
 
@@ -132,7 +143,11 @@ public abstract class HarnessStoreEntryTreeContract {
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store, tx -> tx.insertEntry(turnStartEntry(10, baseline.sessionId(), 999, T1))));
+                store,
+                tx ->
+                    tx.insertEntry(
+                        turnStartEntry(
+                            TestIds.id(10), baseline.sessionId(), TestIds.id(999), T1))));
     // parent 属于其他 session
     assertThrows(
         IllegalArgumentException.class,
@@ -140,11 +155,12 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  long otherSession = tx.nextId();
-                  long otherRoot = tx.nextId();
+                  UUID otherSession = tx.nextId();
+                  UUID otherRoot = tx.nextId();
                   tx.insertSession(session(otherSession));
                   tx.insertEntry(rootEntry(otherRoot, otherSession));
-                  tx.insertEntry(turnStartEntry(11, baseline.sessionId(), otherRoot, T1));
+                  tx.insertEntry(
+                      turnStartEntry(TestIds.id(11), baseline.sessionId(), otherRoot, T1));
                 }));
   }
 
@@ -159,16 +175,19 @@ public abstract class HarnessStoreEntryTreeContract {
                 tx ->
                     tx.insertEntry(
                         turnStartEntry(
-                            10, baseline.sessionId(), baseline.rootEntryId(), T0.minusMillis(1)))));
+                            TestIds.id(10),
+                            baseline.sessionId(),
+                            baseline.rootEntryId(),
+                            T0.minusMillis(1)))));
   }
 
   @Test
   void loadEntryPathWalksFromHeadToRoot() {
     Baseline baseline = seedThreadBaseline(store);
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -195,14 +214,16 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadEntryPathRejectsUnknownHead() {
     assertThrows(
-        IllegalArgumentException.class, () -> inTransaction(store, tx -> tx.loadEntryPath(42)));
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.loadEntryPath(TestIds.id(42))));
   }
 
   @Test
   void insertThreadRequiresExistingHeadEntry() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.insertThread(thread(100, 999))));
+        () ->
+            inTransaction(store, tx -> tx.insertThread(thread(TestIds.id(100), TestIds.id(999)))));
   }
 
   @Test
@@ -217,8 +238,9 @@ public abstract class HarnessStoreEntryTreeContract {
 
   @Test
   void findAndLockThreadReturnEmptyForMissingIds() {
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(1).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.lockThread(1).isEmpty()));
+    UUID missingId = TestIds.id(1);
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(missingId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.lockThread(missingId).isEmpty()));
   }
 
   @Test
@@ -281,10 +303,10 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void insertThenUpdateInTheSameTransactionIsAllowed() {
     Baseline baseline = seedThreadBaseline(store);
-    long threadId =
+    UUID threadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               ThreadState inserted = tx.findThread(id).orElseThrow();
               tx.updateThread(
@@ -312,7 +334,7 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  long id = tx.nextId();
+                  UUID id = tx.nextId();
                   tx.insertEntry(
                       new Entry(
                           id,
@@ -328,29 +350,29 @@ public abstract class HarnessStoreEntryTreeContract {
             inTransaction(
                 store,
                 tx -> {
-                  long turnStartId = tx.nextId();
+                  UUID turnStartId = tx.nextId();
                   tx.insertEntry(
                       turnStartEntry(
                           turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
-                  long assistantId = tx.nextId();
+                  UUID assistantId = tx.nextId();
                   tx.insertEntry(
                       new Entry(
                           assistantId, baseline.sessionId(), turnStartId, assistantPayload(), T1));
                 }));
     // 合法的 TURN_START -> USER -> ASSISTANT 链会被接受并以 path 形式读出
-    long[] ids =
+    UUID[] ids =
         store.transaction(
             tx -> {
-              long turnStartId = tx.nextId();
-              long userId = tx.nextId();
-              long assistantId = tx.nextId();
+              UUID turnStartId = tx.nextId();
+              UUID userId = tx.nextId();
+              UUID assistantId = tx.nextId();
               tx.insertEntry(
                   turnStartEntry(turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
               tx.insertEntry(
                   new Entry(userId, baseline.sessionId(), turnStartId, userMessagePayload(), T1));
               tx.insertEntry(
                   new Entry(assistantId, baseline.sessionId(), userId, assistantPayload(), T1));
-              return new long[] {turnStartId, userId, assistantId};
+              return new UUID[] {turnStartId, userId, assistantId};
             });
     store.transaction(
         tx -> {
@@ -373,13 +395,14 @@ public abstract class HarnessStoreEntryTreeContract {
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  tx.updateThread(new ThreadState(baseline.threadId(), 999, false, 1, 1, T0, T2));
+                  tx.updateThread(
+                      new ThreadState(baseline.threadId(), TestIds.id(999), false, 1, 1, T0, T2));
                 }));
     // 将 head 迁移到一个已存在 entry 是允许的
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -390,7 +413,7 @@ public abstract class HarnessStoreEntryTreeContract {
           tx.updateThread(
               new ThreadState(baseline.threadId(), turnStartEntryId, false, 1, 1, T0, T2));
         });
-    long committedHead =
+    UUID committedHead =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().headEntryId());
     assertEquals(turnStartEntryId, committedHead);
   }

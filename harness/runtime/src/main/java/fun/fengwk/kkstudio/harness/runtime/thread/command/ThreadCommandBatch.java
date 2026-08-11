@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 不可变的原子入队请求，包含精确的 head/sequence CAS 期望。
@@ -11,18 +12,14 @@ import java.util.Set;
  * <p>刻意不引入 batch identity 或 batch 生命周期 state。
  */
 public record ThreadCommandBatch(
-    long threadId,
-    long expectedHeadEntryId,
+    UUID threadId,
+    UUID expectedHeadEntryId,
     long expectedNextCommandSequence,
     List<NewThreadCommand> commands) {
 
   public ThreadCommandBatch {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
-    if (expectedHeadEntryId <= 0) {
-      throw new IllegalArgumentException("expectedHeadEntryId must be positive");
-    }
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(expectedHeadEntryId, "expectedHeadEntryId");
     if (expectedNextCommandSequence <= 0) {
       throw new IllegalArgumentException("expectedNextCommandSequence must be positive");
     }
@@ -32,7 +29,7 @@ public record ThreadCommandBatch(
     }
     commands = List.copyOf(commands);
 
-    Set<String> clientCommandIds = new HashSet<>();
+    Set<UUID> clientCommandIds = new HashSet<>();
     for (NewThreadCommand command : commands) {
       Objects.requireNonNull(command, "commands[]");
       if (!clientCommandIds.add(command.clientCommandId())) {

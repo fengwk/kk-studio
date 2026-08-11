@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 有界 realtime projection 的确定性 strict JSON codec。
@@ -120,11 +121,11 @@ public final class RealtimeEventJsonCodec {
         type == RealtimeEventType.MODEL_DELTA ? MODEL_EVENT_FIELDS : TOOL_EVENT_FIELDS,
         "realtimeEvent");
 
-    long threadId = requiredPositiveLong(node, "threadId", "realtimeEvent");
+    UUID threadId = requiredPositiveUuid(node, "threadId", "realtimeEvent");
     String subjectKindName = requiredText(node, "subjectKind", "realtimeEvent");
     RealtimeEvent.SubjectKind subjectKind =
         readEnum(RealtimeEvent.SubjectKind.class, subjectKindName, "realtimeEvent.subjectKind");
-    long subjectId = requiredPositiveLongString(node, "subjectId", "realtimeEvent");
+    UUID subjectId = requiredPositiveUuid(node, "subjectId", "realtimeEvent");
     int attempt = requiredPositiveInt(node, "attempt", "realtimeEvent");
     JsonNode payloadNode = node.get("payload");
     if (payloadNode == null || !payloadNode.isObject()) {
@@ -163,9 +164,9 @@ public final class RealtimeEventJsonCodec {
 
   private static ObjectNode encodeModelDelta(RealtimeEvent.ModelDelta delta) {
     ObjectNode node = NODES.objectNode();
-    node.put("threadId", Long.toString(delta.threadId()));
+    node.put("threadId", delta.threadId().toString());
     node.put("subjectKind", MODEL_INVOCATION);
-    node.put("subjectId", Long.toString(delta.modelInvocationId()));
+    node.put("subjectId", delta.modelInvocationId().toString());
     node.put("attempt", delta.attempt());
     node.put("sequence", delta.sequence());
     node.put("type", MODEL_DELTA);
@@ -176,9 +177,9 @@ public final class RealtimeEventJsonCodec {
 
   private static ObjectNode encodeToolPartial(RealtimeEvent.ToolPartial partial) {
     ObjectNode node = NODES.objectNode();
-    node.put("threadId", Long.toString(partial.threadId()));
+    node.put("threadId", partial.threadId().toString());
     node.put("subjectKind", TOOL_INVOCATION);
-    node.put("subjectId", Long.toString(partial.toolInvocationId()));
+    node.put("subjectId", partial.toolInvocationId().toString());
     node.put("attempt", partial.attempt());
     node.put("type", TOOL_PARTIAL);
     node.set("payload", ToolResultJsonCodec.encodeNode(partial.partial()));
@@ -289,33 +290,19 @@ public final class RealtimeEventJsonCodec {
     return value.textValue();
   }
 
-  private static long requiredPositiveLong(ObjectNode node, String field, String context) {
+  private static UUID requiredPositiveUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (!value.isTextual()) {
       throw new IllegalArgumentException(
-          context + "." + field + " must be a positive decimal string");
+          context + "." + field + " must be a canonical UUID string");
     }
     String text = value.textValue();
-    if (text.isEmpty() || text.charAt(0) == '+' || text.charAt(0) == '-') {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a positive decimal string");
-    }
-    long parsed;
     try {
-      parsed = Long.parseLong(text);
-    } catch (NumberFormatException error) {
+      return UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          context + "." + field + " must be a positive decimal string", error);
+          context + "." + field + " must be a canonical UUID string", error);
     }
-    if (parsed <= 0) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a positive decimal string");
-    }
-    return parsed;
-  }
-
-  private static long requiredPositiveLongString(ObjectNode node, String field, String context) {
-    return requiredPositiveLong(node, field, context);
   }
 
   private static long requiredPositiveIntegralLong(ObjectNode node, String field, String context) {

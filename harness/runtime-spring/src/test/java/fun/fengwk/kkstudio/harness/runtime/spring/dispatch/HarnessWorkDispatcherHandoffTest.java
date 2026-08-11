@@ -56,6 +56,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
@@ -641,7 +642,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   private static final class FakeModelGateway implements ModelGateway {
 
-    private final List<Long> started = new CopyOnWriteArrayList<>();
+    private final List<UUID> started = new CopyOnWriteArrayList<>();
 
     @Override
     public StartResult start(Execution execution, Listener listener) {
@@ -652,7 +653,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   private static final class FakeToolGateway implements ToolGateway {
 
-    private final List<Long> started = new CopyOnWriteArrayList<>();
+    private final List<UUID> started = new CopyOnWriteArrayList<>();
     private final AtomicInteger preflightCalls = new AtomicInteger();
 
     @Override

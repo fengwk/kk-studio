@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 把一个 terminal Tool invocation 的 durable effects 与 ToolResult 原子追加到 branch。
@@ -24,8 +25,8 @@ public final class ToolOutcomeAppender {
 
   public static Applied append(
       HarnessStore.Transaction tx,
-      long sessionId,
-      long parentEntryId,
+      UUID sessionId,
+      UUID parentEntryId,
       ToolInvocation invocation,
       Instant now) {
     Objects.requireNonNull(tx, "tx");
@@ -35,17 +36,17 @@ public final class ToolOutcomeAppender {
       throw new IllegalArgumentException(
           "tool outcome append requires an unattached terminal invocation");
     }
-    long parent = parentEntryId;
+    UUID parent = parentEntryId;
     if (invocation.status() == ToolInvocationStatus.SUCCEEDED) {
       for (CustomEntryPayload effect : invocation.effects().customEntries()) {
-        long effectEntryId = tx.nextId();
+        UUID effectEntryId = tx.nextId();
         tx.insertEntry(new Entry(effectEntryId, sessionId, parent, effect, now));
         parent = effectEntryId;
       }
     } else if (!invocation.effects().isEmpty()) {
       throw new IllegalStateException("non-succeeded tool invocation must not carry effects");
     }
-    long resultEntryId = tx.nextId();
+    UUID resultEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
             resultEntryId, sessionId, parent, PAYLOAD_MAPPER.toolResultPayload(invocation), now));
@@ -53,5 +54,5 @@ public final class ToolOutcomeAppender {
   }
 
   /** 已追加 outcome 的 invocation 与新的 branch head（即 ToolResult Entry）。 */
-  public record Applied(ToolInvocation invocation, long headEntryId) {}
+  public record Applied(ToolInvocation invocation, UUID headEntryId) {}
 }

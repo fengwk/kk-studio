@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -71,14 +73,14 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("cid-1", "hello"), setYolo("cid-2", true))));
+                List.of(userMessageCommand(TestIds.id(1), "hello"), setYolo(TestIds.id(2), true))));
     assertEquals(2, inserted.size());
     assertEquals(1L, inserted.get(0).sequence());
     assertEquals(2L, inserted.get(1).sequence());
     assertEquals(ThreadCommandState.QUEUED, inserted.get(0).state());
     assertEquals(T0, inserted.get(0).createdAt());
-    assertEquals("cid-1", inserted.get(0).clientCommandId());
-    assertEquals("cid-2", inserted.get(1).clientCommandId());
+    assertEquals(TestIds.id(1), inserted.get(0).clientCommandId());
+    assertEquals(TestIds.id(2), inserted.get(1).clientCommandId());
 
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(3L, thread.nextCommandSequence());
@@ -102,17 +104,19 @@ class HarnessRuntimeEnqueueTest {
                 baseline.rootEntryId(),
                 1,
                 List.of(
-                    userMessageCommand("cid-1", "hello"), userMessageCommand("cid-2", "world"))));
+                    userMessageCommand(TestIds.id(1), "hello"),
+                    userMessageCommand(TestIds.id(2), "world"))));
 
     // 重试携带过期 CAS / 完全不同的 expected 游标：replay 忽略它们。
     List<ThreadCommand> replay =
         runtime.enqueueCommands(
             new ThreadCommandBatch(
                 baseline.threadId(),
-                999L,
+                TestIds.id(999),
                 999L,
                 List.of(
-                    userMessageCommand("cid-1", "hello"), userMessageCommand("cid-2", "world"))));
+                    userMessageCommand(TestIds.id(1), "hello"),
+                    userMessageCommand(TestIds.id(2), "world"))));
     assertEquals(first, replay);
     assertEquals(ThreadCommandState.QUEUED, replay.get(0).state());
 
@@ -136,8 +140,10 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "hello"), userMessageCommand("cid-2", "world"))));
-    long turnStartId = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
+            List.of(
+                userMessageCommand(TestIds.id(1), "hello"),
+                userMessageCommand(TestIds.id(2), "world"))));
+    UUID turnStartId = seedChildTurnStart(store, baseline.sessionId(), baseline.rootEntryId());
     store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -153,7 +159,8 @@ class HarnessRuntimeEnqueueTest {
                 baseline.rootEntryId(),
                 1,
                 List.of(
-                    userMessageCommand("cid-1", "hello"), userMessageCommand("cid-2", "world"))));
+                    userMessageCommand(TestIds.id(1), "hello"),
+                    userMessageCommand(TestIds.id(2), "world"))));
     assertEquals(ThreadCommandState.APPLIED, appliedReplay.get(0).state());
     assertEquals(turnStartId, appliedReplay.get(0).consumedTurnStartEntryId());
 
@@ -164,7 +171,7 @@ class HarnessRuntimeEnqueueTest {
             cancelledBaseline.threadId(),
             cancelledBaseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-3", "bye"))));
+            List.of(userMessageCommand(TestIds.id(3), "bye"))));
     store.transaction(
         tx -> {
           tx.lockThread(cancelledBaseline.threadId());
@@ -180,7 +187,7 @@ class HarnessRuntimeEnqueueTest {
                 cancelledBaseline.threadId(),
                 cancelledBaseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("cid-3", "bye"))));
+                List.of(userMessageCommand(TestIds.id(3), "bye"))));
     assertEquals(ThreadCommandState.CANCELLED, cancelledReplay.get(0).state());
     assertEquals(T3, cancelledReplay.get(0).cancelledAt());
   }
@@ -193,7 +200,7 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "a"))));
+            List.of(userMessageCommand(TestIds.id(1), "a"))));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -204,11 +211,14 @@ class HarnessRuntimeEnqueueTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
-                            userMessageCommand("cid-1", "a"), userMessageCommand("cid-2", "b")))));
+                            userMessageCommand(TestIds.id(1), "a"),
+                            userMessageCommand(TestIds.id(2), "b")))));
     assertEquals(Reason.PARTIAL_COMMAND_REPLAY, error.reason());
     // 缺失命令不被补齐。
     assertTrue(
-        store.transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "cid-2")).isEmpty());
+        store
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)))
+            .isEmpty());
   }
 
   @Test
@@ -219,7 +229,7 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "a"))));
+            List.of(userMessageCommand(TestIds.id(1), "a"))));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -229,7 +239,7 @@ class HarnessRuntimeEnqueueTest {
                         baseline.threadId(),
                         baseline.rootEntryId(),
                         1,
-                        List.of(userMessageCommand("cid-1", "different")))));
+                        List.of(userMessageCommand(TestIds.id(1), "different")))));
     assertEquals(Reason.COMMAND_ID_REUSED, error.reason());
   }
 
@@ -241,7 +251,8 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "a"), userMessageCommand("cid-2", "b"))));
+            List.of(
+                userMessageCommand(TestIds.id(1), "a"), userMessageCommand(TestIds.id(2), "b"))));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -252,7 +263,8 @@ class HarnessRuntimeEnqueueTest {
                         baseline.rootEntryId(),
                         1,
                         List.of(
-                            userMessageCommand("cid-2", "b"), userMessageCommand("cid-1", "a")))));
+                            userMessageCommand(TestIds.id(2), "b"),
+                            userMessageCommand(TestIds.id(1), "a")))));
     assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
   }
 
@@ -264,7 +276,7 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-1", "a"))));
+            List.of(userMessageCommand(TestIds.id(1), "a"))));
     HarnessRuntimeConflictException staleSequence =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -274,7 +286,7 @@ class HarnessRuntimeEnqueueTest {
                         baseline.threadId(),
                         baseline.rootEntryId(),
                         1, // 已被前一批消费
-                        List.of(userMessageCommand("cid-2", "b")))));
+                        List.of(userMessageCommand(TestIds.id(2), "b")))));
     assertEquals(Reason.STALE_COMMAND_CURSOR, staleSequence.reason());
     HarnessRuntimeConflictException staleHead =
         assertThrows(
@@ -282,13 +294,20 @@ class HarnessRuntimeEnqueueTest {
             () ->
                 runtime.enqueueCommands(
                     new ThreadCommandBatch(
-                        baseline.threadId(), 999L, 2, List.of(userMessageCommand("cid-3", "c")))));
+                        baseline.threadId(),
+                        TestIds.id(999),
+                        2,
+                        List.of(userMessageCommand(TestIds.id(3), "c")))));
     assertEquals(Reason.STALE_COMMAND_CURSOR, staleHead.reason());
     // 冲突零 mutation：无新命令、无新 wake、无 revision 变化。
     assertTrue(
-        store.transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "cid-2")).isEmpty());
+        store
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)))
+            .isEmpty());
     assertTrue(
-        store.transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "cid-3")).isEmpty());
+        store
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(3)))
+            .isEmpty());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.nextCommandSequence());
     assertEquals(1L, thread.revision());
@@ -308,13 +327,13 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-a", "a")));
+            List.of(userMessageCommand(TestIds.id(4), "a")));
     ThreadCommandBatch batchB =
         new ThreadCommandBatch(
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(userMessageCommand("cid-b", "b")));
+            List.of(userMessageCommand(TestIds.id(5), "b")));
     ExecutorService pool = Executors.newFixedThreadPool(2);
     CyclicBarrier barrier = new CyclicBarrier(2);
     try {
@@ -368,7 +387,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("cid-1", "hello"))));
+                List.of(userMessageCommand(TestIds.id(1), "hello"))));
     assertEquals(T1, inserted.get(0).createdAt());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(T1, thread.updatedAt());
@@ -383,7 +402,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("cid-1", "hello"))));
+                List.of(userMessageCommand(TestIds.id(1), "hello"))));
     assertThrows(UnsupportedOperationException.class, () -> fresh.add(null));
     List<ThreadCommand> replay =
         runtime.enqueueCommands(
@@ -391,7 +410,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("cid-1", "hello"))));
+                List.of(userMessageCommand(TestIds.id(1), "hello"))));
     assertThrows(UnsupportedOperationException.class, () -> replay.add(null));
   }
 
@@ -404,7 +423,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(setEnvironment("cid-env", ENV2))));
+                List.of(setEnvironment(TestIds.id(6), ENV2))));
     assertEquals(1, inserted.size());
     assertEquals(ThreadCommandState.QUEUED, inserted.get(0).state());
     assertEquals(new SetEnvironmentCommandPayload(ENV2), inserted.get(0).payload());
@@ -415,7 +434,7 @@ class HarnessRuntimeEnqueueTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     // 只有 USER/CUSTOM 阻塞 SET_ENVIRONMENT；已存在的配置命令（如 SET_YOLO）不阻塞。
     seedQueuedCommand(
-        store, baseline.threadId(), 1L, 1L, new SetYoloCommandPayload(true), "cid-old");
+        store, baseline.threadId(), 1L, new SetYoloCommandPayload(true), TestIds.id(8));
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
@@ -428,7 +447,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 2,
-                List.of(setEnvironment("cid-env", ENV2))));
+                List.of(setEnvironment(TestIds.id(6), ENV2))));
     assertEquals(1, inserted.size());
     assertEquals(2L, inserted.get(0).sequence());
   }
@@ -442,7 +461,9 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(setEnvironment("cid-env", ENV2), userMessageCommand("cid-msg", "run it"))));
+                List.of(
+                    setEnvironment(TestIds.id(6), ENV2),
+                    userMessageCommand(TestIds.id(7), "run it"))));
     assertEquals(2, inserted.size());
     assertEquals(1L, inserted.get(0).sequence());
     assertEquals(2L, inserted.get(1).sequence());
@@ -454,7 +475,7 @@ class HarnessRuntimeEnqueueTest {
   @Test
   void setEnvironmentRejectsPreExistingQueuedUserMessage() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hello"), "cid-old");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hello"), TestIds.id(8));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -464,7 +485,7 @@ class HarnessRuntimeEnqueueTest {
                         baseline.threadId(),
                         baseline.rootEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, error.reason());
   }
 
@@ -480,7 +501,7 @@ class HarnessRuntimeEnqueueTest {
                         running.threadId(),
                         running.turnStartEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, active.reason());
 
     HarnessRuntimeTestSupport.ModelBaseline pending = seedTerminalModel(store);
@@ -493,7 +514,7 @@ class HarnessRuntimeEnqueueTest {
                         pending.threadId(),
                         pending.turnStartEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, terminal.reason());
   }
 
@@ -510,7 +531,7 @@ class HarnessRuntimeEnqueueTest {
                         continuation.threadId(),
                         continuation.turnEndEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, error.reason());
   }
 
@@ -527,7 +548,7 @@ class HarnessRuntimeEnqueueTest {
                         active.threadId(),
                         active.assistantEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, liveTool.reason());
 
     HarnessRuntimeTestSupport.ToolBaseline pending = seedToolBaseline(store);
@@ -541,7 +562,7 @@ class HarnessRuntimeEnqueueTest {
                         pending.threadId(),
                         pending.assistantEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, pendingTool.reason());
   }
 
@@ -558,7 +579,7 @@ class HarnessRuntimeEnqueueTest {
                         unleased.threadId(),
                         unleased.rootEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, unleasedError.reason());
 
     HarnessRuntimeTestSupport.Baseline claimed = seedBaseline(store);
@@ -572,7 +593,7 @@ class HarnessRuntimeEnqueueTest {
                         claimed.threadId(),
                         claimed.rootEntryId(),
                         1,
-                        List.of(setEnvironment("cid-env", ENV2)))));
+                        List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertEquals(Reason.THREAD_NOT_QUIESCENT, claimedError.reason());
   }
 
@@ -588,10 +609,10 @@ class HarnessRuntimeEnqueueTest {
                     baseline.threadId(),
                     baseline.rootEntryId(),
                     1,
-                    List.of(setEnvironment("cid-env", ENV2)))));
+                    List.of(setEnvironment(TestIds.id(6), ENV2)))));
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "cid-env"))
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(6)))
             .isEmpty());
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.nextCommandSequence());
@@ -606,9 +627,9 @@ class HarnessRuntimeEnqueueTest {
             baseline.threadId(),
             baseline.rootEntryId(),
             1,
-            List.of(setEnvironment("cid-env", ENV2))));
+            List.of(setEnvironment(TestIds.id(6), ENV2))));
     // 之后线程出现 queued USER 与 THREAD Work：exact replay 仍然直接返回原行。
-    seedQueuedCommand(store, baseline.threadId(), 99L, 2L, userMessagePayload("late"), "cid-late");
+    seedQueuedCommand(store, baseline.threadId(), 99L, userMessagePayload("late"), TestIds.id(9));
     seedThreadWork(store, baseline.threadId());
     List<ThreadCommand> replay =
         runtime.enqueueCommands(
@@ -616,7 +637,7 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(setEnvironment("cid-env", ENV2))));
+                List.of(setEnvironment(TestIds.id(6), ENV2))));
     assertEquals(1, replay.size());
     assertEquals(ThreadCommandState.QUEUED, replay.get(0).state());
     assertEquals(new SetEnvironmentCommandPayload(ENV2), replay.get(0).payload());
@@ -631,7 +652,7 @@ class HarnessRuntimeEnqueueTest {
                 running.threadId(),
                 running.turnStartEntryId(),
                 1,
-                List.of(userMessageCommand("cid-1", "hello"))));
+                List.of(userMessageCommand(TestIds.id(1), "hello"))));
     assertEquals(1, inserted.size());
     ThreadState thread = store.transaction(tx -> tx.findThread(running.threadId()).orElseThrow());
     assertEquals(2L, thread.nextCommandSequence());
@@ -645,7 +666,10 @@ class HarnessRuntimeEnqueueTest {
         () ->
             runtime.enqueueCommands(
                 new ThreadCommandBatch(
-                    999L, 1L, 1L, List.of(userMessageCommand("cid-1", "hello")))));
+                    TestIds.id(999),
+                    TestIds.id(1),
+                    1L,
+                    List.of(userMessageCommand(TestIds.id(1), "hello")))));
   }
 
   @Test
@@ -661,15 +685,17 @@ class HarnessRuntimeEnqueueTest {
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(userMessageCommand("same", "a"), userMessageCommand("same", "b"))));
+                List.of(
+                    userMessageCommand(TestIds.id(10), "a"),
+                    userMessageCommand(TestIds.id(10), "b"))));
   }
 
   private static NewThreadCommand setEnvironment(
-      String clientCommandId, EnvironmentName environmentName) {
+      UUID clientCommandId, EnvironmentName environmentName) {
     return new NewThreadCommand(new SetEnvironmentCommandPayload(environmentName), clientCommandId);
   }
 
-  private static NewThreadCommand setYolo(String clientCommandId, boolean yolo) {
+  private static NewThreadCommand setYolo(UUID clientCommandId, boolean yolo) {
     return new NewThreadCommand(new SetYoloCommandPayload(yolo), clientCommandId);
   }
 }

@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
@@ -58,7 +59,7 @@ public final class ModelProcessor implements AutoCloseable {
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
-  private final ConcurrentHashMap<Long, ModelExecution> executions = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
 
@@ -98,7 +99,7 @@ public final class ModelProcessor implements AutoCloseable {
       throw new IllegalArgumentException(
           "ModelProcessor requires a MODEL work claim, got " + claim.target());
     }
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     String token = claim.leaseToken();
     if (!claimOwned(claim)) {
       return ProcessResult.LOST_OWNERSHIP;
@@ -136,10 +137,8 @@ public final class ModelProcessor implements AutoCloseable {
    *
    * @return 是否存在并已取消对应本地 execution
    */
-  public boolean cancel(long invocationId) {
-    if (invocationId <= 0) {
-      throw new IllegalArgumentException("invocationId must be positive");
-    }
+  public boolean cancel(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
     ModelExecution execution = executions.remove(invocationId);
     if (execution == null) {
       return false;
@@ -181,7 +180,7 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   private ProcessResult dispatch(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     int proposedAttempt = Math.addExact(dispatched.attempt(), 1);
     ModelExecution execution =
         new ModelExecution(
@@ -286,7 +285,7 @@ public final class ModelProcessor implements AutoCloseable {
 
   private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
       return new Prepare.Lost();
@@ -475,7 +474,7 @@ public final class ModelProcessor implements AutoCloseable {
 
     record Lost() implements Prepare {}
 
-    record Dispatched(long threadId, int attempt, ModelInvocationRequest request)
+    record Dispatched(UUID threadId, int attempt, ModelInvocationRequest request)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

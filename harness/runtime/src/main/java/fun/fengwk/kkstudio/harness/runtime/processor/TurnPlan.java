@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 一次 speculative turn plan 的不可变快照：计划事务内锁 Thread、读取 queued Command 快照与 cutoff、校验 claim 后构造， 不写任何
@@ -20,31 +21,25 @@ import java.util.Objects;
  * ResolvedRequestValidator 据此构造并严格校验压缩请求。
  */
 record TurnPlan(
-    long threadId,
-    long sessionId,
-    long sourceHeadEntryId,
+    UUID threadId,
+    UUID sessionId,
+    UUID sourceHeadEntryId,
     boolean sourceYoloEnabled,
     long cutoffSequence,
     List<ThreadCommand> plannedCommands,
     List<ThreadCommand> consumedCommands,
     List<Entry> candidateEntries,
     EntryPath candidatePath,
-    long turnStartEntryId,
-    long candidateHeadEntryId,
+    UUID turnStartEntryId,
+    UUID candidateHeadEntryId,
     boolean finalYoloEnabled,
     TurnStartReason reason,
     CompactionPreparation preparation) {
 
   TurnPlan {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
-    if (sessionId <= 0) {
-      throw new IllegalArgumentException("sessionId must be positive");
-    }
-    if (sourceHeadEntryId <= 0) {
-      throw new IllegalArgumentException("sourceHeadEntryId must be positive");
-    }
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(sourceHeadEntryId, "sourceHeadEntryId");
     if (cutoffSequence < 0) {
       throw new IllegalArgumentException("cutoffSequence must not be negative");
     }
@@ -52,12 +47,8 @@ record TurnPlan(
     consumedCommands = List.copyOf(consumedCommands);
     candidateEntries = List.copyOf(candidateEntries);
     candidatePath = Objects.requireNonNull(candidatePath, "candidatePath");
-    if (turnStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnStartEntryId must be positive");
-    }
-    if (candidateHeadEntryId <= 0) {
-      throw new IllegalArgumentException("candidateHeadEntryId must be positive");
-    }
+    Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
+    Objects.requireNonNull(candidateHeadEntryId, "candidateHeadEntryId");
     reason = Objects.requireNonNull(reason, "reason");
     if ((reason == TurnStartReason.COMPACTION) != (preparation != null)) {
       throw new IllegalArgumentException(

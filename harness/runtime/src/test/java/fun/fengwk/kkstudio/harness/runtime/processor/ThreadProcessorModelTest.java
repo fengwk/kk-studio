@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** ThreadProcessor terminal Model apply：成功 / 错误 / blocker / 非 applicable head / final fence 回滚。 */
 class ThreadProcessorModelTest extends ThreadProcessorTestBase {
@@ -70,7 +71,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void modelSuccessWithoutToolsAppliesAssistantAndClosesTurnThenQuiesces() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -110,7 +111,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void modelSuccessWithToolCallsMaterializesAllToolInvocationsAndRequestsToolWork() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -167,7 +168,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void modelTerminalApplyUsesDurableFloorsWithoutClampingLeaseClock() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -248,7 +249,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     ToolBinding first = pluginBinding("first_tool", firstPlugin, "first", List.of(firstAccess));
     ToolBinding second =
         pluginBinding("second_tool", secondPlugin, "second", List.of(secondAccess));
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -267,7 +268,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         ThreadProcessResult.SUSPENDED,
         fixture.processor.process(claimThreadWork(fixture.store, baseline.threadId())));
 
-    long assistantId = model(fixture.store, modelId).resultEntryId();
+    UUID assistantId = model(fixture.store, modelId).resultEntryId();
     List<ToolInvocation> tools = toolsByAssistant(fixture.store, assistantId);
     assertEquals(ToolInvocationStatus.READY, tools.get(0).status());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.TOOL, tools.get(0).id())));
@@ -295,7 +296,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
           status == ModelInvocationStatus.CANCELLED
               ? new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled")
               : new ModelInvocationError(ProviderErrorKind.TRANSIENT, "model boom");
-      long modelId =
+      UUID modelId =
           seedModelInvocation(
               fixture.store,
               baseline.threadId(),
@@ -330,7 +331,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void modelTerminalWithBasisOffCurrentBranchIsNotApplied() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -362,7 +363,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void descendantHeadStaleTerminalModelIsNotAppliedAndNormalizes() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -398,7 +399,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void nonterminalModelBlocksAndCompletesWorkAsSuspended() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -421,7 +422,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
   void unboundToolCallInTerminalResponseIsRejectedAtomically() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -446,7 +447,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     InMemoryHarnessStore real = new InMemoryHarnessStore();
     Fixture fixture = fixture(STEP_LIMIT, claimLosingStore(real, 2));
     var baseline = seedOpenInputTurn(real);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             real,
             baseline.threadId(),

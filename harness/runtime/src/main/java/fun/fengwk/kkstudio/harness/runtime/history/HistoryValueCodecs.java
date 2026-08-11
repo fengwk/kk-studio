@@ -20,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -305,23 +306,17 @@ final class HistoryValueCodecs {
     return value;
   }
 
-  static long requiredPositiveId(ObjectNode node, String field, String context) {
+  static UUID requiredPositiveId(ObjectNode node, String field, String context) {
     String text = requiredText(node, field, context);
-    long value;
     try {
-      value = Long.parseLong(text);
-    } catch (NumberFormatException error) {
+      return UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          context + "." + field + " must be a decimal string", error);
+          context + "." + field + " must be a canonical UUID string", error);
     }
-    if (value <= 0 || !Long.toString(value).equals(text)) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical positive decimal string");
-    }
-    return value;
   }
 
-  static Long nullablePositiveId(ObjectNode node, String field, String context) {
+  static UUID nullablePositiveId(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {
       return null;
@@ -329,19 +324,12 @@ final class HistoryValueCodecs {
     if (!value.isTextual()) {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
-    String text = value.textValue();
-    long parsed;
     try {
-      parsed = Long.parseLong(text);
-    } catch (NumberFormatException error) {
+      return UUID.fromString(value.textValue());
+    } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          context + "." + field + " must be a decimal string", error);
+          context + "." + field + " must be a canonical UUID string", error);
     }
-    if (parsed <= 0 || !Long.toString(parsed).equals(text)) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a canonical positive decimal string");
-    }
-    return parsed;
   }
 
   static EnvironmentName nullableEnvironmentName(ObjectNode node, String field, String context) {

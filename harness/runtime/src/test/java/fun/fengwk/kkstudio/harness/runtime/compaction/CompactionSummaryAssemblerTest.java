@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,6 +41,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * CompactionSummaryAssembler 组装契约：HISTORY partial 不追加文件 section；FULL 使用响应文本；机械 TURN_PREFIX 只合并
@@ -48,7 +50,6 @@ import java.util.List;
  */
 class CompactionSummaryAssemblerTest {
 
-  private static final long SESSION = 100L;
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
       new BranchSettings(
@@ -69,9 +70,9 @@ class CompactionSummaryAssemblerTest {
     assertEquals(CompactionPhase.HISTORY, payload.phase());
     assertEquals("partial text", payload.summaryText());
     assertFalse(payload.summaryText().contains("<read-files>"));
-    assertEquals(2L, payload.firstKeptEntryId());
-    assertEquals(4L, payload.cutEntryId());
-    assertEquals(3L, payload.turnPrefixStartEntryId());
+    assertEquals(id(2L), payload.firstKeptEntryId());
+    assertEquals(id(4L), payload.cutEntryId());
+    assertEquals(id(3L), payload.turnPrefixStartEntryId());
     assertEquals(500L, payload.tokensBefore());
   }
 
@@ -80,7 +81,7 @@ class CompactionSummaryAssemblerTest {
     EntryPath path = pathWithReadWriteAssistant();
     CompactionRequest request =
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, 2L, 7L, null);
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, id(2L), id(7L), null);
 
     CompactionPayload payload =
         CompactionSummaryAssembler.resultPayload(
@@ -118,7 +119,8 @@ class CompactionSummaryAssemblerTest {
     // 绝不扫描任意更早的陈旧 partial。
     PathBuilder path = new PathBuilder();
     path.root();
-    path.compactionPartial("stale partial summary", 2L, 4L, 3L); // 7: HISTORY incomplete
+    path.compactionPartial(
+        "stale partial summary", id(2L), id(4L), id(3L)); // 7: HISTORY incomplete
     path.normalTurn("later user", "later reply");
     path.compactionTurnStart(); // 当前 TURN_PREFIX turn
 
@@ -149,7 +151,7 @@ class CompactionSummaryAssemblerTest {
   void turnPrefixAfterCompleteCompactionTurnUsesNoPriorHistory() {
     PathBuilder path = new PathBuilder();
     path.root();
-    path.compactionComplete("complete summary", 2L, 4L, null);
+    path.compactionComplete("complete summary", id(2L), id(4L), null);
     path.compactionTurnStart();
 
     assertEquals(
@@ -175,12 +177,12 @@ class CompactionSummaryAssemblerTest {
     PathBuilder path = new PathBuilder();
     path.root();
     path.normalTurn("user", "reply");
-    path.compactionPartial("stale partial summary", 2L, 4L, 3L);
+    path.compactionPartial("stale partial summary", id(2L), id(4L), id(3L));
     path.compactionTurnStart();
 
     CompactionRequest driftedIds =
         new CompactionRequest(
-            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, 5L, 4L, 3L);
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, id(5L), id(4L), id(3L));
     IllegalStateException idError =
         assertThrows(
             IllegalStateException.class,
@@ -189,21 +191,21 @@ class CompactionSummaryAssemblerTest {
 
     CompactionRequest driftedTrigger =
         new CompactionRequest(
-            CompactionPhase.TURN_PREFIX, CompactionTrigger.OVERFLOW, 500L, 2L, 4L, 3L);
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.OVERFLOW, 500L, id(2L), id(4L), id(3L));
     assertThrows(
         IllegalStateException.class,
         () -> CompactionSummaryAssembler.latestIncompleteSummary(path.path(), driftedTrigger));
 
     CompactionRequest driftedTokens =
         new CompactionRequest(
-            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 123L, 2L, 4L, 3L);
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 123L, id(2L), id(4L), id(3L));
     assertThrows(
         IllegalStateException.class,
         () -> CompactionSummaryAssembler.latestIncompleteSummary(path.path(), driftedTokens));
 
     CompactionRequest driftedPrefix =
         new CompactionRequest(
-            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, 2L, 4L, 5L);
+            CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, id(2L), id(4L), id(5L));
     assertThrows(
         IllegalStateException.class,
         () -> CompactionSummaryAssembler.latestIncompleteSummary(path.path(), driftedPrefix));
@@ -211,12 +213,12 @@ class CompactionSummaryAssemblerTest {
 
   private static CompactionRequest historyRequest() {
     return new CompactionRequest(
-        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, 2L, 4L, 3L);
+        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 500L, id(2L), id(4L), id(3L));
   }
 
   private static CompactionRequest prefixRequest() {
     return new CompactionRequest(
-        CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, 2L, 4L, 3L);
+        CompactionPhase.TURN_PREFIX, CompactionTrigger.THRESHOLD, 500L, id(2L), id(4L), id(3L));
   }
 
   /** [ROOT(1), TS(2), USER(3), ASST(4), TE(5), TS-COMP(HISTORY partial 7), TE(8), TS-COMP(9)]。 */
@@ -224,7 +226,7 @@ class CompactionSummaryAssemblerTest {
     PathBuilder path = new PathBuilder();
     path.root();
     path.normalTurn("user", "reply");
-    path.compactionPartial(historySummary, 2L, 4L, 3L);
+    path.compactionPartial(historySummary, id(2L), id(4L), id(3L));
     path.compactionTurnStart();
     return path.path();
   }
@@ -236,13 +238,13 @@ class CompactionSummaryAssemblerTest {
   private static EntryPath pathWithReadWriteAssistant() {
     PathBuilder path = new PathBuilder();
     path.root();
-    path.turnStart(2L);
-    path.user(3L, "user");
-    path.assistantWithFileCalls(4L, "read", "a.txt", "write", "b.txt");
-    path.toolResult(5L, 4L, 0, "call-0", "read");
-    path.toolResult(6L, 4L, 1, "call-2", "write");
-    path.turnEnd(7L, 2L);
-    path.turnStart(8L);
+    path.turnStart(id(2L));
+    path.user(id(3L), "user");
+    path.assistantWithFileCalls(id(4L), "read", "a.txt", "write", "b.txt");
+    path.toolResult(id(5L), id(4L), 0, "call-0", "read");
+    path.toolResult(id(6L), id(4L), 1, "call-2", "write");
+    path.turnEnd(id(7L), id(2L));
+    path.turnStart(id(8L));
     return path.path();
   }
 
@@ -253,7 +255,7 @@ class CompactionSummaryAssemblerTest {
     private long openTurnStartId = -1L;
 
     PathBuilder root() {
-      entries.add(new Entry(nextId++, SESSION, null, new RootPayload(SETTINGS), BASE));
+      entries.add(new Entry(id(nextId++), SESSION_ID, null, new RootPayload(SETTINGS), BASE));
       return this;
     }
 
@@ -261,34 +263,34 @@ class CompactionSummaryAssemblerTest {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
               BASE));
       openTurnStartId = startId;
-      user(nextId++, userText);
-      assistant(nextId++, assistantText);
-      turnEnd(nextId++, startId);
+      user(id(nextId++), userText);
+      assistant(id(nextId++), assistantText);
+      turnEnd(id(nextId++), id(startId));
       return this;
     }
 
     /** 完成压缩 turn：[TURN_START(COMPACTION), COMPACTION payload, TURN_END]。 */
     PathBuilder compactionComplete(
-        String summary, long firstKeptEntryId, long cutEntryId, Long turnPrefixStartEntryId) {
+        String summary, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
               BASE));
       openTurnStartId = startId;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              SESSION_ID,
               parentId(),
               new CompactionPayload(
                   CompactionPhase.FULL,
@@ -300,26 +302,26 @@ class CompactionSummaryAssemblerTest {
                   cutEntryId,
                   turnPrefixStartEntryId),
               BASE));
-      turnEnd(nextId++, startId);
+      turnEnd(id(nextId++), id(startId));
       return this;
     }
 
     /** 切分 HISTORY partial 压缩 turn：[TURN_START(COMPACTION), HISTORY incomplete, TURN_END]。 */
     PathBuilder compactionPartial(
-        String summary, long firstKeptEntryId, long cutEntryId, long turnPrefixStartEntryId) {
+        String summary, UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
               BASE));
       openTurnStartId = startId;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              SESSION_ID,
               parentId(),
               new CompactionPayload(
                   CompactionPhase.HISTORY,
@@ -331,7 +333,7 @@ class CompactionSummaryAssemblerTest {
                   cutEntryId,
                   turnPrefixStartEntryId),
               BASE));
-      turnEnd(nextId++, startId);
+      turnEnd(id(nextId++), id(startId));
       return this;
     }
 
@@ -340,26 +342,26 @@ class CompactionSummaryAssemblerTest {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
               BASE));
       openTurnStartId = startId;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              SESSION_ID,
               parentId(),
               new AssistantErrorPayload(new AssistantError("SUMMARIZATION_FAILED", "boom")),
               BASE));
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              SESSION_ID,
               parentId(),
               new TurnEndPayload(
-                  startId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  id(startId), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
               BASE));
       openTurnStartId = -1L;
       return this;
@@ -370,8 +372,8 @@ class CompactionSummaryAssemblerTest {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
               BASE));
@@ -379,23 +381,23 @@ class CompactionSummaryAssemblerTest {
       return this;
     }
 
-    PathBuilder turnStart(long id) {
+    PathBuilder turnStart(UUID id) {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
               BASE));
-      openTurnStartId = id;
+      openTurnStartId = id.getLeastSignificantBits();
       return this;
     }
 
-    PathBuilder user(long id, String text) {
+    PathBuilder user(UUID id, String text) {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))),
@@ -405,11 +407,11 @@ class CompactionSummaryAssemblerTest {
       return this;
     }
 
-    PathBuilder assistant(long id, String text) {
+    PathBuilder assistant(UUID id, String text) {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(
@@ -421,7 +423,7 @@ class CompactionSummaryAssemblerTest {
     }
 
     /** ASSISTANT 消息携带 read/write 工具调用（用于文件 section 断言）。 */
-    PathBuilder assistantWithFileCalls(long id, String... calls) {
+    PathBuilder assistantWithFileCalls(UUID id, String... calls) {
       List<AgentMessageContent> contents = new ArrayList<>();
       for (int i = 0; i < calls.length; i += 2) {
         contents.add(
@@ -432,7 +434,7 @@ class CompactionSummaryAssemblerTest {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
@@ -443,11 +445,11 @@ class CompactionSummaryAssemblerTest {
     }
 
     PathBuilder toolResult(
-        long id, long assistantEntryId, int ordinal, String toolCallId, String toolName) {
+        UUID id, UUID assistantEntryId, int ordinal, String toolCallId, String toolName) {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new MessagePayload(
                   new AgentMessage(
@@ -472,11 +474,11 @@ class CompactionSummaryAssemblerTest {
       return this;
     }
 
-    PathBuilder turnEnd(long id, long turnStartEntryId) {
+    PathBuilder turnEnd(UUID id, UUID turnStartEntryId) {
       entries.add(
           new Entry(
               id,
-              SESSION,
+              SESSION_ID,
               parentId(),
               new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
               BASE));
@@ -503,12 +505,14 @@ class CompactionSummaryAssemblerTest {
               BigDecimal.ZERO));
     }
 
+    private UUID parentId() {
+      return entries.get(entries.size() - 1).id();
+    }
+
     EntryPath path() {
       return new EntryPath(List.copyOf(entries));
     }
-
-    private long parentId() {
-      return entries.get(entries.size() - 1).id();
-    }
   }
+
+  private static final UUID SESSION_ID = id(100L);
 }
