@@ -1006,6 +1006,46 @@ export const aiCatalog = {
     'en-US': 'Send message',
     'zh-CN': '发送消息',
   },
+  'ai.runtime.composer.attach': {
+    'en-US': 'Attach files',
+    'zh-CN': '添加附件',
+  },
+  'ai.runtime.composer.strip': {
+    'en-US': 'Attachments',
+    'zh-CN': '附件',
+  },
+  'ai.runtime.composer.uploading': {
+    'en-US': 'Uploading…',
+    'zh-CN': '上传中…',
+  },
+  'ai.runtime.composer.uploadFailed': {
+    'en-US': 'Upload failed',
+    'zh-CN': '上传失败',
+  },
+  'ai.runtime.composer.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
+  'ai.runtime.composer.retryUpload': {
+    'en-US': 'Retry upload {{name}}',
+    'zh-CN': '重试上传 {{name}}',
+  },
+  'ai.runtime.composer.removeAttachment': {
+    'en-US': 'Remove attachment {{name}}',
+    'zh-CN': '移除附件 {{name}}',
+  },
+  'ai.runtime.composer.previewAttachment': {
+    'en-US': 'Preview {{name}}',
+    'zh-CN': '预览 {{name}}',
+  },
+  'ai.runtime.composer.closePreview': {
+    'en-US': 'Close preview',
+    'zh-CN': '关闭预览',
+  },
+  'ai.runtime.composer.fileTooLarge': {
+    'en-US': '{{name}} exceeds the {{limit}} upload limit',
+    'zh-CN': '{{name}} 超过 {{limit}} 上传限制',
+  },
   'ai.runtime.command.palette': {
     'en-US': 'Command palette',
     'zh-CN': '命令表',
@@ -1213,6 +1253,14 @@ export const aiCatalog = {
   'ai.runtime.message.binaryPayload': {
     'en-US': 'binary payload',
     'zh-CN': 'binary payload',
+  },
+  'ai.runtime.message.downloadResource': {
+    'en-US': 'Download {{name}}',
+    'zh-CN': '下载 {{name}}',
+  },
+  'ai.runtime.message.resourceUnavailable': {
+    'en-US': 'Resource unavailable',
+    'zh-CN': '资源不可用',
   },
   'ai.runtime.status.agentFallback': {
     'en-US': 'agent',

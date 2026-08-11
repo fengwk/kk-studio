@@ -24,10 +24,10 @@ describe('ChatPanel', () => {
           error: null,
         }}
         composer={{
-          draft: '',
+          parts: [],
           pending: false,
           disabled: false,
-          onDraftChange: vi.fn(),
+          onPartsChange: vi.fn(),
           onSubmit: vi.fn(),
           onCommand: vi.fn(),
         }}

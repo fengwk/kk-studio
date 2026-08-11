@@ -284,8 +284,8 @@ describe('ChatWorkspacePage', () => {
       </QueryClientProvider>,
     )
     const freshComposer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(freshComposer).toHaveValue(''))
-    expect(screen.queryByDisplayValue('stale across chats')).not.toBeInTheDocument()
+    // contenteditable composer：空 draft（无跨会话残留文本）。
+    await waitFor(() => expect(freshComposer).toHaveTextContent(''))
   })
 
   it('renders a blank pane with the Chat Agent and retains pane targets across layouts', async () => {

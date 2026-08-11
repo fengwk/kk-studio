@@ -5,24 +5,25 @@ import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { ThreadCommandPalette } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
+import { createTextPart, type ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 
 function ControlledComposer({
   onSubmit,
   onCommand,
-  initial = '',
+  initial = [],
 }: {
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
-  initial?: string
+  initial?: ComposerPart[]
 }) {
-  const [draft, setDraft] = useState(initial)
+  const [parts, setParts] = useState(initial)
   return (
     <ThreadComposer
-      draft={draft}
+      parts={parts}
       pending={false}
       disabled={false}
-      onDraftChange={setDraft}
+      onPartsChange={setParts}
       onSubmit={onSubmit}
       onCommand={onCommand}
     />
@@ -34,8 +35,8 @@ describe('ThreadComposer interactions', () => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
     render(<ControlledComposer onSubmit={vi.fn()} onCommand={onCommand} />)
-    const textarea = screen.getByLabelText('给 AI 发送消息')
-    await user.type(textarea, '/yolo')
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(editor, '/yolo')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.keyboard('{Enter}')
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'yolo' }))
@@ -45,8 +46,8 @@ describe('ThreadComposer interactions', () => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
     render(<ControlledComposer onSubmit={vi.fn()} onCommand={onCommand} />)
-    const textarea = screen.getByLabelText('给 AI 发送消息')
-    await user.type(textarea, '/')
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(editor, '/')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     // 第一个启用项是 session；ArrowDown -> thread、agent、model...
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
@@ -67,10 +68,10 @@ describe('ThreadComposer interactions', () => {
   it('keeps send enabled while a previous mutation is still pending', () => {
     render(
       <ThreadComposer
-        draft="hello"
+        parts={[createTextPart('hello')]}
         pending
         disabled={false}
-        onDraftChange={vi.fn()}
+        onPartsChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
       />,
@@ -83,10 +84,10 @@ describe('ThreadComposer interactions', () => {
     try {
       const { unmount } = render(
         <ThreadComposer
-          draft="hello"
+          parts={[createTextPart('hello')]}
           pending={false}
           disabled={false}
-          onDraftChange={vi.fn()}
+          onPartsChange={vi.fn()}
           onSubmit={vi.fn()}
           onCommand={vi.fn()}
         />,
@@ -104,10 +105,10 @@ describe('ThreadComposer interactions', () => {
   it('does not render standalone actor-state, Stop, Retry, or add controls', () => {
     render(
       <ThreadComposer
-        draft=""
+        parts={[]}
         pending={false}
         disabled={false}
-        onDraftChange={vi.fn()}
+        onPartsChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
       />,
@@ -122,16 +123,17 @@ describe('ThreadComposer interactions', () => {
   it('disables the complete composer while no Thread projection is available', () => {
     render(
       <ThreadComposer
-        draft="message"
+        parts={[createTextPart('message')]}
         pending={false}
         disabled
-        onDraftChange={vi.fn()}
+        onPartsChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
       />,
     )
-    expect(screen.getByLabelText('给 AI 发送消息')).toBeDisabled()
+    expect(screen.getByLabelText('给 AI 发送消息')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
   })
 })
 

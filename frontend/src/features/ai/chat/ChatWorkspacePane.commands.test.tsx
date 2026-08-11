@@ -798,7 +798,7 @@ describe('ChatWorkspacePane commands', () => {
         expectedRevision: '3',
       }),
     )
-    expect(await screen.findByDisplayValue('s1 prompt')).toBeInTheDocument()
+    await waitFor(() => expect(composer).toHaveTextContent('s1 prompt'))
     expect(screen.queryByRole('dialog', { name: '历史分支' })).not.toBeInTheDocument()
   })
 
@@ -859,7 +859,7 @@ describe('ChatWorkspacePane commands', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled(),
     )
-    expect(screen.getByLabelText('给 AI 发送消息')).toBeDisabled()
+    expect(screen.getByLabelText('给 AI 发送消息')).toHaveAttribute('aria-disabled', 'true')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await user.keyboard('{Enter}')
     expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1)
@@ -889,6 +889,6 @@ describe('ChatWorkspacePane commands', () => {
     )
     expect(harnessService.updateThreadHead).not.toHaveBeenCalled()
     // draft 已被恢复，用户无需重新输入即可重试。
-    expect(await screen.findByDisplayValue('will collide')).toBeInTheDocument()
+    await waitFor(() => expect(composer).toHaveTextContent('will collide'))
   })
 })

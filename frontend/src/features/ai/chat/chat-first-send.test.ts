@@ -3,6 +3,7 @@ import {
   FirstSendMessageError,
   performBlankPaneFirstSend,
 } from '@/features/ai/chat/chat-first-send'
+import { createTextPart } from '@/features/ai/composer/composer-parts'
 import type {
   HarnessBranchSettingsDTO,
   HarnessThreadCommandDTO,
@@ -79,7 +80,7 @@ describe('performBlankPaneFirstSend', () => {
 
     const result = await performBlankPaneFirstSend({
       chatId: 'chat-1',
-      content: 'hello',
+      parts: [createTextPart('hello')],
       title: 'New Thread',
       branchSettings: settings(),
       yoloEnabled: true,
@@ -128,7 +129,7 @@ describe('performBlankPaneFirstSend', () => {
     await expect(
       performBlankPaneFirstSend({
         chatId: 'chat-1',
-        content: 'hello',
+        parts: [createTextPart('hello')],
         title: 't',
         branchSettings: settings(),
         yoloEnabled: false,
@@ -154,7 +155,7 @@ describe('performBlankPaneFirstSend', () => {
 
     const error = await performBlankPaneFirstSend({
       chatId: 'chat-1',
-      content: 'retry me',
+      parts: [createTextPart('retry me')],
       title: 't',
       branchSettings: settings(),
       yoloEnabled: false,
@@ -188,7 +189,7 @@ describe('performBlankPaneFirstSend', () => {
 
     await performBlankPaneFirstSend({
       chatId: 'chat-1',
-      content: 'retry me',
+      parts: [createTextPart('retry me')],
       title: 't',
       branchSettings: settings(),
       yoloEnabled: false,
@@ -207,7 +208,7 @@ describe('performBlankPaneFirstSend', () => {
     enqueueCommands.mockResolvedValueOnce([])
     await performBlankPaneFirstSend({
       chatId: 'chat-1',
-      content: 'retry me',
+      parts: [createTextPart('retry me')],
       title: 't',
       branchSettings: settings(),
       yoloEnabled: false,
@@ -229,7 +230,7 @@ describe('performBlankPaneFirstSend', () => {
     await expect(
       performBlankPaneFirstSend({
         chatId: 'chat-1',
-        content: 'hello',
+        parts: [createTextPart('hello')],
         title: 't',
         branchSettings: settings(),
         yoloEnabled: false,

@@ -46,6 +46,12 @@ class ResizeObserverStub {
 
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver
 
+// jsdom 不实现本地 blob URL；附件 strip 的预览需要稳定 stub。
+if (typeof URL !== 'undefined' && typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = () => 'blob:kk-studio-test'
+  URL.revokeObjectURL = () => undefined
+}
+
 // Thread 状态压缩通过 2D canvas 上下文测量文本。
 if (typeof HTMLCanvasElement !== 'undefined') {
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {

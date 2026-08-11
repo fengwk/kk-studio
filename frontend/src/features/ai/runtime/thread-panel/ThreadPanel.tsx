@@ -4,6 +4,7 @@ import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadError
 import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
+import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -27,15 +28,16 @@ export interface ThreadPanelTranscriptInput {
 }
 
 /**
- * Composer 区域：slash 命令输入 + 发送按钮。所有回调都必填，因为
- * composer 是纯受控组件，自身不持有任何状态。
+ * Composer 区域：slash 命令输入 + 附件 strip + 发送按钮。所有回调都必填，因为
+ * composer 是纯受控组件，自身不持有 parts 状态（上传注册表在组件内部）。
  */
 export interface ThreadPanelComposerInput {
-  draft: string
+  parts: ComposerPart[]
   pending: boolean
   disabled: boolean
-  onDraftChange: (draft: string) => void
-  onSubmit: () => void
+  onPartsChange: (parts: ComposerPart[]) => void
+  /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
+  onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
 }
@@ -94,10 +96,10 @@ export function ThreadPanel({ transcript, composer, activity, slots }: ThreadPan
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
         ) : null}
         <ThreadComposer
-          draft={composer.draft}
+          parts={composer.parts}
           pending={composer.pending}
           disabled={composer.disabled}
-          onDraftChange={composer.onDraftChange}
+          onPartsChange={composer.onPartsChange}
           onSubmit={composer.onSubmit}
           onCommand={composer.onCommand}
           commands={composer.commands}

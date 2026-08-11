@@ -73,12 +73,14 @@ export function projectDurableEntry(
   const contents = getRecordList(message.contents)
   if (role === 'USER' || role === 'SYSTEM') {
     const text = contents.map(contentText).filter(Boolean).join('\n')
-    if (text) {
+    const attachments = contents.flatMap(toResourceAttachment)
+    if (text || attachments.length > 0) {
       messages.push({
         id: entry.entryId,
         role: role === 'USER' ? 'user' : 'system',
         subjectEntryId: entry.entryId,
         text,
+        attachments: attachments.length > 0 ? attachments : undefined,
         createdAt: entry.createTime,
         status: 'done',
       })
