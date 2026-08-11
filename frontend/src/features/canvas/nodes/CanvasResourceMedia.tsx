@@ -59,12 +59,20 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     url: originalUrl,
     loading: originalLoading,
     error: originalError,
+    refresh: refreshOriginal,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
     resourceId: resource.id,
     kind: 'original',
     enabled: originalRequested,
   })
+  const requestOriginal = () => {
+    if (originalRequested) {
+      void refreshOriginal()
+    } else {
+      setOriginalRequested(true)
+    }
+  }
 
   useEffect(() => () => {
     const media = mediaRef.current
@@ -101,7 +109,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           downloadLabel={t('canvas.media.downloadImage')}
           signingLabel={t('canvas.media.signing')}
           signFailedLabel={t('canvas.media.signFailed')}
-          onRequest={() => setOriginalRequested(true)}
+          onRequest={requestOriginal}
         />
       </div>
     )
@@ -142,7 +150,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
               disabled={originalLoading}
               onClick={() => {
                 setPlayRequested(true)
-                setOriginalRequested(true)
+                requestOriginal()
               }}
               aria-label={t('canvas.media.playVideo', { name: resource.name })}
             >
@@ -160,7 +168,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           downloadLabel={t('canvas.media.downloadVideo')}
           signingLabel={t('canvas.media.signing')}
           signFailedLabel={t('canvas.media.signFailed')}
-          onRequest={() => setOriginalRequested(true)}
+          onRequest={requestOriginal}
         />
       </div>
     )
@@ -188,7 +196,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
           disabled={originalLoading}
           onClick={() => {
             setPlayRequested(true)
-            setOriginalRequested(true)
+            requestOriginal()
           }}
         >
           <span aria-hidden="true">♪</span>
@@ -206,7 +214,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
         downloadLabel={t('canvas.media.downloadAudio')}
         signingLabel={t('canvas.media.signing')}
         signFailedLabel={t('canvas.media.signFailed')}
-        onRequest={() => setOriginalRequested(true)}
+        onRequest={requestOriginal}
       />
     </div>
   )

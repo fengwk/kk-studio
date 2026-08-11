@@ -114,8 +114,19 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
     if (canvasId <= 0L) {
       return Optional.empty();
     }
-    CanvasDocumentDO document = documentMapper.getById(canvasId);
-    return document == null ? Optional.empty() : Optional.of(toSnapshot(document));
+    while (true) {
+      CanvasDocumentDO documentBefore = documentMapper.getById(canvasId);
+      if (documentBefore == null) {
+        return Optional.empty();
+      }
+      List<CanvasFunctionRun> runsBefore = functionRunRepository.findByCanvasId(canvasId);
+      CanvasSnapshot snapshot = toSnapshot(documentBefore, runsBefore);
+      List<CanvasFunctionRun> runsAfter = functionRunRepository.findByCanvasId(canvasId);
+      CanvasDocumentDO documentAfter = documentMapper.getById(canvasId);
+      if (documentBefore.equals(documentAfter) && runsBefore.equals(runsAfter)) {
+        return Optional.of(snapshot);
+      }
+    }
   }
 
   @Override
@@ -415,7 +426,8 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
     }
   }
 
-  private CanvasSnapshot toSnapshot(CanvasDocumentDO document) {
+  private CanvasSnapshot toSnapshot(
+      CanvasDocumentDO document, List<CanvasFunctionRun> functionRuns) {
     long canvasId = document.getId();
     Map<Long, List<CanvasResource>> resourcesByNode = new LinkedHashMap<>();
     for (CanvasResourceDO resource : resourceMapper.listByCanvasNodeOrder(canvasId)) {
@@ -424,7 +436,7 @@ public class DurableCanvasService implements CanvasQueryService, CanvasCommandSe
           .add(PostgresqlCanvasResourceRepository.toDomain(resource));
     }
     Map<Long, CanvasFunctionRun> runsByNode = new HashMap<>();
-    for (CanvasFunctionRun run : functionRunRepository.findByCanvasId(canvasId)) {
+    for (CanvasFunctionRun run : functionRuns) {
       runsByNode.put(run.nodeId(), run);
     }
 

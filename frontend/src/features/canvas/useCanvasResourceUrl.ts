@@ -104,5 +104,6 @@ export function useCanvasResourceUrl({
     headers: query.data?.headers ?? {},
     loading: query.isLoading || query.isFetching,
     error: query.error,
+    refresh: query.refetch,
   }
 }

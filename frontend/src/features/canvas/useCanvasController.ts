@@ -143,7 +143,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
       (current) => {
         let next = current
         for (const run of polledRuns) {
-          next = patchSnapshotRun(next, run)
+          next = patchSnapshotRun(next, run, true)
           succeeded ||= run.status === 'SUCCEEDED'
         }
         return next
@@ -684,6 +684,13 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   const deleteSelection = useCallback(() => {
     const commands: CanvasCommandDTO[] = []
     const nodeIds = new Set(snapshotQuery.data?.nodes.map((node) => node.id) ?? [])
+    for (const link of state.selectedLinks) {
+      commands.push({
+        type: 'DELETE_LINK',
+        sourceNodeId: link.sourceNodeId,
+        targetNodeId: link.targetNodeId,
+      })
+    }
     for (const id of state.selectedIds) {
       const groupId = groupIdFromFlowId(id)
       if (groupId) {
@@ -691,13 +698,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
       } else if (nodeIds.has(id as DecimalString)) {
         commands.push({ type: 'DELETE_NODE', nodeId: id as DecimalString })
       }
-    }
-    for (const link of state.selectedLinks) {
-      commands.push({
-        type: 'DELETE_LINK',
-        sourceNodeId: link.sourceNodeId,
-        targetNodeId: link.targetNodeId,
-      })
     }
     if (commands.length === 0) {
       return
@@ -1018,6 +1018,7 @@ function sameSelection(
 function patchSnapshotRun(
   snapshot: CanvasSnapshotDTO | undefined,
   run: CanvasFunctionRunDTO,
+  requireSameRequest = false,
 ): CanvasSnapshotDTO | undefined {
   if (!snapshot) {
     return snapshot
@@ -1027,6 +1028,9 @@ function patchSnapshotRun(
     return snapshot
   }
   const currentRun = snapshot.nodes[nodeIndex]?.run
+  if (requireSameRequest && currentRun?.requestId !== run.requestId) {
+    return snapshot
+  }
   if (
     currentRun?.requestId === run.requestId
     && currentRun.status === run.status

@@ -743,4 +743,63 @@ describe('useCanvasController real snapshot runtime', () => {
     })
     expect(getCanvas).toHaveBeenCalledTimes(2)
   })
+
+  it('ignores a stale poll response from an older FunctionRun request', async () => {
+    // Snapshot 中的 requestId 是运行身份；旧请求的缓存/迟到响应不能覆盖它。
+    const current = snapshot('1')
+    current.nodes = current.nodes.map((node) => node.id === '3' ? {
+      ...node,
+      run: {
+        nodeId: '3',
+        requestId: 'request-current',
+        status: 'RUNNING',
+        stage: 'QUEUED',
+        error: null,
+        updatedAt: '2026-08-10T00:00:02Z',
+      },
+    } : node)
+    const stale = deferred<Awaited<ReturnType<typeof getCanvasFunctionRun>>>()
+    vi.mocked(getCanvas).mockResolvedValue(current)
+    vi.mocked(getCanvasFunctionRun).mockReturnValue(stale.promise)
+    const { result } = renderHook(() => useCanvasController('1'), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.nodes[1]?.run?.requestId).toBe('request-current'))
+    await waitFor(() => expect(getCanvasFunctionRun).toHaveBeenCalled())
+
+    await act(async () => {
+      stale.resolve({
+        nodeId: '3',
+        requestId: 'request-old',
+        status: 'FAILED',
+        stage: 'FAILED',
+        error: 'old failure',
+        updatedAt: '2026-08-10T00:00:01Z',
+      })
+      await stale.promise
+    })
+
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes[1]?.run).toMatchObject({
+        requestId: 'request-current',
+        status: 'RUNNING',
+      })
+    })
+  })
+
+  it('deletes selected links before their incident nodes in one atomic batch', async () => {
+    // PostgreSQL 会在 DELETE_NODE 时级联删除 Link，因此显式 Link 命令必须先执行。
+    const { result } = renderHook(() => useCanvasController('1'), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => {
+      result.current.setSelection(['2'], [{ sourceNodeId: '2', targetNodeId: '3' }])
+    })
+    act(() => {
+      result.current.deleteSelection()
+    })
+
+    await waitFor(() => expect(commands).toHaveLength(1))
+    expect(commands[0]?.commands.map((command) => command.type)).toEqual([
+      'DELETE_LINK',
+      'DELETE_NODE',
+    ])
+  })
 })
