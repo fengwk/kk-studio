@@ -8,6 +8,7 @@ import {
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import { branchDraftFromThread, type BranchDraft } from '@/features/ai/chat/branch-draft'
+import { createAttachmentPart, createTextPart, partsToText, type ComposerPart } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
@@ -150,9 +151,9 @@ function buildBatchFor(
   currentThread: HarnessThreadDTO,
   base: BranchDraft,
   draft: BranchDraft,
-): (content: string) => CommandBatchPlan | null {
-  return (content) =>
-    buildMessageBatchPlan({ thread: currentThread, effectiveBase: base, draft, content })
+): (parts: ComposerPart[]) => CommandBatchPlan | null {
+  return (parts) =>
+    buildMessageBatchPlan({ thread: currentThread, effectiveBase: base, draft, parts })
 }
 
 describe('useAgentThreadController', () => {
@@ -263,7 +264,7 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('hello world'))
+    act(() => result.current.setDraft([createTextPart('hello world')]))
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -281,7 +282,7 @@ describe('useAgentThreadController', () => {
     expect(userMessage.content).toBe('hello world')
     // 严格的协议载荷：USER_MESSAGE 永远不会携带 role 字段。
     expect(userMessage).not.toHaveProperty('role')
-    expect(result.current.draft).toBe('')
+    expect(partsToText(result.current.draft)).toBe('')
   })
 
   it('reports a 409 from send as threadStateChanged and invalidates the snapshot', async () => {
@@ -306,7 +307,7 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('stale message'))
+    act(() => result.current.setDraft([createTextPart('stale message')]))
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -322,7 +323,51 @@ describe('useAgentThreadController', () => {
       ),
     )
     // 失败的 draft 会被恢复，用户无需重新输入即可重试。
-    expect(result.current.draft).toBe('stale message')
+    expect(partsToText(result.current.draft)).toBe('stale message')
+  })
+
+  it('restores the local-id draft, not the resolved payload, after a send failure with attachments', async () => {
+    vi.mocked(harnessService.enqueueCommands).mockRejectedValueOnce(
+      new ApiError('network down', 0),
+    )
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const draft = base
+
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          '',
+          undefined,
+          buildBatchFor(currentThread, base, draft),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    const localPart = createAttachmentPart('local-1', 'a.png')
+    act(() => result.current.setDraft([createTextPart('hello'), localPart]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    await waitFor(() => expect(result.current.actionError).toBeTruthy())
+    // 恢复的是本地草稿（客户端 localId），而不是提交 payload 中的服务端句柄。
+    expect(result.current.draft).toEqual([
+      expect.objectContaining({ type: 'text', text: 'hello' }) as Record<string, string>,
+      expect.objectContaining({ type: 'attachment', uploadId: 'local-1', filename: 'a.png' }) as Record<string, string>,
+    ])
+    // batch 中序列化的是有序 contents（含 ATTACHMENT uploadId）。
+    const batch = vi.mocked(harnessService.enqueueCommands).mock.calls[0]?.[1]
+    const message = batch?.commands[batch.commands.length - 1] as {
+      contents?: Array<Record<string, unknown>>
+    }
+    expect(message.contents).toEqual([
+      { type: 'TEXT', text: 'hello' },
+      { type: 'ATTACHMENT', uploadId: 'local-1' },
+    ])
   })
 
   it('reuses the same batch object when a retry carries identical content and draft', async () => {
@@ -346,14 +391,14 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('retry me'))
+    act(() => result.current.setDraft([createTextPart('retry me')]))
     await act(async () => {
       await result.current.submitMessage()
     })
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     const firstBatch = vi.mocked(harnessService.enqueueCommands).mock.calls[0]?.[1]
     expect(firstBatch).toBeDefined()
-    expect(result.current.draft).toBe('retry me')
+    expect(partsToText(result.current.draft)).toBe('retry me')
 
     await act(async () => {
       await result.current.submitMessage()
@@ -372,14 +417,14 @@ describe('useAgentThreadController', () => {
     const baseA = branchDraftFromThread(currentThread)
     const draftB = { ...baseA, agentName: 'coder' }
     let projectionApplied = false
-    const buildBatch = (content: string) =>
+    const buildBatch = (parts: ComposerPart[]) =>
       buildMessageBatchPlan({
         // 投影之后 effectiveBase 等于 draft：粗略的 {content,base,draft}
         // 身份判定无法匹配；不可变意图层面的身份仍需命中。
         thread: currentThread,
         effectiveBase: projectionApplied ? draftB : baseA,
         draft: draftB,
-        content,
+        parts,
       })
     vi.mocked(harnessService.enqueueCommands)
       .mockRejectedValueOnce(new Error('queue full'))
@@ -401,7 +446,7 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('retry me'))
+    act(() => result.current.setDraft([createTextPart('retry me')]))
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -440,7 +485,7 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('retry me'))
+    act(() => result.current.setDraft([createTextPart('retry me')]))
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -448,7 +493,7 @@ describe('useAgentThreadController', () => {
       .commands[0]?.clientCommandId
 
     // 将 composer 编辑成不同内容时，会重置回放身份。
-    act(() => result.current.setDraft('changed content'))
+    act(() => result.current.setDraft([createTextPart('changed content')]))
     await act(async () => {
       await result.current.submitMessage()
     })
@@ -477,12 +522,12 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('retry me'))
+    act(() => result.current.setDraft([createTextPart('retry me')]))
     await act(async () => {
       await result.current.submitMessage()
     })
     await waitFor(() => expect(result.current.actionError).toContain('queue full'))
-    expect(result.current.draft).toBe('retry me')
+    expect(partsToText(result.current.draft)).toBe('retry me')
   })
 
   it('clears the draft on a successful send', async () => {
@@ -503,12 +548,12 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('hello world'))
+    act(() => result.current.setDraft([createTextPart('hello world')]))
     await act(async () => {
       await result.current.submitMessage()
     })
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
-    expect(result.current.draft).toBe('')
+    expect(partsToText(result.current.draft)).toBe('')
   })
 
   it('stops the Thread with a stable stopRequestId across a retry after failure', async () => {
@@ -933,7 +978,7 @@ describe('useAgentThreadController', () => {
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
-    act(() => result.current.setDraft('retry me'))
+    act(() => result.current.setDraft([createTextPart('retry me')]))
     await act(async () => {
       await result.current.submitMessage()
       await result.current.submitMessage()

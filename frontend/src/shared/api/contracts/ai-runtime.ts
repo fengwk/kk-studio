@@ -96,6 +96,12 @@ export type HarnessUserMessageContentDTO =
   | { type: 'IMAGE'; mediaType: string; source: string }
   | { type: 'AUDIO'; mediaType: string; source: string }
   | { type: 'VIDEO'; mediaType: string; source: string }
+  /**
+   * 共享存储上传的附件引用。uploadId 是预留/完成后的持久 id；后端在后续
+   * slice 中将其物化为 durable RESOURCE 内容。前端运行时会话契约允许该类型，
+   * 后端集成另行落地。
+   */
+  | { type: 'ATTACHMENT'; uploadId: string }
 
 type HarnessUserMessageCommandDTO =
   | { type: 'USER_MESSAGE'; clientCommandId: string; text: string; content?: never; contents?: never }

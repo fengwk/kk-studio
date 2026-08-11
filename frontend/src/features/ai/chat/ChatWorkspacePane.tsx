@@ -4,6 +4,7 @@ import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { LiveEnvironmentDTO } from '@/shared/api/contracts/ai-environment'
 import type { CommandBatchReplay } from '@/features/ai/runtime'
+import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { FirstSendRecovery } from '@/features/ai/chat/chat-first-send'
 import { BlankComposerPane } from '@/features/ai/chat/chat-workspace-pane/BlankComposerPane'
 import { BoundThreadPane } from '@/features/ai/chat/chat-workspace-pane/BoundThreadPane'
@@ -45,7 +46,7 @@ export function ChatWorkspacePane({
 }) {
   const [firstSendRecovery, setFirstSendRecovery] = useState<{
     threadId: string
-    content: string
+    parts: ComposerPart[]
     replay?: CommandBatchReplay
   } | null>(null)
 
@@ -74,11 +75,11 @@ export function ChatWorkspacePane({
         onFocus={onFocus}
         onThreadChange={handleThreadChange}
         onThreadSortChange={onThreadSortChange}
-        // 文本恢复与 replay identity 相互独立：已知 409 会恢复 draft，但不会恢复 replay，
+        // 内容恢复与 replay identity 相互独立：已知 409 会恢复 draft，但不会恢复 replay，
         // 因此下一次提交会重新构建最新 cursor 和 command id。
         initialDraft={
           firstSendRecovery?.threadId === pane.threadId
-            ? firstSendRecovery.content
+            ? firstSendRecovery.parts
             : undefined
         }
         initialReplay={

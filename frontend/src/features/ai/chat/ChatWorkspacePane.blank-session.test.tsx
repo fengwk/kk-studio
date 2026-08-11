@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
@@ -14,6 +14,18 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+
+const storageMocks = vi.hoisted(() => ({
+  reserveUpload: vi.fn(),
+  completeUpload: vi.fn(),
+  deleteUpload: vi.fn(),
+  getBlobOriginalUrl: vi.fn(),
+  getBlobPreviewUrl: vi.fn(),
+  uploadFile: vi.fn(),
+}))
+vi.mock('@/shared/api/storage-service', () => ({
+  storageService: storageMocks,
+}))
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -228,6 +240,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('exposes full command table on blank panes with unsupported entries disabled', () => {
@@ -443,7 +456,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-replay'))
-    expect(await screen.findByDisplayValue('retry me')).toBeInTheDocument()
+    await waitFor(() => expect(composer).toHaveTextContent('retry me'))
 
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(2))
@@ -490,7 +503,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     await waitFor(() => expect(chatService.createChatThread).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-conflict'))
-    expect(await screen.findByDisplayValue('fresh retry')).toBeInTheDocument()
+    await waitFor(() => expect(composer).toHaveTextContent('fresh retry'))
 
     // 当恢复后的 draft 文本相同时重试：已知 409 不会装配 exact replay——
     // 下一次提交必须基于刷新的 snapshot，用全新 cursor 和全新 command id 重新构建。
@@ -810,6 +823,84 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(harnessService.enqueueCommands).not.toHaveBeenCalled()
     // 面板保持空白，让用户在修复 Agent 后重试。
     expect(screen.getByRole('heading', { name: /新对话/ })).toBeInTheDocument()
-    expect(await screen.findByDisplayValue('first message')).toBeInTheDocument()
+    await waitFor(() => expect(composer).toHaveTextContent('first message'))
+  })
+
+  it('recovers the local-id draft, not server upload ids, after a first-send failure with an attachment', async () => {
+    const user = userEvent.setup()
+    // jsdom 无 Worker：用同步回显 sha256 的 fake 满足 composer 默认 hasher。
+    class FakeHashWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      addEventListener(_type: string, listener: (event: MessageEvent) => void) {
+        this.onmessage = listener
+      }
+      removeEventListener() {}
+      postMessage(event: { requestId: string }) {
+        setTimeout(() => {
+          this.onmessage?.({ data: { requestId: event.requestId, sha256: 'a'.repeat(64) } } as MessageEvent)
+        }, 0)
+      }
+      terminate() {}
+    }
+    vi.stubGlobal('Worker', FakeHashWorker)
+    // PENDING 直传 + complete：upload 句柄 up-1 在 complete 后保持不变。
+    storageMocks.reserveUpload.mockResolvedValue({
+      id: 'up-1',
+      state: 'PENDING',
+      blobId: null,
+      presignedPut: { method: 'PUT', url: 'https://s3.test/up-1', headers: {} },
+      expiresAt: null,
+    })
+    storageMocks.uploadFile.mockResolvedValue(undefined)
+    storageMocks.completeUpload.mockResolvedValue({
+      id: 'up-1',
+      state: 'READY',
+      blobId: 'blob-up-1',
+      expiresAt: null,
+    })
+    storageMocks.deleteUpload.mockResolvedValue(undefined)
+    storageMocks.getBlobOriginalUrl.mockResolvedValue({ url: 'https://s3.test/orig', expiresAt: null })
+    storageMocks.getBlobPreviewUrl.mockResolvedValue({ url: 'https://s3.test/prev', expiresAt: null })
+
+    const createdThread = thread({ threadId: 't-replay' })
+    vi.mocked(chatService.createChatThread).mockResolvedValue(snapshotOf(createdThread))
+    vi.mocked(harnessService.enqueueCommands).mockRejectedValue(new Error('queue down'))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(createdThread))
+
+    const onThreadChange = vi.fn()
+    renderBlankPane({ onThreadChange })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.type(composer, 'with file')
+    fireEvent.paste(composer, {
+      clipboardData: {
+        files: [new File([new Uint8Array(8)], 'doc.pdf', { type: 'application/pdf' })],
+        getData: () => '',
+      },
+    })
+    await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
+    await waitFor(() => expect(storageMocks.completeUpload).toHaveBeenCalledWith('up-1'))
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // 首次发送失败：payload 走 HTTP（含服务端句柄），恢复给绑定面板的是本地草稿。
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1))
+    const batch = vi.mocked(harnessService.enqueueCommands).mock.calls[0]?.[1]
+    const message = batch?.commands[batch.commands.length - 1] as {
+      contents?: Array<Record<string, unknown>>
+    }
+    expect(message.contents).toEqual([
+      { type: 'TEXT', text: 'with file' },
+      { type: 'ATTACHMENT', uploadId: 'up-1' },
+    ])
+    await waitFor(() => expect(onThreadChange).toHaveBeenCalledWith('t-replay'))
+
+    // 绑定面板恢复本地草稿：pill 携带客户端 localId（UUID），绝不是服务端句柄。
+    await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
+    const uploadId = document.querySelector('.composer-pill')?.getAttribute('data-upload-id')
+    expect(uploadId).not.toBe('up-1')
+    expect(uploadId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/)
+    expect(document.querySelector('.composer-pill')?.textContent).toContain('doc.pdf')
+    // 附件对象没有被释放（恢复期间绝不 DELETE）。
+    expect(storageMocks.deleteUpload).not.toHaveBeenCalled()
   })
 })

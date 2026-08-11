@@ -2811,6 +2811,35 @@ div.is-error {
   backdrop-filter: blur(18px);
 }
 
+.thread-dock-attach {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 8px;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg-muted);
+  background: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.thread-dock-attach:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.thread-dock-attach:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-dock-attach svg {
+  width: 15px;
+  height: 15px;
+}
+
 .thread-dock-send {
   display: grid;
   width: 28px;
@@ -2839,13 +2868,12 @@ div.is-error {
   height: 14px;
 }
 
-.thread-dock textarea {
+.composer-editor {
   flex: 1;
   min-width: 0;
   min-height: 28px;
   max-height: 190px; /* ~10 lines at 18px line-height */
-  resize: none;
-  overflow-y: hidden;
+  overflow-y: auto;
   border: 0;
   outline: 0;
   background: transparent;
@@ -2853,12 +2881,305 @@ div.is-error {
   font-size: 13px;
   line-height: 18px;
   padding: 5px 8px;
-  field-sizing: content;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
 }
 
-.thread-dock textarea::placeholder {
+.composer-editor[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
   color: var(--fg-dim);
+  pointer-events: none;
+}
+
+.composer-editor[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer-pill {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--stage-dot);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 18px;
+  user-select: none;
+}
+
+.thread-composer-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 2px 8px;
+}
+
+.attachment-tile {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  width: 148px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--overlay-surface-strong);
+  overflow: hidden;
+}
+
+.attachment-tile.is-error {
+  border-color: var(--danger);
+}
+
+.attachment-tile-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attachment-tile-main:disabled {
+  cursor: default;
+}
+
+.attachment-tile-preview {
+  width: 100%;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--stage-dot);
+}
+
+.attachment-tile-icon {
+  width: 100%;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--stage-dot);
+  color: var(--fg-muted);
+}
+
+.attachment-tile-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.attachment-tile-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.attachment-tile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.attachment-tile-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.attachment-tile.is-error .attachment-tile-meta {
+  color: var(--danger);
+}
+
+.attachment-tile-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--stage-dot);
+}
+
+.attachment-tile-progress span {
+  display: block;
+  height: 100%;
+  background: var(--accent, var(--fg));
+  transition: width 0.2s ease;
+}
+
+.attachment-tile-retry {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--stage-bg);
+  background: var(--fg);
+  cursor: pointer;
+}
+
+.attachment-tile-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--stage-dot);
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.attachment-tile:hover .attachment-tile-remove,
+.attachment-tile-remove:focus-visible {
   opacity: 1;
+}
+
+.attachment-tile-remove:disabled {
+  cursor: not-allowed;
+}
+
+.attachment-tile-remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.attachment-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 60%);
+}
+
+.attachment-preview-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(860px, 90vw);
+  max-height: 90vh;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--overlay-surface-strong);
+}
+
+.attachment-preview-modal img,
+.attachment-preview-modal video {
+  max-width: 100%;
+  max-height: 72vh;
+  border-radius: 8px;
+}
+
+.attachment-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.attachment-preview-footer button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--stage-dot);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.attachment-preview-footer svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-user-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.resource-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--overlay-surface);
+  font-size: 12px;
+}
+
+.resource-attachment-preview {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--stage-dot);
+}
+
+.resource-attachment-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--stage-dot);
+  color: var(--fg-muted);
+}
+
+.resource-attachment-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.resource-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.resource-attachment-download {
+  display: grid;
+  place-items: center;
+  color: var(--fg-muted);
+}
+
+.resource-attachment-download svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-attachment-failed {
+  color: var(--danger);
 }
 
 @keyframes thread-pulse {

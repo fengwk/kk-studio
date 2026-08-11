@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import type { RefObject, ReactNode } from 'react'
 import {
   ThreadPanel,
@@ -6,6 +7,11 @@ import {
   type ThreadPanelComposerInput,
   type ThreadPanelTranscriptInput,
 } from '@/features/ai/runtime/thread-panel'
+import {
+  ResourceBlobUrlContext,
+  type ResourceBlobUrls,
+} from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
+import { storageService } from '@/shared/api/storage-service'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
@@ -81,6 +87,14 @@ export function ChatPanel({
   footer: ChatPanelFooterInput
   activity: ChatPanelActivityInput
 }) {
+  // 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。
+  const resolveBlobUrls = useCallback(async (blobId: string): Promise<ResourceBlobUrls | null> => {
+    const [original, preview] = await Promise.all([
+      storageService.getBlobOriginalUrl(blobId).then(({ url }) => url).catch(() => null),
+      storageService.getBlobPreviewUrl(blobId).then(({ url }) => url).catch(() => null),
+    ])
+    return { original, preview }
+  }, [])
   const threadPanelTranscript: ThreadPanelTranscriptInput = {
     messages: transcript.timeline.messages,
     queuedMessages: transcript.timeline.queuedMessages,
@@ -97,32 +111,34 @@ export function ChatPanel({
     onDismissActionError: activity.onDismissActionError,
   }
   return (
-    <ThreadPanel
-      transcript={threadPanelTranscript}
-      composer={composer}
-      activity={panelActivity}
-      slots={{
-        footer: (
-          <ThreadStatusFooter
-            agentName={labels.agentName}
-            providerName={labels.providerName}
-            modelName={labels.modelName}
-            variantName={labels.variantName}
-            environmentName={labels.environmentName}
-            environmentReady={labels.environmentReady}
-            yoloEnabled={footer.yoloEnabled}
-            onAgentClick={footer.onAgentClick}
-            onModelClick={footer.onModelClick}
-            onVariantClick={footer.onVariantClick}
-            onEnvironmentClick={footer.onEnvironmentClick}
-            taskStatusEnabled={footer.taskStatusEnabled}
-            notificationsEnabled={footer.notificationsEnabled}
-            notificationPermission={footer.notificationPermission}
-            onTaskStatusToggle={footer.onTaskStatusToggle}
-            onNotificationsToggle={footer.onNotificationsToggle}
-          />
-        ),
-      }}
-    />
+    <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
+      <ThreadPanel
+        transcript={threadPanelTranscript}
+        composer={composer}
+        activity={panelActivity}
+        slots={{
+          footer: (
+            <ThreadStatusFooter
+              agentName={labels.agentName}
+              providerName={labels.providerName}
+              modelName={labels.modelName}
+              variantName={labels.variantName}
+              environmentName={labels.environmentName}
+              environmentReady={labels.environmentReady}
+              yoloEnabled={footer.yoloEnabled}
+              onAgentClick={footer.onAgentClick}
+              onModelClick={footer.onModelClick}
+              onVariantClick={footer.onVariantClick}
+              onEnvironmentClick={footer.onEnvironmentClick}
+              taskStatusEnabled={footer.taskStatusEnabled}
+              notificationsEnabled={footer.notificationsEnabled}
+              notificationPermission={footer.notificationPermission}
+              onTaskStatusToggle={footer.onTaskStatusToggle}
+              onNotificationsToggle={footer.onNotificationsToggle}
+            />
+          ),
+        }}
+      />
+    </ResourceBlobUrlContext.Provider>
   )
 }
