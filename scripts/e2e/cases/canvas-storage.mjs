@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { assert, cid, envelopeData, expectHttpError } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, cid, envelopeData, expectHttpError } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -26,7 +26,8 @@ registerCase({
     })
     const canvas = envelopeData(createJson)
     assert(UUID_TEXT.test(canvas.id), JSON.stringify(canvas))
-    assert(canvas.version === 0, JSON.stringify(canvas))
+    assertDecimalVersion(canvas.version, 'canvas.version')
+    assert(canvas.version === '0', JSON.stringify(canvas))
     assert(canvas.threadId === null, JSON.stringify(canvas))
 
     // 通用 S3 预签名端点不能触碰 Canvas/blob key 命名空间。
@@ -92,7 +93,7 @@ registerCase({
       'POST',
       `/api/canvases/${canvas.id}/commands`,
       {
-        expectedVersion: 0,
+        expectedVersion: '0',
         commandId: cid(),
         commands: [
           {
@@ -106,14 +107,18 @@ registerCase({
       },
     )
     const patch = envelopeData(commandJson)
-    assert(patch.baseVersion === 0 && patch.version === 1, JSON.stringify(patch))
+    assertDecimalVersion(patch.baseVersion, 'patch.baseVersion')
+    assertDecimalVersion(patch.version, 'patch.version')
+    assert(patch.baseVersion === '0' && patch.version === '1', JSON.stringify(patch))
     const upsert = patch.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
     assert(upsert, JSON.stringify(patch.nodes))
     const resource = upsert.node.resources[0]
     assert(resource.blobId === completed.blobId, JSON.stringify(resource))
     assert(resource.kind === 'IMAGE', JSON.stringify(resource))
     assert(resource.mediaType === 'image/png', JSON.stringify(resource))
-    assert(resource.sizeBytes === PNG_BYTES.length, JSON.stringify(resource))
+    // wire long：sizeBytes 是十进制字符串（非 JS number），值等于上传字节数。
+    assertDecimalVersion(resource.sizeBytes, 'resource.sizeBytes')
+    assert(resource.sizeBytes === String(PNG_BYTES.length), JSON.stringify(resource))
 
     // Resource 直读预签名：只暴露 method/url/headers/expiresAt，字节与上传一致。
     const { json: downloadJson } = await ctx.call(
@@ -142,7 +147,7 @@ registerCase({
     // TEXT 资源没有 blob 内容；未知 resource/canvas 与非法 UUID 明确拒绝。
     const textNodeId = cid()
     await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
-      expectedVersion: 1,
+      expectedVersion: '1',
       commandId: cid(),
       commands: [
         {

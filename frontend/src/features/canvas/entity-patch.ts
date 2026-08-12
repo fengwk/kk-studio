@@ -6,18 +6,20 @@ import type {
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
+import { compareCanvasVersions } from '@/shared/lib/canvas-version'
 
 /**
  * 应用单个 graph patch。返回 null 表示该 patch 无法连续应用：
  * - `patch.version <= snapshot.document.version`：重复/过期 patch，调用方应忽略；
  * - `patch.baseVersion !== snapshot.document.version`：存在 gap，
  *   调用方必须通过 changes（getCanvasChanges）或全量快照恢复。
+ * 版本是 canonical 非负十进制字符串，比较使用长度/字典序（bigint-safe）。
  */
 export function applyEntityPatch(
   snapshot: CanvasSnapshotDTO,
   patch: CanvasPatchDTO,
 ): CanvasSnapshotDTO | null {
-  if (patch.version <= snapshot.document.version) {
+  if (compareCanvasVersions(patch.version, snapshot.document.version) <= 0) {
     return null
   }
   if (patch.baseVersion !== snapshot.document.version) {
@@ -41,7 +43,7 @@ export function applyCanvasChanges(
   changes: CanvasChangesDTO,
 ): CanvasSnapshotDTO | null {
   if (changes.snapshot) {
-    return changes.snapshot.document.version >= snapshot.document.version
+    return compareCanvasVersions(changes.snapshot.document.version, snapshot.document.version) >= 0
       ? changes.snapshot
       : null
   }

@@ -194,7 +194,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   useCanvasVersionEvents({
     canvasId: state.canvasId,
     enabled: state.view === 'editor' && snapshotQuery.isSuccess,
-    version: snapshotQuery.data?.document.version ?? 0,
+    version: snapshotQuery.data?.document.version ?? '0',
     onVersion: syncCanvasChanges,
     onResync: resyncCanvas,
   })

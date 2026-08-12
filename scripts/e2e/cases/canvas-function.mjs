@@ -1,4 +1,4 @@
-import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, cid, envelopeData, sleep } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -29,7 +29,7 @@ registerCase({
       'POST',
       `/api/canvases/${canvas.id}/commands`,
       {
-        expectedVersion: 0,
+        expectedVersion: '0',
         commandId: cid(),
         commands: [
           {
@@ -44,7 +44,9 @@ registerCase({
       },
     )
     const created = envelopeData(commandJson)
-    assert(created.baseVersion === 0 && created.version === 1, JSON.stringify(created))
+    assertDecimalVersion(created.baseVersion, 'created.baseVersion')
+    assertDecimalVersion(created.version, 'created.version')
+    assert(created.baseVersion === '0' && created.version === '1', JSON.stringify(created))
     const upsert = created.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
     assert(upsert, JSON.stringify(created.nodes))
     const node = upsert.node
@@ -74,7 +76,8 @@ registerCase({
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
     const snapshot = envelopeData(snapshotJson)
     const generated = snapshot.nodes.find((item) => item.id === node.id)
-    assert(snapshot.document.version === 3, JSON.stringify(snapshot.document))
+    assertDecimalVersion(snapshot.document.version, 'snapshot.document.version')
+    assert(snapshot.document.version === '3', JSON.stringify(snapshot.document))
     assert(generated?.resources?.length === 1, JSON.stringify(generated))
     assert(generated.resources[0].kind === 'IMAGE', JSON.stringify(generated.resources[0]))
     assert(generated.resources[0].blobId != null, JSON.stringify(generated.resources[0]))

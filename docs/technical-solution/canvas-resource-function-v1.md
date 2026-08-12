@@ -24,7 +24,10 @@ CanvasDocument
 └── Link[]
 ```
 
-所有系统生成并持久化的 Canvas identity、commandId 与 requestId 都是 UUID。`version`、`resourceIndex` 等顺序或版本字段保持整数。
+所有系统生成并持久化的 Canvas identity、commandId 与 requestId 都是 UUID。`version`（graph 版本）
+在数据库是 `bigint`/Java `long` 整数，但 HTTP wire 上统一序列化为 canonical 非负十进制字符串
+（convention4j 对 long 的默认输出），前端契约与比较全程保持字符串；`resourceIndex`、宽高等
+非 long 字段保持整数。
 
 ### 2.1 CanvasDocument 与 version
 
@@ -34,7 +37,9 @@ CanvasDocument
 id, title, version, threadId?, createdAt, updatedAt
 ```
 
-- `version` 是 Graph、Patch、SSE 和 `expectedVersion` CAS 共用的单调游标。
+- `version` 是 Graph、Patch、SSE 和 `expectedVersion` CAS 共用的单调游标。DTO/SSE 中的
+  version 一律是 canonical 非负十进制字符串（如 `"0"`、`"42"`），与数据库 `bigint` 一一对应；
+  客户端禁止转换为 JS number，比较必须使用十进制字符串长度/字典序（bigint-safe）。
 - 每个成功的 typed command batch 恰好前进一次。
 - Function Run 的新 start、cancel、success 或 failure 终态各前进一次；checkpoint 不前进。
 - 同 commandId + 同 request hash 的精确重放返回当前版本的空 Patch，不前进。
@@ -233,7 +238,7 @@ DELETE_GROUP
 
 ```json
 {
-  "expectedVersion": 3,
+  "expectedVersion": "3",
   "commandId": "00000000-0000-0000-0000-000000000010",
   "commands": []
 }
@@ -242,7 +247,7 @@ DELETE_GROUP
 响应是实体 Patch：
 
 ```text
-baseVersion -> version
+baseVersion -> version      # 都是 canonical 非负十进制字符串
 groups[] = UPSERT | REMOVE
 nodes[]  = UPSERT | REMOVE
 links[]  = UPSERT | REMOVE
@@ -343,7 +348,9 @@ PostgreSQL 实体与 `canvas_document.version` 是唯一事实源。
 - 每个 Canvas 一个 bounded Stream：`kk-studio:canvas:{canvasId}:changes`，默认 exact max length 5000。
 - `/changes?afterVersion=N` 只在缓存覆盖全部连续版本时返回 patches；初次读取、Redis 不可用、损坏或任意 gap 都返回权威 Snapshot。
 - PostgreSQL trigger 只在 document insert/version 变化后 `NOTIFY canvas_version`，不修改 version。
-- SSE 事件为 `version` 或 `resync`；`Last-Event-ID` 覆盖 `afterVersion`。客户端收到 version 后拉 `/changes`，收到 resync 后整体替换 Snapshot。
+- SSE 事件为 `version` 或 `resync`；`Last-Event-ID` 覆盖 `afterVersion`，两者都是 canonical
+  非负十进制字符串。客户端收到 version 后拉 `/changes`，收到 resync 后整体替换 Snapshot；
+  数字/前导零/负数/畸形 version 事件一律忽略。
 
 Redis 不是事实源，不建立 consumer group，也不承担恢复。
 
