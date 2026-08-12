@@ -856,6 +856,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       id: 'up-1',
       state: 'READY',
       blobId: 'blob-up-1',
+      presignedPut: null,
       expiresAt: null,
     })
     storageMocks.deleteUpload.mockResolvedValue(undefined)

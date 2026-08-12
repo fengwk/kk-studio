@@ -45,6 +45,7 @@ function readyUpload(id: string): StorageUploadDTO {
     id,
     state: 'READY',
     blobId: 'blob-1',
+    presignedPut: null,
     expiresAt: '2026-08-12T00:00:00Z',
   }
 }

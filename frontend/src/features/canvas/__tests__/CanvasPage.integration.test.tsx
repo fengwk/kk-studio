@@ -325,6 +325,7 @@ function installBackend(options: BackendOptions = {}) {
         id: STORAGE_UPLOAD_ID,
         state: 'READY',
         blobId: '00000000-0000-4000-8000-0000000000aa',
+        presignedPut: null,
         expiresAt: '2026-08-10T00:15:00Z',
       })
     }

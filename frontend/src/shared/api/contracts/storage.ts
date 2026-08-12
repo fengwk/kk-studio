@@ -64,8 +64,8 @@ export type StorageUploadDTO =
   | {
       id: string
       state: 'READY'
-      blobId: string | null
-      presignedPut?: never
+      blobId: string
+      presignedPut: null
       expiresAt: BackendDateTime
     }
 
