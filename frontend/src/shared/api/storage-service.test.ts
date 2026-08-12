@@ -96,7 +96,12 @@ describe('storage-service', () => {
   it('resolves original and preview blob URLs via GET on the blob path', async () => {
     const { client, get } = fakeClient()
     const service = createStorageService(client)
-    get.mockResolvedValue({ url: 'https://s3.test/orig', expiresAt: '2026-08-12T00:00:00Z' })
+    get.mockResolvedValue({
+      url: 'https://s3.test/orig',
+      expiresAt: '2026-08-12T00:00:00Z',
+      mediaType: 'image/png',
+      sizeBytes: 64,
+    })
 
     await service.getBlobOriginalUrl('blob-1')
     expect(get).toHaveBeenCalledWith('/storage/blobs/blob-1/presigned-original')
@@ -153,5 +158,18 @@ describe('storage-service', () => {
     const abort = new DOMException('aborted', 'AbortError')
     vi.mocked(fetch).mockRejectedValueOnce(abort)
     await expect(service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt'))).rejects.toBe(abort)
+  })
+
+  it('maps non-Error fetch rejections to the generic direct-upload message', async () => {
+    const { client } = fakeClient()
+    const service = createStorageService(client)
+    vi.mocked(fetch).mockRejectedValueOnce('network down')
+
+    await expect(
+      service.uploadFile(pendingUpload('up-1').presignedPut, new File([], 'a.txt')),
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      message: 'Direct upload failed',
+    })
   })
 })

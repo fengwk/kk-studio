@@ -6,6 +6,10 @@ export interface ResourceBlobUrls {
   original: string | null
   /** presigned-preview：image/video 内联预览。 */
   preview: string | null
+  /** storage_blob 的权威媒体类型；不从文件名或 URL 猜测。 */
+  mediaType: string | null
+  /** storage_blob 的权威原件字节数。 */
+  sizeBytes: number | null
 }
 
 /**

@@ -28,4 +28,10 @@ public class StoragePresignedUrlDTO {
 
   /** 签名过期时刻（UTC，ISO-8601 字符串）。 */
   private String expiresAt;
+
+  /** 原件 URL 对应 Blob 的权威 media type；上传签名与 preview URL 可为 null。 */
+  private String mediaType;
+
+  /** 原件 URL 对应 Blob 的权威字节数；上传签名与 preview URL 可为 null。 */
+  private Long sizeBytes;
 }

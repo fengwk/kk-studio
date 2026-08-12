@@ -66,7 +66,7 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
 
     StorageUploadService.ReadyUpload consumed =
-        storageUploadService.lockReady(UUID.fromString(ready.getId()));
+        tx.execute(status -> storageUploadService.lockReady(UUID.fromString(ready.getId())));
 
     assertEquals(UUID.fromString(ready.getBlobId()), consumed.blobId());
     assertEquals(
@@ -103,7 +103,9 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageVerificationException error =
         assertThrows(
             StorageVerificationException.class,
-            () -> storageUploadService.lockReady(UUID.fromString(pending.getId())));
+            () ->
+                tx.execute(
+                    status -> storageUploadService.lockReady(UUID.fromString(pending.getId()))));
     assertTrue(error.getMessage().contains("PENDING"), "actual: " + error.getMessage());
     assertEquals(
         1,
@@ -127,7 +129,9 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
     StorageVerificationException error =
         assertThrows(
             StorageVerificationException.class,
-            () -> storageUploadService.lockReady(UUID.fromString(ready.getId())));
+            () ->
+                tx.execute(
+                    status -> storageUploadService.lockReady(UUID.fromString(ready.getId()))));
     assertTrue(error.getMessage().contains("expired"), "actual: " + error.getMessage());
     assertEquals(
         1,
@@ -141,7 +145,7 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
   void lockReadyUnknownUploadThrowsNotFound() {
     assertThrows(
         StorageResourceNotFoundException.class,
-        () -> storageUploadService.lockReady(UUID.randomUUID()));
+        () -> tx.execute(status -> storageUploadService.lockReady(UUID.randomUUID())));
   }
 
   @Test

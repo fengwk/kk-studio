@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
+import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
 
 function message(overrides: Partial<ToolDialogueMessage> = {}): ToolDialogueMessage {
   return {
@@ -70,6 +71,25 @@ describe('ToolMessageBlock', () => {
     expect(screen.getByText('无文本输出')).toBeInTheDocument()
   })
 
+  it('defaults missing call, transient, and result statuses to done', () => {
+    const { rerender } = render(
+      <ToolMessageBlock
+        message={message({ phase: 'call', status: undefined, partial: 'streaming text' })}
+      />,
+    )
+    expect(screen.getAllByText('done')).toHaveLength(2)
+    expect(screen.getByText('streaming text')).toBeInTheDocument()
+
+    rerender(<ToolMessageBlock message={message({ phase: 'result', status: undefined })} />)
+    expect(screen.getByText('done')).toBeInTheDocument()
+    expect(screen.getByText('无文本输出')).toBeInTheDocument()
+  })
+
+  it('shows the failed placeholder for an empty error result', () => {
+    render(<ToolMessageBlock message={message({ status: 'error' })} />)
+    expect(screen.getByText('工具执行失败。')).toBeInTheDocument()
+  })
+
   it('renders image, linked file, and attachment fallbacks', () => {
     render(
       <ToolMessageBlock
@@ -104,6 +124,38 @@ describe('ToolMessageBlock', () => {
     expect(screen.getAllByRole('link', { name: '打开原始内容' })).toHaveLength(2)
   })
 
+  it('renders previewable data audio and video attachments as media controls', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          attachments: [
+            {
+              type: 'audio',
+              name: 'clip.mp3',
+              mime: 'audio/mpeg',
+              data: 'data:audio/mpeg;base64,QUFBQQ==',
+            },
+            {
+              type: 'video',
+              name: 'clip.mp4',
+              mime: 'video/mp4',
+              data: 'data:video/mp4;base64,QUFBQQ==',
+            },
+          ],
+        })}
+      />,
+    )
+
+    expect(container.querySelector('audio')).toHaveAttribute(
+      'src',
+      'data:audio/mpeg;base64,QUFBQQ==',
+    )
+    expect(container.querySelector('video')).toHaveAttribute(
+      'src',
+      'data:video/mp4;base64,QUFBQQ==',
+    )
+  })
+
   it('renders a non-previewable resource preview as TEXT (never as an img src)', () => {
     render(
       <ToolMessageBlock
@@ -126,6 +178,69 @@ describe('ToolMessageBlock', () => {
     // preview 必须以纯文本形式渲染，绝不能作为 src=<preview text> 的图片。
     expect(screen.getByText('{"version":1,"tools":["web-search"]}')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
+  })
+
+  it('resolves a durable blob tool attachment and keeps its preview as text', async () => {
+    const resolveBlobUrls = vi.fn(async () => ({
+      original: 'https://s3.test/result',
+      preview: null,
+      mediaType: 'text/plain',
+      sizeBytes: 12,
+    }))
+    render(
+      <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
+        <ToolMessageBlock
+          message={message({
+            attachments: [
+              {
+                type: 'file',
+                name: 'result.txt',
+                mime: '',
+                data: '',
+                blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+                preview: 'durable excerpt',
+              },
+            ],
+          })}
+        />
+      </ResourceBlobUrlContext.Provider>,
+    )
+
+    expect(resolveBlobUrls).toHaveBeenCalledWith('0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01')
+    expect(await screen.findByRole('link', { name: /下载 result\.txt/ })).toHaveAttribute(
+      'href',
+      'https://s3.test/result',
+    )
+    expect(screen.getByText('durable excerpt')).toBeInTheDocument()
+  })
+
+  it('renders a durable blob attachment without inventing preview text', async () => {
+    const resolveBlobUrls = vi.fn(async () => ({
+      original: 'https://s3.test/result',
+      preview: null,
+      mediaType: 'text/plain',
+      sizeBytes: 12,
+    }))
+    render(
+      <ResourceBlobUrlContext.Provider value={resolveBlobUrls}>
+        <ToolMessageBlock
+          message={message({
+            attachments: [
+              {
+                type: 'file',
+                name: 'result.txt',
+                mime: '',
+                data: '',
+                blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+              },
+            ],
+          })}
+        />
+      </ResourceBlobUrlContext.Provider>,
+    )
+
+    expect(await screen.findByRole('link', { name: /下载 result\.txt/ })).toBeInTheDocument()
+    expect(screen.queryByText('durable excerpt')).not.toBeInTheDocument()
   })
 
   it('disables approval buttons while an approval request is in flight', () => {
@@ -387,5 +502,23 @@ describe('ToolMessageBlock', () => {
     )
     expect(screen.getByText('custom renderer: default output')).toBeInTheDocument()
     expect(screen.queryByText('default output')).not.toBeInTheDocument()
+  })
+
+  it('delegates a call body to a compile-time renderer and suppresses the default transient block', () => {
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          arguments: '{"path":"demo"}',
+          partial: 'default partial',
+        })}
+        renderer={({ message: rendered }) => (
+          <div>custom call: {rendered.toolName}</div>
+        )}
+      />,
+    )
+    expect(screen.getByText('custom call: read')).toBeInTheDocument()
+    expect(screen.queryByText('{"path":"demo"}')).not.toBeInTheDocument()
+    expect(screen.queryByText('default partial')).not.toBeInTheDocument()
   })
 })

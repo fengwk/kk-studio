@@ -139,6 +139,15 @@ describe('command batch replay identity (immutable user intent)', () => {
 })
 
 describe('ordered USER_MESSAGE contents serialization', () => {
+  it('rejects an empty ordered contents list', () => {
+    expect(() =>
+      buildFirstSendMessagePlan({
+        thread: thread(),
+        parts: [],
+      }),
+    ).toThrow('USER_MESSAGE contents must not be empty')
+  })
+
   it('serializes text -> attachment -> text in order with distinct uploadIds', () => {
     const plan = buildMessageBatchPlan({
       thread: thread(),

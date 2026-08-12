@@ -90,10 +90,25 @@ export function ChatPanel({
   // 面板保持 API 无关：RESOURCE blob URL 由本适配层在渲染期解析。
   const resolveBlobUrls = useCallback(async (blobId: string): Promise<ResourceBlobUrls | null> => {
     const [original, preview] = await Promise.all([
-      storageService.getBlobOriginalUrl(blobId).then(({ url }) => url).catch(() => null),
-      storageService.getBlobPreviewUrl(blobId).then(({ url }) => url).catch(() => null),
+      storageService.getBlobOriginalUrl(blobId).catch(() => null),
+      storageService.getBlobPreviewUrl(blobId).catch(() => null),
     ])
-    return { original, preview }
+    if (
+      original == null
+      || !original.url.trim()
+      || !original.mediaType?.trim()
+      || typeof original.sizeBytes !== 'number'
+      || !Number.isSafeInteger(original.sizeBytes)
+      || original.sizeBytes < 0
+    ) {
+      return null
+    }
+    return {
+      original: original.url,
+      preview: preview?.url?.trim() || null,
+      mediaType: original.mediaType,
+      sizeBytes: original.sizeBytes,
+    }
   }, [])
   const threadPanelTranscript: ThreadPanelTranscriptInput = {
     messages: transcript.timeline.messages,

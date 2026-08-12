@@ -119,6 +119,61 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
+  it('projects durable blob resources from lowercase runtime message contents', () => {
+    const blobId = '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01'
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          'user-resource',
+          'MESSAGE',
+          messagePayload('USER', [{ type: 'resource', blobId, name: 'input.png', preview: null }]),
+        ),
+        entry(
+          'assistant-call',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-resource',
+              toolName: 'read',
+              rendererKey: 'read',
+              argumentsJson: '{}',
+            },
+          ]),
+        ),
+        entry(
+          'tool-resource',
+          'MESSAGE',
+          messagePayload('TOOL', [
+            {
+              type: 'tool_result',
+              toolCallId: 'call-resource',
+              toolName: 'read',
+              rendererKey: 'read',
+              error: false,
+              detailsJson: '{}',
+              contents: [
+                { type: 'resource', blobId, name: 'result.txt', preview: 'excerpt' },
+              ],
+            },
+          ]),
+        ),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'user', attachments: [{ blobId, name: 'input.png' }] },
+      { role: 'tool', phase: 'call' },
+      {
+        role: 'tool',
+        phase: 'result',
+        attachments: [{ blobId, name: 'result.txt', preview: 'excerpt' }],
+      },
+    ])
+  })
+
   it('suppresses the entire compaction turn and its realtime model overlay', () => {
     const timeline = buildThreadTimeline(
       [

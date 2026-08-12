@@ -131,7 +131,9 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.method").value("GET"))
         .andExpect(jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/original")))
-        .andExpect(jsonPath("$.data.headers").isEmpty());
+        .andExpect(jsonPath("$.data.headers").isEmpty())
+        .andExpect(jsonPath("$.data.mediaType").value("text/plain"))
+        .andExpect(jsonPath("$.data.sizeBytes").value(content.length));
     mockMvc
         .perform(get("/api/storage/blobs/" + blobId + "/presigned-preview"))
         .andExpect(status().isOk())
