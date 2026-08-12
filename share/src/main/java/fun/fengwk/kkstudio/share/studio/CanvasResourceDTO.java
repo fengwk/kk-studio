@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.studio;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 /**
@@ -19,22 +20,33 @@ public class CanvasResourceDTO {
   private int resourceIndex;
 
   /** TEXT 资源内容在 textContent 中，无对象存储 blob；其余资源引用共享存储的持久 blob。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String blobId;
 
   private String name;
 
+  /** required-nullable：媒体资源无文本内容，必须显式输出 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String textContent;
 
   private String kind;
 
+  /** required-nullable：TEXT 资源无媒体事实，必须显式输出 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String mediaType;
 
+  /** required-nullable：媒体校验缺失时显式输出 null；非 null 时 wire 为规范非负十进制字符串。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Long sizeBytes;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Integer width;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Integer height;
 
+  /** required-nullable：媒体校验缺失时显式输出 null；非 null 时 wire 为规范非负十进制字符串。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Long durationMs;
 
   private String createdAt;

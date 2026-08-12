@@ -8,14 +8,14 @@ import java.util.List;
 
 /**
  * 幂等 graph patch：command 响应、changes 回放与 SSE 恢复统一使用它。 baseVersion -> version 表示一次连续前进；version <=
- * 客户端当前版本时忽略，baseVersion != 客户端当前版本时视为 gap，必须通过 changes 恢复。
+ * 客户端当前版本时忽略，baseVersion != 客户端当前版本时视为 gap，必须通过 changes 恢复。两者 wire 均为规范非负十进制字符串。
  */
 @Data
 public class CanvasPatchDTO {
 
-  private long baseVersion;
+  private String baseVersion;
 
-  private long version;
+  private String version;
 
   private List<CanvasGroupPatchDTO> groups = new ArrayList<>();
 

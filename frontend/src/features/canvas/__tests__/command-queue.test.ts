@@ -10,12 +10,17 @@ import type {
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b'
 
-function snapshot(version: number): CanvasSnapshotDTO {
+/** 测试内版本前进：bigint-safe，支持超过 Number.MAX_SAFE_INTEGER 的用例。 */
+function nextVersion(version: string): string {
+  return String(BigInt(version) + 1n)
+}
+
+function snapshot(version: number | string): CanvasSnapshotDTO {
   return {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version,
+      version: String(version),
       threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
@@ -26,10 +31,10 @@ function snapshot(version: number): CanvasSnapshotDTO {
   }
 }
 
-function advancePatch(from: number, to: number): CanvasPatchDTO {
+function advancePatch(from: number | string, to: number | string): CanvasPatchDTO {
   return {
-    baseVersion: from,
-    version: to,
+    baseVersion: String(from),
+    version: String(to),
     groups: [],
     nodes: [],
     links: [],
@@ -42,10 +47,10 @@ function changesOf(patches: CanvasPatchDTO[] = [], snapshotValue: CanvasSnapshot
 
 describe('CanvasCommandQueue', () => {
   it('serializes batches and applies the returned patch to the latest version', async () => {
-    const calls: number[] = []
+    const calls: string[] = []
     const apply = vi.fn(async (_canvasId, request) => {
       calls.push(request.expectedVersion)
-      return advancePatch(request.expectedVersion, request.expectedVersion + 1)
+      return advancePatch(request.expectedVersion, nextVersion(request.expectedVersion))
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       initialSnapshot: snapshot(7),
@@ -60,9 +65,9 @@ describe('CanvasCommandQueue', () => {
     const first = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
     const second = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
 
-    await expect(first).resolves.toMatchObject({ document: { version: 8 } })
-    await expect(second).resolves.toMatchObject({ document: { version: 9 } })
-    expect(calls).toEqual([7, 8])
+    await expect(first).resolves.toMatchObject({ document: { version: '8' } })
+    await expect(second).resolves.toMatchObject({ document: { version: '9' } })
+    expect(calls).toEqual(['7', '8'])
     expect(apply.mock.calls[0]?.[1].commandId).toBe('aaaaaaaa-0000-4000-8000-000000000001')
     expect(apply.mock.calls[1]?.[1].commandId).toBe('aaaaaaaa-0000-4000-8000-000000000002')
   })
@@ -72,7 +77,7 @@ describe('CanvasCommandQueue', () => {
       .mockRejectedValueOnce(new ApiError('stale', 409, 'CONFLICT'))
       .mockResolvedValueOnce(advancePatch(12, 13))
     const refetch = vi.fn().mockResolvedValue(snapshot(12))
-    const versions: number[] = []
+    const versions: string[] = []
     const queue = new CanvasCommandQueue(CANVAS_ID, {
       initialSnapshot: snapshot(10),
       apply,
@@ -88,11 +93,11 @@ describe('CanvasCommandQueue', () => {
 
     expect(apply).toHaveBeenCalledTimes(1)
     expect(refetch).toHaveBeenCalledTimes(1)
-    expect(queue.currentSnapshot().document.version).toBe(12)
-    expect(versions).toEqual([12])
+    expect(queue.currentSnapshot().document.version).toBe('12')
+    expect(versions).toEqual(['12'])
 
     await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
-    expect(apply.mock.calls[1]?.[1].expectedVersion).toBe(12)
+    expect(apply.mock.calls[1]?.[1].expectedVersion).toBe('12')
   })
 
   it('does not let a failed batch block later queued batches', async () => {
@@ -109,7 +114,7 @@ describe('CanvasCommandQueue', () => {
 
     await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('bad request')
     await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
-      document: { version: 2 },
+      document: { version: '2' },
     })
   })
 
@@ -128,7 +133,7 @@ describe('CanvasCommandQueue', () => {
     await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { signal })
 
     expect(apply).toHaveBeenCalledWith(CANVAS_ID, {
-      expectedVersion: 1,
+      expectedVersion: '1',
       commandId: 'aaaaaaaa-0000-4000-8000-000000000005',
       commands: [{ type: 'DELETE_NODE', nodeId: NODE_ID }],
     }, { signal })
@@ -166,20 +171,20 @@ describe('CanvasCommandQueue', () => {
     }
 
     expect(queue.replaceSnapshot(stale)).toBe(queue.currentSnapshot())
-    expect(queue.currentSnapshot().document.version).toBe(8)
+    expect(queue.currentSnapshot().document.version).toBe('8')
     expect(queue.replaceSnapshot(equal)).toBe(equal)
     expect(queue.currentSnapshot().document.title).toBe('runtime update')
   })
 
   it('recovers a gap through changes when the command response is not continuous', async () => {
     const apply = vi.fn(async (_canvasId, request) => advancePatch(
-      request.expectedVersion + 1,
-      request.expectedVersion + 3,
+      nextVersion(request.expectedVersion),
+      nextVersion(nextVersion(request.expectedVersion)),
     ))
     const getChanges = vi.fn(async (_canvasId, afterVersion) => {
       // 服务端 head 已包含本命令的效果：changes 从当前版本补全完整链
       //（他人提交 1->2 + 本命令 2->4）。
-      expect(afterVersion).toBe(1)
+      expect(afterVersion).toBe('1')
       return changesOf([advancePatch(1, 2), advancePatch(2, 4)])
     })
     const queue = new CanvasCommandQueue(CANVAS_ID, {
@@ -193,9 +198,32 @@ describe('CanvasCommandQueue', () => {
     // 响应 patch base=2 -> version=4：base 与当前版本 1 不连续（gap），
     // 通过 changes 补全 1->2 与 2->4。
     await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
-      document: { version: 4 },
+      document: { version: '4' },
     })
-    expect(getChanges).toHaveBeenCalledWith(CANVAS_ID, 1, { signal: undefined })
+    expect(getChanges).toHaveBeenCalledWith(CANVAS_ID, '1', { signal: undefined })
+  })
+
+  it('handles versions beyond Number.MAX_SAFE_INTEGER without JS number loss', async () => {
+    const huge = '9007199254740992'
+    const hugeNext = '9007199254740993'
+    const apply = vi.fn(async (_canvasId, request) => (
+      advancePatch(request.expectedVersion, nextVersion(request.expectedVersion))
+    ))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(huge),
+      apply,
+      refetch: vi.fn(),
+      getChanges: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000007',
+    })
+
+    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+      document: { version: hugeNext },
+    })
+    expect(apply.mock.calls[0]?.[1].expectedVersion).toBe(huge)
+    // 过期查询快照（大版本语境）不能回退本地状态。
+    expect(queue.replaceSnapshot(snapshot('9007199254740991'))).toBe(queue.currentSnapshot())
+    expect(queue.currentSnapshot().document.version).toBe(hugeNext)
   })
 
   it('syncFrom falls back to the full snapshot when changes cannot close the gap', async () => {
@@ -208,9 +236,9 @@ describe('CanvasCommandQueue', () => {
       getChanges,
     })
 
-    const synced = await queue.syncFrom(1)
+    const synced = await queue.syncFrom('1')
 
-    expect(synced.document.version).toBe(4)
+    expect(synced.document.version).toBe('4')
     expect(refetch).toHaveBeenCalledWith(CANVAS_ID, { signal: undefined })
   })
 
@@ -225,11 +253,11 @@ describe('CanvasCommandQueue', () => {
         .mockResolvedValueOnce(changesOf([], snapshotValue)),
     })
 
-    await queue.syncFrom(7)
-    expect(queue.currentSnapshot().document.version).toBe(9)
+    await queue.syncFrom('7')
+    expect(queue.currentSnapshot().document.version).toBe('9')
 
-    await queue.syncFrom(9)
+    await queue.syncFrom('9')
     expect(queue.currentSnapshot().document.title).toBe('snapshot title')
-    expect(queue.currentSnapshot().document.version).toBe(9)
+    expect(queue.currentSnapshot().document.version).toBe('9')
   })
 })

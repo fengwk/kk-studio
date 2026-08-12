@@ -1,3 +1,4 @@
+import type { CanvasVersion } from '@/shared/api/contracts/base'
 import type { HarnessUserMessageContentDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
@@ -13,14 +14,16 @@ export type CanvasFunctionRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANC
 
 /**
  * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是
- * command expected 游标与 patch base/version 的公共坐标系；
+ * command expected 游标与 patch base/version 的公共坐标系；wire 上是
+ * canonical 非负十进制字符串（Java long，数据库仍为 bigint），
+ * 客户端绝不转换为 JS number；
  * threadId 绑定本画布的 Harness Thread（harness 迁移后同样使用 canonical UUID），
  * null 表示尚未创建（走 blank 首次发送流程）。
  */
 export interface CanvasDocumentDTO {
   id: UUIDString
   title: string
-  version: number
+  version: CanvasVersion
   threadId: UUIDString | null
   createdAt: string
   updatedAt: string
@@ -50,9 +53,11 @@ export interface CanvasResourceDTO {
   textContent: string | null
   kind: CanvasResourceKind
   mediaType: string | null
+  /** wire 是 Java long 的十进制字符串或 null，由 studio-service adapter 归一化为 number|null。 */
   sizeBytes: number | null
   width: number | null
   height: number | null
+  /** wire 是 Java long 的十进制字符串或 null，由 studio-service adapter 归一化为 number|null。 */
   durationMs: number | null
   createdAt: string
 }
@@ -123,10 +128,11 @@ export type CanvasLinkPatchDTO =
  * 幂等 graph patch：command 响应、changes 回放与 SSE 恢复统一使用它。
  * baseVersion -> version 表示一次连续前进；version <= 客户端当前版本时忽略，
  * baseVersion != 客户端当前版本时视为 gap，必须通过 changes 恢复。
+ * 两个版本都是 canonical 非负十进制字符串（Java long wire）。
  */
 export interface CanvasPatchDTO {
-  baseVersion: number
-  version: number
+  baseVersion: CanvasVersion
+  version: CanvasVersion
   groups: CanvasGroupPatchDTO[]
   nodes: CanvasNodePatchDTO[]
   links: CanvasLinkPatchDTO[]
@@ -145,9 +151,10 @@ export interface CanvasChangesDTO {
 /**
  * SSE 'version' 事件 payload：version 前进提示，客户端随后按自身
  * 最后已知版本拉取 changes。'resync' 事件无 payload，表示需要全量快照。
+ * version 是 canonical 非负十进制字符串；数字/前导零/负数/畸形 payload 一律忽略。
  */
 export interface CanvasVersionEventDTO {
-  version: number
+  version: CanvasVersion
 }
 
 export type PromptSegmentDTO =
@@ -202,13 +209,13 @@ export interface CreateCanvasRequestDTO {
 }
 
 /**
- * 命令批请求。expectedVersion 是精确的 graph 版本 CAS 游标；
- * commandId 是整批的幂等键（客户端 UUID）。创建类命令额外携带
- * 客户端生成的实体 UUID（nodeId/groupId），无时间戳回退；
+ * 命令批请求。expectedVersion 是精确的 graph 版本 CAS 游标（canonical
+ * 非负十进制字符串，Java long wire）；commandId 是整批的幂等键（客户端 UUID）。
+ * 创建类命令额外携带客户端生成的实体 UUID（nodeId/groupId），无时间戳回退；
  * 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。
  */
 export interface ApplyCanvasCommandsRequestDTO {
-  expectedVersion: number
+  expectedVersion: CanvasVersion
   commandId: UUIDString
   commands: CanvasCommandDTO[]
 }

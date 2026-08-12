@@ -82,6 +82,14 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
     descriptionKey: 'ai.runtime.command.new',
     keywords: ['blank', 'fresh', 'create', 'session'],
   },
+  {
+    id: 'upload',
+    label: 'upload',
+    description: '',
+    labelKey: 'ai.runtime.command.uploadLabel',
+    descriptionKey: 'ai.runtime.command.upload',
+    keywords: ['attach', 'file', 'image', 'video', 'audio', 'paste'],
+  },
 ]
 
 /**
@@ -89,7 +97,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
  * `/session`（全局 Session 重绑定）已不再存在：树只属于当前 Session，因此该
  * 命令在所有场景下都保持可见但禁用状态。
  */
-const BLANK_SCENE_ENABLED = new Set(['thread', 'agent', 'environment', 'yolo'])
+const BLANK_SCENE_ENABLED = new Set(['upload', 'thread', 'agent', 'environment', 'yolo'])
 const NEVER_ENABLED = new Set(['session'])
 
 /** 投影稳定的 command 列表并附带场景可用性（disabled 仍保留在列表中）。 */

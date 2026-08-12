@@ -112,7 +112,7 @@ function canvasSnapshot(threadId: UUIDString | null): CanvasSnapshotDTO {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: 3,
+      version: '3',
       threadId,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',

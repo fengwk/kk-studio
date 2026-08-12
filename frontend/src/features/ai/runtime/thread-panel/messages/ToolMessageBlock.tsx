@@ -6,6 +6,7 @@ import {
   toToolAttachmentSrc,
 } from '@/features/ai/runtime/thread-panel/tool-attachments'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
+import { AttachmentMediaPreview } from '@/features/ai/runtime/thread-panel/messages/AttachmentMediaPreview'
 import { ResourceAttachmentChip } from '@/features/ai/runtime/thread-panel/messages/ResourceAttachmentChip'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import type { ComponentType } from 'react'
@@ -229,7 +230,7 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
   const preview = attachment.preview?.trim()
   if (attachment.blobId) {
     return (
-      <div className="thread-tool-attachment is-blob">
+      <div className="thread-tool-resource is-blob">
         <ResourceAttachmentChip attachment={attachment} />
         {preview ? <ToolOutputViewport text={preview} className="thread-tool-attachment-preview" /> : null}
       </div>
@@ -239,20 +240,35 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
   const href = getToolAttachmentHref(attachment)
   const label = getToolAttachmentLabel(attachment)
   const previewable = src != null && isPreviewableAttachment(attachment)
+  if (previewable && src && attachment.type === 'image') {
+    return (
+      <div className="thread-tool-resource">
+        <AttachmentMediaPreview
+          kind="image"
+          label={label}
+          previewUrl={src}
+          originalUrl={href ?? src}
+        />
+      </div>
+    )
+  }
+  if (previewable && src && attachment.type === 'video') {
+    return (
+      <div className="thread-tool-resource">
+        <AttachmentMediaPreview
+          kind="video"
+          label={label}
+          previewUrl={src}
+          originalUrl={href ?? src}
+          previewMode="video"
+        />
+      </div>
+    )
+  }
   return (
-    <figure className="thread-tool-attachment">
-      <figcaption>
-        <span>{attachment.type}</span>
-        <span>{label}</span>
-      </figcaption>
-      {previewable && attachment.type === 'image' ? (
-        <img src={src} alt={label} loading="lazy" />
-      ) : null}
-      {previewable && attachment.type === 'audio' ? (
+    <div className="thread-tool-resource">
+      {previewable && src && attachment.type === 'audio' ? (
         <audio controls src={src} aria-label={label} />
-      ) : null}
-      {previewable && attachment.type === 'video' ? (
-        <video controls src={src} aria-label={label} />
       ) : null}
       {!previewable ? (
         <div className="thread-tool-attachment-uri">
@@ -265,13 +281,13 @@ function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
         </div>
       ) : null}
       {href ? (
-        <a href={href} target="_blank" rel="noopener noreferrer">
-          {translate('ai.runtime.message.openRaw')}
+        <a className="resource-attachment-download" href={href} target="_blank" rel="noopener noreferrer">
+          [{label}]
         </a>
       ) : (
-        <div>{formatToolAttachmentFallback(attachment)}</div>
+        <span className="resource-attachment-fallback">{formatToolAttachmentFallback(attachment)}</span>
       )}
-    </figure>
+    </div>
   )
 }
 

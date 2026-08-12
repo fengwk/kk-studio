@@ -59,7 +59,7 @@ describe('useCanvasVersionEvents', () => {
     vi.clearAllMocks()
     FakeEventSource.instances = []
     createCanvasRealtimeStream.mockImplementation(
-      (canvasId: string, afterVersion = 0) =>
+      (canvasId: string, afterVersion = '0') =>
         new FakeEventSource(`/api/canvases/${canvasId}/events/stream?afterVersion=${afterVersion}`),
     )
     vi.stubGlobal('EventSource', FakeEventSource)
@@ -69,17 +69,17 @@ describe('useCanvasVersionEvents', () => {
     renderHook(() => useCanvasVersionEvents({
       canvasId: CANVAS_ID,
       enabled: true,
-      version: 7,
+      version: '7',
       onVersion: vi.fn(),
       onResync: vi.fn(),
     }))
 
-    expect(createCanvasRealtimeStream).toHaveBeenCalledWith(CANVAS_ID, 7)
+    expect(createCanvasRealtimeStream).toHaveBeenCalledWith(CANVAS_ID, '7')
     expect(FakeEventSource.instances).toHaveLength(1)
     expect(FakeEventSource.instances[0]?.url).toContain('afterVersion=7')
   })
 
-  it('triggers changes sync only for versions newer than the known one', () => {
+  it('triggers changes sync only for canonical string versions newer than the known one', () => {
     const onVersion = vi.fn()
     const { rerender } = renderHook(({ version }) => useCanvasVersionEvents({
       canvasId: CANVAS_ID,
@@ -87,23 +87,47 @@ describe('useCanvasVersionEvents', () => {
       version,
       onVersion,
       onResync: vi.fn(),
-    }), { initialProps: { version: 7 } })
+    }), { initialProps: { version: '7' } })
     const source = FakeEventSource.instances[0] as FakeEventSource
 
+    // 数字/前导零/负数/畸形 payload 一律忽略；字符串旧版本也忽略。
     act(() => source.emit('version', { version: 6 }))
+    act(() => source.emit('version', { version: '6' }))
+    act(() => source.emit('version', { version: '01' }))
+    act(() => source.emit('version', { version: '-1' }))
+    act(() => source.emit('version', 'not-json'))
     expect(onVersion).toHaveBeenCalledTimes(1) // 只有 connect 时的初始同步
 
-    act(() => source.emit('version', { version: 8 }))
+    act(() => source.emit('version', { version: '8' }))
     expect(onVersion).toHaveBeenCalledTimes(2)
 
     // 本地版本前进后，迟到的旧事件不再触发同步。
-    rerender({ version: 8 })
-    act(() => source.emit('version', { version: 8 }))
+    rerender({ version: '8' })
+    act(() => source.emit('version', { version: '8' }))
+    expect(onVersion).toHaveBeenCalledTimes(2)
+  })
+
+  it('compares versions beyond Number.MAX_SAFE_INTEGER without JS number loss', () => {
+    const onVersion = vi.fn()
+    const { rerender } = renderHook(({ version }) => useCanvasVersionEvents({
+      canvasId: CANVAS_ID,
+      enabled: true,
+      version,
+      onVersion,
+      onResync: vi.fn(),
+    }), { initialProps: { version: '9007199254740992' } })
+    const source = FakeEventSource.instances[0] as FakeEventSource
+
+    // MAX_SAFE_INTEGER+1 在 JS number 中无法区分，但十进制字符串必须精确比较。
+    act(() => source.emit('version', { version: '9007199254740993' }))
     expect(onVersion).toHaveBeenCalledTimes(2)
 
-    // 畸形 payload 被忽略。
-    act(() => source.emit('version', { version: '9' }))
+    act(() => source.emit('version', { version: '9007199254740992' }))
     expect(onVersion).toHaveBeenCalledTimes(2)
+
+    rerender({ version: '9007199254740993' })
+    act(() => source.emit('version', { version: '9007199254740994' }))
+    expect(onVersion).toHaveBeenCalledTimes(3)
   })
 
   it('triggers full resync on the resync event', () => {
@@ -111,7 +135,7 @@ describe('useCanvasVersionEvents', () => {
     renderHook(() => useCanvasVersionEvents({
       canvasId: CANVAS_ID,
       enabled: true,
-      version: 0,
+      version: '0',
       onVersion: vi.fn(),
       onResync,
     }))
@@ -125,7 +149,7 @@ describe('useCanvasVersionEvents', () => {
     renderHook(() => useCanvasVersionEvents({
       canvasId: CANVAS_ID,
       enabled: true,
-      version: 3,
+      version: '3',
       onVersion,
       onResync: vi.fn(),
     }))
@@ -144,7 +168,7 @@ describe('useCanvasVersionEvents', () => {
     const { unmount, rerender } = renderHook(({ enabled }) => useCanvasVersionEvents({
       canvasId: CANVAS_ID,
       enabled,
-      version: 0,
+      version: '0',
       onVersion: vi.fn(),
       onResync: vi.fn(),
     }), { initialProps: { enabled: false } })

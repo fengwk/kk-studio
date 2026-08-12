@@ -6,12 +6,14 @@ import type {
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
+import type { CanvasVersion } from '@/shared/api/contracts/base'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 export interface CanvasDocument {
   id: UUIDString
   title: string
-  version: number
+  /** canonical 非负十进制字符串（Java long wire），显示与比较都保持字符串。 */
+  version: CanvasVersion
   /** 绑定到本画布的 Harness Thread（canonical UUID）；null 表示尚未创建。 */
   threadId: UUIDString | null
   createdAt: string

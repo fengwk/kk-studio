@@ -55,7 +55,7 @@ export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
     }
     if (isPillElement(node)) {
       const uploadId = node.getAttribute('data-upload-id') ?? ''
-      const filename = node.getAttribute('data-filename') ?? node.textContent?.replace(/^@/, '') ?? ''
+      const filename = node.getAttribute('data-filename') ?? ''
       if (uploadId) {
         parts.push({
           type: 'attachment',
@@ -81,7 +81,7 @@ function createPillElement(root: HTMLElement, part: ComposerPart & { type: 'atta
   pill.dataset.partId = part.partId
   pill.dataset.uploadId = part.uploadId
   pill.dataset.filename = part.filename
-  pill.textContent = `@${part.filename}`
+  pill.textContent = `[${part.filename}](upload)`
   return pill
 }
 

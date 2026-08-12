@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.storage;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 import lombok.Data;
 
@@ -29,9 +30,14 @@ public class StoragePresignedUrlDTO {
   /** 签名过期时刻（UTC，ISO-8601 字符串）。 */
   private String expiresAt;
 
-  /** 原件 URL 对应 Blob 的权威 media type；上传签名与 preview URL 可为 null。 */
+  /** 原件 URL 对应 Blob 的权威 media type；上传签名与 preview URL 可为 null，required-nullable 显式输出。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String mediaType;
 
-  /** 原件 URL 对应 Blob 的权威字节数；上传签名与 preview URL 可为 null。 */
+  /**
+   * 原件 URL 对应 Blob 的权威字节数；上传签名与 preview URL 可为 null，required-nullable 显式输出。非 null 时 wire
+   * 为规范非负十进制字符串。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Long sizeBytes;
 }

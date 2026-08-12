@@ -130,7 +130,8 @@ URI、bucket、object key、mediaType、size 或长期 URL。
 
 Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签名 URL；前端渲染也只通过
 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 临时解析地址。原件响应额外携带
-权威 `mediaType/sizeBytes`；preview 与 upload 签名允许这两个字段为 null。
+权威 `mediaType/sizeBytes`（sizeBytes 是 Java long，wire 为十进制字符串或 null，前端 adapter
+归一化为 number|null）；preview 与 upload 签名允许这两个字段为 null。
 
 ## 7. Canvas
 

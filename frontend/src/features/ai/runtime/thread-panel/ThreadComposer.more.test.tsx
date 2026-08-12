@@ -49,15 +49,19 @@ describe('ThreadComposer interactions', () => {
     const editor = screen.getByLabelText('给 AI 发送消息')
     await user.type(editor, '/')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    // 第一个启用项是 session；ArrowDown -> thread、agent、model...
+    // 稳定产品顺序保持不变：session -> thread -> agent。
     await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'agent' }))
   })
 
-  it('opens only from slash mode and closes with Escape', async () => {
+  it('opens from slash or plus and closes with Escape', async () => {
     const user = userEvent.setup()
     render(<ControlledComposer onSubmit={vi.fn()} onCommand={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
+    const add = screen.getByRole('button', { name: '打开命令表' })
+    await user.click(add)
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('给 AI 发送消息'), '/stop')
     const palette = await screen.findByLabelText('命令表')
     expect(palette).toBeInTheDocument()
@@ -102,7 +106,7 @@ describe('ThreadComposer interactions', () => {
     }
   })
 
-  it('does not render standalone actor-state, Stop, Retry, or add controls', () => {
+  it('renders only the shared plus command entry, without standalone actor-state, Stop, or Retry controls', () => {
     render(
       <ThreadComposer
         parts={[]}
@@ -113,7 +117,7 @@ describe('ThreadComposer interactions', () => {
         onCommand={vi.fn()}
       />,
     )
-    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '打开命令表' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
     expect(screen.queryByText('RUNNING')).not.toBeInTheDocument()
@@ -133,7 +137,7 @@ describe('ThreadComposer interactions', () => {
     )
     expect(screen.getByLabelText('给 AI 发送消息')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '添加附件' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '打开命令表' })).toBeDisabled()
   })
 })
 

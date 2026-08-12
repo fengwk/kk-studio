@@ -67,7 +67,8 @@ kk-studio:
 - complete 使用 checksum-mode HEAD 复核 SHA-256/大小，再物化
   `blobs/{blobId}/original`；渲染期只通过
   `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 获取短期 URL。原件响应同时返回
-  `storage_blob` 的权威 `mediaType/sizeBytes`；preview 与 upload 签名中的这两个字段为 null。
+  `storage_blob` 的权威 `mediaType/sizeBytes`（sizeBytes 是 Java long，wire 为十进制字符串或 null，
+  前端 adapter 归一化为 number|null）；preview 与 upload 签名中的这两个字段为 null。
 - `S3StorageService` 同时提供必须关闭的流式 read、HEAD 与 delete；既有 ComfyUI
   bounded byte[] 下载继续保留，并在 HEAD 与实际读取两阶段执行大小上限校验。
 

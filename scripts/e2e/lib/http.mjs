@@ -13,6 +13,14 @@ export function assert(cond, message) {
   if (!cond) throw new Error(message || 'assertion failed')
 }
 
+/** canonical 非负十进制字符串（Java long wire）：'0' 或非零开头，拒绝前导零/负数/空白/数字。 */
+export function assertDecimalVersion(value, label = 'version') {
+  assert(
+    typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value),
+    `${label} must be a canonical non-negative decimal string, got ${JSON.stringify(value)}`,
+  )
+}
+
 export async function httpJson(
   baseUrl,
   method,

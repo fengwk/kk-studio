@@ -36,14 +36,14 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
 /**
- * Canvas 空 Thread 的 slash 命令表：只有 agent/environment/yolo 可用
- * （compact 选择）；thread/session/tree/new/stop 保持可见但禁用。
+ * Canvas 空 Thread 的 slash 命令表：upload/agent/environment/yolo 可用；
+ * thread/session/tree/new/stop 保持可见但禁用。
  */
 const CANVAS_BLANK_COMMANDS: ThreadCommand[] = THREAD_COMMANDS.map((command) => ({
   ...command,
-  disabled: !['agent', 'environment', 'yolo'].includes(command.id),
+  disabled: !['upload', 'agent', 'environment', 'yolo'].includes(command.id),
   disabledReason: undefined,
-  disabledReasonKey: ['agent', 'environment', 'yolo'].includes(command.id)
+  disabledReasonKey: ['upload', 'agent', 'environment', 'yolo'].includes(command.id)
     ? undefined
     : 'ai.runtime.command.disabledReason',
 }))

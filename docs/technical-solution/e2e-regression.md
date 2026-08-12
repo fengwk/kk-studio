@@ -57,8 +57,8 @@ npm --prefix frontend run e2e:docs
 
 默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，默认测试模型是 `minimax/MiniMax-M2.7`。
 
-本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL 与 MinIO，只连接本机
-S3-compatible endpoint：
+本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、Redis 与 MinIO，只连接本机
+Redis/S3-compatible endpoint：
 
 ```bash
 docker compose -f deploy/test/compose.yaml up -d --wait
@@ -68,6 +68,7 @@ env \
   KK_STUDIO_DB_URL=jdbc:postgresql://127.0.0.1:15432/canvas_test \
   KK_STUDIO_DB_USER=canvas_test \
   KK_STUDIO_DB_PASSWORD=canvas_test_only \
+  KK_STUDIO_REDIS_URL=redis://127.0.0.1:16379 \
   KK_STUDIO_STORAGE_S3_ENABLED=true \
   KK_STUDIO_STORAGE_S3_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=http://127.0.0.1:19000 \
@@ -75,7 +76,6 @@ env \
   KK_STUDIO_STORAGE_S3_BUCKET=canvas-test \
   KK_STUDIO_STORAGE_S3_ACCESS_KEY=canvas-test \
   KK_STUDIO_STORAGE_S3_SECRET_KEY=canvas-test-only \
-  MANAGEMENT_HEALTH_REDIS_ENABLED=false \
   ./scripts/e2e.sh --with-canvas-function --ui
 
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
@@ -198,21 +198,22 @@ L1 的关键语义断言：
 - 未知 Thread snapshot 404；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
 - `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
-  long `version`（`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
+  十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
+  非负十进制字符串，`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
   同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
-  409；`changes?afterVersion=0` 恒为权威 snapshot，尾部版本返回连续 patches 或同样
-  回退 snapshot；深删除后画布 404。
+  409；`changes?afterVersion=0` 在缓存完整时返回连续 `0→1` patch，缓存缺失/gap 时回退
+  权威 snapshot，尾部版本返回空 delta；深删除后画布 404。
 - `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
   S3 配置；通用 S3 预签名端点不能签名 `blobs/` 命名空间 key；全局
   upload reserve（`sha256` 必填）→ 浏览器直传 PUT → complete 绑定 READY blob，
   `CREATE_RESOURCE_NODE` 在同一事务消费上传后 Resource DTO 携带 `blobId`/`kind`/
-  `mediaType`/`sizeBytes`；`download-url`/`preview-url` 只暴露
+  `mediaType`/`sizeBytes`（sizeBytes 是十进制字符串）；`download-url`/`preview-url` 只暴露
   method/url/headers/expiresAt（不暴露 bucket/key），download 字节与上传一致；
   TEXT 资源 URL 400、未知 resource/canvas 404；深删除画布后不可达。
 - `canvas.function_fake_runtime` 仅在 `--with-canvas-function` 下执行：显式注册
   `fake-image`，验证 Function node 创建（客户端 UUID nodeId）、start/poll、成功 Resource
-  原子替换、`320×260 @ (100,100)` transform 精确回读、`document.version` 按命令与 Run
-  状态前进、公开 run DTO 无 `stateJson`，以及 preview signed GET 的 WEBP 字节。
+  原子替换、`320×260 @ (100,100)` transform 精确回读、`document.version`（十进制字符串）
+  按命令与 Run 状态前进、公开 run DTO 无 `stateJson`，以及 preview signed GET 的 WEBP 字节。
 - `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
   reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
   原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
@@ -408,22 +409,26 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
 ```
 
 - 所有实体 id（canvas/node/group/resource/blob/upload/thread）都是 canonical UUID 字符串
-  （shape-only，不限定 version/variant 位）；graph 版本是 long `version`
-  （`canvas_document.version`），不存在 `graphRevision` 字段；
+  （shape-only，不限定 version/variant 位）；graph 版本 wire 是 canonical 非负十进制字符串
+  （数据库 `canvas_document.version` 仍是 bigint/Java long 整数，不存在 `graphRevision` 字段）；
 - `POST /commands` body 为 `{expectedVersion, commandId, commands[]}`：`expectedVersion`
-  是精确 CAS 游标（stale 409 `VERSION_CONFLICT`）；`commandId` 是整批幂等键——同 id 同
-  内容精确回放返回 `{baseVersion:version, version, [], [], []}` 空 patch，同 id 不同内容
+  是精确 CAS 游标（十进制字符串，stale 409 `VERSION_CONFLICT`）；`commandId` 是整批幂等键——同 id 同
+  内容精确回放返回 `{baseVersion:version, version, [], [], []}` 空 patch（版本为十进制字符串），
+  同 id 不同内容
   409 `IDEMPOTENCY_CONFLICT`；创建类命令携带客户端生成的实体 UUID
   （`CREATE_TEXT_NODE(nodeId,name,markdown,transform)`、
   `CREATE_RESOURCE_NODE(nodeId,name,uploadIds,transform)`、
   `CREATE_FUNCTION_NODE(nodeId,name,modelKey,configJson,transform)`、
   `CREATE_GROUP(groupId,title,transform,memberNodeIds)`）；
 - `CanvasResourceDTO` 的 `kind` 由 API 按 blob mediaType 派生，TEXT 资源无 blob；
-  `mediaType/sizeBytes/width/height/durationMs` 来自 blob 权威事实列；
-- `GET /changes`：要么返回从 `afterVersion` 起连续 patches（客户端逐个应用），要么返回
-  必须整体替换的权威 snapshot（初始加载/gap/缓存损坏）；未知 canvas 400；
-- SSE `events/stream`：`afterVersion` 与 `Last-Event-ID` 都是非负十进制 version；
-  `version` 事件只携带前进版本（客户端随后拉 changes），`resync` 事件要求整体快照；
+  `mediaType/width/height` 来自 blob 权威事实列；`sizeBytes/durationMs` 是 Java long，
+  wire 为十进制字符串或 null，前端 API adapter 归一化为内部 number|null（非负且
+  Number.isSafeInteger，非法/超限 fail closed）；
+- `GET /changes`：要么返回从 `afterVersion`（含 0）起连续 patches（客户端逐个应用），
+  要么返回必须整体替换的权威 snapshot（缓存缺失/gap/损坏）；已处于尾部时返回空 delta，
+  未知 canvas 400；
+- SSE `events/stream`：`afterVersion` 与 `Last-Event-ID` 都是 canonical 非负十进制字符串；
+  `version` 事件只携带前进版本（十进制字符串，客户端随后拉 changes），`resync` 事件要求整体快照；
 - `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序
   `USER_MESSAGE contents`（`commandId` 作为 `clientCommandId` 幂等键）并绑定
   `canvas_document.thread_id`；已绑定 Thread 时原样重放；`branchSettings` 是冻结的

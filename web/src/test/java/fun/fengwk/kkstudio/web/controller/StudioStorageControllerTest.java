@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,7 +85,7 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.id").isString())
             .andExpect(jsonPath("$.data.state").value("PENDING"))
-            .andExpect(jsonPath("$.data.blobId").doesNotExist())
+            .andExpect(jsonPath("$.data.blobId").value(nullValue()))
             .andExpect(jsonPath("$.data.presignedPut.method").value("PUT"))
             .andExpect(jsonPath("$.data.presignedPut.headers['if-none-match']").value("*"))
             .andExpect(
@@ -122,23 +124,40 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.state").value("READY"))
             .andExpect(jsonPath("$.data.blobId").isString())
-            .andExpect(jsonPath("$.data.presignedPut").doesNotExist())
+            .andExpect(jsonPath("$.data.presignedPut").value(nullValue()))
             .andReturn();
     String blobId = readJsonString(completed.getResponse().getContentAsString(), "$.data.blobId");
 
-    mockMvc
-        .perform(get("/api/storage/blobs/" + blobId + "/presigned-original"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.method").value("GET"))
-        .andExpect(jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/original")))
-        .andExpect(jsonPath("$.data.headers").isEmpty())
-        .andExpect(jsonPath("$.data.mediaType").value("text/plain"))
-        .andExpect(jsonPath("$.data.sizeBytes").value(content.length));
-    mockMvc
-        .perform(get("/api/storage/blobs/" + blobId + "/presigned-preview"))
-        .andExpect(status().isOk())
-        .andExpect(
-            jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/preview.webp")));
+    MvcResult original =
+        mockMvc
+            .perform(get("/api/storage/blobs/" + blobId + "/presigned-original"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.method").value("GET"))
+            .andExpect(
+                jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/original")))
+            .andExpect(jsonPath("$.data.headers").isEmpty())
+            .andExpect(jsonPath("$.data.mediaType").value("text/plain"))
+            .andExpect(jsonPath("$.data.sizeBytes").value(Long.toString(content.length)))
+            .andReturn();
+    JsonNode originalJson = objectMapper.readTree(original.getResponse().getContentAsByteArray());
+    assertTrue(originalJson.at("/data/sizeBytes").isTextual(), "sizeBytes must be a JSON string");
+    assertEquals(Long.toString(content.length), originalJson.at("/data/sizeBytes").textValue());
+
+    MvcResult preview =
+        mockMvc
+            .perform(get("/api/storage/blobs/" + blobId + "/presigned-preview"))
+            .andExpect(status().isOk())
+            .andExpect(
+                jsonPath("$.data.url").value(containsString("blobs/" + blobId + "/preview.webp")))
+            .andExpect(jsonPath("$.data.mediaType").value(nullValue()))
+            .andExpect(jsonPath("$.data.sizeBytes").value(nullValue()))
+            .andReturn();
+    JsonNode previewJson = objectMapper.readTree(preview.getResponse().getContentAsByteArray());
+    assertTrue(previewJson.has("data"));
+    assertTrue(previewJson.path("data").has("mediaType"));
+    assertTrue(previewJson.at("/data/mediaType").isNull());
+    assertTrue(previewJson.path("data").has("sizeBytes"));
+    assertTrue(previewJson.at("/data/sizeBytes").isNull());
 
     mockMvc.perform(delete("/api/storage/uploads/" + uploadId)).andExpect(status().isNoContent());
 
@@ -187,13 +206,32 @@ public class StudioStorageControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.state").value("READY"))
         .andExpect(jsonPath("$.data.blobId").isString())
-        .andExpect(jsonPath("$.data.presignedPut").doesNotExist());
+        .andExpect(jsonPath("$.data.presignedPut").value(nullValue()));
 
     assertEquals(
         1,
         jdbc.queryForObject(
             "select count(*) from storage_blob where state = 'ACTIVE'", Integer.class),
         "dedup hit must not create a second blob");
+  }
+
+  @Test
+  public void reserveAcceptsStringSizeBytesRequest() throws Exception {
+    byte[] content = "sized".getBytes(StandardCharsets.UTF_8);
+    // 请求侧 sizeBytes 保持 Long，JSON string 由 Jackson coercion 解析，与 number 等价。
+    mockMvc
+        .perform(
+            post("/api/storage/uploads")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"filename":"s.bin","mediaType":"application/octet-stream",
+                     "sizeBytes":"%d","sha256":"%s"}
+                    """
+                        .formatted(content.length, sha256Hex(content))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("PENDING"))
+        .andExpect(jsonPath("$.data.blobId").value(nullValue()));
   }
 
   @Test

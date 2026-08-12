@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState } from 'react'
-import { Download, FileText, Image, Video } from 'lucide-react'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
+import { AttachmentMediaPreview } from '@/features/ai/runtime/thread-panel/messages/AttachmentMediaPreview'
 import {
   ResourceBlobUrlContext,
   type ResourceBlobUrls,
@@ -8,10 +8,8 @@ import {
 import { useI18n } from '@/shared/i18n'
 
 /**
- * durable RESOURCE 附件 chip：只在渲染时通过注入的 blob URL 解析器换取地址，
- * 成功后按 media type 提供预览（image/video，presigned-preview）与下载链接
- * （presigned-original）；解析失败降级为名称 + 不可用提示。绝不内联
- * kkstudio:// 或 s3:// 之类的宿主 URI。
+ * durable RESOURCE 展示：图片/视频使用完整媒体 + hover 名称 + Lightbox；
+ * 其他类型使用紧凑链接。URL 只在渲染时解析，不进入 durable message。
  */
 export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachment }) {
   const { t } = useI18n()
@@ -20,13 +18,13 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
   const [failed, setFailed] = useState(false)
 
   useEffect(() => {
+    setUrls(null)
+    setFailed(false)
     if (!attachment.blobId || !resolveBlobUrls) {
       setFailed(true)
       return
     }
     let cancelled = false
-    setUrls(null)
-    setFailed(false)
     resolveBlobUrls(attachment.blobId)
       .then((resolved) => {
         if (cancelled) {
@@ -48,43 +46,52 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
     }
   }, [attachment.blobId, resolveBlobUrls])
 
-  const mediaType = urls?.mediaType || attachment.mime
-  const type = attachmentType(mediaType, attachment.type)
-  const label = attachment.name || mediaType || t('ai.runtime.message.attachment')
-  const previewUrl =
-    urls?.preview != null && (type === 'image' || type === 'video')
-      ? urls.preview
-      : null
-  const downloadUrl = urls?.original ?? null
-  const unavailable = urls == null && failed
+  const authoritativeMediaType = urls?.mediaType?.trim() || null
+  const mediaType = authoritativeMediaType ?? attachment.mime
+  const type = attachmentType(
+    mediaType,
+    authoritativeMediaType == null ? attachment.type : 'file',
+  )
+  const label =
+    attachment.name
+    || mediaType
+    || t('ai.runtime.message.attachment', { type: attachment.type })
+  const downloadUrl = urls?.original?.trim() || null
+  const previewUrl = urls?.preview?.trim() || null
+  const mediaUrl =
+    type === 'image'
+      ? downloadUrl
+      : type === 'video' && downloadUrl != null
+        ? previewUrl ?? downloadUrl
+        : null
+  const unavailable = failed || (urls != null && downloadUrl == null)
+  if (mediaUrl && downloadUrl && (type === 'image' || type === 'video')) {
+    return (
+      <AttachmentMediaPreview
+        kind={type}
+        label={label}
+        previewUrl={mediaUrl}
+        originalUrl={downloadUrl}
+        previewMode={type === 'video' && previewUrl ? 'image' : type}
+      />
+    )
+  }
   return (
     <span
-      className={`resource-attachment-chip is-${type}`}
+      className={`resource-attachment-link is-${type}`}
       title={label}
     >
-      {previewUrl != null ? (
-        type === 'video' ? (
-          <video className="resource-attachment-preview" src={previewUrl} muted tabIndex={-1} />
-        ) : (
-          <img className="resource-attachment-preview" src={previewUrl} alt="" tabIndex={-1} />
-        )
-      ) : (
-        <span className="resource-attachment-icon" aria-hidden="true">
-          {type === 'image' ? <Image /> : type === 'video' ? <Video /> : <FileText />}
-        </span>
-      )}
-      <span className="resource-attachment-name">{label}</span>
       {downloadUrl != null ? (
         <a
           className="resource-attachment-download"
           href={downloadUrl}
           target="_blank"
-          rel="noreferrer"
+          rel="noreferrer noopener"
           aria-label={t('ai.runtime.message.downloadResource', { name: label })}
         >
-          <Download aria-hidden="true" />
+          [{label}]
         </a>
-      ) : null}
+      ) : <span>[{label}]</span>}
       {unavailable ? <span className="resource-attachment-failed">{t('ai.runtime.message.resourceUnavailable')}</span> : null}
     </span>
   )

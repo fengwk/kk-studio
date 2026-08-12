@@ -64,8 +64,8 @@ export type StorageUploadDTO =
   | {
       id: string
       state: 'READY'
-      blobId: string | null
-      presignedPut?: never
+      blobId: string
+      presignedPut: null
       expiresAt: BackendDateTime
     }
 
@@ -79,6 +79,9 @@ export interface StoragePresignedUrlDTO {
   expiresAt: BackendDateTime
   /** 原件端点返回的权威 Blob 媒体类型；preview 端点可省略。 */
   mediaType?: string | null
-  /** 原件端点返回的权威 Blob 字节数；preview 端点可省略。 */
+  /**
+   * 原件端点返回的权威 Blob 字节数；preview 端点可省略。
+   * wire 是 Java long 的 decimal string|null，由 storage-service adapter 归一化为 number|null。
+   */
   sizeBytes?: number | null
 }

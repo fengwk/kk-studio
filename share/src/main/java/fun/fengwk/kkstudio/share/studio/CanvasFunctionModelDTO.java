@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.studio;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -13,5 +14,8 @@ public class CanvasFunctionModelDTO {
   private CanvasFunctionReferencePolicyDTO referencePolicy;
   private List<CanvasFunctionParameterDefinitionDTO> parameters = new ArrayList<>();
   private Boolean available;
+
+  /** required-nullable：available 时必须显式输出 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String unavailableReason;
 }

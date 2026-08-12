@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.storage;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
 import lombok.Data;
 
@@ -23,10 +24,12 @@ public class StorageUploadDTO {
   /** 当前状态：PENDING 待上传 / READY 已绑定 blob。 */
   private StorageUploadState state;
 
-  /** READY 时绑定的 blob id（uuid 字符串）；PENDING 时为 null。 */
+  /** READY 时绑定的 blob id（uuid 字符串）；PENDING 时为 null，required-nullable 显式输出。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String blobId;
 
-  /** PENDING 时的浏览器直传预签名 PUT；READY 时为 null。 */
+  /** PENDING 时的浏览器直传预签名 PUT；READY 时为 null，required-nullable 显式输出。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private StoragePresignedUrlDTO presignedPut;
 
   /** 上传清理截止时刻：过期后由服务端回收（UTC Instant）。 */

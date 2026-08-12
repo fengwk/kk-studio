@@ -1,4 +1,5 @@
 import { ApiError } from '@/shared/api/client'
+import type { CanvasVersion } from '@/shared/api/contracts/base'
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasPatchDTO,
@@ -10,6 +11,7 @@ import {
   getCanvasChanges,
   postCanvasCommands,
 } from '@/shared/api/studio-service'
+import { compareCanvasVersions } from '@/shared/lib/canvas-version'
 import { applyCanvasChanges, applyEntityPatch } from '@/features/canvas/entity-patch'
 
 export class CanvasCommandConflictError extends Error {
@@ -68,7 +70,7 @@ export class CanvasCommandQueue {
   replaceSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapshotDTO {
     if (
       snapshot.document.id === this.snapshot.document.id
-      && snapshot.document.version < this.snapshot.document.version
+      && compareCanvasVersions(snapshot.document.version, this.snapshot.document.version) < 0
     ) {
       return this.snapshot
     }
@@ -96,7 +98,7 @@ export class CanvasCommandQueue {
    * 供 SSE 'version' 事件与命令响应的 gap 恢复共用：返回连续 patches 则
    * 逐个应用，载荷要求 snapshot 或 patches 无法闭环时回退全量快照。
    */
-  async syncFrom(afterVersion?: number, signal?: AbortSignal): Promise<CanvasSnapshotDTO> {
+  async syncFrom(afterVersion?: CanvasVersion, signal?: AbortSignal): Promise<CanvasSnapshotDTO> {
     const changes = await this.getChanges(
       this.canvasId,
       afterVersion ?? this.snapshot.document.version,
@@ -147,7 +149,7 @@ export class CanvasCommandQueue {
       return next
     }
     // 重复/过期 patch（version 未前进）直接忽略；其余情况视为 gap。
-    if (patch.version <= this.snapshot.document.version) {
+    if (compareCanvasVersions(patch.version, this.snapshot.document.version) <= 0) {
       return this.snapshot
     }
     return await this.syncFrom(this.snapshot.document.version, signal)
