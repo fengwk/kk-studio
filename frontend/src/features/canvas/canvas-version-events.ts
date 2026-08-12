@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react'
+import type { CanvasVersion } from '@/shared/api/contracts/base'
 import type { CanvasVersionEventDTO, UUIDString } from '@/shared/api/contracts/studio'
 import { createCanvasRealtimeStream } from '@/shared/api/studio-service'
+import { compareCanvasVersions, isCanvasVersion } from '@/shared/lib/canvas-version'
 
 export interface CanvasVersionEventsOptions {
   canvasId: UUIDString | null
   /** 仅当编辑器持有权威 snapshot 后才订阅。 */
   enabled: boolean
-  /** 客户端当前已知的 graph 版本（每次渲染的最新值）。 */
-  version: number
+  /** 客户端当前已知的 graph 版本（每次渲染的最新值，canonical 十进制字符串）。 */
+  version: CanvasVersion
   /** 'version' 事件或重连后：按最后已知版本拉取 changes 并应用。 */
   onVersion: () => void
   /** 'resync' 事件：需要整体替换为全量快照。 */
@@ -18,7 +20,8 @@ const RECONNECT_DELAY_MS = 250
 
 /**
  * Canvas 版本事件 SSE 订阅：
- * - 'version' 事件（{version:number}）触发 changes 拉取（不携带载荷应用逻辑）；
+ * - 'version' 事件（{version:"N"}）触发 changes 拉取（不携带载荷应用逻辑），
+ *   只接受 canonical 非负十进制字符串且严格大于当前版本的事件；
  * - 'resync' 事件触发全量快照；
  * - 断线重连使用客户端最后已知版本，并在重连后先同步一次 changes，
  *   关闭断线窗口内的版本缺口；全量快照只发生在初始加载、gap 或 resync。
@@ -60,7 +63,7 @@ export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
       source = createCanvasRealtimeStream(streamCanvasId, versionRef.current)
       source.addEventListener('version', (event) => {
         const payload = parseVersionEvent((event as MessageEvent<string>).data)
-        if (payload == null || payload.version <= versionRef.current) {
+        if (payload == null || compareCanvasVersions(payload.version, versionRef.current) <= 0) {
           return
         }
         onVersionRef.current()
@@ -93,12 +96,14 @@ export function useCanvasVersionEvents(options: CanvasVersionEventsOptions) {
   }, [canvasId, enabled])
 }
 
+/**
+ * 严格解析 SSE 'version' 事件：只接受 canonical 非负十进制字符串。
+ * 数字、前导零、负数、缺失字段或非 JSON 载荷一律返回 null（忽略）。
+ */
 function parseVersionEvent(raw: string): CanvasVersionEventDTO | null {
   try {
     const value = JSON.parse(raw) as Partial<CanvasVersionEventDTO>
-    return typeof value.version === 'number' && Number.isInteger(value.version) && value.version >= 0
-      ? { version: value.version }
-      : null
+    return isCanvasVersion(value.version) ? { version: value.version } : null
   } catch {
     return null
   }

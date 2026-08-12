@@ -90,12 +90,12 @@ class FakeEventSource {
   }
 }
 
-function snapshot(version = 0): CanvasSnapshotDTO {
+function snapshot(version: number | string = 0): CanvasSnapshotDTO {
   return {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version,
+      version: String(version),
       threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
@@ -193,13 +193,18 @@ function snapshot(version = 0): CanvasSnapshotDTO {
   }
 }
 
+/** 测试内版本前进：bigint-safe，避免 JS number 精度问题。 */
+function nextVersion(version: string): string {
+  return String(BigInt(version) + 1n)
+}
+
 /**
  * 全量 upsert patch：从 baseVersion 前进到 snapshot 的版本。
  * 模拟「服务端已把命令效果写进投影」后的连续 patch 载荷。
  */
-function diffPatch(snapshotValue: CanvasSnapshotDTO, baseVersion: number): CanvasPatchDTO {
+function diffPatch(snapshotValue: CanvasSnapshotDTO, baseVersion: number | string): CanvasPatchDTO {
   return {
-    baseVersion,
+    baseVersion: String(baseVersion),
     version: snapshotValue.document.version,
     groups: snapshotValue.groups.map((group) => ({ op: 'UPSERT', group })),
     nodes: snapshotValue.nodes.map((node) => ({ op: 'UPSERT', node })),
@@ -232,7 +237,7 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
   }
   return {
     ...current,
-    document: { ...current.document, version: current.document.version + 1 },
+    document: { ...current.document, version: nextVersion(current.document.version) },
     nodes,
   }
 }

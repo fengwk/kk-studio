@@ -35,12 +35,12 @@ const LINK_DTO = (sourceNodeId: string, targetNodeId: string) => ({
   targetNodeId,
 })
 
-function snapshot(version: number): CanvasSnapshotDTO {
+function snapshot(version: number | string): CanvasSnapshotDTO {
   return {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version,
+      version: String(version),
       threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
@@ -55,8 +55,8 @@ describe('Canvas entity patch reducer', () => {
   it('upserts and removes nodes/groups/links while advancing version', () => {
     const current = snapshot(3)
     const patch: CanvasPatchDTO = {
-      baseVersion: 3,
-      version: 4,
+      baseVersion: '3',
+      version: '4',
       nodes: [
         { op: 'UPSERT', node: { ...NODE_DTO(NODE_A), name: 'renamed' } },
         { op: 'UPSERT', node: NODE_DTO(NODE_B) },
@@ -68,29 +68,29 @@ describe('Canvas entity patch reducer', () => {
     const next = applyEntityPatch(current, patch)
 
     expect(next).not.toBeNull()
-    expect(next?.document.version).toBe(4)
+    expect(next?.document.version).toBe('4')
     expect(next?.document.threadId).toBeNull()
     expect(next?.nodes.map((node) => node.id).sort()).toEqual([NODE_A, NODE_B])
     expect(next?.nodes.find((node) => node.id === NODE_A)?.name).toBe('renamed')
     expect(next?.groups).toEqual([])
     expect(next?.links).toEqual([])
     // 输入快照保持不变（不可变 reducer）。
-    expect(current.document.version).toBe(3)
+    expect(current.document.version).toBe('3')
     expect(current.nodes.map((node) => node.id)).toEqual([NODE_A])
   })
 
   it('ignores duplicate and older patches (version not advanced)', () => {
     const current = snapshot(4)
     expect(applyEntityPatch(current, {
-      baseVersion: 3,
-      version: 4,
+      baseVersion: '3',
+      version: '4',
       groups: [],
       nodes: [],
       links: [],
     })).toBeNull()
     expect(applyEntityPatch(current, {
-      baseVersion: 2,
-      version: 2,
+      baseVersion: '2',
+      version: '2',
       groups: [],
       nodes: [],
       links: [],
@@ -100,16 +100,51 @@ describe('Canvas entity patch reducer', () => {
   it('returns null on a base gap even when the target version is newer', () => {
     const current = snapshot(2)
     expect(applyEntityPatch(current, {
-      baseVersion: 3,
-      version: 5,
+      baseVersion: '3',
+      version: '5',
       groups: [],
       nodes: [],
       links: [],
     })).toBeNull()
     // 重叠区间（base 落后但 version 超前）同样视为 gap。
     expect(applyEntityPatch(current, {
-      baseVersion: 1,
-      version: 4,
+      baseVersion: '1',
+      version: '4',
+      groups: [],
+      nodes: [],
+      links: [],
+    })).toBeNull()
+  })
+
+  it('compares 9 vs 10 and versions beyond Number.MAX_SAFE_INTEGER exactly', () => {
+    // 9 < 10：长度比较，而不是字典序（'9' > '10' 会出错）。
+    expect(applyEntityPatch(snapshot('9'), {
+      baseVersion: '9',
+      version: '10',
+      groups: [],
+      nodes: [],
+      links: [],
+    })?.document.version).toBe('10')
+    // MAX_SAFE_INTEGER+1 在 JS number 中与 +2 无法区分，十进制字符串必须精确。
+    const huge = '9007199254740992'
+    const hugeNext = '9007199254740993'
+    expect(applyEntityPatch(snapshot(huge), {
+      baseVersion: huge,
+      version: hugeNext,
+      groups: [],
+      nodes: [],
+      links: [],
+    })?.document.version).toBe(hugeNext)
+    expect(applyEntityPatch(snapshot(hugeNext), {
+      baseVersion: huge,
+      version: hugeNext,
+      groups: [],
+      nodes: [],
+      links: [],
+    })).toBeNull()
+    expect(applyEntityPatch(snapshot(huge), {
+      baseVersion: String(BigInt(huge) - 1n),
+      version: hugeNext,
       groups: [],
       nodes: [],
       links: [],
@@ -120,21 +155,21 @@ describe('Canvas entity patch reducer', () => {
     const current = snapshot(1)
     const changes: CanvasChangesDTO = {
       patches: [
-        { baseVersion: 1, version: 2, nodes: [{ op: 'UPSERT', node: NODE_DTO(NODE_B) }], groups: [], links: [] },
-        { baseVersion: 2, version: 3, nodes: [{ op: 'REMOVE', nodeId: NODE_A }], groups: [], links: [] },
+        { baseVersion: '1', version: '2', nodes: [{ op: 'UPSERT', node: NODE_DTO(NODE_B) }], groups: [], links: [] },
+        { baseVersion: '2', version: '3', nodes: [{ op: 'REMOVE', nodeId: NODE_A }], groups: [], links: [] },
       ],
       snapshot: null,
     }
 
     const folded = applyCanvasChanges(current, changes)
 
-    expect(folded?.document.version).toBe(3)
+    expect(folded?.document.version).toBe('3')
     expect(folded?.nodes.map((node) => node.id)).toEqual([NODE_B])
 
     const broken = applyCanvasChanges(current, {
       patches: [
-        { baseVersion: 1, version: 2, nodes: [], groups: [], links: [] },
-        { baseVersion: 3, version: 4, nodes: [], groups: [], links: [] },
+        { baseVersion: '1', version: '2', nodes: [], groups: [], links: [] },
+        { baseVersion: '3', version: '4', nodes: [], groups: [], links: [] },
       ],
       snapshot: null,
     })

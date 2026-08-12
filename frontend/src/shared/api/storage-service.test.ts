@@ -96,18 +96,53 @@ describe('storage-service', () => {
   it('resolves original and preview blob URLs via GET on the blob path', async () => {
     const { client, get } = fakeClient()
     const service = createStorageService(client)
+    // 原件 sizeBytes 是 Java long：wire 为 decimal string，adapter 归一化为 number。
     get.mockResolvedValue({
       url: 'https://s3.test/orig',
       expiresAt: '2026-08-12T00:00:00Z',
       mediaType: 'image/png',
-      sizeBytes: 64,
+      sizeBytes: '64',
     })
 
-    await service.getBlobOriginalUrl('blob-1')
+    await expect(service.getBlobOriginalUrl('blob-1')).resolves.toMatchObject({
+      url: 'https://s3.test/orig',
+      sizeBytes: 64,
+    })
     expect(get).toHaveBeenCalledWith('/storage/blobs/blob-1/presigned-original')
 
-    await service.getBlobPreviewUrl('blob-1')
+    await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({
+      url: 'https://s3.test/orig',
+      sizeBytes: 64,
+    })
     expect(get).toHaveBeenCalledWith('/storage/blobs/blob-1/presigned-preview')
+  })
+
+  it('accepts missing and numeric sizeBytes and keeps null', async () => {
+    const { client, get } = fakeClient()
+    const service = createStorageService(client)
+    get.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
+      .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: 9 })
+
+    await expect(service.getBlobOriginalUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
+    await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({ sizeBytes: 9 })
+  })
+
+  it('fails closed on unsafe or malformed sizeBytes instead of silent zero', async () => {
+    const { client, get } = fakeClient()
+    const service = createStorageService(client)
+    const invalid = ['9007199254740993', '-1', '01', 'abc', 1.5, Number.NaN]
+    for (const sizeBytes of invalid) {
+      get.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
+      await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
+        name: 'ApiError',
+        message: expect.stringContaining('sizeBytes'),
+      })
+    }
+    get.mockResolvedValueOnce({ expiresAt: '2026-08-12T00:00:00Z' })
+    await expect(service.getBlobOriginalUrl('blob-1')).rejects.toMatchObject({
+      name: 'ApiError',
+      message: expect.stringContaining('url'),
+    })
   })
 
   it('PUTs object bytes with signed headers minus browser-forbidden ones', async () => {
