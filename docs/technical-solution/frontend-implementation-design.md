@@ -120,11 +120,19 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 
 ## 10. Resource 安全呈现
 
-Tool Result 的 Resource（`ResourceRef {uri, mediaType, name, size, sha256}` + 可选文本 preview）投影为 `ToolAttachment`，**renderer 契约包含 `downloadHref` 投影**（`content-utils.managedResourceHref`）：
+durable Tool/User Resource 固定为 `resource(blobId,name,preview)`，不复制 URI、mediaType、size 或
+sha256。`ChatPanel` 在渲染期通过 `ResourceBlobUrlContext` 并行请求
+`/api/storage/blobs/{blobId}/presigned-original|presigned-preview`：
 
-- **仅 `data:` URI** 自动媒体预览（图片等）；http/https 保持稳定 URI 文本 + 显式直连链接（`rel="noopener noreferrer"`，不触发自动 GET）；
-- file/s3 **绝不把宿主 URI 交给浏览器**：只按内容身份（mediaType/size/name/sha256）投影到同源 `GET /api/ai/runtime/resources/{sha256}`（`downloadHref`）；未知/不完整身份（缺 sha256、非 canonical scheme 或无法重建 ref）**不渲染链接**，只显示 fallback 标签；
-- preview 保持 `<pre>` 文本块，不执行富内容；允许的 scheme 集合固定为 data/file/s3/http/https。
+- 原件响应的 `mediaType/sizeBytes` 是权威媒体事实；`ResourceAttachmentChip` 依此分类 image/audio/video/file，不按文件扩展名猜测；
+- image/video 可使用 preview URL，下载始终使用 original URL；解析失败只显示名称与不可用提示；
+- preview 保持纯文本视口，不执行富内容；durable message 与 DOM 都不保存长期 URL。
+
+瞬时/Invocation `ResourceRef {uri,mediaType,name,size,sha256}` 仍有兼容 renderer：
+
+- 仅 `data:` URI 自动媒体预览；http/https 只提供显式直连链接，不触发自动 GET；
+- file/s3 绝不把宿主 URI 交给浏览器，只在内容身份完整时投影到同源
+  `GET /api/ai/runtime/resources/{sha256}`；未知或不完整身份只显示 fallback 标签。
 
 ## 11. Agent 能力表单
 

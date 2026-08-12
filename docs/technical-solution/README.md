@@ -62,7 +62,7 @@ flowchart TD
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
 - Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX，内部 turn 不进入后续 Provider Context 或前端 transcript。
 - Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；daemon wire 是 v2。
-- Resource 安全边界：`data:` URI 才自动媒体预览；http/https 保持显式直连链接；file/s3 只按内容身份投影到同源 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载（attachment + nosniff），未知/不完整身份不渲染链接。
+- Resource 安全边界：Tool 边界的 URI 只属于瞬时 `ResourceRef`；写入 Entry 前统一摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`。前端通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期获取短期 URL，并以原件响应的权威 `mediaType/sizeBytes` 分类；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation `file:`、`s3:` 引用兼容。
 
 ## 维护规则
 

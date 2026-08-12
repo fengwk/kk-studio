@@ -30,7 +30,7 @@ flowchart LR
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
 | `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
 | `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
-| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、`LocalFileResourceStore` |
+| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、瞬时 `LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
 | `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v2 wire |
 
@@ -85,12 +85,14 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT（BranchSettings）、Thread 并关联 Chat；返回 snapshot |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
 | GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation |
-| POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（8 类命令），202 |
+| POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（7 类命令），202 |
 | PUT | `/api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + Redis realtime overlay |
-| GET | `/api/ai/runtime/resources/{sha256}` | 按内容身份（`mediaType`/`size`/可选 `name`）同源下载 managed Resource：Core `ManagedResourceDownloadService` 通过 `ResourceStore.reference` 重建并读取 canonical `ResourceRef`，Web 只负责 attachment + `X-Content-Type-Options: nosniff` 响应 |
+| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 兼容下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
+| POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
+| GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
 **不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 查询、无 `/messages` 或 `/messages/custom` 端点（消息由 `/commands` 的 `USER_MESSAGE`/`CUSTOM_MESSAGE` 命令表达）、无 `expectedExecutionEpoch` 字段。
 
