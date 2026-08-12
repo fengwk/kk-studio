@@ -1,6 +1,6 @@
 # Prompt 到 Resource 数据流
 
-本文描述 Harness 从命令 batch、BranchSettings 到冻结 ProviderRequest，经 Model/Tool 执行，最终把 Tool Result 外部化为 durable ResourceRef 并回到 Entry/浏览器的事实链。Runtime 语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，Resource 编解码见 [harness-storage-runtime.md](harness-storage-runtime.md)。
+本文描述 Harness 从命令 batch、BranchSettings 到冻结 ProviderRequest，经 Model/Tool 执行，最终把 Tool Result 的瞬时 `ResourceRef` 摄入全局 Blob，并以 `resource(blobId,name,preview)` 回到 Entry/浏览器的事实链。Runtime 语义见 [harness-runtime-architecture.md](harness-runtime-architecture.md)，Resource 编解码见 [harness-storage-runtime.md](harness-storage-runtime.md)。
 
 ## 1. 数据流
 
@@ -17,7 +17,9 @@ flowchart LR
     Effects[Plugin intents<br/>validated ToolEffectBatch]
     Ext[ToolResultExternalizer]
     Inline[Text/Json <= 8KB inline ToolContent]
-    Resource[ResourceRef<br/>超出阈值 / Binary -> file URI]
+    Resource[瞬时 ResourceRef<br/>超出阈值 / Binary -> file URI]
+    Blob[GlobalStorageToolResultHistoryMaterializer<br/>storage_blob + session ref]
+    Durable[durable resource<br/>blobId/name/preview]
     Entry[TOOL Message Entry]
     UI[REST snapshot + SSE]
 
@@ -33,13 +35,15 @@ flowchart LR
     Ext --> Inline
     Ext --> Resource
     Inline --> Entry
-    Resource --> Entry
+    Resource --> Blob
+    Blob --> Durable
+    Durable --> Entry
     Effects --> Entry
     Entry --> UI
     Assistant --> UI
 ```
 
-说明：**Text/Json 内容 UTF-8 ≤ 8KB 保持 inline ToolContent**（不是 ResourceRef）；只有超过阈值或二进制内容才转为 `ResourceRef`（外部 `file:` URI）。
+说明：**Text/Json 内容 UTF-8 ≤ 8KB 保持 inline ToolContent**；超过阈值或二进制内容先转为瞬时 `ResourceRef`。Tool Result Entry 写入前，资源字节统一摄入 `storage_blob`，durable message 不保存该 URI。
 
 ## 2. Command 到 Turn
 
@@ -49,7 +53,7 @@ flowchart LR
 POST /api/ai/runtime/threads/{threadId}/commands
 ```
 
-请求携带 `expectedHeadEntryId`、`expectedNextCommandSequence` 与命令数组（每项含 `clientCommandId`）。服务端**幂等查找先于任何 head/sequence/live 检查**：全部 `clientCommandId` 已存在且 payload 相同、sequence 在请求顺序上连续时是 ordered command-set replay——忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行；部分存在/不同 payload/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`。全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`）并一次性预留 sequence（202 表示已接受，不代表模型已完成）。
+请求携带 `expectedHeadEntryId`、`expectedNextCommandSequence` 与命令数组（每项含 `clientCommandId`）。服务端**幂等查找先于任何 head/sequence/live 检查**：全部 `clientCommandId` 已存在、raw `requestHash` 相同且 sequence 在请求顺序上连续时是 ordered command-set replay——忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行；部分存在/hash 不同/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`。全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`）并一次性预留 sequence（202 表示已接受，不代表模型已完成）。
 
 `ThreadProcessor` 收割 queued Commands：
 
@@ -141,7 +145,7 @@ ToolBinding.type == ENVIRONMENT
 - 外部 I/O 前 `ToolGateway.preflight`：权限判定（Allow/Ask/Deny）与机械校验（未取消/未过期、`name@version` 命中固定目录、arguments 是 JSON object）；plugin Tool 还按 frozen `(pluginId, contributionLocalName)` 恢复贡献并校验 descriptor/state accesses 未漂移；发送结果不确定收敛 `UNKNOWN`，不重放副作用。
 - Tool partial 写 Redis realtime（`TOOL_PARTIAL` 永不携带 Resource）。
 - plugin Tool 是同步纯函数，只读取 Assistant Entry 对应的冻结 `BranchView` 并返回声明式 intents。Core 只接受 owner 匹配、customType 已注册且 binding 声明 WRITE 的 `AppendCustomEntry`，映射为有序 `ToolEffectBatch`；intent 校验失败在任何 Resource 写入与 durable `SUCCEEDED` 之前终结为 `PLUGIN_CONTRACT_VIOLATION`。
-- **durable 外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
+- **瞬时外部化发生在 CoreToolGateway 回调桥**（`ToolResultExternalizer`）：effects 校验通过后的 terminal success 回调 all-or-nothing 处理：
 
 ```text
 Text/Json 内容 UTF-8 <= 8KB（INLINE_RESULT_UTF8_BYTES） -> 保持 inline ToolContent 编码进 ToolResult JSON
@@ -161,10 +165,11 @@ size        # 可选，非负
 sha256      # 可选，64 位小写 hex
 ```
 
-- `LocalFileResourceStore` 生成 canonical `file:///` URI（空 authority、无 dot/空 segment、非空 size/sha256）；**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON 与可选文本 preview。daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容先产生 Resource（daemon 侧 store），core 对 Text/Json >8KB 及 Binary 统一再次外部化/透传。
+- `LocalFileResourceStore` 生成 canonical `file:///` URI（空 authority、无 dot/空 segment、非空 size/sha256）。daemon coding tool 自身可因输出超过 preview 限制（默认 2000 行 / 50KB）或二进制内容先产生 Resource，core 对 Text/Json >8KB 及 Binary 统一再次外部化/透传。
+- Tool outcome Entry 写入前，`ToolOutcomeAppender` 在同一 Store 事务调用 `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3，摄入 `storage_blob`，通过 `harness_session_blob_ref` retain，并把 durable 内容转换为 `resource(blobId,name,preview)`。任何一步失败时事务整体回滚；没有 materializer 时含 Resource 的成功结果 fail closed。
 - ToolProcessor 接收 `ToolSuccess(已外部化 ToolResult, effects)` 并在短事务内做严格 terminal CAS（fire-once、claim ownership 校验），以一次 Store update 原子持久化 `SUCCEEDED + result + effects`，不做存储外部化。
 - Model terminal materialize siblings 时按 ordinal 静态检查 plugin state accesses；同一 `(pluginId, customType)` 的 WRITE 后再 READ/WRITE 直接写成 `FAILED(kind=SIBLING_STATE_CONFLICT)`，不 dispatch。
-- 全部 Tool siblings terminal 后，`ThreadProcessor` 通过唯一 `ToolOutcomeAppender` 按 ordinal apply：每个成功调用先按 effects 顺序追加 `CUSTOM`，再追加 TOOL `MESSAGE` Entry（Tool Result 内容 + ResourceRef 列表 + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**。`resultEntryId` 仍指向 Tool Result；Stop 的 terminal winner 使用同一 appender。
+- 全部 Tool siblings terminal 后，`ThreadProcessor` 通过唯一 `ToolOutcomeAppender` 按 ordinal apply：每个成功调用先按 effects 顺序追加 `CUSTOM`，再追加 TOOL `MESSAGE` Entry（inline 内容 + durable `resource(blobId,name,preview)` + ToolResultMetadata），推进 head，并**固定追加 `TURN_END(COMPLETED, continueModel=true)`**。`resultEntryId` 仍指向 Tool Result；Stop 的 terminal winner 使用同一 appender。
 
 ## 6. 前端呈现与恢复
 
@@ -178,10 +183,9 @@ path Entries
 
 Tool Result 的 Resource 呈现：
 
-- **仅 `data:` URI** 自动媒体预览；http/https 保持显式直连链接（`rel="noopener noreferrer"`）；
-- file/s3 绝不把宿主 URI 交给浏览器：只按内容身份投影到同源 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name`（attachment + nosniff），Core `ManagedResourceDownloadService` 用 `ResourceStore.reference` 重建并读取 canonical ref，Web controller 只组装安全下载响应；未知/不完整身份（缺 sha256 或非 canonical scheme）不渲染链接；
-- preview 保持 `<pre>` 文本块；
-- 允许的 scheme 集合固定为 data/file/s3/http/https，未知 scheme 不渲染链接。
+- durable `resource(blobId,name,preview)` 通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期解析；原件响应携带权威 `mediaType/sizeBytes`，前端不按扩展名猜测；
+- preview 保持纯文本视口；预签名 URL 不进入 durable message；
+- 瞬时/Invocation URI 引用的兼容 renderer 中，仅 `data:` 自动媒体预览，http/https 只显式直连，file/s3 仅在内容身份完整时走 `GET /api/ai/runtime/resources/{sha256}`，绝不把宿主 URI 直接交给浏览器。
 
 task 委派工具（`rendererKey=task`）的呈现契约：call 阶段叠加 `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整快照，含扁平 `descendants` 活动子树 relay，前端按规范化快照整帧替换/语义去重），终态展示 `<task id state>` envelope 的 `<task_result>`/`<task_error>`；任意深度子工具的待决审批都按实际子 ThreadId 复用同一 approval 端点。
 

@@ -81,8 +81,8 @@ SET_ACTIVE_TOOLS, SET_YOLO
 契约：
 
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
-- `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
-- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable RESOURCE），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
+- `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
+- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
 - mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
@@ -91,8 +91,8 @@ SET_ACTIVE_TOOLS, SET_YOLO
 
 幂等查找发生在任何 head/sequence/live 检查之前；**没有 batch 级 identity**，replay 是 ordered command-set replay：
 
-- **全部 `clientCommandId` 已存在**：仅当每个存储 payload 与请求 payload 相同，且存储 sequence 在请求顺序上连续（`seq[i] == seq[0] + i`）时接受——**忽略 `expectedHeadEntryId`/`expectedNextCommandSequence` 与 QUEUED/APPLIED/CANCELLED lifecycle**，返回原行不变。
-- 仅部分 id 存在 → `PARTIAL_COMMAND_REPLAY`（缺失命令永不补齐）；已存在 id 但 payload 不同 → `COMMAND_ID_REUSED`；id 全部存在、payload 相同但 sequence 非连续 → `COMMAND_REPLAY_ORDER_MISMATCH`。
+- **全部 `clientCommandId` 已存在**：仅当每个存储 `requestHash` 与本次 raw 请求 hash 相同，且存储 sequence 在请求顺序上连续（`seq[i] == seq[0] + i`）时接受——**忽略 `expectedHeadEntryId`/`expectedNextCommandSequence` 与 QUEUED/APPLIED/CANCELLED lifecycle**，返回原行不变。hash 独立于 ATTACHMENT 消费后的 durable payload 形态。
+- 仅部分 id 存在 → `PARTIAL_COMMAND_REPLAY`（缺失命令永不补齐）；已存在 id 但 hash 不同 → `COMMAND_ID_REUSED`；id 全部存在、hash 相同但 sequence 非连续 → `COMMAND_REPLAY_ORDER_MISMATCH`。
 
 ### Fresh batch admission
 
@@ -188,7 +188,7 @@ lock Thread
 ```json
 {
   "decision": "ALLOW" | "DENY",
-  "decisionId": "stable-client-key",
+  "decisionId": "00000000-0000-0000-0000-000000000301",
   "actor": "web",
   "reason": null | "text"
 }

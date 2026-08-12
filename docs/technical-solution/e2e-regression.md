@@ -6,13 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **67** 个 API case；标准入口默认执行免费的 **L1 58** 个 case（其中
+当前注册 **68** 个 API case；标准入口默认执行免费的 **L1 58** 个 case（其中
 `canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
 Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 67 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 68 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -81,7 +81,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 60 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 61 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -114,7 +114,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 60，默认 58）
+### L1（注册 61，默认 58）
 
 ```text
 seed.structured_model_config
@@ -216,7 +216,7 @@ L1 的关键语义断言：
 - `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
   reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
   原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
-  `resource(blobId/name)`；整批重放幂等不二次消费；已消费/未 READY upload 与
+  `resource(blobId,name,preview)`；整批重放幂等不二次消费；已消费/未 READY upload 与
   `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
 
 ### L2/L3/L4（7）
@@ -239,7 +239,7 @@ tool.read_turn
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256）；按内容身份请求 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载并验证返回字节数、mediaType、`X-Content-Type-Options: nosniff` 与 sha256 一致 |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
 
 ### L5 UI（默认 15，`--real` 追加 1）
 
@@ -315,7 +315,7 @@ POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
 GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
 
-GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 同源 managed Resource 下载（attachment + nosniff）
+GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 仅瞬时/Invocation ResourceRef 兼容下载
 
 POST /api/storage/uploads                       -> 通用存储 reserve（PENDING + presigned PUT）
 POST /api/storage/uploads/{uploadId}/complete   -> READY（blobId；供 ATTACHMENT 消费）
@@ -342,25 +342,25 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 
 ```json
 {
-  "expectedHeadEntryId": "1",
+  "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
   "expectedNextCommandSequence": "1",
   "commands": [
     {
       "type": "USER_MESSAGE",
-      "clientCommandId": "...",
+      "clientCommandId": "00000000-0000-0000-0000-000000000101",
       "contents": [{ "type": "TEXT", "text": "..." }]
     }
   ]
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId/name)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
 ```json
-{ "targetEntryId": "1", "expectedRevision": "0" }
-{ "stopRequestId": "...", "expectedRevision": "0" }
+{ "targetEntryId": "00000000-0000-0000-0000-000000000005", "expectedRevision": "0" }
+{ "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedRevision": "0" }
 ```
 
 - `PUT /head`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision、非静止、跨 Session target、TURN_END continuation 义务均为 409；成功 revision+1；
@@ -374,7 +374,7 @@ head move 与 stop 均为 revision CAS：
 Tool approval：
 
 ```json
-{ "decision": "ALLOW", "decisionId": "...", "actor": "web", "reason": null }
+{ "decision": "ALLOW", "decisionId": "00000000-0000-0000-0000-000000000301", "actor": "web", "reason": null }
 ```
 
 - `decision` 输入仅 `ALLOW|DENY`，durable `approvalJson.decision` 编码为 `ALLOWED|DENIED`（ToolApprovalDecision 枚举）；`decisionId` 是客户端稳定幂等键，已决策后 exact replay 保留原 `decidedAt`；
@@ -442,8 +442,8 @@ WebSocket /api/ai/environment/daemon/v2
 - Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
 - daemon 由 `scripts/e2e/lib.sh` 以唯一 `--workdir "$DAEMON_ENV_ROOT"` 和显式 `--note "$DAEMON_NOTE"` 启动；`DAEMON_NOTE` 默认稳定为 `E2E daemon environment.`，可由环境变量覆盖。workdir 只作为 CodingTools 本地边界，note 只经真实 CLI/READY 进入模型上下文；`GET /api/ai/environment` 继续只返回既有投影，`daemon.ready` 显式断言不存在 `operatingSystem` / `workingDirectory` / `timeZone` / `note` 字段；
 - Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
-- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB；
-- managed Resource 只按内容身份（mediaType/size/sha256/name）经 `GET /api/ai/runtime/resources/{sha256}` 同源下载：响应 `attachment` + `X-Content-Type-Options: nosniff`，字节与 sha256 一致；未知/不完整身份不产生链接。
+- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会先外部化为瞬时 ResourceRef（`file:///` URI，携带 mediaType/size/sha256）；Entry 写入前再摄入全局 Blob，durable message 为 `resource(blobId,name,preview)`；daemon preview 阈值默认 2000 行 / 50KB；
+- durable Blob Resource 经 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 渲染，原件响应提供权威 mediaType/sizeBytes；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 ResourceRef 兼容，未知或不完整内容身份不产生链接。
 
 默认 L1 不覆盖 task 心跳与 UI 呈现：`task.status` 心跳、renderer 分发、TaskStatusWidget 与浏览器通知等呈现契约由前端单测覆盖，真实 task 委派只由显式 `--real` 的 `real.task_delegation` 覆盖。
 

@@ -1,112 +1,180 @@
 # 存储模型
 
-PostgreSQL 是 Harness 执行、Chat、Catalog 与 Canvas 的 durable truth。权威 DDL 是 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（Flyway 执行；其中 Harness 部分与 `harness-runtime-spring` 的 `harness-runtime-schema.sql` byte-identical）。Redis 只保存 realtime overlay；S3 保存 ComfyUI 与浏览器直传对象。
+PostgreSQL 是 Catalog、Chat、Harness 与 Canvas 的 durable truth。权威 DDL 是
+[`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)；其中 Harness Runtime
+七表区块与 `harness-runtime-spring` 的 `harness-runtime-schema.sql` byte-identical。Redis 只保存
+bounded realtime cache/overlay，S3 保存全局 Blob 与 ComfyUI 临时对象。
 
-## 1. Catalog 表
+## 1. 身份规则
 
-| 表 | 身份与关键约束 |
+- kk-studio 生成并持久化的实体、commandId、requestId 使用 PostgreSQL `uuid`。
+- `version`、`revision`、`sequence`、`attempt`、`ordinal`、`resource_index`、`ref_count`、
+  `size_bytes`、宽高和时长保持整数。
+- Catalog 的稳定自然键保持不变：Provider/Agent 使用 `name`，Model 使用
+  `(provider_name, name)`，ComfyUI Workflow 使用唯一 `api_name`。
+- Provider response ID、Tool call ID、ComfyUI prompt ID 等外部 opaque ID 保持字符串。
+- V1 是 clean-slate schema；不维护兼容迁移、双读双写或全局 bigint sequence。
+
+## 2. Catalog 与 ComfyUI
+
+| 表 | 身份与职责 |
 | --- | --- |
-| `agent_provider` | `name` 主键；当前行的 `provider_type`/`base_url`/`credential`/`config` 是唯一连接事实；`version` 是 CRUD CAS token |
-| `agent_model` | `(provider_name, name)` 复合主键；`provider_name` 外键到 `agent_provider(name)`；`config` 保存结构化 Model 配置 |
-| `agent_definition` | `name` 主键；`(model_provider_name, model_name)` 外键到 Model；`variant` 是可选 variant 名称 |
+| `agent_provider` | `name` 主键；Provider 连接事实与结构化 config；`version` 是 CRUD CAS token |
+| `agent_model` | `(provider_name, name)` 主键；结构化 Model config |
+| `agent_definition` | `name` 主键；引用 Model 自然键；config 保存 tools/skills/subagents |
+| `comfyui_workflow_api` | `id uuid` 主键、唯一 `api_name`、workflow/input bindings、selector、enabled、version |
 
-Catalog 只有上述三张名称资源表。三张表不使用 bigint resource ID，均以名称（Provider/Agent 为 `name`，Model 为 `(providerName, name)`）作为身份与全部引用；`version` 是当前行的 CRUD 乐观锁（CAS）token。删除是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始；记录存续期间名称不可修改。Provider/Model 删除分别与 active Model/Agent 检查及父行锁配合，避免并发创建产生 active orphan。Model 的公开引用为 `providerName/modelName`，API 解析只在第一个 `/` 切分。结构化 Model config 包含 limit、abilities、pricing、`defaultVariant` 与 `variants`；Agent config（`agent_definition.config` JSONB）保存三个**必填**列表：`tools`/`skills` 短名集合与 `subagents` Agent 名称 allowlist——`subagents` 引用被锁定（`agent_definition` 上存在引用该名称的 allowlist 时，删除该 Agent 返回 409；更新/创建时必须能解析到现存 Agent，未知引用 404），无独立引用表。
+Provider/Model/Agent 都使用带 `expectedVersion` 的硬删除。记录存续期间自然键不可修改；删除后
+同名可重建，重建行 version 从 0 开始。
 
-## 2. ComfyUI Workflow API
+## 3. Chat
 
 | 表 | 字段与职责 |
 | --- | --- |
-| `comfyui_workflow_api` | bigint `id`、唯一 `api_name`、名称/描述、workflow/input bindings JSON、default selector、enabled、version 与时间 |
+| `chat` | `id uuid`、标题、`agent_name`、可空 `environment_name`、`yolo_enabled`、version 与时间 |
+| `chat_thread` | `(chat_id, thread_id)` 主键；每个 Thread 至多关联一个 Chat |
 
-该表只保存工作流 API 定义；ComfyUI 产物与浏览器直传对象位于对象存储，不进入 Harness Runtime 表。
+Chat 设置不复制到 Thread。Thread 的完整 BranchSettings 来自 ROOT/TURN_START Entry。
 
-## 3. Chat 与关系
+删除 Chat 时，应用先枚举关联 Thread/Session，显式释放 `harness_session_blob_ref`，再删除 Harness
+执行事实。Blob 引用不能由 FK cascade 隐式维护。
 
-| 表 | 字段与职责 |
-| --- | --- |
-| `chat` | `id`、`title`、`agent_name`、可空 `environment_name`、`yolo_enabled`、`version`、时间；后三项是 Chat 的可见发送设置 |
-| `chat_thread` | `(chat_id, thread_id)` 主键，表示 Chat 与 Thread 的历史多对多关系 |
-
-Chat 的 `agent_name`、`environment_name` 与 `yolo_enabled` 不复制到 Thread；Thread 的 branch 设置来自 head Entry 的 `BranchSettings` 快照。
-
-## 4. Harness 表（精确 7 张）
+## 4. Harness Runtime 执行表（精确 7 张）
 
 | 表 | 关键字段与约束 |
 | --- | --- |
-| `harness_session` | `id`、`title`、`created_at`；只作为 Entry Tree 容器 |
-| `harness_entry` | `id`、`session_id`、`parent_entry_id`、`entry_type`、`payload`、`created_at`；ROOT 无 parent，其余 Entry 有 parent；每 Session 唯一 ROOT |
-| `harness_thread` | `id`、非空 `head_entry_id`、`yolo_enabled`、`next_command_sequence`（≥1）、`revision`（≥0）、时间 |
-| `harness_thread_command` | `thread_id`、`sequence`、`command_type`、`payload`、`client_command_id`、`consumed_turn_start_entry_id`、`cancelled_at` |
-| `harness_model_invocation` | `thread_id`、`turn_start_entry_id`、`basis_head_entry_id`、`request`、status、attempt、`stream_checkpoint`、`result`/`error`/`result_entry_id` |
-| `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`、`request`、status、attempt、`approval`、`result`/`effects`/`error`/`result_entry_id` |
-| `harness_work` | `(target_type, target_id)`、`available_at`、`wake_version`、`lease_token`、`lease_until` |
+| `harness_session` | `id uuid`、`created_at`；Entry Tree 边界 |
+| `harness_entry` | `id uuid`、session/parent、entry_type、payload、时间；每 Session 唯一 ROOT |
+| `harness_thread` | `id uuid`、非空 head、YOLO、next sequence、revision、时间 |
+| `harness_thread_command` | PK `(thread_id, sequence)`；`client_command_id uuid`、`request_hash`、payload 与消费/取消事实 |
+| `harness_model_invocation` | `id uuid`、冻结 request、status、attempt、checkpoint、terminal result/error |
+| `harness_tool_invocation` | `id uuid`、ordinal、冻结 request、approval、result/effects/error |
+| `harness_work` | PK `(target_type, target_id uuid)`；available_at、wake_version、lease |
 
-`harness_entry.entry_type` 只允许：
+`harness_thread_command` 没有代理 id。`request_hash` 是 raw command（含 ordered contents 与 uploadId）
+的 canonical SHA-256；同一 `(thread_id, client_command_id)` 只有 hash 相同才是 exact replay。
+
+Harness EntryType：
 
 ```text
-ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR, ASSISTANT_ABORTED,
-COMPACTION, TURN_END
+ROOT, TURN_START, MESSAGE, CUSTOM, CUSTOM_MESSAGE, ASSISTANT_ERROR,
+ASSISTANT_ABORTED, COMPACTION, TURN_END
 ```
 
-`harness_thread_command.command_type` 只允许：
+ThreadCommandType：
 
 ```text
 USER_MESSAGE, CUSTOM_MESSAGE, SET_ENVIRONMENT, SET_AGENT, SET_MODEL,
 SET_ACTIVE_TOOLS, SET_YOLO
 ```
 
-Chat-scoped Thread 创建事务按 Session → ROOT（完整 `BranchSettings`）→ Thread 的顺序写入，Thread head 直接指向 ROOT（`nextCommandSequence=1`、`revision=0`）。`harness_work` 是唯一调度 mailbox（见 [harness-storage-runtime.md](harness-storage-runtime.md)）。
+## 5. 全局 Blob Storage
 
-### Goal 插件 branch state
+| 表 | 身份与职责 |
+| --- | --- |
+| `storage_blob` | `id uuid`；不可变内容与媒体事实；`ACTIVE/DELETING`；唯一 ACTIVE `(sha256,size_bytes)`；唯一一级 `ref_count` |
+| `storage_upload` | `id uuid` 一次性 Handle；`blob_id IS NULL` 为 PENDING，非空为 READY；保存权威 filename/声明/checksum/expiry |
+| `harness_session_blob_ref` | PK `(session_id, blob_id)`；Session 对 Blob 的显式引用边，每行贡献一次 Blob retain |
 
-Goal 不使用独立表。`plugins/goal` 把每次完整状态快照写成当前 Entry branch 上的 `CUSTOM` payload：
+对象键不落库：
 
-```json
-{
-  "pluginId": "goal",
-  "customType": "state",
-  "schemaVersion": 1,
-  "data": {
-    "objective": "交付并验证当前任务",
-    "tokenBudget": null,
-    "status": "active",
-    "reason": null,
-    "createdAt": "2026-01-01T00:00:00Z",
-    "updatedAt": "2026-01-01T00:00:00Z"
-  }
-}
+```text
+uploads/{uploadId}/original
+blobs/{blobId}/original
+blobs/{blobId}/preview.webp
 ```
 
-同一 `(pluginId, customType)` 的最近快照在当前 branch 生效；fork 只继承其分叉点之前的快照。`create_goal` / `get_goal` / `update_goal` v2 分别声明 WRITE / READ / WRITE，状态只允许 `active`、`complete`、`blocked`；`update_goal` 只允许从 active 进入终态。`agent_thread_goal`、`GoalStore` 与 `DatabaseGoalStore` 均不存在。
+### 5.1 Upload
 
-**不存在的表**：没有 `agent_thread_goal`、dead-letter、interaction、usage ledger、artifact、global settings、input（独立表）、execution activation 等 Harness 辅助表。**没有子 Agent/委派表**：`task` 委派复用既有 Thread/Entry/Invocation（子 Session 由 ROOT 的 `subagentContext` payload 标识），进程内 `SubagentRunRegistry` 不是 durable 表。Harness V1 与 runtime-spring schema byte-identical（由 `CoreHarnessArchitectureTest` 校验）。
+Reserve 请求为 `{filename, mediaType, sizeBytes, sha256}`：
 
-## 5. Invocation 冻结事实
+1. 命中 ACTIVE `(sha256,size)` 时 retain Blob 并直接创建 READY Handle。
+2. 未命中时创建 PENDING Handle，返回包含 `If-None-Match: *` 与
+   `x-amz-checksum-sha256` 的预签名 PUT。
+3. complete 使用 checksum-mode HEAD 校验真实大小与 SHA-256，执行媒体探针，复制到候选 Blob
+   key，再在短事务内解决去重并绑定 READY。
+4. READY Handle 持有一个 Blob 引用；delete/expiry/消费删行并 release。
 
-`ModelInvocationRequest` 的 `environmentName`（route）、exact `providerRequest`、`toolBindings`（descriptor/type/route/plugin provenance/state accesses）、`skillBindings` 与 `subagentBindings`（Agent 名称 + 描述 allowlist）、`yoloEnabled` 是同一份冻结事实，JSON 存储在 `harness_model_invocation.request`。`ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段：Provider 连接事实与 cache capability 在每次 Model attempt 由 Core 按 `providerName` 读取当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。Retry 只改变 invocation attempt 与调度时间，重放同一份 request；`ToolProcessor` 使用 request 中的原 binding，不重新选择 Environment 或插件贡献。Provider 返回冻结 request 中不可见的 Tool 时，Model Invocation 终结失败并由 Agent Loop 写入 `ASSISTANT_ERROR`，不物化 ToolInvocation。
+`StorageUploadService.lockReady` 使用 `PROPAGATION_MANDATORY`，返回锁定行中的权威
+`blobId + filename`。消费方必须在同一外层事务完成 retain 新 owner、删除 Upload 与写入 owner 行。
 
-`harness_tool_invocation.effects` 是 strict JSON object，保存有序 `ToolEffectBatch`；仅 `SUCCEEDED` 可非空，且与成功结果在同一次 Store update 中原子持久化。其后状态与 effects 均 terminal immutable。
+### 5.2 Blob 生命周期
 
-## 6. Canvas
+`storage_blob.ref_count` 只统计直接 owner：
+
+- READY Upload；
+- Canvas Blob Resource 行；
+- `harness_session_blob_ref` 行。
+
+Function INPUT/OUTPUT pin 不修改 ref_count，只决定无 owner Canvas Resource 是否保留。
+
+`retain/release` 都要求调用方事务。release 减到 0 时同一 SQL 将行从
+`ACTIVE(ref_count>0)` 切换为 `DELETING(ref_count=0)`；DELETING 不可复活。提交后当前线程按
+`preview -> original -> row` 清理。机会式小批次与应用启动恢复处理过期 Upload 和崩溃留下的
+DELETING 行；没有独立 GC worker。
+
+## 6. Durable Harness Resource
+
+Wire `USER_MESSAGE` 的 `ATTACHMENT(uploadId)` 是瞬时内容，不能进入 durable codec。Chat/Canvas
+命令提交事务消费 READY Upload 后写成：
+
+```text
+ResourceMessageContent(blobId, name, preview?)
+```
+
+并通过 `harness_session_blob_ref` retain。Tool 边界仍可产生瞬时
+`ResourceRef(uri, mediaType, name, size, sha256)`；在 Tool Result Entry 写入前，
+`GlobalStorageToolResultHistoryMaterializer` 有界读取 data/file/http/https/s3 内容，摄入全局 Blob，
+把 durable history 转换为同一 `ResourceMessageContent`。因此 Entry/Command durable JSON 不保存
+URI、bucket、object key、mediaType、size 或长期 URL。
+
+Provider attempt 才从 `storage_blob` 读取媒体事实并生成新鲜预签名 URL；前端渲染也只通过
+`/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 临时解析地址。原件响应额外携带
+权威 `mediaType/sizeBytes`；preview 与 upload 签名允许这两个字段为 null。
+
+## 7. Canvas
 
 | 表 | 职责 |
 | --- | --- |
-| `canvas_document` | Canvas 身份、标题、graph revision 与时间 |
+| `canvas_document` | `id uuid`、标题、单调 `version`、可空唯一 `thread_id`、时间 |
 | `canvas_group` | 不嵌套的 world transform Group |
-| `canvas_node` | ResourceNode、规范化唯一名称、transform、可选 Group/Function |
-| `canvas_node_resource` | Node 当前有序 Resource 关系；Node 删除时级联，Resource 保留 |
-| `canvas_link` | `(canvas_id, source_node_id, target_node_id)` 可见性边；节点删除级联 |
-| `canvas_function_run` | Function 节点当前/最后一次 Run；node/run FOR UPDATE，checkpoint 与 terminal 只按 `node_id + request_id + RUNNING` 条件更新 |
-| `canvas_resource` | Canvas 内 immutable Resource 内容与 metadata |
-| `canvas_upload` | finalize 前的上传声明与过期事实 |
-| `canvas_command_dedup` | `(canvas_id, command_id)`、request hash、applied revision 与创建时间 |
+| `canvas_node` | 唯一 Node 形态；name/transform/group；可选 `model_key + function_config_json` |
+| `canvas_link` | PK `(canvas_id, source_node_id, target_node_id)`；候选引用边，允许成环 |
+| `canvas_resource` | `id uuid`；nullable owner pair；`blob_id` 与 `text_content` 恰好互斥 |
+| `canvas_function_run` | PK `node_id`；当前/最后 Run，`request_id uuid` |
+| `canvas_function_resource_ref` | INPUT/OUTPUT pin；只保护 Resource 生命周期 |
+| `canvas_command_dedup` | PK `(canvas_id, command_id)`；request hash 与 applied version |
 
-`DurableCanvasService` 支持 Canvas create/list/snapshot，以及 CREATE/UPDATE 文本、Resource/Function Node、Function 配置、rename、绝对 transform、Node/Link/Group 创建移动解绑删除的 typed atomic command batch。名称使用 trim + NFKC + case-insensitive 规范值并由唯一索引并发强制。
+`canvas_resource(owner_node_id, resource_index)` 成对可空：可见资源必须有 owner；Function target
+物化中与 pinned orphan 可以暂时无 owner。Canvas Resource 行贡献一个 Blob 引用；删除行必须显式
+release。
 
-## 7. 事务不变量
+`canvas_document.version` 是 command、Patch、SSE 与 Function 可见状态的公共坐标：
 
-- Thread、Command、ModelInvocation、ToolInvocation siblings、Work 的锁序由 [harness-runtime-contracts.md](harness-runtime-contracts.md) 统一定义（Thread → Commands → Model → Tool siblings → Work）。
-- 每次可见 Thread 变化 `revision` 恰好 +1；`next_command_sequence` 不回退。
-- 命令 batch 的 sequence 预留、命令行写入与 THREAD Work wake 在同一事务。
-- terminal apply（有序 CUSTOM effects + Tool Result Entry + head + Invocation 挂 `resultEntryId`）与后续 Work 请求在同一事务；正常 apply 与 Stop 共用唯一 `ToolOutcomeAppender`。
-- Stop 的 replay 查找在 revision CAS 之前；approval 的 replay 不 bump revision。
+- 成功 command batch +1；
+- Function start/cancel/success/failure +1；
+- checkpoint、Thread 绑定和 exact replay 不增加。
+
+Redis Stream 只缓存 after-commit Patch；PostgreSQL trigger 只发 version NOTIFY 提示，不修改实体。
+
+## 8. FK 与删除
+
+- Harness Runtime 七表保持 Runtime schema 原始 FK 规则。
+- `storage_upload -> storage_blob`、`harness_session_blob_ref -> session/blob`、
+  `canvas_resource -> storage_blob` 都是 RESTRICT。
+- Canvas ownership FK 使用 RESTRICT；应用按
+  `pins -> resources/runs -> links -> nodes -> groups -> dedup -> document` 显式删除。
+- Canvas/Chat 深删除在删除 Session 前逐行删除 `harness_session_blob_ref` 并 release Blob。
+- `canvas_document.thread_id -> harness_thread` 是 RESTRICT；删除 Canvas 时先删 document，再在同一
+  外层事务深删绑定 Thread/Session。
+
+## 9. 时间与事务
+
+- Harness 锁序由 [harness-runtime-contracts.md](harness-runtime-contracts.md) 定义：
+  `Thread -> Commands -> Model -> Tool siblings -> Work`。
+- Harness Store 加入调用方事务（`PROPAGATION_REQUIRED`）；引用管理器与 `lockReady` 使用
+  `MANDATORY`，防止行锁提前释放。
+- `canvas_document` 写入先锁 document，再锁 node/resource/run；Function 使用
+  `document -> node -> run`。
+- PostgreSQL `current_timestamp` 是事务开始时间，不能用于可能等待锁后提交的单调更新时间；
+  Canvas UPDATE 使用 `clock_timestamp()` 与 `greatest(...)`。
