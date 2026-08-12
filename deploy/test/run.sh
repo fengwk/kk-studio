@@ -161,15 +161,18 @@ with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as respon
 '
 
 if [[ "$WITH_APP" == "true" ]]; then
-  step "Checking Canvas Resource reserve, direct PUT, finalize, and preview GET"
+  step "Checking global Blob upload, Canvas consumption, Function runs, and signed media GET"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
   CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../core/src/test/resources/fun/fengwk/kkstudio/core/studio/resource/tiny.png" \
     python3 - <<'PY'
+import base64
+import hashlib
 import json
 import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 base_url = os.environ["CANVAS_TEST_APP_URL"]
@@ -187,54 +190,117 @@ def json_call(method: str, path: str, body: dict | None = None) -> dict:
         return json.load(response)["data"]
 
 
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def header(headers: dict, name: str) -> str:
+    return next(value for key, value in headers.items() if key.lower() == name.lower())
+
+
+def upserted_node(patch: dict, node_id: str) -> dict:
+    return next(
+        item["node"]
+        for item in patch["nodes"]
+        if item["op"] == "UPSERT" and item["node"]["id"] == node_id
+    )
+
+
 canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
+assert uuid.UUID(canvas["id"]).version == 4
+assert canvas["version"] == 0
+assert canvas["threadId"] is None
+sha256 = hashlib.sha256(image).hexdigest()
 reservation = json_call(
     "POST",
-    f"/api/canvases/{canvas['id']}/uploads",
+    "/api/storage/uploads",
     {
-        "kind": "IMAGE",
         "filename": "tiny.png",
         "mediaType": "image/png",
-        "size": str(len(image)),
+        "sizeBytes": len(image),
+        "sha256": sha256,
     },
 )
 assert "bucket" not in reservation and "key" not in reservation
-assert next(
-    value
-    for name, value in reservation["headers"].items()
-    if name.lower() == "if-none-match"
-) == "*"
+assert reservation["state"] == "PENDING"
+assert reservation["blobId"] is None
+assert uuid.UUID(reservation["id"]).version == 4
+presigned_put = reservation["presignedPut"]
+assert header(presigned_put["headers"], "if-none-match") == "*"
+assert header(presigned_put["headers"], "x-amz-checksum-sha256") == base64.b64encode(
+    bytes.fromhex(sha256)
+).decode()
 put = urllib.request.Request(
-    reservation["url"],
+    presigned_put["url"],
     data=image,
-    headers=reservation.get("headers") or {},
-    method=reservation["method"],
+    headers=presigned_put.get("headers") or {},
+    method=presigned_put["method"],
 )
 with urllib.request.urlopen(put, timeout=30) as response:
     assert response.status == 200
 
+# 同内容重放验证 create-only；不同内容重放同时受 create-only 与 checksum 保护。
+duplicate = urllib.request.Request(
+    presigned_put["url"],
+    data=image,
+    headers=presigned_put.get("headers") or {},
+    method=presigned_put["method"],
+)
+try:
+    urllib.request.urlopen(duplicate, timeout=30)
+except urllib.error.HTTPError as error:
+    assert error.code in (409, 412), error.code
+else:
+    raise AssertionError("create-only presigned PUT unexpectedly accepted a duplicate")
+
 replacement = bytes([image[0] ^ 0xFF]) + image[1:]
 overwrite = urllib.request.Request(
-    reservation["url"],
+    presigned_put["url"],
     data=replacement,
-    headers=reservation.get("headers") or {},
-    method=reservation["method"],
+    headers=presigned_put.get("headers") or {},
+    method=presigned_put["method"],
 )
 try:
     urllib.request.urlopen(overwrite, timeout=30)
 except urllib.error.HTTPError as error:
-    assert error.code in (409, 412), error.code
+    assert error.code in (400, 409, 412), error.code
 else:
     raise AssertionError("create-only presigned PUT unexpectedly overwrote original")
 
-resource = json_call(
+completed = json_call(
     "POST",
-    f"/api/canvases/{canvas['id']}/uploads/{reservation['uploadId']}/complete",
+    f"/api/storage/uploads/{reservation['id']}/complete",
 )
-assert resource["id"] == reservation["uploadId"]
+assert completed["id"] == reservation["id"]
+assert completed["state"] == "READY"
+assert completed["presignedPut"] is None
+assert uuid.UUID(completed["blobId"]).version == 4
+
+resource_node_id = new_id()
+resource_patch = json_call(
+    "POST",
+    f"/api/canvases/{canvas['id']}/commands",
+    {
+        "expectedVersion": 0,
+        "commandId": new_id(),
+        "commands": [
+            {
+                "type": "CREATE_RESOURCE_NODE",
+                "nodeId": resource_node_id,
+                "name": "uploaded",
+                "uploadIds": [reservation["id"]],
+                "transform": {"x": 0, "y": 0, "width": 320, "height": 260},
+            }
+        ],
+    },
+)
+assert resource_patch["baseVersion"] == 0 and resource_patch["version"] == 1
+resource_node = upserted_node(resource_patch, resource_node_id)
+resource = resource_node["resources"][0]
+assert resource["blobId"] == completed["blobId"]
 assert resource["mediaType"] == "image/png"
-metadata = json.loads(resource["metadataJson"])
-assert metadata["width"] > 0 and metadata["height"] > 0
+assert resource["width"] > 0 and resource["height"] > 0
+assert resource["sizeBytes"] == len(image)
 
 original = json_call(
     "POST",
@@ -254,15 +320,17 @@ with urllib.request.urlopen(preview["url"], timeout=30) as response:
     assert response.status == 200
     assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
 
-snapshot = json_call(
+function_node_id = new_id()
+function_patch = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/commands",
     {
-        "expectedRevision": "0",
-        "commandId": "container-function-node",
+        "expectedVersion": 1,
+        "commandId": new_id(),
         "commands": [
             {
                 "type": "CREATE_FUNCTION_NODE",
+                "nodeId": function_node_id,
                 "name": "generated",
                 "modelKey": "fake-image",
                 "configJson": json.dumps(
@@ -281,14 +349,15 @@ snapshot = json_call(
         ],
     },
 )
-function_node = next(node for node in snapshot["nodes"] if node["name"] == "generated")
-assert snapshot["document"]["graphRevision"] == "1"
+assert function_patch["baseVersion"] == 1 and function_patch["version"] == 2
+function_node = upserted_node(function_patch, function_node_id)
+request_id = new_id()
 started = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/runs",
-    {"requestId": "container-fake-image"},
+    {"requestId": request_id},
 )
-assert started["requestId"] == "container-fake-image"
+assert started["requestId"] == request_id
 for _ in range(120):
     current = json_call(
         "GET",
@@ -306,7 +375,7 @@ generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
 generated_node = next(
     node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
 )
-assert generated_snapshot["document"]["graphRevision"] == "1"
+assert generated_snapshot["document"]["version"] == 4
 assert len(generated_node["resources"]) == 1
 generated_resource = generated_node["resources"][0]
 assert generated_resource["kind"] == "IMAGE"
@@ -335,15 +404,17 @@ assert all(item["key"] != "seedance2.0mini" for item in models)
 
 def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
     current = json_call("GET", f"/api/canvases/{canvas['id']}")
-    command = json_call(
+    node_id = new_id()
+    patch = json_call(
         "POST",
         f"/api/canvases/{canvas['id']}/commands",
         {
-            "expectedRevision": current["document"]["graphRevision"],
-            "commandId": f"container-{model_key}",
+            "expectedVersion": current["document"]["version"],
+            "commandId": new_id(),
             "commands": [
                 {
                     "type": "CREATE_FUNCTION_NODE",
+                    "nodeId": node_id,
                     "name": name,
                     "modelKey": model_key,
                     "configJson": json.dumps(
@@ -362,11 +433,14 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
             ],
         },
     )
-    node = next(item for item in command["nodes"] if item["name"] == name)
+    assert patch["baseVersion"] == current["document"]["version"]
+    assert patch["version"] == current["document"]["version"] + 1
+    node = upserted_node(patch, node_id)
+    request_id = new_id()
     run = json_call(
         "POST",
         f"/api/canvases/{canvas['id']}/nodes/{node['id']}/runs",
-        {"requestId": f"container-{model_key}-run"},
+        {"requestId": request_id},
     )
     for _ in range(160):
         if run["status"] != "RUNNING":
@@ -377,6 +451,7 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
         )
     assert run["status"] == "SUCCEEDED", run
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
+    assert snapshot["document"]["version"] == patch["version"] + 2
     return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
 
 

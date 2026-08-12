@@ -1,6 +1,5 @@
 import { writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
 import { assert, envelopeData, sleep, cid } from '../lib/http.mjs'
 import {
   approveToolInvocation,
@@ -644,7 +643,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
   requires: ['real', 'tools'],
-  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentName、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，core externalizer 将其外部化为 Resource；durable TOOL MESSAGE entry 的 tool_result.contents 携带 canonical file: URI（uri/mediaType/size/sha256）',
+  docs: '仅 minimax/MiniMax-M2.7：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（frozen environmentName、无 location）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     await requireRealMiniMaxM27(ctx)
@@ -679,10 +678,11 @@ registerCase({
       const environmentName = ctx.vars.daemonEnvironment.name
       // 固定大文本 fixture（临时 root，不进仓库）：单行 >8KB，core externalizer 内联阈值
       // (INLINE_RESULT_UTF8_BYTES=8KB) 之上、daemon preview 阈值（50KB）之下 => read 返回 Text，
-      // core externalizer 确定性外部化为 Resource（LocalFileResourceStore 的 file:/// URI）。
+      // Tool Result Entry 写入前由 history materializer 摄入全局 Blob，durable history 不保留 file URI。
       const envRoot = process.env.DAEMON_ENV_ROOT || '/tmp/kk-studio-e2e-env'
       const fixturePath = path.join(envRoot, 'e2e-resource.txt')
-      writeFileSync(fixturePath, `E2E-RESOURCE-FIXTURE ${'x'.repeat(16 * 1024)}\n`)
+      const fixtureContent = `E2E-RESOURCE-FIXTURE ${'x'.repeat(16 * 1024)}\n`
+      writeFileSync(fixturePath, fixtureContent)
       chat = await createChat(ctx, {
         title: `e2e-tool-chat-${suffix}`,
         agentName: toolAgent.name,
@@ -832,47 +832,56 @@ registerCase({
       )
       for (const resource of resources) {
         assert(
-          /^file:/i.test(String(resource.uri || '')),
-          `resource URI must be a canonical file: URI: ${JSON.stringify(resource)}`,
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+            String(resource.blobId || ''),
+          ),
+          `durable resource must carry a blobId: ${JSON.stringify(resource)}`,
         )
         assert(
-          /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(resource.mediaType || '')),
-          `resource mediaType must be canonical: ${JSON.stringify(resource)}`,
+          typeof resource.name === 'string' && resource.name.trim(),
+          `durable resource name must be present: ${JSON.stringify(resource)}`,
         )
         assert(
-          typeof resource.size === 'number' && resource.size > 0,
-          `resource size must be present: ${JSON.stringify(resource)}`,
+          resource.preview == null || typeof resource.preview === 'string',
+          `durable resource preview must be null or text: ${JSON.stringify(resource)}`,
         )
         assert(
-          /^[0-9a-f]{64}$/.test(String(resource.sha256 || '')),
-          `resource sha256 must be a 64-hex digest: ${JSON.stringify(resource)}`,
+          !Object.hasOwn(resource, 'uri')
+            && !Object.hasOwn(resource, 'mediaType')
+            && !Object.hasOwn(resource, 'size')
+            && !Object.hasOwn(resource, 'sha256'),
+          `durable history must not copy transient ResourceRef facts: ${JSON.stringify(resource)}`,
         )
       }
       const managed = resources[0]
-      const query = new URLSearchParams({
-        mediaType: managed.mediaType,
-        size: String(managed.size),
-      })
-      if (typeof managed.name === 'string' && managed.name.trim()) {
-        query.set('name', managed.name)
-      }
-      const downloadUrl =
-        `${ctx.baseUrl}/api/ai/runtime/resources/${managed.sha256}?${query.toString()}`
-      const download = await fetch(downloadUrl)
-      assert(download.status === 200, `managed resource download status ${download.status}`)
+      const { json: signedJson } = await ctx.call(
+        'GET',
+        `/api/storage/blobs/${managed.blobId}/presigned-original`,
+      )
+      const signed = envelopeData(signedJson)
+      assert(signed.method === 'GET', JSON.stringify(signed))
       assert(
-        String(download.headers.get('content-type') || '').startsWith(managed.mediaType),
+        /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(signed.mediaType || '')),
+        `blob mediaType must be canonical: ${JSON.stringify(signed)}`,
+      )
+      assert(
+        typeof signed.sizeBytes === 'number' && signed.sizeBytes > 0,
+        `blob sizeBytes must be present: ${JSON.stringify(signed)}`,
+      )
+      const download = await fetch(signed.url, { headers: signed.headers || {} })
+      assert(download.status === 200, `blob resource download status ${download.status}`)
+      assert(
+        String(download.headers.get('content-type') || '').startsWith(signed.mediaType),
         `managed resource media type mismatch: ${download.headers.get('content-type')}`,
       )
-      assert(
-        download.headers.get('x-content-type-options') === 'nosniff',
-        `managed resource must set nosniff: ${JSON.stringify([...download.headers])}`,
-      )
       const bytes = Buffer.from(await download.arrayBuffer())
-      assert(bytes.length === managed.size, `download size ${bytes.length} != ${managed.size}`)
       assert(
-        createHash('sha256').update(bytes).digest('hex') === managed.sha256,
-        'managed resource download digest mismatch',
+        bytes.length === signed.sizeBytes,
+        `download size ${bytes.length} != ${signed.sizeBytes}`,
+      )
+      assert(
+        bytes.equals(Buffer.from(fixtureContent)),
+        'blob resource download bytes differ from the fixture',
       )
       ctx.writeArtifact(
         'tool-turn-final.json',
