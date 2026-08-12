@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.core.storage.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
@@ -66,6 +67,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3StorageProperties s3Properties;
   private final StorageProperties storageProperties;
   private final TransactionTemplate transactionTemplate;
+  private final TransactionTemplate mandatoryTransactionTemplate;
 
   public StorageUploadServiceImpl(
       StorageUploadRepository uploadRepository,
@@ -85,8 +87,12 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageProperties = Objects.requireNonNull(storageProperties, "storageProperties");
-    this.transactionTemplate =
-        new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
+    PlatformTransactionManager requiredTransactionManager =
+        Objects.requireNonNull(transactionManager, "transactionManager");
+    this.transactionTemplate = new TransactionTemplate(requiredTransactionManager);
+    this.mandatoryTransactionTemplate = new TransactionTemplate(requiredTransactionManager);
+    this.mandatoryTransactionTemplate.setPropagationBehavior(
+        TransactionDefinition.PROPAGATION_MANDATORY);
   }
 
   @Override
@@ -211,7 +217,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   @Override
   public ReadyUpload lockReady(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
-    return transactionTemplate.execute(
+    return mandatoryTransactionTemplate.execute(
         status -> {
           StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
           if (locked == null) {
@@ -219,7 +225,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
           }
           if (locked.getBlobId() == null) {
             throw new StorageVerificationException(
-                "upload " + uploadId + " is PENDING; complete it before sending");
+                "upload " + uploadId + " is PENDING; complete it before consuming");
           }
           if (!locked.getExpiresAt().isAfter(Instant.now())) {
             throw new StorageVerificationException("upload " + uploadId + " expired");

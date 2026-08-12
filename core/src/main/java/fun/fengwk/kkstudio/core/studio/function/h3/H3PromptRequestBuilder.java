@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 构造 H3 Prompt Agent 的固定 SYSTEM 与 USER 消息。
@@ -84,7 +85,7 @@ public final class H3PromptRequestBuilder {
           .append(" | ")
           .append(reference.mediaType())
           .append(" | ")
-          .append(reference.size())
+          .append(reference.sizeBytes())
           .append(" | ")
           .append(note)
           .append(" |\n");
@@ -146,5 +147,5 @@ public final class H3PromptRequestBuilder {
     return value;
   }
 
-  private record ReferenceKey(long nodeId, int index) {}
+  private record ReferenceKey(UUID nodeId, int index) {}
 }

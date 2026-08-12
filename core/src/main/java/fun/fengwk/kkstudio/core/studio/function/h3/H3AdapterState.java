@@ -17,7 +17,7 @@ public record H3AdapterState(
     Long seed,
     UUID harnessThreadId,
     String enhancedPrompt,
-    Map<Long, H3UploadedFile> uploads,
+    Map<UUID, H3UploadedFile> uploads,
     String promptId,
     H3OutputDescriptor output) {
 
@@ -62,7 +62,7 @@ public record H3AdapterState(
     UUID harnessThreadId = optionalUuid(root, "harnessThreadId");
     String enhancedPrompt = optionalText(root, "enhancedPrompt");
     String promptId = optionalText(root, "promptId");
-    Map<Long, H3UploadedFile> uploads = decodeUploads(root.get("uploads"));
+    Map<UUID, H3UploadedFile> uploads = decodeUploads(root.get("uploads"));
     H3OutputDescriptor output = decodeOutput(root.get("output"));
     return new H3AdapterState(seed, harnessThreadId, enhancedPrompt, uploads, promptId, output);
   }
@@ -74,10 +74,10 @@ public record H3AdapterState(
     put(state, "enhancedPrompt", enhancedPrompt);
     if (!uploads.isEmpty()) {
       Map<String, Object> values = new LinkedHashMap<>();
-      for (Map.Entry<Long, H3UploadedFile> entry : uploads.entrySet()) {
+      for (Map.Entry<UUID, H3UploadedFile> entry : uploads.entrySet()) {
         H3UploadedFile value = entry.getValue();
         values.put(
-            Long.toString(entry.getKey()),
+            entry.getKey().toString(),
             Map.of(
                 "name", value.name(),
                 "subfolder", value.subfolder(),
@@ -109,11 +109,9 @@ public record H3AdapterState(
     return new H3AdapterState(seed, harnessThreadId, value, uploads, promptId, output);
   }
 
-  public H3AdapterState withUpload(long resourceId, H3UploadedFile value) {
-    if (resourceId <= 0L) {
-      throw new IllegalArgumentException("resourceId must be positive");
-    }
-    Map<Long, H3UploadedFile> next = new LinkedHashMap<>(uploads);
+  public H3AdapterState withUpload(UUID resourceId, H3UploadedFile value) {
+    Objects.requireNonNull(resourceId, "resourceId");
+    Map<UUID, H3UploadedFile> next = new LinkedHashMap<>(uploads);
     next.put(resourceId, Objects.requireNonNull(value, "value"));
     return new H3AdapterState(seed, harnessThreadId, enhancedPrompt, next, promptId, output);
   }
@@ -126,27 +124,24 @@ public record H3AdapterState(
     return new H3AdapterState(seed, harnessThreadId, enhancedPrompt, uploads, promptId, value);
   }
 
-  private static Map<Long, H3UploadedFile> decodeUploads(JsonNode value) {
+  private static Map<UUID, H3UploadedFile> decodeUploads(JsonNode value) {
     if (value == null) {
       return Map.of();
     }
     if (!(value instanceof ObjectNode object)) {
       throw new IllegalArgumentException("uploads must be an object");
     }
-    Map<Long, H3UploadedFile> uploads = new LinkedHashMap<>();
+    Map<UUID, H3UploadedFile> uploads = new LinkedHashMap<>();
     object
         .fields()
         .forEachRemaining(
             entry -> {
-              long resourceId;
+              UUID resourceId;
               try {
-                if (!entry.getKey().matches("[1-9][0-9]*")) {
-                  throw new NumberFormatException();
-                }
-                resourceId = Long.parseLong(entry.getKey());
-              } catch (NumberFormatException error) {
+                resourceId = UUID.fromString(entry.getKey());
+              } catch (IllegalArgumentException error) {
                 throw new IllegalArgumentException(
-                    "uploads key must be a positive decimal Resource id", error);
+                    "uploads key must be a canonical UUID Resource id", error);
               }
               ObjectNode file = object(entry.getValue(), "uploads." + entry.getKey());
               requireExact(file, Set.of("name", "subfolder", "type"), "uploads." + entry.getKey());

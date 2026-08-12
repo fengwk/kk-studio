@@ -13,6 +13,8 @@ import java.util.UUID;
 /** adapterState 测试证明 checkpoint 完整 round-trip，并对未知、错型和非精确嵌套结构 fail closed。 */
 class H3AdapterStateTest {
 
+  private static final UUID UPLOAD_1 = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID UPLOAD_2 = UUID.fromString("00000000-0000-0000-0000-000000000002");
   private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
@@ -22,7 +24,7 @@ class H3AdapterStateTest {
             .withSeed(0L)
             .withHarnessThreadId(new UUID(0L, 2L))
             .withEnhancedPrompt("增强提示")
-            .withUpload(11L, new H3UploadedFile("11.png", "kk-studio/7", "input"))
+            .withUpload(UPLOAD_1, new H3UploadedFile("11.png", "kk-studio/7", "input"))
             .withPromptId("prompt-1")
             .withOutput(new H3OutputDescriptor("result.mp4", "", "output"));
 
@@ -30,7 +32,7 @@ class H3AdapterStateTest {
     assertEquals(1, state.uploads().size());
     assertThrows(
         UnsupportedOperationException.class,
-        () -> state.uploads().put(12L, new H3UploadedFile("12.png", "x", "input")));
+        () -> state.uploads().put(UPLOAD_2, new H3UploadedFile("12.png", "x", "input")));
   }
 
   @Test
@@ -49,8 +51,8 @@ class H3AdapterStateTest {
             H3AdapterState.empty()
                 .withEnhancedPrompt("界".repeat(H3AdapterState.MAX_ENHANCED_PROMPT_BYTES)));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> H3AdapterState.empty().withUpload(0L, new H3UploadedFile("a", "b", "input")));
+        NullPointerException.class,
+        () -> H3AdapterState.empty().withUpload(null, new H3UploadedFile("a", "b", "input")));
     assertThrows(
         IllegalArgumentException.class,
         () -> H3AdapterState.decode(Map.of("future", true), mapper));

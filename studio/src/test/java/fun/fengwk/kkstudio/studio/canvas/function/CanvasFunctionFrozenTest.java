@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Function 冻结计划携带 UUID 身份与执行所需媒体快照。 */
+/** Function 冻结计划携带 UUID 身份与权威 blob 媒体事实快照。 */
 class CanvasFunctionFrozenTest {
 
   private static final UUID NODE_ID = new UUID(0L, 20);
@@ -33,11 +33,15 @@ class CanvasFunctionFrozenTest {
             "a.png",
             "image/png",
             1024,
-            "{}");
+            800L,
+            600L,
+            null);
     assertEquals(RESOURCE_ID, reference.resourceId());
     assertEquals(BLOB_ID, reference.blobId());
     assertEquals(CanvasResourceKind.IMAGE, reference.kind());
-    assertEquals(1024L, reference.size());
+    assertEquals(1024L, reference.sizeBytes());
+    assertEquals(800L, reference.width());
+    assertEquals(600L, reference.height());
 
     assertThrows(
         NullPointerException.class,
@@ -51,12 +55,24 @@ class CanvasFunctionFrozenTest {
                 "a",
                 "image/png",
                 1,
-                "{}"));
+                null,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
             new CanvasFunctionFrozenReference(
-                NODE_ID, 0, null, BLOB_ID, CanvasResourceKind.IMAGE, "a", "image/png", 1, "{}"));
+                NODE_ID,
+                0,
+                null,
+                BLOB_ID,
+                CanvasResourceKind.IMAGE,
+                "a",
+                "image/png",
+                1,
+                null,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -69,7 +85,9 @@ class CanvasFunctionFrozenTest {
                 "a",
                 "image/png",
                 1,
-                "{}"));
+                null,
+                null,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -82,7 +100,9 @@ class CanvasFunctionFrozenTest {
                 "a",
                 "image/png",
                 1,
-                "{}"));
+                null,
+                null,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -95,7 +115,54 @@ class CanvasFunctionFrozenTest {
                 "a",
                 "image/png",
                 -1,
-                "{}"));
+                null,
+                null,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionFrozenReference(
+                NODE_ID,
+                0,
+                RESOURCE_ID,
+                BLOB_ID,
+                CanvasResourceKind.IMAGE,
+                "a",
+                "image/png",
+                1,
+                800L,
+                null,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionFrozenReference(
+                NODE_ID,
+                0,
+                RESOURCE_ID,
+                BLOB_ID,
+                CanvasResourceKind.IMAGE,
+                "a",
+                "image/png",
+                1,
+                0L,
+                600L,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasFunctionFrozenReference(
+                NODE_ID,
+                0,
+                RESOURCE_ID,
+                BLOB_ID,
+                CanvasResourceKind.IMAGE,
+                "a",
+                "image/png",
+                1,
+                null,
+                null,
+                0L));
   }
 
   @Test

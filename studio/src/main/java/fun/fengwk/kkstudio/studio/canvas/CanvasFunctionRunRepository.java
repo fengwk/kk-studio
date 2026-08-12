@@ -24,4 +24,8 @@ public interface CanvasFunctionRunRepository {
       UUID nodeId, UUID requestId, String stateJson, String stage, Instant updatedAt);
 
   boolean transitionTerminal(CanvasFunctionRun run);
+
+  boolean deleteByNodeId(UUID nodeId);
+
+  boolean deleteByCanvasId(UUID canvasId);
 }

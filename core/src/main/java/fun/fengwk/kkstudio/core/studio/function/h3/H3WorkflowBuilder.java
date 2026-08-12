@@ -12,6 +12,7 @@ import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** 从仓库内清洁官流模板构造单次 MiniMax-H3 Ref2VA API workflow。 */
 public final class H3WorkflowBuilder {
@@ -45,9 +46,9 @@ public final class H3WorkflowBuilder {
       String ratio,
       int duration,
       long seed,
-      long targetResourceId,
+      UUID targetResourceId,
       H3ReferenceManifest manifest,
-      Map<Long, H3UploadedFile> uploads) {
+      Map<UUID, H3UploadedFile> uploads) {
     if (enhancedPrompt == null || enhancedPrompt.isBlank()) {
       throw new IllegalArgumentException("enhancedPrompt must not be blank");
     }
@@ -58,8 +59,9 @@ public final class H3WorkflowBuilder {
     if (duration < 4 || duration > 15) {
       throw new IllegalArgumentException("duration must be between 4 and 15");
     }
-    if (seed < 0L || targetResourceId <= 0L) {
-      throw new IllegalArgumentException("seed must be nonnegative and targetResourceId positive");
+    if (seed < 0L || targetResourceId == null) {
+      throw new IllegalArgumentException(
+          "seed must be nonnegative and targetResourceId must not be null");
     }
     Objects.requireNonNull(manifest, "manifest");
     Objects.requireNonNull(uploads, "uploads");

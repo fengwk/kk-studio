@@ -29,6 +29,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** 通过 OpenCLI Hub + jimeng-agent 执行 Seedance 2.0 系列。 */
@@ -116,12 +117,8 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         case VIDEO -> {
           videoCount++;
           MediaMetadata metadata = parseMetadata(reference, true);
-          if (!Set.of("mp4", "mov").contains(metadata.container())
-              || !Set.of("h264", "hevc").contains(metadata.videoCodec())
-              || (metadata.audioCodec() != null
-                  && !Set.of("aac", "mp3").contains(metadata.audioCodec()))) {
-            throw new IllegalArgumentException(
-                "Seedance VIDEO requires MP4/MOV, h264/hevc and optional aac/mp3 audio");
+          if (!Set.of("mp4", "mov").contains(metadata.container())) {
+            throw new IllegalArgumentException("Seedance VIDEO requires MP4/MOV container");
           }
           validateDuration(metadata.durationMs(), "VIDEO");
           videoDuration += metadata.durationMs();
@@ -129,9 +126,8 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         case AUDIO -> {
           audioCount++;
           MediaMetadata metadata = parseMetadata(reference, false);
-          if (!Set.of("wav", "mp3").contains(metadata.container())
-              || metadata.audioCodec() == null) {
-            throw new IllegalArgumentException("Seedance AUDIO metadata is invalid");
+          if (!Set.of("wav", "mp3").contains(metadata.container())) {
+            throw new IllegalArgumentException("Seedance AUDIO container is invalid");
           }
           validateDuration(metadata.durationMs(), "AUDIO");
           audioDuration += metadata.durationMs();
@@ -153,7 +149,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String assetId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.ASSET_ID);
@@ -262,9 +258,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
           context.checkpoint("SEEDANCE_MATERIALIZING", state);
           ExecutionResource output = statusResult.resources().get(0);
           try (HubResourceStream stream = client.openResource(output)) {
-            long resourceId =
-                context.materializeTarget(
-                    run.targetResourceId(), stream.mediaType(), stream.size(), stream.content());
+            UUID resourceId = context.materializeTarget(run.targetResourceId(), stream.content());
             return List.of(resourceId);
           } catch (IOException exception) {
             throw new UncheckedIOException("failed to close Seedance Hub resource", exception);
@@ -367,27 +361,31 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private MediaMetadata parseMetadata(CanvasFunctionFrozenReference reference, boolean video) {
-    try {
-      JsonNode root = mapper.readTree(reference.metadataJson());
-      if (root == null || !root.isObject()) {
-        throw new OpenCliHubException("Seedance media metadata must be an object");
-      }
-      String container = requiredText(root, "container").toLowerCase(Locale.ROOT);
-      long durationMs = requiredLong(root, "durationMs");
-      if (video) {
-        String videoCodec = requiredText(root, "videoCodec").toLowerCase(Locale.ROOT);
-        String audioCodec = optionalText(root, "audioCodec");
-        return new MediaMetadata(
-            container,
-            videoCodec,
-            audioCodec == null ? null : audioCodec.toLowerCase(Locale.ROOT),
-            durationMs);
-      }
-      String codec = requiredText(root, "codec").toLowerCase(Locale.ROOT);
-      return new MediaMetadata(container, null, codec, durationMs);
-    } catch (JsonProcessingException exception) {
-      throw new IllegalArgumentException("Seedance media metadata must be valid JSON", exception);
+    // 权威 blob 事实快照：container 由 mediaType 推导，时长直接取 durationMs；编解码器细节不在冻结快照内。
+    String container;
+    if (video) {
+      container =
+          switch (reference.mediaType().toLowerCase(Locale.ROOT)) {
+            case "video/mp4" -> "mp4";
+            case "video/quicktime" -> "mov";
+            default -> throw new IllegalArgumentException(
+                "Seedance VIDEO requires video/mp4 or video/quicktime, got "
+                    + reference.mediaType());
+          };
+    } else {
+      container =
+          switch (reference.mediaType().toLowerCase(Locale.ROOT)) {
+            case "audio/wav" -> "wav";
+            case "audio/mpeg" -> "mp3";
+            default -> throw new IllegalArgumentException(
+                "Seedance AUDIO requires audio/wav or audio/mpeg, got " + reference.mediaType());
+          };
     }
+    Long durationMs = reference.durationMs();
+    if (durationMs == null || durationMs <= 0L) {
+      throw new IllegalArgumentException("Seedance media reference must carry durationMs");
+    }
+    return new MediaMetadata(container, durationMs);
   }
 
   private Instant pollDeadline(Map<String, Object> state) {
@@ -426,7 +424,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       throw new IllegalArgumentException("checkpoint uploads do not cover frozen manifest");
     }
     for (int index = 0; index < uploads.size(); index++) {
-      if (uploads.get(index).resourceId() != run.manifest().get(index).resourceId()) {
+      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
         throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
       }
     }
@@ -454,25 +452,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     return value.booleanValue();
   }
 
-  private static long requiredLong(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new IllegalArgumentException(field + " must be an integer");
-    }
-    return value.longValue();
-  }
-
-  private static String optionalText(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual() || value.textValue().isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank text or null");
-    }
-    return value.textValue();
-  }
-
   private static CanvasFunctionModel model(String key, String label) {
     return new CanvasFunctionModel(
         key,
@@ -489,8 +468,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
                 "duration", "Duration", false, 5, 4, 15)));
   }
 
-  private record MediaMetadata(
-      String container, String videoCodec, String audioCodec, long durationMs) {}
+  private record MediaMetadata(String container, long durationMs) {}
 
   @FunctionalInterface
   interface Sleeper {

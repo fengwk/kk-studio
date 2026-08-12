@@ -34,7 +34,8 @@ public interface StorageUploadService {
   /**
    * 事务内锁定 READY 上传（加入调用方已有事务）并返回权威消费事实：blobId 与权威文件名（文件名取自上传行，绝不信任客户端消息内容）。
    *
-   * <p>调用方随后必须：插入 session blob ref + retain（先于 release）、删除消费过的上传行并 release 其引用——全部在同一 事务内完成。
+   * <p>调用方随后必须先为新 owner retain（Session blob ref 或 Canvas Resource），再删除已消费上传行并 release upload
+   * owner，全部在同一事务内完成。
    *
    * @throws fun.fengwk.kkstudio.core.storage.error.StorageResourceNotFoundException 上传不存在
    * @throws fun.fengwk.kkstudio.core.storage.error.StorageVerificationException 上传仍为 PENDING 或已过期

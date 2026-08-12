@@ -526,22 +526,31 @@ public final class HarnessRuntimeWebMapper {
     return parsed;
   }
 
+  /**
+   * 映射有序 USER_MESSAGE contents 列表（Canvas 首次发送等非 thread-command 路径复用）。
+   *
+   * <p>与 {@link #toUserMessageContents(HarnessThreadCommandCreateDTO)} 的 contents 分支共享严格字段校验。
+   */
+  public static List<AgentMessageContent> toUserMessageContents(
+      List<HarnessUserMessageContentDTO> contents) {
+    List<HarnessUserMessageContentDTO> required = requireList(contents, "contents");
+    if (required.isEmpty()) {
+      throw new IllegalArgumentException("contents must not be empty");
+    }
+    List<AgentMessageContent> mapped = new ArrayList<>(required.size());
+    for (int i = 0; i < required.size(); i++) {
+      mapped.add(toUserMessageContent(required.get(i), i));
+    }
+    return List.copyOf(mapped);
+  }
+
   private static List<AgentMessageContent> toUserMessageContents(
       HarnessThreadCommandCreateDTO dto) {
     if (!dto.hasContentsField()) {
       throw new IllegalArgumentException(
           "USER_MESSAGE must contain exactly one non-empty contents list of TEXT/ATTACHMENT");
     }
-    List<HarnessUserMessageContentDTO> contents = dto.getContents();
-    if (contents == null || contents.isEmpty()) {
-      throw new IllegalArgumentException(
-          "USER_MESSAGE contents must be a non-empty list of TEXT/ATTACHMENT");
-    }
-    List<AgentMessageContent> mapped = new ArrayList<>(contents.size());
-    for (int i = 0; i < contents.size(); i++) {
-      mapped.add(toUserMessageContent(contents.get(i), i));
-    }
-    return List.copyOf(mapped);
+    return toUserMessageContents(dto.getContents());
   }
 
   private static AgentMessageContent toUserMessageContent(

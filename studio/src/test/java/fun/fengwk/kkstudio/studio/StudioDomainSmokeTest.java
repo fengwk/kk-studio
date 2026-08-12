@@ -75,6 +75,12 @@ class StudioDomainSmokeTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new CanvasResource(id(1), id(10), id(20), -1, null, "a", "x", NOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasResource(id(1), id(10), id(20), 0, null, "a", null, NOW));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasResource(id(1), id(10), id(20), 0, id(99), "a", "x", NOW));
     assertEquals(id(99), blob(id(1), id(10), "a").blobId());
     assertEquals("x", text(id(1), id(10), id(20), 0, "x").textContent());
   }
@@ -85,7 +91,10 @@ class StudioDomainSmokeTest {
     CanvasResource blob = blob(id(2), id(10), "b");
     CanvasResource foreign = text(id(3), id(11), id(20), 0, "x");
     CanvasResource unowned = blob(id(4), id(10), "u");
-    CanvasResource otherOwner = blob(id(5), id(10), "o");
+    CanvasResource otherOwner =
+        new CanvasResource(id(5), id(10), id(21), 0, id(99), "o", null, NOW);
+    CanvasResource otherCanvasBlob =
+        new CanvasResource(id(6), id(11), id(20), 0, id(99), "b", null, NOW);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -110,6 +119,11 @@ class StudioDomainSmokeTest {
         () ->
             new CanvasResourceNode(
                 id(20), id(10), "n", TRANSFORM, null, List.of(otherOwner), null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasResourceNode(
+                id(20), id(10), "n", TRANSFORM, null, List.of(otherCanvasBlob), null, null));
   }
 
   @Test

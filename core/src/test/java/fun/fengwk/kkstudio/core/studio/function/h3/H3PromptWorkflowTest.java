@@ -25,9 +25,16 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** prompt 与 workflow 共用同一 manifest 编号，避免附件标签和动态槽位漂移。 */
 class H3PromptWorkflowTest {
+
+  private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID SOURCE_NODE = UUID.fromString("00000000-0000-0000-0000-00000000000a");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-00000000000b");
+  private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000063");
 
   private final ObjectMapper mapper = new ObjectMapper();
 
@@ -47,21 +54,21 @@ class H3PromptWorkflowTest {
     H3PromptRequestBuilder promptBuilder = new H3PromptRequestBuilder();
     CanvasFunctionFrozenRun run =
         new CanvasFunctionFrozenRun(
-            7L,
-            8L,
+            CANVAS,
+            NODE,
             "h3",
-            "request",
+            REQUEST,
             mock(CanvasFunctionModel.class),
             new CanvasFunctionConfig(
                 List.of(
                     new TextSegment("Use "),
-                    new ReferenceSegment(2L, 1),
+                    new ReferenceSegment(new UUID(0L, 2L), 1),
                     new TextSegment(" then "),
-                    new ReferenceSegment(3L, 0)),
+                    new ReferenceSegment(new UUID(0L, 3L), 0)),
                 Map.of("ratio", "16:9", "duration", 5)),
             references,
             "result",
-            99L,
+            TARGET,
             "QUEUED",
             Map.of());
     AgentMessage user = promptBuilder.userMessage(run, manifest);
@@ -77,12 +84,12 @@ class H3PromptWorkflowTest {
       assertTrue(label.startsWith("\nThe next attachment is "), label);
     }
 
-    Map<Long, H3UploadedFile> uploads = new LinkedHashMap<>();
-    uploads.put(11L, new H3UploadedFile("11.png", "kk-studio/7", "input"));
-    uploads.put(12L, new H3UploadedFile("12.mp4", "kk-studio/7", "input"));
-    uploads.put(13L, new H3UploadedFile("13.mp3", "kk-studio/7", "input"));
+    Map<UUID, H3UploadedFile> uploads = new LinkedHashMap<>();
+    uploads.put(resource(11L), new H3UploadedFile("11.png", "kk-studio/7", "input"));
+    uploads.put(resource(12L), new H3UploadedFile("12.mp4", "kk-studio/7", "input"));
+    uploads.put(resource(13L), new H3UploadedFile("13.mp3", "kk-studio/7", "input"));
     ObjectNode workflow =
-        new H3WorkflowBuilder(mapper).build("enhanced", "16:9", 5, 123L, 99L, manifest, uploads);
+        new H3WorkflowBuilder(mapper).build("enhanced", "16:9", 5, 123L, TARGET, manifest, uploads);
     JsonNode inputs = workflow.path("136").path("inputs");
     assertEquals("1000", inputs.path("ref_images.ref_image_0").get(0).asText());
     assertEquals("1002", inputs.path("ref_videos.ref_video_0").get(0).asText());
@@ -116,9 +123,9 @@ class H3PromptWorkflowTest {
                 "9:16",
                 15,
                 0L,
-                99L,
+                TARGET,
                 manifest,
-                Map.of(11L, new H3UploadedFile("11.png", "kk-studio/7", "input")));
+                Map.of(resource(11L), new H3UploadedFile("11.png", "kk-studio/7", "input")));
     for (String deleted : List.of("137", "138", "139", "141", "142", "143", "144")) {
       assertFalse(workflow.has(deleted));
     }
@@ -130,7 +137,8 @@ class H3PromptWorkflowTest {
     assertEquals(15, workflow.path("132").path("inputs").path("value").asInt());
     assertEquals(0L, workflow.path("129").path("inputs").path("noise_seed").asLong());
     assertEquals(
-        "video/kk-studio-99", workflow.path("92").path("inputs").path("filename_prefix").asText());
+        "video/kk-studio-" + TARGET,
+        workflow.path("92").path("inputs").path("filename_prefix").asText());
     assertEquals(
         H3WorkflowBuilder.LENGTH_EXPRESSION,
         workflow.path("131").path("inputs").path("expression").asText());
@@ -138,7 +146,9 @@ class H3PromptWorkflowTest {
     assertEquals(362, H3WorkflowBuilder.frameLength(15));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new H3WorkflowBuilder(mapper).build("prompt", "2:1", 5, 1L, 99L, manifest, Map.of()));
+        () ->
+            new H3WorkflowBuilder(mapper)
+                .build("prompt", "2:1", 5, 1L, TARGET, manifest, Map.of()));
     CanvasFunctionFrozenReference textReference =
         reference(12L, 2L, 2, CanvasResourceKind.TEXT, "text/plain");
     assertThrows(
@@ -157,13 +167,28 @@ class H3PromptWorkflowTest {
     return count;
   }
 
+  private static UUID resource(long value) {
+    return new UUID(0L, value);
+  }
+
   private static CanvasFunctionFrozenReference reference(
       long resourceId,
       long sourceNodeId,
       int sourceIndex,
       CanvasResourceKind kind,
       String mediaType) {
+    UUID resource = resource(resourceId);
     return new CanvasFunctionFrozenReference(
-        sourceNodeId, sourceIndex, resourceId, kind, resourceId + ".bin", mediaType, 1024L, "{}");
+        new UUID(0L, sourceNodeId),
+        sourceIndex,
+        resource,
+        resource,
+        kind,
+        resourceId + ".bin",
+        mediaType,
+        1024L,
+        512L,
+        512L,
+        null);
   }
 }

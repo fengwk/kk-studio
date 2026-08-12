@@ -31,7 +31,7 @@ final class OpenCliReferenceUploader {
       throw new IllegalArgumentException("checkpoint uploads exceed frozen manifest");
     }
     for (int index = 0; index < uploads.size(); index++) {
-      if (uploads.get(index).resourceId() != run.manifest().get(index).resourceId()) {
+      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
         throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest order");
       }
     }

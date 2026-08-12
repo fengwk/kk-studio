@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.core.studio.function;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -13,8 +12,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -35,10 +34,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** Worker 只执行匹配的 RUNNING，CAS 取消静默退出，其他失败仅公开固定错误。 */
 class CanvasFunctionWorkerTest {
 
+  private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000003");
   private static final Instant NOW = Instant.parse("2026-01-02T03:04:05Z");
   private static final CanvasFunctionModel MODEL =
       new CanvasFunctionModel(
@@ -68,10 +71,10 @@ class CanvasFunctionWorkerTest {
     when(registry.require(MODEL.key()))
         .thenReturn(new CanvasFunctionModelRegistry.RegisteredModel(MODEL, adapter));
     ObjectProvider<S3StorageService> storageServices = mock(ObjectProvider.class);
-    ObjectProvider<S3PresignService> presignServices = mock(ObjectProvider.class);
+    ObjectProvider<StorageBlobManager> blobManagers = mock(ObjectProvider.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
     when(storageServices.getIfAvailable()).thenReturn(mock(S3StorageService.class));
-    when(presignServices.getIfAvailable()).thenReturn(mock(S3PresignService.class));
+    when(blobManagers.getIfAvailable()).thenReturn(mock(StorageBlobManager.class));
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
     worker =
         new CanvasFunctionWorker(
@@ -80,20 +83,20 @@ class CanvasFunctionWorkerTest {
             stateCodec,
             transactions,
             storageServices,
-            presignServices,
+            blobManagers,
             materializers,
             Clock.fixed(NOW, ZoneOffset.UTC));
     frozen =
         new CanvasFunctionFrozenRun(
-            1L,
-            2L,
+            NODE,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             MODEL,
             new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of()),
             List.of(),
             "output.png",
-            3L,
+            TARGET,
             "QUEUED",
             Map.of());
     running =
@@ -116,7 +119,7 @@ class CanvasFunctionWorkerTest {
     worker.run(frozen.nodeId(), frozen.requestId());
 
     verify(transactions).completeSuccess(eq(frozen), eq(List.of(frozen.targetResourceId())));
-    verify(transactions, never()).failIfRunning(anyLong(), any(), any());
+    verify(transactions, never()).failIfRunning(any(), any(), any());
   }
 
   @Test
@@ -129,7 +132,7 @@ class CanvasFunctionWorkerTest {
     worker.run(frozen.nodeId(), frozen.requestId());
 
     verify(transactions)
-        .failIfRunning(frozen.nodeId(), frozen.requestId(), "Function execution failed");
+        .failIfRunning(frozen.nodeId(), frozen.requestId().toString(), "Function execution failed");
     verify(transactions, never()).completeSuccess(any(), any());
   }
 
@@ -151,7 +154,7 @@ class CanvasFunctionWorkerTest {
 
     worker.run(frozen.nodeId(), frozen.requestId());
 
-    verify(transactions, never()).failIfRunning(anyLong(), any(), any());
+    verify(transactions, never()).failIfRunning(any(), any(), any());
     verify(transactions, never()).completeSuccess(any(), any());
   }
 
@@ -163,7 +166,7 @@ class CanvasFunctionWorkerTest {
             Optional.of(
                 new CanvasFunctionRun(
                     frozen.nodeId(),
-                    "new-request",
+                    UUID.randomUUID(),
                     CanvasFunctionRunStatus.RUNNING,
                     frozen.stage(),
                     running.stateJson(),
@@ -186,6 +189,6 @@ class CanvasFunctionWorkerTest {
 
     verify(adapter, never()).execute(any(), any());
     verify(transactions, never()).completeSuccess(any(), any());
-    verify(transactions, never()).failIfRunning(anyLong(), any(), any());
+    verify(transactions, never()).failIfRunning(any(), any(), any());
   }
 }

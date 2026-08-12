@@ -12,7 +12,9 @@ import org.apache.ibatis.annotations.Select;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasLinkDO;
 
 import java.util.List;
+import java.util.UUID;
 
+/** {@code canvas_link} 的原子 SQL 入口。 */
 @Mapper
 public interface CanvasLinkMapper extends BaseMapper {
 
@@ -24,9 +26,12 @@ public interface CanvasLinkMapper extends BaseMapper {
   int insert(CanvasLinkDO link);
 
   @Select(
-      "select canvas_id, source_node_id, target_node_id"
-          + " from canvas_link where canvas_id = #{canvasId}"
-          + " order by source_node_id, target_node_id")
+      """
+      select canvas_id, source_node_id, target_node_id
+      from canvas_link
+      where canvas_id = #{canvasId}
+      order by source_node_id, target_node_id
+      """)
   @Results(
       id = "canvasLinkMap",
       value = {
@@ -34,26 +39,39 @@ public interface CanvasLinkMapper extends BaseMapper {
         @Result(column = "source_node_id", property = "sourceNodeId"),
         @Result(column = "target_node_id", property = "targetNodeId")
       })
-  List<CanvasLinkDO> listByCanvas(@Param("canvasId") long canvasId);
+  List<CanvasLinkDO> listByCanvas(@Param("canvasId") UUID canvasId);
 
   @Select(
       """
-      select count(*)
-      from canvas_link
+      select count(1) from canvas_link
       where canvas_id = #{canvasId}
         and source_node_id = #{sourceNodeId}
         and target_node_id = #{targetNodeId}
       """)
   int exists(
-      @Param("canvasId") long canvasId,
-      @Param("sourceNodeId") long sourceNodeId,
-      @Param("targetNodeId") long targetNodeId);
+      @Param("canvasId") UUID canvasId,
+      @Param("sourceNodeId") UUID sourceNodeId,
+      @Param("targetNodeId") UUID targetNodeId);
 
   @Delete(
-      "delete from canvas_link where canvas_id = #{canvasId}"
-          + " and source_node_id = #{sourceNodeId} and target_node_id = #{targetNodeId}")
+      """
+      delete from canvas_link
+      where canvas_id = #{canvasId}
+        and source_node_id = #{sourceNodeId}
+        and target_node_id = #{targetNodeId}
+      """)
   int delete(
-      @Param("canvasId") long canvasId,
-      @Param("sourceNodeId") long sourceNodeId,
-      @Param("targetNodeId") long targetNodeId);
+      @Param("canvasId") UUID canvasId,
+      @Param("sourceNodeId") UUID sourceNodeId,
+      @Param("targetNodeId") UUID targetNodeId);
+
+  @Delete(
+      """
+      delete from canvas_link
+      where canvas_id = #{canvasId} and (source_node_id = #{nodeId} or target_node_id = #{nodeId})
+      """)
+  int deleteByNode(@Param("canvasId") UUID canvasId, @Param("nodeId") UUID nodeId);
+
+  @Delete("delete from canvas_link where canvas_id = #{canvasId}")
+  int deleteByCanvas(@Param("canvasId") UUID canvasId);
 }

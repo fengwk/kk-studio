@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -813,6 +814,30 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         StorageResourceNotFoundException.class,
         () -> storageUploadService.delete(UUID.fromString(pending.getId())),
         "repeat delete must surface the idempotent 404");
+  }
+
+  // ------------------------------------------------------------------
+  // READY consumption
+  // ------------------------------------------------------------------
+
+  @Test
+  void lockReadyRequiresCallerTransactionAndReturnsAuthoritativeFacts() {
+    byte[] content = "consume".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        reserve("authoritative.txt", "text/plain", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "text/plain");
+    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID uploadId = UUID.fromString(ready.getId());
+
+    assertThrows(
+        IllegalTransactionStateException.class,
+        () -> storageUploadService.lockReady(uploadId),
+        "lockReady must not release its row lock before the caller transfers ownership");
+
+    StorageUploadService.ReadyUpload facts =
+        tx.execute(status -> storageUploadService.lockReady(uploadId));
+    assertEquals(UUID.fromString(ready.getBlobId()), facts.blobId());
+    assertEquals("authoritative.txt", facts.filename());
   }
 
   // ------------------------------------------------------------------

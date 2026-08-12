@@ -16,6 +16,7 @@ import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** 只读取 main resources 极小合法媒体、仍经过真实 materializer 的无成本 fake adapter。 */
 public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
@@ -82,13 +83,11 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     context.checkpoint("FAKE_RENDERING", Map.of("fixture", fixture(run)));
     ClassPathResource resource = new ClassPathResource(fixture(run));
     try (InputStream content = resource.getInputStream()) {
-      long resourceId =
-          context.materializeTarget(
-              run.targetResourceId(), mediaType(run), resource.contentLength(), content);
+      UUID resourceId = context.materializeTarget(run.targetResourceId(), content);
       return List.of(resourceId);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to read fake Canvas Function fixture", exception);

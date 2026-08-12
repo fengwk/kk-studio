@@ -17,9 +17,13 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Function config strict wire、canonical prompt 与 descriptor 参数验证。 */
 class CanvasFunctionConfigCodecTest {
+
+  private static final UUID REFERENCE_NODE =
+      UUID.fromString("00000000-0000-0000-0000-00000000000a");
 
   private final CanvasFunctionConfigCodec codec = new CanvasFunctionConfigCodec(new ObjectMapper());
 
@@ -34,8 +38,8 @@ class CanvasFunctionConfigCodecTest {
                 {"type":"TEXT","text":"hello"},
                 {"type":"TEXT","text":""},
                 {"type":"TEXT","text":" world"},
-                {"type":"REFERENCE","nodeId":"12","index":0},
-                {"type":"REFERENCE","nodeId":"12","index":0}
+                {"type":"REFERENCE","nodeId":"00000000-0000-0000-0000-00000000000a","index":0},
+                {"type":"REFERENCE","nodeId":"00000000-0000-0000-0000-00000000000a","index":0}
               ]},
               "parameters":{}
             }
@@ -45,10 +49,10 @@ class CanvasFunctionConfigCodecTest {
     assertEquals(
         List.of(
             new TextSegment("hello world"),
-            new ReferenceSegment(12L, 0),
-            new ReferenceSegment(12L, 0)),
+            new ReferenceSegment(REFERENCE_NODE, 0),
+            new ReferenceSegment(REFERENCE_NODE, 0)),
         config.segments());
-    assertEquals(List.of(new ReferenceSegment(12L, 0)), codec.uniqueReferences(config));
+    assertEquals(List.of(new ReferenceSegment(REFERENCE_NODE, 0)), codec.uniqueReferences(config));
     assertEquals(Map.of("ratio", "AUTO", "duration", 5), config.parameters());
     assertEquals(config, codec.decode(codec.encode(config), model()));
   }
