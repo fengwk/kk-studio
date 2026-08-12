@@ -11,7 +11,8 @@ const MEDIA_MIN_SHORT_EDGE = 180
 
 interface SizableCanvasResource {
   kind: CanvasResourceKind
-  metadata: Record<string, unknown>
+  width: number | null
+  height: number | null
 }
 
 interface SizableResourceNode {
@@ -31,8 +32,8 @@ export function resourceNodeSize(
   if (!resource || !isCompactMediaNode(node)) {
     return { width: node.transform.width, height: node.transform.height }
   }
-  const width = positiveNumber(resource.metadata.width)
-  const height = positiveNumber(resource.metadata.height)
+  const width = positiveNumber(resource.width)
+  const height = positiveNumber(resource.height)
   if (width === null || height === null) {
     return { width: node.transform.width, height: node.transform.height }
   }

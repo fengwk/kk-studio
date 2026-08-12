@@ -1,13 +1,16 @@
 import { ApiError } from '@/shared/api/client'
 import type {
-  CanvasCommandDTO,
+  ApplyCanvasCommandsRequestDTO,
+  CanvasPatchDTO,
   CanvasSnapshotDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 import {
-  applyCanvasCommands,
   getCanvas,
+  getCanvasChanges,
+  postCanvasCommands,
 } from '@/shared/api/studio-service'
+import { applyCanvasChanges, applyEntityPatch } from '@/features/canvas/entity-patch'
 
 export class CanvasCommandConflictError extends Error {
   readonly snapshot: CanvasSnapshotDTO
@@ -23,32 +26,37 @@ export class CanvasCommandConflictError extends Error {
 
 export interface CanvasCommandQueueOptions {
   initialSnapshot: CanvasSnapshotDTO
-  apply?: typeof applyCanvasCommands
+  apply?: typeof postCanvasCommands
   refetch?: typeof getCanvas
-  createCommandId?: () => string
+  getChanges?: typeof getCanvasChanges
+  createCommandId?: () => UUIDString
   onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
 }
 
 /**
- * Canvas graph mutations are serialized in browser order. Every batch reads the
- * latest authoritative revision when it starts, then adopts the returned snapshot.
- * A known 409 refreshes but never replays a semantic command automatically.
+ * Canvas graph 变更按浏览器顺序串行化。每个批次都以开始时最新的权威
+ * version 作为 expectedVersion 提交；命令响应是 graph patch，直接通过
+ * 本地 reducer 应用。重复/过期 patch 被忽略；baseVersion 不连续（gap）
+ * 时通过 GET /changes?afterVersion=N 恢复，changes 无法闭环时回退全量快照。
+ * 已知 409 会刷新快照但绝不自动重放语义命令。
  */
 export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
-  private readonly apply: typeof applyCanvasCommands
+  private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
-  private readonly createCommandId: () => string
+  private readonly getChanges: typeof getCanvasChanges
+  private readonly createCommandId: () => UUIDString
   private readonly onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
 
   constructor(
-    private readonly canvasId: DecimalString,
+    private readonly canvasId: UUIDString,
     options: CanvasCommandQueueOptions,
   ) {
     this.snapshot = options.initialSnapshot
-    this.apply = options.apply ?? applyCanvasCommands
+    this.apply = options.apply ?? postCanvasCommands
     this.refetch = options.refetch ?? getCanvas
+    this.getChanges = options.getChanges ?? getCanvasChanges
     this.createCommandId = options.createCommandId ?? (() => crypto.randomUUID())
     this.onSnapshot = options.onSnapshot
   }
@@ -60,7 +68,7 @@ export class CanvasCommandQueue {
   replaceSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapshotDTO {
     if (
       snapshot.document.id === this.snapshot.document.id
-      && BigInt(snapshot.document.graphRevision) < BigInt(this.snapshot.document.graphRevision)
+      && snapshot.document.version < this.snapshot.document.version
     ) {
       return this.snapshot
     }
@@ -69,7 +77,7 @@ export class CanvasCommandQueue {
   }
 
   enqueue(
-    commands: CanvasCommandDTO[],
+    commands: ApplyCanvasCommandsRequestDTO['commands'],
     options?: { signal?: AbortSignal },
   ): Promise<CanvasSnapshotDTO> {
     if (commands.length === 0) {
@@ -83,22 +91,42 @@ export class CanvasCommandQueue {
     return operation
   }
 
+  /**
+   * 从 afterVersion（缺省为当前版本）开始拉取 changes 并应用。
+   * 供 SSE 'version' 事件与命令响应的 gap 恢复共用：返回连续 patches 则
+   * 逐个应用，载荷要求 snapshot 或 patches 无法闭环时回退全量快照。
+   */
+  async syncFrom(afterVersion?: number, signal?: AbortSignal): Promise<CanvasSnapshotDTO> {
+    const changes = await this.getChanges(
+      this.canvasId,
+      afterVersion ?? this.snapshot.document.version,
+      { signal },
+    )
+    const folded = applyCanvasChanges(this.snapshot, changes)
+    if (folded) {
+      this.adopt(folded)
+      return folded
+    }
+    const latest = await this.refetch(this.canvasId, { signal })
+    this.adopt(latest)
+    return latest
+  }
+
   private async execute(
-    commands: CanvasCommandDTO[],
+    commands: ApplyCanvasCommandsRequestDTO['commands'],
     signal?: AbortSignal,
   ): Promise<CanvasSnapshotDTO> {
     try {
-      const snapshot = await this.apply(
+      const patch = await this.apply(
         this.canvasId,
         {
-          expectedRevision: this.snapshot.document.graphRevision,
+          expectedVersion: this.snapshot.document.version,
           commandId: this.createCommandId(),
           commands,
         },
         { signal },
       )
-      this.adopt(snapshot)
-      return snapshot
+      return await this.ingestPatch(patch, signal)
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 409) {
         throw error
@@ -107,6 +135,22 @@ export class CanvasCommandQueue {
       this.adopt(latest)
       throw new CanvasCommandConflictError(latest, error)
     }
+  }
+
+  private async ingestPatch(
+    patch: CanvasPatchDTO,
+    signal?: AbortSignal,
+  ): Promise<CanvasSnapshotDTO> {
+    const next = applyEntityPatch(this.snapshot, patch)
+    if (next) {
+      this.adopt(next)
+      return next
+    }
+    // 重复/过期 patch（version 未前进）直接忽略；其余情况视为 gap。
+    if (patch.version <= this.snapshot.document.version) {
+      return this.snapshot
+    }
+    return await this.syncFrom(this.snapshot.document.version, signal)
   }
 
   private adopt(snapshot: CanvasSnapshotDTO): void {

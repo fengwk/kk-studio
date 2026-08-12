@@ -30,7 +30,7 @@ import {
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
 import { preserveCanvasWorldCenter } from '@/features/canvas/viewport-framing'
-import type { DecimalString } from '@/shared/api/contracts/studio'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
 const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
@@ -322,8 +322,8 @@ function StageInner() {
     setSelection(
       params.nodes.map((node) => node.id),
       params.edges.map((edge) => ({
-        sourceNodeId: edge.source as DecimalString,
-        targetNodeId: edge.target as DecimalString,
+        sourceNodeId: edge.source as UUIDString,
+        targetNodeId: edge.target as UUIDString,
       })),
     )
   }, [setSelection])

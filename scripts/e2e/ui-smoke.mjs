@@ -432,7 +432,7 @@ async function main(argv) {
     // 创建路径在 mutation 成功后导航，因此先等编辑器挂载再断言 URL。
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
     assert(
-      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
       `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
     )
     // 编辑器沉浸：无全局顶栏、挂 canvas-immersive class，Chat 面板默认收起。
@@ -449,8 +449,8 @@ async function main(argv) {
       'Chat panel must be collapsed by default',
     )
     assert(
-      await page.locator('.agent-composer').count() === 0,
-      'collapsed Canvas must not render a bottom composer',
+      await page.locator('.chat-shell.thread-panel').count() === 0,
+      'collapsed Canvas must not render a thread panel',
     )
     assert(
       await page.locator('.canvas-back-button.sidebar-icon-btn').count() === 1,
@@ -512,8 +512,8 @@ async function main(argv) {
       'closing the Chat panel must restore the same canvas zoom',
     )
     assert(
-      await page.locator('.agent-composer').count() === 0,
-      'closing Chat must not reveal a bottom composer',
+      await page.locator('.chat-shell.thread-panel').count() === 0,
+      'closing Chat must not reveal a thread panel',
     )
     // 左侧居中 add launcher 仍可打开/关闭菜单。
     const addLauncher = page.getByRole('button', {
@@ -540,7 +540,7 @@ async function main(argv) {
       return button?.textContent?.trim() === '100%'
     })
     assert(
-      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
       `canvas reload pathname invalid: ${new URL(page.url()).pathname}`,
     )
     await page.goBack({ waitUntil: 'networkidle' })
@@ -548,7 +548,7 @@ async function main(argv) {
     await expectVisibleText(page, '你的画布')
     await page.goForward({ waitUntil: 'networkidle' })
     assert(
-      /^\/canvas\/[1-9][0-9]*$/.test(new URL(page.url()).pathname),
+      /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
       `canvas forward pathname invalid: ${new URL(page.url()).pathname}`,
     )
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })

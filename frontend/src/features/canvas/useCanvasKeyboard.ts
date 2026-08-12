@@ -9,7 +9,7 @@ type KeyboardApi = {
   zoomRef: RefObject<((scale: number) => void) | null>
   clearSelection: () => void
   deleteSelection: () => void
-  focusAgentPrompt: () => void
+  focusThread: () => void
   createTextNode: () => void
   closeOverlays: () => void
 }
@@ -24,7 +24,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     zoomRef,
     clearSelection,
     deleteSelection,
-    focusAgentPrompt,
+    focusThread,
     createTextNode,
     closeOverlays,
   } = api
@@ -44,7 +44,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
           return
         }
         event.preventDefault()
-        focusAgentPrompt()
+        focusThread()
         return
       }
 
@@ -95,7 +95,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     createTextNode,
     deleteSelection,
     fitViewRef,
-    focusAgentPrompt,
+    focusThread,
     focusSelectionRef,
     stageElementRef,
     view,

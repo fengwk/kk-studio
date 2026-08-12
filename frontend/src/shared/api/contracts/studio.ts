@@ -1,14 +1,27 @@
-/** Canonical bigint values cross the HTTP boundary as base-10 JSON strings. */
-export type DecimalString = `${bigint}`
+import type { HarnessUserMessageContentDTO } from '@/shared/api/contracts/ai-runtime'
+
+/**
+ * Canonical UUID ids cross the HTTP boundary as lowercase dashed strings.
+ * Canvas/Resource/Group/Upload 实体 id 与所有命令 id 都由客户端或服务端
+ * 以 RFC4122 UUID 形式生成（shape-only 校验，不限定 version/variant 位）。
+ */
+export type UUIDString = `${string}-${string}-${string}-${string}-${string}`
 
 export type CanvasResourceKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT'
 export type CanvasFunctionOutputKind = 'IMAGE' | 'VIDEO'
 export type CanvasFunctionRunStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
 
+/**
+ * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是
+ * command expected 游标与 patch base/version 的公共坐标系；
+ * threadId 绑定本画布的 Harness Thread（harness 迁移后同样使用 canonical UUID），
+ * null 表示尚未创建（走 blank 首次发送流程）。
+ */
 export interface CanvasDocumentDTO {
-  id: DecimalString
+  id: UUIDString
   title: string
-  graphRevision: DecimalString
+  version: number
+  threadId: UUIDString | null
   createdAt: string
   updatedAt: string
 }
@@ -20,15 +33,27 @@ export interface CanvasTransformDTO {
   height: number
 }
 
+/**
+ * Canvas 资源的持久投影。immutable 资源行包含 ownerNodeId/resourceIndex，
+ * 与所属节点一起 upsert；kind 由 API 按 mediaType 派生，宽高/时长来自
+ * 服务端媒体校验（可为 null，TEXT 资源没有 blob）。
+ * 契约绝不暴露 bucket/key/URI，客户端也不能提交对象 key。
+ */
 export interface CanvasResourceDTO {
-  id: DecimalString
-  canvasId: DecimalString
-  kind: CanvasResourceKind
-  mediaType: string
+  id: UUIDString
+  canvasId: UUIDString
+  ownerNodeId: UUIDString
+  resourceIndex: number
+  /** TEXT 资源内容在 textContent 中，无对象存储 blob；其余资源引用共享存储的持久 blob。 */
+  blobId: UUIDString | null
   name: string
-  size: DecimalString
   textContent: string | null
-  metadataJson: string
+  kind: CanvasResourceKind
+  mediaType: string | null
+  sizeBytes: number | null
+  width: number | null
+  height: number | null
+  durationMs: number | null
   createdAt: string
 }
 
@@ -38,38 +63,43 @@ export interface CanvasFunctionDTO {
 }
 
 export interface CanvasFunctionRunDTO {
-  nodeId: DecimalString
-  requestId: string
+  nodeId: UUIDString
+  requestId: UUIDString
   status: CanvasFunctionRunStatus
   stage: string
   error: string | null
   updatedAt: string
 }
 
+/**
+ * 完整的资源节点投影：resources/function/run 始终内嵌在 Node DTO 中，
+ * 不单独参与 patch。
+ */
 export interface CanvasResourceNodeDTO {
-  id: DecimalString
-  canvasId: DecimalString
+  id: UUIDString
+  canvasId: UUIDString
   name: string
   transform: CanvasTransformDTO
-  groupId: DecimalString | null
+  groupId: UUIDString | null
   resources: CanvasResourceDTO[]
   function: CanvasFunctionDTO | null
   run: CanvasFunctionRunDTO | null
 }
 
 export interface CanvasGroupDTO {
-  id: DecimalString
-  canvasId: DecimalString
+  id: UUIDString
+  canvasId: UUIDString
   title: string
   transform: CanvasTransformDTO
 }
 
 export interface CanvasLinkDTO {
-  canvasId: DecimalString
-  sourceNodeId: DecimalString
-  targetNodeId: DecimalString
+  canvasId: UUIDString
+  sourceNodeId: UUIDString
+  targetNodeId: UUIDString
 }
 
+/** 权威全量投影：初始加载、gap 恢复或 resync 时整体替换客户端状态。 */
 export interface CanvasSnapshotDTO {
   document: CanvasDocumentDTO
   nodes: CanvasResourceNodeDTO[]
@@ -77,9 +107,52 @@ export interface CanvasSnapshotDTO {
   links: CanvasLinkDTO[]
 }
 
+export type CanvasGroupPatchDTO =
+  | { op: 'UPSERT'; group: CanvasGroupDTO }
+  | { op: 'REMOVE'; groupId: UUIDString }
+
+export type CanvasNodePatchDTO =
+  | { op: 'UPSERT'; node: CanvasResourceNodeDTO }
+  | { op: 'REMOVE'; nodeId: UUIDString }
+
+export type CanvasLinkPatchDTO =
+  | { op: 'UPSERT'; link: CanvasLinkDTO }
+  | { op: 'REMOVE'; sourceNodeId: UUIDString; targetNodeId: UUIDString }
+
+/**
+ * 幂等 graph patch：command 响应、changes 回放与 SSE 恢复统一使用它。
+ * baseVersion -> version 表示一次连续前进；version <= 客户端当前版本时忽略，
+ * baseVersion != 客户端当前版本时视为 gap，必须通过 changes 恢复。
+ */
+export interface CanvasPatchDTO {
+  baseVersion: number
+  version: number
+  groups: CanvasGroupPatchDTO[]
+  nodes: CanvasNodePatchDTO[]
+  links: CanvasLinkPatchDTO[]
+}
+
+/**
+ * GET /canvases/{id}/changes?afterVersion=N 的恢复载荷：
+ * 要么是从 afterVersion 起连续的 patches（客户端逐个应用），
+ * 要么是必须整体替换当前状态的 snapshot（gap / 压缩 / 服务端无法增量）。
+ */
+export interface CanvasChangesDTO {
+  patches: CanvasPatchDTO[]
+  snapshot: CanvasSnapshotDTO | null
+}
+
+/**
+ * SSE 'version' 事件 payload：version 前进提示，客户端随后按自身
+ * 最后已知版本拉取 changes。'resync' 事件无 payload，表示需要全量快照。
+ */
+export interface CanvasVersionEventDTO {
+  version: number
+}
+
 export type PromptSegmentDTO =
   | { type: 'TEXT'; text: string }
-  | { type: 'REFERENCE'; nodeId: DecimalString; index: number }
+  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
 
 export interface CanvasFunctionConfigDTO {
   prompt: {
@@ -117,14 +190,6 @@ export interface CanvasFunctionModelDTO {
   unavailableReason: string | null
 }
 
-export interface CanvasUploadReservationDTO {
-  uploadId: DecimalString
-  method: 'PUT'
-  url: string
-  headers: Record<string, string>
-  expiresAt: string
-}
-
 export interface CanvasPresignedUrlDTO {
   method: 'GET'
   url: string
@@ -136,43 +201,46 @@ export interface CreateCanvasRequestDTO {
   title?: string
 }
 
+/**
+ * 命令批请求。expectedVersion 是精确的 graph 版本 CAS 游标；
+ * commandId 是整批的幂等键（客户端 UUID）。创建类命令额外携带
+ * 客户端生成的实体 UUID（nodeId/groupId），无时间戳回退；
+ * 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。
+ */
 export interface ApplyCanvasCommandsRequestDTO {
-  expectedRevision: DecimalString
-  commandId: string
+  expectedVersion: number
+  commandId: UUIDString
   commands: CanvasCommandDTO[]
 }
 
-export interface CreateCanvasUploadRequestDTO {
-  kind: Exclude<CanvasResourceKind, 'TEXT'>
-  filename: string
-  mediaType: string
-  size: DecimalString
-}
-
 export interface CanvasFunctionRunRequestDTO {
-  requestId: string
+  requestId: UUIDString
 }
 
 export type CanvasCommandDTO =
   | {
       type: 'CREATE_TEXT_NODE'
+      nodeId: UUIDString
       name: string
       markdown: string
       transform: CanvasTransformDTO
     }
   | {
       type: 'UPDATE_TEXT_NODE'
-      nodeId: DecimalString
+      nodeId: UUIDString
       markdown: string
     }
   | {
       type: 'CREATE_RESOURCE_NODE'
+      nodeId: UUIDString
       name: string
-      resourceIds: DecimalString[]
+      /** 已 complete 的共享存储 upload 句柄（服务端生成，非 canvas-scoped）。 */
+      uploadIds: UUIDString[]
       transform: CanvasTransformDTO
     }
   | {
       type: 'CREATE_FUNCTION_NODE'
+      nodeId: UUIDString
       name: string
       modelKey: string
       configJson: string
@@ -180,51 +248,87 @@ export type CanvasCommandDTO =
     }
   | {
       type: 'UPDATE_FUNCTION'
-      nodeId: DecimalString
+      nodeId: UUIDString
       modelKey: string
       configJson: string
     }
   | {
       type: 'RENAME_NODE'
-      nodeId: DecimalString
+      nodeId: UUIDString
       name: string
     }
   | {
       type: 'UPDATE_NODE_TRANSFORMS'
-      updates: Array<{ nodeId: DecimalString; transform: CanvasTransformDTO }>
+      updates: Array<{ nodeId: UUIDString; transform: CanvasTransformDTO }>
     }
   | {
       type: 'DELETE_NODE'
-      nodeId: DecimalString
+      nodeId: UUIDString
     }
   | {
       type: 'CREATE_LINK'
-      sourceNodeId: DecimalString
-      targetNodeId: DecimalString
+      sourceNodeId: UUIDString
+      targetNodeId: UUIDString
     }
   | {
       type: 'DELETE_LINK'
-      sourceNodeId: DecimalString
-      targetNodeId: DecimalString
+      sourceNodeId: UUIDString
+      targetNodeId: UUIDString
     }
   | {
       type: 'CREATE_GROUP'
+      groupId: UUIDString
       title: string
       transform: CanvasTransformDTO
-      memberNodeIds: DecimalString[]
+      memberNodeIds: UUIDString[]
     }
   | {
       type: 'MOVE_GROUP'
-      groupId: DecimalString
+      groupId: UUIDString
       x: number
       y: number
     }
   | {
       type: 'UNGROUP'
-      groupId: DecimalString
-      memberNodeIds: DecimalString[]
+      groupId: UUIDString
+      memberNodeIds: UUIDString[]
     }
   | {
       type: 'DELETE_GROUP'
-      groupId: DecimalString
+      groupId: UUIDString
     }
+
+/**
+ * Canvas Thread 的 branch settings 快照。与 harness runtime 的
+ * HarnessBranchSettingsDTO 同构，后端 slice 负责映射；model 选择
+ * 是冻结的 provider/model/variant 三元组。
+ */
+export interface CanvasThreadBranchSettingsDTO {
+  environmentName: string | null
+  agentName: string
+  model: {
+    providerName: string
+    modelName: string
+    variant: string
+  }
+  activeTools: string[]
+}
+
+/**
+ * Canvas 空 Thread 的原子首次发送（POST /canvases/{id}/thread/messages）：
+ * 创建绑定到本画布的 Thread 并一次性发送有序 USER_MESSAGE contents。
+ * commandId 是幂等键：同一请求重复提交返回同一 Thread 与 document。
+ * 本请求是 canvas-scoped 的（画布 id 在 URL 中），不携带任何隐式画布上下文。
+ */
+export interface CanvasThreadFirstSendRequestDTO {
+  commandId: UUIDString
+  branchSettings: CanvasThreadBranchSettingsDTO
+  yoloEnabled: boolean
+  contents: HarnessUserMessageContentDTO[]
+}
+
+/** 首次发送响应：绑定后的 Thread id 与携带 threadId 的最新 document。 */
+export interface CanvasThreadFirstSendResponseDTO {
+  threadId: UUIDString
+  document: CanvasDocumentDTO
+}

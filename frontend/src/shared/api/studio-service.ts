@@ -2,51 +2,24 @@ import { ApiError, apiBaseUrl } from '@/shared/api/client'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
 import type {
   ApplyCanvasCommandsRequestDTO,
+  CanvasChangesDTO,
   CanvasDocumentDTO,
   CanvasFunctionModelDTO,
   CanvasFunctionRunDTO,
   CanvasFunctionRunRequestDTO,
+  CanvasPatchDTO,
   CanvasPresignedUrlDTO,
-  CanvasResourceDTO,
   CanvasSnapshotDTO,
-  CanvasUploadReservationDTO,
+  CanvasThreadFirstSendRequestDTO,
+  CanvasThreadFirstSendResponseDTO,
   CreateCanvasRequestDTO,
-  CreateCanvasUploadRequestDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 import { getLocale, translate } from '@/shared/i18n'
 
 export interface CanvasRequestOptions {
   signal?: AbortSignal
 }
-
-const FORBIDDEN_REQUEST_HEADERS = new Set([
-  'accept-charset',
-  'accept-encoding',
-  'access-control-request-headers',
-  'access-control-request-method',
-  'connection',
-  'content-length',
-  'cookie',
-  'cookie2',
-  'date',
-  'dnt',
-  'expect',
-  'host',
-  'keep-alive',
-  'origin',
-  'permissions-policy',
-  'referer',
-  'te',
-  'trailer',
-  'transfer-encoding',
-  'upgrade',
-  'user-agent',
-  'via',
-  'x-http-method',
-  'x-http-method-override',
-  'x-method-override',
-])
 
 export function listCanvases(options?: CanvasRequestOptions): Promise<CanvasDocumentDTO[]> {
   return canvasRequest('/canvases', { signal: options?.signal })
@@ -65,18 +38,70 @@ export function createCanvas(
 }
 
 export function getCanvas(
-  canvasId: DecimalString,
+  canvasId: UUIDString,
   options?: CanvasRequestOptions,
 ): Promise<CanvasSnapshotDTO> {
   return canvasRequest(`/canvases/${canvasId}`, { signal: options?.signal })
 }
 
-export function applyCanvasCommands(
-  canvasId: DecimalString,
+/**
+ * POST /canvases/{id}/commands：应用命令批并返回 graph patch。
+ * 响应通过本地 reducer 直接应用；重复/过期 patch 会被忽略，
+ * 存在 gap 时通过 getCanvasChanges 恢复。
+ */
+export function postCanvasCommands(
+  canvasId: UUIDString,
   request: ApplyCanvasCommandsRequestDTO,
   options?: CanvasRequestOptions,
-): Promise<CanvasSnapshotDTO> {
+): Promise<CanvasPatchDTO> {
   return canvasRequest(`/canvases/${canvasId}/commands`, {
+    method: 'POST',
+    body: request,
+    signal: options?.signal,
+  })
+}
+
+/**
+ * GET /canvases/{id}/changes?afterVersion=N：返回连续 patches 或
+ * 必须整体替换的全量 snapshot（gap 恢复 / resync）。
+ */
+export function getCanvasChanges(
+  canvasId: UUIDString,
+  afterVersion: number,
+  options?: CanvasRequestOptions,
+): Promise<CanvasChangesDTO> {
+  const query = new URLSearchParams({ afterVersion: String(afterVersion) })
+  return canvasRequest(`/canvases/${canvasId}/changes?${query}`, {
+    signal: options?.signal,
+  })
+}
+
+/**
+ * GET /canvases/{id}/events/stream?afterVersion=N：版本事件 SSE。
+ * 'version' 事件触发 changes 拉取；'resync' 事件触发全量快照。
+ * 断线重连时使用客户端最后已知版本。
+ */
+export function createCanvasRealtimeStream(
+  canvasId: UUIDString,
+  afterVersion = 0,
+): EventSource {
+  const query = new URLSearchParams({ afterVersion: String(afterVersion) })
+  return new EventSource(
+    `${apiBaseUrl}/canvases/${encodeURIComponent(canvasId)}/events/stream?${query}`,
+  )
+}
+
+/**
+ * POST /canvases/{id}/thread/messages：Canvas 空 Thread 的原子首次发送。
+ * 创建绑定到本画布的 Thread 并发送有序 USER_MESSAGE contents；
+ * 返回绑定后的 threadId 与携带 threadId 的最新 document。
+ */
+export function sendCanvasThreadFirstSend(
+  canvasId: UUIDString,
+  request: CanvasThreadFirstSendRequestDTO,
+  options?: CanvasRequestOptions,
+): Promise<CanvasThreadFirstSendResponseDTO> {
+  return canvasRequest(`/canvases/${canvasId}/thread/messages`, {
     method: 'POST',
     body: request,
     signal: options?.signal,
@@ -89,58 +114,9 @@ export function listCanvasFunctionModels(
   return canvasRequest('/canvas-function-models', { signal: options?.signal })
 }
 
-export function reserveCanvasUpload(
-  canvasId: DecimalString,
-  request: CreateCanvasUploadRequestDTO,
-  options?: CanvasRequestOptions,
-): Promise<CanvasUploadReservationDTO> {
-  return canvasRequest(`/canvases/${canvasId}/uploads`, {
-    method: 'POST',
-    body: request,
-    signal: options?.signal,
-  })
-}
-
-export async function uploadCanvasFile(
-  reservation: CanvasUploadReservationDTO,
-  file: Blob,
-  options?: CanvasRequestOptions,
-): Promise<void> {
-  let response: Response
-  try {
-    response = await fetch(reservation.url, {
-      method: reservation.method,
-      headers: browserSafePresignedHeaders(reservation.headers),
-      body: file,
-      signal: options?.signal,
-    })
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      throw error
-    }
-    throw new ApiError(
-      error instanceof Error ? error.message : 'Direct upload failed',
-    )
-  }
-  if (!response.ok) {
-    throw new ApiError(`Direct upload failed with HTTP ${response.status}`, response.status)
-  }
-}
-
-export function completeCanvasUpload(
-  canvasId: DecimalString,
-  uploadId: DecimalString,
-  options?: CanvasRequestOptions,
-): Promise<CanvasResourceDTO> {
-  return canvasRequest(`/canvases/${canvasId}/uploads/${uploadId}/complete`, {
-    method: 'POST',
-    signal: options?.signal,
-  })
-}
-
 export function getCanvasResourceOriginalUrl(
-  canvasId: DecimalString,
-  resourceId: DecimalString,
+  canvasId: UUIDString,
+  resourceId: UUIDString,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/download-url`, {
@@ -150,8 +126,8 @@ export function getCanvasResourceOriginalUrl(
 }
 
 export function getCanvasResourcePreviewUrl(
-  canvasId: DecimalString,
-  resourceId: DecimalString,
+  canvasId: UUIDString,
+  resourceId: UUIDString,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/preview-url`, {
@@ -161,8 +137,8 @@ export function getCanvasResourcePreviewUrl(
 }
 
 export function startCanvasFunctionRun(
-  canvasId: DecimalString,
-  nodeId: DecimalString,
+  canvasId: UUIDString,
+  nodeId: UUIDString,
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
@@ -174,8 +150,8 @@ export function startCanvasFunctionRun(
 }
 
 export function getCanvasFunctionRun(
-  canvasId: DecimalString,
-  nodeId: DecimalString,
+  canvasId: UUIDString,
+  nodeId: UUIDString,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/run`, {
@@ -184,8 +160,8 @@ export function getCanvasFunctionRun(
 }
 
 export function cancelCanvasFunctionRun(
-  canvasId: DecimalString,
-  nodeId: DecimalString,
+  canvasId: UUIDString,
+  nodeId: UUIDString,
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
@@ -194,25 +170,6 @@ export function cancelCanvasFunctionRun(
     body: request,
     signal: options?.signal,
   })
-}
-
-export function browserSafePresignedHeaders(
-  headers: Record<string, string>,
-): Record<string, string> {
-  const safe: Record<string, string> = {}
-  for (const [name, value] of Object.entries(headers)) {
-    const normalized = name.trim().toLowerCase()
-    if (
-      !normalized
-      || normalized.startsWith('proxy-')
-      || normalized.startsWith('sec-')
-      || FORBIDDEN_REQUEST_HEADERS.has(normalized)
-    ) {
-      continue
-    }
-    safe[name] = value
-  }
-  return safe
 }
 
 async function canvasRequest<T>(

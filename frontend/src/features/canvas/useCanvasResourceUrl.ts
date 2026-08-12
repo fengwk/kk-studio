@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DecimalString } from '@/shared/api/contracts/studio'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
@@ -11,8 +11,8 @@ type ResourceUrlKind = 'preview' | 'original'
 const LAZY_VIEWPORT_MARGIN = 160
 
 interface ResourceUrlOptions {
-  canvasId: DecimalString
-  resourceId: DecimalString
+  canvasId: UUIDString
+  resourceId: UUIDString
   kind: ResourceUrlKind
   enabled?: boolean
   lazy?: boolean

@@ -8,14 +8,14 @@ describe('resourceNodeSize', () => {
     // 1122x1402 is the production regression image supplied for this slice.
     expect(resourceNodeSize({
       transform: fallback,
-      resources: [{ kind: 'IMAGE', metadata: { width: 1122, height: 1402 } }],
+      resources: [{ kind: 'IMAGE', width: 1122, height: 1402 }],
     })).toEqual({ width: 256, height: 344 })
   })
 
   it('uses the source ratio for landscape media nodes', () => {
     expect(resourceNodeSize({
       transform: fallback,
-      resources: [{ kind: 'VIDEO', metadata: { width: 1920, height: 1080 } }],
+      resources: [{ kind: 'VIDEO', width: 1920, height: 1080 }],
     })).toEqual({ width: 320, height: 204 })
   })
 
@@ -23,8 +23,8 @@ describe('resourceNodeSize', () => {
     expect(resourceNodeSize({
       transform: fallback,
       resources: [
-        { kind: 'IMAGE', metadata: { width: 1024, height: 1024 } },
-        { kind: 'IMAGE', metadata: { width: 512, height: 512 } },
+        { kind: 'IMAGE', width: 1024, height: 1024 },
+        { kind: 'IMAGE', width: 512, height: 512 },
       ],
     })).toEqual({ width: 320, height: 386 })
   })
@@ -32,11 +32,11 @@ describe('resourceNodeSize', () => {
   it('keeps the persisted fallback when media dimensions are unavailable', () => {
     expect(resourceNodeSize({
       transform: fallback,
-      resources: [{ kind: 'IMAGE', metadata: {} }],
+      resources: [{ kind: 'IMAGE', width: null, height: null }],
     })).toEqual(fallback)
     expect(resourceNodeSize({
       transform: fallback,
-      resources: [{ kind: 'TEXT', metadata: { width: 100, height: 100 } }],
+      resources: [{ kind: 'TEXT', width: 100, height: 100 }],
     })).toEqual(fallback)
   })
 })

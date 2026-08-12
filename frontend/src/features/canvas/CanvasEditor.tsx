@@ -48,8 +48,8 @@ export function CanvasEditor() {
           <span className="save-state" id="saveState" aria-live="polite">
             {state.commandPending ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
           </span>
-          <span className="revision-pill" title={t('canvas.editor.revision')}>
-            r{snapshot.document.graphRevision}
+          <span className="revision-pill" title={t('canvas.editor.version')}>
+            v{snapshot.document.version}
           </span>
         </div>
         <button

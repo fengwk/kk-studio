@@ -1,9 +1,10 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
+import { probeCanvasFileMetadata } from '@/features/canvas/canvas-file-metadata'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
+import { useCanvasVersionEvents } from '@/features/canvas/canvas-version-events'
 import {
-  projectCanvasResource,
   projectCanvasSnapshot,
   type ResourceNode,
 } from '@/features/canvas/domain'
@@ -14,6 +15,8 @@ import {
 } from '@/features/canvas/node-alias'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
+import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { createWorkerHasher, validateUploadFile } from '@/features/ai/composer'
 import type {
   AddMenuAction,
   CanvasLocalState,
@@ -32,28 +35,29 @@ import {
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   CanvasCommandDTO,
+  CanvasDocumentDTO,
   CanvasFunctionConfigDTO,
   CanvasFunctionRunDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 import {
   cancelCanvasFunctionRun,
-  completeCanvasUpload,
   getCanvas,
   getCanvasFunctionRun,
   listCanvasFunctionModels,
-  reserveCanvasUpload,
   startCanvasFunctionRun,
-  uploadCanvasFile,
 } from '@/shared/api/studio-service'
+import { storageService } from '@/shared/api/storage-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
 const NODE_SIZE: CanvasTransformDTO = { x: 120, y: 120, width: 320, height: 260 }
+/** 画布资源上传与共享 composer 一致：Web Worker 中计算 SHA-256。 */
+const canvasUploadHasher = createWorkerHasher()
 
-export function useCanvasController(initialCanvasId?: DecimalString) {
+export function useCanvasController(initialCanvasId?: UUIDString) {
   const queryClient = useQueryClient()
   const [state, setState] = useState<CanvasLocalState>(() => ({
     view: initialCanvasId ? 'editor' : 'library',
@@ -68,8 +72,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     addMenuOpen: false,
     addMenuIndex: 0,
     threadOpen: false,
-    agentPrompt: '',
-    messages: [],
     uploadProgress: {},
     commandPending: false,
     conflictMessage: null,
@@ -83,21 +85,20 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   const focusSelectionRef = useRef<(() => void) | null>(null)
   const zoomRef = useRef<((scale: number) => void) | null>(null)
   const stageElementRef = useRef<HTMLElement | null>(null)
-  const agentPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const dockAddRef = useRef<HTMLButtonElement | null>(null)
   const queueRef = useRef<CanvasCommandQueue | null>(null)
   const pendingCommandCountRef = useRef(0)
   const transformTimerRef = useRef<number | null>(null)
-  const pendingNodeTransformsRef = useRef(new Map<DecimalString, CanvasTransformDTO>())
-  const pendingGroupMovesRef = useRef(new Map<DecimalString, { x: number; y: number }>())
-  const pendingFunctionConfigsRef = useRef(new Map<DecimalString, PendingFunctionConfig>())
-  const functionConfigTimersRef = useRef(new Map<DecimalString, number>())
-  const functionConfigFlushesRef = useRef(new Map<DecimalString, Promise<void>>())
+  const pendingNodeTransformsRef = useRef(new Map<UUIDString, CanvasTransformDTO>())
+  const pendingGroupMovesRef = useRef(new Map<UUIDString, { x: number; y: number }>())
+  const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingFunctionConfig>())
+  const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
+  const functionConfigFlushesRef = useRef(new Map<UUIDString, Promise<void>>())
   const reservedNodeAliasesRef = useRef(new Set<string>())
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
-    queryFn: ({ signal }) => getCanvas(state.canvasId as DecimalString, { signal }),
+    queryFn: ({ signal }) => getCanvas(state.canvasId as UUIDString, { signal }),
     enabled: state.view === 'editor' && Boolean(state.canvasId),
   })
   const modelsQuery = useQuery({
@@ -117,7 +118,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
         ? queryKeys.studio.canvasRun(state.canvasId, nodeId)
         : ['studio', 'canvas-run', 'none', nodeId],
       queryFn: ({ signal }: { signal: AbortSignal }) => (
-        getCanvasFunctionRun(state.canvasId as DecimalString, nodeId, { signal })
+        getCanvasFunctionRun(state.canvasId as UUIDString, nodeId, { signal })
       ),
       enabled: state.view === 'editor' && Boolean(state.canvasId),
       refetchInterval: 800,
@@ -178,6 +179,38 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     }
   }, [queryClient, snapshotQuery.data, state.canvasId])
 
+  // SSE 版本事件：按最后已知版本拉取 changes（连续 patches 或全量快照）；
+  // resync 事件通过 invalidate 触发权威快照整体替换。
+  const syncCanvasChanges = useCallback(() => {
+    void queueRef.current?.syncFrom().catch(() => undefined)
+  }, [])
+  const resyncCanvas = useCallback(() => {
+    const canvasId = state.canvasId
+    if (!canvasId) {
+      return
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvas(canvasId) })
+  }, [queryClient, state.canvasId])
+  useCanvasVersionEvents({
+    canvasId: state.canvasId,
+    enabled: state.view === 'editor' && snapshotQuery.isSuccess,
+    version: snapshotQuery.data?.document.version ?? 0,
+    onVersion: syncCanvasChanges,
+    onResync: resyncCanvas,
+  })
+
+  /** 原子首次发送成功后，把携带 threadId 的 document 写入快照。 */
+  const bindThreadDocument = useCallback((document: CanvasDocumentDTO) => {
+    const canvasId = state.canvasId
+    if (!canvasId) {
+      return
+    }
+    queryClient.setQueryData<CanvasSnapshotDTO>(
+      queryKeys.studio.canvas(canvasId),
+      (current) => (current ? { ...current, document } : current),
+    )
+  }, [queryClient, state.canvasId])
+
   useEffect(() => {
     if (!state.toast) {
       return
@@ -202,7 +235,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     setState((current) => ({ ...current, toast }))
   }, [])
 
-  const openEditor = useCallback((canvasId: DecimalString) => {
+  const openEditor = useCallback((canvasId: UUIDString) => {
     if (transformTimerRef.current !== null) {
       window.clearTimeout(transformTimerRef.current)
       transformTimerRef.current = null
@@ -350,7 +383,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
             x: update.transform.x,
             y: update.transform.y,
           }
-          pendingNodeTransformsRef.current.set(update.id as DecimalString, update.transform)
+          pendingNodeTransformsRef.current.set(update.id as UUIDString, update.transform)
         }
       }
       return { ...current, positionDrafts }
@@ -394,7 +427,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     })
   }, [])
 
-  const renameNode = useCallback((nodeId: DecimalString, name: string) => {
+  const renameNode = useCallback((nodeId: UUIDString, name: string) => {
     const normalized = name.trim()
     if (!normalized) {
       return
@@ -413,7 +446,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
         mode: 'edit',
         nodeId: node.id,
         name: node.name,
-        markdown: resource.text ?? '',
+        markdown: resource.textContent ?? '',
       },
     }))
   }, [])
@@ -499,6 +532,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     const alias = reserveNodeAlias(editor.name)
     void executeCommands([{
       type: 'CREATE_TEXT_NODE',
+      nodeId: crypto.randomUUID(),
       name: alias,
       markdown: editor.markdown,
       transform: nextTransform(),
@@ -519,6 +553,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     const alias = reserveNodeAlias(outputKind === 'IMAGE' ? '图片生成' : '视频生成')
     void executeCommands([{
       type: 'CREATE_FUNCTION_NODE',
+      nodeId: crypto.randomUUID(),
       name: alias,
       modelKey: model.key,
       configJson: JSON.stringify(config),
@@ -552,6 +587,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     const maxY = Math.max(...memberTransforms.map((transform) => transform.y + transform.height)) + 32
     void executeCommands([{
       type: 'CREATE_GROUP',
+      groupId: crypto.randomUUID(),
       title: '分组',
       transform: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
       memberNodeIds: members.map((node) => node.id),
@@ -569,7 +605,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     if (!snapshot) {
       return
     }
-    const byGroup = new Map<DecimalString, DecimalString[]>()
+    const byGroup = new Map<UUIDString, UUIDString[]>()
     for (const node of snapshot.nodes) {
       if (!node.groupId || !state.selectedIds.includes(node.id)) {
         continue
@@ -603,7 +639,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     if (!state.canvasId) {
       return
     }
-    const canvasId = state.canvasId
     for (const file of Array.from(files)) {
       const descriptor = canvasFileDescriptor(file)
       const localId = `${file.name}:${file.lastModified}:${file.size}`
@@ -611,38 +646,65 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
         setToast(`不支持的文件类型：${file.name}`)
         continue
       }
+      const sizeError = validateUploadFile(file)
+      if (sizeError) {
+        setToast(sizeError)
+        continue
+      }
       try {
         setState((current) => ({
           ...current,
           uploadProgress: { ...current.uploadProgress, [localId]: 0.1 },
         }))
-        const reservation = await reserveCanvasUpload(canvasId, {
-          kind: descriptor.kind,
+        // 画布资源上传走共享存储：Web Worker SHA-256 → reserve → PENDING 直传 →
+        // complete。upload 句柄由服务端生成，complete 后句柄不变，作为命令引用键。
+        const sha256 = await canvasUploadHasher(file)
+        setState((current) => ({
+          ...current,
+          uploadProgress: { ...current.uploadProgress, [localId]: 0.3 },
+        }))
+        const reservation = await storageService.reserveUpload({
           filename: file.name,
           mediaType: descriptor.mediaType,
-          size: String(file.size) as DecimalString,
+          sizeBytes: file.size,
+          sha256,
         })
         setState((current) => ({
           ...current,
-          uploadProgress: { ...current.uploadProgress, [localId]: 0.35 },
+          uploadProgress: { ...current.uploadProgress, [localId]: 0.5 },
         }))
-        await uploadCanvasFile(reservation, file)
-        setState((current) => ({
-          ...current,
-          uploadProgress: { ...current.uploadProgress, [localId]: 0.8 },
-        }))
-        const resource = await completeCanvasUpload(canvasId, reservation.uploadId)
+        if (reservation.state === 'PENDING') {
+          // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
+          await storageService.uploadFile(reservation.presignedPut, file)
+          setState((current) => ({
+            ...current,
+            uploadProgress: { ...current.uploadProgress, [localId]: 0.8 },
+          }))
+        }
+        const completed = await storageService.completeUpload(reservation.id)
+        // 共享存储的 upload 句柄是服务端生成的 canonical UUID：命令引用前校验。
+        const uploadId = completed.id
+        if (!isCanonicalUuid(uploadId)) {
+          throw new Error('存储服务返回了无效的上传句柄')
+        }
+        // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
+        // 交由存储过期回收；绝不删除已消费（complete）的句柄。
+        const metadata = await probeCanvasFileMetadata(file, descriptor.kind)
         const alias = reserveNodeAlias(file.name)
-        const projectedResource = projectCanvasResource(resource)
         const transform = nextTransform(resourceNodeSize({
           transform: NODE_SIZE,
-          resources: [projectedResource],
+          resources: [{
+            kind: descriptor.kind,
+            width: metadata.width,
+            height: metadata.height,
+          }],
         }))
         try {
           await executeCommands([{
             type: 'CREATE_RESOURCE_NODE',
+            nodeId: crypto.randomUUID(),
             name: alias,
-            resourceIds: [resource.id],
+            uploadIds: [uploadId],
             transform,
           }])
         } finally {
@@ -694,8 +756,8 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
       const groupId = groupIdFromFlowId(id)
       if (groupId) {
         commands.push({ type: 'DELETE_GROUP', groupId })
-      } else if (nodeIds.has(id as DecimalString)) {
-        commands.push({ type: 'DELETE_NODE', nodeId: id as DecimalString })
+      } else if (nodeIds.has(id as UUIDString)) {
+        commands.push({ type: 'DELETE_NODE', nodeId: id as UUIDString })
       }
     }
     for (const link of state.selectedLinks) {
@@ -722,15 +784,15 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     state.selectedLinks,
   ])
 
-  const createLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
+  const createLink = useCallback((sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
     void executeCommands([{ type: 'CREATE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
   }, [executeCommands])
 
-  const deleteLink = useCallback((sourceNodeId: DecimalString, targetNodeId: DecimalString) => {
+  const deleteLink = useCallback((sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
     void executeCommands([{ type: 'DELETE_LINK', sourceNodeId, targetNodeId }]).catch(() => undefined)
   }, [executeCommands])
 
-  const flushFunctionConfig = useCallback((nodeId: DecimalString): Promise<void> => {
+  const flushFunctionConfig = useCallback((nodeId: UUIDString): Promise<void> => {
     const timer = functionConfigTimersRef.current.get(nodeId)
     if (timer !== undefined) {
       window.clearTimeout(timer)
@@ -765,7 +827,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     return trackedFlush
   }, [executeCommands])
 
-  const deleteNode = useCallback((nodeId: DecimalString) => {
+  const deleteNode = useCallback((nodeId: UUIDString) => {
     void flushFunctionConfig(nodeId)
       .catch(() => undefined)
       .then(() => executeCommands([{ type: 'DELETE_NODE', nodeId }]))
@@ -788,7 +850,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   }), [deleteNode, editTextNode, renameNode])
 
   const scheduleFunctionConfig = useCallback((
-    nodeId: DecimalString,
+    nodeId: UUIDString,
     modelKey: string,
     config: CanvasFunctionConfigDTO,
   ) => {
@@ -822,7 +884,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     }
   }, [queryClient, state.canvasId])
 
-  const startFunctionRun = useCallback(async (nodeId: DecimalString) => {
+  const startFunctionRun = useCallback(async (nodeId: UUIDString) => {
     if (!state.canvasId) {
       return
     }
@@ -854,8 +916,8 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   }, [flushFunctionConfig, publishRun, setToast, state.canvasId])
 
   const cancelFunctionRun = useCallback(async (
-    nodeId: DecimalString,
-    requestId: string,
+    nodeId: UUIDString,
+    requestId: UUIDString,
   ) => {
     if (!state.canvasId || !requestId) {
       return
@@ -867,32 +929,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
       setToast(error instanceof Error ? error.message : '取消生成失败')
     }
   }, [publishRun, setToast, state.canvasId])
-
-  const setAgentPrompt = useCallback((agentPrompt: string) => {
-    setState((current) => ({ ...current, agentPrompt }))
-  }, [])
-
-  const sendAgent = useCallback(() => {
-    setState((current) => {
-      const text = current.agentPrompt.trim()
-      if (!text) {
-        return { ...current, toast: '请输入要交给 Agent 的任务。' }
-      }
-      return {
-        ...current,
-        agentPrompt: '',
-        threadOpen: true,
-        messages: [
-          ...current.messages,
-          { kind: 'user', text },
-          {
-            kind: 'agent',
-            text: '已收到。Canvas Chat 当前保留本地消息，后续可通过 @节点 显式引用需要处理的节点。',
-          },
-        ],
-      }
-    })
-  }, [])
 
   const toggleAddMenu = useCallback(() => {
     setState((current) => ({
@@ -917,9 +953,9 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
   const collapseThread = useCallback(() => {
     setState((current) => ({ ...current, threadOpen: false }))
   }, [])
-  const focusAgentDock = useCallback(() => {
+  // 快捷键只负责展开面板；composer 聚焦由共享 ThreadComposer 自己管理。
+  const focusThread = useCallback(() => {
     openThread()
-    window.requestAnimationFrame(() => agentPromptRef.current?.focus())
   }, [openThread])
 
   useCanvasKeyboard({
@@ -930,7 +966,7 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     zoomRef,
     clearSelection: () => setSelection([]),
     deleteSelection,
-    focusAgentPrompt: focusAgentDock,
+    focusThread,
     createTextNode,
     closeOverlays: () => {
       closeAddMenu()
@@ -948,7 +984,6 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     focusSelectionRef,
     zoomRef,
     stageElementRef,
-    agentPromptRef,
     dockAddRef,
     snapshotQuery,
     modelsQuery,
@@ -979,14 +1014,13 @@ export function useCanvasController(initialCanvasId?: DecimalString) {
     ungroupSelection,
     uploadFiles,
     handleAddAction,
+    bindThreadDocument,
     toggleAddMenu,
     closeAddMenu,
     setAddMenuIndex,
-    setAgentPrompt,
-    sendAgent,
     openThread,
     collapseThread,
-    focusAgentDock,
+    focusThread,
   }
 }
 

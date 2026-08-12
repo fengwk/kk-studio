@@ -2,7 +2,7 @@ import type {
   CanvasFunctionConfigDTO,
   CanvasFunctionModelDTO,
   CanvasTransformDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type { Group, ResourceNode } from '@/features/canvas/domain'
@@ -17,22 +17,18 @@ export type AddMenuAction =
   | 'video-function'
   | 'group'
 
-export type CanvasThreadMessage =
-  | { kind: 'user'; text: string }
-  | { kind: 'agent'; text: string }
-
 export interface CanvasLinkSelection {
-  sourceNodeId: DecimalString
-  targetNodeId: DecimalString
+  sourceNodeId: UUIDString
+  targetNodeId: UUIDString
 }
 
 export type CanvasTextEditorState =
   | { mode: 'create'; nodeId: null; name: string; markdown: string }
-  | { mode: 'edit'; nodeId: DecimalString; name: string; markdown: string }
+  | { mode: 'edit'; nodeId: UUIDString; name: string; markdown: string }
 
 export interface CanvasLocalState {
   view: CanvasView
-  canvasId: DecimalString | null
+  canvasId: UUIDString | null
   selectedIds: string[]
   selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>
@@ -41,8 +37,6 @@ export interface CanvasLocalState {
   addMenuOpen: boolean
   addMenuIndex: number
   threadOpen: boolean
-  agentPrompt: string
-  messages: CanvasThreadMessage[]
   uploadProgress: Record<string, number>
   commandPending: boolean
   conflictMessage: string | null
@@ -50,13 +44,13 @@ export interface CanvasLocalState {
 }
 
 export interface CanvasNodeCallbacks {
-  renameNode: (nodeId: DecimalString, name: string) => void
+  renameNode: (nodeId: UUIDString, name: string) => void
   editTextNode: (node: ResourceNode) => void
-  deleteNode: (nodeId: DecimalString) => void
+  deleteNode: (nodeId: UUIDString) => void
 }
 
 export interface PendingFunctionConfig {
-  nodeId: DecimalString
+  nodeId: UUIDString
   modelKey: string
   config: CanvasFunctionConfigDTO
 }

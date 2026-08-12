@@ -6,75 +6,142 @@ import { useCanvasController } from '@/features/canvas/useCanvasController'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import type {
   ApplyCanvasCommandsRequestDTO,
+  CanvasCommandDTO,
+  CanvasPatchDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
 import {
-  applyCanvasCommands,
   cancelCanvasFunctionRun,
-  completeCanvasUpload,
+  createCanvasRealtimeStream,
   getCanvas,
+  getCanvasChanges,
   getCanvasFunctionRun,
   listCanvasFunctionModels,
-  reserveCanvasUpload,
+  postCanvasCommands,
   startCanvasFunctionRun,
-  uploadCanvasFile,
 } from '@/shared/api/studio-service'
+import { storageService } from '@/shared/api/storage-service'
+import { probeCanvasFileMetadata } from '@/features/canvas/canvas-file-metadata'
+
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_NOTE = 'aaaaaaaa-0000-4000-8000-000000000002'
+const NODE_FN = 'aaaaaaaa-0000-4000-8000-000000000003'
+const NODE_IMG = 'aaaaaaaa-0000-4000-8000-000000000005'
+const GROUP_A = 'bbbbbbbb-0000-4000-8000-000000000004'
+const RES_NOTE = 'cccccccc-0000-4000-8000-000000000020'
+const RES_OUTPUT = 'cccccccc-0000-4000-8000-000000000030'
+const RES_IMG = 'cccccccc-0000-4000-8000-000000000050'
+const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009'
+const REQUEST_STARTED = 'eeeeeeee-0000-4000-8000-000000000001'
+const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
 
 vi.mock('@/shared/api/studio-service', () => ({
-  applyCanvasCommands: vi.fn(),
+  postCanvasCommands: vi.fn(),
   cancelCanvasFunctionRun: vi.fn(),
-  completeCanvasUpload: vi.fn(),
   getCanvas: vi.fn(),
+  getCanvasChanges: vi.fn(),
   getCanvasFunctionRun: vi.fn(),
   listCanvasFunctionModels: vi.fn(),
-  reserveCanvasUpload: vi.fn(),
   startCanvasFunctionRun: vi.fn(),
-  uploadCanvasFile: vi.fn(),
+  createCanvasRealtimeStream: vi.fn(),
 }))
 
-function snapshot(revision = '0'): CanvasSnapshotDTO {
+vi.mock('@/shared/api/storage-service', () => ({
+  storageService: {
+    reserveUpload: vi.fn(),
+    uploadFile: vi.fn(),
+    completeUpload: vi.fn(),
+    deleteUpload: vi.fn(),
+    getBlobOriginalUrl: vi.fn(),
+    getBlobPreviewUrl: vi.fn(),
+  },
+}))
+
+vi.mock('@/features/canvas/canvas-file-metadata', () => ({
+  probeCanvasFileMetadata: vi.fn(async () => ({ width: 1122, height: 1402 })),
+}))
+
+vi.mock('@/features/ai/composer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/ai/composer')>()
+  return { ...actual, createWorkerHasher: () => async () => FAKE_SHA256 }
+})
+
+class FakeEventSource {
+  private readonly listeners = new Map<string, EventListener[]>()
+
+  addEventListener(type: string, listener: EventListener): void {
+    const existing = this.listeners.get(type) ?? []
+    existing.push(listener)
+    this.listeners.set(type, existing)
+  }
+
+  removeEventListener(type: string, listener: EventListener): void {
+    const existing = this.listeners.get(type) ?? []
+    this.listeners.set(
+      type,
+      existing.filter((value) => value !== listener),
+    )
+  }
+
+  close(): void {
+    this.listeners.clear()
+  }
+}
+
+function snapshot(version = 0): CanvasSnapshotDTO {
   return {
     document: {
-      id: '1',
+      id: CANVAS_ID,
       title: 'Board',
-      graphRevision: revision,
+      version,
+      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
     nodes: [{
-      id: '2',
-      canvasId: '1',
+      id: NODE_NOTE,
+      canvasId: CANVAS_ID,
       name: 'Note',
       transform: { x: 20, y: 30, width: 320, height: 260 },
       groupId: null,
       resources: [{
-        id: '20',
-        canvasId: '1',
+        id: RES_NOTE,
+        canvasId: CANVAS_ID,
+        ownerNodeId: NODE_NOTE,
+        resourceIndex: 0,
+        blobId: null,
+        name: 'note.md',
+        textContent: 'note',
         kind: 'TEXT',
         mediaType: 'text/markdown',
-        name: 'note.md',
-        size: '4',
-        textContent: 'note',
-        metadataJson: '{}',
+        sizeBytes: 4,
+        width: null,
+        height: null,
+        durationMs: null,
         createdAt: '2026-08-10T00:00:00Z',
       }],
       function: null,
       run: null,
     }, {
-      id: '3',
-      canvasId: '1',
+      id: NODE_FN,
+      canvasId: CANVAS_ID,
       name: 'Function',
       transform: { x: 400, y: 30, width: 320, height: 260 },
-      groupId: '4',
+      groupId: GROUP_A,
       resources: [{
-        id: '30',
-        canvasId: '1',
+        id: RES_OUTPUT,
+        canvasId: CANVAS_ID,
+        ownerNodeId: NODE_FN,
+        resourceIndex: 0,
+        blobId: 'blob-output',
+        name: 'old-output.png',
+        textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
-        name: 'old-output.png',
-        size: '3',
-        textContent: null,
-        metadataJson: '{}',
+        sizeBytes: 3,
+        width: null,
+        height: null,
+        durationMs: null,
         createdAt: '2026-08-10T00:00:00Z',
       }],
       function: {
@@ -86,36 +153,85 @@ function snapshot(revision = '0'): CanvasSnapshotDTO {
       },
       run: null,
     }, {
-      id: '5',
-      canvasId: '1',
+      id: NODE_IMG,
+      canvasId: CANVAS_ID,
       name: 'Image',
       transform: { x: 60, y: 360, width: 320, height: 260 },
-      groupId: '4',
+      groupId: GROUP_A,
       resources: [{
-        id: '50',
-        canvasId: '1',
+        id: RES_IMG,
+        canvasId: CANVAS_ID,
+        ownerNodeId: NODE_IMG,
+        resourceIndex: 0,
+        blobId: 'blob-image',
+        name: 'image.png',
+        textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
-        name: 'image.png',
-        size: '3',
-        textContent: null,
-        metadataJson: '{}',
+        sizeBytes: 3,
+        width: null,
+        height: null,
+        durationMs: null,
         createdAt: '2026-08-10T00:00:00Z',
       }],
       function: null,
       run: null,
     }],
     groups: [{
-      id: '4',
-      canvasId: '1',
+      id: GROUP_A,
+      canvasId: CANVAS_ID,
       title: 'Group',
       transform: { x: 0, y: 0, width: 800, height: 700 },
     }],
     links: [{
-      canvasId: '1',
-      sourceNodeId: '2',
-      targetNodeId: '3',
+      canvasId: CANVAS_ID,
+      sourceNodeId: NODE_NOTE,
+      targetNodeId: NODE_FN,
     }],
+  }
+}
+
+/**
+ * 全量 upsert patch：从 baseVersion 前进到 snapshot 的版本。
+ * 模拟「服务端已把命令效果写进投影」后的连续 patch 载荷。
+ */
+function diffPatch(snapshotValue: CanvasSnapshotDTO, baseVersion: number): CanvasPatchDTO {
+  return {
+    baseVersion,
+    version: snapshotValue.document.version,
+    groups: snapshotValue.groups.map((group) => ({ op: 'UPSERT', group })),
+    nodes: snapshotValue.nodes.map((node) => ({ op: 'UPSERT', node })),
+    links: snapshotValue.links.map((link) => ({ op: 'UPSERT', link })),
+  }
+}
+
+/** 模拟服务端命令应用：创建节点 + 版本前进（与命令携带的客户端 UUID 保持一致）。 */
+function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDTO[]): CanvasSnapshotDTO {
+  let nodes = current.nodes
+  for (const command of commands) {
+    if (
+      command.type === 'CREATE_FUNCTION_NODE'
+      || command.type === 'CREATE_TEXT_NODE'
+      || command.type === 'CREATE_RESOURCE_NODE'
+    ) {
+      nodes = [...nodes, {
+        id: command.nodeId,
+        canvasId: current.document.id,
+        name: command.name,
+        transform: command.transform,
+        groupId: null,
+        resources: [],
+        function: command.type === 'CREATE_FUNCTION_NODE'
+          ? { modelKey: command.modelKey, configJson: command.configJson }
+          : null,
+        run: null,
+      }]
+    }
+  }
+  return {
+    ...current,
+    document: { ...current.document, version: current.document.version + 1 },
+    nodes,
   }
 }
 
@@ -140,15 +256,17 @@ function deferred<T>() {
 }
 
 describe('useCanvasController real snapshot runtime', () => {
-  let revision: bigint
+  let current: CanvasSnapshotDTO
   let commands: ApplyCanvasCommandsRequestDTO[]
 
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    revision = 0n
+    current = snapshot()
     commands = []
-    vi.mocked(getCanvas).mockImplementation(async () => snapshot(revision.toString()))
+    vi.mocked(getCanvas).mockImplementation(async () => current)
+    vi.mocked(getCanvasChanges).mockResolvedValue({ patches: [], snapshot: null })
+    vi.mocked(createCanvasRealtimeStream).mockImplementation(() => new FakeEventSource())
     vi.mocked(listCanvasFunctionModels).mockResolvedValue([{
       key: 'fake-image',
       label: 'Fake Image',
@@ -167,49 +285,49 @@ describe('useCanvasController real snapshot runtime', () => {
       available: true,
       unavailableReason: null,
     }])
-    vi.mocked(applyCanvasCommands).mockImplementation(async (_canvasId, request) => {
+    vi.mocked(postCanvasCommands).mockImplementation(async (_canvasId, request) => {
       commands.push(request)
-      revision += 1n
-      return snapshot(revision.toString())
+      const before = current.document.version
+      current = applyCommandBatch(current, request.commands)
+      return diffPatch(current, before)
     })
-    vi.mocked(reserveCanvasUpload).mockResolvedValue({
-      uploadId: '9',
-      method: 'PUT',
-      url: 'https://s3.example/upload',
-      headers: { 'If-None-Match': '*' },
+    vi.mocked(storageService.reserveUpload).mockResolvedValue({
+      id: UPLOAD_ID,
+      state: 'PENDING',
+      blobId: null,
+      presignedPut: {
+        method: 'PUT',
+        url: 'https://s3.example/upload',
+        headers: { 'If-None-Match': '*' },
+      },
       expiresAt: '2026-08-10T00:15:00Z',
     })
-    vi.mocked(uploadCanvasFile).mockResolvedValue()
-    vi.mocked(completeCanvasUpload).mockResolvedValue({
-      id: '9',
-      canvasId: '1',
-      kind: 'IMAGE',
-      mediaType: 'image/png',
-      name: 'upload.png',
-      size: '3',
-      textContent: null,
-      metadataJson: '{"width":1122,"height":1402}',
-      createdAt: '2026-08-10T00:00:00Z',
+    vi.mocked(storageService.uploadFile).mockResolvedValue()
+    vi.mocked(storageService.completeUpload).mockResolvedValue({
+      id: UPLOAD_ID,
+      state: 'READY',
+      blobId: 'blob-upload',
+      expiresAt: '2026-08-10T00:15:00Z',
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
-      nodeId: '3',
-      requestId: 'request-started',
+      nodeId: NODE_FN,
+      requestId: REQUEST_STARTED,
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
       updatedAt: '2026-08-10T00:00:00Z',
     })
     vi.mocked(getCanvasFunctionRun).mockResolvedValue({
-      nodeId: '3',
-      requestId: 'request-started',
+      nodeId: NODE_FN,
+      requestId: REQUEST_STARTED,
       status: 'FAILED',
       stage: 'FAILED',
       error: 'fake failure',
       updatedAt: '2026-08-10T00:00:01Z',
     })
     vi.mocked(cancelCanvasFunctionRun).mockResolvedValue({
-      nodeId: '3',
-      requestId: 'request-started',
+      nodeId: NODE_FN,
+      requestId: REQUEST_STARTED,
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,
@@ -223,27 +341,27 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('starts an initial canvas in editor mode and queries its snapshot immediately', async () => {
     // Direct routes must not wait for an in-memory openEditor transition before loading data.
-    localStorage.removeItem(canvasViewportStorageKey('1'))
-    const { result } = renderHook(() => useCanvasController('1'), { wrapper: Wrapper })
+    localStorage.removeItem(canvasViewportStorageKey(CANVAS_ID))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
 
     expect(result.current.state.view).toBe('editor')
-    expect(result.current.state.canvasId).toBe('1')
+    expect(result.current.state.canvasId).toBe(CANVAS_ID)
     expect(result.current.initialFitPending).toBe(true)
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
-    expect(getCanvas).toHaveBeenCalledWith('1', expect.objectContaining({
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    expect(getCanvas).toHaveBeenCalledWith(CANVAS_ID, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))
   })
 
   it('drives commands, local UI state, uploads, and keyboard actions from one server snapshot', async () => {
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
 
     act(() => {
-      result.current.setSelection(['2'])
-      result.current.nodeCallbacks.renameNode('2', ' Renamed ')
+      result.current.setSelection([NODE_NOTE])
+      result.current.nodeCallbacks.renameNode(NODE_NOTE, ' Renamed ')
     })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_NODE'
@@ -253,14 +371,19 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.snapshot ? {
         ...result.current.snapshot.nodes[0],
         resources: [{
-          id: '20',
-          canvasId: '1',
+          id: RES_NOTE,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_NOTE,
+          resourceIndex: 0,
+          blobId: null,
+          name: 'note.md',
+          textContent: 'note',
           kind: 'TEXT',
           mediaType: 'text/markdown',
-          name: 'note.md',
-          size: '4',
-          text: 'note',
-          metadata: {},
+          sizeBytes: 4,
+          width: null,
+          height: null,
+          durationMs: null,
           createdAt: '2026-08-10T00:00:00Z',
         }],
         function: null,
@@ -300,13 +423,13 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.ungroupSelection()
     })
     act(() => {
-      result.current.setSelection(['2'])
+      result.current.setSelection([NODE_NOTE])
     })
     act(() => {
       result.current.createGroup()
     })
     act(() => {
-      result.current.setSelection(['3', '5'])
+      result.current.setSelection([NODE_FN, NODE_IMG])
     })
     act(() => {
       result.current.ungroupSelection()
@@ -324,9 +447,17 @@ describe('useCanvasController real snapshot runtime', () => {
         new File(['png'], 'upload.png'),
       ])
     })
-    expect(reserveCanvasUpload).toHaveBeenCalledOnce()
-    expect(uploadCanvasFile).toHaveBeenCalledOnce()
-    expect(completeCanvasUpload).toHaveBeenCalledOnce()
+    expect(storageService.reserveUpload).toHaveBeenCalledOnce()
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'upload.png',
+      mediaType: 'image/png',
+      sizeBytes: 3,
+      sha256: FAKE_SHA256,
+    })
+    expect(storageService.uploadFile).toHaveBeenCalledOnce()
+    expect(storageService.completeUpload).toHaveBeenCalledOnce()
+    expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
+    expect(probeCanvasFileMetadata).toHaveBeenCalledWith(expect.any(File), 'IMAGE')
     expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_RESOURCE_NODE'
     ))).toBe(true)
@@ -335,12 +466,19 @@ describe('useCanvasController real snapshot runtime', () => {
       .find((command) => command.type === 'CREATE_RESOURCE_NODE')
     expect(uploadedNode).toMatchObject({
       transform: { width: 256, height: 344 },
+      uploadIds: [UPLOAD_ID],
+    })
+    // 命令只引用共享存储 upload 句柄，绝不携带 resourceIds 或 canvas-scoped 上传 id。
+    expect(uploadedNode).not.toHaveProperty('resourceIds')
+    // 创建类命令携带客户端 UUID 实体 id。
+    expect(uploadedNode).toMatchObject({
+      nodeId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
     })
 
     act(() => {
-      result.current.createLink('2', '3')
-      result.current.deleteLink('2', '3')
-      result.current.setSelection(['group:4', '2'])
+      result.current.createLink(NODE_NOTE, NODE_FN)
+      result.current.deleteLink(NODE_NOTE, NODE_FN)
+      result.current.setSelection([`group:${GROUP_A}`, NODE_NOTE])
     })
     act(() => {
       result.current.deleteSelection()
@@ -351,16 +489,12 @@ describe('useCanvasController real snapshot runtime', () => {
     const deleteNodeCommandCount = commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     )).length
-    act(() => result.current.nodeCallbacks.deleteNode('2'))
+    act(() => result.current.nodeCallbacks.deleteNode(NODE_NOTE))
     await waitFor(() => expect(commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     ))).toHaveLength(deleteNodeCommandCount + 1))
 
     act(() => {
-      result.current.setAgentPrompt('')
-      result.current.sendAgent()
-      result.current.setAgentPrompt('inspect')
-      result.current.sendAgent()
       result.current.toggleAddMenu()
       result.current.closeAddMenu()
       result.current.setAddMenuIndex(2)
@@ -368,7 +502,6 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.collapseThread()
       result.current.setViewport({ x: 1, y: 2, zoom: 0.5 })
     })
-    expect(result.current.state.messages).toHaveLength(2)
     expect(result.current.state.viewport).toEqual({ x: 1, y: 2, zoom: 0.5 })
 
     const fit = vi.fn()
@@ -396,57 +529,22 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {
     // Queue-owned snapshots plus in-flight reservations cover both synchronous clicks and sequential files.
-    let current = snapshot()
-    let resourceId = 90n
-    vi.mocked(getCanvas).mockImplementation(async () => current)
-    vi.mocked(completeCanvasUpload).mockImplementation(async () => {
-      resourceId += 1n
-      return {
-        id: resourceId.toString() as `${bigint}`,
-        canvasId: '1',
-        kind: 'IMAGE',
-        mediaType: 'image/heic',
-        name: 'same.heic',
-        size: '3',
-        textContent: null,
-        metadataJson: '{}',
-        createdAt: '2026-08-10T00:00:00Z',
-      }
+    // READY 预留模拟 sha256 命中去重：跳过直传，直接 complete。
+    vi.mocked(storageService.reserveUpload).mockResolvedValue({
+      id: 'eeeeeeee-0000-4000-8000-000000000090',
+      state: 'READY',
+      blobId: null,
+      expiresAt: '2026-08-10T00:15:00Z',
     })
-    vi.mocked(applyCanvasCommands).mockImplementation(async (_canvasId, request) => {
-      commands.push(request)
-      let nodes = current.nodes
-      for (const command of request.commands) {
-        if (
-          command.type === 'CREATE_FUNCTION_NODE'
-          || command.type === 'CREATE_TEXT_NODE'
-          || command.type === 'CREATE_RESOURCE_NODE'
-        ) {
-          nodes = [...nodes, {
-            id: String(nodes.length + 10) as `${bigint}`,
-            canvasId: '1',
-            name: command.name,
-            transform: command.transform,
-            groupId: null,
-            resources: [],
-            function: command.type === 'CREATE_FUNCTION_NODE'
-              ? { modelKey: command.modelKey, configJson: command.configJson }
-              : null,
-            run: null,
-          }]
-        }
-      }
-      revision += 1n
-      current = {
-        ...current,
-        document: { ...current.document, graphRevision: revision.toString() as `${bigint}` },
-        nodes,
-      }
-      return current
-    })
+    vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
+      id: uploadId,
+      state: 'READY',
+      blobId: 'blob-dedup',
+      expiresAt: '2026-08-10T00:15:00Z',
+    }))
 
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
 
     act(() => {
@@ -487,35 +585,49 @@ describe('useCanvasController real snapshot runtime', () => {
       'same.heic',
       'same.heic 2',
     ])
-    expect(reserveCanvasUpload).toHaveBeenNthCalledWith(1, '1', expect.objectContaining({
-      kind: 'IMAGE',
+    // READY 预留 = sha256 命中：跳过直传；complete 返回同一句柄，命令只引用 uploadIds。
+    expect(storageService.uploadFile).not.toHaveBeenCalled()
+    expect(storageService.completeUpload).toHaveBeenCalledTimes(2)
+    expect(storageService.reserveUpload).toHaveBeenNthCalledWith(1, {
+      filename: 'same.heic',
       mediaType: 'image/heic',
-    }))
-    expect(reserveCanvasUpload).toHaveBeenNthCalledWith(2, '1', expect.objectContaining({
-      kind: 'IMAGE',
+      sizeBytes: 3,
+      sha256: FAKE_SHA256,
+    })
+    expect(storageService.reserveUpload).toHaveBeenNthCalledWith(2, {
+      filename: 'same.heic',
       mediaType: 'image/heic',
-    }))
+      sizeBytes: 3,
+      sha256: FAKE_SHA256,
+    })
+    const uploadCommands = commands
+      .flatMap((request) => request.commands)
+      .filter((command) => command.type === 'CREATE_RESOURCE_NODE')
+    expect(uploadCommands).toHaveLength(2)
+    expect(uploadCommands.every((command) => (
+      command.uploadIds.length === 1 && /^[0-9a-f-]{36}$/i.test(command.uploadIds[0] ?? '')
+    ))).toBe(true)
   })
 
   it('flushes debounced config before UUID start, polls only run state, preserves old output on failure, and cancels', async () => {
     // The call order and unchanged Resource id prove config/run orchestration never introduces a second snapshot.
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
-      result.current.scheduleFunctionConfig('3', 'fake-image', {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
         prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
         parameters: { ratio: 'AUTO' },
       })
     })
     await act(async () => {
-      await result.current.startFunctionRun('3')
+      await result.current.startFunctionRun(NODE_FN)
     })
 
     expect(commands.at(-1)?.commands).toEqual([{
       type: 'UPDATE_FUNCTION',
-      nodeId: '3',
+      nodeId: NODE_FN,
       modelKey: 'fake-image',
       configJson: JSON.stringify({
         prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
@@ -523,75 +635,75 @@ describe('useCanvasController real snapshot runtime', () => {
       }),
     }])
     expect(startCanvasFunctionRun).toHaveBeenCalledWith(
-      '1',
-      '3',
+      CANVAS_ID,
+      NODE_FN,
       { requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i) },
     )
-    expect(vi.mocked(applyCanvasCommands).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(vi.mocked(postCanvasCommands).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(startCanvasFunctionRun).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     )
 
     await waitFor(() => {
-      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run?.status).toBe('FAILED')
+      expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.run?.status).toBe('FAILED')
     })
-    expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.resources[0]?.id).toBe('30')
-    expect(getCanvasFunctionRun).toHaveBeenCalledWith('1', '3', expect.objectContaining({
+    expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.resources[0]?.id).toBe(RES_OUTPUT)
+    expect(getCanvasFunctionRun).toHaveBeenCalledWith(CANVAS_ID, NODE_FN, expect.objectContaining({
       signal: expect.any(AbortSignal),
     }))
 
     await act(async () => {
-      await result.current.cancelFunctionRun('3', 'request-started')
+      await result.current.cancelFunctionRun(NODE_FN, REQUEST_STARTED)
     })
     expect(cancelCanvasFunctionRun).toHaveBeenCalledWith(
-      '1',
-      '3',
-      { requestId: 'request-started' },
+      CANVAS_ID,
+      NODE_FN,
+      { requestId: REQUEST_STARTED },
     )
     await waitFor(() => {
-      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run?.status).toBe('CANCELLED')
+      expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.run?.status).toBe('CANCELLED')
     })
   })
 
   it('retains a failed config draft so start retries the save before posting the run', async () => {
-    vi.mocked(applyCanvasCommands).mockRejectedValueOnce(new Error('save failed'))
+    vi.mocked(postCanvasCommands).mockRejectedValueOnce(new Error('save failed'))
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
-      result.current.scheduleFunctionConfig('3', 'fake-image', {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
         prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
         parameters: { ratio: 'AUTO' },
       })
     })
     await act(async () => {
-      await expect(result.current.flushFunctionConfig('3')).rejects.toThrow('save failed')
+      await expect(result.current.flushFunctionConfig(NODE_FN)).rejects.toThrow('save failed')
     })
     expect(startCanvasFunctionRun).not.toHaveBeenCalled()
 
     await act(async () => {
-      await result.current.startFunctionRun('3')
+      await result.current.startFunctionRun(NODE_FN)
     })
 
-    expect(applyCanvasCommands).toHaveBeenCalledTimes(2)
+    expect(postCanvasCommands).toHaveBeenCalledTimes(2)
     expect(commands.at(-1)?.commands).toEqual([{
       type: 'UPDATE_FUNCTION',
-      nodeId: '3',
+      nodeId: NODE_FN,
       modelKey: 'fake-image',
       configJson: JSON.stringify({
         prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
         parameters: { ratio: 'AUTO' },
       }),
     }])
-    expect(vi.mocked(applyCanvasCommands).mock.invocationCallOrder[1]).toBeLessThan(
+    expect(vi.mocked(postCanvasCommands).mock.invocationCallOrder[1]).toBeLessThan(
       vi.mocked(startCanvasFunctionRun).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     )
   })
 
   it('deduplicates concurrent flushes and drains a newer draft before start', async () => {
-    const firstSave = deferred<CanvasSnapshotDTO>()
-    const secondSave = deferred<CanvasSnapshotDTO>()
-    vi.mocked(applyCanvasCommands)
+    const firstSave = deferred<CanvasPatchDTO>()
+    const secondSave = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands)
       .mockImplementationOnce(async (_canvasId, request) => {
         commands.push(request)
         return firstSave.promise
@@ -601,11 +713,11 @@ describe('useCanvasController real snapshot runtime', () => {
         return secondSave.promise
       })
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
-      result.current.scheduleFunctionConfig('3', 'fake-image', {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
         prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
         parameters: { ratio: 'AUTO' },
       })
@@ -613,34 +725,34 @@ describe('useCanvasController real snapshot runtime', () => {
     let firstFlush!: Promise<void>
     let duplicateFlush!: Promise<void>
     act(() => {
-      firstFlush = result.current.flushFunctionConfig('3')
-      duplicateFlush = result.current.flushFunctionConfig('3')
+      firstFlush = result.current.flushFunctionConfig(NODE_FN)
+      duplicateFlush = result.current.flushFunctionConfig(NODE_FN)
     })
     expect(duplicateFlush).toBe(firstFlush)
-    await waitFor(() => expect(applyCanvasCommands).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(1))
 
     act(() => {
-      result.current.scheduleFunctionConfig('3', 'fake-image', {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
         prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
         parameters: { ratio: 'AUTO' },
       })
     })
     let start!: Promise<void>
     act(() => {
-      start = result.current.startFunctionRun('3')
+      start = result.current.startFunctionRun(NODE_FN)
     })
     expect(startCanvasFunctionRun).not.toHaveBeenCalled()
 
     await act(async () => {
-      firstSave.resolve(snapshot('1'))
+      firstSave.resolve(diffPatch(snapshot(1), 0))
       await firstSave.promise
     })
-    await waitFor(() => expect(applyCanvasCommands).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(2))
     expect(startCanvasFunctionRun).not.toHaveBeenCalled()
     expect(commands.map((request) => request.commands)).toEqual([
       [{
         type: 'UPDATE_FUNCTION',
-        nodeId: '3',
+        nodeId: NODE_FN,
         modelKey: 'fake-image',
         configJson: JSON.stringify({
           prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
@@ -649,7 +761,7 @@ describe('useCanvasController real snapshot runtime', () => {
       }],
       [{
         type: 'UPDATE_FUNCTION',
-        nodeId: '3',
+        nodeId: NODE_FN,
         modelKey: 'fake-image',
         configJson: JSON.stringify({
           prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
@@ -659,7 +771,7 @@ describe('useCanvasController real snapshot runtime', () => {
     ])
 
     await act(async () => {
-      secondSave.resolve(snapshot('2'))
+      secondSave.resolve(diffPatch(snapshot(2), 1))
       await Promise.all([firstFlush, duplicateFlush, start])
     })
     expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
@@ -674,7 +786,7 @@ describe('useCanvasController real snapshot runtime', () => {
         throw new Error('start response lost')
       })
       vi.mocked(getCanvasFunctionRun).mockImplementation(async () => ({
-        nodeId: '3',
+        nodeId: NODE_FN,
         requestId: submittedRequestId,
         status,
         stage: status === 'RUNNING' ? 'QUEUED' : 'FAILED',
@@ -682,15 +794,15 @@ describe('useCanvasController real snapshot runtime', () => {
         updatedAt: '2026-08-10T00:00:01Z',
       }))
       const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-      act(() => result.current.openEditor('1'))
-      await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+      act(() => result.current.openEditor(CANVAS_ID))
+      await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
       await act(async () => {
-        await result.current.startFunctionRun('3')
+        await result.current.startFunctionRun(NODE_FN)
       })
 
       await waitFor(() => {
-        expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.run).toEqual(
+        expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.run).toEqual(
           expect.objectContaining({ requestId: submittedRequestId, status }),
         )
       })
@@ -702,36 +814,41 @@ describe('useCanvasController real snapshot runtime', () => {
   it('refetches the authoritative snapshot after a successful polled run', async () => {
     // Success is complete only when the snapshot query replaces old output with backend materialized resources.
     vi.mocked(getCanvasFunctionRun).mockResolvedValue({
-      nodeId: '3',
-      requestId: 'request-started',
+      nodeId: NODE_FN,
+      requestId: REQUEST_STARTED,
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
       updatedAt: '2026-08-10T00:00:01Z',
     })
     vi.mocked(getCanvas).mockImplementation(async () => {
-      const current = snapshot(revision.toString())
+      const latest = current
       if (vi.mocked(getCanvas).mock.calls.length < 2) {
-        return current
+        return latest
       }
       return {
-        ...current,
-        nodes: current.nodes.map((node) => node.id === '3' ? {
+        ...latest,
+        nodes: latest.nodes.map((node) => node.id === NODE_FN ? {
           ...node,
           resources: [{
-            id: '31',
-            canvasId: '1',
+            id: 'ffffffff-0000-4000-8000-000000000031',
+            canvasId: CANVAS_ID,
+            ownerNodeId: NODE_FN,
+            resourceIndex: 0,
+            blobId: 'blob-new-output',
+            name: 'new-output.png',
+            textContent: null,
             kind: 'IMAGE',
             mediaType: 'image/png',
-            name: 'new-output.png',
-            size: '4',
-            textContent: null,
-            metadataJson: '{}',
+            sizeBytes: 4,
+            width: null,
+            height: null,
+            durationMs: null,
             createdAt: '2026-08-10T00:00:01Z',
           }],
           run: {
-            nodeId: '3',
-            requestId: 'request-started',
+            nodeId: NODE_FN,
+            requestId: REQUEST_STARTED,
             status: 'SUCCEEDED',
             stage: 'SUCCEEDED',
             error: null,
@@ -741,13 +858,13 @@ describe('useCanvasController real snapshot runtime', () => {
       }
     })
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
-    act(() => result.current.openEditor('1'))
-    await waitFor(() => expect(result.current.snapshot?.document.id).toBe('1'))
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await act(async () => {
-      await result.current.startFunctionRun('3')
+      await result.current.startFunctionRun(NODE_FN)
     })
     await waitFor(() => {
-      expect(result.current.snapshot?.nodes.find((node) => node.id === '3')?.resources[0]?.id).toBe('31')
+      expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.resources[0]?.id).toBe('ffffffff-0000-4000-8000-000000000031')
     })
     expect(getCanvas).toHaveBeenCalledTimes(2)
   })
