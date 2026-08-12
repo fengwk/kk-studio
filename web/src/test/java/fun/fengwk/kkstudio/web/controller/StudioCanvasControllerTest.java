@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -18,14 +19,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
@@ -98,7 +101,9 @@ class StudioCanvasControllerTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    objectMapper = new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    // 使用 convention4j 生产 ObjectMapper：long/Long 输出十进制字符串、默认 NON_NULL、FAIL_ON_UNKNOWN_PROPERTIES
+    // 关闭（未知字段由 DTO @JsonAnySetter 拒绝），与真实 wire 一致。
+    objectMapper = ObjectMapperHolder.getInstance();
     queryService = mock(CanvasQueryService.class);
     commandService = mock(CanvasCommandService.class);
     realtimeService = mock(CanvasRealtimeService.class);
@@ -133,34 +138,55 @@ class StudioCanvasControllerTest {
     when(queryService.listDocuments()).thenReturn(List.of(document()));
     when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
 
-    mockMvc
-        .perform(get("/api/canvases"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].id").value(CANVAS.toString()))
-        .andExpect(jsonPath("$.data[0].version").value(3))
-        .andExpect(jsonPath("$.data[0].threadId").value(THREAD.toString()))
-        .andExpect(jsonPath("$.data[0].graphRevision").doesNotExist());
+    MvcResult list =
+        mockMvc
+            .perform(get("/api/canvases"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data[0].id").value(CANVAS.toString()))
+            .andExpect(jsonPath("$.data[0].version").value("3"))
+            .andExpect(jsonPath("$.data[0].threadId").value(THREAD.toString()))
+            .andExpect(jsonPath("$.data[0].graphRevision").doesNotExist())
+            .andReturn();
+    JsonNode listJson = readTree(list);
+    assertEquals(
+        true, listJson.at("/data/0/version").isTextual(), "version wire must be a JSON string");
+    assertEquals("3", listJson.at("/data/0/version").asText());
 
-    mockMvc
-        .perform(get("/api/canvases/" + CANVAS))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.document.version").value(3))
-        .andExpect(jsonPath("$.data.nodes[0].id").value(NODE_1.toString()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].id").value(RESOURCE_1.toString()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(BLOB_1.toString()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("IMAGE"))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].mediaType").value("image/png"))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].sizeBytes").value(5))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(640))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].height").value(480))
-        .andExpect(jsonPath("$.data.nodes[1].function.modelKey").value("model"))
-        .andExpect(jsonPath("$.data.nodes[1].run.stage").value("QUEUED"))
-        .andExpect(jsonPath("$.data.nodes[1].run.requestId").value(REQUEST.toString()))
-        .andExpect(jsonPath("$.data.nodes[1].run.stateJson").doesNotExist())
-        .andExpect(jsonPath("$.data.groups[0].id").value(GROUP.toString()))
-        .andExpect(jsonPath("$.data.links[0].canvasId").value(CANVAS.toString()))
-        .andExpect(jsonPath("$.data.links[0].sourceNodeId").value(NODE_1.toString()))
-        .andExpect(jsonPath("$.data.links[0].id").doesNotExist());
+    MvcResult snapshotResult =
+        mockMvc
+            .perform(get("/api/canvases/" + CANVAS))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.document.version").value("3"))
+            .andExpect(jsonPath("$.data.nodes[0].id").value(NODE_1.toString()))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].id").value(RESOURCE_1.toString()))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(BLOB_1.toString()))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("IMAGE"))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].mediaType").value("image/png"))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].sizeBytes").value("5"))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(640))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].height").value(480))
+            .andExpect(jsonPath("$.data.nodes[0].resources[0].durationMs").value(nullValue()))
+            .andExpect(jsonPath("$.data.nodes[0].groupId").value(GROUP.toString()))
+            .andExpect(jsonPath("$.data.nodes[0].function").value(nullValue()))
+            .andExpect(jsonPath("$.data.nodes[0].run").value(nullValue()))
+            .andExpect(jsonPath("$.data.nodes[1].function.modelKey").value("model"))
+            .andExpect(jsonPath("$.data.nodes[1].groupId").value(nullValue()))
+            .andExpect(jsonPath("$.data.nodes[1].run.stage").value("QUEUED"))
+            .andExpect(jsonPath("$.data.nodes[1].run.requestId").value(REQUEST.toString()))
+            .andExpect(jsonPath("$.data.nodes[1].run.error").value(nullValue()))
+            .andExpect(jsonPath("$.data.nodes[1].run.stateJson").doesNotExist())
+            .andExpect(jsonPath("$.data.groups[0].id").value(GROUP.toString()))
+            .andExpect(jsonPath("$.data.links[0].canvasId").value(CANVAS.toString()))
+            .andExpect(jsonPath("$.data.links[0].sourceNodeId").value(NODE_1.toString()))
+            .andExpect(jsonPath("$.data.links[0].id").doesNotExist())
+            .andReturn();
+    JsonNode json = readTree(snapshotResult);
+    assertTextual(json, "/data/document/version", "3");
+    assertTextual(json, "/data/nodes/0/resources/0/sizeBytes", "5");
+    assertNullPresent(json, "/data/nodes/0/resources/0/durationMs");
+    assertNullPresent(json, "/data/nodes/0/function");
+    assertNullPresent(json, "/data/nodes/0/run");
+    assertNullPresent(json, "/data/nodes/1/run/error");
   }
 
   @Test
@@ -169,7 +195,7 @@ class StudioCanvasControllerTest {
         .thenReturn(
             Optional.of(
                 new CanvasSnapshot(
-                    document(),
+                    new CanvasDocument(CANVAS, "demo", 3, null, NOW, NOW),
                     List.of(
                         new CanvasResourceNode(
                             NODE_1,
@@ -189,10 +215,16 @@ class StudioCanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.document.version").value("3"))
+        .andExpect(jsonPath("$.data.document.threadId").value(nullValue()))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].kind").value("TEXT"))
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].textContent").value("hello"))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].blobId").value(nullValue()))
         .andExpect(jsonPath("$.data.nodes[0].resources[0].mediaType").value(nullValue()))
-        .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(nullValue()));
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].sizeBytes").value(nullValue()))
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].width").value(nullValue()))
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].height").value(nullValue()))
+        .andExpect(jsonPath("$.data.nodes[0].resources[0].durationMs").value(nullValue()));
 
     CreateCanvasRequestDTO body = new CreateCanvasRequestDTO();
     body.setTitle("board");
@@ -203,7 +235,7 @@ class StudioCanvasControllerTest {
                 .content(objectMapper.writeValueAsBytes(body)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.code").value("CREATED"))
-        .andExpect(jsonPath("$.data.version").value(3))
+        .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.threadId").value(THREAD.toString()));
     verify(commandService).createCanvas("board");
 
@@ -218,7 +250,7 @@ class StudioCanvasControllerTest {
     when(commandService.applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList()))
         .thenReturn(patch());
     ApplyCanvasCommandsRequestDTO request = new ApplyCanvasCommandsRequestDTO();
-    request.setExpectedVersion(2L);
+    request.setExpectedVersion("2");
     request.setCommandId(COMMAND.toString());
     request.setCommands(
         List.of(
@@ -232,8 +264,8 @@ class StudioCanvasControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsBytes(request)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.baseVersion").value(2))
-        .andExpect(jsonPath("$.data.version").value(3))
+        .andExpect(jsonPath("$.data.baseVersion").value("2"))
+        .andExpect(jsonPath("$.data.version").value("3"))
         .andExpect(jsonPath("$.data.nodes[0].op").value("REMOVE"))
         .andExpect(jsonPath("$.data.nodes[0].nodeId").value(NODE_2.toString()));
 
@@ -247,6 +279,47 @@ class StudioCanvasControllerTest {
                     new CanvasCommand.CreateTextNode(
                         NODE_1, "note", "hello", new CanvasTransform(1, 2, 100, 80)),
                     new CanvasCommand.CreateLink(NODE_1, NODE_2))));
+  }
+
+  @Test
+  void expectedVersionRequiresCanonicalNonNegativeDecimal() throws Exception {
+    when(commandService.applyCommands(any(UUID.class), anyLong(), any(UUID.class), anyList()))
+        .thenReturn(patch());
+    String commands =
+        "\"commandId\":\"%s\",\"commands\":[{\"type\":\"DELETE_NODE\",\"nodeId\":\"%s\"}]"
+            .formatted(COMMAND, NODE_1);
+
+    // 公共契约是 string；JSON number 经 Jackson coercion 兼容接受（同一严格校验）。
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\"," + commands + "}"))
+        .andExpect(status().isOk());
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/commands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":3," + commands + "}"))
+        .andExpect(status().isOk());
+
+    for (String invalid :
+        new String[] {
+          "\"-1\"", // 负数
+          "\"01\"", // leading zero
+          "\"abc\"", // 非数字
+          "\"9223372036854775808\"", // 超 long 范围
+          "null" // 缺失
+        }) {
+      mockMvc
+          .perform(
+              post("/api/canvases/" + CANVAS + "/commands")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content("{\"expectedVersion\":" + invalid + "," + commands + "}"))
+          .andExpect(status().isBadRequest());
+    }
+
+    verify(commandService, times(2)).applyCommands(eq(CANVAS), eq(3L), eq(COMMAND), anyList());
   }
 
   @Test
@@ -282,6 +355,12 @@ class StudioCanvasControllerTest {
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=abc"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=01"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=9223372036854775808"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=-1"))
@@ -334,10 +413,10 @@ class StudioCanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/changes?afterVersion=1"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.patches[0].baseVersion").value(2))
-        .andExpect(jsonPath("$.data.patches[0].version").value(3))
+        .andExpect(jsonPath("$.data.patches[0].baseVersion").value("2"))
+        .andExpect(jsonPath("$.data.patches[0].version").value("3"))
         .andExpect(jsonPath("$.data.patches[0].groups[0].op").value("UPSERT"))
-        .andExpect(jsonPath("$.data.snapshot").doesNotExist());
+        .andExpect(jsonPath("$.data.snapshot").value(nullValue()));
 
     when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
     when(realtimeService.readChanges(CANVAS, 0L))
@@ -346,7 +425,7 @@ class StudioCanvasControllerTest {
         .perform(get("/api/canvases/" + CANVAS + "/changes"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.patches").isEmpty())
-        .andExpect(jsonPath("$.data.snapshot.document.version").value(3));
+        .andExpect(jsonPath("$.data.snapshot.document.version").value("3"));
   }
 
   @Test
@@ -426,15 +505,37 @@ class StudioCanvasControllerTest {
     mockMvc
         .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=abc"))
         .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=01"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/events/stream?afterVersion=9223372036854775808"))
+        .andExpect(status().isBadRequest());
     verifyNoInteractions(versionEventSource);
   }
 
   private String validCommandJson() {
     return """
-        {"expectedVersion":3,"commandId":"%s",
+        {"expectedVersion":"3","commandId":"%s",
          "commands":[{"type":"DELETE_NODE","nodeId":"%s"}]}
         """
         .formatted(COMMAND, NODE_1);
+  }
+
+  private JsonNode readTree(MvcResult result) throws Exception {
+    return objectMapper.readTree(result.getResponse().getContentAsByteArray());
+  }
+
+  private static void assertTextual(JsonNode root, String pointer, String expected) {
+    JsonNode node = root.at(pointer);
+    assertEquals(true, node.isTextual(), pointer + " must be a JSON string");
+    assertEquals(expected, node.textValue(), pointer);
+  }
+
+  private static void assertNullPresent(JsonNode root, String pointer) {
+    JsonNode node = root.at(pointer);
+    assertEquals(false, node.isMissingNode(), pointer + " must be present");
+    assertEquals(true, node.isNull(), pointer + " must be JSON null");
   }
 
   private CanvasDocument document() {

@@ -89,7 +89,7 @@ public class StudioWebMapper {
     CanvasDocumentDTO dto = new CanvasDocumentDTO();
     dto.setId(document.id().toString());
     dto.setTitle(document.title());
-    dto.setVersion(document.version());
+    dto.setVersion(Long.toString(document.version()));
     dto.setThreadId(document.threadId() == null ? null : document.threadId().toString());
     dto.setCreatedAt(document.createdAt().toString());
     dto.setUpdatedAt(document.updatedAt().toString());
@@ -109,8 +109,8 @@ public class StudioWebMapper {
   public CanvasPatchDTO toDto(CanvasPatch patch) {
     Objects.requireNonNull(patch, "patch");
     CanvasPatchDTO dto = new CanvasPatchDTO();
-    dto.setBaseVersion(patch.baseVersion());
-    dto.setVersion(patch.version());
+    dto.setBaseVersion(Long.toString(patch.baseVersion()));
+    dto.setVersion(Long.toString(patch.version()));
     dto.setGroups(patch.groups().stream().map(this::toGroupPatchDto).toList());
     dto.setNodes(patch.nodes().stream().map(this::toNodePatchDto).toList());
     dto.setLinks(patch.links().stream().map(this::toLinkPatchDto).toList());
