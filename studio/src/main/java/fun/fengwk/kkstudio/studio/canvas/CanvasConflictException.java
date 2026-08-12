@@ -15,7 +15,7 @@ public class CanvasConflictException extends RuntimeException {
   }
 
   public enum Reason {
-    REVISION_CONFLICT,
+    VERSION_CONFLICT,
     IDEMPOTENCY_CONFLICT
   }
 }

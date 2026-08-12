@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.studio.canvas.function;
 
 import java.util.List;
+import java.util.UUID;
 
 /** 一个 provider adapter 可声明并执行一个或多个 Canvas Function model。 */
 public interface CanvasFunctionAdapter {
@@ -13,7 +14,7 @@ public interface CanvasFunctionAdapter {
 
   void preflight(CanvasFunctionFrozenRun run);
 
-  List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run);
+  List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run);
 
   default void cancel(CanvasFunctionFrozenRun run) {}
 }

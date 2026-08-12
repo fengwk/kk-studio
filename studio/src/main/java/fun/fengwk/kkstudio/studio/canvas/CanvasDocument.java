@@ -2,16 +2,21 @@ package fun.fengwk.kkstudio.studio.canvas;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
-/** Canvas aggregate 的持久化头。 */
+/**
+ * Canvas aggregate 的持久化头。
+ *
+ * <p>{@code threadId} 可空：Canvas 至多绑定一个根 Harness Thread，作为该画布的根级对话上下文。
+ */
 public record CanvasDocument(
-    long id, String title, long graphRevision, Instant createdAt, Instant updatedAt) {
+    UUID id, String title, long version, UUID threadId, Instant createdAt, Instant updatedAt) {
 
   public CanvasDocument {
-    CanvasValidation.requirePositive(id, "id");
+    Objects.requireNonNull(id, "id");
     CanvasValidation.requireNonBlank(title, "title");
-    if (graphRevision < 0L) {
-      throw new IllegalArgumentException("graphRevision must be >= 0");
+    if (version < 0L) {
+      throw new IllegalArgumentException("version must be >= 0");
     }
     Objects.requireNonNull(createdAt, "createdAt");
     Objects.requireNonNull(updatedAt, "updatedAt");
