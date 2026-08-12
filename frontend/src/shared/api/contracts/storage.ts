@@ -77,4 +77,8 @@ export type StorageUploadDTO =
 export interface StoragePresignedUrlDTO {
   url: string
   expiresAt: BackendDateTime
+  /** 原件端点返回的权威 Blob 媒体类型；preview 端点可省略。 */
+  mediaType?: string | null
+  /** 原件端点返回的权威 Blob 字节数；preview 端点可省略。 */
+  sizeBytes?: number | null
 }

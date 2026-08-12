@@ -181,6 +181,30 @@ describe('performBlankPaneFirstSend', () => {
     expect(enqueueCommands).toHaveBeenCalledOnce()
   })
 
+  it('preserves a non-Error failure as the cause and stringifies its message', async () => {
+    const createChatThread = vi.fn(async () => snapshot(thread({ threadId: 't-non-error' })))
+    const enqueueCommands = vi.fn(async () => {
+      throw 'network down'
+    })
+
+    const error = await performBlankPaneFirstSend({
+      chatId: 'chat-1',
+      parts: [createTextPart('retry me')],
+      title: 't',
+      branchSettings: settings(),
+      yoloEnabled: false,
+      createChatThread,
+      enqueueCommands,
+    }).catch((value: unknown) => value)
+
+    expect(error).toBeInstanceOf(FirstSendMessageError)
+    expect(error).toMatchObject({
+      message: 'network down',
+      cause: 'network down',
+    })
+    expect((error as FirstSendMessageError).snapshot.thread.threadId).toBe('t-non-error')
+  })
+
   it('preserves a supplied clientCommandId across replay so the batch is byte-for-byte identical', async () => {
     const createChatThread = vi.fn(async () => snapshot(thread({ threadId: 't1' })))
     const enqueueCommands = vi.fn(async () => {

@@ -90,9 +90,13 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
 
   @Override
   public StoragePresignedUrlDTO presignOriginalUrl(UUID blobId) {
-    requireActive(blobId);
-    return StoragePresignedUrls.from(
-        s3PresignService.presignDownload(StorageObjectKeys.blobOriginal(blobId), null));
+    StorageBlob blob = requireActive(blobId);
+    StoragePresignedUrlDTO signed =
+        StoragePresignedUrls.from(
+            s3PresignService.presignDownload(StorageObjectKeys.blobOriginal(blobId), null));
+    signed.setMediaType(blob.getMediaType());
+    signed.setSizeBytes(blob.getSizeBytes());
+    return signed;
   }
 
   @Override
@@ -116,11 +120,12 @@ public class PostgresqlStorageBlobManager implements StorageBlobManager {
     return swept;
   }
 
-  private void requireActive(UUID blobId) {
+  private StorageBlob requireActive(UUID blobId) {
     StorageBlob blob = blobRepository.getById(blobId);
     if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
       throw new StorageResourceNotFoundException("blob", blobId.toString());
     }
+    return blob;
   }
 
   private void deleteObjectsAndRow(UUID blobId) {

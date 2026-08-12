@@ -48,27 +48,29 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
     }
   }, [attachment.blobId, resolveBlobUrls])
 
-  const label = attachment.name || attachment.mime || t('ai.runtime.message.attachment')
+  const mediaType = urls?.mediaType || attachment.mime
+  const type = attachmentType(mediaType, attachment.type)
+  const label = attachment.name || mediaType || t('ai.runtime.message.attachment')
   const previewUrl =
-    urls?.preview != null && (attachment.type === 'image' || attachment.type === 'video')
+    urls?.preview != null && (type === 'image' || type === 'video')
       ? urls.preview
       : null
   const downloadUrl = urls?.original ?? null
   const unavailable = urls == null && failed
   return (
     <span
-      className={`resource-attachment-chip is-${attachment.type}`}
+      className={`resource-attachment-chip is-${type}`}
       title={label}
     >
       {previewUrl != null ? (
-        attachment.type === 'video' ? (
+        type === 'video' ? (
           <video className="resource-attachment-preview" src={previewUrl} muted tabIndex={-1} />
         ) : (
           <img className="resource-attachment-preview" src={previewUrl} alt="" tabIndex={-1} />
         )
       ) : (
         <span className="resource-attachment-icon" aria-hidden="true">
-          {attachment.type === 'image' ? <Image /> : attachment.type === 'video' ? <Video /> : <FileText />}
+          {type === 'image' ? <Image /> : type === 'video' ? <Video /> : <FileText />}
         </span>
       )}
       <span className="resource-attachment-name">{label}</span>
@@ -86,4 +88,17 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
       {unavailable ? <span className="resource-attachment-failed">{t('ai.runtime.message.resourceUnavailable')}</span> : null}
     </span>
   )
+}
+
+function attachmentType(mediaType: string, fallback: ToolAttachment['type']): ToolAttachment['type'] {
+  if (mediaType.startsWith('image/')) {
+    return 'image'
+  }
+  if (mediaType.startsWith('audio/')) {
+    return 'audio'
+  }
+  if (mediaType.startsWith('video/')) {
+    return 'video'
+  }
+  return fallback
 }

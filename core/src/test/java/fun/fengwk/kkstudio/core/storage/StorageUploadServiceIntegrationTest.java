@@ -853,6 +853,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     StoragePresignedUrlDTO original = storageBlobManager.presignOriginalUrl(blobUuid);
     assertEquals("GET", original.getMethod());
     assertTrue(original.getUrl().contains("blobs/" + blobId + "/original"));
+    assertEquals("application/octet-stream", original.getMediaType());
+    assertEquals((long) content.length, original.getSizeBytes());
     StoragePresignedUrlDTO preview = storageBlobManager.presignPreviewUrl(blobUuid);
     assertTrue(preview.getUrl().contains("blobs/" + blobId + "/preview.webp"));
 

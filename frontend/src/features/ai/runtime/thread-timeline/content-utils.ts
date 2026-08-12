@@ -36,16 +36,16 @@ function stringifyJsonContent(value: unknown): string {
 
 /**
  * 规范的 resource content -> attachment：`{type:'resource', uri, mediaType, name, size,
- * sha256, preview?}` 与 durable `{type:'RESOURCE', blobId, name, mediaType?, sizeBytes?}`。
+ * sha256, preview?}` 与 durable `{type:'resource', blobId, name, preview?}`。
  * URI 是稳定的展示/链接标识；file:/s3: URI 不会被当作 base64 负载。
  * blobId 资源不携带 URI——预览/下载 URL 只在渲染时通过 storage service 解析。
  */
 export function toResourceAttachment(content: Record<string, unknown>): ToolAttachment[] {
   const type = getString(content.type)
-  if (type === 'RESOURCE') {
-    const blobId = getString(content.blobId)
+  const blobId = getString(content.blobId)
+  if ((type === 'resource' || type === 'RESOURCE') && blobId.trim()) {
     const name = getString(content.name)
-    if (!blobId.trim() || !name.trim()) {
+    if (!name.trim()) {
       return []
     }
     const mediaType = getString(content.mediaType)
@@ -56,6 +56,7 @@ export function toResourceAttachment(content: Record<string, unknown>): ToolAtta
         mime: mediaType,
         data: '',
         blobId,
+        preview: getString(content.preview) || undefined,
         size: numberField(content, 'size', 'sizeBytes') || null,
       },
     ]
