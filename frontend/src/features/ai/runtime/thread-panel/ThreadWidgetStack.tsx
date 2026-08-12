@@ -33,7 +33,7 @@ export function ThreadWidgetStack({
       {hasQueuedMessages ? (
         <ol className="thread-input-queue" aria-label={t('ai.runtime.thread.queue')}>
           {queuedMessages.map((message) => (
-            <li key={message.commandId} className="thread-input-queue-item">
+            <li key={message.clientCommandId} className="thread-input-queue-item">
               <span className="thread-input-queue-label">{t('ai.runtime.thread.queued')}</span>
               <span className="thread-input-queue-content">{message.text}</span>
             </li>

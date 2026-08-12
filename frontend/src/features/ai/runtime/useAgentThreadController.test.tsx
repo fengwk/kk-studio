@@ -279,7 +279,9 @@ describe('useAgentThreadController', () => {
     expect(types).toContain('SET_YOLO')
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
     const userMessage = batchArg.commands[batchArg.commands.length - 1]!
-    expect(userMessage.content).toBe('hello world')
+    expect(userMessage).toMatchObject({
+      contents: [{ type: 'TEXT', text: 'hello world' }],
+    })
     // 严格的协议载荷：USER_MESSAGE 永远不会携带 role 字段。
     expect(userMessage).not.toHaveProperty('role')
     expect(partsToText(result.current.draft)).toBe('')

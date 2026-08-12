@@ -161,7 +161,7 @@ describe('ThreadWidgetStack', () => {
       <ThreadWidgetStack
         working
         queuedMessages={[
-          { inputId: 'queued-1', role: 'user', text: '稍后处理这条', sequence: 1 },
+          { clientCommandId: 'queued-1', role: 'user', text: '稍后处理这条', sequence: 1 },
         ]}
       />,
     )

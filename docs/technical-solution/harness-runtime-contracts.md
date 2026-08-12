@@ -71,9 +71,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
       "clientCommandId": "00000000-0000-0000-0000-000000000102",
       "contents": [
         { "type": "TEXT", "text": "describe these references" },
-        { "type": "IMAGE", "mediaType": "image/png", "source": "https://example.test/image.png" },
-        { "type": "AUDIO", "mediaType": "audio/mpeg", "source": "https://example.test/audio.mp3" },
-        { "type": "VIDEO", "mediaType": "video/mp4", "source": "https://example.test/video.mp4" }
+        { "type": "ATTACHMENT", "uploadId": "00000000-0000-0000-0000-000000000200" }
       ]
     }
   ]
@@ -84,10 +82,10 @@ SET_ACTIVE_TOOLS, SET_YOLO
 
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
 - `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
-- `USER_MESSAGE` 必须且只能携带一个纯文本 shorthand `text` 或非空结构化 `contents`，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`，未知字段、未知类型、模态不匹配的 mediaType 与空 source 一律拒绝。现有 `content` 纯文本 shorthand 继续兼容，但不能与 `text`/`contents` 同时出现。
+- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable RESOURCE），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
-- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `text`/`contents`/`role` 等不相关字段。
+- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
 
 ### Ordered command-set replay
 

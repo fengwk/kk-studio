@@ -17,7 +17,7 @@ describe('harnessService', () => {
       expectedHeadEntryId: '1',
       expectedNextCommandSequence: '0',
       commands: [
-        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', content: 'hello', role: 'user' },
+        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', contents: [{ type: 'TEXT', text: 'hello' }] },
         { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
       ],
     })
@@ -38,7 +38,7 @@ describe('harnessService', () => {
       expectedHeadEntryId: '1',
       expectedNextCommandSequence: '0',
       commands: [
-        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', content: 'hello', role: 'user' },
+        { type: 'USER_MESSAGE', clientCommandId: 'cid-1', contents: [{ type: 'TEXT', text: 'hello' }] },
         { type: 'SET_YOLO', clientCommandId: 'cid-2', yoloEnabled: true },
       ],
     })

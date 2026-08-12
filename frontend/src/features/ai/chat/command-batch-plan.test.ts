@@ -174,7 +174,7 @@ describe('ordered USER_MESSAGE contents serialization', () => {
     expect(reordered.identity).not.toBe(plan.identity)
   })
 
-  it('keeps text-only messages byte-compatible with the content shorthand', () => {
+  it('serializes text-only messages as ordered contents', () => {
     const plan = buildFirstSendMessagePlan({
       thread: thread(),
       parts: partsOf(createTextPart('hello')),
@@ -182,9 +182,9 @@ describe('ordered USER_MESSAGE contents serialization', () => {
     expect(plan.batch.commands[0]).toEqual({
       type: 'USER_MESSAGE',
       clientCommandId: expect.any(String) as string,
-      content: 'hello',
+      contents: [{ type: 'TEXT', text: 'hello' }],
     })
-    expect(plan.batch.commands[0]).not.toHaveProperty('contents')
+    expect(plan.batch.commands[0]).not.toHaveProperty('content')
   })
 
   it('trims outer whitespace while preserving attachment order', () => {

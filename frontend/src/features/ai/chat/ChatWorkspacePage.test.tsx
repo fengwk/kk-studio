@@ -503,7 +503,7 @@ describe('ChatWorkspacePage', () => {
         expectedHeadEntryId: 'h1',
         expectedNextCommandSequence: '1',
         commands: [
-          expect.objectContaining({ type: 'USER_MESSAGE', content: 'hello after Agent deletion' }),
+          expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: 'hello after Agent deletion' }] }),
         ],
       }),
     )
@@ -603,7 +603,7 @@ describe('ChatWorkspacePage', () => {
         expectedHeadEntryId: 'e-root',
         expectedNextCommandSequence: '1',
         commands: [
-          expect.objectContaining({ type: 'USER_MESSAGE', content: 'first message' }),
+          expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: 'first message' }] }),
         ],
       }),
     )

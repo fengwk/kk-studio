@@ -15,12 +15,11 @@ vi.mock('@/shared/api/harness-service', () => ({
   },
 }))
 
-function command(commandId: string, type: string, content: string) {
+function command(clientCommandId: string, type: string, content: string) {
   return {
     type,
-    clientCommandId: commandId,
-    content,
-    role: 'user',
+    clientCommandId,
+    contents: [{ type: 'TEXT', text: content }],
   }
 }
 
@@ -34,12 +33,12 @@ function batch(): HarnessThreadCommandBatchDTO {
 
 function appliedCommand(): HarnessThreadCommandDTO {
   return {
-    commandId: 'cmd-1',
     threadId: 't1',
     sequence: '1',
     type: 'USER_MESSAGE',
     state: 'QUEUED',
     clientCommandId: 'cid-1',
+    requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
     }),

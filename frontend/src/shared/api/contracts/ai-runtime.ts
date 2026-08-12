@@ -70,14 +70,18 @@ export interface HarnessThreadDTO {
   updateTime: BackendDateTime
 }
 
-/** 持久的 Thread mailbox command 投影。 */
+/**
+ * 持久的 Thread mailbox command 投影；身份为 (threadId, sequence)，无代理主键。
+ * clientCommandId 是稳定的客户端幂等键；requestHash 是其 raw 命令的 canonical SHA-256。
+ */
 export interface HarnessThreadCommandDTO {
-  commandId: string
   threadId: string
   sequence: string
   type: string
   state: 'QUEUED' | 'APPLIED' | 'CANCELLED' | string
   clientCommandId: string
+  /** 客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256：64 位小写 hex；与 clientCommandId 构成幂等键。 */
+  requestHash: string
   payloadJson: string
   consumedTurnStartEntryId: string | null
   cancelledAt: InstantTimestamp
@@ -87,26 +91,23 @@ export interface HarnessThreadCommandDTO {
 /**
  * 类型化的 Thread mailbox command 请求。
  *
- * USER_MESSAGE 支持 text shorthand、结构化 contents，以及现有 content shorthand 兼容形态；
- * 三者互斥且不得携带 role（role 始终是 USER）。CUSTOM_MESSAGE 携带大写 role
- *（SYSTEM/USER）。clientCommandId 是稳定的幂等键。
+ * USER_MESSAGE 只接受一个非空、有序的 contents 列表（TEXT/ATTACHMENT），不提供
+ * 任何文本 shorthand。CUSTOM_MESSAGE 携带 content 与大写 role（SYSTEM/USER）。
+ * clientCommandId 是稳定的幂等键。
  */
 export type HarnessUserMessageContentDTO =
   | { type: 'TEXT'; text: string }
-  | { type: 'IMAGE'; mediaType: string; source: string }
-  | { type: 'AUDIO'; mediaType: string; source: string }
-  | { type: 'VIDEO'; mediaType: string; source: string }
   /**
-   * 共享存储上传的附件引用。uploadId 是预留/完成后的持久 id；后端在后续
-   * slice 中将其物化为 durable RESOURCE 内容。前端运行时会话契约允许该类型，
-   * 后端集成另行落地。
+   * 共享存储 READY 上传的引用。uploadId 是完成后的持久句柄；后端在入队事务内
+   * 将其原子物化为 durable RESOURCE。
    */
   | { type: 'ATTACHMENT'; uploadId: string }
 
-type HarnessUserMessageCommandDTO =
-  | { type: 'USER_MESSAGE'; clientCommandId: string; text: string; content?: never; contents?: never }
-  | { type: 'USER_MESSAGE'; clientCommandId: string; contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]; text?: never; content?: never }
-  | { type: 'USER_MESSAGE'; clientCommandId: string; content: string; text?: never; contents?: never }
+type HarnessUserMessageCommandDTO = {
+  type: 'USER_MESSAGE'
+  clientCommandId: string
+  contents: [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]]
+}
 
 export type HarnessThreadCommandCreateDTO =
   | HarnessUserMessageCommandDTO

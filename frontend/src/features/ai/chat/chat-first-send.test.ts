@@ -60,16 +60,16 @@ describe('performBlankPaneFirstSend', () => {
     const enqueueCommands = vi.fn(
       async (
         threadId: string,
-        batch: { expectedHeadEntryId: string; expectedNextCommandSequence: string; commands: Array<{ type: string; clientCommandId: string; content?: string; role?: string }> },
+        batch: { expectedHeadEntryId: string; expectedNextCommandSequence: string; commands: Array<{ type: string; clientCommandId: string; contents: Array<{ type: string; text: string }> }> },
       ): Promise<HarnessThreadCommandDTO[]> => {
-        calls.push(`enqueue:${threadId}:${batch.commands[0]?.clientCommandId}:${batch.commands[0]?.content}`)
+        calls.push(`enqueue:${threadId}:${batch.commands[0]?.clientCommandId}:${JSON.stringify(batch.commands[0]?.contents)}`)
         return [{
-          commandId: 'cmd-1',
           threadId,
           sequence: batch.expectedNextCommandSequence,
           type: batch.commands[0]?.type ?? 'USER_MESSAGE',
           state: 'QUEUED',
           clientCommandId: batch.commands[0]?.clientCommandId ?? 'cid-1',
+          requestHash: '0123456789abcdef'.repeat(4),
           payloadJson: JSON.stringify(batch),
           consumedTurnStartEntryId: null,
           cancelledAt: null,
@@ -100,7 +100,7 @@ describe('performBlankPaneFirstSend', () => {
       expectedHeadEntryId: 'root',
       expectedNextCommandSequence: '1',
       commands: [
-        { type: 'USER_MESSAGE', clientCommandId: expect.any(String) as string, content: 'hello' },
+        { type: 'USER_MESSAGE', clientCommandId: expect.any(String) as string, contents: [{ type: 'TEXT', text: 'hello' }] },
       ],
     })
     const sentBody = enqueueCommands.mock.calls[0]?.[1] as {
@@ -170,7 +170,7 @@ describe('performBlankPaneFirstSend', () => {
       expectedHeadEntryId: 'root',
       expectedNextCommandSequence: '2',
       commands: [
-        { type: 'USER_MESSAGE', clientCommandId: expect.any(String) as string, content: 'retry me' },
+        { type: 'USER_MESSAGE', clientCommandId: expect.any(String) as string, contents: [{ type: 'TEXT', text: 'retry me' }] },
       ],
     })
     // 严格 wire：role 不会泄漏到 USER_MESSAGE 中。
@@ -199,7 +199,7 @@ describe('performBlankPaneFirstSend', () => {
     }).catch(() => undefined)
 
     expect(enqueueCommands).toHaveBeenCalledWith('t1', expect.objectContaining({
-      commands: [expect.objectContaining({ type: 'USER_MESSAGE', clientCommandId: 'cid-stable', content: 'retry me' })],
+      commands: [expect.objectContaining({ type: 'USER_MESSAGE', clientCommandId: 'cid-stable', contents: [{ type: 'TEXT', text: 'retry me' }] })],
     }))
     const sent = enqueueCommands.mock.calls[0]?.[1] as { commands: Array<Record<string, unknown>> }
     expect(sent.commands[0]).not.toHaveProperty('role')

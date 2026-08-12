@@ -65,7 +65,7 @@ export function buildThreadTimeline(
       continue
     }
     queuedMessages.push({
-      commandId: command.commandId,
+      clientCommandId: command.clientCommandId,
       role: queuedMessage.role,
       text: queuedMessage.text,
       sequence: command.sequence,
