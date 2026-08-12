@@ -2,6 +2,7 @@
   "model": {
     "providerName": "openai",
     "modelName": "gpt-5-mini",
+    "inputModalities": ["IMAGE", "TEXT"],
     "tools": true,
     "reasoning": true,
     "pricing": {

@@ -14,6 +14,7 @@ import org.apache.ibatis.annotations.Update;
 import fun.fengwk.kkstudio.core.ai.chat.repo.impl.model.ChatDO;
 
 import java.util.List;
+import java.util.UUID;
 
 @Mapper
 public interface ChatMapper extends BaseMapper {
@@ -22,7 +23,7 @@ public interface ChatMapper extends BaseMapper {
       "id, title, agent_name, environment_name, yolo_enabled, version, "
           + "created_at as create_time, updated_at as update_time";
 
-  @Select("select " + COLUMNS + " from chat order by updated_at desc, id desc")
+  @Select("select " + COLUMNS + " from chat order by updated_at desc, created_at desc, title asc")
   @Results(
       id = "chatResultMap",
       value = {
@@ -39,7 +40,7 @@ public interface ChatMapper extends BaseMapper {
 
   @Select("select " + COLUMNS + " from chat where id = #{id}")
   @ResultMap("chatResultMap")
-  ChatDO getById(@Param("id") long id);
+  ChatDO getById(@Param("id") UUID id);
 
   @Insert(
       """
@@ -65,5 +66,5 @@ public interface ChatMapper extends BaseMapper {
   int updateById(@Param("chat") ChatDO chat, @Param("expectedVersion") long expectedVersion);
 
   @Delete("delete from chat where id = #{id} and version = #{expectedVersion}")
-  int deleteById(@Param("id") long id, @Param("expectedVersion") long expectedVersion);
+  int deleteById(@Param("id") UUID id, @Param("expectedVersion") long expectedVersion);
 }

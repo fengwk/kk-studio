@@ -10,11 +10,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /** H3 adapterState 的唯一 typed 视图。 */
 public record H3AdapterState(
     Long seed,
-    Long harnessThreadId,
+    UUID harnessThreadId,
     String enhancedPrompt,
     Map<Long, H3UploadedFile> uploads,
     String promptId,
@@ -27,9 +28,6 @@ public record H3AdapterState(
   public H3AdapterState {
     if (seed != null && seed < 0L) {
       throw new IllegalArgumentException("seed must be nonnegative");
-    }
-    if (harnessThreadId != null && harnessThreadId <= 0L) {
-      throw new IllegalArgumentException("harnessThreadId must be positive");
     }
     if (enhancedPrompt != null) {
       enhancedPrompt = requireText(enhancedPrompt, "enhancedPrompt");
@@ -61,7 +59,7 @@ public record H3AdapterState(
       throw new IllegalArgumentException("H3 adapterState contains unknown fields: " + unknown);
     }
     Long seed = optionalLong(root, "seed", false);
-    Long harnessThreadId = optionalLong(root, "harnessThreadId", true);
+    UUID harnessThreadId = optionalUuid(root, "harnessThreadId");
     String enhancedPrompt = optionalText(root, "enhancedPrompt");
     String promptId = optionalText(root, "promptId");
     Map<Long, H3UploadedFile> uploads = decodeUploads(root.get("uploads"));
@@ -103,7 +101,7 @@ public record H3AdapterState(
     return new H3AdapterState(value, harnessThreadId, enhancedPrompt, uploads, promptId, output);
   }
 
-  public H3AdapterState withHarnessThreadId(long value) {
+  public H3AdapterState withHarnessThreadId(UUID value) {
     return new H3AdapterState(seed, value, enhancedPrompt, uploads, promptId, output);
   }
 
@@ -184,6 +182,26 @@ public record H3AdapterState(
           field + (positive ? " must be positive" : " must be nonnegative"));
     }
     return number;
+  }
+
+  private static UUID optionalUuid(ObjectNode root, String field) {
+    JsonNode value = root.get(field);
+    if (value == null) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID string");
+    }
+    String raw = value.textValue();
+    try {
+      UUID parsed = UUID.fromString(raw);
+      if (!parsed.toString().equals(raw)) {
+        throw new IllegalArgumentException(field + " must be a canonical UUID string");
+      }
+      return parsed;
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID string", error);
+    }
   }
 
   private static String optionalText(ObjectNode root, String field) {

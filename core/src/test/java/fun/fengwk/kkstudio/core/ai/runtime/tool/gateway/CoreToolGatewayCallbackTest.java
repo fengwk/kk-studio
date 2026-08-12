@@ -39,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,6 +63,7 @@ class CoreToolGatewayCallbackTest {
       "x".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES + 1);
   private static final String LARGE_JSON =
       "{\"data\":\"" + "y".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES) + "\"}";
+  private static final UUID ID = new UUID(0L, 1L);
 
   @Test
   void binaryContentIsExternalizedBeforeTerminalDelivery() {
@@ -211,9 +213,9 @@ class CoreToolGatewayCallbackTest {
             .result();
     ToolInvocation invocation =
         new ToolInvocation(
-            1L,
-            1L,
-            1L,
+            ID,
+            ID,
+            ID,
             0,
             ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR),
             ToolInvocationStatus.SUCCEEDED,

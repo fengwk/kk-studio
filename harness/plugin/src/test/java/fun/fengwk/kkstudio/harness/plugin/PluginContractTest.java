@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 class PluginContractTest {
 
@@ -91,10 +92,11 @@ class PluginContractTest {
 
   private static BranchView branch() {
     Instant createdAt = Instant.parse("2026-01-01T00:00:00Z");
+    UUID id = new UUID(0L, 1L);
     Entry root =
         new Entry(
-            1L,
-            1L,
+            id,
+            id,
             null,
             new RootPayload(
                 new BranchSettings(

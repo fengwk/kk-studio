@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.core.persistence.id.SequenceMapper;
 
 import java.lang.reflect.Method;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -76,7 +75,10 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     }
   }
 
-  /** 严格的单调递增、无重复，且在不同调用方之间共享。生成的持久化业务实体与 Harness 实体都委托给同一个物理序列；catalog 标识就是名称，因此不会消耗该序列。 */
+  /**
+   * 严格的单调递增、无重复，且在不同调用方之间共享。生成的 Canvas 持久化业务实体都委托给同一个物理序列；catalog
+   * 标识就是名称，因此不会消耗该序列。Chat/Comfy/Harness 实体已迁移到应用侧 UUID，不再使用该序列。
+   */
   @Test
   void allocationsAreStrictlyMonotonicAndSharedAcrossCallSites() {
     int totalCalls = 64;
@@ -84,13 +86,7 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     Map<String, Long> lastBySite = new LinkedHashMap<>();
 
     String[] sites = {
-      "comfyui_workflow_api",
-      "canvas_document",
-      "canvas_group",
-      "canvas_node",
-      "canvas_resource",
-      "canvas_upload",
-      "chat"
+      "canvas_document", "canvas_group", "canvas_node", "canvas_resource", "canvas_upload"
     };
 
     long previous = 0L;
@@ -110,41 +106,6 @@ class PostgresqlSequenceIdGeneratorIntegrationTest extends PostgresSchemaSupport
     assertEquals(totalCalls, seen.size(), "every allocation must be unique");
     for (Map.Entry<String, Long> entry : lastBySite.entrySet()) {
       assertTrue(entry.getValue() > 0L, "site " + entry.getKey() + " saw a non-positive id");
-    }
-  }
-
-  /**
-   * Harness runtime 序列是另一个独立的物理序列：它独立于业务序列分配正数单调 id，且不会与任何 seed 对齐（曾经持有确定性 singleton id 的 runtime
-   * policy 表已移除）。
-   */
-  @Test
-  void harnessRuntimeSequenceAllocatesPositiveMonotonicIds() throws Exception {
-    long previous = 0L;
-    for (int i = 0; i < 16; i++) {
-      long id;
-      try (Connection conn = newConnection();
-          Statement st = conn.createStatement();
-          ResultSet rs = st.executeQuery("select nextval('harness_runtime_id_seq')")) {
-        assertTrue(rs.next(), "harness_runtime_id_seq nextval must return exactly one row");
-        id = rs.getLong(1);
-      }
-      assertTrue(id > 0, "harness_runtime_id_seq must produce positive ids, got " + id);
-      assertTrue(
-          id > previous,
-          "harness_runtime_id_seq must be monotonic: prev=" + previous + " next=" + id);
-      previous = id;
-    }
-
-    // 两个序列是相互独立的物理对象。
-    try (Connection conn = newConnection();
-        PreparedStatement ps =
-            conn.prepareStatement(
-                "select count(*) from information_schema.sequences"
-                    + " where sequence_schema = 'public'"
-                    + " and sequence_name in ('kk_studio_id_seq', 'harness_runtime_id_seq')");
-        ResultSet rs = ps.executeQuery()) {
-      assertTrue(rs.next());
-      assertEquals(2L, rs.getLong(1), "both declared sequences must exist");
     }
   }
 }

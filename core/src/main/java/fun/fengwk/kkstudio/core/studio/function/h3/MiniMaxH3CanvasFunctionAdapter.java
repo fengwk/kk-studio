@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** MiniMax-H3 Ref2VA Canvas Function adapter。 */
@@ -131,9 +132,8 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     if (INITIALIZED.equals(stage)) {
       checkpoint(context, PROMPT_SUBMITTING, state);
       AgentMessage promptRequest = promptRequest(context, run, manifest);
-      long threadId =
+      UUID threadId =
           oneShotService.submit(
-              "canvas-h3:" + run.nodeId(),
               requireText(properties.getPromptAgentName(), "promptAgentName"),
               new EnvironmentName(
                   requireText(properties.getPromptEnvironmentName(), "promptEnvironmentName")),
@@ -148,7 +148,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     }
 
     if (PROMPT_WAITING.equals(stage)) {
-      long threadId = requirePositive(state.harnessThreadId(), "harnessThreadId");
+      UUID threadId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
       String enhancedPrompt =
           oneShotService.await(
               threadId,

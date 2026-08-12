@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -39,12 +38,21 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * {@link StudioChatController} Chat-scoped Thread 编排契约：列表按关联顺序映射快照、创建先 createThread
  * 再关联并返回创建快照、关联前校验快照存在。
  */
 class StudioChatControllerTest {
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
+
+  private static String idText(long value) {
+    return id(value).toString();
+  }
 
   private ChatService chatService;
   private ChatThreadService chatThreadService;
@@ -66,18 +74,19 @@ class StudioChatControllerTest {
 
   @Test
   void listChatThreadsReturnsMappedThreadsInAssociationOrder() throws Exception {
-    when(chatThreadService.listThreadIds("7")).thenReturn(List.of(2L, 1L));
-    when(runtime.getThreadSnapshot(2L))
-        .thenReturn(HarnessRuntimeTestFixtures.continuationDueSnapshot(2L));
-    when(runtime.getThreadSnapshot(1L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(1L));
+    when(chatThreadService.listThreadIds("7")).thenReturn(List.of(id(2), id(1)));
+    when(runtime.getThreadSnapshot(id(2)))
+        .thenReturn(HarnessRuntimeTestFixtures.continuationDueSnapshot(id(2)));
+    when(runtime.getThreadSnapshot(id(1)))
+        .thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(id(1)));
 
     mockMvc
         .perform(get("/api/ai/chat/7/threads"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(2))
-        .andExpect(jsonPath("$.data[0].threadId").value("2"))
+        .andExpect(jsonPath("$.data[0].threadId").value(idText(2)))
         .andExpect(jsonPath("$.data[0].status").value("CONTINUATION_DUE"))
-        .andExpect(jsonPath("$.data[1].threadId").value("1"))
+        .andExpect(jsonPath("$.data[1].threadId").value(idText(1)))
         .andExpect(jsonPath("$.data[1].status").value("IDLE"));
   }
 
@@ -88,13 +97,12 @@ class StudioChatControllerTest {
             new CreatedThread(
                 HarnessRuntimeTestFixtures.session(),
                 HarnessRuntimeTestFixtures.rootEntry(),
-                HarnessRuntimeTestFixtures.thread(1)));
-    when(runtime.getThreadSnapshot(1L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+                HarnessRuntimeTestFixtures.thread(id(1))));
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
     String body =
         """
         {
-          "title": "new chat",
           "branchSettings": {
             "environmentName": "123e4567-e89b-12d3-a456-426614174000",
             "agentName": "default-assistant",
@@ -109,18 +117,17 @@ class StudioChatControllerTest {
         .perform(
             post("/api/ai/chat/7/threads").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.thread.threadId").value("1"))
+        .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
         .andExpect(jsonPath("$.data.thread.branchSettings.agentName").value("default-assistant"));
 
     ArgumentCaptor<CreateThreadCommand> captor = ArgumentCaptor.forClass(CreateThreadCommand.class);
     verify(runtime).createThread(captor.capture());
-    assertEquals("new chat", captor.getValue().title());
     assertEquals("default-assistant", captor.getValue().branchSettings().agentName());
     assertEquals("gpt-5", captor.getValue().branchSettings().model().modelName());
     assertEquals(List.of("web_search"), captor.getValue().branchSettings().activeTools());
     assertEquals(true, captor.getValue().yoloEnabled());
-    verify(chatThreadService).associateThread("7", 1L);
+    verify(chatThreadService).associateThread("7", id(1));
   }
 
   @Test
@@ -221,22 +228,22 @@ class StudioChatControllerTest {
 
   @Test
   void associateValidatesRuntimeSnapshotThenAssociates() throws Exception {
-    when(runtime.getThreadSnapshot(5L)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+    when(runtime.getThreadSnapshot(id(5))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
 
-    mockMvc.perform(put("/api/ai/chat/7/threads/5")).andExpect(status().isNoContent());
+    mockMvc.perform(put("/api/ai/chat/7/threads/" + idText(5))).andExpect(status().isNoContent());
 
-    verify(runtime).getThreadSnapshot(5L);
-    verify(chatThreadService).associateThread("7", 5L);
+    verify(runtime).getThreadSnapshot(id(5));
+    verify(chatThreadService).associateThread("7", id(5));
   }
 
   @Test
   void associateMissingThreadIsNotFoundAndDoesNotAssociate() throws Exception {
-    when(runtime.getThreadSnapshot(anyLong()))
+    when(runtime.getThreadSnapshot(any()))
         .thenThrow(new HarnessRuntimeNotFoundException("thread 9 does not exist"));
 
-    mockMvc.perform(put("/api/ai/chat/7/threads/9")).andExpect(status().isNotFound());
+    mockMvc.perform(put("/api/ai/chat/7/threads/" + idText(9))).andExpect(status().isNotFound());
 
-    verify(chatThreadService, never()).associateThread(eq("7"), anyLong());
+    verify(chatThreadService, never()).associateThread(eq("7"), any());
   }
 
   @Test
@@ -245,7 +252,7 @@ class StudioChatControllerTest {
         .perform(
             post("/api/ai/chat/7/threads")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"title\":\"broken\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
     verify(runtime, never()).createThread(any(CreateThreadCommand.class));
   }
@@ -255,7 +262,6 @@ class StudioChatControllerTest {
     String body =
         """
         {
-          "title": "broken",
           "branchSettings": {
             "environmentName": null,
             "agentName": "default-assistant",

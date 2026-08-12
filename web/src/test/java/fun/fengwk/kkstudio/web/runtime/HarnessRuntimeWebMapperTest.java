@@ -37,7 +37,10 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * 映射测试：7 类 command 的严格字段规则与 canonical payload JSON、严格 decimal 解析、全部快照状态派生
@@ -53,16 +56,33 @@ class HarnessRuntimeWebMapperTest {
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
 
+  private static final String THREAD_ID = idText(1);
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
+
+  private static String idText(long value) {
+    return id(value).toString();
+  }
+
+  /** 稳定地把任意测试用客户端幂等键映射为 canonical UUID string（相同输入映射相同输出）。 */
+  private static final Map<String, String> CLIENT_IDS = new HashMap<>();
+
+  private static String clientId(String value) {
+    return CLIENT_IDS.computeIfAbsent(value, ignored -> idText(CLIENT_IDS.size() + 100));
+  }
+
   private static HarnessThreadCommandCreateDTO command(String type, String clientCommandId) {
     HarnessThreadCommandCreateDTO dto = new HarnessThreadCommandCreateDTO();
     dto.setType(type);
-    dto.setClientCommandId(clientCommandId);
+    dto.setClientCommandId(clientCommandId == null ? null : clientId(clientCommandId));
     return dto;
   }
 
   private static HarnessThreadCommandBatchDTO batch(HarnessThreadCommandCreateDTO... commands) {
     HarnessThreadCommandBatchDTO dto = new HarnessThreadCommandBatchDTO();
-    dto.setExpectedHeadEntryId("3");
+    dto.setExpectedHeadEntryId(idText(3));
     dto.setExpectedNextCommandSequence("4");
     dto.setCommands(List.of(commands));
     return dto;
@@ -104,11 +124,11 @@ class HarnessRuntimeWebMapperTest {
 
     ThreadCommandBatch batch =
         HarnessRuntimeWebMapper.toCommandBatch(
-            "1", batch(user, custom, agent, model, tools, yolo, environment));
+            THREAD_ID, batch(user, custom, agent, model, tools, yolo, environment));
 
     assertEquals(7, batch.commands().size());
-    assertEquals(1L, batch.threadId());
-    assertEquals(3L, batch.expectedHeadEntryId());
+    assertEquals(id(1), batch.threadId());
+    assertEquals(id(3), batch.expectedHeadEntryId());
     assertEquals(4L, batch.expectedNextCommandSequence());
     assertExactPayload(
         batch,
@@ -147,7 +167,8 @@ class HarnessRuntimeWebMapperTest {
     HarnessThreadCommandCreateDTO content = command("USER_MESSAGE", "c-content");
     content.setContent("hello");
 
-    ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch("1", batch(text, content));
+    ThreadCommandBatch mapped =
+        HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(text, content));
 
     String expected =
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}";
@@ -171,7 +192,7 @@ class HarnessRuntimeWebMapperTest {
     HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-structured");
     user.setContents(List.of(text, image, audio, video));
 
-    ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch("1", batch(user));
+    ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(user));
 
     assertExactPayload(
         mapped,
@@ -194,27 +215,27 @@ class HarnessRuntimeWebMapperTest {
     ambiguous.setContents(List.of(content("TEXT")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(ambiguous)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(ambiguous)));
 
     HarnessThreadCommandCreateDTO explicitNull = command("USER_MESSAGE", "c-null");
     explicitNull.setText(null);
     explicitNull.setContents(List.of(content("TEXT")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(explicitNull)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(explicitNull)));
 
     HarnessThreadCommandCreateDTO empty = command("USER_MESSAGE", "c-empty");
     empty.setContents(List.of());
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(empty)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(empty)));
 
     HarnessUserMessageContentDTO tool = content("TOOL");
     HarnessThreadCommandCreateDTO hiddenType = command("USER_MESSAGE", "c-tool");
     hiddenType.setContents(List.of(tool));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(hiddenType)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(hiddenType)));
 
     HarnessUserMessageContentDTO invalidMedia = content("IMAGE");
     invalidMedia.setMediaType("audio/mpeg");
@@ -223,7 +244,7 @@ class HarnessRuntimeWebMapperTest {
     wrongMedia.setContents(List.of(invalidMedia));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(wrongMedia)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(wrongMedia)));
 
     HarnessUserMessageContentDTO malformedMedia = content("VIDEO");
     malformedMedia.setMediaType("video/ ");
@@ -232,7 +253,7 @@ class HarnessRuntimeWebMapperTest {
     malformed.setContents(List.of(malformedMedia));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(malformed)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(malformed)));
 
     HarnessUserMessageContentDTO blankSource = content("VIDEO");
     blankSource.setMediaType("video/mp4");
@@ -241,7 +262,7 @@ class HarnessRuntimeWebMapperTest {
     invalidSource.setContents(List.of(blankSource));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(invalidSource)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(invalidSource)));
 
     HarnessUserMessageContentDTO textWithMedia = content("TEXT");
     textWithMedia.setText("hello");
@@ -250,13 +271,14 @@ class HarnessRuntimeWebMapperTest {
     forbiddenField.setContents(List.of(textWithMedia));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(forbiddenField)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(forbiddenField)));
   }
 
   @Test
   void setEnvironmentAcceptsNullToClearAndMapsToNullEnvironmentName() {
     HarnessThreadCommandCreateDTO environment = command("SET_ENVIRONMENT", "c-env-clear");
-    ThreadCommandBatch batch = HarnessRuntimeWebMapper.toCommandBatch("1", batch(environment));
+    ThreadCommandBatch batch =
+        HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(environment));
     assertExactPayload(batch, 0, ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}");
   }
 
@@ -267,28 +289,28 @@ class HarnessRuntimeWebMapperTest {
     userWithSettings.setAgentName("default-assistant");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(userWithSettings)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(userWithSettings)));
 
     HarnessThreadCommandCreateDTO userWithRole = command("USER_MESSAGE", "c-2");
     userWithRole.setContent("hello");
     userWithRole.setRole("user");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(userWithRole)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(userWithRole)));
 
     HarnessThreadCommandCreateDTO agentWithContent = command("SET_AGENT", "c-3");
     agentWithContent.setAgentName("default-assistant");
     agentWithContent.setContent("forbidden");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(agentWithContent)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(agentWithContent)));
 
     HarnessThreadCommandCreateDTO yoloWithEnvironment = command("SET_YOLO", "c-4");
     yoloWithEnvironment.setYoloEnabled(false);
     yoloWithEnvironment.setEnvironmentName("123e4567-e89b-12d3-a456-426614174000");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(yoloWithEnvironment)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(yoloWithEnvironment)));
   }
 
   @Test
@@ -296,56 +318,72 @@ class HarnessRuntimeWebMapperTest {
     HarnessThreadCommandCreateDTO noContent = command("USER_MESSAGE", "c-1");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(noContent)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(noContent)));
 
     HarnessThreadCommandCreateDTO customWithoutRole = command("CUSTOM_MESSAGE", "c-2");
     customWithoutRole.setContent("rules");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(customWithoutRole)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(customWithoutRole)));
 
     HarnessThreadCommandCreateDTO customBadRole = command("CUSTOM_MESSAGE", "c-3");
     customBadRole.setContent("rules");
     customBadRole.setRole("assistant");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(customBadRole)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(customBadRole)));
 
     HarnessThreadCommandCreateDTO noModel = command("SET_MODEL", "c-4");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(noModel)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(noModel)));
 
     HarnessThreadCommandCreateDTO noClientId = command("SET_YOLO", null);
     noClientId.setYoloEnabled(true);
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(noClientId)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(noClientId)));
 
     HarnessThreadCommandCreateDTO unknownType = command("RENAME_THREAD", "c-5");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(unknownType)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(unknownType)));
   }
 
   @Test
-  void rejectsStrictDecimalViolations() {
+  void rejectsStrictUuidAndDecimalViolations() {
+    assertThrows(
+        IllegalArgumentException.class, () -> HarnessRuntimeWebMapper.parseUuid("0", "threadId"));
+    assertThrows(
+        IllegalArgumentException.class, () -> HarnessRuntimeWebMapper.parseUuid("1", "threadId"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.parsePositiveId("0", "threadId"));
+        () -> HarnessRuntimeWebMapper.parseUuid("not-a-uuid", "threadId"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.parsePositiveId("01", "threadId"));
+        () ->
+            HarnessRuntimeWebMapper.parseUuid("00000000-0000-0000-0000-000000000001 ", "threadId"));
+    assertEquals(id(1), HarnessRuntimeWebMapper.parseUuid(idText(1), "threadId"));
+
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.parsePositiveId("-1", "threadId"));
+        () -> HarnessRuntimeWebMapper.parsePositiveDecimal("0", "expectedNextCommandSequence"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.parsePositiveId("abc", "threadId"));
+        () -> HarnessRuntimeWebMapper.parsePositiveDecimal("01", "expectedNextCommandSequence"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.parsePositiveId("99999999999999999999", "threadId"));
-    assertEquals(1L, HarnessRuntimeWebMapper.parsePositiveId("1", "threadId"));
+        () -> HarnessRuntimeWebMapper.parsePositiveDecimal("-1", "expectedNextCommandSequence"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.parsePositiveDecimal("abc", "expectedNextCommandSequence"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeWebMapper.parsePositiveDecimal(
+                "99999999999999999999", "expectedNextCommandSequence"));
+    assertEquals(
+        1L, HarnessRuntimeWebMapper.parsePositiveDecimal("1", "expectedNextCommandSequence"));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -374,19 +412,19 @@ class HarnessRuntimeWebMapperTest {
                 HarnessRuntimeTestFixtures.turnStartEntry()));
     ThreadSnapshot active =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(2), path, List.of(), running, List.of());
+            HarnessRuntimeTestFixtures.thread(id(2)), path, List.of(), running, List.of());
     assertThreadStatus(active, "MODEL_RUNNING", true);
 
     ModelInvocation terminal = model(ModelInvocationStatus.SUCCEEDED, null);
     ThreadSnapshot pending =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(2), path, List.of(), terminal, List.of());
+            HarnessRuntimeTestFixtures.thread(id(2)), path, List.of(), terminal, List.of());
     assertThreadStatus(pending, "APPLYING", true);
   }
 
   @Test
   void derivesToolStatusFromWaitingApprovalSibling() {
-    ModelInvocation succeeded = model(ModelInvocationStatus.SUCCEEDED, 4L);
+    ModelInvocation succeeded = model(ModelInvocationStatus.SUCCEEDED, id(4));
     when(succeeded.result()).thenReturn(HarnessRuntimeTestFixtures.toolCallResponse());
     EntryPath path =
         new EntryPath(
@@ -397,7 +435,7 @@ class HarnessRuntimeWebMapperTest {
                 HarnessRuntimeTestFixtures.assistantEntry()));
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(4),
+            HarnessRuntimeTestFixtures.thread(id(4)),
             path,
             List.of(),
             succeeded,
@@ -407,7 +445,7 @@ class HarnessRuntimeWebMapperTest {
 
   @Test
   void mapsSnapshotToExactDtoJson() throws Exception {
-    ModelInvocation succeeded = model(ModelInvocationStatus.SUCCEEDED, 4L);
+    ModelInvocation succeeded = model(ModelInvocationStatus.SUCCEEDED, id(4));
     when(succeeded.result()).thenReturn(HarnessRuntimeTestFixtures.toolCallResponse());
     EntryPath path =
         new EntryPath(
@@ -418,7 +456,7 @@ class HarnessRuntimeWebMapperTest {
                 HarnessRuntimeTestFixtures.assistantEntry()));
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(4),
+            HarnessRuntimeTestFixtures.thread(id(4)),
             path,
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
             succeeded,
@@ -429,9 +467,9 @@ class HarnessRuntimeWebMapperTest {
 
     assertEquals("3", json.path("revision").asText());
     JsonNode thread = json.path("thread");
-    assertEquals("1", thread.path("threadId").asText());
-    assertEquals("1", thread.path("sessionId").asText());
-    assertEquals("4", thread.path("headEntryId").asText());
+    assertEquals(idText(1), thread.path("threadId").asText());
+    assertEquals(idText(1), thread.path("sessionId").asText());
+    assertEquals(idText(4), thread.path("headEntryId").asText());
     assertTrue(thread.path("yoloEnabled").asBoolean());
     assertEquals(4, thread.path("nextCommandSequence").asLong());
     assertEquals("3", thread.path("revision").asText());
@@ -444,8 +482,8 @@ class HarnessRuntimeWebMapperTest {
 
     assertEquals(4, json.path("entries").size());
     assertEquals("ROOT", json.path("entries").get(0).path("entryType").asText());
-    assertEquals("1", json.path("entries").get(0).path("entryId").asText());
-    assertEquals("1", json.path("entries").get(0).path("sessionId").asText());
+    assertEquals(idText(1), json.path("entries").get(0).path("entryId").asText());
+    assertEquals(idText(1), json.path("entries").get(0).path("sessionId").asText());
     assertTrue(json.path("entries").get(0).path("parentEntryId").isNull());
     assertEquals("TURN_START", json.path("entries").get(1).path("entryType").asText());
     assertEquals("MESSAGE", json.path("entries").get(2).path("entryType").asText());
@@ -459,7 +497,7 @@ class HarnessRuntimeWebMapperTest {
     assertEquals(1, json.path("queuedCommands").size());
     assertEquals("QUEUED", json.path("queuedCommands").get(0).path("state").asText());
     assertEquals("USER_MESSAGE", json.path("queuedCommands").get(0).path("type").asText());
-    assertEquals("client-1", json.path("queuedCommands").get(0).path("clientCommandId").asText());
+    assertEquals(idText(50), json.path("queuedCommands").get(0).path("clientCommandId").asText());
     assertTrue(
         json.path("queuedCommands")
             .get(0)
@@ -467,16 +505,16 @@ class HarnessRuntimeWebMapperTest {
             .asText()
             .contains("\"text\":\"hello\""));
 
-    assertEquals("10", json.path("modelInvocation").path("id").asText());
+    assertEquals(idText(10), json.path("modelInvocation").path("id").asText());
     assertEquals("SUCCEEDED", json.path("modelInvocation").path("status").asText());
-    assertEquals("4", json.path("modelInvocation").path("resultEntryId").asText());
+    assertEquals(idText(4), json.path("modelInvocation").path("resultEntryId").asText());
     assertTrue(json.path("modelInvocation").path("resultJson").asText().contains("\"toolCalls\""));
 
     assertEquals(1, json.path("toolInvocations").size());
     JsonNode tool = json.path("toolInvocations").get(0);
-    assertEquals("100", tool.path("id").asText());
-    assertEquals("10", tool.path("modelInvocationId").asText());
-    assertEquals("4", tool.path("assistantEntryId").asText());
+    assertEquals(idText(100), tool.path("id").asText());
+    assertEquals(idText(10), tool.path("modelInvocationId").asText());
+    assertEquals(idText(4), tool.path("assistantEntryId").asText());
     assertEquals(0, tool.path("ordinal").asInt());
     assertEquals("WAITING_APPROVAL", tool.path("status").asText());
     assertEquals("call-1", tool.path("toolCallId").asText());
@@ -509,7 +547,6 @@ class HarnessRuntimeWebMapperTest {
   @Test
   void mapsCreateHeadStopAndApprovalRequestFields() {
     HarnessThreadCreateDTO create = new HarnessThreadCreateDTO();
-    create.setTitle("new chat");
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
     settings.setEnvironmentName(null);
     settings.setAgentName("default-assistant");
@@ -523,7 +560,6 @@ class HarnessRuntimeWebMapperTest {
     create.setYoloEnabled(false);
 
     CreateThreadCommand created = HarnessRuntimeWebMapper.toCreateThreadCommand(create);
-    assertEquals("new chat", created.title());
     assertNull(created.branchSettings().environmentName());
     assertEquals("default-assistant", created.branchSettings().agentName());
     assertEquals("gpt-5", created.branchSettings().model().modelName());
@@ -531,43 +567,44 @@ class HarnessRuntimeWebMapperTest {
     assertFalse(created.yoloEnabled());
 
     HarnessThreadHeadUpdateDTO head = new HarnessThreadHeadUpdateDTO();
-    head.setTargetEntryId("2");
+    head.setTargetEntryId(idText(2));
     head.setExpectedRevision("3");
-    MoveHeadCommand move = HarnessRuntimeWebMapper.toMoveHeadCommand("1", head);
-    assertEquals(1L, move.threadId());
-    assertEquals(2L, move.targetEntryId());
+    MoveHeadCommand move = HarnessRuntimeWebMapper.toMoveHeadCommand(THREAD_ID, head);
+    assertEquals(id(1), move.threadId());
+    assertEquals(id(2), move.targetEntryId());
     assertEquals(3L, move.expectedRevision());
 
     HarnessThreadStopDTO stop = new HarnessThreadStopDTO();
-    stop.setStopRequestId("stop-1");
+    stop.setStopRequestId(idText(9));
     stop.setExpectedRevision("3");
-    StopCommand stopCommand = HarnessRuntimeWebMapper.toStopCommand("1", stop);
-    assertEquals(1L, stopCommand.threadId());
-    assertEquals("stop-1", stopCommand.stopRequestId());
+    StopCommand stopCommand = HarnessRuntimeWebMapper.toStopCommand(THREAD_ID, stop);
+    assertEquals(id(1), stopCommand.threadId());
+    assertEquals(id(9), stopCommand.stopRequestId());
     assertEquals(3L, stopCommand.expectedRevision());
 
     HarnessToolApprovalDTO approval = new HarnessToolApprovalDTO();
     approval.setDecision("ALLOW");
-    approval.setDecisionId("decision-1");
+    approval.setDecisionId(idText(1));
     approval.setActor("alice");
     approval.setReason("looks safe");
-    ToolApprovalCommand allow = HarnessRuntimeWebMapper.toToolApprovalCommand("1", "100", approval);
-    assertEquals(1L, allow.threadId());
-    assertEquals(100L, allow.toolInvocationId());
+    ToolApprovalCommand allow =
+        HarnessRuntimeWebMapper.toToolApprovalCommand(THREAD_ID, idText(100), approval);
+    assertEquals(id(1), allow.threadId());
+    assertEquals(id(100), allow.toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, allow.decision());
-    assertEquals("decision-1", allow.decisionId());
+    assertEquals(id(1), allow.decisionId());
     assertEquals("alice", allow.actor());
     assertEquals("looks safe", allow.reason());
 
     approval.setDecision("DENY");
     assertEquals(
         ToolApprovalDecision.DENIED,
-        HarnessRuntimeWebMapper.toToolApprovalCommand("1", "100", approval).decision());
+        HarnessRuntimeWebMapper.toToolApprovalCommand(THREAD_ID, idText(100), approval).decision());
 
     approval.setDecision("MAYBE");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toToolApprovalCommand("1", "100", approval));
+        () -> HarnessRuntimeWebMapper.toToolApprovalCommand(THREAD_ID, idText(100), approval));
   }
 
   @Test
@@ -584,7 +621,8 @@ class HarnessRuntimeWebMapperTest {
     empty.setExpectedNextCommandSequence("4");
     empty.setCommands(List.of());
     assertThrows(
-        IllegalArgumentException.class, () -> HarnessRuntimeWebMapper.toCommandBatch("1", empty));
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, empty));
 
     HarnessThreadCommandCreateDTO duplicate = command("SET_YOLO", "same-id");
     duplicate.setYoloEnabled(true);
@@ -592,22 +630,22 @@ class HarnessRuntimeWebMapperTest {
     duplicateAgain.setAgentName("default-assistant");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", batch(duplicate, duplicateAgain)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(duplicate, duplicateAgain)));
 
     HarnessThreadCommandBatchDTO nullCursor = new HarnessThreadCommandBatchDTO();
     nullCursor.setExpectedHeadEntryId("3");
     nullCursor.setCommands(List.of(duplicate));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch("1", nullCursor));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, nullCursor));
   }
 
-  private static ModelInvocation model(ModelInvocationStatus status, Long resultEntryId) {
+  private static ModelInvocation model(ModelInvocationStatus status, UUID resultEntryId) {
     ModelInvocation model = mock(ModelInvocation.class);
-    when(model.id()).thenReturn(10L);
-    when(model.threadId()).thenReturn(1L);
-    when(model.turnStartEntryId()).thenReturn(2L);
-    when(model.basisHeadEntryId()).thenReturn(2L);
+    when(model.id()).thenReturn(id(10));
+    when(model.threadId()).thenReturn(id(1));
+    when(model.turnStartEntryId()).thenReturn(id(2));
+    when(model.basisHeadEntryId()).thenReturn(id(2));
     when(model.status()).thenReturn(status);
     when(model.attempt()).thenReturn(1);
     when(model.resultEntryId()).thenReturn(resultEntryId);

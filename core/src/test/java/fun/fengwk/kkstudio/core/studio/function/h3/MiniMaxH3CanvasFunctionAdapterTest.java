@@ -33,11 +33,13 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** adapter stage machine 覆盖主链、每项上传 checkpoint/reuse、双 SUBMITTING 防重放、cancel 与 materialize。 */
 class MiniMaxH3CanvasFunctionAdapterTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
+  private static final UUID THREAD_ID = new UUID(0L, 55L);
   private HarnessOneShotService oneShot;
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
@@ -70,8 +72,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   @Test
   void executesAllStagesAndMaterializesOnlyTarget() {
     RecordingContext context = new RecordingContext();
-    when(oneShot.submit(anyString(), anyString(), any(), anyString(), any())).thenReturn(55L);
-    when(oneShot.await(anyLong(), any(), any())).thenReturn("enhanced prompt");
+    when(oneShot.submit(anyString(), any(), anyString(), any())).thenReturn(THREAD_ID);
+    when(oneShot.await(any(), any(), any())).thenReturn("enhanced prompt");
     when(comfy.upload(anyString(), anyString(), anyLong(), any(), anyLong()))
         .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
     when(comfy.submit(any(), anyString())).thenReturn("p1");
@@ -114,7 +116,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                         MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING,
                         H3AdapterState.empty().withSeed(1L).encode())));
     assertFalse(prompt.getMessage().isBlank());
-    verify(oneShot, never()).submit(anyString(), anyString(), any(), anyString(), any());
+    verify(oneShot, never()).submit(anyString(), any(), anyString(), any());
 
     IllegalStateException comfyError =
         assertThrows(
@@ -152,10 +154,10 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         run(MiniMaxH3CanvasFunctionAdapter.COMFY_UPLOADING, state.encode()));
     verify(comfy, never()).upload(anyString(), anyString(), anyLong(), any(), anyLong());
 
-    H3AdapterState cancelState = state.withHarnessThreadId(55L).withPromptId("p1");
-    doThrow(new IllegalStateException("stop failed")).when(oneShot).stop(55L);
+    H3AdapterState cancelState = state.withHarnessThreadId(THREAD_ID).withPromptId("p1");
+    doThrow(new IllegalStateException("stop failed")).when(oneShot).stop(THREAD_ID);
     adapter.cancel(run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, cancelState.encode()));
-    verify(oneShot).stop(55L);
+    verify(oneShot).stop(THREAD_ID);
     verify(comfy).cancelPending("p1");
   }
 
@@ -217,11 +219,11 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, Map.of("future", "unsupported")));
 
     H3AdapterState state =
-        H3AdapterState.empty().withSeed(1L).withHarnessThreadId(55L).withPromptId("p1");
+        H3AdapterState.empty().withSeed(1L).withHarnessThreadId(THREAD_ID).withPromptId("p1");
     doThrow(new IllegalStateException("delete failed")).when(comfy).cancelPending("p1");
     assertDoesNotThrow(
         () -> adapter.cancel(run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, state.encode())));
-    verify(oneShot).stop(55L);
+    verify(oneShot).stop(THREAD_ID);
   }
 
   private CanvasFunctionFrozenRun run(String stage, Map<String, Object> state) {

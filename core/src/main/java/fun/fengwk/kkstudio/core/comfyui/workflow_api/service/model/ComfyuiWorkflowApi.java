@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 /**
  * ComfyUI workflow API card 领域实体。
@@ -12,8 +13,8 @@ import java.time.LocalDateTime;
 @Data
 public class ComfyuiWorkflowApi {
 
-  /** 业务主键（bigint，由 kk_studio_id_seq 生成，> 0）。 */
-  private Long id;
+  /** 业务主键（PostgreSQL uuid，由应用生成）。 */
+  private UUID id;
 
   /** 对外 api 名：正则 {@code ^[a-z][a-z0-9-]{0,63}$}（小写字母开头，仅含 [a-z0-9-]，最长 64），唯一索引约束。 */
   private String apiName;

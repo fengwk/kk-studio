@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -37,6 +38,8 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -63,6 +66,7 @@ class CoreModelGatewayTest {
       new ModelCallTimeoutPolicy(Duration.ofSeconds(45), Duration.ofSeconds(3));
   private static final ModelGatewayConfig CONFIG = new ModelGatewayConfig(BUSY_DELAY);
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
+  private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final ModelInvocationRequest INVOCATION_REQUEST =
       new ModelInvocationRequest(
           new EnvironmentName("env-1"),
@@ -954,7 +958,8 @@ class CoreModelGatewayTest {
       assertThrows(
           NullPointerException.class,
           () ->
-              fixture.subject.start(new ModelGateway.Execution(42L, 1, INVOCATION_REQUEST), null));
+              fixture.subject.start(
+                  new ModelGateway.Execution(INVOCATION_ID, 1, INVOCATION_REQUEST), null));
       assertThrows(NullPointerException.class, () -> fixture.subject.start(null, fixture.listener));
     }
   }
@@ -966,6 +971,7 @@ class CoreModelGatewayTest {
         new ModelDescriptor(
             "provider",
             "frozen-model",
+            Set.of(ModelInputModality.TEXT),
             true,
             false,
             new ModelPricing(
@@ -1041,7 +1047,8 @@ class CoreModelGatewayTest {
     }
 
     private ModelGateway.StartResult start() {
-      return subject.start(new ModelGateway.Execution(42L, 1, INVOCATION_REQUEST), listener);
+      return subject.start(
+          new ModelGateway.Execution(INVOCATION_ID, 1, INVOCATION_REQUEST), listener);
     }
 
     /** 两阶段激活的标准路径：start 返回 Started 后先 activate（打开 Gateway 回调 gate）再驱动 Provider。 */

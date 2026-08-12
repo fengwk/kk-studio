@@ -9,7 +9,7 @@ import java.time.Instant;
 @Data
 public class ChatDTO {
 
-  /** Chat 业务主键：正十进制字符串（底层 bigint，由数据库序列分配）。 */
+  /** Chat 业务主键：canonical UUID string（PostgreSQL uuid，由应用生成）。 */
   private String id;
 
   /** 聊天标题：非空白且 ≤256 字符。 */

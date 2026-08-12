@@ -44,7 +44,7 @@ registerCase({
   title: 'HTTP 错误响应按 Accept-Language 返回英文或中文',
   docs: 'Domain error 与 ResponseStatusException 保持 status/code/context/detail，仅本地化 message/title；不支持语言回退英文',
   async run(ctx) {
-    const unknownChatPath = '/api/ai/chat/999999999999'
+    const unknownChatPath = '/api/ai/chat/00000000-0000-0000-0000-000000000999'
     const englishDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'en-US'))
     const chineseDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'zh-CN'))
     assert(englishDomain.code === 'resource_not_found', JSON.stringify(englishDomain))
@@ -53,7 +53,8 @@ registerCase({
     assert(chineseDomain.message === '未找到 chat。', JSON.stringify(chineseDomain))
     assert(chineseDomain.errors?.resource === 'chat', JSON.stringify(chineseDomain))
     assert(
-      chineseDomain.errors?.detail === 'chat not found: 999999999999',
+      chineseDomain.errors?.detail ===
+        'chat not found: 00000000-0000-0000-0000-000000000999',
       JSON.stringify(chineseDomain),
     )
 
@@ -98,7 +99,7 @@ registerCase({
     assert(chineseHttp.message === '请求无效。', JSON.stringify(chineseHttp))
     assert(chineseHttp.errors?.title === '请求错误', JSON.stringify(chineseHttp))
     assert(
-      chineseHttp.errors?.detail === 'threadId must be an unsigned positive decimal: not-a-number',
+      chineseHttp.errors?.detail === 'threadId must be a canonical UUID: not-a-number',
       JSON.stringify(chineseHttp),
     )
     assert(fallbackHttp.code === englishHttp.code, JSON.stringify(fallbackHttp))

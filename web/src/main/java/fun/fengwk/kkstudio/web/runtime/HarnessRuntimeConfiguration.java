@@ -7,6 +7,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
@@ -44,6 +45,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -72,8 +74,9 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
-  public HarnessStore harnessStore(DataSource dataSource) {
-    return new PostgresqlHarnessStore(dataSource);
+  public HarnessStore harnessStore(
+      DataSource dataSource, PlatformTransactionManager transactionManager) {
+    return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
   }
 
   /**

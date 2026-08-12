@@ -15,11 +15,11 @@
 
 | 模块 | 角色 |
 | --- | --- |
-| `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以十进制字符串形式暴露，持久层内部仍为 `long` |
+| `share/.../ComfyuiWorkflow*.java` | HTTP / DTO 边界 DTO；卡片 `id` 在边界以 canonical UUID string 形式暴露，持久层内部为 `uuid` |
 | `core/comfyui/ComfyuiConfiguration` | Spring 配置：`ComfyUIClient` bean 仅在 `kk-studio.comfyui.enabled=true` 时创建 |
 | `core/comfyui/ComfyuiProperties` | `kk-studio.comfyui.*` 配置属性 |
 | `core/comfyui/ComfyuiRuntimeService` | 无状态运行期：参数映射、S3 输入桥、提交、查询（按 JSONPath selector 投影规范化结果）、取消、job-scoped 输出下载 |
-| `core/comfyui/workflow_api/service/ComfyuiWorkflowApiIds` | 边界 ID 严格解析；`parsePositive` / `format` |
+| `core/comfyui/workflow_api/service/ComfyuiWorkflowApiIds` | 边界 ID 严格解析；`parseUuid` / `format` |
 | `core/comfyui/workflow_api/service/runtime/*` | binding 模型 + parser + selector validator + lookup service（runtime 入口） |
 | `core/comfyui/workflow_api/repo/*` | MyBatis 仓储 |
 | `core/storage/S3ObjectContent` | 固定 bucket 读取的对象字节 + content type |
@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | `GET`    | `/api/comfyui/workflows?pageNumber&pageSize` | 卡片分页 |
 | `POST`   | `/api/comfyui/workflows` | 创建卡片（写入路径校验 binding / selector） |
-| `PUT`    | `/api/comfyui/workflows/{id}` | 更新卡片（`id` 路径为十进制字符串） |
+| `PUT`    | `/api/comfyui/workflows/{id}` | 更新卡片（`id` 路径为 canonical UUID string） |
 | `DELETE` | `/api/comfyui/workflows/{id}` | 删除卡片 |
 | `POST`   | `/api/comfyui/workflows/{apiName}/runs` | 无状态提交，返回 `{runId, status, defaultSelector}` |
 | `GET`    | `/api/comfyui/runs/{runId}?select=...` | 任务查询；终态时返回规范化 `{outputs, files}`，可选 JSONPath 投影 |
@@ -67,7 +67,7 @@ kk-studio:
 
 ## 边界约束
 
-- 卡片 `id` 在 DTO 与 `@PathVariable` 上都是十进制字符串，由 `ComfyuiWorkflowApiIds.parsePositive` 校验后转换为 `long` 访问数据库。
+- 卡片 `id` 在 DTO 与 `@PathVariable` 上都是 canonical UUID string，由 `ComfyuiWorkflowApiIds.parseUuid` 校验后转换为 `UUID` 访问数据库。
 - 工作流 JSON 必须可被 `Workflow.fromApiJson` 解析；binding JSON 必须是 JSON 数组，每项必须含 `name`、`kind`、`nodeId`、`inputName`；`kind=file` 不允许 `valueType` / `defaultValue`；`kind=parameter` 可选 `valueType ∈ {string, integer, number, boolean, json}` 与对应 `defaultValue`。
 - `defaultSelector` 静态校验：长度 ≤ 1024 字符；禁止 `..` 递归下降与 `=~` 过滤；必须能被 Jayway `JsonPath.compile` 编译。
 - 文件输入只接受固定 bucket 的 S3 key（经 `S3ObjectKeyNormalizer.normalize` 校验）；提交前按 `max-input-file-size` 做 HEAD + 下载后字节双重校验。

@@ -12,9 +12,7 @@ import java.util.List;
  */
 @Data
 public class HarnessThreadCommandBatchDTO {
-  /**
-   * 必填 CAS 游标：strict positive decimal string，须等于最新 {@link HarnessThreadDTO#headEntryId}；不匹配返回 409。
-   */
+  /** 必填 CAS 游标：canonical UUID string，须等于最新 {@link HarnessThreadDTO#headEntryId}；不匹配返回 409。 */
   private String expectedHeadEntryId;
 
   /**

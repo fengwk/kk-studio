@@ -7,11 +7,16 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 /** 进程内 task 并发 reservation 的计数与 session 归属语义。 */
 class SubagentRunRegistryTest {
 
   private static final Duration ONE_MS = Duration.ofMillis(1);
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
 
   private static SubagentConfig config(int maxConcurrency, Integer maxTotalConcurrency) {
     return new SubagentConfig(2, maxConcurrency, maxTotalConcurrency, ONE_MS, 50, ONE_MS);
@@ -23,15 +28,17 @@ class SubagentRunRegistryTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(1, null);
 
-    try (SubagentRunRegistry.Reservation first = registry.reserve(1, 1, null, config)) {
+    try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), null, config)) {
       IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, null, config));
+          assertThrows(
+              IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), null, config));
       assertEquals("subagent concurrency limit reached (1/1)", error.getMessage());
     }
 
     // 关闭后计数已释放：同一 parent 可再次占用唯一槽位，占满后依旧拒绝。
-    try (SubagentRunRegistry.Reservation second = registry.reserve(1, 1, null, config)) {
-      assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, null, config));
+    try (SubagentRunRegistry.Reservation second = registry.reserve(id(1), id(1), null, config)) {
+      assertThrows(
+          IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), null, config));
     }
   }
 
@@ -41,17 +48,19 @@ class SubagentRunRegistryTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(10, 2);
 
-    try (SubagentRunRegistry.Reservation alpha = registry.reserve(1, 9, null, config);
-        SubagentRunRegistry.Reservation beta = registry.reserve(2, 9, null, config)) {
+    try (SubagentRunRegistry.Reservation alpha = registry.reserve(id(1), id(9), null, config);
+        SubagentRunRegistry.Reservation beta = registry.reserve(id(2), id(9), null, config)) {
       IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> registry.reserve(3, 9, null, config));
+          assertThrows(
+              IllegalArgumentException.class, () -> registry.reserve(id(3), id(9), null, config));
       assertEquals("subagent tree concurrency limit reached (2/2)", error.getMessage());
     }
 
     // root 总量随 reservation 关闭而释放：两个新的不同 parent 可重新占满并再次拒绝第三个。
-    try (SubagentRunRegistry.Reservation gamma = registry.reserve(3, 9, null, config);
-        SubagentRunRegistry.Reservation delta = registry.reserve(4, 9, null, config)) {
-      assertThrows(IllegalArgumentException.class, () -> registry.reserve(5, 9, null, config));
+    try (SubagentRunRegistry.Reservation gamma = registry.reserve(id(3), id(9), null, config);
+        SubagentRunRegistry.Reservation delta = registry.reserve(id(4), id(9), null, config)) {
+      assertThrows(
+          IllegalArgumentException.class, () -> registry.reserve(id(5), id(9), null, config));
     }
   }
 
@@ -61,15 +70,17 @@ class SubagentRunRegistryTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(10, null);
 
-    try (SubagentRunRegistry.Reservation first = registry.reserve(1, 1, 42L, config)) {
+    try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), id(42), config)) {
       IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, 42L, config));
-      assertEquals("subagent session \"42\" is currently running", error.getMessage());
+          assertThrows(
+              IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), id(42), config));
+      assertEquals("subagent session \"" + id(42) + "\" is currently running", error.getMessage());
     }
 
     // session 释放后可再次恢复；恢复后再次被独占。
-    try (SubagentRunRegistry.Reservation resumed = registry.reserve(1, 1, 42L, config)) {
-      assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, 42L, config));
+    try (SubagentRunRegistry.Reservation resumed = registry.reserve(id(1), id(1), id(42), config)) {
+      assertThrows(
+          IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), id(42), config));
     }
   }
 
@@ -79,24 +90,25 @@ class SubagentRunRegistryTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(10, null);
 
-    try (SubagentRunRegistry.Reservation first = registry.reserve(1, 1, null, config)) {
-      first.attach(200);
-      SubagentRunRegistry.Reservation second = registry.reserve(2, 2, null, config);
+    try (SubagentRunRegistry.Reservation first = registry.reserve(id(1), id(1), null, config)) {
+      first.attach(id(200));
+      SubagentRunRegistry.Reservation second = registry.reserve(id(2), id(2), null, config);
       try {
         IllegalArgumentException error =
-            assertThrows(IllegalArgumentException.class, () -> second.attach(200));
-        assertEquals("subagent session \"200\" is currently running", error.getMessage());
+            assertThrows(IllegalArgumentException.class, () -> second.attach(id(200)));
+        assertEquals(
+            "subagent session \"" + id(200) + "\" is currently running", error.getMessage());
       } finally {
         second.close();
       }
     }
 
     // thread 随 reservation 关闭而释放：新 reservation 可再次 attach 并重新独占它。
-    try (SubagentRunRegistry.Reservation again = registry.reserve(1, 1, null, config)) {
-      again.attach(200);
-      SubagentRunRegistry.Reservation other = registry.reserve(2, 2, null, config);
+    try (SubagentRunRegistry.Reservation again = registry.reserve(id(1), id(1), null, config)) {
+      again.attach(id(200));
+      SubagentRunRegistry.Reservation other = registry.reserve(id(2), id(2), null, config);
       try {
-        assertThrows(IllegalArgumentException.class, () -> other.attach(200));
+        assertThrows(IllegalArgumentException.class, () -> other.attach(id(200)));
       } finally {
         other.close();
       }
@@ -109,10 +121,11 @@ class SubagentRunRegistryTest {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(10, null);
 
-    try (SubagentRunRegistry.Reservation reservation = registry.reserve(1, 1, null, config)) {
-      reservation.attach(200);
-      reservation.attach(200);
-      assertThrows(IllegalStateException.class, () -> reservation.attach(201));
+    try (SubagentRunRegistry.Reservation reservation =
+        registry.reserve(id(1), id(1), null, config)) {
+      reservation.attach(id(200));
+      reservation.attach(id(200));
+      assertThrows(IllegalStateException.class, () -> reservation.attach(id(201)));
     }
   }
 
@@ -123,25 +136,28 @@ class SubagentRunRegistryTest {
     SubagentConfig config = config(1, 1);
 
     // 新子 Agent 的 reservation：attach 的 thread 随 close 释放。
-    SubagentRunRegistry.Reservation child = registry.reserve(1, 1, null, config);
-    child.attach(200);
+    SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
+    child.attach(id(200));
     child.close();
     child.close();
     // 关闭后 attach 不得重新登记 thread。
-    child.attach(200);
+    child.attach(id(200));
 
     // resume session 的 reservation：session 占用随 close 释放。
-    SubagentRunRegistry.Reservation resumed = registry.reserve(1, 1, 42L, config);
+    SubagentRunRegistry.Reservation resumed = registry.reserve(id(1), id(1), id(42), config);
     resumed.close();
     resumed.close();
 
     // 计数、resume session 与 thread 均已归还：可重新占满并再次拒绝。
-    try (SubagentRunRegistry.Reservation again = registry.reserve(1, 1, 42L, config)) {
-      assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, null, config));
-      assertThrows(IllegalArgumentException.class, () -> registry.reserve(1, 1, 42L, config));
+    try (SubagentRunRegistry.Reservation again = registry.reserve(id(1), id(1), id(42), config)) {
+      assertThrows(
+          IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), null, config));
+      assertThrows(
+          IllegalArgumentException.class, () -> registry.reserve(id(1), id(1), id(42), config));
     }
-    try (SubagentRunRegistry.Reservation withThread = registry.reserve(1, 1, null, config)) {
-      withThread.attach(200);
+    try (SubagentRunRegistry.Reservation withThread =
+        registry.reserve(id(1), id(1), null, config)) {
+      withThread.attach(id(200));
     }
   }
 
@@ -150,23 +166,23 @@ class SubagentRunRegistryTest {
   void relaysDescendantStatusesToAncestors() {
     SubagentRunRegistry registry = new SubagentRunRegistry();
     SubagentConfig config = config(10, null);
-    SubagentRunRegistry.Reservation child = registry.reserve(1, 1, null, config);
-    SubagentRunRegistry.Reservation grandchild = registry.reserve(2, 1, null, config);
-    child.attach(2);
-    grandchild.attach(3);
-    var approval = new SubagentRunRegistry.RelayedApproval(51, "bash", "confirm");
+    SubagentRunRegistry.Reservation child = registry.reserve(id(1), id(1), null, config);
+    SubagentRunRegistry.Reservation grandchild = registry.reserve(id(2), id(1), null, config);
+    child.attach(id(2));
+    grandchild.attach(id(3));
+    var approval = new SubagentRunRegistry.RelayedApproval(id(51), "bash", "confirm");
     var status =
         new SubagentRunRegistry.RelayedStatus(
-            3, "coder", "waiting_approval", 3, 1, 1, "waiting bash", List.of(approval));
+            id(3), "coder", "waiting_approval", 3, 1, 1, "waiting bash", List.of(approval));
 
     registry.publishStatus(status);
 
-    assertEquals(List.of(status), registry.descendantStatuses(1));
-    assertEquals(List.of(status), registry.descendantStatuses(2));
-    assertEquals(List.of(), registry.descendantStatuses(3));
+    assertEquals(List.of(status), registry.descendantStatuses(id(1)));
+    assertEquals(List.of(status), registry.descendantStatuses(id(2)));
+    assertEquals(List.of(), registry.descendantStatuses(id(3)));
 
     grandchild.close();
-    assertEquals(List.of(), registry.descendantStatuses(1));
+    assertEquals(List.of(), registry.descendantStatuses(id(1)));
     child.close();
   }
 }

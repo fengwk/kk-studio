@@ -21,7 +21,7 @@ public class HarnessThreadStopResultDTO {
   private HarnessThreadDTO thread;
 
   /**
-   * 被停止 Turn 的 TURN_END Entry 主键：strict positive decimal string；仅 STOPPED / REPLAYED 时非
+   * 被停止 Turn 的 TURN_END Entry 主键：canonical UUID string；仅 STOPPED / REPLAYED 时非
    * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)

@@ -66,15 +66,17 @@ import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
  * Harness Runtime HTTP 边界的严格 DTO&lt;-&gt;domain mapper。
  *
- * <p>Entity id 是底层 bigint 值的严格正十进制字符串（{@code [1-9][0-9]*}）；revision 是严格非负十进制字符串。 domain JSON
- * payload 只通过规范 runtime codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 从
- * {@link ThreadSnapshot} 确定性推导：IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; / TOOL_&lt;status&gt;
- * / APPLYING；只有 IDLE 时 processing 为 false。
+ * <p>实体 id（Thread / Session / Entry / Invocation / clientCommandId / stopRequestId / decisionId）均为
+ * canonical UUID string；revision 与 command sequence 仍是十进制字符串。domain JSON payload 只通过规范 runtime
+ * codecs 编解码。Thread 状态与 processing 标志通过共享的 {@link ThreadContextClassifier} 从 {@link ThreadSnapshot}
+ * 确定性推导：IDLE / CONTINUATION_DUE / MODEL_&lt;status&gt; / TOOL_&lt;status&gt; / APPLYING；只有 IDLE 时
+ * processing 为 false。
  *
  * <p>所有返回的 DTO 列表都是不可变副本。
  */
@@ -101,10 +103,28 @@ public final class HarnessRuntimeWebMapper {
 
   private HarnessRuntimeWebMapper() {}
 
-  // ---------- 严格十进制解析 ----------
+  // ---------- 严格解析 ----------
 
-  /** 解析 long 范围内的严格正十进制 id（{@code [1-9][0-9]*}）。 */
-  public static long parsePositiveId(String value, String field) {
+  /** 解析 canonical UUID 实体 id（{@code UUID.fromString} 往返一致）。 */
+  public static UUID parseUuid(String value, String field) {
+    Objects.requireNonNull(field, "field");
+    if (value == null) {
+      throw new IllegalArgumentException(field + " must not be null");
+    }
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
+    }
+    if (!parsed.toString().equals(value)) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
+    }
+    return parsed;
+  }
+
+  /** 解析严格正十进制 sequence 游标（{@code [1-9][0-9]*}）。 */
+  public static long parsePositiveDecimal(String value, String field) {
     Objects.requireNonNull(field, "field");
     if (value == null || !POSITIVE_DECIMAL.matcher(value).matches()) {
       throw new IllegalArgumentException(field + " must be an unsigned positive decimal: " + value);
@@ -136,9 +156,9 @@ public final class HarnessRuntimeWebMapper {
   public static HarnessThreadDTO toThreadDto(ThreadSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
     HarnessThreadDTO dto = new HarnessThreadDTO();
-    dto.setThreadId(Long.toString(snapshot.thread().id()));
-    dto.setSessionId(Long.toString(snapshot.entryPath().root().sessionId()));
-    dto.setHeadEntryId(Long.toString(snapshot.thread().headEntryId()));
+    dto.setThreadId(snapshot.thread().id().toString());
+    dto.setSessionId(snapshot.entryPath().root().sessionId().toString());
+    dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
     dto.setRevision(Long.toString(snapshot.thread().revision()));
@@ -174,10 +194,9 @@ public final class HarnessRuntimeWebMapper {
   public static HarnessSessionEntryDTO toEntryDto(Entry entry) {
     Objects.requireNonNull(entry, "entry");
     HarnessSessionEntryDTO dto = new HarnessSessionEntryDTO();
-    dto.setEntryId(Long.toString(entry.id()));
-    dto.setSessionId(Long.toString(entry.sessionId()));
-    dto.setParentEntryId(
-        entry.parentEntryId() == null ? null : Long.toString(entry.parentEntryId()));
+    dto.setEntryId(entry.id().toString());
+    dto.setSessionId(entry.sessionId().toString());
+    dto.setParentEntryId(entry.parentEntryId() == null ? null : entry.parentEntryId().toString());
     dto.setEntryType(entry.payload().type().name());
     dto.setPayloadJson(ENTRY_PAYLOADS.encode(entry.payload()));
     dto.setCreateTime(entry.createdAt());
@@ -187,17 +206,16 @@ public final class HarnessRuntimeWebMapper {
   public static HarnessThreadCommandDTO toCommandDto(ThreadCommand command) {
     Objects.requireNonNull(command, "command");
     HarnessThreadCommandDTO dto = new HarnessThreadCommandDTO();
-    dto.setCommandId(Long.toString(command.id()));
-    dto.setThreadId(Long.toString(command.threadId()));
+    dto.setThreadId(command.threadId().toString());
     dto.setSequence(Long.toString(command.sequence()));
     dto.setType(command.type().name());
     dto.setState(command.state().name());
-    dto.setClientCommandId(command.clientCommandId());
+    dto.setClientCommandId(command.clientCommandId().toString());
     dto.setPayloadJson(COMMAND_PAYLOADS.encode(command.payload()));
     dto.setConsumedTurnStartEntryId(
         command.consumedTurnStartEntryId() == null
             ? null
-            : Long.toString(command.consumedTurnStartEntryId()));
+            : command.consumedTurnStartEntryId().toString());
     dto.setCancelledAt(command.cancelledAt());
     dto.setCreateTime(command.createdAt());
     return dto;
@@ -206,10 +224,10 @@ public final class HarnessRuntimeWebMapper {
   public static ModelInvocationDTO toModelInvocationDto(ModelInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
     ModelInvocationDTO dto = new ModelInvocationDTO();
-    dto.setId(Long.toString(invocation.id()));
-    dto.setThreadId(Long.toString(invocation.threadId()));
-    dto.setTurnStartEntryId(Long.toString(invocation.turnStartEntryId()));
-    dto.setBasisHeadEntryId(Long.toString(invocation.basisHeadEntryId()));
+    dto.setId(invocation.id().toString());
+    dto.setThreadId(invocation.threadId().toString());
+    dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
+    dto.setBasisHeadEntryId(invocation.basisHeadEntryId().toString());
     dto.setStatus(invocation.status().name());
     dto.setAttempt(invocation.attempt());
     dto.setStreamCheckpointJson(
@@ -220,7 +238,7 @@ public final class HarnessRuntimeWebMapper {
         invocation.result() == null ? null : MODEL_RESULTS.encode(invocation.result()));
     dto.setErrorJson(invocation.error() == null ? null : MODEL_ERRORS.encode(invocation.error()));
     dto.setResultEntryId(
-        invocation.resultEntryId() == null ? null : Long.toString(invocation.resultEntryId()));
+        invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
     dto.setCreateTime(invocation.createdAt());
     dto.setUpdateTime(invocation.updatedAt());
     return dto;
@@ -229,9 +247,9 @@ public final class HarnessRuntimeWebMapper {
   public static ToolInvocationDTO toToolInvocationDto(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
     ToolInvocationDTO dto = new ToolInvocationDTO();
-    dto.setId(Long.toString(invocation.id()));
-    dto.setModelInvocationId(Long.toString(invocation.modelInvocationId()));
-    dto.setAssistantEntryId(Long.toString(invocation.assistantEntryId()));
+    dto.setId(invocation.id().toString());
+    dto.setModelInvocationId(invocation.modelInvocationId().toString());
+    dto.setAssistantEntryId(invocation.assistantEntryId().toString());
     dto.setOrdinal(invocation.ordinal());
     dto.setStatus(invocation.status().name());
     dto.setAttempt(invocation.attempt());
@@ -250,7 +268,7 @@ public final class HarnessRuntimeWebMapper {
         invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result()));
     dto.setErrorJson(invocation.error() == null ? null : TOOL_ERRORS.encode(invocation.error()));
     dto.setResultEntryId(
-        invocation.resultEntryId() == null ? null : Long.toString(invocation.resultEntryId()));
+        invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
     dto.setCreateTime(invocation.createdAt());
     dto.setUpdateTime(invocation.updatedAt());
     return dto;
@@ -298,7 +316,7 @@ public final class HarnessRuntimeWebMapper {
       StopResult result, ThreadSnapshot postStopSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(postStopSnapshot, "postStopSnapshot");
-    if (result.thread().id() != postStopSnapshot.thread().id()
+    if (!result.thread().id().equals(postStopSnapshot.thread().id())
         || result.thread().revision() != postStopSnapshot.thread().revision()) {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
@@ -306,9 +324,7 @@ public final class HarnessRuntimeWebMapper {
     dto.setStatus(result.status().name());
     dto.setThread(toThreadDto(postStopSnapshot));
     dto.setStoppedTurnEndEntryId(
-        result.stoppedTurnEndEntryId() == null
-            ? null
-            : Long.toString(result.stoppedTurnEndEntryId()));
+        result.stoppedTurnEndEntryId() == null ? null : result.stoppedTurnEndEntryId().toString());
     dto.setCancelledCommandCount(result.cancelledCommandCount());
     return dto;
   }
@@ -318,7 +334,6 @@ public final class HarnessRuntimeWebMapper {
   public static CreateThreadCommand toCreateThreadCommand(HarnessThreadCreateDTO dto) {
     requireNonNull(dto, "createDTO");
     return new CreateThreadCommand(
-        dto.getTitle(),
         toBranchSettings(dto.getBranchSettings()),
         requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
@@ -352,9 +367,9 @@ public final class HarnessRuntimeWebMapper {
       domain.add(toNewThreadCommand(command));
     }
     return new ThreadCommandBatch(
-        parsePositiveId(threadId, "threadId"),
-        parsePositiveId(dto.getExpectedHeadEntryId(), "expectedHeadEntryId"),
-        parsePositiveId(dto.getExpectedNextCommandSequence(), "expectedNextCommandSequence"),
+        parseUuid(threadId, "threadId"),
+        parseUuid(dto.getExpectedHeadEntryId(), "expectedHeadEntryId"),
+        parsePositiveDecimal(dto.getExpectedNextCommandSequence(), "expectedNextCommandSequence"),
         domain);
   }
 
@@ -363,22 +378,22 @@ public final class HarnessRuntimeWebMapper {
     requireNonNull(dto, "commandDTO");
     ThreadCommandType type = requireType(dto.getType());
     return new NewThreadCommand(
-        toPayload(type, dto), requireText(dto.getClientCommandId(), "clientCommandId"));
+        toPayload(type, dto), parseUuid(dto.getClientCommandId(), "clientCommandId"));
   }
 
   public static MoveHeadCommand toMoveHeadCommand(String threadId, HarnessThreadHeadUpdateDTO dto) {
     requireNonNull(dto, "headUpdateDTO");
     return new MoveHeadCommand(
-        parsePositiveId(threadId, "threadId"),
-        parsePositiveId(dto.getTargetEntryId(), "targetEntryId"),
+        parseUuid(threadId, "threadId"),
+        parseUuid(dto.getTargetEntryId(), "targetEntryId"),
         parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
   }
 
   public static StopCommand toStopCommand(String threadId, HarnessThreadStopDTO dto) {
     requireNonNull(dto, "stopDTO");
     return new StopCommand(
-        parsePositiveId(threadId, "threadId"),
-        requireText(dto.getStopRequestId(), "stopRequestId"),
+        parseUuid(threadId, "threadId"),
+        parseUuid(dto.getStopRequestId(), "stopRequestId"),
         parseNonNegativeDecimal(dto.getExpectedRevision(), "expectedRevision"));
   }
 
@@ -394,10 +409,10 @@ public final class HarnessRuntimeWebMapper {
               "decision must be ALLOW or DENY: " + decision);
         };
     return new ToolApprovalCommand(
-        parsePositiveId(threadId, "threadId"),
-        parsePositiveId(toolInvocationId, "toolInvocationId"),
+        parseUuid(threadId, "threadId"),
+        parseUuid(toolInvocationId, "toolInvocationId"),
         parsed,
-        requireText(dto.getDecisionId(), "decisionId"),
+        parseUuid(dto.getDecisionId(), "decisionId"),
         requireText(dto.getActor(), "actor"),
         dto.getReason());
   }

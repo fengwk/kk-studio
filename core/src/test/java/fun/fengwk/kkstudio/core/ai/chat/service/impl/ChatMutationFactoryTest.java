@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
@@ -69,11 +68,8 @@ class ChatMutationFactoryTest {
   }
 
   private static ChatMutationFactory factory(boolean defaultYolo) {
-    PostgresqlSequenceIdGenerator idGenerator = mock(PostgresqlSequenceIdGenerator.class);
-    when(idGenerator.next()).thenReturn(1L);
     ToolSettingsProvider settings = mock(ToolSettingsProvider.class);
     when(settings.get()).thenReturn(new ToolSettings(Map.of(), defaultYolo));
-    return new ChatMutationFactory(
-        new AgentEditableSupport(new ObjectMapper()), idGenerator, settings);
+    return new ChatMutationFactory(new AgentEditableSupport(new ObjectMapper()), settings);
   }
 }

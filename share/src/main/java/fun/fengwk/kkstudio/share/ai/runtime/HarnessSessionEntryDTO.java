@@ -5,18 +5,17 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** Session Entry 查询投影；id 均为 strict positive decimal string。 */
+/** Session Entry 查询投影；实体 id 均为 canonical UUID string。 */
 @Data
 public class HarnessSessionEntryDTO {
-  /** Entry 主键：strict positive decimal string（{@code [1-9][0-9]*}，底层 bigint）。 */
+  /** Entry 主键：canonical UUID string。 */
   private String entryId;
 
-  /** 所属 Session 主键：strict positive decimal string。 */
+  /** 所属 Session 主键：canonical UUID string。 */
   private String sessionId;
 
   /**
-   * 父 Entry 主键：strict positive decimal string；仅 ROOT Entry 为 null（{@code @JsonInclude(ALWAYS)} 保证
-   * null 也输出）。
+   * 父 Entry 主键：canonical UUID string；仅 ROOT Entry 为 null（{@code @JsonInclude(ALWAYS)} 保证 null 也输出）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String parentEntryId;

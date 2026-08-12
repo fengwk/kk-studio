@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.UUID;
 
 /** 验证 PostgreSQL schema 是否完全表达非 Harness 的业务数据。 */
 class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
@@ -69,8 +70,8 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   @Test
   void chatAgentNameContractIsCanonicalAndThreadRevisionStaysAppOwned() throws SQLException {
     try (Connection conn = newConnection()) {
-      insertChat(conn, FIXTURE_IDS.incrementAndGet());
-      insertChat(conn, FIXTURE_IDS.incrementAndGet());
+      insertChat(conn, uuid());
+      insertChat(conn, uuid());
     }
 
     for (String invalid : new String[] {" ", " agent ", "\tagent\t", "agent/name"}) {
@@ -78,22 +79,22 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
           PreparedStatement ps =
               conn.prepareStatement(
                   "insert into chat (id, title, agent_name) values (?, 'schema-test', ?)")) {
-        ps.setLong(1, FIXTURE_IDS.incrementAndGet());
+        ps.setObject(1, uuid());
         ps.setString(2, invalid);
         assertTransactionConstraintViolation(conn, "ck_chat_agent_name", () -> ps.executeUpdate());
       }
     }
 
-    long threadId = FIXTURE_IDS.incrementAndGet();
-    long sessionId = FIXTURE_IDS.incrementAndGet();
-    long entryId = FIXTURE_IDS.incrementAndGet();
+    UUID threadId = uuid();
+    UUID sessionId = uuid();
+    UUID entryId = uuid();
     try (Connection conn = newConnection()) {
       insertThread(conn, threadId, sessionId, entryId);
       assertEquals(
           0L, queryLong(conn, "select revision from harness_thread where id = ?", threadId));
       try (PreparedStatement ps =
           conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
-        ps.setLong(1, threadId);
+        ps.setObject(1, threadId);
         assertEquals(1, ps.executeUpdate());
       }
       assertEquals(
@@ -302,22 +303,25 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertChat(Connection conn, long id) throws SQLException {
+  private static UUID uuid() {
+    return new UUID(0L, FIXTURE_IDS.incrementAndGet());
+  }
+
+  private void insertChat(Connection conn, UUID id) throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
             "insert into chat (id, title, agent_name)"
                 + " values (?, 'schema-test', 'schema-agent')")) {
-      ps.setLong(1, id);
+      ps.setObject(1, id);
       assertEquals(1, ps.executeUpdate());
     }
   }
 
-  private void insertThread(Connection conn, long threadId, long sessionId, long entryId)
+  private void insertThread(Connection conn, UUID threadId, UUID sessionId, UUID entryId)
       throws SQLException {
     try (PreparedStatement session =
             conn.prepareStatement(
-                "insert into harness_session (id, title, created_at) values (?, 'schema',"
-                    + " current_timestamp)");
+                "insert into harness_session (id, created_at) values (?, current_timestamp)");
         PreparedStatement entry =
             conn.prepareStatement(
                 "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
@@ -327,14 +331,24 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
                 "insert into harness_thread (id, head_entry_id, yolo_enabled,"
                     + " next_command_sequence, revision, created_at, updated_at) values"
                     + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
-      session.setLong(1, sessionId);
+      session.setObject(1, sessionId);
       assertEquals(1, session.executeUpdate());
-      entry.setLong(1, entryId);
-      entry.setLong(2, sessionId);
+      entry.setObject(1, entryId);
+      entry.setObject(2, sessionId);
       assertEquals(1, entry.executeUpdate());
-      thread.setLong(1, threadId);
-      thread.setLong(2, entryId);
+      thread.setObject(1, threadId);
+      thread.setObject(2, entryId);
       assertEquals(1, thread.executeUpdate());
+    }
+  }
+
+  private long queryLong(Connection conn, String sql, UUID id) throws SQLException {
+    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setObject(1, id);
+      try (var rs = ps.executeQuery()) {
+        rs.next();
+        return rs.getLong(1);
+      }
     }
   }
 

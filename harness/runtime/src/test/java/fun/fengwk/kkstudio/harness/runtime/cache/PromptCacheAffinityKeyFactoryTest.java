@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -301,6 +303,7 @@ class PromptCacheAffinityKeyFactoryTest {
         new ModelDescriptor(
             "provider",
             "m1",
+            Set.of(ModelInputModality.IMAGE),
             !identity.tools(),
             !identity.reasoning(),
             new ModelPricing(
@@ -511,6 +514,7 @@ class PromptCacheAffinityKeyFactoryTest {
     return new ModelDescriptor(
         provider,
         model,
+        Set.of(ModelInputModality.TEXT),
         true,
         false,
         new ModelPricing(

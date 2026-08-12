@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.util.Map;
+import java.util.UUID;
 
 /** adapterState 测试证明 checkpoint 完整 round-trip，并对未知、错型和非精确嵌套结构 fail closed。 */
 class H3AdapterStateTest {
@@ -19,7 +20,7 @@ class H3AdapterStateTest {
     H3AdapterState state =
         H3AdapterState.empty()
             .withSeed(0L)
-            .withHarnessThreadId(2L)
+            .withHarnessThreadId(new UUID(0L, 2L))
             .withEnhancedPrompt("增强提示")
             .withUpload(11L, new H3UploadedFile("11.png", "kk-studio/7", "input"))
             .withPromptId("prompt-1")
@@ -39,7 +40,7 @@ class H3AdapterStateTest {
         () -> new H3AdapterState(-1L, null, null, Map.of(), null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new H3AdapterState(null, 0L, null, Map.of(), null, null));
+        () -> H3AdapterState.decode(Map.of("harnessThreadId", "not-a-uuid"), mapper));
     assertThrows(
         IllegalArgumentException.class, () -> H3AdapterState.empty().withEnhancedPrompt(" "));
     assertThrows(

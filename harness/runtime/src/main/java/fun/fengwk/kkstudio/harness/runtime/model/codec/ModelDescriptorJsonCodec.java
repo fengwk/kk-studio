@@ -10,11 +10,13 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -36,10 +38,13 @@ import java.util.Set;
  *
  * <ul>
  *   <li>对象字段按声明顺序写入。
+ *   <li>enum {@code Set} 字段（{@code inputModalities}）按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
  *   <li>{@link BigDecimal} 字段以 {@code toPlainString()} 文本输出。
  *   <li>{@code ModelVariant} 的 nullable 字段（{@code maxOutputTokens} / {@code temperature} 等）显式输出
  *       {@code null} 而非省略，便于 schema 对照。
  * </ul>
+ *
+ * <p>durable 形态为直接 V1：descriptor 固定六个字段（含 {@code inputModalities}），旧五字段形态由严格字段校验拒绝，不做 dual-read 兼容。
  */
 public final class ModelDescriptorJsonCodec {
 
@@ -48,7 +53,7 @@ public final class ModelDescriptorJsonCodec {
 
   /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
-      orderedSet("providerName", "modelName", "tools", "reasoning", "pricing");
+      orderedSet("providerName", "modelName", "inputModalities", "tools", "reasoning", "pricing");
 
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
@@ -146,6 +151,11 @@ public final class ModelDescriptorJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("providerName", descriptor.providerName());
     node.put("modelName", descriptor.modelName());
+    ArrayNode inputModalities = node.putArray("inputModalities");
+    for (ModelInputModality modality :
+        sorted(descriptor.inputModalities(), Comparator.comparing(Enum::name))) {
+      inputModalities.add(modality.name());
+    }
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
     node.set("pricing", writePricing(descriptor.pricing()));
@@ -156,10 +166,35 @@ public final class ModelDescriptorJsonCodec {
     requireFields(node, DESCRIPTOR_FIELDS, "model");
     String providerName = text(node, "providerName");
     String modelName = text(node, "modelName");
+    Set<ModelInputModality> inputModalities = readInputModalities(node);
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
     ModelPricing pricing = readPricing(node.get("pricing"));
-    return new ModelDescriptor(providerName, modelName, tools, reasoning, pricing);
+    return new ModelDescriptor(providerName, modelName, inputModalities, tools, reasoning, pricing);
+  }
+
+  private static Set<ModelInputModality> readInputModalities(ObjectNode node) {
+    ArrayNode modalities = array(node.get("inputModalities"), "inputModalities");
+    if (modalities.isEmpty()) {
+      throw new IllegalArgumentException("inputModalities must not be empty");
+    }
+    Set<ModelInputModality> result = new LinkedHashSet<>();
+    for (JsonNode item : modalities) {
+      if (!item.isTextual() || item.textValue().isBlank()) {
+        throw new IllegalArgumentException("inputModalities must contain non-blank strings");
+      }
+      ModelInputModality modality;
+      try {
+        modality = ModelInputModality.valueOf(item.textValue());
+      } catch (IllegalArgumentException exception) {
+        throw new IllegalArgumentException(
+            "unknown input modality: " + item.textValue(), exception);
+      }
+      if (!result.add(modality)) {
+        throw new IllegalArgumentException("inputModalities must not contain duplicates");
+      }
+    }
+    return result;
   }
 
   // ---------- ModelVariant ----------
@@ -366,6 +401,11 @@ public final class ModelDescriptorJsonCodec {
       set.add(value);
     }
     return set;
+  }
+
+  /** 按给定比较器排序的不可变列表，用于 enum Set 的 deterministic 输出。 */
+  static <T> List<T> sorted(Set<T> values, Comparator<? super T> comparator) {
+    return values.stream().sorted(comparator).toList();
   }
 
   private static String write(ObjectNode node) {

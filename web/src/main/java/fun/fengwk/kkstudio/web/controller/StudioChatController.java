@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -85,9 +86,9 @@ public class StudioChatController {
     List<HarnessThreadDTO> threads =
         withRuntimeTranslation(
             () -> {
-              List<Long> threadIds = chatThreadService.listThreadIds(chatId);
+              List<UUID> threadIds = chatThreadService.listThreadIds(chatId);
               List<HarnessThreadDTO> mapped = new ArrayList<>(threadIds.size());
-              for (long threadId : threadIds) {
+              for (UUID threadId : threadIds) {
                 ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
                 mapped.add(HarnessRuntimeWebMapper.toThreadDto(snapshot));
               }
@@ -106,7 +107,7 @@ public class StudioChatController {
               chatThreadService.requireChat(chatId);
               CreatedThread created =
                   runtime.createThread(HarnessRuntimeWebMapper.toCreateThreadCommand(createDTO));
-              long threadId = created.thread().id();
+              UUID threadId = created.thread().id();
               chatThreadService.associateThread(chatId, threadId);
               return HarnessRuntimeWebMapper.toSnapshotDto(runtime.getThreadSnapshot(threadId));
             });
@@ -118,7 +119,7 @@ public class StudioChatController {
   public Result<Void> associateThread(@PathVariable String chatId, @PathVariable String threadId) {
     withRuntimeTranslation(
         () -> {
-          long id = HarnessRuntimeWebMapper.parsePositiveId(threadId, "threadId");
+          UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
           runtime.getThreadSnapshot(id);
           chatThreadService.associateThread(chatId, id);
           return null;

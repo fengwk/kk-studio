@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Function;
 
 class DatabasePluginBranchViewLoaderTest {
@@ -28,7 +29,8 @@ class DatabasePluginBranchViewLoaderTest {
     HarnessStore store = mock(HarnessStore.class);
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
     EntryPath path = rootPath();
-    when(transaction.loadEntryPath(11L)).thenReturn(path);
+    UUID entryId = new UUID(0L, 11L);
+    when(transaction.loadEntryPath(entryId)).thenReturn(path);
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -37,19 +39,20 @@ class DatabasePluginBranchViewLoaderTest {
             });
     DatabasePluginBranchViewLoader loader = new DatabasePluginBranchViewLoader(store);
 
-    BranchView view = loader.load(11L);
+    BranchView view = loader.load(entryId);
 
     assertSame(path, view.path());
-    verify(transaction).loadEntryPath(11L);
-    assertThrows(IllegalArgumentException.class, () -> loader.load(0L));
+    verify(transaction).loadEntryPath(entryId);
+    assertThrows(NullPointerException.class, () -> loader.load(null));
     assertThrows(NullPointerException.class, () -> new DatabasePluginBranchViewLoader(null));
   }
 
   private static EntryPath rootPath() {
+    UUID id = new UUID(0L, 1L);
     Entry root =
         new Entry(
-            1L,
-            1L,
+            id,
+            id,
             null,
             new RootPayload(
                 new BranchSettings(

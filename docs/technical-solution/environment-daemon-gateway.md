@@ -155,7 +155,7 @@ sequenceDiagram
     TP->>DB: partial -> Redis overlay; terminal -> ToolInvocation + Work
 ```
 
-Wire `invocationId` 始终是持久 Invocation ID 的十进制字符串。每个 envelope 由 `environmentName` 作用域校验；连接/环境/invocation ownership 不匹配的回调被拒绝。
+Wire `invocationId` 始终是持久 Invocation ID 的 canonical UUID string。每个 envelope 由 `environmentName` 作用域校验；连接/环境/invocation ownership 不匹配的回调被拒绝。
 
 分发前校验：
 
