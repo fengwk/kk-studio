@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
   createAttachmentPart,
   createPartId,
@@ -17,15 +17,12 @@ export interface AttachmentUpload {
   /** 服务端 upload 句柄：USER_MESSAGE ATTACHMENT 引用它，释放也删除它。 */
   uploadId: string | null
   filename: string
-  mediaKind: StorageMediaKind
   mediaType: string
   sizeBytes: number
   sha256: string | null
   status: AttachmentUploadStatus
   progress: number
   error: string | null
-  /** 本地 object URL（仅 image/video 预览），release 时回收。 */
-  previewUrl: string | null
   /** 提交后等待发送结果期间隐藏（发送失败恢复时重新挂载）。 */
   detached: boolean
 }
@@ -153,8 +150,8 @@ export function useAttachmentUploads(options?: {
   )
 
   /**
-   * 释放上传句柄：标记 pipeline 失效、回收预览 URL，并对已预留的 upload
-   * 发起 best-effort DELETE（调用方已确认 draft 中不再引用）。
+   * 释放上传句柄：标记 pipeline 失效，并对已预留的 upload 发起
+   * best-effort DELETE（调用方已确认 draft 中不再引用）。
    */
   const releaseUpload = useCallback(
     (localId: string) => {
@@ -162,9 +159,6 @@ export function useAttachmentUploads(options?: {
       const record = uploadsRef.current.find((upload) => upload.localId === localId)
       if (!record) {
         return
-      }
-      if (record.previewUrl) {
-        URL.revokeObjectURL(record.previewUrl)
       }
       filesRef.current.delete(localId)
       const uploadId = record.uploadId
@@ -245,23 +239,16 @@ export function useAttachmentUploads(options?: {
       for (const file of files) {
         const localId = createPartId()
         const validationError = validateUploadFile(file)
-        const kind = mediaKindOf(file.type)
-        const previewUrl =
-          !validationError && (kind === 'image' || kind === 'video')
-            ? URL.createObjectURL(file)
-            : null
         const record: AttachmentUpload = {
           localId,
           uploadId: null,
           filename: file.name,
-          mediaKind: kind,
           mediaType: file.type,
           sizeBytes: file.size,
           sha256: null,
           status: validationError ? 'error' : 'uploading',
           progress: 0,
           error: validationError,
-          previewUrl,
           detached: false,
         }
         created.push(record)
@@ -308,17 +295,6 @@ export function useAttachmentUploads(options?: {
     },
     [updateUploads],
   )
-
-  // 卸载时回收本地预览 URL；不发起 DELETE（消息可能仍引用这些对象）。
-  useEffect(() => {
-    return () => {
-      for (const record of uploadsRef.current) {
-        if (record.previewUrl) {
-          URL.revokeObjectURL(record.previewUrl)
-        }
-      }
-    }
-  }, [])
 
   return {
     uploads,

@@ -1006,9 +1006,9 @@ export const aiCatalog = {
     'en-US': 'Send message',
     'zh-CN': '发送消息',
   },
-  'ai.runtime.composer.attach': {
-    'en-US': 'Attach files',
-    'zh-CN': '添加附件',
+  'ai.runtime.composer.openCommands': {
+    'en-US': 'Open commands',
+    'zh-CN': '打开命令表',
   },
   'ai.runtime.composer.strip': {
     'en-US': 'Attachments',
@@ -1022,10 +1022,6 @@ export const aiCatalog = {
     'en-US': 'Upload failed',
     'zh-CN': '上传失败',
   },
-  'ai.runtime.composer.retry': {
-    'en-US': 'Retry',
-    'zh-CN': '重试',
-  },
   'ai.runtime.composer.retryUpload': {
     'en-US': 'Retry upload {{name}}',
     'zh-CN': '重试上传 {{name}}',
@@ -1033,14 +1029,6 @@ export const aiCatalog = {
   'ai.runtime.composer.removeAttachment': {
     'en-US': 'Remove attachment {{name}}',
     'zh-CN': '移除附件 {{name}}',
-  },
-  'ai.runtime.composer.previewAttachment': {
-    'en-US': 'Preview {{name}}',
-    'zh-CN': '预览 {{name}}',
-  },
-  'ai.runtime.composer.closePreview': {
-    'en-US': 'Close preview',
-    'zh-CN': '关闭预览',
   },
   'ai.runtime.composer.fileTooLarge': {
     'en-US': '{{name}} exceeds the {{limit}} upload limit',
@@ -1078,6 +1066,10 @@ export const aiCatalog = {
     'en-US': 'Select or create a Thread first',
     'zh-CN': '选择或创建 Thread 后可用',
   },
+  'ai.runtime.command.upload': {
+    'en-US': 'Upload files and insert ordered attachment references',
+    'zh-CN': '上传文件并插入有序附件引用',
+  },
   'ai.runtime.command.session': {
     'en-US': 'Relocate the current Thread to a history position in the selected Session',
     'zh-CN': '把当前 Thread 重定位到所选 Session 的历史位置',
@@ -1109,6 +1101,10 @@ export const aiCatalog = {
   'ai.runtime.command.new': {
     'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
     'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
+  },
+  'ai.runtime.command.uploadLabel': {
+    'en-US': 'upload',
+    'zh-CN': 'upload',
   },
   'ai.runtime.command.sessionLabel': {
     'en-US': 'session',
@@ -1206,10 +1202,6 @@ export const aiCatalog = {
     'en-US': '(no arguments)',
     'zh-CN': '（无参数）',
   },
-  'ai.runtime.message.openRaw': {
-    'en-US': 'Open raw content',
-    'zh-CN': '打开原始内容',
-  },
   'ai.runtime.message.toolCall': {
     'en-US': 'Tool call ·',
     'zh-CN': '工具调用 ·',
@@ -1261,6 +1253,18 @@ export const aiCatalog = {
   'ai.runtime.message.resourceUnavailable': {
     'en-US': 'Resource unavailable',
     'zh-CN': '资源不可用',
+  },
+  'ai.runtime.message.previewResource': {
+    'en-US': 'Preview {{name}}',
+    'zh-CN': '预览 {{name}}',
+  },
+  'ai.runtime.message.closeResourcePreview': {
+    'en-US': 'Close media preview',
+    'zh-CN': '关闭媒体预览',
+  },
+  'ai.runtime.message.openResource': {
+    'en-US': 'Open original {{name}}',
+    'zh-CN': '打开原件 {{name}}',
   },
   'ai.runtime.status.agentFallback': {
     'en-US': 'agent',

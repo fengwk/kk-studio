@@ -1,14 +1,29 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
-import { createTextPart } from '@/features/ai/composer/composer-parts'
+import { createTextPart, type ComposerPart } from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
   threadCommandsForScene,
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { firstEnabledCommandIndex } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
+
+function ControlledComposer() {
+  const [parts, setParts] = useState<ComposerPart[]>([])
+  return (
+    <ThreadComposer
+      parts={parts}
+      pending={false}
+      disabled={false}
+      onPartsChange={setParts}
+      onSubmit={vi.fn()}
+      onCommand={vi.fn()}
+    />
+  )
+}
 
 describe('ThreadComposer and commands', () => {
   it('keeps stable command order and grays unsupported blank-scene commands', () => {
@@ -21,6 +36,7 @@ describe('ThreadComposer and commands', () => {
       'tree',
       'stop',
       'new',
+      'upload',
     ])
     const blank = threadCommandsForScene('blank')
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
@@ -31,6 +47,7 @@ describe('ThreadComposer and commands', () => {
       'agent',
       'environment',
       'yolo',
+      'upload',
     ])
     expect(blank.find((c) => c.id === 'session')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
@@ -45,7 +62,7 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
-  it('allows send and opens the command palette only from a slash draft', async () => {
+  it('allows send and executes slash commands', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
     const onCommand = vi.fn()
@@ -62,7 +79,6 @@ describe('ThreadComposer and commands', () => {
     )
     await user.click(screen.getByRole('button', { name: '发送消息' }))
     expect(onSubmit).toHaveBeenCalled()
-    expect(screen.queryByRole('button', { name: '打开命令表' })).not.toBeInTheDocument()
 
     rerender(
       <ThreadComposer
@@ -92,6 +108,47 @@ describe('ThreadComposer and commands', () => {
     await user.click(screen.getByLabelText('给 AI 发送消息'))
     await user.keyboard('{Enter}')
     expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'tree' }))
+  })
+
+  it('makes plus equivalent to typing slash in an empty editor', async () => {
+    const user = userEvent.setup()
+    render(<ControlledComposer />)
+    const add = screen.getByRole('button', { name: '打开命令表' })
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    expect(add).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(add)
+
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    expect(add).toHaveAttribute('aria-expanded', 'true')
+    expect(editor).toHaveTextContent('/')
+    expect(screen.getByRole('option', { name: /^upload/ })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    expect(editor).toBeEmptyDOMElement()
+  })
+
+  it('handles /upload locally and keeps the native file input hidden', async () => {
+    const user = userEvent.setup()
+    render(
+      <ThreadComposer
+        parts={[createTextPart('/upload')]}
+        pending={false}
+        disabled={false}
+        onPartsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onCommand={vi.fn()}
+      />,
+    )
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    expect(input).not.toBeNull()
+    expect(input).toHaveAttribute('hidden')
+    expect(input).toHaveClass('composer-file-input-hidden')
+    const click = vi.spyOn(input!, 'click').mockImplementation(() => undefined)
+    await user.click(screen.getByRole('option', { name: /^upload/ }))
+    expect(click).toHaveBeenCalledOnce()
+    click.mockRestore()
   })
 
   it('blocks send when draft is blank or pending', () => {
