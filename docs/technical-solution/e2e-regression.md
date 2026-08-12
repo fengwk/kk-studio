@@ -57,8 +57,8 @@ npm --prefix frontend run e2e:docs
 
 默认 backend URL 是 `http://127.0.0.1:18081`，默认 frontend URL 由 `scripts/e2e.sh` 传入 `http://127.0.0.1:5173`。真实 Provider 使用 `TEST_MINIMAX_BASE_URL` 与 `TEST_MINIMAX_API_KEY`，默认测试模型是 `minimax/MiniMax-M2.7`。
 
-本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL 与 MinIO，只连接本机
-S3-compatible endpoint：
+本地完整免费 Canvas 回归使用 `deploy/test` 提供 PostgreSQL、Redis 与 MinIO，只连接本机
+Redis/S3-compatible endpoint：
 
 ```bash
 docker compose -f deploy/test/compose.yaml up -d --wait
@@ -68,6 +68,7 @@ env \
   KK_STUDIO_DB_URL=jdbc:postgresql://127.0.0.1:15432/canvas_test \
   KK_STUDIO_DB_USER=canvas_test \
   KK_STUDIO_DB_PASSWORD=canvas_test_only \
+  KK_STUDIO_REDIS_URL=redis://127.0.0.1:16379 \
   KK_STUDIO_STORAGE_S3_ENABLED=true \
   KK_STUDIO_STORAGE_S3_ENDPOINT=http://127.0.0.1:19000 \
   KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=http://127.0.0.1:19000 \
@@ -75,7 +76,6 @@ env \
   KK_STUDIO_STORAGE_S3_BUCKET=canvas-test \
   KK_STUDIO_STORAGE_S3_ACCESS_KEY=canvas-test \
   KK_STUDIO_STORAGE_S3_SECRET_KEY=canvas-test-only \
-  MANAGEMENT_HEALTH_REDIS_ENABLED=false \
   ./scripts/e2e.sh --with-canvas-function --ui
 
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
@@ -201,8 +201,8 @@ L1 的关键语义断言：
   十进制字符串 graph `version`（数据库 `canvas_document.version` 仍是 bigint，wire 是 canonical
   非负十进制字符串，`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
   同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
-  409；`changes?afterVersion=0` 恒为权威 snapshot，尾部版本返回连续 patches 或同样
-  回退 snapshot；深删除后画布 404。
+  409；`changes?afterVersion=0` 在缓存完整时返回连续 `0→1` patch，缓存缺失/gap 时回退
+  权威 snapshot，尾部版本返回空 delta；深删除后画布 404。
 - `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
   S3 配置；通用 S3 预签名端点不能签名 `blobs/` 命名空间 key；全局
   upload reserve（`sha256` 必填）→ 浏览器直传 PUT → complete 绑定 READY blob，
@@ -424,8 +424,9 @@ GET  /api/storage/blobs/{blobId}/presigned-preview
   `mediaType/width/height` 来自 blob 权威事实列；`sizeBytes/durationMs` 是 Java long，
   wire 为十进制字符串或 null，前端 API adapter 归一化为内部 number|null（非负且
   Number.isSafeInteger，非法/超限 fail closed）；
-- `GET /changes`：要么返回从 `afterVersion` 起连续 patches（客户端逐个应用），要么返回
-  必须整体替换的权威 snapshot（初始加载/gap/缓存损坏）；未知 canvas 400；
+- `GET /changes`：要么返回从 `afterVersion`（含 0）起连续 patches（客户端逐个应用），
+  要么返回必须整体替换的权威 snapshot（缓存缺失/gap/损坏）；已处于尾部时返回空 delta，
+  未知 canvas 400；
 - SSE `events/stream`：`afterVersion` 与 `Last-Event-ID` 都是 canonical 非负十进制字符串；
   `version` 事件只携带前进版本（十进制字符串，客户端随后拉 changes），`resync` 事件要求整体快照；
 - `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序

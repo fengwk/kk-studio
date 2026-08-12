@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.core.studio.realtime;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.Limit;
 import org.springframework.data.redis.connection.RedisStreamCommands.XAddOptions;
@@ -28,15 +26,15 @@ public final class RedisCanvasPatchStore implements CanvasPatchStore {
 
   private final StringRedisTemplate stringRedisTemplate;
   private final CanvasRealtimeProperties properties;
-  private final ObjectMapper objectMapper;
+  private final CanvasPatchJsonCodec codec;
 
   public RedisCanvasPatchStore(
       StringRedisTemplate stringRedisTemplate,
       CanvasRealtimeProperties properties,
-      ObjectMapper objectMapper) {
+      CanvasPatchJsonCodec codec) {
     this.stringRedisTemplate = Objects.requireNonNull(stringRedisTemplate, "stringRedisTemplate");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    this.codec = Objects.requireNonNull(codec, "codec");
   }
 
   @Override
@@ -47,7 +45,7 @@ public final class RedisCanvasPatchStore implements CanvasPatchStore {
         .opsForStream()
         .add(
             properties.key(canvasId.toString()),
-            Map.of(PATCH_FIELD, encode(patch)),
+            Map.of(PATCH_FIELD, codec.encode(patch)),
             XAddOptions.maxlen(properties.getRedisMaxLength()));
   }
 
@@ -79,25 +77,8 @@ public final class RedisCanvasPatchStore implements CanvasPatchStore {
         throw new IllegalArgumentException(
             "canvas changes stream record must contain exactly one text patch field");
       }
-      patches.add(decode(payloadJson));
+      patches.add(codec.decode(payloadJson));
     }
     return List.copyOf(patches);
-  }
-
-  private String encode(CanvasPatch patch) {
-    try {
-      return objectMapper.writeValueAsString(patch);
-    } catch (JsonProcessingException error) {
-      throw new IllegalStateException("cannot serialize canvas patch", error);
-    }
-  }
-
-  private CanvasPatch decode(String json) {
-    try {
-      return objectMapper.readValue(json, CanvasPatch.class);
-    } catch (JsonProcessingException error) {
-      throw new IllegalArgumentException(
-          "canvas changes stream patch is not canonical JSON", error);
-    }
   }
 }

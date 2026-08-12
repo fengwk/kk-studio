@@ -88,29 +88,32 @@ registerCase({
       { status: 409 },
     )
 
-    // changes：afterVersion=0 总是权威 snapshot；缓存存在时返回连续 patches，否则同样回退 snapshot。
+    // changes：缓存完整时 afterVersion=0 可直接回放 0→1；缓存缺失时回退权威 snapshot。
     const { json: changesJson } = await ctx.call(
       'GET',
       `/api/canvases/${canvas.id}/changes?afterVersion=0`,
     )
     const changes = envelopeData(changesJson)
-    assertDecimalVersion(changes.snapshot?.document?.version, 'snapshot.document.version')
-    assert(changes.snapshot?.document?.version === '1', JSON.stringify(changes))
-    assert(changes.patches.length === 0, JSON.stringify(changes))
+    const firstPatchOk =
+      changes.snapshot === null
+      && changes.patches.length === 1
+      && changes.patches[0].baseVersion === '0'
+      && changes.patches[0].version === '1'
+    const firstSnapshotOk =
+      changes.patches.length === 0
+      && changes.snapshot !== null
+      && assertDecimalVersionSafe(changes.snapshot.document.version)
+      && changes.snapshot.document.version === '1'
+    assert(firstPatchOk || firstSnapshotOk, JSON.stringify(changes))
+
+    // 已处于权威尾部时没有 delta，也无需返回 snapshot。
     const { json: tailChangesJson } = await ctx.call(
       'GET',
       `/api/canvases/${canvas.id}/changes?afterVersion=1`,
     )
     const tailChanges = envelopeData(tailChangesJson)
-    const tailPatchesOk =
-      tailChanges.patches.length === 1
-      && assertDecimalVersionSafe(tailChanges.patches[0].version)
-      && tailChanges.patches[0].version === '1'
-    const tailSnapshotOk =
-      tailChanges.snapshot !== null
-      && assertDecimalVersionSafe(tailChanges.snapshot.document.version)
-      && tailChanges.snapshot.document.version === '1'
-    assert(tailPatchesOk || tailSnapshotOk, JSON.stringify(tailChanges))
+    assert(tailChanges.patches.length === 0, JSON.stringify(tailChanges))
+    assert(tailChanges.snapshot === null, JSON.stringify(tailChanges))
 
     // snapshot/list：canonical UUID id、version 与 threadId 契约；删除后 404。
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
