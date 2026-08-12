@@ -13,8 +13,8 @@ import java.util.UUID;
  *
  * <p>与 chat-attachments 分支的通用 {@code ChatThreadCommandService} 语义对齐：单一应用事务内完成创建 + 关联（本端口的 关联是
  * {@code canvas_document.thread_id}，对应通用服务的 Chat↔Thread associate），commandId 作为 {@code
- * clientCommandId} 幂等键；HarnessRuntime 为可选装配（缺失时只在首次发送调用点确定性失败）。本端口不感知 Chat 关联/附件消费（contents 只含
- * TEXT/IMAGE/AUDIO/VIDEO），也不复制任何通用附件代码；web 层复用 {@code
+ * clientCommandId} 幂等键；HarnessRuntime 为可选装配（缺失时只在首次发送调用点确定性失败）。本端口不复制附件消费逻辑，命令提交复用共享 Chat command
+ * use-case，把 ordered TEXT/ATTACHMENT 物化为 durable TEXT/RESOURCE；web 层复用 {@code
  * HarnessRuntimeWebMapper.toUserMessageContents} 把 share DTO 映射为本端口的 harness 领域类型。
  */
 public interface CanvasThreadService {

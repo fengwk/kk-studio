@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 
@@ -23,18 +25,23 @@ import java.util.UUID;
 
 /**
  * Canvas 根 Thread 首次发送实现：单事务（document 行锁 + Harness {@code PROPAGATION_REQUIRED} 加入）原子完成
- * 创建/入队/绑定；重复提交（threadId 已绑定）原样重放既有 Thread 与 document。
+ * 创建/附件物化/入队/绑定；重复提交（threadId 已绑定）按 raw request hash 精确重放既有 Thread 与 document。
  */
 @Service
 public class CanvasThreadServiceImpl implements CanvasThreadService {
 
   private final CanvasDocumentMapper documentMapper;
   private final ObjectProvider<HarnessRuntime> runtimes;
+  private final ChatThreadCommandService threadCommandService;
 
   public CanvasThreadServiceImpl(
-      CanvasDocumentMapper documentMapper, ObjectProvider<HarnessRuntime> runtimes) {
+      CanvasDocumentMapper documentMapper,
+      ObjectProvider<HarnessRuntime> runtimes,
+      ChatThreadCommandService threadCommandService) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
+    this.threadCommandService =
+        Objects.requireNonNull(threadCommandService, "threadCommandService");
   }
 
   @Override
@@ -52,20 +59,13 @@ public class CanvasThreadServiceImpl implements CanvasThreadService {
     if (document.getThreadId() != null) {
       return replayExisting(runtime, document, command);
     }
+    NewThreadCommand firstCommand = firstCommand(command);
     CreatedThread created =
         runtime.createThread(
             new CreateThreadCommand(command.branchSettings(), command.yoloEnabled()));
     UUID threadId = created.thread().id();
-    runtime.enqueueCommands(
-        new ThreadCommandBatch(
-            threadId,
-            created.rootEntry().id(),
-            1L,
-            List.of(
-                new NewThreadCommand(
-                    new UserMessageCommandPayload(
-                        new AgentMessage(AgentMessageRole.USER, command.contents())),
-                    UUID.fromString(command.commandId())))));
+    threadCommandService.submitCommands(
+        new ThreadCommandBatch(threadId, created.rootEntry().id(), 1L, List.of(firstCommand)));
     if (documentMapper.bindThreadIfAbsent(canvasId, threadId) != 1) {
       throw new IllegalStateException(
           "canvas thread binding failed for canvas " + canvasId + " and thread " + threadId);
@@ -81,18 +81,26 @@ public class CanvasThreadServiceImpl implements CanvasThreadService {
       HarnessRuntime runtime, CanvasDocumentDO document, CanvasFirstSendCommand command) {
     UUID threadId = document.getThreadId();
     UUID clientCommandId = UUID.fromString(command.commandId());
+    NewThreadCommand expected = firstCommand(command);
     var existing =
         runtime
             .findThreadCommand(threadId, clientCommandId)
             .orElseThrow(
                 () ->
                     conflict("Canvas already has a bound Thread with a different first commandId"));
-    UserMessageCommandPayload expected =
-        new UserMessageCommandPayload(new AgentMessage(AgentMessageRole.USER, command.contents()));
-    if (!existing.payload().equals(expected)) {
+    if (!existing.requestHash().equals(expected.requestHash())) {
       throw conflict("Canvas first message commandId was reused with different message contents");
     }
     return new CanvasFirstSendResult(threadId, toDomain(document));
+  }
+
+  private static NewThreadCommand firstCommand(CanvasFirstSendCommand command) {
+    UserMessageCommandPayload payload =
+        new UserMessageCommandPayload(new AgentMessage(AgentMessageRole.USER, command.contents()));
+    return new NewThreadCommand(
+        payload,
+        UUID.fromString(command.commandId()),
+        ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   private static HarnessRuntimeConflictException conflict(String message) {

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.core.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
@@ -98,6 +99,7 @@ public class DurableCanvasService implements CanvasCommandService {
   private final ObjectMapper objectMapper;
   private final CanvasRealtimeService realtimeService;
   private final ObjectProvider<HarnessStore> harnessStores;
+  private final ObjectProvider<SessionBlobRefManager> sessionBlobRefManagers;
 
   public DurableCanvasService(
       CanvasDocumentMapper documentMapper,
@@ -115,7 +117,8 @@ public class DurableCanvasService implements CanvasCommandService {
       CanvasFunctionModelRegistry functionModelRegistry,
       ObjectMapper objectMapper,
       CanvasRealtimeService realtimeService,
-      ObjectProvider<HarnessStore> harnessStores) {
+      ObjectProvider<HarnessStore> harnessStores,
+      ObjectProvider<SessionBlobRefManager> sessionBlobRefManagers) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
@@ -133,6 +136,8 @@ public class DurableCanvasService implements CanvasCommandService {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
     this.harnessStores = Objects.requireNonNull(harnessStores, "harnessStores");
+    this.sessionBlobRefManagers =
+        Objects.requireNonNull(sessionBlobRefManagers, "sessionBlobRefManagers");
   }
 
   @Override
@@ -234,11 +239,11 @@ public class DurableCanvasService implements CanvasCommandService {
       groupMapper.deleteById(canvasId, group.getId());
     }
     commandDedupMapper.deleteByCanvas(canvasId);
-    if (document.getThreadId() != null) {
-      deepDeleteThread(document.getThreadId());
-    }
     if (documentMapper.deleteById(canvasId) != 1) {
       throw new IllegalStateException("canvas document delete failed under row lock");
+    }
+    if (document.getThreadId() != null) {
+      deepDeleteThread(document.getThreadId());
     }
   }
 
@@ -623,6 +628,12 @@ public class DurableCanvasService implements CanvasCommandService {
           tx.deleteCommands(threadId);
           tx.deleteThread(threadId);
           tx.deleteEntries(sessionId);
+          SessionBlobRefManager refManager = sessionBlobRefManagers.getIfAvailable();
+          if (refManager != null) {
+            for (UUID blobId : refManager.listBlobIds(sessionId)) {
+              refManager.releaseRef(sessionId, blobId);
+            }
+          }
           tx.deleteSession(sessionId);
           return null;
         });

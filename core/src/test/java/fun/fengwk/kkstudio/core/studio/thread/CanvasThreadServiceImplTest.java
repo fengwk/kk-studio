@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.time.Instant;
@@ -45,7 +47,9 @@ class CanvasThreadServiceImplTest {
     when(documents.getByIdForUpdate(CANVAS)).thenReturn(boundDocument());
     when(runtime.findThreadCommand(THREAD, COMMAND))
         .thenReturn(Optional.of(storedCommand("hello")));
-    CanvasThreadServiceImpl service = new CanvasThreadServiceImpl(documents, provider(runtime));
+    ChatThreadCommandService commandService = mock(ChatThreadCommandService.class);
+    CanvasThreadServiceImpl service =
+        new CanvasThreadServiceImpl(documents, provider(runtime), commandService);
 
     CanvasThreadService.CanvasFirstSendResult result =
         service.sendFirstMessage(CANVAS, command(COMMAND, "hello"));
@@ -54,6 +58,7 @@ class CanvasThreadServiceImplTest {
     assertEquals(THREAD, result.document().threadId());
     verify(runtime, never()).createThread(any());
     verify(runtime, never()).enqueueCommands(any());
+    verify(commandService, never()).submitCommands(any());
   }
 
   @Test
@@ -61,7 +66,9 @@ class CanvasThreadServiceImplTest {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     CanvasDocumentMapper documents = mock(CanvasDocumentMapper.class);
     when(documents.getByIdForUpdate(CANVAS)).thenReturn(boundDocument());
-    CanvasThreadServiceImpl service = new CanvasThreadServiceImpl(documents, provider(runtime));
+    CanvasThreadServiceImpl service =
+        new CanvasThreadServiceImpl(
+            documents, provider(runtime), mock(ChatThreadCommandService.class));
 
     when(runtime.findThreadCommand(THREAD, COMMAND)).thenReturn(Optional.empty());
     HarnessRuntimeConflictException missing =
@@ -89,12 +96,15 @@ class CanvasThreadServiceImplTest {
   }
 
   private static ThreadCommand storedCommand(String text) {
+    UserMessageCommandPayload payload =
+        new UserMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))));
     return new ThreadCommand(
         THREAD,
         1L,
-        new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)))),
+        payload,
         COMMAND,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
         NOW);
