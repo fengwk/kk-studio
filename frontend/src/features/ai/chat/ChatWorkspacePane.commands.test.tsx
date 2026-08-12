@@ -430,7 +430,7 @@ describe('ChatWorkspacePane commands', () => {
     expect(types).toContain('SET_ENVIRONMENT')
     expect(types[types.length - 1]).toBe('USER_MESSAGE')
     const message = batchArg.commands[batchArg.commands.length - 1]!
-    expect(message.content).toBe('hello world')
+    expect(message).toMatchObject({ contents: [{ type: 'TEXT', text: 'hello world' }] })
     // 严格 wire：USER_MESSAGE 绝不携带 role。
     expect(message).not.toHaveProperty('role')
     expect(message).toHaveProperty('clientCommandId')
@@ -542,12 +542,12 @@ describe('ChatWorkspacePane commands', () => {
           entries: sessionEntries(),
           queuedCommands: [
             {
-              commandId: 'c-pending',
               threadId: 't1',
               sequence: '1',
               type: 'USER_MESSAGE',
               state: 'QUEUED',
               clientCommandId: 'cid-pending',
+              requestHash: '0123456789abcdef'.repeat(4),
               payloadJson: '{}',
               consumedTurnStartEntryId: null,
               cancelledAt: null,
@@ -614,12 +614,12 @@ describe('ChatWorkspacePane commands', () => {
       snapshot(thread({}), {
         queuedCommands: [
           {
-            commandId: 'c-pending',
             threadId: 't1',
             sequence: '1',
             type: 'USER_MESSAGE',
             state: 'QUEUED',
             clientCommandId: 'cid-pending',
+            requestHash: '0123456789abcdef'.repeat(4),
             payloadJson: '{}',
             consumedTurnStartEntryId: null,
             cancelledAt: null,
@@ -645,12 +645,12 @@ describe('ChatWorkspacePane commands', () => {
       snapshot(thread({}), {
         queuedCommands: [
           {
-            commandId: 'c-pending',
             threadId: 't1',
             sequence: '1',
             type: 'USER_MESSAGE',
             state: 'QUEUED',
             clientCommandId: 'cid-pending',
+            requestHash: '0123456789abcdef'.repeat(4),
             payloadJson: '{}',
             consumedTurnStartEntryId: null,
             cancelledAt: null,

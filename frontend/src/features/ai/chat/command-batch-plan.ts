@@ -12,7 +12,6 @@ import {
 } from '@/features/ai/chat/branch-draft'
 import {
   partsToMessageContents,
-  partsToText,
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
@@ -47,10 +46,10 @@ export interface CommandBatchPlan {
 }
 
 /**
- * USER_MESSAGE 序列化 ordered contents：
- * - 纯文本消息保持 text shorthand（与既有 wire 逐字节兼容）；
- * - 含附件时使用 `contents` 数组：TEXT parts 与 ATTACHMENT {uploadId} 按序排列。
- * USER_MESSAGE 绝不携带 role（strict mapper 会拒绝它）。
+ * USER_MESSAGE 序列化 ordered contents：所有消息（含纯文本）都使用 `contents`
+ * 数组——TEXT parts 与 ATTACHMENT {uploadId} 按 ComposerPart 顺序排列。
+ * USER_MESSAGE 绝不携带 role（strict mapper 会拒绝它）。contents 必须非空
+ *（调用方已用 hasMessageContent 保证至少一个可发送 part）。
  */
 function createUserMessageCommand(
   parts: ComposerPart[],
@@ -58,11 +57,7 @@ function createUserMessageCommand(
 ): HarnessThreadCommandCreateDTO {
   const contents = partsToMessageContents(parts)
   if (contents.length === 0) {
-    return { type: 'USER_MESSAGE', clientCommandId, content: '' }
-  }
-  const hasAttachment = contents.some((content) => content.type === 'ATTACHMENT')
-  if (!hasAttachment) {
-    return { type: 'USER_MESSAGE', clientCommandId, content: partsToText(parts) }
+    throw new Error('USER_MESSAGE contents must not be empty')
   }
   return {
     type: 'USER_MESSAGE',
@@ -71,18 +66,15 @@ function createUserMessageCommand(
   }
 }
 
-/** 消息身份：text-only 保持 `{threadId, content, draft}`；附件消息追加有序 contents。 */
+/** 消息身份：`{threadId, contents, draft}`——ordered contents 是 wire 的唯一表示。 */
 function messageIdentity(
   threadId: string,
   trimmed: ComposerPart[],
   draft: BranchDraft,
 ): string {
-  const text = partsToText(trimmed)
-  const hasAttachment = trimmed.some((part) => part.type === 'attachment')
   return JSON.stringify({
     threadId,
-    content: text,
-    ...(hasAttachment ? { contents: partsToMessageContents(trimmed) } : {}),
+    contents: partsToMessageContents(trimmed),
     draft,
   })
 }
@@ -109,7 +101,7 @@ export function buildMessageBatchPlan(options: {
       expectedNextCommandSequence: options.thread.nextCommandSequence,
       commands,
     },
-    // 不可变的用户意图：thread + content + target draft。effectiveBase 故意不参与——
+    // 不可变的用户意图：thread + ordered contents + target draft。effectiveBase 故意不参与——
     // queued SET_* 投影会改变它，但用户意图并未变化。
     identity: messageIdentity(options.thread.threadId, trimmed, options.draft),
   }
@@ -119,9 +111,9 @@ export function buildMessageBatchPlan(options: {
  * 针对新创建 Thread 的首次发送 batch：仅含 USER_MESSAGE command；完整的
  * branch draft 已在创建 Thread 时烘焙进去。
  *
- * 语义 identity 与 {@link buildMessageBatchPlan}（{threadId, content, draft}）共享同一
- * 不可变意图结构：首次发送失败后通过绑定面板 replay（同一 thread、同一 content、同一 target
- * draft）会得到一致的 identity，并逐字节复用同一 batch，保留 message command id。
+ * 语义 identity 与 {@link buildMessageBatchPlan}（{threadId, contents, draft}）共享同一
+ * 不可变意图结构：首次发送失败后通过绑定面板 replay（同一 thread、同一 contents、同一
+ * target draft）会得到一致的 identity，并逐字节复用同一 batch，保留 message command id。
  */
 export function buildFirstSendMessagePlan(options: {
   thread: HarnessThreadDTO

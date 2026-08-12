@@ -413,7 +413,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(batchArg.expectedNextCommandSequence).toBe('1')
     expect(batchArg.commands).toHaveLength(1)
     expect(batchArg.commands[0]?.type).toBe('USER_MESSAGE')
-    expect(batchArg.commands[0]?.content).toBe('first message')
+    expect(batchArg.commands[0]).toMatchObject({ contents: [{ type: 'TEXT', text: 'first message' }] })
     // 严格 wire：USER_MESSAGE 绝不携带 role。
     expect(batchArg.commands[0]).not.toHaveProperty('role')
     expect(batchArg.commands[0]?.clientCommandId).toBeTruthy()
@@ -666,7 +666,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
     expect(payload.yoloEnabled).toBe(false)
     const batchArg = vi.mocked(harnessService.enqueueCommands).mock.calls[0]![1]
     expect(batchArg.commands).toHaveLength(1)
-    expect(batchArg.commands[0]?.content).toBe('hi')
+    expect(batchArg.commands[0]).toMatchObject({ contents: [{ type: 'TEXT', text: 'hi' }] })
     expect(batchArg.commands[0]).not.toHaveProperty('role')
   })
 

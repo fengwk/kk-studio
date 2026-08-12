@@ -112,7 +112,8 @@ export type DialogueMessage =
 
 /** 在持久 transcript 之外展示的 QUEUED mailbox 命令；sequence 保持十进制字符串。 */
 export interface QueuedThreadMessage {
-  commandId: string
+  /** 稳定客户端幂等键（DTO clientCommandId）；也是 UI 渲染 key。 */
+  clientCommandId: string
   role: 'user' | 'system'
   text: string
   sequence: string
