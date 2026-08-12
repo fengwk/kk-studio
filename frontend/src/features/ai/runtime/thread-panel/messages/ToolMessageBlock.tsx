@@ -6,6 +6,7 @@ import {
   toToolAttachmentSrc,
 } from '@/features/ai/runtime/thread-panel/tool-attachments'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
+import { ResourceAttachmentChip } from '@/features/ai/runtime/thread-panel/messages/ResourceAttachmentChip'
 import type { ToolAttachment, ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import type { ComponentType } from 'react'
 import type { ToolRendererProps } from '@/platform/extensions/types'
@@ -225,11 +226,19 @@ function DefaultToolResult({ context }: { context: ToolRenderContext }) {
 }
 
 function AttachmentPreview({ attachment }: { attachment: ToolAttachment }) {
+  const preview = attachment.preview?.trim()
+  if (attachment.blobId) {
+    return (
+      <div className="thread-tool-attachment is-blob">
+        <ResourceAttachmentChip attachment={attachment} />
+        {preview ? <ToolOutputViewport text={preview} className="thread-tool-attachment-preview" /> : null}
+      </div>
+    )
+  }
   const src = toToolAttachmentSrc(attachment)
   const href = getToolAttachmentHref(attachment)
   const label = getToolAttachmentLabel(attachment)
   const previewable = src != null && isPreviewableAttachment(attachment)
-  const preview = attachment.preview?.trim()
   return (
     <figure className="thread-tool-attachment">
       <figcaption>

@@ -18,8 +18,8 @@
 ## 能力摘要
 
 - Harness：Session 共享 append-only Entry Tree（TURN_START/MESSAGE/TOOL/TURN_END 语义）；Thread 以非空 head + 命令 mailbox + revision CAS 控制执行；7 张 durable 表 + 唯一 `harness_work` 调度 mailbox；Redis 仅用于 realtime overlay
-- Studio：Canvas 九表持久化 document/group/node/node-resource/link/function-run/resource/upload/command-dedup；typed command batch 使用 graph revision CAS 与 request hash 幂等
-- 前端：AI 接真实 Thread API（snapshot-first SSE + 命令 batch）；Canvas Library/Create 接真实 API，Editor 仍使用本地交互投影
+- Studio：Canvas 八表持久化 document/group/node/link/resource/function-run/function-resource-ref/command-dedup；typed command batch 使用 document version CAS 与 request hash 幂等
+- 前端：AI 与 Canvas 都接真实 snapshot/command/SSE API；Canvas Editor 通过实体 Patch 更新，gap 时回退权威 Snapshot
 
 ## 模块
 

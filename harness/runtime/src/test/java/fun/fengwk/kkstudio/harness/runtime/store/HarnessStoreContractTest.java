@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -59,7 +60,14 @@ class HarnessStoreContractTest {
               "claimNextWork",
               "renewWork",
               "completeWork",
-              "rescheduleWork"));
+              "rescheduleWork",
+              "deleteCommands",
+              "deleteToolInvocations",
+              "deleteModelInvocations",
+              "deleteThread",
+              "deleteEntries",
+              "deleteSession",
+              "deleteWorkByThread"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {
@@ -86,7 +94,12 @@ class HarnessStoreContractTest {
   void allReadsReturnOptionalOrImmutableListOrEntryPath() {
     for (Method method : HarnessStore.Transaction.class.getDeclaredMethods()) {
       Class<?> returnType = method.getReturnType();
-      if (returnType == void.class || returnType == long.class || returnType == boolean.class) {
+      if (returnType == void.class
+          || returnType == long.class
+          || returnType == int.class
+          || returnType == boolean.class
+          || returnType == int.class
+          || returnType == UUID.class) {
         continue;
       }
       assertTrue(

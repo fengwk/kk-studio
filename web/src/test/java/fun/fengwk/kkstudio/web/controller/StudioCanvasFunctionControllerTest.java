@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionModelRegistry;
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionRuntimeService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
@@ -30,29 +31,40 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionRunException;
+import fun.fengwk.kkstudio.web.storage.FixedObjectProvider;
+import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Function model/run HTTP 契约、状态码与 stateJson 隔离。 */
 class StudioCanvasFunctionControllerTest {
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
+  private static final UUID CANVAS = new UUID(0L, 1L);
+  private static final UUID NODE = new UUID(0L, 2L);
+  private static final UUID REQUEST = new UUID(0L, 3L);
 
   private MockMvc mockMvc;
   private CanvasFunctionRuntimeService runtimeService;
 
   @BeforeEach
+  @SuppressWarnings("unchecked")
   void setUp() {
     runtimeService = mock(CanvasFunctionRuntimeService.class);
     CanvasFunctionModelRegistry registry =
         new CanvasFunctionModelRegistry(List.of(adapter("fake-image")));
+    FixedObjectProvider<StorageBlobManager> blobManagers =
+        new FixedObjectProvider<>(mock(StorageBlobManager.class));
     ObjectMapper mapper = new ObjectMapper();
     mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     mockMvc =
-        standaloneSetup(new StudioCanvasFunctionController(registry, runtimeService))
+        standaloneSetup(
+                new StudioCanvasFunctionController(
+                    registry, runtimeService, new StudioWebMapper(blobManagers)))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(mapper))
             .build();
   }
@@ -72,14 +84,14 @@ class StudioCanvasFunctionControllerTest {
   @Test
   void startGetCancelExposeOnlyPublicRunFields() throws Exception {
     CanvasFunctionRun run = run(CanvasFunctionRunStatus.RUNNING, "QUEUED");
-    when(runtimeService.start(42L, 7L, "request-1")).thenReturn(run);
-    when(runtimeService.get(42L, 7L)).thenReturn(run);
-    when(runtimeService.cancel(42L, 7L, "request-1"))
+    when(runtimeService.start(CANVAS, NODE, "request-1")).thenReturn(run);
+    when(runtimeService.get(CANVAS, NODE)).thenReturn(run);
+    when(runtimeService.cancel(CANVAS, NODE, "request-1"))
         .thenReturn(run(CanvasFunctionRunStatus.CANCELLED, "CANCELLED"));
 
     mockMvc
         .perform(
-            post("/api/canvases/42/nodes/7/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
@@ -87,37 +99,37 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data.stage").value("QUEUED"))
         .andExpect(jsonPath("$.data.stateJson").doesNotExist());
     mockMvc
-        .perform(get("/api/canvases/42/nodes/7/run"))
+        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.requestId").value("request-1"));
+        .andExpect(jsonPath("$.data.requestId").value(REQUEST.toString()));
     mockMvc
         .perform(
-            post("/api/canvases/42/nodes/7/run/cancel")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("CANCELLED"));
-    verify(runtimeService).start(42L, 7L, "request-1");
-    verify(runtimeService).cancel(42L, 7L, "request-1");
+    verify(runtimeService).start(CANVAS, NODE, "request-1");
+    verify(runtimeService).cancel(CANVAS, NODE, "request-1");
   }
 
   @Test
   void rejectsUnknownDuplicateAndNonCanonicalIds() throws Exception {
     mockMvc
         .perform(
-            post("/api/canvases/42/nodes/7/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"extra\":true}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/42/nodes/7/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\",\"requestId\":\"r\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/canvases/042/nodes/7/runs")
+            post("/api/canvases/not-a-uuid/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\"}"))
         .andExpect(status().isBadRequest());
@@ -125,17 +137,19 @@ class StudioCanvasFunctionControllerTest {
 
   @Test
   void mapsNotFoundAndConflictPrecisely() throws Exception {
-    when(runtimeService.get(anyLong(), anyLong()))
+    when(runtimeService.get(any(), any()))
         .thenThrow(
             new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, "missing"));
-    when(runtimeService.start(anyLong(), anyLong(), anyString()))
+    when(runtimeService.start(any(), any(), anyString()))
         .thenThrow(
             new CanvasFunctionRunException(CanvasFunctionRunException.Reason.CONFLICT, "running"));
 
-    mockMvc.perform(get("/api/canvases/42/nodes/7/run")).andExpect(status().isNotFound());
+    mockMvc
+        .perform(get("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/run"))
+        .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            post("/api/canvases/42/nodes/7/runs")
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/runs")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"requestId\":\"r\"}"))
         .andExpect(status().isConflict());
@@ -143,8 +157,8 @@ class StudioCanvasFunctionControllerTest {
 
   private static CanvasFunctionRun run(CanvasFunctionRunStatus status, String stage) {
     return new CanvasFunctionRun(
-        7L,
-        "request-1",
+        NODE,
+        REQUEST,
         status,
         stage,
         "{\"stage\":\"" + stage + "\",\"secret\":\"hidden\"}",
@@ -180,7 +194,7 @@ class StudioCanvasFunctionControllerTest {
       public void preflight(CanvasFunctionFrozenRun run) {}
 
       @Override
-      public List<Long> execute(
+      public List<UUID> execute(
           CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
         throw new UnsupportedOperationException();
       }

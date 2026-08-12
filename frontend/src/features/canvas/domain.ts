@@ -1,28 +1,38 @@
 import type {
   CanvasFunctionRunStatus,
+  CanvasResourceDTO,
   CanvasResourceKind,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
+import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 export interface CanvasDocument {
-  id: DecimalString
+  id: UUIDString
   title: string
-  graphRevision: DecimalString
+  version: number
+  /** 绑定到本画布的 Harness Thread（canonical UUID）；null 表示尚未创建。 */
+  threadId: UUIDString | null
   createdAt: string
   updatedAt: string
 }
 
 export interface Resource {
-  id: DecimalString
-  canvasId: DecimalString
-  kind: CanvasResourceKind
-  mediaType: string
+  id: UUIDString
+  canvasId: UUIDString
+  ownerNodeId: UUIDString
+  resourceIndex: number
+  /** TEXT 资源内容在 textContent 中，无对象存储 blob；其余资源引用共享存储的持久 blob。 */
+  blobId: string | null
   name: string
-  size: DecimalString
-  text: string | null
-  metadata: Record<string, unknown>
+  textContent: string | null
+  kind: CanvasResourceKind
+  mediaType: string | null
+  sizeBytes: number | null
+  width: number | null
+  height: number | null
+  durationMs: number | null
   createdAt: string
 }
 
@@ -32,8 +42,8 @@ export interface Function {
 }
 
 export interface Run {
-  nodeId: DecimalString
-  requestId: string
+  nodeId: UUIDString
+  requestId: UUIDString
   status: CanvasFunctionRunStatus
   stage: string
   error: string | null
@@ -41,27 +51,27 @@ export interface Run {
 }
 
 export interface ResourceNode {
-  id: DecimalString
-  canvasId: DecimalString
+  id: UUIDString
+  canvasId: UUIDString
   name: string
   transform: CanvasTransformDTO
-  groupId: DecimalString | null
+  groupId: UUIDString | null
   resources: Resource[]
   function: Function | null
   run: Run | null
 }
 
 export interface Group {
-  id: DecimalString
-  canvasId: DecimalString
+  id: UUIDString
+  canvasId: UUIDString
   title: string
   transform: CanvasTransformDTO
 }
 
 export interface Link {
-  canvasId: DecimalString
-  sourceNodeId: DecimalString
-  targetNodeId: DecimalString
+  canvasId: UUIDString
+  sourceNodeId: UUIDString
+  targetNodeId: UUIDString
 }
 
 export interface CanvasSnapshot {
@@ -74,23 +84,19 @@ export interface CanvasSnapshot {
 export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapshot {
   return {
     document: { ...snapshot.document },
-    resourceNodes: snapshot.nodes.map((node) => ({
-      ...node,
-      transform: { ...node.transform },
-      resources: node.resources.map((resource) => ({
-        id: resource.id,
-        canvasId: resource.canvasId,
-        kind: resource.kind,
-        mediaType: resource.mediaType,
-        name: resource.name,
-        size: resource.size,
-        text: resource.textContent,
-        metadata: parseMetadata(resource.metadataJson),
-        createdAt: resource.createdAt,
-      })),
-      function: node.function ? { ...node.function } : null,
-      run: node.run ? { ...node.run } : null,
-    })),
+    resourceNodes: snapshot.nodes.map((node) => {
+      const projected: ResourceNode = {
+        ...node,
+        transform: { ...node.transform },
+        resources: node.resources.map(projectCanvasResource),
+        function: node.function ? { ...node.function } : null,
+        run: node.run ? { ...node.run } : null,
+      }
+      return {
+        ...projected,
+        transform: { ...projected.transform, ...resourceNodeSize(projected) },
+      }
+    }),
     groups: snapshot.groups.map((group) => ({
       ...group,
       transform: { ...group.transform },
@@ -99,13 +105,21 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
   }
 }
 
-function parseMetadata(metadataJson: string): Record<string, unknown> {
-  try {
-    const value: unknown = JSON.parse(metadataJson)
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
+export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
+  return {
+    id: resource.id,
+    canvasId: resource.canvasId,
+    ownerNodeId: resource.ownerNodeId,
+    resourceIndex: resource.resourceIndex,
+    blobId: resource.blobId,
+    name: resource.name,
+    textContent: resource.textContent,
+    kind: resource.kind,
+    mediaType: resource.mediaType,
+    sizeBytes: resource.sizeBytes,
+    width: resource.width,
+    height: resource.height,
+    durationMs: resource.durationMs,
+    createdAt: resource.createdAt,
   }
 }

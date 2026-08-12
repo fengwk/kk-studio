@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 一次 Model invocation 的 durable 当前状态。
@@ -18,33 +19,25 @@ import java.util.Objects;
  * #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ModelInvocation(
-    long id,
-    long threadId,
-    long turnStartEntryId,
-    long basisHeadEntryId,
+    UUID id,
+    UUID threadId,
+    UUID turnStartEntryId,
+    UUID basisHeadEntryId,
     ModelInvocationRequest request,
     ModelInvocationStatus status,
     int attempt,
     StreamCheckpoint streamCheckpoint,
     ProviderResponse result,
     ModelInvocationError error,
-    Long resultEntryId,
+    UUID resultEntryId,
     Instant createdAt,
     Instant updatedAt) {
 
   public ModelInvocation {
-    if (id <= 0) {
-      throw new IllegalArgumentException("invocation id must be positive");
-    }
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
-    if (turnStartEntryId <= 0) {
-      throw new IllegalArgumentException("turnStartEntryId must be positive");
-    }
-    if (basisHeadEntryId <= 0) {
-      throw new IllegalArgumentException("basisHeadEntryId must be positive");
-    }
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
+    Objects.requireNonNull(basisHeadEntryId, "basisHeadEntryId");
     request = Objects.requireNonNull(request, "request");
     status = Objects.requireNonNull(status, "status");
     if (attempt < 0) {
@@ -91,10 +84,10 @@ public record ModelInvocation(
   }
 
   private static void requireStableIdentity(ModelInvocation stored, ModelInvocation next) {
-    if (stored.id() != next.id()
-        || stored.threadId() != next.threadId()
-        || stored.turnStartEntryId() != next.turnStartEntryId()
-        || stored.basisHeadEntryId() != next.basisHeadEntryId()
+    if (!stored.id().equals(next.id())
+        || !stored.threadId().equals(next.threadId())
+        || !stored.turnStartEntryId().equals(next.turnStartEntryId())
+        || !stored.basisHeadEntryId().equals(next.basisHeadEntryId())
         || !stored.request().equals(next.request())
         || !stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException(
@@ -155,13 +148,12 @@ public record ModelInvocation(
         || !Objects.equals(stored.error(), next.error())) {
       throw new IllegalArgumentException("terminal model invocation facts must not change");
     }
-    Long storedResultEntryId = stored.resultEntryId();
-    Long nextResultEntryId = next.resultEntryId();
+    UUID storedResultEntryId = stored.resultEntryId();
+    UUID nextResultEntryId = next.resultEntryId();
     if (storedResultEntryId == null) {
-      if (nextResultEntryId != null && nextResultEntryId <= 0) {
-        throw new IllegalArgumentException("terminal resultEntryId must be positive");
-      }
-    } else if (!storedResultEntryId.equals(nextResultEntryId)) {
+      return;
+    }
+    if (!Objects.equals(storedResultEntryId, nextResultEntryId)) {
       throw new IllegalArgumentException("terminal resultEntryId must not change");
     }
   }
@@ -314,7 +306,7 @@ public record ModelInvocation(
   }
 
   /** Terminal -&gt; 同一 terminal 状态，并链接执行结果 Entry；可以清除安全 checkpoint，其他 terminal 事实保持不变。 */
-  public ModelInvocation attachResultEntry(long resultEntryId, Instant now) {
+  public ModelInvocation attachResultEntry(UUID resultEntryId, Instant now) {
     return withState(status, attempt, null, result, error, resultEntryId, now);
   }
 
@@ -325,7 +317,7 @@ public record ModelInvocation(
       StreamCheckpoint streamCheckpoint,
       ProviderResponse result,
       ModelInvocationError error,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant now) {
     ModelInvocation next =
         new ModelInvocation(
@@ -356,14 +348,11 @@ public record ModelInvocation(
       int attempt,
       ProviderResponse result,
       ModelInvocationError error,
-      Long resultEntryId,
+      UUID resultEntryId,
       StreamCheckpoint streamCheckpoint) {
     boolean terminal = status.isTerminal();
     if (!terminal && resultEntryId != null) {
       throw new IllegalArgumentException("resultEntryId is only allowed on terminal states");
-    }
-    if (terminal && resultEntryId != null && resultEntryId <= 0) {
-      throw new IllegalArgumentException("terminal resultEntryId must be positive");
     }
     if (status == ModelInvocationStatus.READY) {
       if (streamCheckpoint != null) {

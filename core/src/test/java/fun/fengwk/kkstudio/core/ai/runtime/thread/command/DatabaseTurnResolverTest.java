@@ -99,6 +99,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -108,7 +109,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 class DatabaseTurnResolverTest {
 
   private static final Instant NOW = Instant.parse("2026-08-02T00:00:00Z");
-  private static final long SESSION_ID = 100L;
+  private static final UUID THREAD_ID = new UUID(0L, 1L);
+  private static final UUID SESSION_ID = new UUID(0L, 100L);
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
+
   private static final EnvironmentName ENV_A = new EnvironmentName("env-1");
   private static final EnvironmentName ENV_B = new EnvironmentName("env-2");
   private static final EnvironmentName ENV_MISSING = new EnvironmentName("env-3");
@@ -126,6 +133,8 @@ class DatabaseTurnResolverTest {
 
     assertEquals("provider", request.providerRequest().model().providerName());
     assertEquals("model", request.providerRequest().model().modelName());
+    assertEquals(
+        Set.of(ModelInputModality.TEXT), request.providerRequest().model().inputModalities());
     assertEquals("custom", request.providerRequest().variant().id());
     assertEquals(0.5, request.providerRequest().variant().temperature());
     assertEquals(2048, request.providerRequest().variant().maxOutputTokens());
@@ -542,11 +551,11 @@ class DatabaseTurnResolverTest {
     EntryPath path =
         new EntryPath(
             List.of(
-                new Entry(1L, SESSION_ID, null, new RootPayload(settings), NOW),
+                new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
                 new Entry(
-                    2L,
+                    id(2),
                     SESSION_ID,
-                    1L,
+                    id(1),
                     new CustomEntryPayload(
                         "goal",
                         "state",
@@ -708,12 +717,12 @@ class DatabaseTurnResolverTest {
         new EntryPath(
             List.of(
                 new Entry(
-                    1L,
+                    id(1),
                     SESSION_ID,
                     null,
                     new RootPayload(
                         settings(null, "default", List.of(TaskTool.NAME)),
-                        new SubagentContext(90L, 80L, 70L, 2)),
+                        new SubagentContext(id(90), id(80), id(70), 2)),
                     NOW)));
     assertEquals(
         "task is unavailable at subagent depth 2 (maxDepth=2)",
@@ -881,7 +890,7 @@ class DatabaseTurnResolverTest {
         IllegalStateException.class,
         () ->
             missingAgent.resolver.resolve(
-                1L, missingAgent.path(settings(null, "default")), false, null));
+                THREAD_ID, missingAgent.path(settings(null, "default")), false, null));
 
     Fixture missingProvider = new Fixture(List.of(), List.of(), List.of());
     missingProvider.failProviderLookup(new RuntimeException("db down"));
@@ -889,7 +898,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingProvider.resolver.resolve(
-                1L, missingProvider.path(settings(null, "default")), false, null));
+                THREAD_ID, missingProvider.path(settings(null, "default")), false, null));
 
     Fixture missingModel = new Fixture(List.of(), List.of(), List.of());
     missingModel.failModelLookup(new RuntimeException("db down"));
@@ -897,7 +906,7 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingModel.resolver.resolve(
-                1L, missingModel.path(settings(null, "default")), false, null));
+                THREAD_ID, missingModel.path(settings(null, "default")), false, null));
   }
 
   @Test
@@ -959,7 +968,8 @@ class DatabaseTurnResolverTest {
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
-    return new EntryPath(List.of(new Entry(1L, SESSION_ID, null, new RootPayload(settings), NOW)));
+    return new EntryPath(
+        List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
   /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。两个 Turn 使用同一 settings。 */
@@ -970,28 +980,19 @@ class DatabaseTurnResolverTest {
   /** 两个关闭 Turn，各自携带独立的 BranchSettings 快照（验证 latest-snapshot-wins）。 */
   private static EntryPath multiTurnPath(
       BranchSettings firstTurnSettings, BranchSettings latestTurnSettings) {
-    long rootId = 1L;
-    long turn1Id = 2L;
-    long user1Id = 3L;
-    long abortedId = 4L;
-    long end1Id = 5L;
-    long turn2Id = 6L;
-    long customId = 7L;
-    long errorId = 8L;
-    long end2Id = 9L;
     return new EntryPath(
         List.of(
-            new Entry(rootId, SESSION_ID, null, new RootPayload(firstTurnSettings), NOW),
+            new Entry(id(1), SESSION_ID, null, new RootPayload(firstTurnSettings), NOW),
             new Entry(
-                turn1Id,
+                id(2),
                 SESSION_ID,
-                rootId,
+                id(1),
                 new TurnStartPayload(TurnStartReason.INPUT, firstTurnSettings),
                 NOW),
             new Entry(
-                user1Id,
+                id(3),
                 SESSION_ID,
-                turn1Id,
+                id(2),
                 new MessagePayload(
                     new AgentMessage(
                         AgentMessageRole.USER, List.of(new TextMessageContent("first user"))),
@@ -999,31 +1000,31 @@ class DatabaseTurnResolverTest {
                     null),
                 NOW),
             new Entry(
-                abortedId,
+                id(4),
                 SESSION_ID,
-                user1Id,
+                id(3),
                 new AssistantAbortedPayload(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
                         List.of(new TextMessageContent("partial text")))),
                 NOW),
             new Entry(
-                end1Id,
+                id(5),
                 SESSION_ID,
-                abortedId,
+                id(4),
                 new TurnEndPayload(
-                    turn1Id, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "STOP/1/2"),
+                    id(2), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1)),
                 NOW),
             new Entry(
-                turn2Id,
+                id(6),
                 SESSION_ID,
-                end1Id,
+                id(5),
                 new TurnStartPayload(TurnStartReason.INPUT, latestTurnSettings),
                 NOW),
             new Entry(
-                customId,
+                id(7),
                 SESSION_ID,
-                turn2Id,
+                id(6),
                 new CustomMessagePayload(
                     CustomMessagePayload.CORE_PLUGIN_ID,
                     CustomMessagePayload.CORE_CUSTOM_TYPE,
@@ -1033,17 +1034,17 @@ class DatabaseTurnResolverTest {
                     CustomMessagePayload.CORE_DETAILS_JSON),
                 NOW),
             new Entry(
-                errorId,
+                id(8),
                 SESSION_ID,
-                customId,
+                id(7),
                 new AssistantErrorPayload(new AssistantError("PLANNING_FAILED", "boom")),
                 NOW),
             new Entry(
-                end2Id,
+                id(9),
                 SESSION_ID,
-                errorId,
+                id(8),
                 new TurnEndPayload(
-                    turn2Id, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                    id(6), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                 NOW)));
   }
 
@@ -1086,8 +1087,8 @@ class DatabaseTurnResolverTest {
             CompactionTrigger.THRESHOLD,
             123L,
             4096L,
-            2L,
-            3L,
+            id(2),
+            id(3),
             null,
             null,
             messages);
@@ -1098,11 +1099,14 @@ class DatabaseTurnResolverTest {
     assertEquals(CompactionPhase.FULL, request.compaction().phase());
     assertEquals(CompactionTrigger.THRESHOLD, request.compaction().trigger());
     assertEquals(123L, request.compaction().tokensBefore());
-    assertEquals(2L, request.compaction().firstKeptEntryId());
-    assertEquals(3L, request.compaction().cutEntryId());
+    assertEquals(id(2), request.compaction().firstKeptEntryId());
+    assertEquals(id(3), request.compaction().cutEntryId());
     assertNull(request.compaction().turnPrefixStartEntryId());
     assertEquals(4096, request.contextWindow());
     assertEquals(ENV_A, request.environmentName());
+    // 解析的 inputModalities 必须随 descriptor 冻结进 compaction ProviderRequest。
+    assertEquals(
+        Set.of(ModelInputModality.TEXT), request.providerRequest().model().inputModalities());
     // 零 tool / skill，无 cache。
     assertEquals(List.of(), request.toolBindings());
     assertEquals(List.of(), request.skillBindings());
@@ -1133,8 +1137,8 @@ class DatabaseTurnResolverTest {
             CompactionTrigger.THRESHOLD,
             123L,
             4096L,
-            2L,
-            3L,
+            id(2),
+            id(3),
             null,
             null,
             messages);
@@ -1144,9 +1148,9 @@ class DatabaseTurnResolverTest {
             CompactionTrigger.THRESHOLD,
             123L,
             4096L,
-            2L,
-            3L,
-            2L,
+            id(2),
+            id(3),
+            id(2),
             null,
             messages);
 
@@ -1173,7 +1177,7 @@ class DatabaseTurnResolverTest {
     BranchSettings settings = settings(ENV_A, "default");
 
     ModelInvocationRequest request =
-        fixture.resolved(projectionPath(settings, "summary text", 2L, 4L));
+        fixture.resolved(projectionPath(settings, "summary text", id(2), id(4)));
 
     List<ProviderMessage> messages = request.providerRequest().messages();
     assertEquals(5, messages.size());
@@ -1208,10 +1212,10 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     BranchSettings settings = settings(ENV_A, "default");
     // cut 不在当前路径。
-    EntryPath missingCut = projectionPath(settings, "summary", 2L, 999L);
+    EntryPath missingCut = projectionPath(settings, "summary", id(2), id(999));
     assertThrows(IllegalStateException.class, () -> fixture.resolved(missingCut));
     // firstKept 在 cut 之后（顺序非法）。
-    EntryPath inverted = projectionPath(settings, "summary", 4L, 3L);
+    EntryPath inverted = projectionPath(settings, "summary", id(4), id(3));
     assertThrows(IllegalStateException.class, () -> fixture.resolved(inverted));
   }
 
@@ -1234,31 +1238,19 @@ class DatabaseTurnResolverTest {
 
   /** 完整压缩投影路径：ROOT + 两个关闭 turn，中间夹一个完成压缩 turn（payload 携带给定 firstKept/cut）。 */
   private static EntryPath projectionPath(
-      BranchSettings settings, String summary, long firstKeptEntryId, long cutEntryId) {
-    long rootId = 1L;
-    long turn1Id = 2L;
-    long user1Id = 3L;
-    long assistant1Id = 4L;
-    long end1Id = 5L;
-    long compactionStartId = 6L;
-    long compactionId = 7L;
-    long end2Id = 8L;
-    long turn2Id = 9L;
-    long user2Id = 10L;
-    long assistant2Id = 11L;
-    long end3Id = 12L;
+      BranchSettings settings, String summary, UUID firstKeptEntryId, UUID cutEntryId) {
     return new EntryPath(
         List.of(
-            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
-            turnEntry(turn1Id, rootId, settings),
-            userEntry(user1Id, turn1Id, "first user"),
-            assistantEntry(assistant1Id, user1Id, "first reply"),
-            turnEnd(end1Id, assistant1Id, turn1Id),
-            compactionStartEntry(compactionStartId, end1Id, settings),
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(id(2), id(1), settings),
+            userEntry(id(3), id(2), "first user"),
+            assistantEntry(id(4), id(3), "first reply"),
+            turnEnd(id(5), id(4), id(2)),
+            compactionStartEntry(id(6), id(5), settings),
             new Entry(
-                compactionId,
+                id(7),
                 SESSION_ID,
-                compactionStartId,
+                id(6),
                 new CompactionPayload(
                     CompactionPhase.FULL,
                     CompactionTrigger.THRESHOLD,
@@ -1269,137 +1261,102 @@ class DatabaseTurnResolverTest {
                     cutEntryId,
                     null),
                 NOW),
-            turnEnd(end2Id, compactionId, compactionStartId),
-            turnEntry(turn2Id, end2Id, settings),
-            userEntry(user2Id, turn2Id, "second user"),
-            assistantEntry(assistant2Id, user2Id, "second reply"),
-            turnEnd(end3Id, assistant2Id, turn2Id)));
+            turnEnd(id(8), id(7), id(6)),
+            turnEntry(id(9), id(8), settings),
+            userEntry(id(10), id(9), "second user"),
+            assistantEntry(id(11), id(10), "second reply"),
+            turnEnd(id(12), id(11), id(9))));
   }
 
   /** 被停止压缩 turn 投影路径：ROOT + turn1 + 停止压缩 turn（ABORTED）+ turn2。 */
   private static EntryPath stoppedCompactionProjectionPath(BranchSettings settings) {
-    long rootId = 1L;
-    long turn1Id = 2L;
-    long user1Id = 3L;
-    long assistant1Id = 4L;
-    long end1Id = 5L;
-    long compactionStartId = 6L;
-    long abortedId = 7L;
-    long end2Id = 8L;
-    long turn2Id = 9L;
-    long user2Id = 10L;
-    long assistant2Id = 11L;
-    long end3Id = 12L;
     return new EntryPath(
         List.of(
-            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
-            turnEntry(turn1Id, rootId, settings),
-            userEntry(user1Id, turn1Id, "first user"),
-            assistantEntry(assistant1Id, user1Id, "first reply"),
-            turnEnd(end1Id, assistant1Id, turn1Id),
-            compactionStartEntry(compactionStartId, end1Id, settings),
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(id(2), id(1), settings),
+            userEntry(id(3), id(2), "first user"),
+            assistantEntry(id(4), id(3), "first reply"),
+            turnEnd(id(5), id(4), id(2)),
+            compactionStartEntry(id(6), id(5), settings),
             new Entry(
-                abortedId,
+                id(7),
                 SESSION_ID,
-                compactionStartId,
+                id(6),
                 new AssistantAbortedPayload(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
                         List.of(new TextMessageContent("internal aborted")))),
                 NOW),
             new Entry(
-                end2Id,
+                id(8),
                 SESSION_ID,
-                abortedId,
+                id(7),
                 new TurnEndPayload(
-                    compactionStartId,
-                    TurnEndOutcome.STOPPED,
-                    false,
-                    TurnEndReason.USER_STOP,
-                    "s-1"),
+                    id(6), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1)),
                 NOW),
-            turnEntry(turn2Id, end2Id, settings),
-            userEntry(user2Id, turn2Id, "second user"),
-            assistantEntry(assistant2Id, user2Id, "second reply"),
-            turnEnd(end3Id, assistant2Id, turn2Id)));
+            turnEntry(id(9), id(8), settings),
+            userEntry(id(10), id(9), "second user"),
+            assistantEntry(id(11), id(10), "second reply"),
+            turnEnd(id(12), id(11), id(9))));
   }
 
   /** 两次完整压缩路径：第二次的 wrapper 与 cut 完全取代第一次。 */
   private static EntryPath twoCompactionProjectionPath(BranchSettings settings) {
-    long rootId = 1L;
-    long turn1Id = 2L;
-    long user1Id = 3L;
-    long assistant1Id = 4L;
-    long end1Id = 5L;
-    long compaction1StartId = 6L;
-    long compaction1Id = 7L;
-    long end2Id = 8L;
-    long turn2Id = 9L;
-    long user2Id = 10L;
-    long assistant2Id = 11L;
-    long end3Id = 12L;
-    long compaction2StartId = 13L;
-    long compaction2Id = 14L;
-    long end4Id = 15L;
-    long turn3Id = 16L;
-    long user3Id = 17L;
-    long assistant3Id = 18L;
-    long end5Id = 19L;
     return new EntryPath(
         List.of(
-            new Entry(rootId, SESSION_ID, null, new RootPayload(settings), NOW),
-            turnEntry(turn1Id, rootId, settings),
-            userEntry(user1Id, turn1Id, "first user"),
-            assistantEntry(assistant1Id, user1Id, "first reply"),
-            turnEnd(end1Id, assistant1Id, turn1Id),
-            compactionStartEntry(compaction1StartId, end1Id, settings),
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(id(2), id(1), settings),
+            userEntry(id(3), id(2), "first user"),
+            assistantEntry(id(4), id(3), "first reply"),
+            turnEnd(id(5), id(4), id(2)),
+            compactionStartEntry(id(6), id(5), settings),
             new Entry(
-                compaction1Id,
+                id(7),
                 SESSION_ID,
-                compaction1StartId,
+                id(6),
                 new CompactionPayload(
                     CompactionPhase.FULL,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "old summary",
-                    2L,
-                    4L,
+                    id(2),
+                    id(4),
                     null),
                 NOW),
-            turnEnd(end2Id, compaction1Id, compaction1StartId),
-            turnEntry(turn2Id, end2Id, settings),
-            userEntry(user2Id, turn2Id, "second user"),
-            assistantEntry(assistant2Id, user2Id, "second reply"),
-            turnEnd(end3Id, assistant2Id, turn2Id),
-            compactionStartEntry(compaction2StartId, end3Id, settings),
+            turnEnd(id(8), id(7), id(6)),
+            turnEntry(id(9), id(8), settings),
+            userEntry(id(10), id(9), "second user"),
+            assistantEntry(id(11), id(10), "second reply"),
+            turnEnd(id(12), id(11), id(9)),
+            compactionStartEntry(id(13), id(12), settings),
             new Entry(
-                compaction2Id,
+                id(14),
                 SESSION_ID,
-                compaction2StartId,
+                id(13),
                 new CompactionPayload(
                     CompactionPhase.FULL,
                     CompactionTrigger.THRESHOLD,
                     500L,
                     true,
                     "latest summary",
-                    2L,
-                    10L,
+                    id(2),
+                    id(10),
                     null),
                 NOW),
-            turnEnd(end4Id, compaction2Id, compaction2StartId),
-            turnEntry(turn3Id, end4Id, settings),
-            userEntry(user3Id, turn3Id, "third user"),
-            assistantEntry(assistant3Id, user3Id, "third reply"),
-            turnEnd(end5Id, assistant3Id, turn3Id)));
+            turnEnd(id(15), id(14), id(13)),
+            turnEntry(id(16), id(15), settings),
+            userEntry(id(17), id(16), "third user"),
+            assistantEntry(id(18), id(17), "third reply"),
+            turnEnd(id(19), id(18), id(16))));
   }
 
-  private static Entry turnEntry(long id, long parentId, BranchSettings settings) {
+  private static Entry turnEntry(UUID id, UUID parentId, BranchSettings settings) {
     return new Entry(
         id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.INPUT, settings), NOW);
   }
 
-  private static Entry userEntry(long id, long parentId, String text) {
+  private static Entry userEntry(UUID id, UUID parentId, String text) {
     return new Entry(
         id,
         SESSION_ID,
@@ -1411,7 +1368,7 @@ class DatabaseTurnResolverTest {
         NOW);
   }
 
-  private static Entry assistantEntry(long id, long parentId, String text) {
+  private static Entry assistantEntry(UUID id, UUID parentId, String text) {
     return new Entry(
         id,
         SESSION_ID,
@@ -1434,12 +1391,12 @@ class DatabaseTurnResolverTest {
         NOW);
   }
 
-  private static Entry compactionStartEntry(long id, long parentId, BranchSettings settings) {
+  private static Entry compactionStartEntry(UUID id, UUID parentId, BranchSettings settings) {
     return new Entry(
         id, SESSION_ID, parentId, new TurnStartPayload(TurnStartReason.COMPACTION, settings), NOW);
   }
 
-  private static Entry turnEnd(long id, long parentId, long turnStartEntryId) {
+  private static Entry turnEnd(UUID id, UUID parentId, UUID turnStartEntryId) {
     return new Entry(
         id,
         SESSION_ID,
@@ -1730,18 +1687,18 @@ class DatabaseTurnResolverTest {
     }
 
     private ModelInvocationRequest resolved(EntryPath path, boolean yoloEnabled) {
-      TurnResolver.Result result = resolver.resolve(1L, path, yoloEnabled, null);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, yoloEnabled, null);
       return assertInstanceOf(TurnResolver.Resolved.class, result).request();
     }
 
     private ModelInvocationRequest resolved(
         EntryPath path, boolean yoloEnabled, CompactionPreparation preparation) {
-      TurnResolver.Result result = resolver.resolve(1L, path, yoloEnabled, preparation);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, yoloEnabled, preparation);
       return assertInstanceOf(TurnResolver.Resolved.class, result).request();
     }
 
     private TurnResolver.Rejected rejected(EntryPath path) {
-      TurnResolver.Result result = resolver.resolve(1L, path, false, null);
+      TurnResolver.Result result = resolver.resolve(THREAD_ID, path, false, null);
       return assertInstanceOf(TurnResolver.Rejected.class, result);
     }
 

@@ -55,6 +55,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -66,7 +67,9 @@ import java.util.concurrent.atomic.AtomicReference;
 class EnvironmentDaemonGatewayFinalTest {
   private static final EnvironmentName ENVIRONMENT_NAME = new EnvironmentName("env-1");
   private static final EnvironmentName OTHER_ENVIRONMENT_NAME = new EnvironmentName("env-2");
-  private static final long INVOCATION_ID = 9001L;
+  private static final UUID INVOCATION_ID = new UUID(0L, 9001L);
+  private static final UUID SECOND_INVOCATION_ID = new UUID(0L, 9002L);
+  private static final UUID THREAD_ID = new UUID(0L, 7001L);
   private static final Instant NOW = Instant.parse("2026-07-17T00:00:00Z");
   private static final String GATEWAY_TOKEN = "gateway-test-token";
   private static final List<DaemonSkillDescriptor> ADVERTISED_SKILLS =
@@ -109,7 +112,7 @@ class EnvironmentDaemonGatewayFinalTest {
         messageTypes(connection.envelopes()));
     DaemonEnvelope invoke = connection.envelopes().get(1);
     assertEquals(ENVIRONMENT_NAME, invoke.environmentName());
-    assertEquals(Long.toString(INVOCATION_ID), invoke.invocationId());
+    assertEquals(INVOCATION_ID.toString(), invoke.invocationId());
     assertTrue(invoke.payloadJson().contains("\"toolName\":\"read\""));
 
     handle.cancel();
@@ -133,7 +136,7 @@ class EnvironmentDaemonGatewayFinalTest {
     String resourcePayload =
         resultCodec.encodeCompleted(
             new ToolResult(
-                Long.toString(INVOCATION_ID),
+                INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {1, 2})),
                 false,
                 "{}",
@@ -153,7 +156,7 @@ class EnvironmentDaemonGatewayFinalTest {
     String payload =
         resultCodec.encodeCompleted(
             new ToolResult(
-                Long.toString(INVOCATION_ID),
+                INVOCATION_ID.toString(),
                 List.of(new BinaryToolContent("text/plain", new byte[] {7, 8})),
                 false,
                 "{}",
@@ -178,7 +181,7 @@ class EnvironmentDaemonGatewayFinalTest {
         envelope(
             ENVIRONMENT_NAME,
             DaemonMessageType.CANCELLED,
-            Long.toString(INVOCATION_ID),
+            INVOCATION_ID.toString(),
             2,
             "{\"reason\":\"stop\"}"));
     assertTrue(listener.error instanceof RemoteToolCancelledException);
@@ -253,7 +256,7 @@ class EnvironmentDaemonGatewayFinalTest {
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT_NAME,
-                request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+                request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
                 secondListener));
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE),
@@ -267,7 +270,7 @@ class EnvironmentDaemonGatewayFinalTest {
     ToolExecutionHandle next =
         fixture.gateway.invoke(
             ENVIRONMENT_NAME,
-            request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+            request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
             secondListener);
     assertNotNull(next);
     assertEquals(
@@ -290,21 +293,21 @@ class EnvironmentDaemonGatewayFinalTest {
         () ->
             fixture.gateway.invoke(
                 ENVIRONMENT_NAME,
-                request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+                request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
                 new RecordingListener()));
     fixture.gateway.receive(
         connection.connectionId(),
         envelope(
             ENVIRONMENT_NAME,
             DaemonMessageType.CANCELLED,
-            Long.toString(INVOCATION_ID),
+            INVOCATION_ID.toString(),
             2,
             "{\"reason\":\"stop\"}"));
 
     ToolExecutionHandle next =
         fixture.gateway.invoke(
             ENVIRONMENT_NAME,
-            request(fixture.descriptor, INVOCATION_ID + 1, "provider-call-2"),
+            request(fixture.descriptor, SECOND_INVOCATION_ID, "provider-call-2"),
             new RecordingListener());
     assertNotNull(next);
     assertEquals(
@@ -737,23 +740,23 @@ class EnvironmentDaemonGatewayFinalTest {
   }
 
   private ToolExecutionRequest request(
-      ToolDescriptor descriptor, long invocationId, String toolCallId) {
+      ToolDescriptor descriptor, UUID invocationId, String toolCallId) {
     return request(descriptor, Duration.ofSeconds(30), invocationId, toolCallId);
   }
 
   private ToolExecutionRequest request(
-      ToolDescriptor descriptor, Duration timeout, long invocationId, String toolCallId) {
+      ToolDescriptor descriptor, Duration timeout, UUID invocationId, String toolCallId) {
     return new ToolExecutionRequest(
         descriptor,
         new ToolCall(toolCallId, descriptor.name(), "{\"path\":\"README.md\"}"),
         timeout,
-        new ToolExecutionContext(invocationId, 7001L));
+        new ToolExecutionContext(invocationId, THREAD_ID));
   }
 
   private String resultPayload(String text) {
     return resultCodec.encodeCompleted(
         new ToolResult(
-            Long.toString(INVOCATION_ID), List.of(new TextToolContent(text)), false, "{}", false),
+            INVOCATION_ID.toString(), List.of(new TextToolContent(text)), false, "{}", false),
         inlineResourceStore(new byte[0]));
   }
 
@@ -845,20 +848,12 @@ class EnvironmentDaemonGatewayFinalTest {
 
   private String partial(long sequence, String payload) {
     return envelope(
-        ENVIRONMENT_NAME,
-        DaemonMessageType.PARTIAL,
-        Long.toString(INVOCATION_ID),
-        sequence,
-        payload);
+        ENVIRONMENT_NAME, DaemonMessageType.PARTIAL, INVOCATION_ID.toString(), sequence, payload);
   }
 
   private String completed(long sequence, String payload) {
     return envelope(
-        ENVIRONMENT_NAME,
-        DaemonMessageType.COMPLETED,
-        Long.toString(INVOCATION_ID),
-        sequence,
-        payload);
+        ENVIRONMENT_NAME, DaemonMessageType.COMPLETED, INVOCATION_ID.toString(), sequence, payload);
   }
 
   private String envelope(

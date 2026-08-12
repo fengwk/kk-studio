@@ -22,9 +22,18 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Versioned state codec 冻结完整 plan，并严格拒绝 schema、model 与类型漂移。 */
 class CanvasFunctionRunStateCodecTest {
+
+  private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID SOURCE_NODE = UUID.fromString("00000000-0000-0000-0000-000000000003");
+  private static final UUID RESOURCE = UUID.fromString("00000000-0000-0000-0000-000000000004");
+  private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
+  private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
 
   private ObjectMapper mapper;
   private CanvasFunctionRunStateCodec codec;
@@ -52,29 +61,32 @@ class CanvasFunctionRunStateCodecTest {
                     "duration", "Duration", false, 5, 4, 15)));
     run =
         new CanvasFunctionFrozenRun(
-            1L,
-            2L,
+            CANVAS,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             model,
             new CanvasFunctionConfig(
                 List.of(
                     new TextSegment("before"),
-                    new ReferenceSegment(3L, 0),
+                    new ReferenceSegment(SOURCE_NODE, 0),
                     new TextSegment("after")),
                 Map.of("ratio", "16:9", "duration", 5)),
             List.of(
                 new CanvasFunctionFrozenReference(
-                    3L,
+                    SOURCE_NODE,
                     0,
-                    4L,
+                    RESOURCE,
+                    BLOB,
                     CanvasResourceKind.IMAGE,
                     "source.png",
                     "image/png",
                     12L,
-                    "{\"width\":1,\"height\":1}")),
+                    640L,
+                    480L,
+                    null)),
             "output.mp4",
-            5L,
+            TARGET,
             "SUBMITTED",
             Map.of("jobId", "job-1", "attempt", 1));
   }
@@ -98,7 +110,7 @@ class CanvasFunctionRunStateCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(unknownField, model));
 
     root.remove("extra");
-    root.put("version", 2);
+    root.put("version", 3);
     String unsupportedVersion = root.toString();
     assertThrows(IllegalArgumentException.class, () -> codec.decode(unsupportedVersion, model));
 
@@ -127,7 +139,7 @@ class CanvasFunctionRunStateCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidStage, model));
 
     String duplicate =
-        codec.encode(run).replaceFirst("\"version\":1", "\"version\":1,\"version\":1");
+        codec.encode(run).replaceFirst("\"version\":2", "\"version\":2,\"version\":2");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate, model));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));
     assertThrows(IllegalArgumentException.class, () -> codec.modelKey("{}"));

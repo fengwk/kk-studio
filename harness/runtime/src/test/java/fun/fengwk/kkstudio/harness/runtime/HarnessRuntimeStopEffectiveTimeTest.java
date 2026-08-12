@@ -16,13 +16,16 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Stop 将一个有效时间戳钳制到所有已锁定的 durable 事实，本地时钟回滚或跨节点时钟偏差 都不能让 Command、Entry、Thread、Model 或 Tool 的时间倒退。
@@ -40,11 +43,11 @@ class HarnessRuntimeStopEffectiveTimeTest {
           tx.insertCommands(
               List.of(
                   new ThreadCommand(
-                      tx.nextId(),
                       baseline.threadId(),
                       1,
                       userMessagePayload("late"),
-                      "late-command",
+                      TestIds.id(1),
+                      ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("late")),
                       null,
                       null,
                       T6)));
@@ -55,7 +58,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
 
     StopResult result =
         new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
-            .stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+            .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 0));
 
     assertEquals(T6, result.thread().updatedAt());
     ModelInvocation stopped =
@@ -63,7 +66,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
     assertEquals(T6, stopped.updatedAt());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "late-command").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(T6, command.cancelledAt());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));
     assertEquals(T6, path.entries().get(path.entries().size() - 2).createdAt());
@@ -85,10 +88,10 @@ class HarnessRuntimeStopEffectiveTimeTest {
 
     StopResult result =
         new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
-            .stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+            .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 1));
 
     assertEquals(T6, result.thread().updatedAt());
-    for (long toolId : baseline.toolIds()) {
+    for (UUID toolId : baseline.toolIds()) {
       ToolInvocation tool = store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
       assertEquals(T6, tool.updatedAt());
       assertEquals(
@@ -107,7 +110,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
 
     StopResult result =
         new HarnessRuntime(store, Clock.fixed(T0, ZoneOffset.UTC))
-            .stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+            .stop(new StopCommand(baseline.threadId(), TestIds.id(2), 1));
 
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));
     for (int i = path.entries().size() - 3; i < path.entries().size(); i++) {

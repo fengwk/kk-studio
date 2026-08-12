@@ -284,8 +284,8 @@ describe('ChatWorkspacePage', () => {
       </QueryClientProvider>,
     )
     const freshComposer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(freshComposer).toHaveValue(''))
-    expect(screen.queryByDisplayValue('stale across chats')).not.toBeInTheDocument()
+    // contenteditable composer：空 draft（无跨会话残留文本）。
+    await waitFor(() => expect(freshComposer).toHaveTextContent(''))
   })
 
   it('renders a blank pane with the Chat Agent and retains pane targets across layouts', async () => {
@@ -503,7 +503,7 @@ describe('ChatWorkspacePage', () => {
         expectedHeadEntryId: 'h1',
         expectedNextCommandSequence: '1',
         commands: [
-          expect.objectContaining({ type: 'USER_MESSAGE', content: 'hello after Agent deletion' }),
+          expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: 'hello after Agent deletion' }] }),
         ],
       }),
     )
@@ -603,7 +603,7 @@ describe('ChatWorkspacePage', () => {
         expectedHeadEntryId: 'e-root',
         expectedNextCommandSequence: '1',
         commands: [
-          expect.objectContaining({ type: 'USER_MESSAGE', content: 'first message' }),
+          expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: 'first message' }] }),
         ],
       }),
     )

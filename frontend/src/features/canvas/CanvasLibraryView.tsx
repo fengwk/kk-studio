@@ -97,9 +97,9 @@ export function CanvasLibraryView() {
                 </div>
                 <strong>{canvas.title}</strong>
                 <small>
-                  {t('canvas.library.revision')}
+                  {t('canvas.library.version')}
                   {' '}
-                  {canvas.graphRevision}
+                  {canvas.version}
                 </small>
                 <div className="project-footer">
                   <span>{t('canvas.library.realCanvas')}</span>

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.CALL_ID;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationTestData.request;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** ToolInvocation 各 status 下持久化字段的不变式。 */
 class ToolInvocationTest {
@@ -29,8 +31,8 @@ class ToolInvocationTest {
         invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, requiredUndecided(), null, null, null);
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL, waiting.status());
     assertEquals(0, waiting.ordinal());
-    assertEquals(1L, waiting.modelInvocationId());
-    assertEquals(1L, waiting.assistantEntryId());
+    assertEquals(id(1L), waiting.modelInvocationId());
+    assertEquals(id(1L), waiting.assistantEntryId());
     assertTrue(waiting.approval().required());
     assertNull(waiting.result());
     assertNull(waiting.error());
@@ -68,15 +70,16 @@ class ToolInvocationTest {
     assertEquals(2, runningNotRequired.attempt());
 
     ToolInvocation succeeded =
-        invocation(ToolInvocationStatus.SUCCEEDED, 1, allowed(), result(), null, 99L);
+        invocation(ToolInvocationStatus.SUCCEEDED, 1, allowed(), result(), null, id(99L));
     assertEquals(CALL_ID, succeeded.result().toolCallId());
-    assertEquals(99L, succeeded.resultEntryId());
+    assertEquals(id(99L), succeeded.resultEntryId());
 
     ToolInvocation succeededWithoutEntry =
         invocation(ToolInvocationStatus.SUCCEEDED, 1, notRequired(), result(), null, null);
     assertNull(succeededWithoutEntry.resultEntryId());
 
-    ToolInvocation failed = invocation(ToolInvocationStatus.FAILED, 1, null, null, error(), 99L);
+    ToolInvocation failed =
+        invocation(ToolInvocationStatus.FAILED, 1, null, null, error(), id(99L));
     assertEquals("tool boom", failed.error().message());
 
     ToolInvocation cancelled =
@@ -160,60 +163,9 @@ class ToolInvocationTest {
         IllegalArgumentException.class,
         () ->
             new ToolInvocation(
-                0L,
-                1L,
-                1L,
-                0,
-                request("bash", "{}"),
-                ToolInvocationStatus.READY,
-                0,
-                null,
-                null,
-                null,
-                null,
-                CREATED,
-                UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                1L,
-                0L,
-                1L,
-                0,
-                request("bash", "{}"),
-                ToolInvocationStatus.READY,
-                0,
-                null,
-                null,
-                null,
-                null,
-                CREATED,
-                UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                1L,
-                1L,
-                0L,
-                0,
-                request("bash", "{}"),
-                ToolInvocationStatus.READY,
-                0,
-                null,
-                null,
-                null,
-                null,
-                CREATED,
-                UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                1L,
-                1L,
-                1L,
+                id(1L),
+                id(1L),
+                id(1L),
                 -1,
                 request("bash", "{}"),
                 ToolInvocationStatus.READY,
@@ -228,9 +180,9 @@ class ToolInvocationTest {
         IllegalArgumentException.class,
         () ->
             new ToolInvocation(
-                1L,
-                1L,
-                1L,
+                id(1L),
+                id(1L),
+                id(1L),
                 0,
                 request("bash", "{}"),
                 ToolInvocationStatus.READY,
@@ -245,9 +197,9 @@ class ToolInvocationTest {
         IllegalArgumentException.class,
         () ->
             new ToolInvocation(
-                1L,
-                1L,
-                1L,
+                id(1L),
+                id(1L),
+                id(1L),
                 0,
                 request("bash", "{}"),
                 ToolInvocationStatus.READY,
@@ -262,9 +214,9 @@ class ToolInvocationTest {
         NullPointerException.class,
         () ->
             new ToolInvocation(
-                1L,
-                1L,
-                1L,
+                id(1L),
+                id(1L),
+                id(1L),
                 0,
                 null,
                 ToolInvocationStatus.READY,
@@ -279,9 +231,9 @@ class ToolInvocationTest {
         NullPointerException.class,
         () ->
             new ToolInvocation(
-                1L,
-                1L,
-                1L,
+                id(1L),
+                id(1L),
+                id(1L),
                 0,
                 request("bash", "{}"),
                 null,
@@ -330,7 +282,7 @@ class ToolInvocationTest {
         IllegalArgumentException.class,
         () ->
             invocation(
-                ToolInvocationStatus.WAITING_APPROVAL, 0, requiredUndecided(), null, null, 5L));
+                ToolInvocationStatus.WAITING_APPROVAL, 0, requiredUndecided(), null, null, id(5L)));
   }
 
   @Test
@@ -349,7 +301,7 @@ class ToolInvocationTest {
         () -> invocation(ToolInvocationStatus.READY, 0, null, null, error(), null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.READY, 0, null, null, null, 5L));
+        () -> invocation(ToolInvocationStatus.READY, 0, null, null, null, id(5L)));
   }
 
   @Test
@@ -371,7 +323,7 @@ class ToolInvocationTest {
         () -> invocation(ToolInvocationStatus.RUNNING, 1, null, null, error(), null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.RUNNING, 1, null, null, null, 5L));
+        () -> invocation(ToolInvocationStatus.RUNNING, 1, null, null, null, id(5L)));
   }
 
   @Test
@@ -405,10 +357,10 @@ class ToolInvocationTest {
         () -> invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), result(), error(), null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.SUCCEEDED, 1, null, result(), null, 0L));
+        () -> invocation(ToolInvocationStatus.SUCCEEDED, 1, null, result(), null, id(0L)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.SUCCEEDED, 1, null, result(), null, -1L));
+        () -> invocation(ToolInvocationStatus.SUCCEEDED, 1, null, result(), null, id(-1L)));
   }
 
   private static ToolInvocation invocation(
@@ -417,11 +369,11 @@ class ToolInvocationTest {
       ToolApproval approval,
       ToolResult result,
       ToolInvocationError error,
-      Long resultEntryId) {
+      UUID resultEntryId) {
     return new ToolInvocation(
-        1L,
-        1L,
-        1L,
+        id(1L),
+        id(1L),
+        id(1L),
         0,
         request("bash", "{}"),
         status,
@@ -446,7 +398,7 @@ class ToolInvocationTest {
     return new ToolApproval(
         true,
         ToolApprovalDecision.ALLOWED,
-        "d-1",
+        id(1L),
         "actor",
         null,
         REQUESTED,
@@ -457,7 +409,7 @@ class ToolInvocationTest {
     return new ToolApproval(
         true,
         ToolApprovalDecision.DENIED,
-        "d-2",
+        id(2L),
         "actor",
         null,
         REQUESTED,

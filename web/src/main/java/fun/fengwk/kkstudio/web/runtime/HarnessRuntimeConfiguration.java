@@ -7,6 +7,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.core.ai.environment.gateway.EnvironmentReadyListener;
 import fun.fengwk.kkstudio.core.ai.runtime.configuration.HarnessRuntimeProperties;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
@@ -44,6 +46,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -72,8 +75,9 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
-  public HarnessStore harnessStore(DataSource dataSource) {
-    return new PostgresqlHarnessStore(dataSource);
+  public HarnessStore harnessStore(
+      DataSource dataSource, PlatformTransactionManager transactionManager) {
+    return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
   }
 
   /**
@@ -173,8 +177,10 @@ public class HarnessRuntimeConfiguration {
       TurnResolver turnResolver,
       ThreadProcessorConfig config,
       Clock clock,
-      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler) {
-    return new ThreadProcessor(store, turnResolver, config, clock, scheduler);
+      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
+      ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
+    return new ThreadProcessor(
+        store, turnResolver, config, clock, scheduler, materializerProvider.getIfAvailable());
   }
 
   @Bean(destroyMethod = "close")
@@ -201,8 +207,13 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public HarnessRuntime harnessRuntime(
-      HarnessStore store, Clock clock, ModelProcessor modelProcessor, ToolProcessor toolProcessor) {
-    return new HarnessRuntime(store, clock, modelProcessor, toolProcessor);
+      HarnessStore store,
+      Clock clock,
+      ModelProcessor modelProcessor,
+      ToolProcessor toolProcessor,
+      ObjectProvider<ToolResultHistoryMaterializer> materializerProvider) {
+    return new HarnessRuntime(
+        store, clock, materializerProvider.getIfAvailable(), modelProcessor, toolProcessor);
   }
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */

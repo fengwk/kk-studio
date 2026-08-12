@@ -6,7 +6,7 @@ import lombok.Data;
 import java.time.Instant;
 
 /**
- * ToolInvocation 查询投影（tool_invocation 表）；id 均为 strict positive decimal string。
+ * ToolInvocation 查询投影（tool_invocation 表）；实体 id 均为 canonical UUID string。
  *
  * <p>请求字段由 tool binding 与 call 派生；{@code approvalJson} / {@code resultJson} / {@code errorJson} 为
  * canonical runtime codec JSON，仅对应阶段非 null；{@code environmentName} 为 nullable canonical bounded
@@ -14,13 +14,13 @@ import java.time.Instant;
  */
 @Data
 public class ToolInvocationDTO {
-  /** Invocation 主键：strict positive decimal string。 */
+  /** Invocation 主键：canonical UUID string。 */
   private String id;
 
-  /** 所属 ModelInvocation 主键：strict positive decimal string。 */
+  /** 所属 ModelInvocation 主键：canonical UUID string。 */
   private String modelInvocationId;
 
-  /** 携带 tool calls 的 ASSISTANT Message Entry 主键：strict positive decimal string。 */
+  /** 携带 tool calls 的 ASSISTANT Message Entry 主键：canonical UUID string。 */
   private String assistantEntryId;
 
   /** 在同一 Model 结果 tool calls 中的下标（非负整数，0..N-1 连续前缀）。 */
@@ -74,7 +74,7 @@ public class ToolInvocationDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;
 
-  /** 结果挂载的 Entry 主键：strict positive decimal string；结果应用后非 null（{@code @JsonInclude(ALWAYS)}）。 */
+  /** 结果挂载的 Entry 主键：canonical UUID string；结果应用后非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String resultEntryId;
 

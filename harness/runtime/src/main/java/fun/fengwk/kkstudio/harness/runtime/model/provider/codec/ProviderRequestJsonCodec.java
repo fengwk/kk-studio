@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -38,6 +39,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
  * {@link ProviderRequest} 的严格、确定性 JSON codec。顶层严格字段为 {@code model}、{@code variant}、{@code
@@ -45,6 +47,10 @@ import java.util.TreeSet;
  *
  * <p>原始 JSON 字符串（{@code json}、{@code argumentsJson}、{@code detailsJson}、{@code
  * inputSchemaJson}）原样保留； enum {@code Set} 字段按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
+ *
+ * <p>本 codec 服务于 durable 路径（Model invocation request 持久化 / 重放）：媒体块（IMAGE/AUDIO/VIDEO）携带
+ * attempt-only 的 presigned source，encode/decode 一律确定性拒绝；{@code resource} 块是唯一允许的 durable 媒体引用。有效
+ * attempt 请求（含媒体块）只存在于内存，由 provider adapter 直接发出，绝不经过本 codec 重序列化。
  */
 public final class ProviderRequestJsonCodec {
 
@@ -65,14 +71,13 @@ public final class ProviderRequestJsonCodec {
   private static final Set<String> TOOL_CALL_FIELDS = orderedSet("id", "name", "argumentsJson");
 
   private static final Set<String> TEXT_BLOCK_FIELDS = orderedSet("type", "text");
-  private static final Set<String> IMAGE_BLOCK_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> AUDIO_BLOCK_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> VIDEO_BLOCK_FIELDS = orderedSet("type", "mediaType", "source");
   private static final Set<String> THINKING_BLOCK_FIELDS = orderedSet("type", "thinking");
   private static final Set<String> JSON_BLOCK_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_BLOCK_FIELDS = orderedSet("type", "toolCall");
   private static final Set<String> TOOL_RESULT_BLOCK_FIELDS =
       orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
+  private static final Set<String> RESOURCE_BLOCK_FIELDS =
+      orderedSet("type", "blobId", "name", "preview");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -239,26 +244,13 @@ public final class ProviderRequestJsonCodec {
       node.put("text", value.text());
       return node;
     }
-    if (content instanceof ProviderImageBlock value) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "image");
-      node.put("mediaType", value.mediaType());
-      node.put("source", value.source());
-      return node;
-    }
-    if (content instanceof ProviderAudioBlock value) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "audio");
-      node.put("mediaType", value.mediaType());
-      node.put("source", value.source());
-      return node;
-    }
-    if (content instanceof ProviderVideoBlock value) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "video");
-      node.put("mediaType", value.mediaType());
-      node.put("source", value.source());
-      return node;
+    if (content instanceof ProviderImageBlock
+        || content instanceof ProviderAudioBlock
+        || content instanceof ProviderVideoBlock) {
+      throw new IllegalArgumentException(
+          content.getClass().getSimpleName()
+              + " is transient (provider attempt projection only) and must never be persisted;"
+              + " durable media references use resource blocks");
     }
     if (content instanceof ProviderThinkingBlock value) {
       ObjectNode node = NODES.objectNode();
@@ -291,6 +283,14 @@ public final class ProviderRequestJsonCodec {
       node.put("detailsJson", requireJsonObject(value.detailsJson(), "detailsJson"));
       return node;
     }
+    if (content instanceof ProviderResourceBlock value) {
+      ObjectNode node = NODES.objectNode();
+      node.put("type", "resource");
+      node.put("blobId", value.blobId().toString());
+      node.put("name", value.name());
+      node.put("preview", value.preview());
+      return node;
+    }
     throw new IllegalArgumentException("unsupported provider content block: " + content.getClass());
   }
 
@@ -308,18 +308,6 @@ public final class ProviderRequestJsonCodec {
       case "text" -> {
         requireFields(node, TEXT_BLOCK_FIELDS, "text content block");
         yield new ProviderTextBlock(text(node, "text"));
-      }
-      case "image" -> {
-        requireFields(node, IMAGE_BLOCK_FIELDS, "image content block");
-        yield new ProviderImageBlock(text(node, "mediaType"), text(node, "source"));
-      }
-      case "audio" -> {
-        requireFields(node, AUDIO_BLOCK_FIELDS, "audio content block");
-        yield new ProviderAudioBlock(text(node, "mediaType"), text(node, "source"));
-      }
-      case "video" -> {
-        requireFields(node, VIDEO_BLOCK_FIELDS, "video content block");
-        yield new ProviderVideoBlock(text(node, "mediaType"), text(node, "source"));
       }
       case "thinking" -> {
         requireFields(node, THINKING_BLOCK_FIELDS, "thinking content block");
@@ -346,6 +334,11 @@ public final class ProviderRequestJsonCodec {
             nested,
             bool(node, "error"),
             jsonObjectText(node, "detailsJson"));
+      }
+      case "resource" -> {
+        requireFields(node, RESOURCE_BLOCK_FIELDS, "resource content block");
+        yield new ProviderResourceBlock(
+            canonicalUuid(node, "blobId"), text(node, "name"), textAllowEmpty(node, "preview"));
       }
       default -> throw new IllegalArgumentException("unknown provider content block type: " + type);
     };
@@ -390,6 +383,30 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be text");
     }
     return value.textValue();
+  }
+
+  /** 必填文本但允许空字符串（如 resource preview 的 empty 形态）。 */
+  private static String textAllowEmpty(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.textValue();
+  }
+
+  /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
+  private static UUID canonicalUuid(ObjectNode node, String field) {
+    String value = text(node, field);
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value, error);
+    }
+    if (!parsed.toString().equals(value)) {
+      throw new IllegalArgumentException(field + " must be a canonical UUID: " + value);
+    }
+    return parsed;
   }
 
   private static String decodeNullableText(ObjectNode node, String field) {

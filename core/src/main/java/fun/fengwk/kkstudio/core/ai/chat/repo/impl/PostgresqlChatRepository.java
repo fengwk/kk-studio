@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.core.ai.chat.repo.impl.model.ChatDO;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /** 基于 PostgreSQL 的 Chat 集合仓库。 */
@@ -24,8 +25,13 @@ public class PostgresqlChatRepository implements ChatRepository {
   }
 
   @Override
-  public Chat getById(long id) {
+  public Chat getById(UUID id) {
     return toModel(chatMapper.getById(id));
+  }
+
+  @Override
+  public Chat lockById(UUID id) {
+    return toModel(chatMapper.lockById(id));
   }
 
   @Override
@@ -39,7 +45,7 @@ public class PostgresqlChatRepository implements ChatRepository {
   }
 
   @Override
-  public boolean deleteById(long id, long expectedVersion) {
+  public boolean deleteById(UUID id, long expectedVersion) {
     return chatMapper.deleteById(id, expectedVersion) == 1;
   }
 

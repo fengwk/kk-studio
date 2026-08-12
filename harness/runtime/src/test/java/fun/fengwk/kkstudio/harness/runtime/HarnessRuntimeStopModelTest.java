@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Stop 在 MODEL_ACTIVE 上：按各状态返回 CANCELLED 并保持 attempt 语义，写入 checkpoint barrier （ASSISTANT_ABORTED
@@ -65,11 +67,11 @@ class HarnessRuntimeStopModelTest {
   void readyModelStopWritesErrorBarrierKeepsAttemptAndCancelsCommands() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.READY);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
 
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(1, result.cancelledCommandCount());
     ModelInvocation model = storedModel(baseline.modelId());
@@ -85,11 +87,11 @@ class HarnessRuntimeStopModelTest {
     AssistantError error = ((AssistantErrorPayload) barrier.payload()).error();
     assertEquals("CANCELLED", error.code());
     assertEquals(barrier.id(), model.resultEntryId());
-    assertStoppedEnd(turnEnd, path, barrier, baseline.threadId(), "stop-1");
+    assertStoppedEnd(turnEnd, path, barrier, baseline.threadId(), TestIds.id(1));
 
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "cid-1").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
     assertFalse(
         store
@@ -107,7 +109,7 @@ class HarnessRuntimeStopModelTest {
   void dispatchingModelStopAdvancesAttemptByOne() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.DISPATCHING);
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     ModelInvocation model = storedModel(baseline.modelId());
     assertEquals(ModelInvocationStatus.CANCELLED, model.status());
     assertEquals(1, model.attempt());
@@ -117,7 +119,7 @@ class HarnessRuntimeStopModelTest {
   void runningModelStopKeepsTheConfirmedAttempt() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     ModelInvocation model = storedModel(baseline.modelId());
     assertEquals(ModelInvocationStatus.CANCELLED, model.status());
     assertEquals(1, model.attempt());
@@ -136,7 +138,7 @@ class HarnessRuntimeStopModelTest {
               model.checkpoint(
                   new StreamCheckpoint(1, 1, "partial text", "  partial thinking  "), T5));
         });
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     ModelInvocation model = storedModel(baseline.modelId());
     assertEquals(ModelInvocationStatus.CANCELLED, model.status());
     assertNull(model.streamCheckpoint());
@@ -165,7 +167,7 @@ class HarnessRuntimeStopModelTest {
           tx.updateModelInvocation(
               model.checkpoint(new StreamCheckpoint(1, 1, "", "only thinking"), T5));
         });
-    runtime.stop(new StopCommand(thinkingOnly.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(thinkingOnly.threadId(), TestIds.id(1), 0));
     EntryPath thinkingPath = pathOf(thinkingOnly.threadId());
     AssistantAbortedPayload thinkingBarrier =
         (AssistantAbortedPayload) thinkingPath.entries().get(3).payload();
@@ -181,7 +183,7 @@ class HarnessRuntimeStopModelTest {
           tx.updateModelInvocation(
               model.checkpoint(new StreamCheckpoint(1, 1, "only text", ""), T5));
         });
-    runtime.stop(new StopCommand(textOnly.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(textOnly.threadId(), TestIds.id(1), 0));
     EntryPath textPath = pathOf(textOnly.threadId());
     AssistantAbortedPayload textBarrier =
         (AssistantAbortedPayload) textPath.entries().get(3).payload();
@@ -194,7 +196,7 @@ class HarnessRuntimeStopModelTest {
   void continuationTurnModelStopAppendsBarrierUnderTheBareTurnStart() {
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedRunningContinuationModel(store);
     seedModelWork(store, baseline.modelId());
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, result.status());
     EntryPath path = pathOf(baseline.threadId());
     assertEquals(4, path.entries().size());
@@ -211,13 +213,13 @@ class HarnessRuntimeStopModelTest {
   @Test
   void terminalPendingModelStopConflictsWithoutAnyMutation() {
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
     assertEquals(Reason.TERMINAL_APPLY_PENDING, error.reason());
     ModelInvocation model = storedModel(baseline.modelId());
     assertTrue(model.status().isTerminal());
@@ -226,7 +228,7 @@ class HarnessRuntimeStopModelTest {
     assertEquals(0L, thread.revision());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "cid-1").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.QUEUED, command.state());
     assertTrue(
         store
@@ -240,22 +242,22 @@ class HarnessRuntimeStopModelTest {
             .isPresent());
   }
 
-  private ModelInvocation storedModel(long modelId) {
+  private ModelInvocation storedModel(UUID modelId) {
     return store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
   }
 
-  private EntryPath pathOf(long threadId) {
+  private EntryPath pathOf(UUID threadId) {
     ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
     return store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
   }
 
   private static void assertStoppedEnd(
-      Entry turnEnd, EntryPath path, Entry barrier, long threadId, String stopRequestId) {
+      Entry turnEnd, EntryPath path, Entry barrier, UUID threadId, UUID stopRequestId) {
     assertTrue(turnEnd.payload() instanceof TurnEndPayload);
     TurnEndPayload end = (TurnEndPayload) turnEnd.payload();
     assertEquals(TurnEndOutcome.STOPPED, end.outcome());
     assertEquals(TurnEndReason.USER_STOP, end.reason());
-    assertEquals("STOP/" + threadId + "/" + stopRequestId, end.closeRequestId());
+    assertEquals(stopRequestId, end.closeRequestId());
     assertEquals(path.entries().get(1).id(), end.turnStartEntryId());
     assertEquals(barrier.id(), turnEnd.parentEntryId());
     assertEquals(turnEnd.id(), path.head().id());

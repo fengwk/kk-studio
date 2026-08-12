@@ -4,9 +4,7 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.core.studio.function.CanvasFunctionRunStateCodec;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasFunctionRunMapper;
-import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasFunctionRunDO;
-import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -16,36 +14,35 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
+/** {@code canvas_function_run} 的持久化实现。 */
 @Repository
 public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunRepository {
 
   private final CanvasFunctionRunMapper runMapper;
-  private final CanvasNodeMapper nodeMapper;
   private final CanvasFunctionRunStateCodec stateCodec;
 
   public PostgresqlCanvasFunctionRunRepository(
-      CanvasFunctionRunMapper runMapper,
-      CanvasNodeMapper nodeMapper,
-      CanvasFunctionRunStateCodec stateCodec) {
-    this.runMapper = runMapper;
-    this.nodeMapper = nodeMapper;
-    this.stateCodec = stateCodec;
+      CanvasFunctionRunMapper runMapper, CanvasFunctionRunStateCodec stateCodec) {
+    this.runMapper = Objects.requireNonNull(runMapper, "runMapper");
+    this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
   }
 
   @Override
-  public Optional<CanvasFunctionRun> findByNodeId(long nodeId) {
+  public Optional<CanvasFunctionRun> findByNodeId(UUID nodeId) {
     return Optional.ofNullable(runMapper.getByNodeId(nodeId)).map(this::toDomain);
   }
 
   @Override
-  public Optional<CanvasFunctionRun> findByNodeIdForUpdate(long nodeId) {
+  public Optional<CanvasFunctionRun> findByNodeIdForUpdate(UUID nodeId) {
     return Optional.ofNullable(runMapper.getByNodeIdForUpdate(nodeId)).map(this::toDomain);
   }
 
   @Override
-  public List<CanvasFunctionRun> findByCanvasId(long canvasId) {
+  public List<CanvasFunctionRun> findByCanvasId(UUID canvasId) {
     List<CanvasFunctionRun> runs = new ArrayList<>();
     for (CanvasFunctionRunDO run : runMapper.listByCanvas(canvasId)) {
       runs.add(toDomain(run));
@@ -65,20 +62,20 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   @Override
   public void insertRunning(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.RUNNING);
-    requireFunctionNode(run.nodeId());
-    runMapper.insert(toData(run));
+    if (runMapper.insert(toData(run)) != 1) {
+      throw new IllegalStateException("insert canvas function run failed: " + run.nodeId());
+    }
   }
 
   @Override
   public boolean replaceTerminalWithRunning(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.RUNNING);
-    requireFunctionNode(run.nodeId());
     return runMapper.replaceTerminalWithRunning(toData(run)) == 1;
   }
 
   @Override
   public boolean checkpoint(
-      long nodeId, String requestId, String stateJson, String stage, Instant updatedAt) {
+      UUID nodeId, UUID requestId, String stateJson, String stage, Instant updatedAt) {
     if (!stage.equals(stateCodec.stage(stateJson))) {
       throw new IllegalArgumentException("checkpoint stage must match stateJson");
     }
@@ -93,6 +90,16 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
       throw new IllegalArgumentException("terminal transition requires terminal status");
     }
     return runMapper.transitionTerminal(toData(run)) == 1;
+  }
+
+  @Override
+  public boolean deleteByNodeId(UUID nodeId) {
+    return runMapper.deleteByNodeId(nodeId) >= 0;
+  }
+
+  @Override
+  public boolean deleteByCanvasId(UUID canvasId) {
+    return runMapper.deleteByCanvas(canvasId) >= 0;
   }
 
   private CanvasFunctionRun toDomain(CanvasFunctionRunDO run) {
@@ -120,13 +127,6 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   private static void requireStatus(CanvasFunctionRun run, CanvasFunctionRunStatus expectedStatus) {
     if (run.status() != expectedStatus) {
       throw new IllegalArgumentException("FunctionRun status must be " + expectedStatus);
-    }
-  }
-
-  private void requireFunctionNode(long nodeId) {
-    CanvasNodeDO node = nodeMapper.getByGlobalId(nodeId);
-    if (node == null || node.getModelKey() == null) {
-      throw new IllegalArgumentException("FunctionRun node must have a Function");
     }
   }
 }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -17,18 +18,24 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /** history Entry payload codec：标准形态、严格边界拒绝与老字段拒绝。 */
 class HistoryEntryPayloadJsonCodecTest {
 
   private static final String ENV = "123e4567-e89b-12d3-a456-426614174000";
+  private static final String UUID_2 = "00000000-0000-0000-0000-000000000002";
+  private static final String UUID_7 = "00000000-0000-0000-0000-000000000007";
+  private static final String UUID_10 = "00000000-0000-0000-0000-00000000000a";
+  private static final String UUID_11 = "00000000-0000-0000-0000-00000000000b";
+  private static final String UUID_0 = "00000000-0000-0000-0000-000000000000";
   private static final HistoryEntryPayloadJsonCodec CODEC = new HistoryEntryPayloadJsonCodec();
 
   @Test
@@ -42,7 +49,10 @@ class HistoryEntryPayloadJsonCodecTest {
                 AgentMessageRole.USER,
                 List.of(
                     new TextMessageContent("hello"),
-                    new VideoMessageContent("video/mp4", "https://example.test/reference.mp4"))),
+                    new ResourceMessageContent(
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                        "reference.mp4",
+                        null))),
             null,
             null);
     EntryPayload assistant =
@@ -51,7 +61,7 @@ class HistoryEntryPayloadJsonCodecTest {
         new MessagePayload(
             toolMessage("call-1"),
             null,
-            new ToolResultMetadata(2L, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
+            new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
     EntryPayload custom =
         new CustomMessagePayload(
             CustomMessagePayload.CORE_PLUGIN_ID,
@@ -66,7 +76,7 @@ class HistoryEntryPayloadJsonCodecTest {
             new AgentMessage(
                 AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("partial"))));
     EntryPayload turnEnd =
-        new TurnEndPayload(7L, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "stop-1");
+        new TurnEndPayload(id(7L), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1L));
 
     for (EntryPayload payload :
         List.of(
@@ -83,11 +93,12 @@ class HistoryEntryPayloadJsonCodecTest {
             toolMessage("call-1"),
             null,
             new ToolResultMetadata(
-                2L, "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT));
+                id(2L), "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT));
     EntryPayload root = new RootPayload(settings(null));
     EntryPayload subagentRoot =
-        new RootPayload(settings(null), new SubagentContext(11L, 10L, 12L, 2));
-    EntryPayload completedEnd = new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, false, null, null);
+        new RootPayload(settings(null), new SubagentContext(id(11L), id(10L), id(12L), 2));
+    EntryPayload completedEnd =
+        new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, null);
 
     assertEquals(tool, CODEC.decode(EntryType.MESSAGE, CODEC.encode(tool)));
     assertEquals(root, CODEC.decode(EntryType.ROOT, CODEC.encode(root)));
@@ -120,9 +131,11 @@ class HistoryEntryPayloadJsonCodecTest {
         CODEC.encode(
             new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"open\"}")));
     assertEquals(
-        "{\"turnStartEntryId\":\"7\",\"outcome\":\"COMPLETED\",\"continueModel\":true,"
+        "{\"turnStartEntryId\":\""
+            + UUID_7
+            + "\",\"outcome\":\"COMPLETED\",\"continueModel\":true,"
             + "\"reason\":null,\"closeRequestId\":null}",
-        CODEC.encode(new TurnEndPayload(7L, TurnEndOutcome.COMPLETED, true, null, null)));
+        CODEC.encode(new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, true, null, null)));
     assertEquals(
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hi\"}]},"
             + "\"assistantMetadata\":null,\"toolResultMetadata\":null}",
@@ -138,12 +151,19 @@ class HistoryEntryPayloadJsonCodecTest {
             500L,
             true,
             "full summary",
-            2L,
-            4L,
+            id(2L),
+            id(4L),
             null);
     CompactionPayload history =
         new CompactionPayload(
-            CompactionPhase.HISTORY, CompactionTrigger.OVERFLOW, 0L, false, "partial", 2L, 4L, 3L);
+            CompactionPhase.HISTORY,
+            CompactionTrigger.OVERFLOW,
+            0L,
+            false,
+            "partial",
+            id(2L),
+            id(4L),
+            id(3L));
     CompactionPayload prefix =
         new CompactionPayload(
             CompactionPhase.TURN_PREFIX,
@@ -151,9 +171,9 @@ class HistoryEntryPayloadJsonCodecTest {
             500L,
             true,
             "prefix",
-            2L,
-            4L,
-            3L);
+            id(2L),
+            id(4L),
+            id(3L));
 
     for (CompactionPayload payload : List.of(full, history, prefix)) {
       assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
@@ -165,8 +185,11 @@ class HistoryEntryPayloadJsonCodecTest {
   void encodesCompactionCanonicalFieldOrder() {
     assertEquals(
         "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
-            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\"2\","
-            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":null}",
+            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\""
+            + UUID_2
+            + "\","
+            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
+            + "\"turnPrefixStartEntryId\":null}",
         CODEC.encode(
             new CompactionPayload(
                 CompactionPhase.FULL,
@@ -174,13 +197,16 @@ class HistoryEntryPayloadJsonCodecTest {
                 500L,
                 true,
                 "summary",
-                2L,
-                4L,
+                id(2L),
+                id(4L),
                 null)));
     assertEquals(
         "{\"phase\":\"HISTORY\",\"trigger\":\"OVERFLOW\",\"tokensBefore\":0,"
-            + "\"complete\":false,\"summaryText\":\"partial\",\"firstKeptEntryId\":\"2\","
-            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":\"3\"}",
+            + "\"complete\":false,\"summaryText\":\"partial\",\"firstKeptEntryId\":\""
+            + UUID_2
+            + "\","
+            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
+            + "\"turnPrefixStartEntryId\":\"00000000-0000-0000-0000-000000000003\"}",
         CODEC.encode(
             new CompactionPayload(
                 CompactionPhase.HISTORY,
@@ -188,20 +214,30 @@ class HistoryEntryPayloadJsonCodecTest {
                 0L,
                 false,
                 "partial",
-                2L,
-                4L,
-                3L)));
+                id(2L),
+                id(4L),
+                id(3L))));
   }
 
   @Test
   void compactionCodecRejectsInvalidPhaseCompleteAndScalars() {
     String base =
         "{\"phase\":\"FULL\",\"trigger\":\"THRESHOLD\",\"tokensBefore\":500,"
-            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\"2\","
-            + "\"cutEntryId\":\"4\",\"turnPrefixStartEntryId\":null}";
+            + "\"complete\":true,\"summaryText\":\"summary\",\"firstKeptEntryId\":\""
+            + UUID_2
+            + "\","
+            + "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\","
+            + "\"turnPrefixStartEntryId\":null}";
     assertEquals(
         new CompactionPayload(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 2L, 4L, null),
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            500L,
+            true,
+            "summary",
+            id(2L),
+            id(4L),
+            null),
         CODEC.decode(EntryType.COMPACTION, base));
 
     assertThrows(
@@ -232,18 +268,24 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.COMPACTION,
-                base.replace("\"2\",\"cutEntryId\":\"4\"", "\"0\",\"cutEntryId\":\"4\"")));
+                base.replace(
+                    "\"" + UUID_2 + "\",\"cutEntryId\"", "\"not-a-uuid\",\"cutEntryId\"")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.COMPACTION,
-                base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":\"-4\"")));
+                base.replace(
+                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
+                    "\"cutEntryId\":\"-4\"")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                EntryType.COMPACTION, base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":5")));
+                EntryType.COMPACTION,
+                base.replace(
+                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
+                    "\"cutEntryId\":5")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -278,7 +320,9 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.COMPACTION,
-                base.replace("\"cutEntryId\":\"4\"", "\"cutEntryId\":\"4\",\"cutEntryId\":\"4\"")));
+                base.replace(
+                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"",
+                    "\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\",\"cutEntryId\":\"00000000-0000-0000-0000-000000000004\"")));
   }
 
   @Test
@@ -360,8 +404,8 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"environmentName\":5,"
-                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
-                    + "\"variant\":\"v\"},\"activeTools\":[]}}"));
+                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"activeTools\":[]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -413,7 +457,10 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
-                "{\"turnStartEntryId\":\"7\",\"outcome\":\"COMPLETED\",\"continueModel\":\"yes\",\"reason\":null,\"closeRequestId\":null}"));
+                "{\"turnStartEntryId\":\""
+                    + UUID_7
+                    + "\",\"outcome\":\"COMPLETED\","
+                    + "\"continueModel\":\"yes\",\"reason\":null,\"closeRequestId\":null}"));
   }
 
   @Test
@@ -426,31 +473,19 @@ class HistoryEntryPayloadJsonCodecTest {
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
-                turnEndWith("{\"turnStartEntryId\":\"7\",\"outcome\":\"FOO\",")));
+                turnEndWith("{\"turnStartEntryId\":\"" + UUID_7 + "\",\"outcome\":\"FOO\",")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
-                turnEndWith("{\"turnStartEntryId\":\"0\",\"outcome\":\"COMPLETED\",")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_END,
-                turnEndWith("{\"turnStartEntryId\":\"-1\",\"outcome\":\"COMPLETED\",")));
+                turnEndWith("{\"turnStartEntryId\":\"not-a-uuid\",\"outcome\":\"COMPLETED\",")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
                 turnEndWith("{\"turnStartEntryId\":\"abc\",\"outcome\":\"COMPLETED\",")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.TURN_END,
-                turnEndWith("{\"turnStartEntryId\":\"007\",\"outcome\":\"COMPLETED\",")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -463,20 +498,28 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_END,
                 turnEndWith(
-                    "{\"turnStartEntryId\":\"7\",\"outcome\":\"COMPLETED\",\"continueModel\":true,\"reason\":5,")));
+                    "{\"turnStartEntryId\":\""
+                        + UUID_7
+                        + "\",\"outcome\":\"COMPLETED\","
+                        + "\"continueModel\":true,\"reason\":5,")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
                 turnEndWith(
-                    "{\"turnStartEntryId\":\"7\",\"outcome\":\"COMPLETED\",\"continueModel\":true,\"reason\":null,\"closeRequestId\":5}")));
+                    "{\"turnStartEntryId\":\""
+                        + UUID_7
+                        + "\",\"outcome\":\"COMPLETED\","
+                        + "\"continueModel\":true,\"reason\":null,\"closeRequestId\":5}")));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_END,
-                "{\"turnStartEntryId\":\"7\",\"outcome\":\"COMPLETED\",\"continueModel\":true,"
+                "{\"turnStartEntryId\":\""
+                    + UUID_7
+                    + "\",\"outcome\":\"COMPLETED\",\"continueModel\":true,"
                     + "\"reason\":null,\"closeRequestId\":\" close\"}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -504,63 +547,79 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"0\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_0
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\"}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-9\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-9\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"007\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"00000000-0000-0000-0000-000000000007\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"2\",\"toolCallId\":\"call-1\",\"ordinal\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"ordinal\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.MESSAGE, toolMessageJson + "\"toolResultMetadata\":[]}"));

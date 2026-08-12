@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 /**
  * Stop 在 CONTINUATION_DUE 上：恰好三条 Entry（TURN_START(CONTINUATION, baseSettings)、
@@ -53,12 +55,13 @@ class HarnessRuntimeStopContinuationTest {
   @Test
   void continuationStopAppendsExactlyThreeEntriesWithBaseSettingsAndCancelsConfigCommands() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
-    long threadId = seedYoloThreadAt(store, chain.turnEndEntryId());
+    UUID threadId = seedYoloThreadAt(store, chain.turnEndEntryId());
     // 配置 Command 本会被 CONTINUATION 计划应用进 TURN_START settings；Stop 必须取消它而不是应用。
-    seedQueuedCommand(store, threadId, 1L, 1L, new SetAgentCommandPayload("other-agent"), "cid-1");
+    seedQueuedCommand(
+        store, threadId, 1L, new SetAgentCommandPayload("other-agent"), TestIds.id(1));
     seedThreadWork(store, threadId);
 
-    StopResult result = runtime.stop(new StopCommand(threadId, "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(1, result.cancelledCommandCount());
     assertEquals(1L, result.thread().revision());
@@ -84,13 +87,13 @@ class HarnessRuntimeStopContinuationTest {
     TurnEndPayload endPayload = (TurnEndPayload) turnEnd.payload();
     assertEquals(TurnEndOutcome.STOPPED, endPayload.outcome());
     assertEquals(TurnEndReason.USER_STOP, endPayload.reason());
-    assertEquals("STOP/" + threadId + "/stop-1", endPayload.closeRequestId());
+    assertEquals(TestIds.id(1), endPayload.closeRequestId());
     assertEquals(turnStart.id(), endPayload.turnStartEntryId());
     assertEquals(barrier.id(), turnEnd.parentEntryId());
     assertEquals(turnEnd.id(), stored.headEntryId());
 
     ThreadCommand command =
-        store.transaction(tx -> tx.findCommandByClientId(threadId, "cid-1").orElseThrow());
+        store.transaction(tx -> tx.findCommandByClientId(threadId, TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
     assertNull(command.consumedTurnStartEntryId());
     assertFalse(
@@ -102,7 +105,7 @@ class HarnessRuntimeStopContinuationTest {
   @Test
   void continuationStopWithoutCommandsStillClosesTheObligation() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
-    StopResult result = runtime.stop(new StopCommand(chain.threadId(), "stop-1", 1));
+    StopResult result = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(0, result.cancelledCommandCount());
     ThreadState stored = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());

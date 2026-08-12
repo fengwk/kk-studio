@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+
 class ClaimAdmissionGuardTest {
 
   /** 同一 token 在 active admission 期间只能进入一次；对称 release 后可再次进入。 */
@@ -12,11 +14,11 @@ class ClaimAdmissionGuardTest {
   void rejectsDuplicateTokenUntilReleased() {
     ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
 
-    assertTrue(guard.tryAdmit(1, "token-1"));
-    assertFalse(guard.tryAdmit(1, "token-1"));
+    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
+    assertFalse(guard.tryAdmit(TestIds.id(1), "token-1"));
 
-    guard.release(1, "token-1");
-    assertTrue(guard.tryAdmit(1, "token-1"));
+    guard.release(TestIds.id(1), "token-1");
+    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
   }
 
   /** 新 lease token 可 supersede 旧 token；旧调用方的迟到 release 不能删除当前 admission。 */
@@ -24,13 +26,13 @@ class ClaimAdmissionGuardTest {
   void staleReleaseDoesNotRemoveSupersedingToken() {
     ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
 
-    assertTrue(guard.tryAdmit(1, "token-1"));
-    assertTrue(guard.tryAdmit(1, "token-2"));
+    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
+    assertTrue(guard.tryAdmit(TestIds.id(1), "token-2"));
 
-    guard.release(1, "token-1");
-    assertFalse(guard.tryAdmit(1, "token-2"));
+    guard.release(TestIds.id(1), "token-1");
+    assertFalse(guard.tryAdmit(TestIds.id(1), "token-2"));
 
-    guard.release(1, "token-2");
-    assertTrue(guard.tryAdmit(1, "token-2"));
+    guard.release(TestIds.id(1), "token-2");
+    assertTrue(guard.tryAdmit(TestIds.id(1), "token-2"));
   }
 }

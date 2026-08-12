@@ -14,11 +14,11 @@ Redis Streams
 
 PostgreSQL 是唯一 durable truth。Redis 重启或清空只会造成流式 overlay 缺口；客户端重新读取 Thread snapshot 即可恢复权威状态。
 
-权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含 `harness_runtime_id_seq` 与七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable runtime ID 由 sequence 分配，在 API 中编码为十进制字符串。
+权威 DDL 有两份 byte-identical 的副本：`core` 的 [`V1__schema.sql`](../../core/src/main/resources/db/migration/V1__schema.sql)（含七张表）与 `harness-runtime-spring` 的 [`harness-runtime-schema.sql`](../../harness/runtime-spring/src/main/resources/fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql)；`CoreHarnessArchitectureTest` 逐字节校验两者一致。Schema 采用 clean-slate rebuild，不维护兼容迁移；不存在 `agent_thread_goal`，Goal 状态复用 `harness_entry` 的插件 CUSTOM payload。所有 durable 实体 id 由注入的 `Supplier<UUID>` 生成（生产：`UUID::randomUUID`），API 中编码为 canonical UUID string；`sequence`/`revision` 仍是 bigint，编码为十进制字符串。
 
 ## 2. `harness_session` / `harness_entry`
 
-`harness_session`：`id`、`title`、`created_at`。Session 只组织一棵 append-only Entry Tree。
+`harness_session`：`id`、`created_at`。Session 只组织一棵 append-only Entry Tree。
 
 `harness_entry`：`id`、`session_id`、`parent_entry_id`、`entry_type`、`payload`、`created_at`。
 
@@ -36,7 +36,7 @@ COMPACTION, TURN_END
 
 | 列 | 约束 |
 | --- | --- |
-| `id` | 正 |
+| `id` | UUID 主键 |
 | `head_entry_id` | 非空，FK 到 `harness_entry` |
 | `yolo_enabled` | Thread 运行时策略 |
 | `next_command_sequence` | `>= 1`；创建即 1 |
@@ -52,7 +52,8 @@ Thread 行不保存 Session/Environment/status/epoch/lease/runnable；全部由 
 | `thread_id` / `sequence` | `(thread_id, sequence)` 唯一；`sequence > 0` |
 | `command_type` | 七类 check 约束（USER_MESSAGE/CUSTOM_MESSAGE/SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO） |
 | `payload` | JSON object |
-| `client_command_id` | `(thread_id, client_command_id)` 唯一幂等键，≤128 字符 |
+| `client_command_id` | UUID；`(thread_id, client_command_id)` 唯一幂等键 |
+| `request_hash` | raw 命令的 canonical SHA-256，64 位小写 hex；exact replay 必须匹配 |
 | `consumed_turn_start_entry_id` | null 或 FK 到 Entry；与 `cancelled_at` 互斥（terminal check） |
 | `cancelled_at` | null 或 `>= created_at` |
 
@@ -119,9 +120,9 @@ durable mutation
 
 ```json
 {
-  "threadId": "1",
+  "threadId": "00000000-0000-0000-0000-000000000001",
   "subjectKind": "MODEL_INVOCATION",
-  "subjectId": "1",
+  "subjectId": "00000000-0000-0000-0000-000000000010",
   "attempt": 1,
   "type": "MODEL_DELTA",
   "payload": { "kind": "TEXT_DELTA", "text": "..." }
@@ -164,9 +165,14 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 
 ## 10. Resource store
 
-- `harness-runtime-spring` 提供 `LocalFileResourceStore`（`ResourceStore.reference` 无副作用地计划精确 `ResourceRef`；canonical `file:///` URI、非空 size/sha256）；`harness-daemon` 的 coding 工具使用同构实现（daemon 侧 `store` 直接落盘并返回 ref）。
-- file/s3 资源经**同源** `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载：调用方只提交内容身份，Core `ManagedResourceDownloadService` 用 `ResourceStore.reference` 重建并读取自身拥有的 canonical 引用（绝不接受浏览器传入任意 file URI）；Web `StudioHarnessResourceController` 只组装 `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff`（禁 MIME sniff，避免不可信 Tool 输出在同源执行）+ immutable 私有缓存。
-- `ToolResultExternalizer`（core，位于 `CoreToolGateway` callback bridge）在持久化前把 ToolResult all-or-nothing 外部化：插件 intents 必须先完整校验为 effects；Text/Json 内容 UTF-8 ≤ `INLINE_RESULT_UTF8_BYTES`（8KB）保持 inline ToolContent 直接编码；超过阈值或二进制内容先经 `ResourceStore.reference` **无副作用计划**精确 `ResourceRef`，再逐项 `put` 写入，**每次 put 返回的 ref 必须与计划 ref 精确相等**（不等即存储契约违反）；随后才把 `ToolSuccess(result, effects)` 交给 ToolProcessor 落库。**PostgreSQL 不存 BLOB**——durable 表只保存 ResourceRef JSON（uri/mediaType/name/size/sha256）与可选文本 preview。
+- `harness-runtime-spring` 提供瞬时 `LocalFileResourceStore`：`ResourceStore.reference` 无副作用地计划 canonical `file:///` `ResourceRef`，`put` 返回精确相同引用；`harness-daemon` 的 coding 工具使用同构 store。
+- `ToolResultExternalizer` 位于 `CoreToolGateway` callback bridge。插件 intents 先完整校验为 effects；Text/Json UTF-8 ≤ 8KB 保持 inline，超过阈值或 Binary 才按 `reference -> put -> exact ref check` 转为瞬时 `ResourceRef`，随后 `ToolProcessor` 原子持久化 terminal `result + effects + SUCCEEDED`。
+- Tool outcome Entry 插入前，`ToolOutcomeAppender` 在同一 Store 事务调用
+  `GlobalStorageToolResultHistoryMaterializer`：有界读取 data/file/http/https/s3 内容，摄入
+  `storage_blob`，写入 `resource(blobId,name,preview)`，并通过
+  `harness_session_blob_ref` 为 Session 持有 Blob。没有 materializer 时，含 Resource 的成功结果
+  fail closed，瞬时 URI 绝不进入 durable message。
+- Provider attempt 从 `storage_blob` 读取权威媒体事实，为所选模型支持的 image/audio/video 生成新鲜预签名 HTTPS URL；durable invocation request 只保存 `blobId/name/preview`。前端 durable 渲染走 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 引用兼容。
 
 ## 11. 验证入口
 

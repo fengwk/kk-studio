@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -210,13 +211,13 @@ class WorkHeartbeatTest {
     final ClaimedWork claimed;
 
     Fixture() {
-      long threadId =
+      UUID threadId =
           store.transaction(
               tx -> {
-                long sessionId = tx.nextId();
-                long rootEntryId = tx.nextId();
-                long threadIdValue = tx.nextId();
-                tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+                UUID sessionId = tx.nextId();
+                UUID rootEntryId = tx.nextId();
+                UUID threadIdValue = tx.nextId();
+                tx.insertSession(new Session(sessionId, NOW));
                 tx.insertEntry(
                     new Entry(
                         rootEntryId,

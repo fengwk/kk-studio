@@ -85,6 +85,31 @@ describe('TaskStatusWidget', () => {
     expect(screen.getAllByText('running read')).toHaveLength(2)
   })
 
+  it('omits optional metrics and uses zero indentation when the heartbeat omits them', () => {
+    render(
+      <TaskStatusWidget
+        messages={[
+          taskMessage(
+            heartbeat('101', {
+              depth: null,
+              turns: null,
+              toolCalls: null,
+              lastActivity: null,
+            }),
+          ),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText('1 个运行中')).toBeInTheDocument()
+    expect(screen.getByText('explorer')).toBeInTheDocument()
+    expect(screen.getByText('工具运行中')).toBeInTheDocument()
+    expect(screen.queryByText('3 轮')).not.toBeInTheDocument()
+    expect(screen.queryByText('5 次工具调用')).not.toBeInTheDocument()
+    expect(screen.queryByText('running read')).not.toBeInTheDocument()
+    expect(screen.getByRole('listitem').getAttribute('style')).toContain('--task-depth: 0')
+  })
+
   it('replaces heartbeats of the same thread and orders rows by depth', () => {
     render(
       <TaskStatusWidget

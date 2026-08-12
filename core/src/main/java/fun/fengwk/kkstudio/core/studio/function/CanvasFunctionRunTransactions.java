@@ -1,20 +1,32 @@
 package fun.fengwk.kkstudio.core.studio.function;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.core.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.core.studio.realtime.CanvasRealtimeService;
+import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasDocumentMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasLinkMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeMapper;
-import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasNodeResourceMapper;
 import fun.fengwk.kkstudio.core.studio.repo.impl.mapper.CanvasResourceMapper;
+import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasDocumentDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeDO;
-import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasNodeResourceDO;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasResourceDO;
+import fun.fengwk.kkstudio.core.studio.resource.CanvasResourceLifecycle;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRef;
+import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionResourceRefRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.studio.canvas.CanvasNodePatch;
+import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.studio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.studio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
@@ -31,50 +43,61 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
-/** Function start/checkpoint/terminal/resource swap 的短事务边界。 */
+/** Function start/checkpoint/terminal/resource swap 的短事务边界（全部事务内锁定 node + document 行）。 */
 @Component
 public class CanvasFunctionRunTransactions {
 
   private final CanvasNodeMapper nodeMapper;
   private final CanvasResourceMapper resourceMapper;
-  private final CanvasNodeResourceMapper nodeResourceMapper;
   private final CanvasLinkMapper linkMapper;
+  private final CanvasDocumentMapper documentMapper;
   private final CanvasFunctionRunRepository runRepository;
+  private final CanvasFunctionResourceRefRepository refRepository;
   private final CanvasFunctionModelRegistry registry;
   private final CanvasFunctionConfigCodec configCodec;
   private final CanvasFunctionRunStateCodec stateCodec;
-  private final PostgresqlSequenceIdGenerator idGenerator;
+  private final CanvasResourceLifecycle resourceLifecycle;
+  private final ObjectProvider<StorageBlobManager> blobManagers;
+  private final CanvasRealtimeService realtimeService;
   private final Clock clock;
 
   public CanvasFunctionRunTransactions(
       CanvasNodeMapper nodeMapper,
       CanvasResourceMapper resourceMapper,
-      CanvasNodeResourceMapper nodeResourceMapper,
       CanvasLinkMapper linkMapper,
+      CanvasDocumentMapper documentMapper,
       CanvasFunctionRunRepository runRepository,
+      CanvasFunctionResourceRefRepository refRepository,
       CanvasFunctionModelRegistry registry,
       CanvasFunctionConfigCodec configCodec,
       CanvasFunctionRunStateCodec stateCodec,
-      PostgresqlSequenceIdGenerator idGenerator,
+      CanvasResourceLifecycle resourceLifecycle,
+      ObjectProvider<StorageBlobManager> blobManagers,
+      CanvasRealtimeService realtimeService,
       Clock clock) {
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
     this.resourceMapper = Objects.requireNonNull(resourceMapper, "resourceMapper");
-    this.nodeResourceMapper = Objects.requireNonNull(nodeResourceMapper, "nodeResourceMapper");
     this.linkMapper = Objects.requireNonNull(linkMapper, "linkMapper");
+    this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
+    this.refRepository = Objects.requireNonNull(refRepository, "refRepository");
     this.registry = Objects.requireNonNull(registry, "registry");
     this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
-    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
+    this.blobManagers = Objects.requireNonNull(blobManagers, "blobManagers");
+    this.realtimeService = Objects.requireNonNull(realtimeService, "realtimeService");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   @Transactional
-  public CanvasFunctionStartResult start(long canvasId, long nodeId, String requestId) {
-    requirePositive(canvasId, "canvasId");
-    requirePositive(nodeId, "nodeId");
+  public CanvasFunctionStartResult start(UUID canvasId, UUID nodeId, String requestId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
     String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    CanvasDocumentDO document = requireDocumentForUpdate(canvasId);
     CanvasNodeDO node = nodeMapper.getByIdForUpdate(canvasId, nodeId);
     if (node == null) {
       throw notFound("Canvas Function node not found");
@@ -82,9 +105,8 @@ public class CanvasFunctionRunTransactions {
     if (node.getModelKey() == null) {
       throw new IllegalArgumentException("node must be a Canvas Function");
     }
-
     CanvasFunctionRun existing = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (existing != null && existing.requestId().equals(validatedRequestId)) {
+    if (existing != null && existing.requestId().toString().equals(validatedRequestId)) {
       return new CanvasFunctionStartResult(existing, false);
     }
     if (existing != null && existing.status() == CanvasFunctionRunStatus.RUNNING) {
@@ -101,13 +123,13 @@ public class CanvasFunctionRunTransactions {
     CanvasFunctionConfig config = configCodec.decode(node.getFunctionConfigJson(), model);
     List<CanvasFunctionFrozenReference> manifest =
         freezeManifest(canvasId, nodeId, config, model.referencePolicy());
-    long targetResourceId = idGenerator.next();
+    UUID targetResourceId = UUID.randomUUID();
     CanvasFunctionFrozenRun frozen =
         new CanvasFunctionFrozenRun(
             canvasId,
             nodeId,
             node.getName(),
-            validatedRequestId,
+            UUID.fromString(validatedRequestId),
             model,
             config,
             manifest,
@@ -121,25 +143,35 @@ public class CanvasFunctionRunTransactions {
     CanvasFunctionRun running =
         new CanvasFunctionRun(
             nodeId,
-            validatedRequestId,
+            UUID.fromString(validatedRequestId),
             CanvasFunctionRunStatus.RUNNING,
             frozen.stage(),
             stateJson,
             null,
             now);
+    if (existing != null) {
+      resourceLifecycle.releaseRunPins(canvasId, nodeId, existing.requestId());
+    }
+    refRepository.addAll(pins(canvasId, nodeId, running.requestId(), manifest, targetResourceId));
+    boolean created;
     if (existing == null) {
       runRepository.insertRunning(running);
-    } else if (!runRepository.replaceTerminalWithRunning(running)) {
+      created = true;
+    } else if (runRepository.replaceTerminalWithRunning(running)) {
+      created = false;
+    } else {
       throw conflict("terminal FunctionRun was replaced concurrently");
     }
-    return new CanvasFunctionStartResult(running, true);
+    bumpAndPublishNode(document, canvasId, nodeId);
+    return new CanvasFunctionStartResult(running, created);
   }
 
   @Transactional
-  public CanvasFunctionRun cancel(long canvasId, long nodeId, String requestId) {
-    requirePositive(canvasId, "canvasId");
-    requirePositive(nodeId, "nodeId");
+  public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
     String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    CanvasDocumentDO document = requireDocumentForUpdate(canvasId);
     CanvasNodeDO node = nodeMapper.getByIdForUpdate(canvasId, nodeId);
     if (node == null) {
       throw notFound("Canvas Function node not found");
@@ -148,7 +180,7 @@ public class CanvasFunctionRunTransactions {
         runRepository
             .findByNodeIdForUpdate(nodeId)
             .orElseThrow(() -> notFound("Canvas Function run not found"));
-    if (!current.requestId().equals(validatedRequestId)) {
+    if (!current.requestId().toString().equals(validatedRequestId)) {
       throw conflict("requestId does not match the current FunctionRun");
     }
     if (current.status() != CanvasFunctionRunStatus.RUNNING) {
@@ -162,44 +194,44 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.transitionTerminal(terminal)) {
       throw conflict("FunctionRun changed while cancelling");
     }
+    resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
+    bumpAndPublishNode(document, canvasId, nodeId);
     return terminal;
   }
 
   @Transactional
-  public boolean completeSuccess(CanvasFunctionFrozenRun frozen, List<Long> orderedResourceIds) {
-    CanvasNodeDO node = nodeMapper.getByIdForUpdate(frozen.canvasId(), frozen.nodeId());
-    if (node == null || node.getModelKey() == null) {
-      return false;
-    }
-    CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(frozen.nodeId()).orElse(null);
-    if (!matchesRunning(current, frozen.requestId())) {
-      return false;
-    }
+  public boolean completeSuccess(CanvasFunctionFrozenRun frozen, List<UUID> orderedResourceIds) {
+    Objects.requireNonNull(frozen, "frozen");
     if (!orderedResourceIds.equals(List.of(frozen.targetResourceId()))) {
       throw new IllegalArgumentException(
           "adapter result must equal the preallocated target Resource id");
     }
-    List<CanvasResourceDO> resources =
-        resourceMapper.listByIds(frozen.canvasId(), orderedResourceIds);
-    if (resources.size() != orderedResourceIds.size()
-        || resources.stream()
-            .anyMatch(
-                resource ->
-                    CanvasResourceKind.valueOf(resource.getKind())
-                        != frozen.model().outputKind())) {
+    CanvasDocumentDO document = requireDocumentForUpdate(frozen.canvasId());
+    CanvasNodeDO node = nodeMapper.getByIdForUpdate(frozen.canvasId(), frozen.nodeId());
+    if (node == null || node.getModelKey() == null) {
+      resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+      return false;
+    }
+    CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(frozen.nodeId()).orElse(null);
+    if (!matchesRunning(current, frozen.requestId().toString())) {
+      resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+      return false;
+    }
+    CanvasResourceDO output = resourceMapper.getById(frozen.canvasId(), frozen.targetResourceId());
+    if (output == null
+        || output.getOwnerNodeId() != null
+        || output.getResourceIndex() != null
+        || output.getBlobId() == null) {
       throw new IllegalArgumentException(
-          "all adapter results must be materialized with the frozen output kind");
+          "adapter result must be materialized as an unowned blob Resource");
     }
-
-    nodeResourceMapper.deleteByNode(frozen.canvasId(), frozen.nodeId());
-    for (int index = 0; index < orderedResourceIds.size(); index++) {
-      CanvasNodeResourceDO relation = new CanvasNodeResourceDO();
-      relation.setCanvasId(frozen.canvasId());
-      relation.setNodeId(frozen.nodeId());
-      relation.setResourceIndex(index);
-      relation.setResourceId(orderedResourceIds.get(index));
-      nodeResourceMapper.insert(relation);
+    StorageBlob outputBlob = requireBlobManager().getBlob(output.getBlobId());
+    if (outputBlob == null || kindOf(outputBlob.getMediaType()) != frozen.model().outputKind()) {
+      throw new IllegalArgumentException(
+          "adapter result blob kind must match the frozen Function output kind");
     }
+    resourceLifecycle.replaceOwnedWithTarget(
+        frozen.canvasId(), frozen.nodeId(), frozen.targetResourceId());
     CanvasFunctionFrozenRun succeeded =
         stateCodec.checkpoint(frozen, "SUCCEEDED", frozen.adapterState());
     CanvasFunctionRun terminal =
@@ -207,50 +239,79 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.transitionTerminal(terminal)) {
       throw new IllegalStateException("FunctionRun success CAS failed after row lock");
     }
+    bumpAndPublishNode(document, frozen.canvasId(), frozen.nodeId());
     return true;
   }
 
   @Transactional
-  public boolean failIfRunning(long nodeId, String requestId, String error) {
+  public boolean failIfRunning(UUID nodeId, String requestId, String error) {
+    Objects.requireNonNull(nodeId, "nodeId");
+    Objects.requireNonNull(requestId, "requestId");
+    CanvasFunctionRun observed = runRepository.findByNodeId(nodeId).orElse(null);
+    if (!matchesRunning(observed, requestId)) {
+      return false;
+    }
+    CanvasFunctionFrozenRun observedFrozen = decode(observed);
+    CanvasDocumentDO document = requireDocumentForUpdate(observedFrozen.canvasId());
+    CanvasNodeDO node = nodeMapper.getByIdForUpdate(observedFrozen.canvasId(), nodeId);
+    if (node == null || node.getModelKey() == null) {
+      return false;
+    }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
     if (!matchesRunning(current, requestId)) {
       return false;
     }
     CanvasFunctionFrozenRun frozen = decode(current);
     CanvasFunctionFrozenRun failed = stateCodec.checkpoint(frozen, "FAILED", frozen.adapterState());
-    return runRepository.transitionTerminal(
-        terminal(current, CanvasFunctionRunStatus.FAILED, failed, error));
+    CanvasFunctionRun terminal = terminal(current, CanvasFunctionRunStatus.FAILED, failed, error);
+    if (!runRepository.transitionTerminal(terminal)) {
+      throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
+    }
+    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    bumpAndPublishNode(document, frozen.canvasId(), frozen.nodeId());
+    return true;
   }
 
   private List<CanvasFunctionFrozenReference> freezeManifest(
-      long canvasId,
-      long targetNodeId,
+      UUID canvasId,
+      UUID targetNodeId,
       CanvasFunctionConfig config,
       CanvasFunctionReferencePolicy policy) {
     List<CanvasFunctionFrozenReference> manifest = new ArrayList<>();
     for (ReferenceSegment reference : configCodec.uniqueReferences(config)) {
-      CanvasNodeDO source = nodeMapper.getByGlobalId(reference.nodeId());
-      if (source == null || source.getCanvasId() != canvasId) {
+      CanvasNodeDO source = nodeMapper.getById(canvasId, reference.nodeId());
+      if (source == null) {
         throw new IllegalArgumentException("referenced source node must belong to the same canvas");
       }
       if (linkMapper.exists(canvasId, reference.nodeId(), targetNodeId) != 1) {
         throw new IllegalArgumentException("referenced source node must have a Link to target");
       }
-      List<CanvasResourceDO> resources = resourceMapper.listByNode(canvasId, reference.nodeId());
+      List<CanvasResourceDO> resources =
+          resourceMapper.listByOwnerNode(canvasId, reference.nodeId());
       if (reference.index() >= resources.size()) {
         throw new IllegalArgumentException("reference index is outside source node resources");
       }
       CanvasResourceDO resource = resources.get(reference.index());
+      if (resource.getBlobId() == null) {
+        throw new IllegalArgumentException("referenced resource must be a Storage blob");
+      }
+      StorageBlob blob = requireBlobManager().getBlob(resource.getBlobId());
+      if (blob == null) {
+        throw new IllegalArgumentException("referenced blob is missing: " + resource.getBlobId());
+      }
       manifest.add(
           new CanvasFunctionFrozenReference(
               reference.nodeId(),
               reference.index(),
               resource.getId(),
-              CanvasResourceKind.valueOf(resource.getKind()),
+              resource.getBlobId(),
+              kindOf(blob.getMediaType()),
               resource.getName(),
-              resource.getMediaType(),
-              resource.getSize(),
-              resource.getMetadataJson()));
+              blob.getMediaType(),
+              blob.getSizeBytes(),
+              blob.getWidth(),
+              blob.getHeight(),
+              blob.getDurationMs()));
     }
     validateReferencePolicy(manifest, policy);
     return List.copyOf(manifest);
@@ -276,6 +337,78 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
+  private List<CanvasFunctionResourceRef> pins(
+      UUID canvasId,
+      UUID nodeId,
+      UUID requestId,
+      List<CanvasFunctionFrozenReference> manifest,
+      UUID targetResourceId) {
+    List<CanvasFunctionResourceRef> refs = new ArrayList<>(manifest.size() + 1);
+    for (CanvasFunctionFrozenReference reference : manifest) {
+      refs.add(
+          new CanvasFunctionResourceRef(
+              canvasId,
+              nodeId,
+              requestId,
+              reference.resourceId(),
+              CanvasFunctionResourceRef.Role.INPUT));
+    }
+    refs.add(
+        new CanvasFunctionResourceRef(
+            canvasId, nodeId, requestId, targetResourceId, CanvasFunctionResourceRef.Role.OUTPUT));
+    return List.copyOf(refs);
+  }
+
+  private void bumpAndPublishNode(CanvasDocumentDO document, UUID canvasId, UUID nodeId) {
+    long baseVersion = document.getVersion();
+    long newVersion = baseVersion + 1L;
+    if (documentMapper.compareAndSetVersion(canvasId, baseVersion, newVersion) != 1) {
+      throw new IllegalStateException("canvas document version CAS failed under row lock");
+    }
+    CanvasResourceNode node = projectNode(canvasId, nodeId);
+    realtimeService.publish(
+        canvasId,
+        new CanvasPatch(
+            baseVersion,
+            newVersion,
+            List.of(),
+            List.of(new CanvasNodePatch.Upsert(node)),
+            List.of()));
+  }
+
+  private CanvasResourceNode projectNode(UUID canvasId, UUID nodeId) {
+    CanvasNodeDO node = nodeMapper.getById(canvasId, nodeId);
+    if (node == null) {
+      throw new IllegalStateException("node disappeared under document row lock: " + nodeId);
+    }
+    List<CanvasResource> resources = new ArrayList<>();
+    for (CanvasResourceDO resource : resourceMapper.listByOwnerNode(canvasId, nodeId)) {
+      resources.add(
+          new CanvasResource(
+              resource.getId(),
+              resource.getCanvasId(),
+              resource.getOwnerNodeId(),
+              resource.getResourceIndex(),
+              resource.getBlobId(),
+              resource.getName(),
+              resource.getTextContent(),
+              resource.getCreatedAt().toInstant()));
+    }
+    CanvasFunction function =
+        node.getModelKey() == null
+            ? null
+            : new CanvasFunction(node.getModelKey(), node.getFunctionConfigJson());
+    return new CanvasResourceNode(
+        node.getId(),
+        node.getCanvasId(),
+        node.getName(),
+        new CanvasTransform(node.getX(), node.getY(), node.getWidth(), node.getHeight()),
+        node.getGroupId(),
+        resources,
+        function,
+        runRepository.findByNodeId(nodeId).orElse(null));
+  }
+
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
     CanvasFunctionModel model = registry.require(stateCodec.modelKey(run.stateJson())).model();
     return stateCodec.decode(run.stateJson(), model);
@@ -296,10 +429,45 @@ public class CanvasFunctionRunTransactions {
         clock.instant());
   }
 
+  private CanvasDocumentDO requireDocumentForUpdate(UUID canvasId) {
+    CanvasDocumentDO document = documentMapper.getByIdForUpdate(canvasId);
+    if (document == null) {
+      throw notFound("Canvas document not found");
+    }
+    return document;
+  }
+
+  private StorageBlobManager requireBlobManager() {
+    StorageBlobManager blobManager = blobManagers.getIfAvailable();
+    if (blobManager == null) {
+      throw new IllegalStateException("global blob storage is unavailable");
+    }
+    return blobManager;
+  }
+
+  private static CanvasResourceKind kindOf(String mediaType) {
+    if (mediaType == null) {
+      throw new IllegalArgumentException("blob mediaType must not be null");
+    }
+    if (mediaType.startsWith("image/")) {
+      return CanvasResourceKind.IMAGE;
+    }
+    if (mediaType.startsWith("video/")) {
+      return CanvasResourceKind.VIDEO;
+    }
+    if (mediaType.startsWith("audio/")) {
+      return CanvasResourceKind.AUDIO;
+    }
+    if (mediaType.startsWith("text/")) {
+      return CanvasResourceKind.TEXT;
+    }
+    throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
+  }
+
   private static boolean matchesRunning(CanvasFunctionRun run, String requestId) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
-        && run.requestId().equals(requestId);
+        && run.requestId().toString().equals(requestId);
   }
 
   private static String outputName(String nodeName, CanvasResourceKind outputKind) {
@@ -314,12 +482,6 @@ public class CanvasFunctionRunTransactions {
     String base =
         nodeName.length() <= maxBaseLength ? nodeName : nodeName.substring(0, maxBaseLength);
     return base + extension;
-  }
-
-  private static void requirePositive(long value, String field) {
-    if (value <= 0L) {
-      throw new IllegalArgumentException(field + " must be > 0");
-    }
   }
 
   private static CanvasFunctionRunException notFound(String message) {

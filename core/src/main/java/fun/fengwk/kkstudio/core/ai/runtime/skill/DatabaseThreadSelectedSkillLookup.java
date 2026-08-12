@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.skill.ThreadSelectedSkillLookup;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 从与已 claim 的 Model invocation 一起持久化的不可变请求中解析选中的 skills。
@@ -27,13 +28,9 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
   }
 
   @Override
-  public List<SkillBinding> selectedSkills(long invocationId, long threadId) {
-    if (invocationId <= 0) {
-      throw new IllegalArgumentException("invocationId must be positive");
-    }
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+  public List<SkillBinding> selectedSkills(UUID invocationId, UUID threadId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(threadId, "threadId");
     String requestJson = mapper.findModelRequest(invocationId, threadId);
     if (requestJson == null) {
       return List.of();

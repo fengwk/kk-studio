@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -29,6 +30,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Stop 进程内的本地取消：invocation id 仅在 durable 事务提交后才下发，terminal sibling 被排除， 每次失败都相互隔离，replay/idle
@@ -43,8 +45,8 @@ class HarnessRuntimeStopLocalCancellationTest {
         seedModel(store, ModelInvocationStatus.READY);
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
-    List<Long> modelCalls = new ArrayList<>();
-    List<Long> toolCalls = new ArrayList<>();
+    List<UUID> modelCalls = new ArrayList<>();
+    List<UUID> toolCalls = new ArrayList<>();
     HarnessRuntime runtime =
         new HarnessRuntime(
             store,
@@ -63,7 +65,7 @@ class HarnessRuntimeStopLocalCancellationTest {
             },
             toolCalls::add);
 
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(List.of(baseline.modelId()), modelCalls);
@@ -74,7 +76,7 @@ class HarnessRuntimeStopLocalCancellationTest {
   void toolCancellationIncludesOnlyOriginallyNonTerminalSiblings() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 3);
-    List<Long> ids = baseline.toolIds();
+    List<UUID> ids = baseline.toolIds();
     beginDispatchTool(store, ids.get(1));
     markRunningTool(store, ids.get(1));
     beginDispatchTool(store, ids.get(2));
@@ -82,11 +84,11 @@ class HarnessRuntimeStopLocalCancellationTest {
     succeedTool(store, ids.get(2));
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
-    for (long id : ids) {
+    for (UUID id : ids) {
       seedToolWork(store, id);
     }
-    List<Long> modelCalls = new ArrayList<>();
-    List<Long> toolCalls = new ArrayList<>();
+    List<UUID> modelCalls = new ArrayList<>();
+    List<UUID> toolCalls = new ArrayList<>();
     HarnessRuntime runtime =
         new HarnessRuntime(
             store,
@@ -105,7 +107,7 @@ class HarnessRuntimeStopLocalCancellationTest {
                       .isPresent());
             });
 
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     assertTrue(modelCalls.isEmpty());
     assertEquals(List.of(ids.get(0), ids.get(1)), toolCalls);
@@ -116,7 +118,7 @@ class HarnessRuntimeStopLocalCancellationTest {
   void cancellationFailuresAreIsolatedFromTheCommittedStopAndFromEachOther() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 2);
-    List<Long> calls = new ArrayList<>();
+    List<UUID> calls = new ArrayList<>();
     HarnessRuntime runtime =
         new HarnessRuntime(
             store,
@@ -127,11 +129,11 @@ class HarnessRuntimeStopLocalCancellationTest {
               throw new IllegalStateException("local cancellation failed");
             });
 
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     assertEquals(StopResult.Status.STOPPED, result.status());
     assertEquals(baseline.toolIds(), calls);
-    for (long id : baseline.toolIds()) {
+    for (UUID id : baseline.toolIds()) {
       ToolInvocation tool = storedTool(store, id);
       assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
       assertNotNull(tool.resultEntryId());
@@ -142,19 +144,19 @@ class HarnessRuntimeStopLocalCancellationTest {
   void replayAndIdleStopsDoNotRepeatLocalCancellation() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline active = seedModel(store, ModelInvocationStatus.READY);
-    List<Long> calls = new ArrayList<>();
+    List<UUID> calls = new ArrayList<>();
     HarnessRuntime runtime =
         new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC), calls::add, ignored -> {});
-    runtime.stop(new StopCommand(active.threadId(), "stop-1", 0));
-    runtime.stop(new StopCommand(active.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(active.threadId(), TestIds.id(1), 0));
+    runtime.stop(new StopCommand(active.threadId(), TestIds.id(1), 0));
     assertEquals(List.of(active.modelId()), calls);
 
     HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
-    runtime.stop(new StopCommand(idle.threadId(), "idle-stop", 0));
+    runtime.stop(new StopCommand(idle.threadId(), TestIds.id(2), 0));
     assertEquals(List.of(active.modelId()), calls);
   }
 
-  private static ToolInvocation storedTool(InMemoryHarnessStore store, long toolId) {
+  private static ToolInvocation storedTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
   }
 }

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Model 执行 admission / stream 端口：把一次冻结的 Model invocation 提交给外部 Gateway。
@@ -34,12 +35,10 @@ public interface ModelGateway {
   StartResult start(Execution execution, Listener listener);
 
   /** 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，request 已冻结。 */
-  record Execution(long invocationId, int proposedAttempt, ModelInvocationRequest request) {
+  record Execution(UUID invocationId, int proposedAttempt, ModelInvocationRequest request) {
 
     public Execution {
-      if (invocationId <= 0) {
-        throw new IllegalArgumentException("invocationId must be positive");
-      }
+      Objects.requireNonNull(invocationId, "invocationId");
       if (proposedAttempt <= 0) {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }

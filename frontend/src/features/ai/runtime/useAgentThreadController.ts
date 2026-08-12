@@ -17,6 +17,13 @@ import {
   createStopRequestId,
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
+import {
+  hasMessageContent,
+  partsKey,
+  slashQueryOf,
+  trimMessageParts,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
@@ -35,11 +42,11 @@ function errorMessage(error: unknown): string {
 
 /**
  * 一次失败发送的回放身份：精确的 command batch（保持相同的 ID/负载/顺序
- * 以及原始 expected cursor），加上恢复后的 composer 内容。
+ * 以及原始 expected cursor），加上恢复后的 ordered composer parts。
  */
 export interface CommandBatchReplay {
   plan: CommandBatchPlan
-  content: string
+  parts: ComposerPart[]
 }
 
 /**
@@ -82,14 +89,14 @@ export function retireStaleStopPending(
 
 export function useAgentThreadController(
   threadId: string,
-  initialDraft = '',
+  initialParts: ComposerPart[] = [],
   initialReplay?: CommandBatchReplay,
-  buildBatch: ((content: string) => CommandBatchPlan | null) | null = null,
+  buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
   environmentReadyByName: ReadonlyMap<string, boolean> | null = null,
 ) {
   const { t } = useI18n()
-  const [draft, setDraftState] = useState(initialDraft)
-  const draftRef = useRef(initialDraft)
+  const [draft, setDraftState] = useState<ComposerPart[]>(initialParts)
+  const draftRef = useRef<ComposerPart[]>(initialParts)
   const [actionError, setActionError] = useState<string | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
@@ -146,8 +153,8 @@ export function useAgentThreadController(
     if (initializedReplayThreadRef.current === threadId) {
       return
     }
-    setDraftState(initialDraft)
-    draftRef.current = initialDraft
+    setDraftState(initialParts)
+    draftRef.current = initialParts
     replayRef.current = initialReplay ?? null
     setReplayPending(initialReplay != null)
     initializedReplayThreadRef.current = threadId
@@ -155,7 +162,7 @@ export function useAgentThreadController(
     pendingStopRef.current = null
     setStopReplayPending(false)
     decisionIdByInvocation.current.clear()
-  }, [initialDraft, initialReplay, threadId])
+  }, [initialParts, initialReplay, threadId])
 
   const approvalMutation = useMutation({
     mutationFn: ({
@@ -241,9 +248,9 @@ export function useAgentThreadController(
     setActionError(errorMessage(error))
   }
 
-  function setDraft(next: string) {
+  function setDraft(next: ComposerPart[]) {
     // 把恢复的 draft 编辑为不同内容会重置请求回放身份。
-    if (replayRef.current != null && next !== replayRef.current.content) {
+    if (replayRef.current != null && partsKey(next) !== partsKey(replayRef.current.parts)) {
       replayRef.current = null
       setReplayPending(false)
     }
@@ -251,9 +258,14 @@ export function useAgentThreadController(
     setDraftState(next)
   }
 
-  function submitMessage(): Promise<void> {
-    const content = draft.trim()
-    if (!content || content.startsWith('/') || !thread) {
+  /**
+   * 提交消息。payload 用于构建 command batch；localDraft（客户端 localId 快照）
+   * 用于 replay 与失败恢复——两者分开，绝不把服务端 uploadId 回填进草稿。
+   */
+  function submitMessage(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]): Promise<void> {
+    const trimmed = trimMessageParts(payloadParts ?? draft)
+    const localDraft = trimMessageParts(localDraftParts ?? draft)
+    if (!hasMessageContent(trimmed) || slashQueryOf(trimmed) != null || !thread) {
       return Promise.resolve()
     }
     if (!bound) {
@@ -265,7 +277,7 @@ export function useAgentThreadController(
       return Promise.resolve()
     }
     setActionError(null)
-    const plan = buildBatch(content)
+    const plan = buildBatch(trimmed)
     if (plan == null) {
       return Promise.resolve()
     }
@@ -275,11 +287,11 @@ export function useAgentThreadController(
     const reused = previous != null && previous.plan.identity === plan.identity
       ? previous.plan
       : plan
-    replayRef.current = { plan: reused, content }
+    replayRef.current = { plan: reused, parts: localDraft }
     setReplayPending(true)
-    // 先捕获 content + id，随后立即清空 draft，以便输入下一条消息。
-    draftRef.current = ''
-    setDraftState('')
+    // 先捕获 parts + id，随后立即清空 draft，以便输入下一条消息。
+    draftRef.current = []
+    setDraftState([])
     setInFlightSubmissions((count) => count + 1)
     return batchMutation
       .mutateAsync(reused.batch)
@@ -294,7 +306,7 @@ export function useAgentThreadController(
         reportMutationError(error, 'ai.runtime.action.sendFailed')
         // 仅在 composer 为空时恢复，以免破坏正在输入中的下一条 draft。
         // （Ref 变更必须在 state updater 之外进行：React 会延迟执行 updater 函数。）
-        if (draftRef.current.trim() === '') {
+        if (!hasMessageContent(draftRef.current)) {
           if (isConflictError(error)) {
             // 409 = batch 未被接受：精确回放已过期。下一次发送会基于刷新的
             // head/nextSequence 用全新的 command id 重新构建。
@@ -302,11 +314,12 @@ export function useAgentThreadController(
             setReplayPending(false)
           } else {
             // 网络/不确定的失败会保留精确 batch，用于逐字节回放。
-            replayRef.current = { plan: reused, content }
+            replayRef.current = { plan: reused, parts: localDraft }
             setReplayPending(true)
           }
-          draftRef.current = content
-          setDraftState(content)
+          // 恢复本地草稿（客户端 localId），与提交 payload 分开。
+          draftRef.current = localDraft
+          setDraftState(localDraft)
         }
       })
       .finally(() => {

@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 class BranchViewTest {
 
@@ -64,35 +65,39 @@ class BranchViewTest {
     assertThrows(NullPointerException.class, () -> new BranchView(null));
   }
 
+  private static UUID uuid(long value) {
+    return new UUID(0L, value);
+  }
+
   private static EntryPath pathWithCustomEntries() {
     BranchSettings settings =
         new BranchSettings(
             null, "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), List.of());
     return new EntryPath(
         List.of(
-            new Entry(1L, 10L, null, new RootPayload(settings), NOW),
+            new Entry(uuid(1), uuid(10), null, new RootPayload(settings), NOW),
             new Entry(
-                2L,
-                10L,
-                1L,
+                uuid(2),
+                uuid(10),
+                uuid(1),
                 new CustomEntryPayload("com.example.goal", "goal", 1, "{\"state\":\"first\"}"),
                 NOW),
             new Entry(
-                3L,
-                10L,
-                2L,
+                uuid(3),
+                uuid(10),
+                uuid(2),
                 new CustomEntryPayload("com.example.goal", "memory", 1, "{\"note\":\"memo\"}"),
                 NOW),
             new Entry(
-                4L,
-                10L,
-                3L,
+                uuid(4),
+                uuid(10),
+                uuid(3),
                 new CustomEntryPayload("com.example.goal", "goal", 2, "{\"state\":\"second\"}"),
                 NOW),
             new Entry(
-                5L,
-                10L,
-                4L,
+                uuid(5),
+                uuid(10),
+                uuid(4),
                 new CustomEntryPayload("com.example.other", "goal", 1, "{\"state\":\"other\"}"),
                 NOW)));
   }

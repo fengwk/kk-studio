@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.spring.redis;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -28,15 +29,14 @@ class RedisRealtimeConfigTest {
   }
 
   @Test
-  void keyIsPrefixPlusDecimalThreadId() {
+  void keyIsPrefixPlusUuidThreadId() {
     RedisRealtimeConfig config = new RedisRealtimeConfig("kk-studio:harness:realtime:", 5000);
-    assertEquals("kk-studio:harness:realtime:42", config.key(42L));
+    assertEquals("kk-studio:harness:realtime:" + id(42L), config.key(id(42L)));
   }
 
   @Test
-  void keyRejectsNonPositiveThreadId() {
+  void keyRejectsNullThreadId() {
     RedisRealtimeConfig config = new RedisRealtimeConfig();
-    assertThrows(IllegalArgumentException.class, () -> config.key(0L));
-    assertThrows(IllegalArgumentException.class, () -> config.key(-1L));
+    assertThrows(NullPointerException.class, () -> config.key(null));
   }
 }

@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 为 PLATFORM tool 解析当前 Thread Agent 已选中的 skill 元数据。
@@ -13,9 +14,9 @@ import java.util.Optional;
 public interface ThreadSelectedSkillLookup {
 
   /** 随已 claim 的 Model invocation 持久化的 skill binding。 */
-  List<SkillBinding> selectedSkills(long invocationId, long threadId);
+  List<SkillBinding> selectedSkills(UUID invocationId, UUID threadId);
 
-  default Optional<SkillBinding> findSelected(long invocationId, long threadId, String skillName) {
+  default Optional<SkillBinding> findSelected(UUID invocationId, UUID threadId, String skillName) {
     if (skillName == null || skillName.isBlank()) {
       return Optional.empty();
     }

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 
 import java.util.List;
+import java.util.UUID;
 
 /** Chat↔Thread 历史关联的应用边界。 */
 @Service
@@ -29,14 +30,14 @@ public class ChatThreadServiceImpl implements ChatThreadService {
 
   @Override
   @Transactional(readOnly = true)
-  public List<Long> listThreadIds(String chatId) {
+  public List<UUID> listThreadIds(String chatId) {
     Chat chat = chatGuard.requireChat(chatId);
     return chatThreadRepository.listThreadIds(chat.getId());
   }
 
   @Override
   @Transactional
-  public void associateThread(String chatId, long threadId) {
+  public void associateThread(String chatId, UUID threadId) {
     Chat chat = chatGuard.requireChat(chatId);
     // ON CONFLICT DO NOTHING 使重复关联幂等。
     chatThreadRepository.associate(chat.getId(), threadId);

@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 
 /** MiniMax-H3 Ref2VA adapter 装配。 */
 @Configuration
@@ -15,8 +16,8 @@ import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
 public class MiniMaxH3Configuration {
 
   @Bean
-  public H3MediaPreflight h3MediaPreflight(ObjectMapper objectMapper) {
-    return new H3MediaPreflight(objectMapper);
+  public H3MediaPreflight h3MediaPreflight() {
+    return new H3MediaPreflight();
   }
 
   @Bean
@@ -53,6 +54,7 @@ public class MiniMaxH3Configuration {
       HarnessOneShotService oneShotService,
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
+      ObjectProvider<StorageBlobIngestService> ingestServices,
       ObjectMapper objectMapper) {
     return new MiniMaxH3CanvasFunctionAdapter(
         properties,
@@ -61,6 +63,7 @@ public class MiniMaxH3Configuration {
         oneShotService,
         workflowBuilder,
         comfyClients,
+        ingestServices,
         objectMapper);
   }
 }

@@ -21,20 +21,27 @@ function positiveDecimal(value, field) {
   return raw
 }
 
+/** 实体标识统一为 canonical UUID 字符串（Chat/Thread/Entry/Session/Invocation/Command 均如此）。 */
+function canonicalUuid(value, field) {
+  const raw = String(value ?? '')
+  assert(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(raw),
+    `expected canonical UUID ${field}: ${JSON.stringify(value)}`,
+  )
+  return raw
+}
+
 function nonNegativeDecimal(value, field) {
   const raw = String(value ?? '')
   assert(/^(0|[1-9]\d*)$/.test(raw), `expected non-negative decimal ${field}: ${JSON.stringify(value)}`)
   return raw
 }
 
-/** 严格校验 Thread 投影 DTO 的 decimal 标识字段并返回 threadId。 */
+/** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
 export function threadIdOf(thread) {
-  const threadId = positiveDecimal(thread?.threadId, 'threadId')
-  assert(thread.sessionId && /^[1-9]\d*$/.test(String(thread.sessionId)), JSON.stringify(thread))
-  assert(
-    thread.headEntryId && /^[1-9]\d*$/.test(String(thread.headEntryId)),
-    JSON.stringify(thread),
-  )
+  const threadId = canonicalUuid(thread?.threadId, 'threadId')
+  canonicalUuid(thread.sessionId, 'sessionId')
+  canonicalUuid(thread.headEntryId, 'headEntryId')
   assert(
     thread.nextCommandSequence && /^[1-9]\d*$/.test(String(thread.nextCommandSequence)),
     `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
@@ -180,8 +187,8 @@ export async function listEnvironments(ctx) {
 export function userMessageCommand(content, clientCommandId) {
   assert(typeof content === 'string' && content.trim(), 'content required')
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/content.
-  return { type: 'USER_MESSAGE', clientCommandId, content }
+  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/contents（TEXT/ATTACHMENT，无文本 shorthand）。
+  return { type: 'USER_MESSAGE', clientCommandId, contents: [{ type: 'TEXT', text: content }] }
 }
 
 export function customMessageCommand(role, content, clientCommandId) {
@@ -234,7 +241,7 @@ export async function enqueueCommands(
     'POST',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/commands`,
     {
-      expectedHeadEntryId: positiveDecimal(expectedHeadEntryId, 'expectedHeadEntryId'),
+      expectedHeadEntryId: canonicalUuid(expectedHeadEntryId, 'expectedHeadEntryId'),
       expectedNextCommandSequence: positiveDecimal(
         expectedNextCommandSequence,
         'expectedNextCommandSequence',
@@ -254,7 +261,7 @@ export async function updateThreadHead(ctx, threadId, { targetEntryId, expectedR
     'PUT',
     `/api/ai/runtime/threads/${encodeURIComponent(threadId)}/head`,
     {
-      targetEntryId: positiveDecimal(targetEntryId, 'targetEntryId'),
+      targetEntryId: canonicalUuid(targetEntryId, 'targetEntryId'),
       expectedRevision: nonNegativeDecimal(expectedRevision, 'expectedRevision'),
     },
   )
@@ -280,7 +287,7 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedRevisio
   assert(stop?.thread, `expected stop result thread: ${JSON.stringify(json)}`)
   assert(typeof stop.status === 'string', JSON.stringify(stop))
   if (stop.stoppedTurnEndEntryId != null) {
-    positiveDecimal(stop.stoppedTurnEndEntryId, 'stoppedTurnEndEntryId')
+    canonicalUuid(stop.stoppedTurnEndEntryId, 'stoppedTurnEndEntryId')
   }
   assert(
     Number.isSafeInteger(stop.cancelledCommandCount) && stop.cancelledCommandCount >= 0,
@@ -311,10 +318,8 @@ export async function approveToolInvocation(
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)
   const invocation = envelopeData(json)
-  assert(
-    invocation?.id && /^[1-9]\d*$/.test(String(invocation.id)) && invocation.status,
-    `invalid ToolInvocationDTO: ${JSON.stringify(json)}`,
-  )
+  assert(invocation?.id && invocation.status, `invalid ToolInvocationDTO: ${JSON.stringify(json)}`)
+  canonicalUuid(invocation.id, 'invocation.id')
   return invocation
 }
 
@@ -360,7 +365,7 @@ export async function waitForModelTextDeltaAfterSseConnected(
   startWork,
   { timeoutMs = 90_000 } = {},
 ) {
-  const expectedThreadId = positiveDecimal(threadId, 'threadId')
+  const expectedThreadId = canonicalUuid(threadId, 'threadId')
   assert(typeof startWork === 'function', 'startWork must be a function')
   assert(
     typeof ctx?.baseUrl === 'string' && ctx.baseUrl.trim(),
@@ -471,7 +476,9 @@ function parseModelTextDelta(record, expectedThreadId) {
     envelope.type !== 'MODEL_DELTA'
     || envelope.subjectKind !== 'MODEL_INVOCATION'
     || envelope.threadId !== expectedThreadId
-    || !/^[1-9]\d*$/.test(String(envelope.subjectId || ''))
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      String(envelope.subjectId || ''),
+    )
     || !Number.isSafeInteger(envelope.attempt)
     || envelope.attempt <= 0
     || typeof envelope.createdAt !== 'string'

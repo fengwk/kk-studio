@@ -4,10 +4,11 @@
 
 ## 1. 模块与 ID
 
-Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）、`compaction` 与 `cache`。Runtime 内部使用 `long` durable ID；HTTP 边界使用 strict decimal strings：
+Runtime 领域包包括 `history`（Entry）、`thread`（Thread/Command/Classifier）、`invocation`（Model/Tool）、`work`、`processor`、`session`（消息语义）、`compaction` 与 `cache`。实体主键（Thread/Session/Entry/Invocation/Command id）在领域模型中是 `UUID`，HTTP wire 上编码为 canonical UUID string；`sequence` 与 `revision` 仍是 `long`，wire 上编码为 strict decimal strings：
 
 ```text
-id / sequence          -> [1-9][0-9]*
+实体 id（threadId/sessionId/entryId/invocationId/clientCommandId/stopRequestId/decisionId） -> canonical UUID
+sequence               -> [1-9][0-9]*
 revision / afterRevision -> 0|[1-9][0-9]*
 ```
 
@@ -17,8 +18,8 @@ revision / afterRevision -> 0|[1-9][0-9]*
 
 ```java
 public record ThreadState(
-    long id,
-    long headEntryId,        // 必须为正
+    UUID id,
+    UUID headEntryId,        // 本 Thread 当前 head Entry（已提交）
     boolean yoloEnabled,
     long nextCommandSequence, // 必须 >= 1（创建即为 1）
     long revision,           // 必须 >= 0
@@ -26,7 +27,7 @@ public record ThreadState(
     Instant updatedAt) {}
 ```
 
-- `headEntryId` 必须为正；Thread 的当前 Session、Environment、status 与 branch settings 由 head Entry 分支派生。
+- `headEntryId` 必须是本 Thread Session 的已提交 Entry id；Thread 的当前 Session、Environment、status 与 branch settings 由 head Entry 分支派生。
 - 已提交 Entry append-only；每个 Session 只有一个无 parent ROOT。
 - 创建 Thread 时 `nextCommandSequence=1`、`revision=0`；`validateTransition` 强制每次可见变化 revision 恰好 +1，exact replay 恒接受。
 
@@ -42,11 +43,11 @@ Entry payload 由 `HistoryEntryPayloadJsonCodec` 严格编解码（ROOT/TURN_STA
 ```json
 {
   "settings": { "environmentName": null, "agentName": "...", "model": {...}, "activeTools": [...] },
-  "subagentContext": null | { "parentThreadId": "1", "rootThreadId": "1", "taskInvocationId": "2", "depth": 2 }
+  "subagentContext": null | { "parentThreadId": "<uuid>", "rootThreadId": "<uuid>", "taskInvocationId": "<uuid>", "depth": 2 }
 }
 ```
 
-普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{phase, trigger, tokensBefore, complete, summaryText, firstKeptEntryId, cutEntryId, turnPrefixStartEntryId}`：`tokensBefore` 是 JSON number，Entry ID 是 canonical positive decimal string。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
+普通用户 Session 的 `subagentContext` 为 null；`depth` 以普通根 Thread 为 1，子 Session 从 2 开始。`CUSTOM` payload 为嵌套对象形态：`{"pluginId": "...", "customType": "...", "schemaVersion": 1, "data": {...}}`；`CUSTOM_MESSAGE` payload 为 `{"pluginId": "...", "customType": "...", "rendererKey": "...", "message": {...}, "details": {...}}`（`data`/`details` 是嵌套 JSON object，不是 raw JSON 字符串）。`COMPACTION` payload 固定为 `{phase, trigger, tokensBefore, complete, summaryText, firstKeptEntryId, cutEntryId, turnPrefixStartEntryId}`：`tokensBefore` 是 JSON number，Entry ID 是 canonical UUID string。`CUSTOM` 是透明 branch state：不参与 turn grammar、默认不投影给 provider；插件自行定义 schema，`ContextProjector` 才能把需要的状态显式投影。Goal 使用 `goal/state@1` 完整替换快照，当前 branch 最近一条生效。
 
 ## 3. 命令 batch
 
@@ -61,18 +62,16 @@ SET_ACTIVE_TOOLS, SET_YOLO
 
 ```json
 {
-  "expectedHeadEntryId": "1",
+  "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
   "expectedNextCommandSequence": "3",
   "commands": [
-    { "type": "SET_AGENT", "clientCommandId": "cid-1", "agentName": "coder" },
+    { "type": "SET_AGENT", "clientCommandId": "00000000-0000-0000-0000-000000000101", "agentName": "coder" },
     {
       "type": "USER_MESSAGE",
-      "clientCommandId": "cid-2",
+      "clientCommandId": "00000000-0000-0000-0000-000000000102",
       "contents": [
         { "type": "TEXT", "text": "describe these references" },
-        { "type": "IMAGE", "mediaType": "image/png", "source": "https://example.test/image.png" },
-        { "type": "AUDIO", "mediaType": "audio/mpeg", "source": "https://example.test/audio.mp3" },
-        { "type": "VIDEO", "mediaType": "video/mp4", "source": "https://example.test/video.mp4" }
+        { "type": "ATTACHMENT", "uploadId": "00000000-0000-0000-0000-000000000200" }
       ]
     }
   ]
@@ -82,18 +81,18 @@ SET_ACTIVE_TOOLS, SET_YOLO
 契约：
 
 - `expectedHeadEntryId` / `expectedNextCommandSequence` 是 exact CAS cursors，读取自最新 snapshot DTO；无 batch 级 identity 字段。
-- `commands` 非空；每个 command 必须有非空 `clientCommandId`（thread 内唯一，幂等键）；同 batch 内 `clientCommandId` 不得重复。
-- `USER_MESSAGE` 必须且只能携带一个纯文本 shorthand `text` 或非空结构化 `contents`，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`，未知字段、未知类型、模态不匹配的 mediaType 与空 source 一律拒绝。现有 `content` 纯文本 shorthand 继续兼容，但不能与 `text`/`contents` 同时出现。
+- `commands` 非空；每个 command 必须有 canonical UUID `clientCommandId`（thread 内唯一，幂等键）；同 batch 内不得重复。
+- `USER_MESSAGE` 必须且只能携带一个非空、有序的 `contents` 列表，**不携带 role**（role 恒为 USER）；`contents` 元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费物化为 durable `resource(blobId,name,preview)`），未知字段、未知类型、空 `contents` 与非 canonical uploadId 一律拒绝。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝、`content` 对 USER_MESSAGE 禁用。
 - `CUSTOM_MESSAGE` 携带 `content` 与 `role: "SYSTEM" | "USER"`（大写枚举，strict mapper 拒绝其他值）。
 - `SET_AGENT` 携带 `agentName`；`SET_MODEL` 携带 `model`（providerName/modelName/variant）；`SET_ACTIVE_TOOLS` 携带 `activeTools` 名称列表；`SET_YOLO` 携带 `yoloEnabled`；`SET_ENVIRONMENT` 携带 `environmentName`（canonical bounded 小写路由名称或 null）。
-- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `text`/`contents`/`role` 等不相关字段。
+- mapper 对每个 discriminator 严格校验：未知 type、未知/缺失字段、非 canonical 值一律 400；`USER_MESSAGE` 之外的命令 payload 拒绝 `contents`（`role` 仅 `CUSTOM_MESSAGE` 允许）等不相关字段，未知字段（含 `text`）一律拒绝。
 
 ### Ordered command-set replay
 
 幂等查找发生在任何 head/sequence/live 检查之前；**没有 batch 级 identity**，replay 是 ordered command-set replay：
 
-- **全部 `clientCommandId` 已存在**：仅当每个存储 payload 与请求 payload 相同，且存储 sequence 在请求顺序上连续（`seq[i] == seq[0] + i`）时接受——**忽略 `expectedHeadEntryId`/`expectedNextCommandSequence` 与 QUEUED/APPLIED/CANCELLED lifecycle**，返回原行不变。
-- 仅部分 id 存在 → `PARTIAL_COMMAND_REPLAY`（缺失命令永不补齐）；已存在 id 但 payload 不同 → `COMMAND_ID_REUSED`；id 全部存在、payload 相同但 sequence 非连续 → `COMMAND_REPLAY_ORDER_MISMATCH`。
+- **全部 `clientCommandId` 已存在**：仅当每个存储 `requestHash` 与本次 raw 请求 hash 相同，且存储 sequence 在请求顺序上连续（`seq[i] == seq[0] + i`）时接受——**忽略 `expectedHeadEntryId`/`expectedNextCommandSequence` 与 QUEUED/APPLIED/CANCELLED lifecycle**，返回原行不变。hash 独立于 ATTACHMENT 消费后的 durable payload 形态。
+- 仅部分 id 存在 → `PARTIAL_COMMAND_REPLAY`（缺失命令永不补齐）；已存在 id 但 hash 不同 → `COMMAND_ID_REUSED`；id 全部存在、hash 相同但 sequence 非连续 → `COMMAND_REPLAY_ORDER_MISMATCH`。
 
 ### Fresh batch admission
 
@@ -108,7 +107,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
 ```json
 {
   "revision": "7",
-  "thread": { "threadId": "1", "sessionId": "2", "headEntryId": "5",
+  "thread": { "threadId": "00000000-0000-0000-0000-000000000001", "sessionId": "00000000-0000-0000-0000-000000000002", "headEntryId": "00000000-0000-0000-0000-000000000005",
               "yoloEnabled": false, "nextCommandSequence": "4", "revision": "7",
               "status": "TOOL_RUNNING", "processing": true, "branchSettings": {...},
               "createTime": "...", "updateTime": "..." },
@@ -128,7 +127,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
 
 | 情形 | HTTP |
 | --- | --- |
-| DTO 字段非法、id/revision 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
+| DTO 字段非法、实体 id 非 canonical UUID、sequence/revision 非 strict decimal、未知命令 type、非 canonical 名称 | 400 |
 | 作为请求目标的 Thread/Entry 不存在（snapshot、commands、head、stop 路径） | 404 |
 | 命令 cursor 过期（`STALE_COMMAND_CURSOR`）、revision 过期（`STALE_REVISION`）、Thread 非 quiescent、terminal apply pending、跨 Session move、move 到 continueModel TURN_END、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`） | 409 |
@@ -141,7 +140,7 @@ typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAN
 ## 6. MOVE_HEAD
 
 ```java
-public record MoveHeadCommand(long threadId, long targetEntryId, long expectedRevision) {}
+public record MoveHeadCommand(UUID threadId, UUID targetEntryId, long expectedRevision) {}
 ```
 
 - 同 target → no-op（返回当前 Thread，不 bump revision）。
@@ -153,7 +152,7 @@ public record MoveHeadCommand(long threadId, long targetEntryId, long expectedRe
 ## 7. Stop
 
 ```java
-public record StopCommand(long threadId, String stopRequestId, long expectedRevision) {}
+public record StopCommand(UUID threadId, UUID stopRequestId, long expectedRevision) {}
 ```
 
 协议（在 Thread 行锁内）：
@@ -189,7 +188,7 @@ lock Thread
 ```json
 {
   "decision": "ALLOW" | "DENY",
-  "decisionId": "stable-client-key",
+  "decisionId": "00000000-0000-0000-0000-000000000301",
   "actor": "web",
   "reason": null | "text"
 }
@@ -222,10 +221,10 @@ public record ModelInvocationRequest(
 - `providerRequest.tools` 与 `toolBindings` 必须数量、顺序、名称一一对应；tool/skill/subagent binding 名称各自不得重复；每个 environment-bound tool/skill 必须引用本请求 route。
 - `SubagentBinding(name, description)`：`name` 是 canonical 非空短名（≤64 字符），`description` 是可空展示描述快照（≤512 字符）；随 request 冻结，task 执行绝不依据后续 Agent 配置扩权。
 - `contextWindow` 是创建时冻结的正 int；threshold、retention 与 overflow retry 均使用该值，不受后续 Model config 修改影响。
-- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent/provider tools 必须全部为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical positive decimal strings。
+- `compaction == null` 表示正常调用；非 null 时 tool/skill/subagent/provider tools 必须全部为空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix。`tokensBefore` 是 JSON number，三个 Entry ID 是 canonical UUID strings。
 - `ToolBinding(descriptor, type, environmentName, plugin)`：`PLATFORM` binding 的 environmentName 为 null，`ENVIRONMENT` binding 指向具体 route（可为 null）；descriptor 的 type 与 binding type 一致。
 - `plugin` 为 null 或 `PluginToolBinding(pluginId, contributionLocalName, stateAccesses)`；仅 `PLATFORM` 可携带 plugin，identifier 必须 canonical，state accesses 按 customType 唯一且 mode 仅 `READ` / `WRITE`。该 provenance 随 request 冻结，retry 不按工具名重新归属。
-- `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
+- `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 - retry 重放同一份 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择。
 - JSON codec 只接受固定顶层字段并严格校验嵌套结构（未知字段拒绝）。
 
@@ -258,7 +257,7 @@ public record ModelInvocationRequest(
 `task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`），其调用与结果仍是普通 ToolInvocation/TOOL MESSAGE 事实，不引入新表或新状态机：
 
 - 运行中进度以**非 durable** Redis `TOOL_PARTIAL` 心跳发布（约 1s 一次），`details.kind=task.status`，payload 是**完整 JSON 快照**：`{threadId, subagentType, state, depth, turns, toolCalls, lastActivity, approvals[], descendants[]}`；`state` 为 `queued` / `running_model` / `running_tool` / `waiting_approval`，`approvals[]` 项为 `{invocationId, toolName, reason}`（该状态 Thread 的待决审批），`descendants[]` 是应用相同字段契约的扁平活动子树状态。descendant relay 仅用于实时呈现与审批寻址，不参与调度、并发计数或终态判定；前端按规范化完整快照整帧替换/语义去重，绝不追加或 delta 合并。
-- 终态 ToolResult 文本为 `<task id="..." state="completed|error|cancelled">` envelope：成功含 `<task_result>` 报告，失败/取消含 `<task_error>`（报告正文最多保留 8000 字符）；`details.kind=task.result`，`details` 携带 `threadId`/`subagentType`/`state`。`id` 即子 ThreadId（十进制），可作 `session_id` 恢复。
+- 终态 ToolResult 文本为 `<task id="..." state="completed|error|cancelled">` envelope：成功含 `<task_result>` 报告，失败/取消含 `<task_error>`（报告正文最多保留 8000 字符）；`details.kind=task.result`，`details` 携带 `threadId`/`subagentType`/`state`。`id` 即子 ThreadId（canonical UUID），可作 `session_id` 恢复。
 - 恢复契约：`session_id` 必须指向同 parent/root 归属的既有子 Session，且子 Thread quiescent；`maxTurns` 是软预算——达到后每 5 turn 注入一条 SYSTEM `CUSTOM_MESSAGE` 提醒（`rendererKey=message`），不是硬终止。
 
 `ProviderResponse` 是 terminal `resultJson` 的 canonical shape：

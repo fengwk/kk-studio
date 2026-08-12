@@ -103,7 +103,10 @@ SET_ACTIVE_TOOLS
 SET_YOLO
 ```
 
-每行保存 `(thread_id, sequence)`（唯一）、`client_command_id`（thread 内唯一幂等键）、`consumed_turn_start_entry_id`（被哪个 TURN_START 消费）与 `cancelled_at`。`USER_MESSAGE` 与 `CUSTOM_MESSAGE` 之外都是 settings diff 命令，被 TURN_START/CONTINUATION 消费但不产生 Message Entry。
+每行保存 `(thread_id, sequence)` 主键、UUID `client_command_id`（thread 内唯一幂等键）、
+`request_hash`（raw 命令 canonical SHA-256）、`consumed_turn_start_entry_id` 与
+`cancelled_at`。`USER_MESSAGE` 与 `CUSTOM_MESSAGE` 之外都是 settings diff 命令，被
+TURN_START/CONTINUATION 消费但不产生 Message Entry。
 
 ### Invocation
 
@@ -112,7 +115,7 @@ SET_YOLO
 | `harness_model_invocation` | thread、`turn_start_entry_id`（唯一）、`basis_head_entry_id`、完整 frozen `request` JSON（route/provider/tools/skills/**subagentBindings**/YOLO/contextWindow 与可空 compaction metadata）、status、attempt、`stream_checkpoint`（attempt-local 单调 checkpoint）、`result`/`error`/`result_entry_id`、时间 |
 | `harness_tool_invocation` | `model_invocation_id`、`assistant_entry_id`、`ordinal`（(assistant_entry_id, ordinal) 唯一）、frozen `request`（binding + plugin provenance/access）、status、attempt、`approval` JSON、`result`/`effects`/`error`/`result_entry_id`、时间 |
 
-冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
+冻结 `request` 中的 `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 连接事实与 cache capability 在每次 attempt 由 Core 按当前 `agent_provider` 行解析（见 [harness-capability-wiring.md](harness-capability-wiring.md)）。
 
 状态机（Model）：
 
@@ -232,7 +235,13 @@ ToolProcessor 消费 TOOL Work：
 3. **ToolProcessor 接收已验证、已外部化的 `ToolSuccess(result, effects)`**，先做领域校验（toolCallId、禁止 inline Binary、canonical size、effects 上限与 payload 等），再在短事务内做严格 terminal CAS（fire-once、attempt/claim ownership 校验），以一次 Store update 同时落 `SUCCEEDED + result + effects`，不做任何存储外部化；
 4. terminal 后请求 THREAD Work 做 sibling apply。本地执行取消（Stop 后）通过 process-local `modelExecutionCanceller` / `toolExecutionCanceller` best-effort 回调。
 
-**durable Resource 外部化发生在 CoreToolGateway 的 callback bridge**（`ToolResultExternalizer`，core 侧）：插件 Tool 先把声明式 intents 映射并校验为 `ToolEffectBatch`；只有 effects 合法后，terminal success 才在桥内 all-or-nothing 地做 managed externalization（先 `ResourceStore.reference` 无副作用计划、再逐项 `put`、返回 ref 必须与计划精确相等），随后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 落库；partial 拒绝 Binary/Resource 且零存储 I/O。
+`ToolResultExternalizer` 在 CoreToolGateway callback bridge 只做**瞬时** Resource 外部化：插件
+Tool 先把声明式 intents 映射并校验为 `ToolEffectBatch`；effects 合法后才按
+`ResourceStore.reference -> put -> exact ref check` 生成 `ResourceRef`，随后把
+`ToolSuccess(result,effects)` 交给 ToolProcessor 落 terminal 事实；partial 拒绝
+Binary/Resource 且零存储 I/O。durable 物化发生在 `ToolOutcomeAppender` 追加 TOOL Entry
+之前：同一 Store 事务内由 `ToolResultHistoryMaterializer` 摄入全局 `storage_blob`，消息只保存
+`resource(blobId,name,preview)` 与 Session Blob Ref，绝不保存瞬时 URI。
 
 ## 8. Command 控制面（HarnessRuntime）
 
@@ -244,7 +253,7 @@ Thread -> Commands -> ModelInvocation -> ToolInvocation siblings -> Work
 
 实现 `createThread`、`enqueueCommands`、`moveHead`、`stop`、`decideToolApproval` 与 `getThreadSnapshot`。
 
-- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在且 payload 相同、sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/不同 payload/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER_MESSAGE/CUSTOM_MESSAGE、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
+- `enqueueCommands`：幂等查找先于任何 head/sequence/live 检查——全部 `clientCommandId` 已存在、对应 `requestHash` 相同且 sequence 连续时是 **ordered command-set replay**（忽略 expected cursors 与 QUEUED/APPLIED/CANCELLED lifecycle，返回原行）；部分存在/hash 不同/非连续顺序分别 `PARTIAL_COMMAND_REPLAY` / `COMMAND_ID_REUSED` / `COMMAND_REPLAY_ORDER_MISMATCH`；全新 batch 才做双 cursor CAS（`STALE_COMMAND_CURSOR`），一次性预留全部 sequence（`revision` +1），含 `SET_ENVIRONMENT` 的 batch 额外要求真正静止前置状态（无 queued USER_MESSAGE/CUSTOM_MESSAGE、classifier 为 IDLE_OR_HISTORICAL、无 THREAD Work 行）。
 - `moveHead`：revision CAS；同 target no-op；**只允许同 Session**；无 queued command；无 live/terminal-pending context；不能指向 `continueModel=true` 的 TURN_END。
 - `stop`：先 `findReplay`（同 thread + stopRequestId 的 durable TURN_END，在 revision CAS **之前**）→ `REPLAYED`；否则 revision CAS。`IDLE_OR_HISTORICAL` 取消 queued（有取消则 revision +1、不写 stop marker；无 queued 则真正 no-op）；`CONTINUATION_DUE` 先物化 `TURN_START(CONTINUATION)` + `ASSISTANT_ERROR(CANCELLED)`，再追加 `TURN_END(STOPPED)`；Model/Tool active 则写安全 `ASSISTANT_ABORTED` 或取消/不确定 Tool Result，再追加 `TURN_END(STOPPED)`。Tool terminal winner 在 Stop 路径也共用 `ToolOutcomeAppender`，成功 sibling 的 effects 不会丢失；所有 STOPPED 路径同时取消 queued 并 fence 后续 callback。
 - `decideToolApproval`：`decisionId` 幂等；已决定请求精确 replay（保留原 `decidedAt`，无 revision bump，不请求 Work）；未决定请求必须位于锁定的 TOOL_ACTIVE 上下文，mutation/`decidedAt` 抬升到 Thread/head/Model/siblings/approval 的最新 durable 时间，`ALLOWED` → `READY` + TOOL Work，`DENIED` → `FAILED` + THREAD Work，revision 恰好 touch 一次；Work request 仍使用原始本地调度时钟。
@@ -275,7 +284,7 @@ durable mutation
 
 - 子 Thread 创建复用 `HarnessRuntime.createThread`：ROOT 携带 `SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`（普通根 depth=1，子 Session 从 2 开始；rootThreadId 在整棵委派树不变）；Thread YOLO 继承父 Thread；branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（activeTools = config.tools + skills 非空时内部 `load_skill` + subagents 非空且 depth < maxDepth 时内部 `task`）。
 - 委派权限冻结在父 `ModelInvocationRequest.subagentBindings`（Agent 名称 + 描述）；TaskTool 执行只消费该冻结 allowlist，绝不重读父 Agent 配置扩权。运行中由 `TaskTool` 轮询子 Thread snapshot：以 durable 指纹（revision/head/model/tool siblings）判定活动，idle 超时排除 active tool 时间；约 1s 一次发布非 durable `TOOL_PARTIAL` 心跳（`details.kind=task.status` 完整 JSON 快照）。活动 task 的进程内 registry 只 relay 扁平 descendant 状态给祖先心跳，使根 Thread 可审批任意深度调用；durable 子 Thread 仍是唯一执行事实。`maxTurns` 软预算达界后每 5 turn 入队 SYSTEM `CUSTOM_MESSAGE` 提醒。
-- 恢复（`session_id` = 十进制子 ThreadId）要求同 parent/root 归属且子 Thread quiescent；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 只做并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
+- 恢复（`session_id` = 子 ThreadId，canonical UUID）要求同 parent/root 归属且子 Thread quiescent；Stop/取消子 Thread 保留可恢复 Session（`cancelChild` 复用 `HarnessRuntime.stop` 的 `task-{invocationId}-cancel` stopRequestId）。进程内 `SubagentRunRegistry` 只做并发 reservation（每父/每根上限、resume 单飞），进程重启后仅由 durable Thread 恢复。
 - 子 Agent 的工具审批仍复用既有 `decideToolApproval`（以子 ThreadId 定位），approval 事实/`WAITING_APPROVAL` 语义与父 Thread 完全一致；子工具执行经同一 ToolGateway 管线，权限判定同 YOLO/Allow/Ask/Deny 规则。
 
 相关文档：

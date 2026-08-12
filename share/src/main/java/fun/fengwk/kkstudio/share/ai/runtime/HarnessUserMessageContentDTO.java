@@ -11,12 +11,13 @@ import lombok.Setter;
 /**
  * USER_MESSAGE 的结构化内容单元。
  *
- * <p>{@code type} 仅允许 TEXT / IMAGE / AUDIO / VIDEO；mapper 按类型严格校验其余字段。
+ * <p>{@code type} 仅允许 TEXT / ATTACHMENT；mapper 按类型严格校验其余字段。ATTACHMENT 携带瞬时 {@code uploadId}（READY
+ * 上传的 canonical UUID），由应用 use-case 在入队事务内物化为 durable RESOURCE。
  */
 @Data
 public class HarnessUserMessageContentDTO {
 
-  /** 内容类型 discriminator：TEXT / IMAGE / AUDIO / VIDEO。 */
+  /** 内容类型 discriminator：TEXT / ATTACHMENT。 */
   private String type;
 
   /** 仅 TEXT 使用。 */
@@ -26,19 +27,12 @@ public class HarnessUserMessageContentDTO {
   @Setter(AccessLevel.NONE)
   private boolean textFieldPresent;
 
-  /** 仅 IMAGE / AUDIO / VIDEO 使用。 */
-  private String mediaType;
+  /** 仅 ATTACHMENT 使用：READY 上传的 canonical UUID string。 */
+  private String uploadId;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
-  private boolean mediaTypeFieldPresent;
-
-  /** 仅 IMAGE / AUDIO / VIDEO 使用的 URI 或内联编码。 */
-  private String source;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean sourceFieldPresent;
+  private boolean uploadIdFieldPresent;
 
   @JsonSetter("text")
   public void setText(String text) {
@@ -46,16 +40,10 @@ public class HarnessUserMessageContentDTO {
     this.textFieldPresent = true;
   }
 
-  @JsonSetter("mediaType")
-  public void setMediaType(String mediaType) {
-    this.mediaType = mediaType;
-    this.mediaTypeFieldPresent = true;
-  }
-
-  @JsonSetter("source")
-  public void setSource(String source) {
-    this.source = source;
-    this.sourceFieldPresent = true;
+  @JsonSetter("uploadId")
+  public void setUploadId(String uploadId) {
+    this.uploadId = uploadId;
+    this.uploadIdFieldPresent = true;
   }
 
   @JsonIgnore
@@ -64,13 +52,8 @@ public class HarnessUserMessageContentDTO {
   }
 
   @JsonIgnore
-  public boolean hasMediaTypeField() {
-    return mediaTypeFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasSourceField() {
-    return sourceFieldPresent;
+  public boolean hasUploadIdField() {
+    return uploadIdFieldPresent;
   }
 
   @JsonAnySetter

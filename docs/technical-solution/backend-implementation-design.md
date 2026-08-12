@@ -30,13 +30,13 @@ flowchart LR
 | `core.ai.runtime` | `DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、`ToolResultExternalizer`、Environment registry/gateway、query 投影 |
 | `harness-plugin` | `PluginCatalog`、`BranchView`、同步 `PluginTool`、state access 声明、intent、context projector 与提示词模板 |
 | `plugins/goal` | Goal v2 工具、`goal/state` 完整快照 codec 与 active context projector |
-| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、`LocalFileResourceStore` |
+| `harness-runtime-spring` | `HarnessStore`（PostgreSQL）、Work dispatcher、Redis overlay、瞬时 `LocalFileResourceStore` |
 | `harness-runtime` | Thread/Command/Invocation/Work 状态机与 Thread/Model/Tool processor |
 | `harness-tool` | Tool API、descriptor、`ResourceRef`、RemoteTool 与 Daemon v2 wire |
 
 ## 2. 身份与公开数据
 
-Runtime durable ID 在 HTTP 中编码为 strict decimal strings（id `[1-9][0-9]*`、revision `0|[1-9][0-9]*`）。Catalog 不使用 bigint resource ID：
+Runtime 实体 durable ID 是 `UUID`，在 HTTP 中编码为 canonical UUID strings；`sequence`/`revision` 仍编码为 strict decimal strings（sequence `[1-9][0-9]*`、revision `0|[1-9][0-9]*`）。Catalog 不使用 bigint resource ID：
 
 - Provider 和 Agent 的 identity 是 immutable `name`，Model 的 identity 是 `(providerName, name)`；记录存续期间名称不可修改。
 - Provider/Model/Agent 都是带 `expectedVersion` CAS 的硬删除（物理删行）：删除后同名立即可重建，重建行 `version` 从 0 重新开始。
@@ -59,7 +59,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | `PluginCatalogConfiguration` | 收集全部 `HarnessPlugin` beans，构造并冻结 `PluginCatalog`；Core 不依赖具体插件实现 |
 | `HarnessToolGatewayConfiguration` | `ObjectProvider<ToolFactory>` + `PluginCatalog` + `PluginBranchViewLoader`；`CoreToolGateway`（preflight + 两阶段激活 + FIFO 回调桥 + intent 校验 + `ToolResultExternalizer`） |
 | `RuntimeToolsConfiguration` | 装配两个内部 Platform Tool `load_skill` 与 `task`（含 `SubagentConfig`、并发 reservation/活动 descendant relay 共用的 `SubagentRunRegistry`、子 Agent 执行线程池）；把本地 `ToolFactory` descriptor 与冻结插件贡献合并为 `ToolCatalog`，按插件 visibility 维护 selectable/internal 名称 |
-| `HarnessRuntimeWebMapper` | strict decimal/JSON 校验：DTO → 领域命令 |
+| `HarnessRuntimeWebMapper` | canonical UUID/decimal/JSON 校验：DTO → 领域命令 |
 
 ## 4. HTTP API
 
@@ -85,12 +85,14 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 | POST | `/api/ai/chat/{chatId}/threads` | 原子创建 Session、ROOT（BranchSettings）、Thread 并关联 Chat；返回 snapshot |
 | PUT | `/api/ai/chat/{chatId}/threads/{threadId}` | 幂等建立历史关联 |
 | GET | `/api/ai/runtime/threads/{threadId}/snapshot` | revision、entries（root-to-head）、queuedCommands、活跃 Invocation |
-| POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（8 类命令），202 |
+| POST | `/api/ai/runtime/threads/{threadId}/commands` | 原子命令 batch 入队（7 类命令），202 |
 | PUT | `/api/ai/runtime/threads/{threadId}/head` | 同 Session 非空 head 重定位（revision CAS） |
 | POST | `/api/ai/runtime/threads/{threadId}/stop` | `{stopRequestId, expectedRevision}`；STOPPED/IDLE/REPLAYED |
 | POST | `/api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval` | `{decision: ALLOW|DENY, decisionId, actor, reason}` |
 | GET | `/api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + Redis realtime overlay |
-| GET | `/api/ai/runtime/resources/{sha256}` | 按内容身份（`mediaType`/`size`/可选 `name`）同源下载 managed Resource：Core `ManagedResourceDownloadService` 通过 `ResourceStore.reference` 重建并读取 canonical `ResourceRef`，Web 只负责 attachment + `X-Content-Type-Options: nosniff` 响应 |
+| GET | `/api/ai/runtime/resources/{sha256}` | 瞬时/Invocation `ResourceRef` 兼容下载：Core `ManagedResourceDownloadService` 按 `mediaType`/`size`/可选 `name` 重建引用，Web 只负责 attachment + `X-Content-Type-Options: nosniff`；Entry history 的 Blob Resource 不走该端点 |
+| POST/DELETE | `/api/storage/uploads[/{uploadId}]` | 全局 Upload reserve、complete 与释放；READY Handle 供 `ATTACHMENT(uploadId)` 原子消费 |
+| GET | `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` | durable Blob Resource 的渲染期短期 URL；原件响应额外携带权威 `mediaType/sizeBytes` |
 
 **不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 查询、无 `/messages` 或 `/messages/custom` 端点（消息由 `/commands` 的 `USER_MESSAGE`/`CUSTOM_MESSAGE` 命令表达）、无 `expectedExecutionEpoch` 字段。
 
@@ -109,7 +111,7 @@ Agent DTO 的 `model` 使用 Model ref；Model DTO 使用 `providerName` 与 `na
 
 | 情况 | HTTP |
 | --- | --- |
-| DTO、名称格式、Model config、Model ref、decimal string 或请求体中的 Catalog 引用非法 | 400 |
+| DTO、名称格式、Model config、Model ref、id/sequence/revision 格式非法（实体 id 非 canonical UUID、sequence/revision 非 decimal string）或请求体中的 Catalog 引用非法 | 400 |
 | 作为请求目标的 Thread/Entry/Catalog 名称不存在（snapshot/commands/head/stop 路径） | 404 |
 | 命令 cursor / revision CAS 过期、Thread 非 quiescent、terminal apply pending、跨 Session move、ordered replay 冲突 | 409 |
 | approval target 不存在 / 不属于本 Thread / 无 required approval / 不在适用上下文（`APPROVAL_NOT_APPLICABLE`）、已决定但请求不匹配（`APPROVAL_DECISION_MISMATCH`） | 409（approval 路径的 Thread/target 缺失不是 404） |
@@ -141,7 +143,7 @@ HTTP 错误支持 `en-US` 与 `zh-CN`，稳定错误码、状态和结构化字�
 
 - 参数 `{subagent_type, prompt, maxTurns?, session_id?}` 严格校验；`subagent_type` 必须命中父 Invocation 冻结的 `subagentBindings`（执行绝不重读父 Agent 配置）。
 - 新建时按 `AgentBranchSettingsMaterializer` 物化子 Agent branch settings（继承父 branch 的 `environmentName` 与父 Thread 的 YOLO），以 `createThread` 原子创建 Session + ROOT（`SubagentContext{parentThreadId, rootThreadId, taskInvocationId, depth}`）+ Thread（yolo 继承父 Thread），随后一个原子 batch 入队 settings diff + `USER_MESSAGE`（task prompt）；`clientCommandId` 以 `task-{invocationId}-{ordinal}` 稳定生成。
-- 恢复（`session_id`，十进制子 ThreadId）：要求 ROOT 的 parent/root 归属与当前父一致、子 Thread quiescent（无 model/tool siblings/queued、head 非 continueModel TURN_END）；目标 Agent 可在恢复时切换。
+- 恢复（`session_id`，子 ThreadId）：要求 ROOT 的 parent/root 归属与当前父一致、子 Thread quiescent（无 model/tool siblings/queued、head 非 continueModel TURN_END）；目标 Agent 可在恢复时切换。
 - 轮询等待期间：以 durable snapshot 指纹判定活动（idle 超时排除 active tool 时间）；约 1s 一次发布非 durable `TOOL_PARTIAL` 心跳（完整 JSON 快照，`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）。`descendants` 由进程内活动 registry 扁平 relay 给祖先，仅用于实时展示和审批寻址；`turns >= maxTurns` 起每 5 turn 入队一条 SYSTEM `CUSTOM_MESSAGE` 软提醒；达到 idle 超时/被取消时 `stop` 子 Thread 并保留可恢复 Session。
 - 终态 ToolResult 为 `<task id state>` envelope（`<task_result>` / `<task_error>`，报告正文最多保留 8000 字符），`details.kind=task.result`；`state` 为 `completed` / `error` / `cancelled`。
 

@@ -9,4 +9,5 @@ public sealed interface ProviderContentBlock
         ProviderThinkingBlock,
         ProviderJsonBlock,
         ProviderToolCallBlock,
-        ProviderToolResultBlock {}
+        ProviderToolResultBlock,
+        ProviderResourceBlock {}

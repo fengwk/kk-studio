@@ -36,11 +36,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -61,6 +63,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -121,6 +124,7 @@ public final class ThreadProcessor {
   private final ThreadProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
@@ -133,11 +137,23 @@ public final class ThreadProcessor {
       ThreadProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler) {
+    this(store, resolver, config, clock, scheduler, null);
+  }
+
+  /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
+  public ThreadProcessor(
+      HarnessStore store,
+      TurnResolver resolver,
+      ThreadProcessorConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
     this.compactionPlanner = new CompactionPlanner(config.compaction());
   }
 
@@ -155,7 +171,7 @@ public final class ThreadProcessor {
       throw new IllegalArgumentException(
           "ThreadProcessor requires a THREAD work claim, got " + claim.target());
     }
-    long threadId = claim.target().id();
+    UUID threadId = claim.target().id();
     String token = claim.leaseToken();
     if (!claimOwned(claim)) {
       return ThreadProcessResult.LOST_OWNERSHIP;
@@ -234,7 +250,7 @@ public final class ThreadProcessor {
       model = tx.findModelInvocationByTurn(thread.id(), openTurn.get().id()).orElse(null);
       if (model != null
           && model.resultEntryId() != null
-          && model.resultEntryId() == thread.headEntryId()
+          && model.resultEntryId().equals(thread.headEntryId())
           && path.head().payload() instanceof MessagePayload message
           && message.message().role() == AgentMessageRole.ASSISTANT) {
         siblings = tx.loadToolInvocationsByAssistantEntryId(path.head().id());
@@ -459,7 +475,7 @@ public final class ThreadProcessor {
   private static Entry turnResultEntry(EntryPath path, Entry turn) {
     boolean inTurn = false;
     for (Entry entry : path.entries()) {
-      if (entry.id() == turn.id()) {
+      if (entry.id().equals(turn.id())) {
         inTurn = true;
         continue;
       }
@@ -489,7 +505,7 @@ public final class ThreadProcessor {
       if (payload instanceof TurnEndPayload end) {
         for (int j = i - 1; j >= 0; j--) {
           Entry entry = path.entries().get(j);
-          if (entry.id() == end.turnStartEntryId()) {
+          if (entry.id().equals(end.turnStartEntryId())) {
             return new ClosedTurn(entry, end);
           }
         }
@@ -507,7 +523,7 @@ public final class ThreadProcessor {
   private static CompactionPayload compactionResultOfTurn(EntryPath path, Entry turn) {
     boolean inTurn = false;
     for (Entry entry : path.entries()) {
-      if (entry.id() == turn.id()) {
+      if (entry.id().equals(turn.id())) {
         inTurn = true;
         continue;
       }
@@ -552,9 +568,9 @@ public final class ThreadProcessor {
         && previousCompaction.trigger() == CompactionTrigger.OVERFLOW;
   }
 
-  private static int indexOfEntry(List<Entry> entries, long entryId) {
+  private static int indexOfEntry(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }
@@ -574,18 +590,18 @@ public final class ThreadProcessor {
       Instant now) {
     if (!model.status().isTerminal()
         || model.resultEntryId() != null
-        || thread.headEntryId() != model.basisHeadEntryId()) {
+        || !thread.headEntryId().equals(model.basisHeadEntryId())) {
       // 决策与执行同事务，理论不可达；防御性回到循环重新决策。
       return new LoopStep.Continue();
     }
     Instant mutationNow =
         durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
-    long sessionId = path.root().sessionId();
-    long parentId = path.head().id();
+    UUID sessionId = path.root().sessionId();
+    UUID parentId = path.head().id();
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
     ProviderResponse response = model.result();
     CompactionRequest compactionRequest = model.request().compaction();
-    long resultEntryId = tx.nextId();
+    UUID resultEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
             resultEntryId,
@@ -599,7 +615,7 @@ public final class ThreadProcessor {
                 : payloadMapper.assistantErrorPayload(model.error()),
             mutationNow));
     tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-    long head = resultEntryId;
+    UUID head = resultEntryId;
     List<ToolInvocation> invocations = List.of();
     if (succeeded && compactionRequest != null) {
       // 压缩 turn：成功结果固定无 tool call；HISTORY 部分成功固定 continueModel=false，只有 complete 最终压缩且
@@ -607,7 +623,7 @@ public final class ThreadProcessor {
       boolean continueModel =
           compactionRequest.phase() != CompactionPhase.HISTORY
               && compactionRequest.trigger() == CompactionTrigger.OVERFLOW;
-      long turnEndId = tx.nextId();
+      UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
               turnEndId,
@@ -618,7 +634,7 @@ public final class ThreadProcessor {
               mutationNow));
       head = turnEndId;
     } else if (succeeded && response.toolCalls().isEmpty()) {
-      long turnEndId = tx.nextId();
+      UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
               turnEndId,
@@ -642,7 +658,7 @@ public final class ThreadProcessor {
                   + " of invocation "
                   + model.id());
         }
-        long toolId = tx.nextId();
+        UUID toolId = tx.nextId();
         ToolInvocationError conflict = siblingStateConflict(binding.plugin(), seenStateAccesses);
         ToolInvocationStatus status =
             conflict == null ? ToolInvocationStatus.READY : ToolInvocationStatus.FAILED;
@@ -667,7 +683,7 @@ public final class ThreadProcessor {
       tx.insertToolInvocations(materialized);
       invocations = materialized;
     } else {
-      long turnEndId = tx.nextId();
+      UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
               turnEndId,
@@ -689,7 +705,7 @@ public final class ThreadProcessor {
     }
     if (!invocations.isEmpty()) {
       List<ToolInvocation> ordered = new ArrayList<>(invocations);
-      ordered.sort(Comparator.comparingLong(ToolInvocation::id));
+      ordered.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
       for (ToolInvocation invocation : ordered) {
         if (invocation.status() == ToolInvocationStatus.READY) {
           tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now);
@@ -724,7 +740,7 @@ public final class ThreadProcessor {
             "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
       }
       ToolInvocation sibling = siblings.get(i);
-      if (sibling.modelInvocationId() != model.id()
+      if (!sibling.modelInvocationId().equals(model.id())
           || !sibling.status().isTerminal()
           || sibling.resultEntryId() != null) {
         // 锁内复查：任何不一致都是不变量违反，回滚（绝不部分 apply 或重新挂载）。
@@ -737,16 +753,17 @@ public final class ThreadProcessor {
     for (ToolInvocation sibling : siblings) {
       mutationNow = durableMutationTime(mutationNow, sibling.updatedAt());
     }
-    long sessionId = path.root().sessionId();
-    long parentId = path.head().id();
+    UUID sessionId = path.root().sessionId();
+    UUID parentId = path.head().id();
     List<ToolInvocation> updated = new ArrayList<>(siblings.size());
     for (ToolInvocation sibling : siblings) {
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, mutationNow);
+          ToolOutcomeAppender.append(
+              tx, sessionId, parentId, sibling, mutationNow, toolResultHistoryMaterializer);
       updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }
-    long turnEndId = tx.nextId();
+    UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
             turnEndId,
@@ -882,7 +899,7 @@ public final class ThreadProcessor {
     if (thread == null) {
       return CommitOutcome.LOST;
     }
-    if (thread.headEntryId() != plan.sourceHeadEntryId()
+    if (!thread.headEntryId().equals(plan.sourceHeadEntryId())
         || thread.yoloEnabled() != plan.sourceYoloEnabled()) {
       return CommitOutcome.LOST;
     }
@@ -903,7 +920,7 @@ public final class ThreadProcessor {
       consumed.add(command.consume(plan.turnStartEntryId()));
     }
     tx.updateCommands(consumed);
-    Long invocationId = null;
+    UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
           thread.advanceHead(plan.candidateHeadEntryId(), plan.finalYoloEnabled(), mutationNow);
@@ -926,7 +943,7 @@ public final class ThreadProcessor {
               mutationNow));
     } else {
       TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
-      long errorEntryId = tx.nextId();
+      UUID errorEntryId = tx.nextId();
       tx.insertEntry(
           new Entry(
               errorEntryId,
@@ -934,7 +951,7 @@ public final class ThreadProcessor {
               plan.candidateHeadEntryId(),
               new AssistantErrorPayload(rejected.error()),
               mutationNow));
-      long turnEndId = tx.nextId();
+      UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
               turnEndId,
@@ -980,8 +997,7 @@ public final class ThreadProcessor {
       withinCutoff++;
       ThreadCommand planned = plannedBySequence.get(command.sequence());
       if (planned == null
-          || planned.id() != command.id()
-          || planned.threadId() != command.threadId()
+          || !planned.threadId().equals(command.threadId())
           || !planned.payload().equals(command.payload())
           || !planned.clientCommandId().equals(command.clientCommandId())
           || planned.state() != command.state()) {

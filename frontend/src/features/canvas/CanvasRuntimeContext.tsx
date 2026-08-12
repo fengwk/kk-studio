@@ -1,12 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, type PropsWithChildren } from 'react'
 import { useCanvasController, type CanvasController } from '@/features/canvas/useCanvasController'
-import type { DecimalString } from '@/shared/api/contracts/studio'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 
 export const CanvasRuntimeContext = createContext<CanvasController | null>(null)
 
 interface CanvasRuntimeProviderProps extends PropsWithChildren {
-  initialCanvasId?: DecimalString
+  initialCanvasId?: UUIDString
 }
 
 export function CanvasRuntimeProvider({

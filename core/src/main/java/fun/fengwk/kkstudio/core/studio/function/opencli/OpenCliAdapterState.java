@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** Adapter checkpoint map 的严格小型读写器。 */
 final class OpenCliAdapterState {
@@ -48,18 +49,17 @@ final class OpenCliAdapterState {
       Object resourceId = map.get("resourceId");
       Object resourcePath = map.get("resourcePath");
       if (!(resourceId instanceof String idText)
-          || !idText.matches("[1-9][0-9]*")
           || !(resourcePath instanceof String path)
           || !isCanonicalResourcePath(path)) {
         throw new IllegalArgumentException(
             "adapterState.uploads contains an invalid resourceId/resourcePath");
       }
-      long id;
+      UUID id;
       try {
-        id = Long.parseLong(idText);
-      } catch (NumberFormatException exception) {
+        id = UUID.fromString(idText);
+      } catch (IllegalArgumentException exception) {
         throw new IllegalArgumentException(
-            "adapterState.uploads resourceId is outside bigint range", exception);
+            "adapterState.uploads resourceId must be a canonical UUID string", exception);
       }
       uploads.add(new UploadedInput(id, path));
     }
@@ -70,7 +70,7 @@ final class OpenCliAdapterState {
     List<Map<String, Object>> encoded = new ArrayList<>();
     for (UploadedInput upload : uploads) {
       Map<String, Object> item = new LinkedHashMap<>();
-      item.put("resourceId", Long.toString(upload.resourceId()));
+      item.put("resourceId", upload.resourceId().toString());
       item.put("resourcePath", upload.resourcePath());
       encoded.add(item);
     }
@@ -99,5 +99,5 @@ final class OpenCliAdapterState {
     }
   }
 
-  record UploadedInput(long resourceId, String resourcePath) {}
+  record UploadedInput(UUID resourceId, String resourcePath) {}
 }

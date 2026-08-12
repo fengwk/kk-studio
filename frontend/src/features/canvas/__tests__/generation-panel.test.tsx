@@ -67,26 +67,33 @@ const models: CanvasFunctionModelDTO[] = [{
   unavailableReason: null,
 }]
 
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+
 function resourceNode(
-  id: `${bigint}`,
+  id: string,
   name: string,
   kind: 'IMAGE' | 'VIDEO',
 ): ResourceNode {
   return {
     id,
-    canvasId: '1',
+    canvasId: CANVAS_ID,
     name,
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: `${id}0` as `${bigint}`,
-      canvasId: '1',
+      id: `${id}-r0`,
+      canvasId: CANVAS_ID,
+      ownerNodeId: id,
+      resourceIndex: 0,
+      blobId: 'blob-output',
+      name,
+      textContent: null,
       kind,
       mediaType: kind === 'IMAGE' ? 'image/png' : 'video/mp4',
-      name,
-      size: '3',
-      text: null,
-      metadata: {},
+      sizeBytes: 3,
+      width: null,
+      height: null,
+      durationMs: null,
       createdAt: '2026-08-10T00:00:00Z',
     }],
     function: null,
@@ -97,7 +104,7 @@ function resourceNode(
 function fixture(run: ResourceNode['run'] = null) {
   const target: ResourceNode = {
     id: '9',
-    canvasId: '1',
+    canvasId: CANVAS_ID,
     name: 'Generator',
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
@@ -115,7 +122,8 @@ function fixture(run: ResourceNode['run'] = null) {
     document: {
       id: '1',
       title: 'Board',
-      graphRevision: '0',
+      version: 0,
+      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -127,9 +135,9 @@ function fixture(run: ResourceNode['run'] = null) {
     ],
     groups: [],
     links: [
-      { canvasId: '1', sourceNodeId: '2', targetNodeId: '9' },
-      { canvasId: '1', sourceNodeId: '3', targetNodeId: '9' },
-      { canvasId: '1', sourceNodeId: '4', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9' },
     ],
   }
   return { snapshot, target }
@@ -329,19 +337,19 @@ describe('Canvas generic generation panel', () => {
 
     const running = renderPanel({
       nodeId: '9',
-      requestId: 'request-1',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
       updatedAt: '2026-08-10T00:00:00Z',
     })
     await user.click(screen.getByRole('button', { name: '取消' }))
-    expect(running.cancelFunctionRun).toHaveBeenCalledWith('9', 'request-1')
+    expect(running.cancelFunctionRun).toHaveBeenCalledWith('9', 'c9c9c9c9-9999-4999-8999-999999999991')
     running.unmount()
 
     renderPanel({
       nodeId: '9',
-      requestId: 'request-2',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
       status: 'FAILED',
       stage: 'FAILED',
       error: 'provider failed',
@@ -362,7 +370,7 @@ describe('Canvas generic generation panel', () => {
 
     const running = renderPanel({
       nodeId: '9',
-      requestId: 'request-1',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -374,7 +382,7 @@ describe('Canvas generic generation panel', () => {
 
     const failed = renderPanel({
       nodeId: '9',
-      requestId: 'request-2',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
       status: 'FAILED',
       stage: 'FAILED',
       error: 'boom',
@@ -386,7 +394,7 @@ describe('Canvas generic generation panel', () => {
 
     const cancelled = renderPanel({
       nodeId: '9',
-      requestId: 'request-3',
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999993',
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.studio.canvas.function;
 
 import java.io.InputStream;
 import java.util.Map;
+import java.util.UUID;
 
 /** Foundation 向 provider adapter 暴露的最小强一致执行能力。 */
 public interface CanvasFunctionExecutionContext {
@@ -14,5 +15,5 @@ public interface CanvasFunctionExecutionContext {
 
   String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds);
 
-  long materializeTarget(long targetResourceId, String mediaType, long size, InputStream content);
+  UUID materializeTarget(UUID targetResourceId, InputStream content);
 }

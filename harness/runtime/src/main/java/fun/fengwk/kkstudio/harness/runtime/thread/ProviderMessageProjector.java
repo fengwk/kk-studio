@@ -1,32 +1,25 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,9 +32,6 @@ import java.util.List;
  */
 public final class ProviderMessageProjector {
   private static final String ORPHAN_RESULT_TEXT = "No result provided";
-
-  /** 非 data URI 的 prompt 标签最大字符数（含截断省略号），防止无限长 URI 注入 provider prompt。 */
-  static final int MAX_URI_LABEL_CHARS = 512;
 
   public List<ProviderMessage> project(List<AgentMessage> messages) {
     List<ProviderMessage> result = new ArrayList<>();
@@ -119,15 +109,8 @@ public final class ProviderMessageProjector {
     if (content instanceof TextMessageContent value) {
       return new ProviderTextBlock(value.text());
     }
-    if (content instanceof ImageMessageContent value) {
-      return new ProviderImageBlock(value.mediaType(), value.source());
-    }
-    if (content instanceof AudioMessageContent value) {
-      return new ProviderAudioBlock(value.mediaType(), value.source());
-    }
-    if (content instanceof VideoMessageContent value) {
-      return new ProviderVideoBlock(value.mediaType(), value.source());
-    }
+    // durable history 绝不携带 Image/Audio/Video 瞬时内容（AgentMessageJsonCodec 拒绝）；媒体只在
+    // Provider attempt 物化（ProviderResourceMaterializer）时由 resource 块投影为 media 块。
     if (content instanceof ThinkingMessageContent value) {
       return new ProviderThinkingBlock(value.text());
     }
@@ -147,35 +130,11 @@ public final class ProviderMessageProjector {
           value.detailsJson());
     }
     if (content instanceof ResourceMessageContent value) {
-      ResourceRef resource = value.resource();
-      String label = resourceLabel(resource);
-      String preview = value.preview() == null ? "" : value.preview();
-      return new ProviderTextBlock("[Resource " + label + "]\n" + preview);
+      // durable blob 引用原样投影；Provider attempt 物化（core ProviderResourceMaterializer）在每次
+      // attempt 时按 storage_blob 事实替换为携带新鲜预签名 URL 的 media 块或确定性文本回退。
+      return new ProviderResourceBlock(
+          value.blobId(), value.name(), value.preview() == null ? "" : value.preview());
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
-  }
-
-  /**
-   * Resource 的 prompt 标记：display name 优先；否则 data URI 用 {@code inline <mediaType>}（绝不把大 data URI 注入
-   * prompt）；其余 URI 标签 ASCII 截断到至多 512 字符并追加 {@code ...}。preview 由 {@link ResourceMessageContent} 的
-   * 16 KiB 上限约束。
-   */
-  private static String resourceLabel(ResourceRef resource) {
-    if (resource.name() != null) {
-      return resource.name();
-    }
-    String scheme = URI.create(resource.uri()).getScheme();
-    if ("data".equals(scheme)) {
-      return "inline " + resource.mediaType();
-    }
-    return truncateAscii(resource.uri());
-  }
-
-  /** ASCII URI 截断：超过 {@link #MAX_URI_LABEL_CHARS} 字符时保留前缀并追加 {@code ...}，总长不超过上限。 */
-  private static String truncateAscii(String uri) {
-    if (uri.length() <= MAX_URI_LABEL_CHARS) {
-      return uri;
-    }
-    return uri.substring(0, MAX_URI_LABEL_CHARS - 3) + "...";
   }
 }

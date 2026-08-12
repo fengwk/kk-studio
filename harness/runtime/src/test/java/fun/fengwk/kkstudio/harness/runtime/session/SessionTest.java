@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** Session 字段约束测试。 */
 class SessionTest {
@@ -15,33 +15,16 @@ class SessionTest {
 
   @Test
   void sessionIsValid() {
-    Session session = new Session(1L, "title", NOW);
+    Session session = new Session(UUID.fromString("00000000-0000-0000-0000-000000000001"), NOW);
 
-    assertEquals(1L, session.id());
-    assertEquals("title", session.title());
+    assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000001"), session.id());
     assertEquals(NOW, session.createdAt());
   }
 
   @Test
-  void titleMayBeNull() {
-    Session session = new Session(1L, null, NOW);
-
-    assertNull(session.title());
-  }
-
-  @Test
-  void rejectsNonPositiveIds() {
-    assertThrows(IllegalArgumentException.class, () -> new Session(0L, "title", NOW));
-  }
-
-  @Test
-  void rejectsBlankTitleWhenPresent() {
-    assertThrows(IllegalArgumentException.class, () -> new Session(1L, "", NOW));
-    assertThrows(IllegalArgumentException.class, () -> new Session(1L, "  ", NOW));
-  }
-
-  @Test
   void rejectsNullCreatedAt() {
-    assertThrows(NullPointerException.class, () -> new Session(1L, "title", null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new Session(UUID.fromString("00000000-0000-0000-0000-000000000001"), null));
   }
 }

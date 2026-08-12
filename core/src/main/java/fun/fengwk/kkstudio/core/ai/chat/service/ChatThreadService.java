@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.chat.service;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Chat 作用域内的 Thread 关联用例。
@@ -14,8 +15,8 @@ public interface ChatThreadService {
   void requireChat(String chatId);
 
   /** 校验 Chat 并返回其关联的 Thread id 列表，最新关联在前。 */
-  List<Long> listThreadIds(String chatId);
+  List<UUID> listThreadIds(String chatId);
 
   /** 校验 Chat 并幂等地将已有 Thread 与其关联。 */
-  void associateThread(String chatId, long threadId);
+  void associateThread(String chatId, UUID threadId);
 }

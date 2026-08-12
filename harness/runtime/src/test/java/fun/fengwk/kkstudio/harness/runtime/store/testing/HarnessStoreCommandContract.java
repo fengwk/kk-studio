@@ -24,11 +24,13 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
 /** Command mailbox 约束：唯一 key、queued 顺序、terminal marker 与不可变身份。 */
 public abstract class HarnessStoreCommandContract {
@@ -52,30 +54,33 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(
               List.of(
-                  command(1, baseline.threadId(), 2, "client-b"),
-                  command(2, baseline.threadId(), 1, "client-a")));
+                  command(baseline.threadId(), 2, TestIds.id(1)),
+                  command(baseline.threadId(), 1, TestIds.id(2))));
         });
-    List<Long> queuedIds =
+    List<ThreadCommand> queued =
         store.transaction(
             tx -> {
               tx.lockThread(baseline.threadId());
-              return tx.loadQueuedCommands(baseline.threadId()).stream()
-                  .map(ThreadCommand::id)
-                  .toList();
+              return tx.loadQueuedCommands(baseline.threadId());
             });
-    assertEquals(List.of(2L, 1L), queuedIds);
+    // 按 sequence 升序：sequence=1 在前，sequence=2 在后
+    assertEquals(
+        List.of(
+            command(baseline.threadId(), 1, TestIds.id(2)),
+            command(baseline.threadId(), 2, TestIds.id(1))),
+        queued);
   }
 
   @Test
   void commandTimestampsRejectSubMillisecondPrecision() {
-    ThreadCommand canonical = command(1, baseline.threadId(), 1, "client-a");
+    ThreadCommand canonical = command(baseline.threadId(), 1, TestIds.id(1));
     ThreadCommand command =
         new ThreadCommand(
-            canonical.id(),
             canonical.threadId(),
             canonical.sequence(),
             canonical.payload(),
             canonical.clientCommandId(),
+            canonical.requestHash(),
             canonical.consumedTurnStartEntryId(),
             canonical.cancelledAt(),
             canonical.createdAt().plusNanos(1));
@@ -93,10 +98,10 @@ public abstract class HarnessStoreCommandContract {
 
   @Test
   void queuedCommandsOfOtherThreadsAreNotLoaded() {
-    long otherThreadId =
+    UUID otherThreadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(new ThreadState(id, baseline.rootEntryId(), false, 1, 0, T1, T1));
               return id;
             });
@@ -104,7 +109,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertTrue(
         store.<Boolean>transaction(
@@ -122,13 +127,13 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(
               List.of(
-                  command(1, baseline.threadId(), 1, "client-a"),
-                  command(2, baseline.threadId(), 2, "client-b")));
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(baseline.threadId(), 2, TestIds.id(2))));
         });
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -152,13 +157,13 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.APPLIED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow())
+                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
             .state());
     assertEquals(
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), "client-b").orElseThrow())
+                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow())
             .state());
   }
 
@@ -168,7 +173,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertThrows(
         IllegalArgumentException.class,
@@ -177,7 +182,7 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  tx.insertCommands(List.of(command(1, baseline.threadId(), 2, "client-b")));
+                  tx.insertCommands(List.of(command(baseline.threadId(), 2, TestIds.id(1))));
                 }));
   }
 
@@ -187,7 +192,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertThrows(
         IllegalArgumentException.class,
@@ -196,7 +201,7 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  tx.insertCommands(List.of(command(2, baseline.threadId(), 1, "client-b")));
+                  tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(2))));
                 }));
   }
 
@@ -206,7 +211,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertThrows(
         IllegalArgumentException.class,
@@ -215,16 +220,16 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  tx.insertCommands(List.of(command(2, baseline.threadId(), 2, "client-a")));
+                  tx.insertCommands(List.of(command(baseline.threadId(), 2, TestIds.id(1))));
                 }));
   }
 
   @Test
   void sameClientCommandIdOnDifferentThreadsIsAllowed() {
-    long otherThreadId =
+    UUID otherThreadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(new ThreadState(id, baseline.rootEntryId(), false, 1, 0, T1, T1));
               return id;
             });
@@ -235,11 +240,13 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(otherThreadId);
           tx.insertCommands(
               List.of(
-                  command(1, baseline.threadId(), 1, "client-a"),
-                  command(2, otherThreadId, 1, "client-a")));
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(otherThreadId, 1, TestIds.id(1))));
         });
     assertTrue(
-        store.transaction(tx -> tx.findCommandByClientId(otherThreadId, "client-a")).isPresent());
+        store
+            .transaction(tx -> tx.findCommandByClientId(otherThreadId, TestIds.id(1)))
+            .isPresent());
   }
 
   @Test
@@ -248,17 +255,20 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "client-a"))
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)))
             .isPresent());
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "missing"))
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(999)))
             .isEmpty());
-    assertTrue(store.transaction(tx -> tx.findCommandByClientId(999, "client-a")).isEmpty());
+    assertTrue(
+        store
+            .transaction(tx -> tx.findCommandByClientId(TestIds.id(999), TestIds.id(1)))
+            .isEmpty());
   }
 
   @Test
@@ -267,7 +277,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     assertThrows(
         IllegalStateException.class,
@@ -276,8 +286,8 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx -> {
                   ThreadCommand stored =
-                      tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow();
-                  tx.updateCommands(List.of(withConsumedTurnStart(stored, 77)));
+                      tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow();
+                  tx.updateCommands(List.of(withConsumedTurnStart(stored, TestIds.id(77))));
                 }));
   }
 
@@ -287,57 +297,61 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     ThreadCommand stored =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     List<ThreadCommand> forged =
         Arrays.asList(
             new ThreadCommand(
-                stored.id(),
-                stored.threadId() + 1,
+                TestIds.id(999), // for threadId must match stored
                 stored.sequence(),
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
             new ThreadCommand(
-                stored.id(),
                 stored.threadId(),
                 stored.sequence() + 1,
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
             new ThreadCommand(
-                stored.id(),
                 stored.threadId(),
                 stored.sequence(),
                 stored.payload(),
-                "other-client",
+                TestIds.id(888), // different clientCommandId
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
             new ThreadCommand(
-                stored.id(),
                 stored.threadId(),
                 stored.sequence(),
                 new UserMessageCommandPayload(
                     new AgentMessage(
                         AgentMessageRole.USER, List.of(new TextMessageContent("other message")))),
                 stored.clientCommandId(),
+                ThreadCommandPayloadJsonCodec.requestHash(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER,
+                            List.of(new TextMessageContent("other message"))))),
                 null,
                 null,
                 stored.createdAt()),
             new ThreadCommand(
-                stored.id(),
                 stored.threadId(),
                 stored.sequence(),
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 T1));
@@ -361,9 +375,9 @@ public abstract class HarnessStoreCommandContract {
     store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
           ThreadCommand inserted =
-              tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow();
+              tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow();
           tx.updateCommands(List.of(withCancelledAt(inserted, T2)));
           return null;
         });
@@ -371,7 +385,7 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow())
+                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
             .state());
   }
 
@@ -386,7 +400,7 @@ public abstract class HarnessStoreCommandContract {
                 store,
                 tx ->
                     tx.insertCommands(
-                        Arrays.asList(command(1, baseline.threadId(), 1, "client-a"), null))));
+                        Arrays.asList(command(baseline.threadId(), 1, TestIds.id(1)), null))));
   }
 
   @Test
@@ -395,7 +409,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     List<ThreadCommand> queued =
         store.transaction(
@@ -405,7 +419,7 @@ public abstract class HarnessStoreCommandContract {
             });
     assertThrows(
         UnsupportedOperationException.class,
-        () -> queued.add(command(9, baseline.threadId(), 9, "client-zz")));
+        () -> queued.add(command(baseline.threadId(), 9, TestIds.id(9))));
   }
 
   @Test
@@ -413,7 +427,9 @@ public abstract class HarnessStoreCommandContract {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            inTransaction(store, tx -> tx.insertCommands(List.of(command(1, 999, 1, "client-a")))));
+            inTransaction(
+                store,
+                tx -> tx.insertCommands(List.of(command(TestIds.id(999), 1, TestIds.id(1))))));
   }
 
   @Test
@@ -422,7 +438,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     // 未持有 thread lock 的 load 会被拒绝，锁序 Thread -> commands
     assertThrows(
@@ -434,7 +450,7 @@ public abstract class HarnessStoreCommandContract {
         () ->
             inTransaction(
                 store,
-                tx -> tx.insertCommands(List.of(command(9, baseline.threadId(), 9, "client-z")))));
+                tx -> tx.insertCommands(List.of(command(baseline.threadId(), 9, TestIds.id(9))))));
     // 已锁定路径可正常工作
     assertTrue(
         store.<Boolean>transaction(
@@ -450,12 +466,12 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -471,10 +487,10 @@ public abstract class HarnessStoreCommandContract {
                   tx.updateCommands(List.of(queued));
                 }));
     // 同事务内的 QUEUED -> APPLIED 之后的 terminal 转换会被拦下
-    long otherTurnStartEntryId =
+    UUID otherTurnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -504,7 +520,7 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(2, baseline.threadId(), 2, "client-b")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 2, TestIds.id(2))));
           ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
           ThreadCommand cancelled = withCancelledAt(queued, T2);
           tx.updateCommands(List.of(cancelled));
@@ -514,15 +530,15 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.CANCELLED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), "client-b").orElseThrow())
+                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(2)).orElseThrow())
             .state());
   }
 
   @Test
   void insertCommandsAcceptsOnlyQueuedCommands() {
     ThreadCommand applied =
-        withConsumedTurnStart(command(1, baseline.threadId(), 1, "client-a"), 77);
-    ThreadCommand cancelled = withCancelledAt(command(2, baseline.threadId(), 2, "client-b"), T2);
+        withConsumedTurnStart(command(baseline.threadId(), 1, TestIds.id(1)), TestIds.id(77));
+    ThreadCommand cancelled = withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), T2);
     assertThrows(
         IllegalArgumentException.class,
         () -> inTransaction(store, tx -> tx.insertCommands(List.of(applied))));
@@ -533,8 +549,8 @@ public abstract class HarnessStoreCommandContract {
 
   @Test
   void caughtLateInsertValidationFailureDoesNotCommitAnEarlierBatchItem() {
-    ThreadCommand valid = command(1, baseline.threadId(), 1, "client-a");
-    ThreadCommand invalid = withCancelledAt(command(2, baseline.threadId(), 2, "client-b"), T2);
+    ThreadCommand valid = command(baseline.threadId(), 1, TestIds.id(1));
+    ThreadCommand invalid = withCancelledAt(command(baseline.threadId(), 2, TestIds.id(2)), T2);
     store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -547,7 +563,7 @@ public abstract class HarnessStoreCommandContract {
         });
     assertTrue(
         store
-            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), "client-a"))
+            .transaction(tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)))
             .isEmpty());
   }
 
@@ -559,13 +575,13 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(
               List.of(
-                  command(1, baseline.threadId(), 1, "client-a"),
-                  command(2, baseline.threadId(), 2, "client-b")));
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(baseline.threadId(), 2, TestIds.id(2))));
         });
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -600,16 +616,16 @@ public abstract class HarnessStoreCommandContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.insertCommands(List.of(command(1, baseline.threadId(), 1, "client-a")));
+          tx.insertCommands(List.of(command(baseline.threadId(), 1, TestIds.id(1))));
         });
     // 位于 TURN_START 之下的 USER MESSAGE 不是 TURN_START Entry
-    long userEntryId =
+    UUID userEntryId =
         store.transaction(
             tx -> {
-              long turnStartId = tx.nextId();
+              UUID turnStartId = tx.nextId();
               tx.insertEntry(
                   turnStartEntry(turnStartId, baseline.sessionId(), baseline.rootEntryId(), T1));
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(id, baseline.sessionId(), turnStartId, userMessagePayload(), T1));
               return id;
@@ -626,10 +642,10 @@ public abstract class HarnessStoreCommandContract {
                 }));
     // 其他 session 中的 TURN_START 不匹配 thread 当前 head session
     Baseline other = seedThreadBaseline(store);
-    long otherTurnStart =
+    UUID otherTurnStart =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, other.sessionId(), other.rootEntryId(), T1));
               return id;
             });
@@ -644,10 +660,10 @@ public abstract class HarnessStoreCommandContract {
                   tx.updateCommands(List.of(withConsumedTurnStart(queued, otherTurnStart)));
                 }));
     // thread 当前 head session 中的 TURN_START 可接受
-    long turnStartEntryId =
+    UUID turnStartEntryId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), T1));
               return id;
             });
@@ -662,7 +678,7 @@ public abstract class HarnessStoreCommandContract {
         ThreadCommandState.APPLIED,
         store
             .transaction(
-                tx -> tx.findCommandByClientId(baseline.threadId(), "client-a").orElseThrow())
+                tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow())
             .state());
   }
 }

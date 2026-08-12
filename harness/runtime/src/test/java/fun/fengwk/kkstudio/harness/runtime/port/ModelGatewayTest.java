@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,23 +32,17 @@ class ModelGatewayTest {
   @Test
   void executionFreezesTheKeyAndTheRequest() {
     ModelGateway.Execution execution =
-        new ModelGateway.Execution(42L, 3, PortTestData.modelRequest());
-    assertEquals(42L, execution.invocationId());
+        new ModelGateway.Execution(id(42L), 3, PortTestData.modelRequest());
+    assertEquals(id(42L), execution.invocationId());
     assertEquals(3, execution.proposedAttempt());
     assertEquals(PortTestData.modelRequest(), execution.request());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelGateway.Execution(0L, 1, PortTestData.modelRequest()));
+        () -> new ModelGateway.Execution(id(1L), 0, PortTestData.modelRequest()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelGateway.Execution(-1L, 1, PortTestData.modelRequest()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelGateway.Execution(1L, 0, PortTestData.modelRequest()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelGateway.Execution(1L, -1, PortTestData.modelRequest()));
-    assertThrows(NullPointerException.class, () -> new ModelGateway.Execution(1L, 1, null));
+        () -> new ModelGateway.Execution(id(1L), -1, PortTestData.modelRequest()));
+    assertThrows(NullPointerException.class, () -> new ModelGateway.Execution(id(1L), 1, null));
   }
 
   @Test
@@ -105,7 +100,7 @@ class ModelGatewayTest {
                   // 尽力而为、幂等的取消
                 });
     ModelGateway.StartResult result =
-        gateway.start(new ModelGateway.Execution(7L, 1, PortTestData.modelRequest()), events());
+        gateway.start(new ModelGateway.Execution(id(7L), 1, PortTestData.modelRequest()), events());
     assertTrue(result instanceof ModelGateway.Started);
   }
 

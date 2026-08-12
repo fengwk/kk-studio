@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
@@ -23,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,11 +34,13 @@ import java.util.concurrent.atomic.AtomicReference;
 /** SSE 关闭会取消 tail worker 以便阻塞读取循环停止；过载拒绝时不会触发任何工作。 */
 class StudioHarnessThreadSseEmitterTest {
 
+  private static final UUID THREAD_ID = new UUID(0L, 1L);
+
   @Test
   void completeStopsFurtherTailReads() throws Exception {
     RealtimeEventTail tail = mock(RealtimeEventTail.class);
     AtomicInteger calls = new AtomicInteger();
-    when(tail.readAfter(anyLong(), anyString(), anyInt(), any(Duration.class)))
+    when(tail.readAfter(any(), anyString(), anyInt(), any(Duration.class)))
         .thenAnswer(
             inv -> {
               calls.incrementAndGet();
@@ -57,14 +59,14 @@ class StudioHarnessThreadSseEmitterTest {
             });
     try {
       SseEmitter emitter =
-          StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), executor);
+          StudioHarnessThreadSseEmitter.stream(THREAD_ID, 0L, "0-0", tail, source(), executor);
       assertNotNull(emitter);
       Thread.sleep(250);
       emitter.complete();
       int afterClose = calls.get();
       Thread.sleep(500);
       assertTrue(calls.get() <= afterClose + 1);
-      verify(tail, atLeastOnce()).readAfter(anyLong(), anyString(), anyInt(), any(Duration.class));
+      verify(tail, atLeastOnce()).readAfter(any(), anyString(), anyInt(), any(Duration.class));
     } finally {
       executor.shutdownNow();
     }
@@ -80,7 +82,7 @@ class StudioHarnessThreadSseEmitterTest {
         };
 
     SseEmitter emitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), rejecting);
+        StudioHarnessThreadSseEmitter.stream(THREAD_ID, 0L, "0-0", tail, source(), rejecting);
 
     assertNotNull(emitter);
     verifyNoInteractions(tail);
@@ -102,14 +104,14 @@ class StudioHarnessThreadSseEmitterTest {
     doReturn(asyncFuture).when(async).submit(any(Runnable.class));
 
     SseEmitter asyncEmitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), async);
+        StudioHarnessThreadSseEmitter.stream(THREAD_ID, 0L, "0-0", tail, source(), async);
 
     verify(async).submit(any(Runnable.class));
     asyncEmitter.complete();
 
     AtomicReference<Runnable> submitted = new AtomicReference<>();
     SseEmitter plainEmitter =
-        StudioHarnessThreadSseEmitter.stream(1L, 0L, "0-0", tail, source(), submitted::set);
+        StudioHarnessThreadSseEmitter.stream(THREAD_ID, 0L, "0-0", tail, source(), submitted::set);
 
     assertNotNull(submitted.get());
     plainEmitter.complete();

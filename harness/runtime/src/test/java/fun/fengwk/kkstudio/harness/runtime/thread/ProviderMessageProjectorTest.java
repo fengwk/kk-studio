@@ -5,31 +5,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
+import java.util.UUID;
 
 /** Provider 投影必须修复每一个 orphan 出现位置，但全局不持有 ToolCall ID。 */
 class ProviderMessageProjectorTest {
@@ -49,19 +44,10 @@ class ProviderMessageProjectorTest {
                     AgentMessageRole.ASSISTANT,
                     List.of(
                         new TextMessageContent("answer"),
-                        new ImageMessageContent("image/png", "image-data"),
-                        new AudioMessageContent("audio/mpeg", "audio-data"),
-                        new VideoMessageContent("video/mp4", "video-data"),
                         new ThinkingMessageContent("reasoning"),
                         new JsonMessageContent("{\"answer\":true}"),
-                        new ResourceMessageContent(
-                            new ResourceRef(
-                                "https://example.test/report.txt",
-                                "text/plain",
-                                "report",
-                                3L,
-                                null),
-                            "resource preview"),
+                        new ResourceMessageContent(new UUID(0L, 1L), "report", "resource preview"),
+                        new TextMessageContent("second text"),
                         new ToolCallMessageContent(
                             "call-1", "lookup", "lookup", "{\"key\":\"value\"}"))),
                 new AgentMessage(
@@ -73,7 +59,6 @@ class ProviderMessageProjectorTest {
                             "lookup",
                             List.of(
                                 new TextMessageContent("tool output"),
-                                new VideoMessageContent("video/webm", "tool-video-data"),
                                 new JsonMessageContent("{\"found\":true}")),
                             true,
                             "{\"code\":\"NOT_FOUND\"}")))));
@@ -90,12 +75,10 @@ class ProviderMessageProjectorTest {
     assertEquals(
         List.of(
             new ProviderTextBlock("answer"),
-            new ProviderImageBlock("image/png", "image-data"),
-            new ProviderAudioBlock("audio/mpeg", "audio-data"),
-            new ProviderVideoBlock("video/mp4", "video-data"),
             new ProviderThinkingBlock("reasoning"),
             new ProviderJsonBlock("{\"answer\":true}"),
-            new ProviderTextBlock("[Resource report]\nresource preview"),
+            new ProviderResourceBlock(new UUID(0L, 1L), "report", "resource preview"),
+            new ProviderTextBlock("second text"),
             new ProviderToolCallBlock(
                 new ProviderToolCall("call-1", "lookup", "{\"key\":\"value\"}"))),
         projected.get(2).contents());
@@ -106,7 +89,6 @@ class ProviderMessageProjectorTest {
                 "lookup",
                 List.of(
                     new ProviderTextBlock("tool output"),
-                    new ProviderVideoBlock("video/webm", "tool-video-data"),
                     new ProviderJsonBlock("{\"found\":true}")),
                 true,
                 "{\"code\":\"NOT_FOUND\"}")),
@@ -137,12 +119,13 @@ class ProviderMessageProjectorTest {
     assertSyntheticOrphanResult(projected.get(4));
   }
 
-  /** Resource 投影为有界小文本标记：display name 优先；data URI 用 inline mediaType；长 URI ASCII 截断到 512 字符。 */
+  /**
+   * Resource 投影为 durable-safe 的 ProviderResourceBlock（blobId/name/preview），绝不注入 URI / mediaType /
+   * size。
+   */
   @Test
-  void projectsBoundedResourceMarkersWithoutInjectingLargeUris() {
+  void projectsDurableResourceBlocksPreservingBlobFacts() {
     ProviderMessageProjector projector = new ProviderMessageProjector();
-    String longUri = "https://example.test/" + "segment/".repeat(100) + "tail.txt";
-    assertTrue(longUri.length() > ProviderMessageProjector.MAX_URI_LABEL_CHARS);
 
     List<ProviderMessage> projected =
         projector.project(
@@ -150,58 +133,14 @@ class ProviderMessageProjectorTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ResourceMessageContent(
-                            new ResourceRef(
-                                "https://example.test/a.txt", "text/plain", "a.txt", null, null),
-                            null),
-                        new ResourceMessageContent(
-                            new ResourceRef(
-                                "https://example.test/b.txt", "text/plain", null, null, null),
-                            "preview"),
-                        new ResourceMessageContent(
-                            new ResourceRef(
-                                "data:text/plain,hello",
-                                "text/plain",
-                                null,
-                                5L,
-                                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
-                            "data preview"),
-                        new ResourceMessageContent(
-                            new ResourceRef(longUri, "text/plain", null, null, null), null)))));
+                        new ResourceMessageContent(new UUID(0L, 1L), "a.txt", null),
+                        new ResourceMessageContent(new UUID(0L, 2L), "b.txt", "preview")))));
 
-    String truncated =
-        longUri.substring(0, ProviderMessageProjector.MAX_URI_LABEL_CHARS - 3) + "...";
     assertEquals(
         List.of(
-            new ProviderTextBlock("[Resource a.txt]\n"),
-            new ProviderTextBlock("[Resource https://example.test/b.txt]\npreview"),
-            new ProviderTextBlock("[Resource inline text/plain]\ndata preview"),
-            new ProviderTextBlock("[Resource " + truncated + "]\n")),
+            new ProviderResourceBlock(new UUID(0L, 1L), "a.txt", ""),
+            new ProviderResourceBlock(new UUID(0L, 2L), "b.txt", "preview")),
         projected.get(0).contents());
-  }
-
-  /** display name 优先于 data URI：data 资源带 name 时绝不投影 inline/inline 载荷。 */
-  @Test
-  void resourceNameWinsOverDataUri() {
-    ProviderMessageProjector projector = new ProviderMessageProjector();
-
-    List<ProviderMessage> projected =
-        projector.project(
-            List.of(
-                new AgentMessage(
-                    AgentMessageRole.ASSISTANT,
-                    List.of(
-                        new ResourceMessageContent(
-                            new ResourceRef(
-                                "data:text/plain,hello",
-                                "text/plain",
-                                "hello.txt",
-                                5L,
-                                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
-                            null)))));
-
-    assertEquals(
-        List.of(new ProviderTextBlock("[Resource hello.txt]\n")), projected.get(0).contents());
   }
 
   private static AgentMessage assistantToolCall(String toolCallId) {

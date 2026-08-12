@@ -2,6 +2,7 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 
 export function CanvasOverlays() {
   const { state } = useCanvasRuntime()
+  const uploads = Object.entries(state.uploadProgress)
 
   return (
     <>
@@ -10,6 +11,18 @@ export function CanvasOverlays() {
       </div>
       {state.conflictMessage ? (
         <div className="canvas-conflict-banner" role="alert">{state.conflictMessage}</div>
+      ) : null}
+      {uploads.length > 0 ? (
+        <div className="canvas-upload-progress" role="status" aria-live="polite">
+          {uploads.map(([name, progress]) => (
+            <span key={name}>
+              {name.split(':')[0]}
+              {' '}
+              {Math.round(progress * 100)}
+              %
+            </span>
+          ))}
+        </div>
       ) : null}
     </>
   )

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -76,6 +78,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -84,7 +87,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -396,11 +398,11 @@ class ModelProcessorTest {
         fixture.store,
         fixture.invocationId,
         model -> model.succeed(response("ok", ProviderStopReason.COMPLETED), NOW));
-    long assistantEntryId =
+    UUID assistantEntryId =
         fixture.store.transaction(
             tx -> {
-              long userId = tx.nextId();
-              long id = tx.nextId();
+              UUID userId = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       userId,
@@ -1944,7 +1946,7 @@ class ModelProcessorTest {
   @Test
   void abandonDuringHeartbeatStartupBouncesWithoutStartingGateway() {
     AtomicReference<ModelProcessor> processorRef = new AtomicReference<>();
-    AtomicLong cancelId = new AtomicLong();
+    AtomicReference<UUID> cancelId = new AtomicReference<>();
     ScheduledExecutorService base = newScheduler();
     ScheduledExecutorService hooked =
         (ScheduledExecutorService)
@@ -2186,7 +2188,7 @@ class ModelProcessorTest {
   void heartbeatCannotRestartAfterStop() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Baseline baseline = seedBaseline(store, NOW);
-    long invocationId = seedInvocation(store, baseline, request(), NOW);
+    UUID invocationId = seedInvocation(store, baseline, request(), NOW);
     ClaimedWork claimed = claim(store, invocationId, NOW);
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(store, newScheduler(), LEASE_CONFIG, Clock.systemUTC(), () -> {});
@@ -2271,7 +2273,7 @@ class ModelProcessorTest {
     assertTrue(fixture.sink.events.isEmpty());
 
     assertFalse(fixture.processor.cancel(fixture.invocationId));
-    assertThrows(IllegalArgumentException.class, () -> fixture.processor.cancel(0));
+    assertThrows(NullPointerException.class, () -> fixture.processor.cancel(null));
   }
 
   /** close 取消全部本地 execution；durable 行保持 RUNNING 等待 lease 恢复。 */
@@ -2279,7 +2281,7 @@ class ModelProcessorTest {
   void closeCancelsAllLocalExecutions() {
     Fixture fixture = fixture();
     Baseline secondBaseline = seedBaseline(fixture.store, NOW);
-    long secondInvocationId = seedInvocation(fixture.store, secondBaseline, request(), NOW);
+    UUID secondInvocationId = seedInvocation(fixture.store, secondBaseline, request(), NOW);
     FakeHandle firstHandle = new FakeHandle();
     FakeHandle secondHandle = new FakeHandle();
     fixture.gateway.queue(new ModelGateway.Started(firstHandle));
@@ -2307,7 +2309,7 @@ class ModelProcessorTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     Baseline baseline = seedBaseline(store, now);
-    long invocationId = seedInvocation(store, baseline, request(), now);
+    UUID invocationId = seedInvocation(store, baseline, request(), now);
     FakeGateway gateway = new FakeGateway();
     RecordingSink sink = new RecordingSink();
     FakeHandle handle = new FakeHandle();
@@ -2425,7 +2427,7 @@ class ModelProcessorTest {
     deleteModelWork(fixture, fixture.invocationId);
   }
 
-  private void deleteModelWork(Fixture fixture, long invocationId) {
+  private void deleteModelWork(Fixture fixture, UUID invocationId) {
     fixture.store.transaction(
         tx -> {
           tx.lockThread(fixture.baseline.threadId()).orElseThrow();
@@ -2438,7 +2440,7 @@ class ModelProcessorTest {
     replaceModelWork(fixture, fixture.invocationId);
   }
 
-  private void replaceModelWork(Fixture fixture, long invocationId) {
+  private void replaceModelWork(Fixture fixture, UUID invocationId) {
     fixture.store.transaction(
         tx -> {
           tx.lockThread(fixture.baseline.threadId()).orElseThrow();
@@ -2485,7 +2487,7 @@ class ModelProcessorTest {
     final ScheduledExecutorService scheduler;
     final ModelInvocationRequest request;
     final Baseline baseline;
-    final long invocationId;
+    final UUID invocationId;
     final ModelProcessor processor;
 
     Fixture(InvocationRetryPolicy retryPolicy, ModelInvocationRequest request) {
@@ -2516,7 +2518,7 @@ class ModelProcessorTest {
     }
   }
 
-  private record Baseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
+  private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
   private static Baseline seedBaseline(InMemoryHarnessStore store, Instant now) {
     return seedBaseline(store, now, TurnStartReason.INPUT);
@@ -2526,11 +2528,11 @@ class ModelProcessorTest {
       InMemoryHarnessStore store, Instant now, TurnStartReason reason) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           tx.insertEntry(
@@ -2545,12 +2547,12 @@ class ModelProcessorTest {
         });
   }
 
-  private static long seedInvocation(
+  private static UUID seedInvocation(
       InMemoryHarnessStore store, Baseline baseline, ModelInvocationRequest request, Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertModelInvocation(
               new ModelInvocation(
                   id,
@@ -2572,12 +2574,12 @@ class ModelProcessorTest {
         });
   }
 
-  private static ClaimedWork claim(InMemoryHarnessStore store, long invocationId, Instant now) {
+  private static ClaimedWork claim(InMemoryHarnessStore store, UUID invocationId, Instant now) {
     return claim(store, invocationId, now, "token-" + invocationId);
   }
 
   private static ClaimedWork claim(
-      InMemoryHarnessStore store, long invocationId, Instant now, String token) {
+      InMemoryHarnessStore store, UUID invocationId, Instant now, String token) {
     return store
         .transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, now, token, now.plusSeconds(60)))
         .orElseThrow();
@@ -2585,7 +2587,7 @@ class ModelProcessorTest {
 
   private static void transition(
       InMemoryHarnessStore store,
-      long invocationId,
+      UUID invocationId,
       Function<ModelInvocation, ModelInvocation> transition) {
     store.transaction(
         tx -> {
@@ -2595,11 +2597,11 @@ class ModelProcessorTest {
         });
   }
 
-  private static ModelInvocation model(InMemoryHarnessStore store, long invocationId) {
+  private static ModelInvocation model(InMemoryHarnessStore store, UUID invocationId) {
     return store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
   }
 
-  private static ThreadState thread(InMemoryHarnessStore store, long threadId) {
+  private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
@@ -2641,7 +2643,7 @@ class ModelProcessorTest {
         false,
         100_000,
         new CompactionRequest(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, 2L, 2L, null));
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, id(2L), id(2L), null));
   }
 
   private static ModelInvocationRequest requestWithTool() {
@@ -2675,6 +2677,7 @@ class ModelProcessorTest {
     return new ModelDescriptor(
         "provider",
         "model",
+        Set.of(ModelInputModality.TEXT),
         true,
         true,
         new ModelPricing(
@@ -2749,7 +2752,7 @@ class ModelProcessorTest {
     private static final Object NULL_START = new Object();
     final LinkedList<Object> results = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
-    final ConcurrentHashMap<Long, Listener> listeners = new ConcurrentHashMap<>();
+    final ConcurrentHashMap<UUID, Listener> listeners = new ConcurrentHashMap<>();
     volatile Consumer<Listener> beforeReturn;
     volatile int startCalls;
 
@@ -2784,7 +2787,7 @@ class ModelProcessorTest {
       return (StartResult) result;
     }
 
-    Listener listener(long invocationId) {
+    Listener listener(UUID invocationId) {
       return listeners.get(invocationId);
     }
   }

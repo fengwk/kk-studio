@@ -76,7 +76,7 @@ public final class ThreadContextClassifier {
       return new ThreadContext.IdleOrHistorical();
     }
     // 规则 3：Model 身份必须与当前 Thread + open TURN_START 精确一致。
-    if (model.threadId() != thread.id() || model.turnStartEntryId() != turn.id()) {
+    if (!model.threadId().equals(thread.id()) || !model.turnStartEntryId().equals(turn.id())) {
       throw new IllegalStateException(
           "model "
               + model.id()
@@ -86,7 +86,7 @@ public final class ThreadContextClassifier {
               + turn.id());
     }
     Entry head = path.head();
-    if (head.id() == model.basisHeadEntryId() && model.resultEntryId() == null) {
+    if (head.id().equals(model.basisHeadEntryId()) && model.resultEntryId() == null) {
       // 规则 4：head 恰为 basis 且结果未挂载；siblings 只可能在结果 head 加载，出现在这里是不兼容形状。
       requireEmptySiblings(toolSiblings, "at the model basis");
       if (model.status().isTerminal()) {
@@ -94,7 +94,7 @@ public final class ThreadContextClassifier {
       }
       return new ThreadContext.ModelActive(model);
     }
-    if (model.resultEntryId() == null || model.resultEntryId() != head.id()) {
+    if (model.resultEntryId() == null || !model.resultEntryId().equals(head.id())) {
       // 规则 6：head/basis/result 的任何其他关系（含 relocation 回 basis、descendant 或另一分支）都是历史。
       requireEmptySiblings(toolSiblings, "without the model result at the head");
       return new ThreadContext.IdleOrHistorical();
@@ -157,7 +157,7 @@ public final class ThreadContextClassifier {
         throw new IllegalStateException(
             "tool siblings must be a contiguous ordinal prefix of entry " + assistant.id());
       }
-      if (sibling.modelInvocationId() != model.id()) {
+      if (!sibling.modelInvocationId().equals(model.id())) {
         throw new IllegalStateException(
             "tool siblings of entry " + assistant.id() + " must be owned by model " + model.id());
       }

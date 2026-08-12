@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJ
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * {@link ModelDescriptorJsonCodec} 的契约与 round-trip 测试，覆盖 descriptor 与 variant 完整字段、所有 strict
@@ -89,13 +91,14 @@ class ModelDescriptorJsonCodecTest {
     ArrayNode names = NODES.arrayNode();
     root.fieldNames().forEachRemaining(names::add);
     assertEquals(
-        List.of("providerName", "modelName", "tools", "reasoning", "pricing"),
+        List.of("providerName", "modelName", "inputModalities", "tools", "reasoning", "pricing"),
         List.of(
             names.get(0).asText(),
             names.get(1).asText(),
             names.get(2).asText(),
             names.get(3).asText(),
-            names.get(4).asText()));
+            names.get(4).asText(),
+            names.get(5).asText()));
   }
 
   /** BigDecimal 字段以 plain 字符串输出。 */
@@ -195,6 +198,7 @@ class ModelDescriptorJsonCodecTest {
         "{"
             + "\"providerName\":\"provider\",\"providerName\":\"other\","
             + "\"modelName\":\"x\","
+            + "\"inputModalities\":[\"TEXT\"],"
             + "\"tools\":false,\"reasoning\":false,"
             + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
             + "\"serviceTier\":\"s\",\"serviceTierMultiplier\":\"1\",\"version\":\"v\","
@@ -203,6 +207,42 @@ class ModelDescriptorJsonCodecTest {
             + "\"cacheWriteLongPerMillionTokens\":\"0\",\"reasoningPerMillionTokens\":\"0\"}"
             + "}";
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
+  }
+
+  /** inputModalities 必须是非空、无重复的合法 enum 字符串数组。 */
+  @Test
+  void rejectsInvalidInputModalities() {
+    ObjectNode unknownEnum = canonicalDescriptorNode();
+    unknownEnum.set("inputModalities", NODES.arrayNode().add("TEXT").add("FOREVER"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(unknownEnum));
+
+    ObjectNode duplicate = canonicalDescriptorNode();
+    duplicate.set("inputModalities", NODES.arrayNode().add("TEXT").add("TEXT"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(duplicate));
+
+    ObjectNode empty = canonicalDescriptorNode();
+    empty.set("inputModalities", NODES.arrayNode());
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(empty));
+
+    ObjectNode wrongType = canonicalDescriptorNode();
+    wrongType.set("inputModalities", NODES.textNode("TEXT"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(wrongType));
+
+    ObjectNode nonTextElement = canonicalDescriptorNode();
+    nonTextElement.set("inputModalities", NODES.arrayNode().add(1));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(nonTextElement));
+
+    ObjectNode blankElement = canonicalDescriptorNode();
+    blankElement.set("inputModalities", NODES.arrayNode().add(" "));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(blankElement));
+  }
+
+  /** 旧五字段 durable 形态（缺 inputModalities）不做 dual-read，必须拒绝。 */
+  @Test
+  void rejectsLegacyDescriptorShapeWithoutInputModalities() {
+    ObjectNode node = canonicalDescriptorNode();
+    node.remove("inputModalities");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
   /** 边界：providerName 必须为非空、无首尾空白的字符串。 */
@@ -282,7 +322,13 @@ class ModelDescriptorJsonCodecTest {
   // ---------- Fixture / 辅助方法 ----------
 
   private static ModelDescriptor canonicalDescriptor() {
-    return new ModelDescriptor("openai", "gpt-5-mini", true, true, canonicalPricing());
+    return new ModelDescriptor(
+        "openai",
+        "gpt-5-mini",
+        Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+        true,
+        true,
+        canonicalPricing());
   }
 
   private static ModelPricing canonicalPricing() {

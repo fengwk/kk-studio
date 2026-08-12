@@ -5,6 +5,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.UUID;
+
 /** 拥有某 Tool invocation 的冻结 Model request 的窄读适配器。 */
 @Mapper
 public interface SelectedSkillBindingMapper extends BaseMapper {
@@ -18,5 +20,5 @@ public interface SelectedSkillBindingMapper extends BaseMapper {
         and model.thread_id = #{threadId}
       """)
   String findModelRequest(
-      @Param("toolInvocationId") long toolInvocationId, @Param("threadId") long threadId);
+      @Param("toolInvocationId") UUID toolInvocationId, @Param("threadId") UUID threadId);
 }

@@ -39,6 +39,11 @@ import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
+import {
+  createTextPart,
+  hasMessageContent,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 import { branchTarget } from '@/features/ai/chat/session-entry-tree'
 import { toThreadSelectionItem } from '@/features/ai/chat/thread-selection'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
@@ -88,8 +93,8 @@ export function BoundThreadPane({
   onFocus: () => void
   onThreadChange: (threadId: string | null) => void
   onThreadSortChange: (sort: PaneSortPreference) => void
-  /** 在首次发送失败后恢复 composer 文本；与 replay identity 相互独立。 */
-  initialDraft?: string
+  /** 在首次发送失败后恢复 composer 内容；与 replay identity 相互独立。 */
+  initialDraft?: ComposerPart[]
   initialReplay?: CommandBatchReplay
   onReplayInitialized?: () => void
 }) {
@@ -101,12 +106,12 @@ export function BoundThreadPane({
   )
   // buildBatch 依赖 controller 的 snapshot thread；controller 在下方创建，因此
   // 稳定的回调通过一个 ref 转发，并在每次渲染中、use 之前赋值。
-  const buildBatchRef = useRef<((content: string) => CommandBatchPlan | null) | null>(null)
+  const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
   const controller = useAgentThreadController(
     threadId,
-    initialDraft ?? initialReplay?.content ?? '',
+    initialDraft ?? initialReplay?.parts ?? [],
     initialReplay,
-    (content) => buildBatchRef.current?.(content) ?? null,
+    (parts) => buildBatchRef.current?.(parts) ?? null,
     environmentReadyByName,
   )
   // 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，
@@ -200,7 +205,7 @@ export function BoundThreadPane({
   }, [controller.thread])
 
   const buildBatch = useCallback(
-    (content: string): CommandBatchPlan | null => {
+    (parts: ComposerPart[]): CommandBatchPlan | null => {
       const thread = controller.thread
       if (!thread || branchState == null || effectiveBase == null) {
         return null
@@ -209,7 +214,7 @@ export function BoundThreadPane({
         thread,
         effectiveBase,
         draft: branchState.draft,
-        content,
+        parts,
       })
     },
     [branchState, controller.thread, effectiveBase],
@@ -245,7 +250,7 @@ export function BoundThreadPane({
       const snapshotDraft = branchDraftFromThread(updatedThread)
       setBranchState({ base: snapshotDraft, draft: snapshotDraft, initialized: true })
       // USER/CUSTOM 回退会将其可编辑的原文恢复到 composer。
-      controller.setDraft(branchTarget(entry).draft)
+      controller.setDraft([createTextPart(branchTarget(entry).draft)])
     },
   })
 
@@ -255,7 +260,7 @@ export function BoundThreadPane({
   // - panePending = 任何使切换不安全的 in-flight mutation：queued commands、command HTTP、
   //   head 重定位、stop、approval、未决的 exact batch replay，或等待精确重试的
   //   不确定 Stop 操作。
-  const paneDirty = dirty || controller.draft.trim() !== ''
+  const paneDirty = dirty || hasMessageContent(controller.draft)
   const panePending =
     hasPendingCommands
     || controller.pending
@@ -412,7 +417,7 @@ export function BoundThreadPane({
         if (paneDirty && !window.confirm(t('ai.chat.history.confirmDiscardDraft'))) {
           return
         }
-        controller.setDraft('')
+        controller.setDraft([])
         onThreadChange(null)
         return
       default:
@@ -466,7 +471,7 @@ export function BoundThreadPane({
     },
   }
   const composer: ChatPanelComposerInput = {
-    draft: controller.draft,
+    parts: controller.draft,
     // Pending 覆盖 in-flight HTTP 请求（同时禁用发送：canSend 已检查 disabled），
     // 加上 branch draft 与 buildBatch 就绪状态，确保一个 replayRef 不会服务并发的
     // CAS 请求。
@@ -477,9 +482,9 @@ export function BoundThreadPane({
       || rebindMutation.isPending
       || branchState == null
       || effectiveBase == null,
-    onDraftChange: controller.setDraft,
-    onSubmit: () => {
-      void controller.submitMessage()
+    onPartsChange: controller.setDraft,
+    onSubmit: (payload, localDraft) => {
+      void controller.submitMessage(payload, localDraft)
     },
     onCommand: handleCommand,
     commands: BOUND_PANE_COMMANDS,

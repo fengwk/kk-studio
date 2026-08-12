@@ -32,6 +32,7 @@ DatabaseTurnResolver
 CoreModelGateway.start（每次 attempt）
   -> DatabaseProviderResolutionService 按 providerName 读取当前 agent_provider 行
   -> 当前 ProviderFactory.create(当前 credential/config) -> attempt-local adapter
+  -> ProviderResourceMaterializer 按 storage_blob 事实生成 attempt-only media URL/文本回退
   -> 持久 cache control 按当前 capability 规范化
 ```
 
@@ -73,7 +74,7 @@ public interface ProviderFactory {
 
 `GET /api/ai/catalog/tools` 只返回 Agent 可选择的 Platform/Environment 目录。Agent config 保存可选择 Tool 名称集合，不保存 Tool 实例或 Environment 连接。
 
-`CoreToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做 durable Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落库。
+`CoreToolGateway` 是 `ToolGateway` 端口适配：`preflight` 同步无副作用（`Allow` / `Ask(reason)` / `Deny(error)`），外部 I/O 前完成权限判定与机械校验；两阶段激活与 Model 同构；普通 `PLATFORM` binding 走本地 registry，`ENVIRONMENT` binding 经 `RemoteToolTransport`（`EnvironmentDaemonGateway`）发往冻结 route；带 plugin binding 的 `PLATFORM` Tool 按冻结 contribution 精确恢复并同步执行。terminal success 在回调桥内先校验插件 intents，再经 `ToolResultExternalizer` 做瞬时 Resource 外部化（reference plan → put → exact ref check），最后把 `ToolSuccess(result, effects)` 交给 ToolProcessor 原子落 terminal 事实。Tool outcome Entry 写入前，`ToolResultHistoryMaterializer` 再在同一 Store 事务把 Resource 摄入全局 Blob 并转换为 `resource(blobId,name,preview)`。
 
 ### Trusted plugin
 
@@ -147,7 +148,7 @@ Compaction resolver 不读取 Agent prompt、plugin projector、Environment live
 - tool/skill/subagent binding 名称各自不重复；每个 environment-bound tool/skill 引用本请求 route；
 - `SubagentBinding(name, description)`：canonical 短名 + 可空描述（≤512 字符）的 allowlist 快照；`task` 的 ToolBinding 冻结在 `toolBindings`，allowlist 冻结在 `subagentBindings`，二者在同一个 request 中配对；
 - `contextWindow` 是冻结正 int；`compaction` 非 null 时 provider tools、tool bindings、skill bindings、subagent bindings 必须全空，并冻结 phase/trigger/tokensBefore/firstKept/cut/prefix；
-- `ModelDescriptor` 只含 `providerName`/`modelName`/`tools`/`reasoning`/`pricing` 五个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
+- `ModelDescriptor` 只含 `providerName`/`modelName`/`inputModalities`/`tools`/`reasoning`/`pricing` 六个字段；Provider 类型与 cache capability 由 attempt 时当前 `ProviderFactory` 解析；
 - retry 重放同一 request；ToolInvocation 执行同一 binding，不从最新 Agent/Environment 重新选择；
 - attempt 时 `DatabaseProviderResolutionService` 按 `providerName` 读取当前 `agent_provider` 行构造短生命周期 Provider，并把持久 cache control 按当前 factory capability 规范化：不兼容能力降级为 `none()`，兼容时按当前 capability 重求形态与断点。
 

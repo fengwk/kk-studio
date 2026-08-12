@@ -47,7 +47,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 /**
  * Environment daemon 的连接/协议 transport 与能力/技能适配器。
@@ -64,8 +63,6 @@ import java.util.regex.Pattern;
 @Service
 public class EnvironmentDaemonGateway
     implements EnvironmentDaemonEndpoint, EnvironmentSkillLoader, RemoteToolTransport {
-
-  private static final Pattern UNSIGNED_POSITIVE_DECIMAL = Pattern.compile("^[1-9][0-9]*$");
 
   private final LiveEnvironmentRegistry environmentRegistry;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -159,7 +156,7 @@ public class EnvironmentDaemonGateway
     ConnectionState state;
     ActiveRemote active;
     String invokePayload;
-    long invocationId;
+    UUID invocationId;
     synchronized (this) {
       state = environmentConnections.get(environmentName);
       if (state == null
@@ -182,9 +179,6 @@ public class EnvironmentDaemonGateway
             unavailableMessage(environmentName, request.call().toolName()));
       }
       invocationId = request.context().invocationId();
-      if (invocationId <= 0) {
-        throw new IllegalArgumentException("invocationId must be positive");
-      }
       // 完整编码在注册 active 之前完成；确定性 payload 失败不得留下永远占用 Environment 的幽灵 invocation。
       invokePayload = createInvokePayload(request);
       active =
@@ -198,8 +192,7 @@ public class EnvironmentDaemonGateway
     }
     // 在 gateway monitor 之外发送，避免与 receive 路径产生 this->state 锁顺序反转。
     SendOutcome outcome =
-        sendWithOutcome(
-            state, DaemonMessageType.INVOKE, Long.toString(invocationId), invokePayload);
+        sendWithOutcome(state, DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
     if (outcome == SendOutcome.SENT) {
       return active;
     }
@@ -522,13 +515,13 @@ public class EnvironmentDaemonGateway
 
   private ActiveRemote requireActive(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
-    long invocationId = parsePositive(envelope.invocationId(), "invocationId");
+    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     ActiveRemote active;
     synchronized (this) {
       active = activeByEnvironment.get(state.environmentName);
     }
     if (active == null
-        || active.invocationId != invocationId
+        || !active.invocationId.equals(invocationId)
         || !active.connectionId.equals(state.connection.connectionId())) {
       throw new DaemonProtocolException(
           "daemon callback does not own invocationId: " + envelope.invocationId());
@@ -716,7 +709,7 @@ public class EnvironmentDaemonGateway
   }
 
   private static String wireInvocationId(ActiveRemote active) {
-    return Long.toString(active.invocationId);
+    return active.invocationId.toString();
   }
 
   private static String unavailableMessage(EnvironmentName environmentName, String toolName) {
@@ -791,18 +784,19 @@ public class EnvironmentDaemonGateway
     return value;
   }
 
-  private static long parsePositive(String value, String field) {
-    if (value == null || value.isBlank() || !UNSIGNED_POSITIVE_DECIMAL.matcher(value).matches()) {
-      throw new DaemonProtocolException(field + " must be an unsigned positive decimal: " + value);
+  private static UUID parseUuid(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new DaemonProtocolException(field + " must not be blank: " + value);
     }
     try {
-      long parsed = Long.parseLong(value);
-      if (parsed <= 0) {
-        throw new DaemonProtocolException(field + " must be positive: " + value);
+      UUID parsed = UUID.fromString(value);
+      if (!parsed.toString().equals(value)) {
+        throw new DaemonProtocolException(field + " must be a canonical UUID string: " + value);
       }
       return parsed;
-    } catch (NumberFormatException error) {
-      throw new DaemonProtocolException(field + " exceeds long range: " + value, error);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(
+          field + " must be a canonical UUID string: " + value, error);
     }
   }
 
@@ -815,7 +809,7 @@ public class EnvironmentDaemonGateway
   private final class ActiveRemote implements ToolExecutionHandle {
     private final EnvironmentName environmentName;
     private final String connectionId;
-    private final long invocationId;
+    private final UUID invocationId;
     private final ToolCall call;
     private final ToolExecutionListener listener;
     private volatile boolean cancelled;
@@ -825,7 +819,7 @@ public class EnvironmentDaemonGateway
     private ActiveRemote(
         EnvironmentName environmentName,
         String connectionId,
-        long invocationId,
+        UUID invocationId,
         ToolCall call,
         ToolExecutionListener listener) {
       this.environmentName = environmentName;
@@ -852,7 +846,7 @@ public class EnvironmentDaemonGateway
         state = environmentConnections.get(environmentName);
       }
       if (state != null && state.connection.connectionId().equals(connectionId)) {
-        send(state, DaemonMessageType.CANCEL, Long.toString(invocationId), "{}");
+        send(state, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
       }
     }
 

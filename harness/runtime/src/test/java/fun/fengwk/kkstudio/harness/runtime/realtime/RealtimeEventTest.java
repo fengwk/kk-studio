@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** 有损 realtime event 必须保留足够的 durable identity，以支持 snapshot-first 过滤。 */
 class RealtimeEventTest {
@@ -20,11 +21,19 @@ class RealtimeEventTest {
     Instant createdAt = Instant.parse("2026-07-23T00:00:00Z");
     RealtimeEvent.ModelDelta event =
         new RealtimeEvent.ModelDelta(
-            1L, 2L, 3, 4L, new ProviderStreamEvent.TextDelta("delta"), createdAt);
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            3,
+            4L,
+            new ProviderStreamEvent.TextDelta("delta"),
+            createdAt);
 
-    assertEquals(1L, event.threadId());
+    assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000001"), event.threadId());
     assertEquals(
-        new RealtimeEvent.Subject(RealtimeEvent.SubjectKind.MODEL_INVOCATION, 2L), event.subject());
+        new RealtimeEvent.Subject(
+            RealtimeEvent.SubjectKind.MODEL_INVOCATION,
+            UUID.fromString("00000000-0000-0000-0000-000000000002")),
+        event.subject());
     assertEquals(3, event.attempt());
     assertEquals(4L, event.sequence());
     assertEquals(RealtimeEventType.MODEL_DELTA, event.type());
@@ -38,23 +47,54 @@ class RealtimeEventTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RealtimeEvent.ModelDelta(0L, 2L, 1, 1L, delta, now));
+        () ->
+            new RealtimeEvent.ModelDelta(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                0,
+                1L,
+                delta,
+                now));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RealtimeEvent.ModelDelta(1L, 0L, 1, 1L, delta, now));
+        () ->
+            new RealtimeEvent.ModelDelta(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                0L,
+                delta,
+                now));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RealtimeEvent.ModelDelta(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                1L,
+                null,
+                now));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RealtimeEvent.ModelDelta(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                1L,
+                delta,
+                null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RealtimeEvent.ModelDelta(1L, 2L, 0, 1L, delta, now));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 0L, delta, now));
-    assertThrows(
-        NullPointerException.class, () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, null, now));
-    assertThrows(
-        NullPointerException.class, () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, delta, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RealtimeEvent.ModelDelta(1L, 2L, 1, 1L, delta, now.plusNanos(1)));
+        () ->
+            new RealtimeEvent.ModelDelta(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                1L,
+                delta,
+                now.plusNanos(1)));
   }
 
   @Test
@@ -62,27 +102,56 @@ class RealtimeEventTest {
     Instant now = Instant.parse("2026-07-23T00:00:00Z");
     ToolResult partial =
         new ToolResult("call-1", List.of(new TextToolContent("partial")), false, "{}", false);
-    RealtimeEvent.ToolPartial event = new RealtimeEvent.ToolPartial(1L, 2L, 3, partial, now);
+    RealtimeEvent.ToolPartial event =
+        new RealtimeEvent.ToolPartial(
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            3,
+            partial,
+            now);
 
     assertEquals(
-        new RealtimeEvent.Subject(RealtimeEvent.SubjectKind.TOOL_INVOCATION, 2L), event.subject());
+        new RealtimeEvent.Subject(
+            RealtimeEvent.SubjectKind.TOOL_INVOCATION,
+            UUID.fromString("00000000-0000-0000-0000-000000000002")),
+        event.subject());
     assertEquals(RealtimeEventType.TOOL_PARTIAL, event.type());
     assertEquals(now, event.createdAt());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RealtimeEvent.ToolPartial(0L, 2L, 1, partial, now));
+        () ->
+            new RealtimeEvent.ToolPartial(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                0,
+                partial,
+                now));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RealtimeEvent.ToolPartial(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                null,
+                now));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RealtimeEvent.ToolPartial(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                partial,
+                null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new RealtimeEvent.ToolPartial(1L, 0L, 1, partial, now));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RealtimeEvent.ToolPartial(1L, 2L, 0, partial, now));
-    assertThrows(
-        NullPointerException.class, () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, null, now));
-    assertThrows(
-        NullPointerException.class, () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, partial, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RealtimeEvent.ToolPartial(1L, 2L, 1, partial, now.plusNanos(1)));
+        () ->
+            new RealtimeEvent.ToolPartial(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                partial,
+                now.plusNanos(1)));
   }
 }

@@ -27,7 +27,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.LongSupplier;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath、queued Command 快照与 YOLO 开关构造完整合法
@@ -46,12 +47,12 @@ final class TurnPlanBuilder {
   private final CommandHarvestReducer harvestReducer = new CommandHarvestReducer();
 
   TurnPlan build(
-      long threadId,
+      UUID threadId,
       EntryPath sourcePath,
       boolean sourceYoloEnabled,
       TurnStartReason reason,
       List<ThreadCommand> plannedCommands,
-      LongSupplier idAllocator,
+      Supplier<UUID> idAllocator,
       Instant now,
       CompactionPreparation preparation) {
     Objects.requireNonNull(sourcePath, "sourcePath");
@@ -59,9 +60,7 @@ final class TurnPlanBuilder {
     Objects.requireNonNull(plannedCommands, "plannedCommands");
     Objects.requireNonNull(idAllocator, "idAllocator");
     Objects.requireNonNull(now, "now");
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+    Objects.requireNonNull(threadId, "threadId");
     if ((reason == TurnStartReason.COMPACTION) != (preparation != null)) {
       throw new IllegalArgumentException(
           "compaction preparation must be present iff reason is COMPACTION");
@@ -77,12 +76,12 @@ final class TurnPlanBuilder {
         harvestReducer.reduce(
             threadId, sourcePath.baseSettings(), sourceYoloEnabled, consumedCommands);
 
-    long sessionId = sourcePath.root().sessionId();
+    UUID sessionId = sourcePath.root().sessionId();
     long cutoffSequence =
         plannedCommands.isEmpty() ? 0L : plannedCommands.get(plannedCommands.size() - 1).sequence();
 
     List<Entry> candidateEntries = new ArrayList<>();
-    long parentId = sourcePath.head().id();
+    UUID parentId = sourcePath.head().id();
     if (reason == TurnStartReason.INPUT) {
       List<Entry> normalization = normalizationSuffix(sourcePath, idAllocator, now);
       candidateEntries.addAll(normalization);
@@ -90,7 +89,7 @@ final class TurnPlanBuilder {
         parentId = normalization.get(normalization.size() - 1).id();
       }
     }
-    long turnStartEntryId = idAllocator.getAsLong();
+    UUID turnStartEntryId = idAllocator.get();
     candidateEntries.add(
         new Entry(
             turnStartEntryId,
@@ -102,7 +101,7 @@ final class TurnPlanBuilder {
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
       for (ThreadCommand command : plannedCommands) {
         if (reason == TurnStartReason.INPUT && command.type() == ThreadCommandType.USER_MESSAGE) {
-          long entryId = idAllocator.getAsLong();
+          UUID entryId = idAllocator.get();
           candidateEntries.add(
               new Entry(
                   entryId,
@@ -114,7 +113,7 @@ final class TurnPlanBuilder {
           parentId = entryId;
         } else if (command.type() == ThreadCommandType.CUSTOM_MESSAGE
             && isConsumed(reason, command)) {
-          long entryId = idAllocator.getAsLong();
+          UUID entryId = idAllocator.get();
           candidateEntries.add(
               new Entry(
                   entryId,
@@ -175,15 +174,15 @@ final class TurnPlanBuilder {
    * Invocation 结果。ROOT / 已关闭 TURN_END 无 suffix。
    */
   private List<Entry> normalizationSuffix(
-      EntryPath sourcePath, LongSupplier idAllocator, Instant now) {
+      EntryPath sourcePath, Supplier<UUID> idAllocator, Instant now) {
     var openTurn = sourcePath.openTurnStart();
     if (openTurn.isEmpty()) {
       return List.of();
     }
     Entry turn = openTurn.get();
-    long sessionId = sourcePath.root().sessionId();
+    UUID sessionId = sourcePath.root().sessionId();
     List<Entry> suffix = new ArrayList<>();
-    long parentId = sourcePath.head().id();
+    UUID parentId = sourcePath.head().id();
     Entry assistant = assistantResultInTurn(sourcePath, turn);
     if (assistant != null
         && assistant.payload() instanceof MessagePayload message
@@ -197,7 +196,7 @@ final class TurnPlanBuilder {
       int present = countToolResultsAfter(sourcePath, assistant.id());
       for (int ordinal = present; ordinal < calls.size(); ordinal++) {
         ToolCallMessageContent call = calls.get(ordinal);
-        long entryId = idAllocator.getAsLong();
+        UUID entryId = idAllocator.get();
         suffix.add(
             new Entry(
                 entryId,
@@ -208,7 +207,7 @@ final class TurnPlanBuilder {
         parentId = entryId;
       }
     }
-    long turnEndId = idAllocator.getAsLong();
+    UUID turnEndId = idAllocator.get();
     suffix.add(
         new Entry(
             turnEndId,
@@ -224,7 +223,7 @@ final class TurnPlanBuilder {
   static Entry assistantResultInTurn(EntryPath path, Entry turn) {
     boolean inTurn = false;
     for (Entry entry : path.entries()) {
-      if (entry.id() == turn.id()) {
+      if (entry.id().equals(turn.id())) {
         inTurn = true;
         continue;
       }
@@ -247,11 +246,11 @@ final class TurnPlanBuilder {
   }
 
   /** 统计 assistant Entry 之后 path 上已有的 TOOL Message 数量（TurnPathValidator 保证是 ordinal 严格前缀）。 */
-  static int countToolResultsAfter(EntryPath path, long assistantEntryId) {
+  static int countToolResultsAfter(EntryPath path, UUID assistantEntryId) {
     int count = 0;
     boolean after = false;
     for (Entry entry : path.entries()) {
-      if (entry.id() == assistantEntryId) {
+      if (entry.id().equals(assistantEntryId)) {
         after = true;
         continue;
       }

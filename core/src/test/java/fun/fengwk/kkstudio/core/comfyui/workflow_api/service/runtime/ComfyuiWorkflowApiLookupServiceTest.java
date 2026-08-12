@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkfl
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -103,7 +104,7 @@ public class ComfyuiWorkflowApiLookupServiceTest {
 
     StubRepository put(String apiName, String workflow, String bindings, boolean enabled) {
       ComfyuiWorkflowApi row = new ComfyuiWorkflowApi();
-      row.setId(System.nanoTime());
+      row.setId(new UUID(0L, System.nanoTime()));
       row.setApiName(apiName);
       row.setName(apiName);
       row.setWorkflowJson(workflow);
@@ -130,7 +131,7 @@ public class ComfyuiWorkflowApiLookupServiceTest {
     }
 
     @Override
-    public ComfyuiWorkflowApi getById(long id) {
+    public ComfyuiWorkflowApi getById(UUID id) {
       throw new UnsupportedOperationException();
     }
 
@@ -150,7 +151,7 @@ public class ComfyuiWorkflowApiLookupServiceTest {
     }
 
     @Override
-    public boolean deleteById(long id) {
+    public boolean deleteById(UUID id) {
       throw new UnsupportedOperationException();
     }
   }

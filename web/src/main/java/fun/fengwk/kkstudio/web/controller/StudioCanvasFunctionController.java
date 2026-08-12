@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,15 +20,26 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.web.studio.StudioWebMapper;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /** Canvas Function model registry 与 run 生命周期 HTTP 边界。 */
 @RestController
 @RequestMapping("/api")
-@RequiredArgsConstructor
 public class StudioCanvasFunctionController {
 
   private final CanvasFunctionModelRegistry registry;
   private final CanvasFunctionRuntimeService runtimeService;
+  private final StudioWebMapper mapper;
+
+  public StudioCanvasFunctionController(
+      CanvasFunctionModelRegistry registry,
+      CanvasFunctionRuntimeService runtimeService,
+      StudioWebMapper mapper) {
+    this.registry = Objects.requireNonNull(registry, "registry");
+    this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
+    this.mapper = Objects.requireNonNull(mapper, "mapper");
+  }
 
   @GetMapping("/canvas-function-models")
   public Result<List<CanvasFunctionModelDTO>> listModels() {
@@ -37,7 +47,7 @@ public class StudioCanvasFunctionController {
         registry.list().stream()
             .map(
                 registered ->
-                    StudioWebMapper.toDto(
+                    mapper.toDto(
                         registered.model(),
                         registered.adapter().enabled(),
                         registered.adapter().unavailableReason()))
@@ -53,12 +63,10 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
+      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
       return Results.accepted(
-          StudioWebMapper.toDto(
-              runtimeService.start(
-                  StudioWebMapper.parsePositiveId(canvasIdText, "canvasId"),
-                  StudioWebMapper.parsePositiveId(nodeIdText, "nodeId"),
-                  request.getRequestId())));
+          mapper.toDto(runtimeService.start(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
     } catch (IllegalArgumentException exception) {
@@ -70,11 +78,9 @@ public class StudioCanvasFunctionController {
   public Result<CanvasFunctionRunDTO> get(
       @PathVariable("canvasId") String canvasIdText, @PathVariable("nodeId") String nodeIdText) {
     try {
-      return Results.ok(
-          StudioWebMapper.toDto(
-              runtimeService.get(
-                  StudioWebMapper.parsePositiveId(canvasIdText, "canvasId"),
-                  StudioWebMapper.parsePositiveId(nodeIdText, "nodeId"))));
+      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
+      return Results.ok(mapper.toDto(runtimeService.get(canvasId, nodeId)));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
     } catch (IllegalArgumentException exception) {
@@ -91,12 +97,10 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
+      UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = StudioWebMapper.parseUuid(nodeIdText, "nodeId");
       return Results.ok(
-          StudioWebMapper.toDto(
-              runtimeService.cancel(
-                  StudioWebMapper.parsePositiveId(canvasIdText, "canvasId"),
-                  StudioWebMapper.parsePositiveId(nodeIdText, "nodeId"),
-                  request.getRequestId())));
+          mapper.toDto(runtimeService.cancel(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
     } catch (IllegalArgumentException exception) {

@@ -31,6 +31,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -49,9 +50,9 @@ import java.util.function.BooleanSupplier;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
-  private static final long SESSION_ID = 9_900_000L;
-  private static final long ROOT_ENTRY_ID = 9_900_001L;
-  private static final long THREAD_ID = 9_900_002L;
+  private static final UUID SESSION_ID = new UUID(0L, 9_900_000L);
+  private static final UUID ROOT_ENTRY_ID = new UUID(0L, 9_900_001L);
+  private static final UUID THREAD_ID = new UUID(0L, 9_900_002L);
   private static final String SCHEMA_RESOURCE =
       "fun/fengwk/kkstudio/harness/runtime/spring/postgresql/harness-runtime-schema.sql";
 
@@ -130,9 +131,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       """;
 
   private void seedDueThreadWork() {
-    jdbc.update(
-        "insert into harness_session (id, title, created_at) values (?, 'lifecycle-test', now())",
-        SESSION_ID);
+    jdbc.update("insert into harness_session (id, created_at) values (?, now())", SESSION_ID);
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
             + " created_at) values (?, ?, null, 'ROOT', ?::jsonb, now())",
@@ -150,7 +149,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         THREAD_ID);
   }
 
-  private int workRowCount(long threadId) {
+  private int workRowCount(UUID threadId) {
     return jdbc.queryForObject(
         "select count(*) from harness_work where target_type = 'THREAD' and target_id = ?",
         Integer.class,

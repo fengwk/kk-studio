@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -39,7 +40,7 @@ class HarnessRuntimeStopCallbackFenceTest {
             tx -> tx.claimNextWork(WorkTargetType.MODEL, T3, "model-lease", T6).orElseThrow());
 
     new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC))
-        .stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+        .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
     assertEquals(
@@ -60,7 +61,7 @@ class HarnessRuntimeStopCallbackFenceTest {
             tx -> tx.claimNextWork(WorkTargetType.TOOL, T3, "tool-lease", T6).orElseThrow());
 
     new HarnessRuntime(store, Clock.fixed(T5, ZoneOffset.UTC))
-        .stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+        .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
     assertEquals(

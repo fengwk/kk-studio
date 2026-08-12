@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
  *
  * <ul>
  *   <li>CRUD 路由；
- *   <li>响应 DTO 中的 {@code id} 为十进制字符串形式；
- *   <li>路径参数非法（{@code not-a-number}）通过 global exception handler 转化为 400；
+ *   <li>响应 DTO 中的 {@code id} 为 canonical UUID 字符串形式；
+ *   <li>路径参数非法（{@code not-a-uuid}）通过 global exception handler 转化为 400；
  *   <li>解析合法但数据库中找不到的 id → 404；
  *   <li>写入路径非法入参（空白 workflowJson / 非小写 apiName）通过 global exception handler 转化为 400。
  * </ul>
@@ -91,8 +91,8 @@ public class StudioComfyuiWorkflowApiControllerTest extends WebPostgresTestSuppo
     assertTrue(idNode.isTextual(), "data.id must be a string, was: " + idNode.getNodeType());
     String idString = idNode.asText();
     assertTrue(
-        idString.matches("\\d+"), "data.id must be a non-blank decimal string, was: " + idString);
-    assertTrue(Long.parseLong(idString) > 0, "data.id must be positive, was: " + idString);
+        idString.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),
+        "data.id must be a canonical UUID string, was: " + idString);
 
     try {
       // 2) 列表：刚创建的资源必须出现在分页结果中。
@@ -183,7 +183,7 @@ public class StudioComfyuiWorkflowApiControllerTest extends WebPostgresTestSuppo
     // 解析合法但数据库中找不到的 id 必须返回 404，与 malformed id 的 400 明确区分。
     mockMvc
         .perform(
-            put("/api/comfyui/workflows/999999999999999")
+            put("/api/comfyui/workflows/00000000-0000-0000-0000-000000000999")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(update)))
         .andExpect(status().isNotFound());
@@ -193,7 +193,7 @@ public class StudioComfyuiWorkflowApiControllerTest extends WebPostgresTestSuppo
   public void shouldDeleteUnknownParseableIdWith404() throws Exception {
     // DELETE 也要走相同的 404 路径。
     mockMvc
-        .perform(delete("/api/comfyui/workflows/999999999999999"))
+        .perform(delete("/api/comfyui/workflows/00000000-0000-0000-0000-000000000999"))
         .andExpect(status().isNotFound());
   }
 }

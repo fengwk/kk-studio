@@ -22,6 +22,8 @@ export interface ToolAttachment {
   sha256?: string | null
   /** Harness adapter 已解析的显式下载地址；portable panel 不感知 API 路由。 */
   downloadHref?: string
+  /** 共享存储的持久资源 id（RESOURCE parts）；URL 仅在渲染时通过 storage service 解析。 */
+  blobId?: string
 }
 
 /** 由 ToolInvocation approvalJson 投影得到的、未决/已决的 Tool 审批状态。 */
@@ -44,6 +46,11 @@ interface BaseDialogueMessage {
 export interface TextDialogueMessage extends BaseDialogueMessage {
   role: 'user' | 'assistant' | 'system'
   text: string
+  /**
+   * 可选的 durable 附件（user 消息的 RESOURCE parts 投影）；预览/下载 URL
+   * 只在渲染时通过 storage service 解析。
+   */
+  attachments?: ToolAttachment[]
   // 可选的 assistant 思考文本。仅在本次 attempt 中 assistant 确实产生过思考时存在；
   // 纯文本响应及非 assistant 角色不会出现该字段。
   thinking?: string
@@ -105,7 +112,8 @@ export type DialogueMessage =
 
 /** 在持久 transcript 之外展示的 QUEUED mailbox 命令；sequence 保持十进制字符串。 */
 export interface QueuedThreadMessage {
-  commandId: string
+  /** 稳定客户端幂等键（DTO clientCommandId）；也是 UI 渲染 key。 */
+  clientCommandId: string
   role: 'user' | 'system'
   text: string
   sequence: string

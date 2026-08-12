@@ -13,6 +13,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -85,10 +87,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
   @Test
   void skipLockedClaimsTheNextDueTargetWithoutWaiting() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
-    long secondThreadId =
+    UUID secondThreadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               return id;
             });
@@ -140,10 +142,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
   @Test
   void reversedThreadLocksAreRejectedBeforePostgresqlCanDeadlock() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
-    long higherThreadId =
+    UUID higherThreadId =
         store.transaction(
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertThread(thread(id, baseline.rootEntryId()));
               return id;
             });
@@ -271,10 +273,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
   @Test
   void reversedConcurrentToolBatchesUseOneCanonicalDatabaseLockOrder() throws Exception {
     TurnBaseline baseline = seedTurnBaseline(store);
-    long userEntryId =
+    UUID userEntryId =
         insertChildEntry(
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
-    long assistantEntryId =
+    UUID assistantEntryId =
         insertChildEntry(
             store, baseline.sessionId(), userEntryId, assistantPayload("call-1", "call-2"));
     inTransaction(
@@ -283,17 +285,17 @@ class PostgresqlHarnessStoreConcurrencyTest {
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
               modelInvocation(
-                  1,
+                  id(1L),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
                   ModelInvocationStatus.READY,
                   null,
                   T1));
-          ModelInvocation model = tx.lockModelInvocation(1).orElseThrow();
+          ModelInvocation model = tx.lockModelInvocation(id(1L)).orElseThrow();
           tx.updateModelInvocation(
               modelInvocation(
-                  1,
+                  id(1L),
                   baseline.threadId(),
                   baseline.turnStartEntryId(),
                   baseline.turnStartEntryId(),
@@ -302,9 +304,11 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   model.createdAt()));
         });
     ToolInvocation ordinal0 =
-        toolInvocation(10, 1, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, null, T2);
     ToolInvocation ordinal1 =
-        toolInvocation(11, 1, assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2);
+        toolInvocation(
+            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, null, T2);
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
@@ -340,7 +344,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
   }
 
   private boolean lockThreadPair(
-      long firstThreadId, long secondThreadId, CountDownLatch firstLocks) {
+      UUID firstThreadId, UUID secondThreadId, CountDownLatch firstLocks) {
     try {
       store.transaction(
           tx -> {

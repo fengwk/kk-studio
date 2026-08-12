@@ -6,7 +6,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionAdapter;
@@ -19,11 +26,14 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** MiniMax-H3 Ref2VA Canvas Function adapter。 */
@@ -73,6 +83,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private final HarnessOneShotService oneShotService;
   private final H3WorkflowBuilder workflowBuilder;
   private final ObjectProvider<StandardComfyuiClient> comfyClients;
+  private final ObjectProvider<StorageBlobIngestService> ingestServices;
   private final ObjectMapper mapper;
 
   public MiniMaxH3CanvasFunctionAdapter(
@@ -82,6 +93,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       HarnessOneShotService oneShotService,
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
+      ObjectProvider<StorageBlobIngestService> ingestServices,
       ObjectMapper mapper) {
     this.properties = Objects.requireNonNull(properties, "properties");
     this.mediaPreflight = Objects.requireNonNull(mediaPreflight, "mediaPreflight");
@@ -89,6 +101,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     this.oneShotService = Objects.requireNonNull(oneShotService, "oneShotService");
     this.workflowBuilder = Objects.requireNonNull(workflowBuilder, "workflowBuilder");
     this.comfyClients = Objects.requireNonNull(comfyClients, "comfyClients");
+    this.ingestServices = Objects.requireNonNull(ingestServices, "ingestServices");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
 
@@ -116,7 +129,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   }
 
   @Override
-  public List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     requireModel(run);
     H3ReferenceManifest manifest = H3ReferenceManifest.from(run.manifest());
     H3AdapterState state = H3AdapterState.decode(run.adapterState(), mapper);
@@ -130,15 +143,15 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
 
     if (INITIALIZED.equals(stage)) {
       checkpoint(context, PROMPT_SUBMITTING, state);
-      AgentMessage promptRequest = promptRequest(context, run, manifest);
-      long threadId =
+      AgentMessage promptRequest = promptBuilder.userMessage(run, manifest);
+      UUID threadId =
           oneShotService.submit(
-              "canvas-h3:" + run.nodeId(),
               requireText(properties.getPromptAgentName(), "promptAgentName"),
               new EnvironmentName(
                   requireText(properties.getPromptEnvironmentName(), "promptEnvironmentName")),
               promptBuilder.systemPrompt(),
-              promptRequest);
+              promptRequest,
+              mediaPreflight(context, manifest));
       state = state.withHarnessThreadId(threadId);
       checkpoint(context, PROMPT_WAITING, state);
       stage = PROMPT_WAITING;
@@ -148,7 +161,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     }
 
     if (PROMPT_WAITING.equals(stage)) {
-      long threadId = requirePositive(state.harnessThreadId(), "harnessThreadId");
+      UUID threadId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
       String enhancedPrompt =
           oneShotService.await(
               threadId,
@@ -170,7 +183,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     StandardComfyuiClient comfy = requireComfyClient();
     if (COMFY_UPLOADING.equals(stage)) {
       for (H3ReferenceManifest.Item item : manifest.items()) {
-        long resourceId = item.reference().resourceId();
+        UUID resourceId = item.reference().resourceId();
         if (state.uploads().containsKey(resourceId)) {
           continue;
         }
@@ -225,8 +238,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       ensureRunning(context);
       try (H3ComfyDownload download =
           comfy.download(Objects.requireNonNull(state.output(), "output"))) {
-        context.materializeTarget(
-            run.targetResourceId(), download.mediaType(), download.length(), download.content());
+        context.materializeTarget(run.targetResourceId(), download.content());
       } catch (IOException error) {
         throw new IllegalStateException("cannot close ComfyUI output stream", error);
       }
@@ -275,16 +287,71 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
         error.getClass().getSimpleName());
   }
 
-  private AgentMessage promptRequest(
-      CanvasFunctionExecutionContext context,
-      CanvasFunctionFrozenRun run,
-      H3ReferenceManifest manifest) {
-    long expires = properties.getPresignExpirySeconds();
-    if (expires <= 0L) {
-      throw new IllegalArgumentException("presignExpirySeconds must be positive");
+  /**
+   * 入队 preflight：把 USER 消息中按 manifest 顺序的 label 段落物化为全局存储 RESOURCE 内容（同一 store 事务内下载 canvas
+   * original 字节并摄入，任何失败整体回滚）。消息结构：contents[0] 是 manifest 表格，contents[1+i] 是第 i 个引用的 label 段落；物化后在每个
+   * label 段落之后追加对应 RESOURCE。
+   */
+  private NewCommandPreflight mediaPreflight(
+      CanvasFunctionExecutionContext context, H3ReferenceManifest manifest) {
+    StorageBlobIngestService ingestService = ingestServices.getIfAvailable();
+    if (ingestService == null) {
+      throw new IllegalStateException(
+          "global storage is not available; H3 prompt media cannot be externalized");
     }
-    return promptBuilder.userMessage(
-        run, manifest, item -> context.presignOriginal(item.reference(), expires));
+    List<H3ReferenceManifest.Item> items = manifest.items();
+    return (tx, sessionId, commands) -> {
+      List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
+      for (NewThreadCommand command : commands) {
+        if (!(command.payload() instanceof CustomMessageCommandPayload custom)) {
+          prepared.add(command);
+          continue;
+        }
+        AgentMessage message = custom.message();
+        if (message.contents().size() != 1 + items.size()) {
+          throw new IllegalStateException(
+              "H3 prompt message must carry the manifest table plus one label per reference");
+        }
+        List<AgentMessageContent> contents = new ArrayList<>(1 + items.size() * 2);
+        contents.add(message.contents().get(0));
+        for (int i = 0; i < items.size(); i++) {
+          AgentMessageContent label = message.contents().get(1 + i);
+          if (!(label instanceof TextMessageContent)
+              || !((TextMessageContent) label).text().startsWith("\nThe next attachment is ")) {
+            throw new IllegalStateException("H3 prompt label mismatch at index " + i);
+          }
+          contents.add(label);
+          contents.add(ingestMedia(sessionId, context, items.get(i), ingestService));
+        }
+        prepared.add(
+            new NewThreadCommand(
+                new CustomMessageCommandPayload(new AgentMessage(message.role(), contents)),
+                command.clientCommandId(),
+                command.requestHash()));
+      }
+      return List.copyOf(prepared);
+    };
+  }
+
+  private static ResourceMessageContent ingestMedia(
+      UUID sessionId,
+      CanvasFunctionExecutionContext context,
+      H3ReferenceManifest.Item item,
+      StorageBlobIngestService ingestService) {
+    try (CanvasFunctionResourceStream stream = context.openOriginal(item.reference())) {
+      byte[] bytes;
+      try (InputStream content = stream.content()) {
+        bytes = content.readAllBytes();
+      } catch (IOException error) {
+        throw new IllegalArgumentException(
+            "cannot read H3 reference media " + item.reference().resourceId(), error);
+      }
+      UUID blobId = ingestService.ingest(sessionId, bytes, item.reference().mediaType());
+      return new ResourceMessageContent(blobId, item.reference().name(), null);
+    } catch (IOException error) {
+      throw new IllegalArgumentException(
+          "cannot close H3 reference media " + item.reference().resourceId(), error);
+    }
   }
 
   private static H3OutputDescriptor awaitComfy(

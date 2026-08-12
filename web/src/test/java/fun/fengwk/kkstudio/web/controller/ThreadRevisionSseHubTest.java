@@ -16,6 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 class ThreadRevisionSseHubTest {
 
@@ -36,10 +37,11 @@ class ThreadRevisionSseHubTest {
     ThreadRevisionSseHub hub = new ThreadRevisionSseHub(dataSource);
     List<ThreadRevisionEventSource.Event> staleSubscriber = new ArrayList<>();
     List<ThreadRevisionEventSource.Event> currentSubscriber = new ArrayList<>();
-    AutoCloseable stale = hub.subscribe(7L, 4L, staleSubscriber::add);
-    hub.subscribe(7L, 5L, currentSubscriber::add);
+    UUID threadId = new UUID(0L, 7L);
+    AutoCloseable stale = hub.subscribe(threadId, 4L, staleSubscriber::add);
+    hub.subscribe(threadId, 5L, currentSubscriber::add);
 
-    verify(statement, times(2)).setLong(1, 7L);
+    verify(statement, times(2)).setObject(1, threadId);
     assertEquals(List.of(new ThreadRevisionEventSource.Event("5", false)), staleSubscriber);
     assertTrue(currentSubscriber.isEmpty());
 

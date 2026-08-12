@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationReque
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -21,6 +22,8 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * {@link DatabaseThreadSelectedSkillLookup}：用 invocation request codec 解码并直接返回冻结的 canonical skill
@@ -32,13 +35,16 @@ class DatabaseThreadSelectedSkillLookupTest {
   private static final ModelInvocationRequestJsonCodec REQUEST_CODEC =
       new ModelInvocationRequestJsonCodec();
 
+  private static final UUID INVOCATION_ID = new UUID(0L, 42L);
+  private static final UUID THREAD_ID = new UUID(0L, 7L);
+
   @Test
   void resolvesFrozenSkillBindingsThroughTheCodec() {
     SelectedSkillBindingMapper mapper = mock(SelectedSkillBindingMapper.class);
-    when(mapper.findModelRequest(42L, 7L)).thenReturn(encodedRequest(ENV_ID));
+    when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(ENV_ID));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    var skills = lookup.selectedSkills(42L, 7L);
+    var skills = lookup.selectedSkills(INVOCATION_ID, THREAD_ID);
 
     assertEquals(1, skills.size());
     var skill = skills.get(0);
@@ -50,19 +56,19 @@ class DatabaseThreadSelectedSkillLookupTest {
   @Test
   void missingRequestRowReturnsEmptySkills() {
     SelectedSkillBindingMapper mapper = mock(SelectedSkillBindingMapper.class);
-    when(mapper.findModelRequest(42L, 7L)).thenReturn(null);
+    when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(null);
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    assertTrue(lookup.selectedSkills(42L, 7L).isEmpty());
+    assertTrue(lookup.selectedSkills(INVOCATION_ID, THREAD_ID).isEmpty());
   }
 
   @Test
   void preservesPlatformSkillWithoutSourceEnvironment() {
     SelectedSkillBindingMapper mapper = mock(SelectedSkillBindingMapper.class);
-    when(mapper.findModelRequest(42L, 7L)).thenReturn(encodedRequest(null));
+    when(mapper.findModelRequest(INVOCATION_ID, THREAD_ID)).thenReturn(encodedRequest(null));
 
     ThreadSelectedSkillLookup lookup = new DatabaseThreadSelectedSkillLookup(mapper);
-    var skills = lookup.selectedSkills(42L, 7L);
+    var skills = lookup.selectedSkills(INVOCATION_ID, THREAD_ID);
     assertEquals(1, skills.size());
     assertNull(skills.getFirst().sourceEnvironmentName());
   }
@@ -89,6 +95,7 @@ class DatabaseThreadSelectedSkillLookupTest {
     return new ModelDescriptor(
         "provider",
         "model",
+        Set.of(ModelInputModality.TEXT),
         true,
         true,
         new ModelPricing(

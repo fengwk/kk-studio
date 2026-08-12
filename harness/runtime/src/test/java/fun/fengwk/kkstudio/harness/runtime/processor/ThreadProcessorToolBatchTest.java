@@ -69,6 +69,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** ThreadProcessor Tool sibling batch：原子 ordinal 回写、错误 payload、blocker 与不变量违反回滚。 */
 class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
@@ -293,7 +294,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void toolSiblingCountMismatchIsRejectedAtomically() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -303,10 +304,10 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             tooledRequest(List.of("bash")),
             successResponse(List.of("call-1", "call-2"), "bash"),
             null);
-    long assistantId =
+    UUID assistantId =
         insertAssistantWithCalls(fixture.store, baseline, List.of("call-1", "call-2"));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
-    long toolId =
+    UUID toolId =
         seedToolInvocation(
             fixture.store, modelId, assistantId, 0, "call-1", ToolInvocationStatus.SUCCEEDED);
     requestThreadWork(fixture.store, baseline.threadId());
@@ -322,7 +323,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void toolSiblingCountMismatchOnNonterminalSiblingsIsInvariantViolation() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -332,10 +333,10 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             tooledRequest(List.of("bash")),
             successResponse(List.of("call-1", "call-2"), "bash"),
             null);
-    long assistantId =
+    UUID assistantId =
         insertAssistantWithCalls(fixture.store, baseline, List.of("call-1", "call-2"));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
-    long toolId =
+    UUID toolId =
         seedToolInvocation(
             fixture.store, modelId, assistantId, 0, "call-1", ToolInvocationStatus.READY);
     requestThreadWork(fixture.store, baseline.threadId());
@@ -357,11 +358,11 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             List.of("call-1", "call-2"),
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.READY));
-    long tool0EntryId =
+    UUID tool0EntryId =
         inTx(
             fixture,
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       id,
@@ -392,7 +393,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void assistantWithCallsButEmptySiblingsIsInvariantViolationNotNormalization() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -402,7 +403,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             tooledRequest(List.of("bash")),
             successResponse(List.of("call-1", "call-2"), "bash"),
             null);
-    long assistantId =
+    UUID assistantId =
         insertAssistantWithCalls(fixture.store, baseline, List.of("call-1", "call-2"));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
@@ -426,7 +427,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ModelInvocationStatus.UNKNOWN)) {
       Fixture fixture = fixture();
       var baseline = seedOpenInputTurn(fixture.store);
-      long modelId =
+      UUID modelId =
           seedModelInvocation(
               fixture.store,
               baseline.threadId(),
@@ -436,7 +437,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
               tooledRequest(List.of("bash")),
               null,
               new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
-      long assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of("call-1"));
+      UUID assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of("call-1"));
       transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
       requestThreadWork(fixture.store, baseline.threadId());
       ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
@@ -454,7 +455,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void modelResultToolCallsMismatchingAssistantAreInvariantViolation() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -465,7 +466,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             successResponse(List.of("call-1", "call-2"), "bash"),
             null);
     // assistant 与 response 不一致（第二个 call id 不同）：result 与历史 Entry 的机械一致性被破坏。
-    long assistantId =
+    UUID assistantId =
         insertAssistantWithCalls(fixture.store, baseline, List.of("call-1", "call-X"));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -489,11 +490,11 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
     // 另一 descendant 上已有 TOOL0 结果并挂载 tool0（head 不动，模拟 relocation 前的历史分支）。
-    long tool0EntryId =
+    UUID tool0EntryId =
         inTx(
             fixture,
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       id,
@@ -546,7 +547,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   void binaryToolContentRollsBackAtomically() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -556,13 +557,13 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             tooledRequest(List.of("bash")),
             successResponse(List.of("call-1", "call-2"), "bash"),
             null);
-    long assistantId =
+    UUID assistantId =
         insertAssistantWithCalls(fixture.store, baseline, List.of("call-1", "call-2"));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
-    long tool0 =
+    UUID tool0 =
         seedToolInvocation(
             fixture.store, modelId, assistantId, 0, "call-1", ToolInvocationStatus.READY);
-    long tool1 =
+    UUID tool1 =
         seedToolInvocation(
             fixture.store, modelId, assistantId, 1, "call-2", ToolInvocationStatus.SUCCEEDED);
     succeedToolWith(

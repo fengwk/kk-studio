@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -47,6 +48,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** HistoryPayloadMapper 纯映射测试：ASSISTANT / ASSISTANT_ERROR / TOOL / synthetic 四种 payload 的精确结构。 */
 class HistoryPayloadMapperTest {
@@ -171,7 +173,7 @@ class HistoryPayloadMapperTest {
     assertEquals("{\"a\":1}", ((JsonMessageContent) result.contents().get(1)).json());
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(ToolResultStatus.SUCCEEDED, metadata.status());
-    assertEquals(7L, metadata.assistantEntryId());
+    assertEquals(id(7L), metadata.assistantEntryId());
     assertEquals(3, metadata.ordinal());
     assertEquals("call-1", metadata.toolCallId());
     assertFalse(metadata.synthetic());
@@ -179,7 +181,7 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
-  void toolResultPayloadSucceededMapsResourceContentPreservingRefAndPreview() {
+  void toolResultPayloadSucceededRejectsResourceContentWithoutMaterializer() {
     ResourceRef resource =
         new ResourceRef(
             "file:///report.txt",
@@ -195,11 +197,25 @@ class HistoryPayloadMapperTest {
                 false,
                 "{}",
                 false));
-    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    // 无物化端口时 Resource 引用 fail-closed：瞬时 URI / ResourceStore 引用绝不进入持久化 message。
+    assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
+  }
+
+  @Test
+  void toolResultPayloadSucceededUsesMaterializedContents() {
+    ToolInvocation invocation =
+        succeededInvocation(
+            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}", false));
+    MessagePayload payload =
+        MAPPER.toolResultPayload(
+            invocation,
+            List.of(
+                new ResourceMessageContent(new UUID(0L, 1L), "report.txt", "complete preview")));
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     ResourceMessageContent mapped = (ResourceMessageContent) result.contents().get(0);
-    assertEquals(resource, mapped.resource());
+    assertEquals(new UUID(0L, 1L), mapped.blobId());
+    assertEquals("report.txt", mapped.name());
     assertEquals("complete preview", mapped.preview());
   }
 
@@ -283,9 +299,9 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadRejectsNonTerminalInvocation() {
     ToolInvocation ready =
         new ToolInvocation(
-            1L,
-            1L,
-            7L,
+            id(1L),
+            id(1L),
+            id(7L),
             0,
             request(),
             ToolInvocationStatus.READY,
@@ -303,9 +319,9 @@ class HistoryPayloadMapperTest {
   void syntheticHistoryCutToolResultIsStableUnknownWithNoResultProvided() {
     MessagePayload payload =
         MAPPER.syntheticHistoryCutToolResult(
-            7L, 2, new ToolCallMessageContent("call-9", "bash", "shell-command", "{}"));
+            id(7L), 2, new ToolCallMessageContent("call-9", "bash", "shell-command", "{}"));
     ToolResultMetadata metadata = payload.toolResultMetadata();
-    assertEquals(7L, metadata.assistantEntryId());
+    assertEquals(id(7L), metadata.assistantEntryId());
     assertEquals("call-9", metadata.toolCallId());
     assertEquals(2, metadata.ordinal());
     assertEquals(ToolResultStatus.UNKNOWN, metadata.status());
@@ -320,9 +336,9 @@ class HistoryPayloadMapperTest {
 
   private static ToolInvocation succeededInvocation(ToolResult result) {
     return new ToolInvocation(
-        1L,
-        1L,
-        7L,
+        id(1L),
+        id(1L),
+        id(7L),
         3,
         request(),
         ToolInvocationStatus.SUCCEEDED,
@@ -338,9 +354,9 @@ class HistoryPayloadMapperTest {
   private static ToolInvocation terminalInvocation(
       ToolInvocationStatus status, ToolInvocationError error) {
     return new ToolInvocation(
-        1L,
-        1L,
-        7L,
+        id(1L),
+        id(1L),
+        id(7L),
         3,
         request(),
         status,

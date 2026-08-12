@@ -57,6 +57,7 @@ import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * ThreadProcessor continuation / input planning 与 speculative plan + CAS 提交、reschedule、lease
@@ -68,7 +69,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void continuationHasPriorityOverQueuedInputAndLeavesMessagesForDeferredWake() {
     Fixture fixture = fixture();
     var baseline = seedClosedTurn(fixture.store, true);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -100,20 +101,20 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void continuationConsumesOnlyOrdinaryConfigCommandsAndAppliesSettings() {
     Fixture fixture = fixture();
     var baseline = seedClosedTurn(fixture.store, true);
-    long modelCommand =
+    UUID modelCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
             new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
-    long envCommand =
+    UUID envCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
             new SetEnvironmentCommandPayload(new EnvironmentName("env-1")));
-    long yoloCommand =
+    UUID yoloCommand =
         seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());
     // final branch 事实 = 消费 SET_MODEL/SET_YOLO 后的 candidate settings；auto 模式按同源事实构造一致请求。
@@ -149,7 +150,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void configOnlyWithoutContinuationCreatesNoTurnAndNeverCallsResolver() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long configCommand =
+    UUID configCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
@@ -170,15 +171,15 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void inputTurnAppliesSettingsAndMessagesInOneAtomicTurn() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long modelCommand =
+    UUID modelCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
             new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
-    long yoloCommand =
+    UUID yoloCommand =
         seedCommand(fixture.store, baseline.threadId(), new SetYoloCommandPayload(true));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
@@ -265,7 +266,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void typedRejectionWritesAssistantErrorAndFailedTurnEndWithoutInvocation() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -303,7 +304,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void cutoffCommandArrivingDuringResolveCommitsButIsExcluded() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long firstCommand =
+    UUID firstCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
@@ -313,7 +314,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     // resolve 期间入队第二条 USER（sequence > cutoff）并请求 THREAD Work（enqueue 侧行为）。
     fixture.resolver.onResolve =
         () -> {
-          long second =
+          UUID second =
               seedCommand(
                   fixture.store,
                   baseline.threadId(),
@@ -355,7 +356,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void cancelledCutoffCommandLosesCommitAtomically() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -387,7 +388,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void movedHeadDuringResolveLosesCommitAtomically() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -398,7 +399,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
             inTx(
                 fixture,
                 tx -> {
-                  long turnStartId = tx.nextId();
+                  UUID turnStartId = tx.nextId();
                   tx.insertEntry(
                       new Entry(
                           turnStartId,
@@ -426,7 +427,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void deletedWorkDuringResolveLosesCommitAtomically() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -457,7 +458,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void resolverExceptionReschedulesWithZeroDurableMutation() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -523,7 +524,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         plainRequest(),
         ThreadProcessorTestSupport.successResponse(List.of(), "bash"),
         null);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());
@@ -553,7 +554,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void nearExpiryClaimRenewsLeaseAtPlanTimeAndCommits() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
     requestThreadWork(fixture.store, baseline.threadId());

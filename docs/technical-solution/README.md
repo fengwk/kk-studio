@@ -51,7 +51,7 @@ flowchart TD
 - Harness 单轨协议：恰好 5 个 Harness 基础模块（`harness-tool` / `harness-runtime` / `harness-plugin` / `harness-runtime-spring` / `harness-daemon`）、3 个 processor（Thread/Model/Tool）、3 个 Work target（THREAD/MODEL/TOOL）、7 张表、9 种 `EntryType`、1 个 Agent Loop；受信任插件位于独立 `plugins/*` 构建模块。
 - `harness-runtime` 是纯 Java 领域模块，拥有 Thread 状态机与 processor；`harness-plugin` 提供构建期注册、启动时冻结的插件 API；`harness-runtime-spring` 只做 Store/Work/Redis 适配；`core` 提供 Catalog、TurnResolver、Model/Tool Gateway 与 Environment/Chat 应用能力，不写 `harness_*` 表；Goal 由 `plugins/goal` 提供；`web` 是生产组合根。
 - PostgreSQL 是唯一 durable truth；`harness_work` 是唯一调度 mailbox（`wake_version` + lease）；Redis/NOTIFY 永非 correctness truth。
-- 所有 Runtime id/sequence/revision 在 HTTP wire 上是 strict decimal strings：id 为 `[1-9][0-9]*`，revision 为 `0|[1-9][0-9]*`。
+- 所有 Runtime 实体 id（Thread/Session/Entry/Invocation/Command）在 HTTP wire 上是 canonical UUID strings；`sequence`/`revision` 是 strict decimal strings（sequence `[1-9][0-9]*`、revision `0|[1-9][0-9]*`）。
 - Thread `nextCommandSequence` 从 1 开始；每次可见状态变化 `revision` 恰好 +1。
 - 7 类 command：`USER_MESSAGE` / `CUSTOM_MESSAGE` / `SET_ENVIRONMENT` / `SET_AGENT` / `SET_MODEL` / `SET_ACTIVE_TOOLS` / `SET_YOLO`；前端 diff 顺序固定为 ENV → AGENT → MODEL → TOOLS → YOLO，再追加 `USER_MESSAGE`。
 - MOVE_HEAD 只允许**同 Session** 历史 Entry，revision CAS、要求 quiescent 且无 queued command；不能指向 `continueModel=true` 的 TURN_END。
@@ -62,7 +62,7 @@ flowchart TD
 - Tool terminal success 的 `effects` 与 `SUCCEEDED` 同行原子持久化且 terminal immutable；唯一 `ToolOutcomeAppender` 按 `CUSTOM effects -> Tool Result` 顺序推进 Entry/head。
 - Durable compaction 复用 MODEL Work 与现有 processor：阈值或一次 overflow recovery 启动 `TURN_START(COMPACTION) -> COMPACTION -> TURN_END`；split turn 使用 HISTORY/TURN_PREFIX，内部 turn 不进入后续 Provider Context 或前端 transcript。
 - Environment 以 canonical bounded 小写 `environmentName` 作为唯一动态路由身份，不持久化独立环境资源；daemon wire 是 v2。
-- Resource 安全边界：`data:` URI 才自动媒体预览；http/https 保持显式直连链接；file/s3 只按内容身份投影到同源 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载（attachment + nosniff），未知/不完整身份不渲染链接。
+- Resource 安全边界：Tool 边界的 URI 只属于瞬时 `ResourceRef`；写入 Entry 前统一摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`。前端通过 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 在渲染期获取短期 URL，并以原件响应的权威 `mediaType/sizeBytes` 分类；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation `file:`、`s3:` 引用兼容。
 
 ## 维护规则
 

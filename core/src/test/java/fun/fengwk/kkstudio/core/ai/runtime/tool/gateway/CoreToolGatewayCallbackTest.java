@@ -11,14 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.BinaryToolContent;
@@ -39,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,6 +65,7 @@ class CoreToolGatewayCallbackTest {
       "x".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES + 1);
   private static final String LARGE_JSON =
       "{\"data\":\"" + "y".repeat(ToolResultExternalizer.INLINE_RESULT_UTF8_BYTES) + "\"}";
+  private static final UUID ID = new UUID(0L, 1L);
 
   @Test
   void binaryContentIsExternalizedBeforeTerminalDelivery() {
@@ -198,7 +202,7 @@ class CoreToolGatewayCallbackTest {
             <= ResourceRef.MAX_PREVIEW_UTF8_BYTES);
   }
 
-  /** 9,926-byte read/bash 类输出虽被外部化，仍经 history 与 provider 投影完整暴露给模型。 */
+  /** 9,926-byte read/bash 类输出虽被外部化，仍经 durable RESOURCE（preview 完整保留）与 provider 投影完整暴露给模型。 */
   @Test
   void externalized9926ByteTextRemainsFullyVisibleToProviderModel() {
     String text = "0123456789".repeat(992) + "123456";
@@ -211,9 +215,9 @@ class CoreToolGatewayCallbackTest {
             .result();
     ToolInvocation invocation =
         new ToolInvocation(
-            1L,
-            1L,
-            1L,
+            ID,
+            ID,
+            ID,
             0,
             ToolGatewayTestSupport.platformRequest("call-1", DESCRIPTOR),
             ToolInvocationStatus.SUCCEEDED,
@@ -225,18 +229,22 @@ class CoreToolGatewayCallbackTest {
             Instant.EPOCH,
             Instant.EPOCH);
 
+    // 物化端口（全局 Blob 摄入）会把外部化文本映射为 durable ResourceMessageContent；9926 字节 ≤ 16 KiB，
+    // preview 完整保留正文，模型在 provider attempt 仍能看到全文。
+    MessagePayload payload =
+        new HistoryPayloadMapper()
+            .toolResultPayload(
+                invocation, List.of(new ResourceMessageContent(ID, "demo-result-1.txt", text)));
     ProviderToolResultBlock projected =
         assertInstanceOf(
             ProviderToolResultBlock.class,
             new ProviderMessageProjector()
-                .project(
-                    List.of(new HistoryPayloadMapper().toolResultPayload(invocation).message()))
+                .project(List.of(payload.message()))
                 .getFirst()
                 .contents()
                 .getFirst());
     assertEquals(
-        new ProviderTextBlock("[Resource demo-result-1.txt]\n" + text),
-        projected.contents().getFirst());
+        new ProviderResourceBlock(ID, "demo-result-1.txt", text), projected.contents().getFirst());
   }
 
   @Test

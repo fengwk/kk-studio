@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
@@ -20,9 +19,10 @@ import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
-import fun.fengwk.kkstudio.share.storage.S3PresignedResponseDTO;
+import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -46,13 +46,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** Execution context 只允许 frozen original/target，并验证对象长度与 checkpoint CAS。 */
 class CanvasFunctionExecutionContextImplTest {
 
+  private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID SOURCE_NODE = UUID.fromString("00000000-0000-0000-0000-000000000003");
+  private static final UUID RESOURCE = UUID.fromString("00000000-0000-0000-0000-000000000004");
+  private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
+  private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
+
   private CanvasFunctionRunRepository runs;
   private S3StorageService storage;
-  private S3PresignService presign;
+  private StorageBlobManager blobManager;
   private CanvasResourceMaterializer materializer;
   private CanvasFunctionRunStateCodec stateCodec;
   private CanvasFunctionFrozenRun frozen;
@@ -61,7 +70,7 @@ class CanvasFunctionExecutionContextImplTest {
   void setUp() {
     runs = mock(CanvasFunctionRunRepository.class);
     storage = mock(S3StorageService.class);
-    presign = mock(S3PresignService.class);
+    blobManager = mock(StorageBlobManager.class);
     materializer = mock(CanvasResourceMaterializer.class);
     CanvasFunctionConfigCodec configCodec = new CanvasFunctionConfigCodec(new ObjectMapper());
     stateCodec = new CanvasFunctionRunStateCodec(new ObjectMapper(), configCodec);
@@ -74,26 +83,36 @@ class CanvasFunctionExecutionContextImplTest {
             List.of());
     CanvasFunctionFrozenReference reference =
         new CanvasFunctionFrozenReference(
-            2L, 0, 3L, CanvasResourceKind.IMAGE, "source.png", "image/png", 3L, "{}");
+            SOURCE_NODE,
+            0,
+            RESOURCE,
+            BLOB,
+            CanvasResourceKind.IMAGE,
+            "source.png",
+            "image/png",
+            3L,
+            1L,
+            1L,
+            null);
     frozen =
         new CanvasFunctionFrozenRun(
-            1L,
-            4L,
+            CANVAS,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             model,
             new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of()),
             List.of(reference),
             "output.png",
-            5L,
+            TARGET,
             "QUEUED",
             Map.of());
-    when(runs.findByNodeId(4L))
+    when(runs.findByNodeId(NODE))
         .thenReturn(
             Optional.of(
                 new CanvasFunctionRun(
-                    4L,
-                    "request",
+                    NODE,
+                    REQUEST,
                     CanvasFunctionRunStatus.RUNNING,
                     "QUEUED",
                     stateCodec.encode(frozen),
@@ -104,7 +123,7 @@ class CanvasFunctionExecutionContextImplTest {
   @Test
   void opensOnlyFrozenOriginalAndClosesLengthMismatch() {
     TrackingInputStream mismatch = new TrackingInputStream(new byte[] {1, 2});
-    when(storage.readObject("canvases/1/resources/3/original"))
+    when(storage.readObject(StorageObjectKeys.blobOriginal(BLOB)))
         .thenReturn(new S3ObjectStream(mismatch, new S3ObjectMetadata(2L, "image/png", null)));
     CanvasFunctionExecutionContextImpl context = context();
 
@@ -116,70 +135,66 @@ class CanvasFunctionExecutionContextImplTest {
         () ->
             context.openOriginal(
                 new CanvasFunctionFrozenReference(
-                    9L, 0, 10L, CanvasResourceKind.IMAGE, "other.png", "image/png", 3L, "{}")));
+                    SOURCE_NODE,
+                    0,
+                    RESOURCE,
+                    UUID.randomUUID(),
+                    CanvasResourceKind.IMAGE,
+                    "other.png",
+                    "image/png",
+                    3L,
+                    1L,
+                    1L,
+                    null)));
   }
 
   @Test
   void materializesOnlyFrozenTargetAndOutputKind() {
-    when(materializer.materialize(
-            anyLong(),
-            anyLong(),
-            any(),
-            anyString(),
-            anyString(),
-            anyLong(),
-            any(InputStream.class)))
+    when(materializer.materialize(eq(CANVAS), eq(TARGET), anyString(), any(InputStream.class)))
         .thenReturn(
             new CanvasResource(
-                5L,
-                1L,
-                CanvasResourceKind.IMAGE,
-                "image/png",
-                "output.png",
-                3L,
-                null,
-                "{}",
-                Instant.EPOCH));
+                TARGET, CANVAS, null, null, BLOB, "output.png", null, Instant.EPOCH));
     CanvasFunctionExecutionContextImpl context = context();
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             context.materializeTarget(
-                6L, "image/png", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3})));
+                UUID.randomUUID(), new ByteArrayInputStream(new byte[] {1, 2, 3})));
     assertEquals(
-        5L,
-        context.materializeTarget(
-            5L, "image/png", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3})));
+        TARGET, context.materializeTarget(TARGET, new ByteArrayInputStream(new byte[] {1, 2, 3})));
     verify(materializer)
-        .materialize(
-            eq(1L),
-            eq(5L),
-            eq(CanvasResourceKind.IMAGE),
-            eq("output.png"),
-            eq("image/png"),
-            eq(3L),
-            any(InputStream.class));
+        .materialize(eq(CANVAS), eq(TARGET), eq("output.png"), any(InputStream.class));
   }
 
   @Test
   void presignsOnlyFrozenOriginalWhileRunIsRunning() {
-    when(presign.presignDownload("canvases/1/resources/3/original", 120L))
-        .thenReturn(S3PresignedResponseDTO.builder().url("https://s3.example/object").build());
+    when(blobManager.presignOriginalUrl(BLOB))
+        .thenReturn(StoragePresignedUrlDTO.builder().url("https://s3.example/object").build());
     CanvasFunctionExecutionContextImpl context = context();
 
     assertEquals(
         "https://s3.example/object", context.presignOriginal(frozen.manifest().get(0), 120L));
-    verify(presign).presignDownload("canvases/1/resources/3/original", 120L);
+    verify(blobManager).presignOriginalUrl(BLOB);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             context.presignOriginal(
                 new CanvasFunctionFrozenReference(
-                    9L, 0, 10L, CanvasResourceKind.IMAGE, "other.png", "image/png", 3L, "{}"),
+                    SOURCE_NODE,
+                    0,
+                    RESOURCE,
+                    UUID.randomUUID(),
+                    CanvasResourceKind.IMAGE,
+                    "other.png",
+                    "image/png",
+                    3L,
+                    1L,
+                    1L,
+                    null),
                 120L));
 
-    when(runs.findByNodeId(4L)).thenReturn(Optional.empty());
+    when(runs.findByNodeId(NODE)).thenReturn(Optional.empty());
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> context.presignOriginal(frozen.manifest().get(0), 120L));
@@ -188,8 +203,7 @@ class CanvasFunctionExecutionContextImplTest {
   @Test
   void checkpointCasStopsExecutionAndAdapterStateIsBounded() {
     CanvasFunctionExecutionContextImpl context = context();
-    when(runs.checkpoint(anyLong(), anyString(), anyString(), anyString(), any()))
-        .thenReturn(false);
+    when(runs.checkpoint(any(), any(), anyString(), anyString(), any())).thenReturn(false);
     assertThrows(
         CanvasFunctionInternalCancellation.class,
         () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
@@ -202,18 +216,18 @@ class CanvasFunctionExecutionContextImplTest {
                 "SUBMITTING",
                 Map.of(
                     "oversized", "x".repeat(CanvasFunctionRunStateCodec.MAX_ADAPTER_STATE_BYTES))));
-    verify(runs, never()).checkpoint(anyLong(), anyString(), anyString(), anyString(), any());
+    verify(runs, never()).checkpoint(any(), any(), anyString(), anyString(), any());
   }
 
   private CanvasFunctionExecutionContextImpl context() {
     ObjectProvider<S3StorageService> storageProvider = provider(storage);
-    ObjectProvider<S3PresignService> presignProvider = provider(presign);
+    ObjectProvider<StorageBlobManager> blobManagerProvider = provider(blobManager);
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
         runs,
         stateCodec,
         storageProvider,
-        presignProvider,
+        blobManagerProvider,
         materializerProvider,
         Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
         frozen);

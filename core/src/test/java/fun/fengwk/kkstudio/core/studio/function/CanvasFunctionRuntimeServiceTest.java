@@ -33,12 +33,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** Runtime service 只编排短事务、dispatch、查询边界和提交后的 best-effort cancel hook。 */
 class CanvasFunctionRuntimeServiceTest {
 
-  private static final long CANVAS_ID = 1L;
-  private static final long NODE_ID = 2L;
+  private static final UUID CANVAS_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID NODE_ID = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000011");
+  private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000012");
   private static final Instant NOW = Instant.parse("2026-01-02T03:04:05Z");
   private static final CanvasFunctionModel MODEL =
       new CanvasFunctionModel(
@@ -70,18 +73,18 @@ class CanvasFunctionRuntimeServiceTest {
     service =
         new CanvasFunctionRuntimeService(
             nodeMapper, repository, transactions, dispatcher, registry, stateCodec);
-    when(dispatcher.dispatch(NODE_ID, "request")).thenReturn(true);
+    when(dispatcher.dispatch(NODE_ID, REQUEST)).thenReturn(true);
     frozen =
         new CanvasFunctionFrozenRun(
             CANVAS_ID,
             NODE_ID,
             "output",
-            "request",
+            REQUEST,
             MODEL,
             new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of()),
             List.of(),
             "output.png",
-            3L,
+            TARGET,
             "QUEUED",
             Map.of());
   }
@@ -101,9 +104,9 @@ class CanvasFunctionRuntimeServiceTest {
     assertSame(running, service.start(CANVAS_ID, NODE_ID, "request"));
     assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
 
-    verify(dispatcher, times(2)).dispatch(NODE_ID, "request");
+    verify(dispatcher, times(2)).dispatch(NODE_ID, REQUEST);
     verify(transactions, never())
-        .failIfRunning(NODE_ID, "request", "Function execution could not be scheduled");
+        .failIfRunning(NODE_ID, REQUEST.toString(), "Function execution could not be scheduled");
   }
 
   @Test
@@ -113,7 +116,7 @@ class CanvasFunctionRuntimeServiceTest {
     CanvasFunctionRun terminal =
         new CanvasFunctionRun(
             NODE_ID,
-            "request",
+            REQUEST,
             CanvasFunctionRunStatus.FAILED,
             failed.stage(),
             stateCodec.encode(failed),
@@ -122,14 +125,14 @@ class CanvasFunctionRuntimeServiceTest {
     when(transactions.start(CANVAS_ID, NODE_ID, "request"))
         .thenReturn(new CanvasFunctionStartResult(running, true))
         .thenReturn(new CanvasFunctionStartResult(running, false));
-    when(dispatcher.dispatch(NODE_ID, "request")).thenReturn(false);
+    when(dispatcher.dispatch(NODE_ID, REQUEST)).thenReturn(false);
     when(repository.findByNodeId(NODE_ID)).thenReturn(Optional.of(terminal));
 
     assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
     assertSame(terminal, service.start(CANVAS_ID, NODE_ID, "request"));
 
     verify(transactions, times(2))
-        .failIfRunning(NODE_ID, "request", "Function execution could not be scheduled");
+        .failIfRunning(NODE_ID, REQUEST.toString(), "Function execution could not be scheduled");
   }
 
   @Test
@@ -183,6 +186,6 @@ class CanvasFunctionRuntimeServiceTest {
 
   private CanvasFunctionRun run(CanvasFunctionRunStatus status, CanvasFunctionFrozenRun state) {
     return new CanvasFunctionRun(
-        NODE_ID, "request", status, state.stage(), stateCodec.encode(state), null, NOW);
+        NODE_ID, REQUEST, status, state.stage(), stateCodec.encode(state), null, NOW);
   }
 }

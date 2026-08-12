@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
@@ -26,6 +25,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 从 Provider / invocation 事实到 immutable history Entry payload 的聚焦纯 mapper。
@@ -116,7 +116,7 @@ public final class HistoryPayloadMapper {
    * HISTORY_CUT，稳定 "No result provided" 错误内容；不关联任何 ToolInvocation。
    */
   public MessagePayload syntheticHistoryCutToolResult(
-      long assistantEntryId, int ordinal, ToolCallMessageContent call) {
+      UUID assistantEntryId, int ordinal, ToolCallMessageContent call) {
     Objects.requireNonNull(call, "call");
     ToolResultMessageContent content =
         new ToolResultMessageContent(
@@ -138,6 +138,47 @@ public final class HistoryPayloadMapper {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
+  /**
+   * 用调用方物化好的 contents 构建 SUCCEEDED ToolResult payload（contents 为空时回退为空文本）。
+   *
+   * <p>物化路径（注入 {@link ToolResultHistoryMaterializer}）由物化端口完成 Resource 内容的 blob 外部化；本方法只做
+   * 语义消息组装，不再接受 ResourceToolContent。
+   */
+  public MessagePayload toolResultPayload(
+      ToolInvocation invocation, List<AgentMessageContent> contents) {
+    Objects.requireNonNull(invocation, "invocation");
+    Objects.requireNonNull(contents, "contents");
+    if (!invocation.status().isTerminal()) {
+      throw new IllegalArgumentException("tool result payload requires a terminal invocation");
+    }
+    if (invocation.status() != ToolInvocationStatus.SUCCEEDED) {
+      throw new IllegalArgumentException(
+          "materialized contents are only valid for succeeded tool results");
+    }
+    List<AgentMessageContent> effective = List.copyOf(contents);
+    if (effective.isEmpty()) {
+      effective = List.of(new TextMessageContent(""));
+    }
+    ToolResultMessageContent content =
+        new ToolResultMessageContent(
+            invocation.request().call().id(),
+            invocation.request().call().toolName(),
+            invocation.request().binding().descriptor().rendererKey(),
+            effective,
+            invocation.result().error(),
+            invocation.result().detailsJson());
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.TOOL, List.of(content)),
+        null,
+        new ToolResultMetadata(
+            invocation.assistantEntryId(),
+            invocation.request().call().id(),
+            invocation.ordinal(),
+            statusOf(invocation),
+            false,
+            null));
+  }
+
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (ToolContent toolContent : result.contents()) {
@@ -145,8 +186,11 @@ public final class HistoryPayloadMapper {
         contents.add(new TextMessageContent(text.text()));
       } else if (toolContent instanceof JsonToolContent json) {
         contents.add(new JsonMessageContent(json.json()));
-      } else if (toolContent instanceof ResourceToolContent resource) {
-        contents.add(new ResourceMessageContent(resource.resource(), resource.preview()));
+      } else if (toolContent instanceof ResourceToolContent) {
+        // Resource 引用无法在没有 ToolResultHistoryMaterializer 的情况下表示为 durable blob 内容：
+        // fail-closed（与 BinaryToolContent 一致），绝不让瞬时 URI / ResourceStore 引用进入持久化 message。
+        throw new IllegalArgumentException(
+            "resource tool result content requires a ToolResultHistoryMaterializer");
       } else {
         // BinaryToolContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(

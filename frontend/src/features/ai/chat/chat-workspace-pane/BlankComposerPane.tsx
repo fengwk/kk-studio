@@ -20,6 +20,12 @@ import {
   materializeBlankBranchDraft,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
+import {
+  hasMessageContent,
+  slashQueryOf,
+  trimMessageParts,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 import { useChatThreadPicker } from '@/features/ai/chat/useChatThreadPicker'
 import {
   AgentSelectionModal,
@@ -70,13 +76,17 @@ export function BlankComposerPane({
   // 空面板 draft：通过 catalog 将 Chat 默认值 materialize 后，复制第一个可解析值，
   // 再冻结。后续 Chat/Catalog refetch 不会悄悄重写它。
   const [frozenDraft, setFrozenDraft] = useState<BranchDraft | null>(null)
-  const [draft, setDraft] = useState('')
+  const [parts, setParts] = useState<ComposerPart[]>([])
   const [pending, setPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [agentModalOpen, setAgentModalOpen] = useState(false)
   const [environmentModalOpen, setEnvironmentModalOpen] = useState(false)
   const [threadModalOpen, setThreadModalOpen] = useState(false)
-  const [pendingContent, setPendingContent] = useState<string | null>(null)
+  /** 等待 agent 补全期间挂起的提交：payload（server uploadId）+ localDraft（客户端 localId）分开保存。 */
+  const [pendingContent, setPendingContent] = useState<{
+    payload: ComposerPart[]
+    localDraft: ComposerPart[]
+  } | null>(null)
   // 首个可解析 materialized draft：后续 pane-local 编辑（agent/env/yolo）相对于这个
   // 不可变的初始值会标记面板为 dirty（state 镜像，绝不是 render-ref）。
   const [initialFrozenDraft, setInitialFrozenDraft] = useState<BranchDraft | null>(null)
@@ -120,7 +130,11 @@ export function BlankComposerPane({
     // 明确错误，并通过 agent picker 在创建 Thread 之前补全 draft。
   }, [chat, chatAgent, frozenDraft, models, modelsQuery.isLoading])
 
-  async function runFirstSend(content: string, effective: BranchDraft | null = frozenDraft) {
+  async function runFirstSend(
+    sendParts: ComposerPart[],
+    localDraft: ComposerPart[],
+    effective: BranchDraft | null = frozenDraft,
+  ) {
     if (!chat || effective == null) {
       return
     }
@@ -129,7 +143,8 @@ export function BlankComposerPane({
     try {
       const result = await performBlankPaneFirstSend({
         chatId: chat.id,
-        content,
+        // payload（server uploadId）只用于 HTTP 发送。
+        parts: sendParts,
         // Session 拒绝空标题；Chat title 可为空——保持 null。
         title: chat.title ?? null,
         branchSettings: {
@@ -144,14 +159,14 @@ export function BlankComposerPane({
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.threads(chat.id) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(result.threadId) }),
       ])
-      setDraft('')
+      setParts([])
       setPendingContent(null)
       onThreadChange(result.threadId)
     } catch (error) {
       if (error instanceof FirstSendMessageError) {
         if (isConflictError(error.cause)) {
           // 已知 409：服务器明确拒绝了过期 batch（cursor 已移动）。仍需绑定已创建的
-          // Thread 并恢复 composer 文本，但绝不能把过期的 plan 交给 controller replayRef：
+          // Thread 并恢复 composer 内容，但绝不能把过期的 plan 交给 controller replayRef：
           // 下一次提交会基于刷新的 snapshot 重新构建 cursor + command id。
           await Promise.all([
             queryClient.invalidateQueries({
@@ -159,38 +174,39 @@ export function BlankComposerPane({
             }),
             queryClient.invalidateQueries({ queryKey: queryKeys.chats.threads(chat.id) }),
           ])
-          onFirstSendRecovery(error.snapshot.thread.threadId, { content })
+          onFirstSendRecovery(error.snapshot.thread.threadId, { parts: localDraft })
           return
         }
         // 网络/不确定失败：为绑定面板保留精确 batch（相同 command id + 完整 replay）。
         onFirstSendRecovery(error.snapshot.thread.threadId, {
-          content,
-          replay: { plan: error.plan, content },
+          parts: localDraft,
+          replay: { plan: error.plan, parts: localDraft },
         })
         return
       }
       setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
-      setDraft(content)
+      setParts(localDraft)
     } finally {
       setPending(false)
     }
   }
 
-  async function handleSubmit() {
-    const content = draft.trim()
-    if (!content || content.startsWith('/') || pending) {
+  async function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
+    const payload = trimMessageParts(payloadParts ?? parts)
+    const localDraft = trimMessageParts(localDraftParts ?? parts)
+    if (!hasMessageContent(payload) || slashQueryOf(payload) != null || pending) {
       return
     }
     onFocus()
     if (!frozenDraft) {
       // 要么 catalog 仍在加载，要么 Chat agent/model 无法解析；打开 agent picker
       // 补全 draft（绝不创建 provider/model/variant 为空的 Thread，否则会被
-      // strict mapper 拒绝）。
-      setPendingContent(content)
+      // strict mapper 拒绝）。payload 与 localDraft 分开挂起。
+      setPendingContent({ payload, localDraft })
       setAgentModalOpen(true)
       return
     }
-    await runFirstSend(content, frozenDraft)
+    await runFirstSend(payload, localDraft, frozenDraft)
   }
 
   function handleCommand(command: ThreadCommand) {
@@ -258,9 +274,9 @@ export function BlankComposerPane({
     void onAgentChange(selectedAgentName).catch((error: unknown) => {
       setActionError(errorMessage(error, t('ai.runtime.action.updateAgentFailed')))
     })
-    const content = pendingContent?.trim()
-    if (content) {
-      void runFirstSend(content, next)
+    const content = pendingContent
+    if (content && hasMessageContent(content.payload)) {
+      void runFirstSend(content.payload, content.localDraft, next)
     }
   }
 
@@ -299,7 +315,7 @@ export function BlankComposerPane({
   // payload 或面板本地 draft 编辑都需要确认后才能丢弃。
   const panePending = pending
   const paneDirty =
-    draft.trim() !== ''
+    hasMessageContent(parts)
     || pendingContent != null
     || (
       frozenDraft != null
@@ -324,12 +340,12 @@ export function BlankComposerPane({
             {actionError ? <div className="thread-error-panel">{actionError}</div> : null}
           </div>
           <ThreadComposer
-            draft={draft}
+            parts={parts}
             pending={pending}
             disabled={pending}
-            onDraftChange={setDraft}
-            onSubmit={() => {
-              void handleSubmit()
+            onPartsChange={setParts}
+            onSubmit={(payload, localDraft) => {
+              void handleSubmit(payload, localDraft)
             }}
             onCommand={handleCommand}
             commands={BLANK_PANE_COMMANDS}

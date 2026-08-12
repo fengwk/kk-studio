@@ -148,9 +148,9 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeSubagentContext(SubagentContext value) {
     ObjectNode node = NODES.objectNode();
-    node.put("parentThreadId", Long.toString(value.parentThreadId()));
-    node.put("rootThreadId", Long.toString(value.rootThreadId()));
-    node.put("taskInvocationId", Long.toString(value.taskInvocationId()));
+    node.put("parentThreadId", value.parentThreadId().toString());
+    node.put("rootThreadId", value.rootThreadId().toString());
+    node.put("taskInvocationId", value.taskInvocationId().toString());
     node.put("depth", value.depth());
     return node;
   }
@@ -218,19 +218,19 @@ public final class HistoryEntryPayloadJsonCodec {
     node.put("tokensBefore", value.tokensBefore());
     node.put("complete", value.complete());
     node.put("summaryText", value.summaryText());
-    node.put("firstKeptEntryId", Long.toString(value.firstKeptEntryId()));
-    node.put("cutEntryId", Long.toString(value.cutEntryId()));
+    node.put("firstKeptEntryId", value.firstKeptEntryId().toString());
+    node.put("cutEntryId", value.cutEntryId().toString());
     if (value.turnPrefixStartEntryId() == null) {
       node.putNull("turnPrefixStartEntryId");
     } else {
-      node.put("turnPrefixStartEntryId", Long.toString(value.turnPrefixStartEntryId()));
+      node.put("turnPrefixStartEntryId", value.turnPrefixStartEntryId().toString());
     }
     return node;
   }
 
   private static ObjectNode encodeTurnEnd(TurnEndPayload value) {
     ObjectNode node = NODES.objectNode();
-    node.put("turnStartEntryId", Long.toString(value.turnStartEntryId()));
+    node.put("turnStartEntryId", value.turnStartEntryId().toString());
     node.put("outcome", value.outcome().name());
     node.put("continueModel", value.continueModel());
     if (value.reason() == null) {
@@ -241,7 +241,7 @@ public final class HistoryEntryPayloadJsonCodec {
     if (value.closeRequestId() == null) {
       node.putNull("closeRequestId");
     } else {
-      node.put("closeRequestId", value.closeRequestId());
+      node.put("closeRequestId", value.closeRequestId().toString());
     }
     return node;
   }
@@ -255,7 +255,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeToolResultMetadata(ToolResultMetadata metadata) {
     ObjectNode node = NODES.objectNode();
-    node.put("assistantEntryId", Long.toString(metadata.assistantEntryId()));
+    node.put("assistantEntryId", metadata.assistantEntryId().toString());
     node.put("toolCallId", metadata.toolCallId());
     node.put("ordinal", metadata.ordinal());
     node.put("status", metadata.status().name());
@@ -382,7 +382,7 @@ public final class HistoryEntryPayloadJsonCodec {
             TurnEndOutcome.class, HistoryValueCodecs.text(node, "outcome"), "TURN_END.outcome"),
         HistoryValueCodecs.requiredBoolean(node, "continueModel", "TURN_END"),
         HistoryValueCodecs.nullableEnum(TurnEndReason.class, node, "reason", "TURN_END.reason"),
-        HistoryValueCodecs.nullableText(node, "closeRequestId"));
+        HistoryValueCodecs.nullablePositiveId(node, "closeRequestId", "TURN_END"));
   }
 
   private static AssistantError decodeError(JsonNode value) {

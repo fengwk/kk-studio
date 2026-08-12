@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import java.util.List;
 
+/** Canvas typed command：创建类命令携带客户端生成的实体 UUID（nodeId/groupId）， 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。 */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
   @JsonSubTypes.Type(value = CanvasCommandDTO.CreateTextNode.class, name = "CREATE_TEXT_NODE"),
@@ -50,16 +51,17 @@ public sealed interface CanvasCommandDTO
     throw new IllegalArgumentException("unknown field: " + field);
   }
 
-  record CreateTextNode(String name, String markdown, CanvasTransformDTO transform)
+  record CreateTextNode(String nodeId, String name, String markdown, CanvasTransformDTO transform)
       implements CanvasCommandDTO {}
 
   record UpdateTextNode(String nodeId, String markdown) implements CanvasCommandDTO {}
 
-  record CreateResourceNode(String name, List<String> resourceIds, CanvasTransformDTO transform)
+  record CreateResourceNode(
+      String nodeId, String name, List<String> uploadIds, CanvasTransformDTO transform)
       implements CanvasCommandDTO {}
 
   record CreateFunctionNode(
-      String name, String modelKey, String configJson, CanvasTransformDTO transform)
+      String nodeId, String name, String modelKey, String configJson, CanvasTransformDTO transform)
       implements CanvasCommandDTO {}
 
   record UpdateFunction(String nodeId, String modelKey, String configJson)
@@ -82,7 +84,8 @@ public sealed interface CanvasCommandDTO
 
   record DeleteLink(String sourceNodeId, String targetNodeId) implements CanvasCommandDTO {}
 
-  record CreateGroup(String title, CanvasTransformDTO transform, List<String> memberNodeIds)
+  record CreateGroup(
+      String groupId, String title, CanvasTransformDTO transform, List<String> memberNodeIds)
       implements CanvasCommandDTO {}
 
   record MoveGroup(String groupId, double x, double y) implements CanvasCommandDTO {}

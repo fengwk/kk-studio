@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -33,7 +34,7 @@ final class StudioHarnessThreadSseEmitter {
   private StudioHarnessThreadSseEmitter() {}
 
   static SseEmitter stream(
-      long threadId,
+      UUID threadId,
       long afterRevision,
       String afterStreamId,
       RealtimeEventTail tail,

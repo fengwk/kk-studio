@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.storage;
 
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import java.io.InputStream;
@@ -21,6 +23,43 @@ public interface S3StorageService {
   S3ObjectStream readObject(String key);
 
   void deleteObject(String key);
+
+  /**
+   * 幂等删除：对象不存在（404）时静默成功，其它 S3 错误照常抛出。
+   *
+   * <p>新存储基础依赖该语义清理临时对象与两阶段删除的 blob 对象； 未实现的实现会抛出 {@link UnsupportedOperationException}。
+   */
+  default void deleteObjectIfExists(String key) {
+    try {
+      deleteObject(key);
+    } catch (NoSuchKeyException e) {
+      // 对象已不存在，视为删除成功。
+    } catch (AwsServiceException e) {
+      if (e.statusCode() != 404) {
+        throw e;
+      }
+    }
+  }
+
+  /**
+   * 以 checksum mode（{@code x-amz-checksum-mode: ENABLED}）HEAD 对象，返回带 {@code checksumSha256}
+   * 的元数据，用于服务端校验浏览器直传内容的完整性。
+   *
+   * <p>未实现的实现会抛出 {@link UnsupportedOperationException}。
+   */
+  default S3ObjectMetadata headObjectWithChecksum(String key) {
+    throw new UnsupportedOperationException(
+        "headObjectWithChecksum is not supported by this implementation");
+  }
+
+  /**
+   * 在同一固定 bucket 内复制对象（保留源对象元数据）。目标 key 已存在时按内容幂等覆盖。
+   *
+   * <p>未实现的实现会抛出 {@link UnsupportedOperationException}。
+   */
+  default void copyObject(String sourceKey, String targetKey) {
+    throw new UnsupportedOperationException("copyObject is not supported by this implementation");
+  }
 
   String getPublicUrl(String key);
 

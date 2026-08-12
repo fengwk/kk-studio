@@ -8,7 +8,8 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 /**
- * 卡片写路径以正的十进制字符串 ID 暴露给 HTTP / DTO 边界（PostgreSQL sequence 分配）；持久层在内部转换为 {@code long} 后再访问数据库。
+ * 卡片写路径以 canonical UUID string ID 暴露给 HTTP / DTO 边界（应用侧 {@code UUID.randomUUID()} 分配）；持久层直接以 {@link
+ * java.util.UUID} 访问数据库。apiName 保持为稳定自然键。
  *
  * @author fengwk
  */

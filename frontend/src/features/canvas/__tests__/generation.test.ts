@@ -15,6 +15,8 @@ import {
 } from '@/features/canvas/generation'
 import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
 
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+
 const imageModel: CanvasFunctionModelDTO = {
   key: 'fake-image',
   label: 'Fake Image',
@@ -48,26 +50,31 @@ const imageModel: CanvasFunctionModelDTO = {
 }
 
 function node(
-  id: `${bigint}`,
+  id: string,
   name: string,
   kinds: Array<'IMAGE' | 'VIDEO'>,
   functionNode = false,
 ): ResourceNode {
   return {
     id,
-    canvasId: '1',
+    canvasId: CANVAS_ID,
     name,
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
     resources: kinds.map((kind, index) => ({
-      id: `${Number(id) * 10 + index}` as `${bigint}`,
-      canvasId: '1',
+      id: `${id}-r${index}`,
+      canvasId: CANVAS_ID,
+      ownerNodeId: id,
+      resourceIndex: index,
+      blobId: 'blob-output',
+      name: `${name}-${index}`,
+      textContent: null,
       kind,
       mediaType: kind === 'IMAGE' ? 'image/png' : 'video/mp4',
-      name: `${name}-${index}`,
-      size: '3',
-      text: null,
-      metadata: {},
+      sizeBytes: 3,
+      width: null,
+      height: null,
+      durationMs: null,
       createdAt: '2026-08-10T00:00:00Z',
     })),
     function: functionNode ? { modelKey: 'fake-image', configJson: '{}' } : null,
@@ -80,7 +87,8 @@ function snapshot(): CanvasSnapshot {
     document: {
       id: '1',
       title: 'Board',
-      graphRevision: '0',
+      version: 0,
+      threadId: null,
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -93,10 +101,10 @@ function snapshot(): CanvasSnapshot {
     ],
     groups: [],
     links: [
-      { canvasId: '1', sourceNodeId: '2', targetNodeId: '9' },
-      { canvasId: '1', sourceNodeId: '3', targetNodeId: '9' },
-      { canvasId: '1', sourceNodeId: '4', targetNodeId: '9' },
-      { canvasId: '1', sourceNodeId: '5', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9' },
+      { canvasId: CANVAS_ID, sourceNodeId: '5', targetNodeId: '9' },
     ],
   }
 }

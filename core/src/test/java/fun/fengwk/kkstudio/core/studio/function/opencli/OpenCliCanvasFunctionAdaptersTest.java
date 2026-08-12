@@ -44,11 +44,19 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** Adapter golden argv、checkpoint 恢复、provider 状态和流式 materialize 契约。 */
 class OpenCliCanvasFunctionAdaptersTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final UUID CANVAS = new UUID(0L, 1L);
+  private static final UUID NODE = new UUID(0L, 2L);
+  private static final UUID REQUEST = new UUID(0L, 3L);
+  private static final UUID TARGET = new UUID(0L, 900L);
+  private static final UUID RESOURCE_100 = new UUID(0L, 100L);
+  private static final UUID RESOURCE_101 = new UUID(0L, 101L);
+  private static final UUID RESOURCE_102 = new UUID(0L, 102L);
 
   @Test
   void disabledAdaptersStillDeclareModelsWithoutLeakingConfiguration() {
@@ -88,9 +96,9 @@ class OpenCliCanvasFunctionAdaptersTest {
             adapter.models().get(0),
             List.of(
                 new TextSegment("Put "),
-                new ReferenceSegment(11L, 0),
+                new ReferenceSegment(new UUID(0L, 11), 0),
                 new TextSegment(" behind "),
-                new ReferenceSegment(10L, 0)),
+                new ReferenceSegment(new UUID(0L, 10), 0)),
             Map.of("ratio", "16:9"),
             List.of(first, second),
             "QUEUED",
@@ -110,9 +118,10 @@ class OpenCliCanvasFunctionAdaptersTest {
         .thenReturn(
             new HubResourceStream(
                 new ByteArrayInputStream(new byte[] {1, 2, 3, 4}), 4L, "image/png"));
-    RecordingContext context = new RecordingContext(Map.of(100L, bytes(100), 101L, bytes(101)));
+    RecordingContext context =
+        new RecordingContext(Map.of(RESOURCE_100, bytes(100), RESOURCE_101, bytes(101)));
 
-    assertEquals(List.of(900L), adapter.execute(context, run));
+    assertEquals(List.of(TARGET), adapter.execute(context, run));
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<String>> argv = ArgumentCaptor.forClass(List.class);
@@ -133,9 +142,8 @@ class OpenCliCanvasFunctionAdaptersTest {
             "900"),
         tokens.subList(3, tokens.size()));
     assertNoHubManagedArguments(tokens);
-    assertEquals(List.of(100L, 101L), context.openedResourceIds);
+    assertEquals(List.of(RESOURCE_100, RESOURCE_101), context.openedResourceIds);
     assertEquals("GPT_IMAGE_MATERIALIZING", context.stages.get(context.stages.size() - 1));
-    assertEquals("image/png", context.materializedMediaType);
     assertArrayEquals(new byte[] {1, 2, 3, 4}, context.materialized);
   }
 
@@ -200,17 +208,22 @@ class OpenCliCanvasFunctionAdaptersTest {
     state.put("executionId", "existing");
     state.put(
         "uploads",
-        List.of(Map.of("resourceId", "100", "resourcePath", "/resources/date/upload/x.png")));
+        List.of(
+            Map.of(
+                "resourceId",
+                RESOURCE_100.toString(),
+                "resourcePath",
+                "/resources/date/upload/x.png")));
     CanvasFunctionFrozenRun run =
         run(
             adapter.models().get(0),
-            List.of(new TextSegment("use "), new ReferenceSegment(10L, 0)),
+            List.of(new TextSegment("use "), new ReferenceSegment(new UUID(0L, 10), 0)),
             Map.of("ratio", "1:1"),
             List.of(image(10L, 0, 100L, "x.png")),
             "GPT_IMAGE_POLLING",
             state);
 
-    assertEquals(List.of(900L), adapter.execute(new RecordingContext(Map.of()), run));
+    assertEquals(List.of(TARGET), adapter.execute(new RecordingContext(Map.of()), run));
     verify(client, never()).upload(anyString(), anyString(), anyLong(), any(InputStream.class));
     verify(client, never()).execute(any(), anyLong());
     adapter.cancel(run);
@@ -225,11 +238,16 @@ class OpenCliCanvasFunctionAdaptersTest {
     state.put("executionId", "existing");
     state.put(
         "uploads",
-        List.of(Map.of("resourceId", "100", "resourcePath", "/resources/safe/%2e%2e/outside.png")));
+        List.of(
+            Map.of(
+                "resourceId",
+                RESOURCE_100.toString(),
+                "resourcePath",
+                "/resources/safe/%2e%2e/outside.png")));
     CanvasFunctionFrozenRun run =
         run(
             adapter.models().get(0),
-            List.of(new TextSegment("use "), new ReferenceSegment(10L, 0)),
+            List.of(new TextSegment("use "), new ReferenceSegment(new UUID(0L, 10), 0)),
             Map.of("ratio", "1:1"),
             List.of(image(10L, 0, 100L, "x.png")),
             "GPT_IMAGE_POLLING",
@@ -258,37 +276,19 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     CanvasFunctionFrozenReference image = image(10L, 0, 100L, "image.png");
     CanvasFunctionFrozenReference video =
-        reference(
-            11L,
-            0,
-            101L,
-            CanvasResourceKind.VIDEO,
-            "video.mp4",
-            "video/mp4",
-            """
-            {"container":"mp4","videoCodec":"h264","audioCodec":"aac","durationMs":2000}
-            """);
+        reference(11L, 0, 101L, CanvasResourceKind.VIDEO, "video.mp4", "video/mp4", 2000L);
     CanvasFunctionFrozenReference audio =
-        reference(
-            12L,
-            0,
-            102L,
-            CanvasResourceKind.AUDIO,
-            "audio.mp3",
-            "audio/mpeg",
-            """
-            {"container":"mp3","codec":"mp3","durationMs":3000}
-            """);
+        reference(12L, 0, 102L, CanvasResourceKind.AUDIO, "audio.mp3", "audio/mpeg", 3000L);
     CanvasFunctionFrozenRun run =
         run(
             adapter.models().get(1),
             List.of(
                 new TextSegment("Start "),
-                new ReferenceSegment(11L, 0),
+                new ReferenceSegment(new UUID(0L, 11), 0),
                 new TextSegment(" then "),
-                new ReferenceSegment(10L, 0),
+                new ReferenceSegment(new UUID(0L, 10), 0),
                 new TextSegment(" with "),
-                new ReferenceSegment(12L, 0)),
+                new ReferenceSegment(new UUID(0L, 12), 0)),
             Map.of("ratio", "9:16", "duration", 4),
             List.of(image, video, audio),
             "QUEUED",
@@ -339,9 +339,10 @@ class OpenCliCanvasFunctionAdaptersTest {
         .thenReturn(
             new HubResourceStream(new ByteArrayInputStream(new byte[] {4, 5, 6}), 3L, "video/mp4"));
     RecordingContext context =
-        new RecordingContext(Map.of(100L, bytes(1), 101L, bytes(2), 102L, bytes(3)));
+        new RecordingContext(
+            Map.of(RESOURCE_100, bytes(1), RESOURCE_101, bytes(2), RESOURCE_102, bytes(3)));
 
-    assertEquals(List.of(900L), adapter.execute(context, run));
+    assertEquals(List.of(TARGET), adapter.execute(context, run));
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<String>> argv = ArgumentCaptor.forClass(List.class);
@@ -391,7 +392,6 @@ class OpenCliCanvasFunctionAdaptersTest {
     assertEquals(expectedStatus, argv.getAllValues().get(2));
     argv.getAllValues().forEach(OpenCliCanvasFunctionAdaptersTest::assertNoHubManagedArguments);
     assertEquals(List.of(5L, 5L), sleeps);
-    assertEquals("video/mp4", context.materializedMediaType);
     assertArrayEquals(new byte[] {4, 5, 6}, context.materialized);
   }
 
@@ -401,16 +401,7 @@ class OpenCliCanvasFunctionAdaptersTest {
     SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
     CanvasFunctionModel model = adapter.models().get(0);
     CanvasFunctionFrozenReference badCodec =
-        reference(
-            10L,
-            0,
-            100L,
-            CanvasResourceKind.VIDEO,
-            "bad.mp4",
-            "video/mp4",
-            """
-            {"container":"mp4","videoCodec":"vp9","audioCodec":null,"durationMs":2000}
-            """);
+        reference(10L, 0, 100L, CanvasResourceKind.VIDEO, "bad.webp", "video/webp", 2000L);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -425,22 +416,8 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     List<CanvasFunctionFrozenReference> tooLong =
         List.of(
-            reference(
-                10L,
-                0,
-                100L,
-                CanvasResourceKind.VIDEO,
-                "a.mp4",
-                "video/mp4",
-                "{\"container\":\"mp4\",\"videoCodec\":\"h264\",\"audioCodec\":null,\"durationMs\":8000}"),
-            reference(
-                11L,
-                0,
-                101L,
-                CanvasResourceKind.VIDEO,
-                "b.mov",
-                "video/quicktime",
-                "{\"container\":\"mov\",\"videoCodec\":\"hevc\",\"audioCodec\":\"aac\",\"durationMs\":8000}"));
+            reference(10L, 0, 100L, CanvasResourceKind.VIDEO, "a.mp4", "video/mp4", 8000L),
+            reference(11L, 0, 101L, CanvasResourceKind.VIDEO, "b.mov", "video/quicktime", 8000L));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -515,7 +492,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             "SEEDANCE_STATUS_POLLING",
             state);
 
-    assertEquals(List.of(900L), adapter.execute(new RecordingContext(Map.of()), run));
+    assertEquals(List.of(TARGET), adapter.execute(new RecordingContext(Map.of()), run));
     assertTrue(sleeps.isEmpty());
     verify(client, never()).execute(any(), anyLong());
     adapter.cancel(run);
@@ -628,7 +605,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             "GPT_IMAGE_POLLING",
             Map.of("executionId", "existing", "uploads", List.of()));
 
-    assertEquals(List.of(900L), adapter.execute(new RecordingContext(Map.of()), run));
+    assertEquals(List.of(TARGET), adapter.execute(new RecordingContext(Map.of()), run));
     verify(client).getExecution("existing", 120);
 
     CanvasFunctionFrozenRun noExecution =
@@ -691,7 +668,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             Map.of("executionId", "submit-existing", "uploads", List.of()));
     RecordingContext context = new RecordingContext(Map.of());
 
-    assertEquals(List.of(900L), adapter.execute(context, run));
+    assertEquals(List.of(TARGET), adapter.execute(context, run));
     verify(client, times(2)).execute(any(), anyLong());
     assertTrue(context.stages.contains("SEEDANCE_STATUS_WAITING"));
     assertEquals("SEEDANCE_MATERIALIZING", context.stages.get(context.stages.size() - 1));
@@ -797,14 +774,7 @@ class OpenCliCanvasFunctionAdaptersTest {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter gpt = gptAdapter(client);
     CanvasFunctionFrozenReference video =
-        reference(
-            10L,
-            0,
-            100L,
-            CanvasResourceKind.VIDEO,
-            "video.mp4",
-            "video/mp4",
-            "{\"container\":\"mp4\",\"videoCodec\":\"h264\",\"durationMs\":2000}");
+        reference(10L, 0, 100L, CanvasResourceKind.VIDEO, "video.mp4", "video/mp4", 2000L);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -819,7 +789,7 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     SeedanceCanvasFunctionAdapter seedance = seedanceAdapter(client, ignored -> {});
     CanvasFunctionFrozenReference text =
-        reference(11L, 0, 101L, CanvasResourceKind.TEXT, "text.txt", "text/plain", "{}");
+        reference(11L, 0, 101L, CanvasResourceKind.TEXT, "text.txt", "text/plain", null);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -832,14 +802,7 @@ class OpenCliCanvasFunctionAdaptersTest {
                     "QUEUED",
                     Map.of())));
     CanvasFunctionFrozenReference malformedAudio =
-        reference(
-            12L,
-            0,
-            102L,
-            CanvasResourceKind.AUDIO,
-            "audio.wav",
-            "audio/wav",
-            "{\"container\":\"wav\",\"codec\":\"mp3\",\"durationMs\":\"bad\"}");
+        reference(12L, 0, 102L, CanvasResourceKind.AUDIO, "audio.wav", "audio/wav", null);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -855,7 +818,10 @@ class OpenCliCanvasFunctionAdaptersTest {
     Map<String, Object> mismatched = new LinkedHashMap<>();
     mismatched.put("executionId", "existing");
     mismatched.put(
-        "uploads", List.of(Map.of("resourceId", "999", "resourcePath", "/resources/a.png")));
+        "uploads",
+        List.of(
+            Map.of(
+                "resourceId", new UUID(0L, 999L).toString(), "resourcePath", "/resources/a.png")));
     CanvasFunctionFrozenRun recovery =
         run(
             gpt.models().get(0),
@@ -982,29 +948,22 @@ class OpenCliCanvasFunctionAdaptersTest {
       String stage,
       Map<String, Object> state) {
     return new CanvasFunctionFrozenRun(
-        1L,
-        2L,
+        CANVAS,
+        NODE,
         "output",
-        "request",
+        REQUEST,
         model,
         new CanvasFunctionConfig(segments, parameters),
         manifest,
         model.outputKind() == CanvasResourceKind.IMAGE ? "output.png" : "output.mp4",
-        900L,
+        TARGET,
         stage,
         state);
   }
 
   private static CanvasFunctionFrozenReference image(
       long nodeId, int index, long resourceId, String name) {
-    return reference(
-        nodeId,
-        index,
-        resourceId,
-        CanvasResourceKind.IMAGE,
-        name,
-        "image/png",
-        "{\"container\":\"png\",\"codec\":\"png\",\"width\":16,\"height\":16}");
+    return reference(nodeId, index, resourceId, CanvasResourceKind.IMAGE, name, "image/png", null);
   }
 
   private static CanvasFunctionFrozenReference reference(
@@ -1014,9 +973,20 @@ class OpenCliCanvasFunctionAdaptersTest {
       CanvasResourceKind kind,
       String name,
       String mediaType,
-      String metadata) {
+      Long durationMs) {
+    UUID resource = new UUID(0L, resourceId);
     return new CanvasFunctionFrozenReference(
-        nodeId, index, resourceId, kind, name, mediaType, 3L, metadata.strip());
+        new UUID(0L, nodeId),
+        index,
+        resource,
+        resource,
+        kind,
+        name,
+        mediaType,
+        3L,
+        16L,
+        16L,
+        durationMs);
   }
 
   private static byte[] bytes(int value) {
@@ -1025,14 +995,13 @@ class OpenCliCanvasFunctionAdaptersTest {
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {
 
-    private final Map<Long, byte[]> originals;
-    private final List<Long> openedResourceIds = new ArrayList<>();
+    private final Map<UUID, byte[]> originals;
+    private final List<UUID> openedResourceIds = new ArrayList<>();
     private final List<String> stages = new ArrayList<>();
     private byte[] materialized;
-    private String materializedMediaType;
     private boolean running = true;
 
-    private RecordingContext(Map<Long, byte[]> originals) {
+    private RecordingContext(Map<UUID, byte[]> originals) {
       this.originals = originals;
     }
 
@@ -1067,15 +1036,12 @@ class OpenCliCanvasFunctionAdaptersTest {
     }
 
     @Override
-    public long materializeTarget(
-        long targetResourceId, String mediaType, long size, InputStream content) {
+    public UUID materializeTarget(UUID targetResourceId, InputStream content) {
       try {
         materialized = content.readAllBytes();
       } catch (IOException exception) {
         throw new IllegalStateException(exception);
       }
-      assertEquals(size, materialized.length);
-      materializedMediaType = mediaType;
       return targetResourceId;
     }
   }

@@ -5,6 +5,45 @@ import { describe, expect, it } from 'vitest'
 import { AppShell } from '@/platform/shell/AppShell'
 import { setLocale } from '@/shared/i18n'
 
+describe('AppShell canvas immersive routes', () => {
+  it('hides the global topbar and adds the immersive class for a valid /canvas/:canvasId editor route', () => {
+    render(
+      <MemoryRouter initialEntries={['/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f']}>
+        <AppShell>
+          <div>Editor</div>
+        </AppShell>
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('banner')).not.toBeInTheDocument()
+    expect(document.querySelector('.app-frame')).toHaveClass('canvas-immersive')
+    expect(screen.getByText('Editor')).toBeInTheDocument()
+  })
+
+  it.each([
+    '/canvas',
+    '/canvas/7',
+    '/canvas/not-a-uuid',
+    '/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f/extra',
+    '/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f/7',
+  ])(
+    'keeps the global topbar outside a valid editor route: %s',
+    (path) => {
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <AppShell>
+            <div>Canvas route</div>
+          </AppShell>
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByRole('banner')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
+      expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
+    },
+  )
+})
+
 describe('AppShell locale selector', () => {
   it('keeps both responsive dropdowns synchronized and supports keyboard controls', async () => {
     setLocale('zh-CN')

@@ -15,14 +15,14 @@ describe('canvas viewport storage', () => {
       setItem: (key: string, value: string) => values.set(key, value),
     }
 
-    saveCanvasViewport('1', { x: 12, y: -9, zoom: 99 }, storage)
-    saveCanvasViewport('2', { x: 1, y: 2, zoom: 0.5 }, storage)
+    saveCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', { x: 12, y: -9, zoom: 99 }, storage)
+    saveCanvasViewport('bbbbbbbb-2222-4222-8222-222222222222', { x: 1, y: 2, zoom: 0.5 }, storage)
 
-    expect(loadCanvasViewport('1', storage)).toEqual({ x: 12, y: -9, zoom: 2 })
-    expect(loadCanvasViewport('2', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
-    expect(hasStoredCanvasViewport('1', storage)).toBe(true)
-    expect(values.has(canvasViewportStorageKey('1'))).toBe(true)
-    expect(canvasViewportStorageKey('1')).toBe('kkstudio.canvas.viewport.v3:1')
+    expect(loadCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', storage)).toEqual({ x: 12, y: -9, zoom: 2 })
+    expect(loadCanvasViewport('bbbbbbbb-2222-4222-8222-222222222222', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
+    expect(hasStoredCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', storage)).toBe(true)
+    expect(values.has(canvasViewportStorageKey('aaaaaaaa-1111-4111-8111-111111111111'))).toBe(true)
+    expect(canvasViewportStorageKey('aaaaaaaa-1111-4111-8111-111111111111')).toBe('kkstudio.canvas.viewport.v6:aaaaaaaa-1111-4111-8111-111111111111')
   })
 
   it('falls back for malformed or non-finite persisted values', () => {
@@ -32,15 +32,15 @@ describe('canvas viewport storage', () => {
     const malformedStorage = { getItem: () => '{' }
 
     // Invalid JSON or value types must not suppress the editor's one-time initial fit.
-    expect(hasStoredCanvasViewport('1', nonFiniteStorage)).toBe(false)
-    expect(hasStoredCanvasViewport('1', malformedStorage)).toBe(false)
-    expect(loadCanvasViewport('1', nonFiniteStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
-    expect(loadCanvasViewport('1', malformedStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
+    expect(hasStoredCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', nonFiniteStorage)).toBe(false)
+    expect(hasStoredCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', malformedStorage)).toBe(false)
+    expect(loadCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', nonFiniteStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
+    expect(loadCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', malformedStorage)).toEqual(DEFAULT_CANVAS_VIEWPORT)
   })
 
   it('ignores non-finite values instead of corrupting storage', () => {
     let writeCount = 0
-    saveCanvasViewport('1', { x: Number.NaN, y: 0, zoom: 1 }, {
+    saveCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', { x: Number.NaN, y: 0, zoom: 1 }, {
       setItem: () => {
         writeCount += 1
       },

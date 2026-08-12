@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * durable Thread 当前状态。
@@ -14,8 +15,8 @@ import java.util.Objects;
  * 严格 +1。Store 仍必须在每次 {@code updateThread} 写入前调用 {@link #validateTransition}，严格拒绝直接构造的时间回退。
  */
 public record ThreadState(
-    long id,
-    long headEntryId,
+    UUID id,
+    UUID headEntryId,
     boolean yoloEnabled,
     long nextCommandSequence,
     long revision,
@@ -23,12 +24,8 @@ public record ThreadState(
     Instant updatedAt) {
 
   public ThreadState {
-    if (id <= 0) {
-      throw new IllegalArgumentException("thread id must be positive");
-    }
-    if (headEntryId <= 0) {
-      throw new IllegalArgumentException("headEntryId must be positive");
-    }
+    Objects.requireNonNull(id, "id");
+    Objects.requireNonNull(headEntryId, "headEntryId");
     if (nextCommandSequence < 1) {
       throw new IllegalArgumentException("nextCommandSequence must start at 1");
     }
@@ -52,7 +49,7 @@ public record ThreadState(
     if (stored.equals(next)) {
       return;
     }
-    if (stored.id() != next.id()) {
+    if (!stored.id().equals(next.id())) {
       throw new IllegalArgumentException("thread id must not change");
     }
     if (!stored.createdAt().equals(next.createdAt())) {
@@ -95,7 +92,7 @@ public record ThreadState(
    * 在一个原子步骤中推进 head Entry cursor 并设置冻结的 YOLO runtime policy（terminal apply 会重新发送当前 policy 值）；{@code
    * revision} 严格 +1。
    */
-  public ThreadState advanceHead(long headEntryId, boolean yoloEnabled, Instant now) {
+  public ThreadState advanceHead(UUID headEntryId, boolean yoloEnabled, Instant now) {
     ThreadState next =
         new ThreadState(
             id,
