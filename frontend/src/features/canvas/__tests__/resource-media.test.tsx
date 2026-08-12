@@ -16,6 +16,8 @@ vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourcePreviewUrl: vi.fn(),
 }))
 
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+
 let intersectionCallback: IntersectionObserverCallback
 const observe = vi.fn()
 const disconnect = vi.fn()
@@ -37,7 +39,12 @@ class IntersectionObserverFake {
 function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Resource {
   return {
     id: '20',
-    canvasId: '1',
+    canvasId: CANVAS_ID,
+    ownerNodeId: '2',
+    resourceIndex: 0,
+    blobId: kind === 'TEXT' ? null : 'blob-asset',
+    name: `${kind.toLowerCase()}.asset`,
+    textContent: kind === 'TEXT' ? '# Markdown title\n\n- safe list' : null,
     kind,
     mediaType: kind === 'IMAGE'
       ? 'image/png'
@@ -46,16 +53,18 @@ function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Re
         : kind === 'AUDIO'
           ? 'audio/mpeg'
           : 'text/markdown',
-    name: `${kind.toLowerCase()}.asset`,
-    size: '3',
-    text: kind === 'TEXT' ? '# Markdown title\n\n- safe list' : null,
-    metadata: kind === 'IMAGE'
-      ? { width: 1122, height: 1402 }
+    sizeBytes: 3,
+    width: kind === 'IMAGE'
+      ? 1122
       : kind === 'VIDEO'
-        ? { width: 1920, height: 1080, durationMs: 65_000 }
-        : kind === 'AUDIO'
-          ? { durationMs: 65_000 }
-          : {},
+        ? 1920
+        : null,
+    height: kind === 'IMAGE'
+      ? 1402
+      : kind === 'VIDEO'
+        ? 1080
+        : null,
+    durationMs: kind === 'VIDEO' || kind === 'AUDIO' ? 65_000 : null,
     createdAt: '2026-08-10T00:00:00Z',
     ...overrides,
   }

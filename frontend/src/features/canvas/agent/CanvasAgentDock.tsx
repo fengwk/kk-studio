@@ -5,7 +5,6 @@ import {
   useState,
   type CSSProperties,
 } from 'react'
-import { CanvasAgentComposer } from '@/features/canvas/agent/CanvasAgentComposer'
 import { CanvasAgentThread } from '@/features/canvas/agent/CanvasAgentThread'
 import {
   agentPanelWidthBounds,
@@ -18,8 +17,8 @@ import { useI18n } from '@/shared/i18n'
 
 /**
  * Canvas Chat 右侧面板。
- * 仅做组合 —— thread、composer 保持模块化，类似 ChatPanel + ChatComposer 的边界。
- * 左边缘支持指针和键盘调宽；threadOpen=false 时完全不渲染。
+ * 仅做组合 —— 面板主体（真实 Thread / blank 首次发送）在 CanvasAgentThread；
+ * 本组件保留 resize/header/collapse 外壳与桌面/窄屏行为。
  */
 export function CanvasAgentDock() {
   const { state, collapseThread } = useCanvasRuntime()
@@ -133,7 +132,6 @@ export function CanvasAgentDock() {
         </button>
       </header>
       <CanvasAgentThread />
-      <CanvasAgentComposer />
     </aside>
   )
 }

@@ -45,9 +45,9 @@ export const canvasCatalog = {
     'en-US': 'Blank canvas · Start now',
     'zh-CN': '空白画布 · 立即开始',
   },
-  'canvas.library.revision': {
-    'en-US': 'revision',
-    'zh-CN': '修订版',
+  'canvas.library.version': {
+    'en-US': 'version',
+    'zh-CN': '版本',
   },
   'canvas.library.realCanvas': {
     'en-US': 'Server snapshot',
@@ -97,9 +97,9 @@ export const canvasCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
-  'canvas.editor.revision': {
-    'en-US': 'Canvas revision',
-    'zh-CN': '画布修订版',
+  'canvas.editor.version': {
+    'en-US': 'Canvas version',
+    'zh-CN': '画布版本',
   },
   'canvas.editor.thread': {
     'en-US': 'Chat',
@@ -445,20 +445,20 @@ export const canvasCatalog = {
     'en-US': 'Canvas Chat messages',
     'zh-CN': 'Canvas 对话消息',
   },
+  'canvas.agent.blankTitle': {
+    'en-US': 'Start a Canvas thread',
+    'zh-CN': '开始 Canvas 对话',
+  },
+  'canvas.agent.blankDescription': {
+    'en-US': 'Choose the agent below; the first message creates the thread bound to this canvas.',
+    'zh-CN': '在下方选择 Agent；第一条消息将创建绑定到本画布的对话。',
+  },
+  'canvas.agent.agentMissing': {
+    'en-US': 'No resolvable agent configuration yet; pick an agent to continue.',
+    'zh-CN': '暂无可解析的 Agent 配置，请先选择一个 Agent。',
+  },
   'canvas.agent.collapse': {
     'en-US': 'Collapse the Chat panel',
     'zh-CN': '收起对话面板',
-  },
-  'canvas.agent.prompt.ariaLabel': {
-    'en-US': 'Message Agent',
-    'zh-CN': '向 Agent 发送消息',
-  },
-  'canvas.agent.prompt.placeholder': {
-    'en-US': 'Message Agent…',
-    'zh-CN': '向 Agent 发送消息…',
-  },
-  'canvas.agent.send': {
-    'en-US': 'Send to Agent',
-    'zh-CN': '发送给 Agent',
   },
 } satisfies LocaleCatalog

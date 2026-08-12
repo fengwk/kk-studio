@@ -1,6 +1,7 @@
 import { Bot, Grid2X2, Menu, UserRound, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
 import { Link, useLocation } from 'react-router'
+import { isCanonicalUuid } from '@/features/canvas/uuid'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 
@@ -25,9 +26,10 @@ function isChatWorkspaceRoute(pathname: string) {
   return /^\/chats\/[^/]+/.test(pathname)
 }
 
-/** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（正整数），`/canvas` Library 保留全局顶栏。 */
+/** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（canonical UUID），`/canvas` Library 保留全局顶栏。 */
 function isCanvasWorkspaceRoute(pathname: string) {
-  return /^\/canvas\/[1-9][0-9]*\/?$/.test(pathname)
+  const match = /^\/canvas\/([^/]+)\/?$/.exec(pathname)
+  return match != null && isCanonicalUuid(match[1] as string)
 }
 
 export function AppShell({ children }: PropsWithChildren) {

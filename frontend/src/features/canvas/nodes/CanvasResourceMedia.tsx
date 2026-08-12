@@ -13,7 +13,7 @@ export function CanvasResourceMedia({ resource }: { resource: Resource }) {
   if (resource.kind === 'TEXT') {
     return (
       <div className="canvas-markdown-resource" data-testid="canvas-markdown-resource">
-        <MarkdownRenderer content={resource.text ?? ''} />
+        <MarkdownRenderer content={resource.textContent ?? ''} />
       </div>
     )
   }
@@ -196,7 +196,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     )
   }
 
-  const durationMs = finiteNumber(resource.metadata.durationMs)
+  const durationMs = finiteNumber(resource.durationMs)
   return (
     <div className="canvas-resource-media audio">
       {playRequested && originalUrl ? (
@@ -351,8 +351,8 @@ function finiteNumber(value: unknown): number | null {
 }
 
 function resourceDimensions(resource: Resource): { width: number; height: number } | null {
-  const width = finiteNumber(resource.metadata.width)
-  const height = finiteNumber(resource.metadata.height)
+  const width = finiteNumber(resource.width)
+  const height = finiteNumber(resource.height)
   return width !== null && width > 0 && height !== null && height > 0
     ? { width, height }
     : null

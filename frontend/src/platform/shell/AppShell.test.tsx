@@ -8,7 +8,7 @@ import { setLocale } from '@/shared/i18n'
 describe('AppShell canvas immersive routes', () => {
   it('hides the global topbar and adds the immersive class for a valid /canvas/:canvasId editor route', () => {
     render(
-      <MemoryRouter initialEntries={['/canvas/7']}>
+      <MemoryRouter initialEntries={['/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f']}>
         <AppShell>
           <div>Editor</div>
         </AppShell>
@@ -20,7 +20,13 @@ describe('AppShell canvas immersive routes', () => {
     expect(screen.getByText('Editor')).toBeInTheDocument()
   })
 
-  it.each(['/canvas', '/canvas/not-a-number', '/canvas/7suffix', '/canvas/7/extra'])(
+  it.each([
+    '/canvas',
+    '/canvas/7',
+    '/canvas/not-a-uuid',
+    '/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f/extra',
+    '/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f/7',
+  ])(
     'keeps the global topbar outside a valid editor route: %s',
     (path) => {
       render(

@@ -5,7 +5,8 @@ import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
 import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
-import type { DecimalString } from '@/shared/api/contracts/studio'
+import { isCanonicalUuid } from '@/features/canvas/uuid'
+import type { UUIDString } from '@/shared/api/contracts/studio'
 import '@/features/canvas/canvas.css'
 
 function CanvasPageBody() {
@@ -25,10 +26,11 @@ export function CanvasPage() {
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   }))
 
-  if (canvasId !== undefined && !/^[1-9][0-9]*$/.test(canvasId)) {
+  // 只接受 canonical UUID 深链；非 UUID id（包括旧十进制 id）重定向回库。
+  if (canvasId !== undefined && !isCanonicalUuid(canvasId)) {
     return <Navigate to="/canvas" replace />
   }
-  const initialCanvasId = canvasId as DecimalString | undefined
+  const initialCanvasId = canvasId as UUIDString | undefined
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
+import { isCanonicalUuid } from '@/features/canvas/uuid'
 import type { CanvasSnapshot, Link } from '@/features/canvas/domain'
 import type {
   CanvasFlowNodeData,
@@ -7,7 +8,7 @@ import type {
 } from '@/features/canvas/types'
 import type {
   CanvasFunctionModelDTO,
-  DecimalString,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 
 export type CanvasFlowNode = Node<CanvasFlowNodeData, 'resource' | 'group'>
@@ -101,7 +102,11 @@ export function groupFlowId(groupId: string): string {
   return `group:${groupId}`
 }
 
-export function groupIdFromFlowId(flowId: string): DecimalString | null {
+/**
+ * 从 flow id 解码 group UUID。UUID 不含 ':'，前缀切片是安全的；
+ * 非 canonical UUID 后缀（包括旧十进制 id）一律拒绝。
+ */
+export function groupIdFromFlowId(flowId: string): UUIDString | null {
   const groupId = flowId.startsWith('group:') ? flowId.slice('group:'.length) : ''
-  return /^[1-9][0-9]*$/.test(groupId) ? groupId as DecimalString : null
+  return isCanonicalUuid(groupId) ? groupId as UUIDString : null
 }

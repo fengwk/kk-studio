@@ -546,7 +546,11 @@ export function CanvasGenerationPanel({
           <button
             type="button"
             className="generation-submit cancel"
-            onClick={() => void runtime.cancelFunctionRun(node.id, node.run?.requestId ?? '')}
+            onClick={() => {
+              if (node.run?.requestId) {
+                void runtime.cancelFunctionRun(node.id, node.run.requestId)
+              }
+            }}
           >
             {t('canvas.generation.cancel')}
           </button>

@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef, type ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasAddMenu } from '@/features/canvas/agent/CanvasAddMenu'
-import { CanvasAgentComposer } from '@/features/canvas/agent/CanvasAgentComposer'
 import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
 import { CanvasAgentThread } from '@/features/canvas/agent/CanvasAgentThread'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
@@ -13,12 +13,120 @@ import {
 } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasLocalState } from '@/features/canvas/types'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
+import type { CanvasSnapshotDTO, CanvasThreadFirstSendRequestDTO, UUIDString } from '@/shared/api/contracts/studio'
+import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
+import { harnessService } from '@/shared/api/harness-service'
+import type {
+  HarnessBranchSettingsDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
+
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const THREAD_ID = 'a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d'
+
+const { sendCanvasThreadFirstSend, createCanvasRealtimeStream } = vi.hoisted(() => ({
+  sendCanvasThreadFirstSend: vi.fn(),
+  createCanvasRealtimeStream: vi.fn(),
+}))
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listAgents: vi.fn(),
+    listModels: vi.fn(),
+    listProviders: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
+    getThreadSnapshot: vi.fn(),
+    enqueueCommands: vi.fn(),
+    updateThreadHead: vi.fn(),
+    stopThread: vi.fn(),
+    decideApproval: vi.fn(),
+    createThreadRealtimeStream: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/studio-service', () => ({
+  sendCanvasThreadFirstSend,
+  createCanvasRealtimeStream,
+}))
+
+class FakeEventSource {
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  close(): void {}
+}
+
+const assistantAgent = {
+  name: 'assistant',
+  description: null,
+  systemPrompt: null,
+  model: 'minimax/MiniMax',
+  variant: 'default',
+  config: { tools: [], skills: [], subagents: [] },
+  version: '0',
+  createTime: null,
+  updateTime: null,
+}
+
+const threadFixture: HarnessThreadDTO = {
+  threadId: THREAD_ID,
+  sessionId: 's1',
+  headEntryId: 'h1',
+  yoloEnabled: false,
+  nextCommandSequence: '1',
+  revision: '0',
+  status: 'IDLE',
+  processing: false,
+  branchSettings: {
+    environmentName: null,
+    agentName: 'assistant',
+    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    activeTools: [],
+  } as HarnessBranchSettingsDTO,
+  createTime: null,
+  updateTime: null,
+}
+
+function threadSnapshot(): HarnessThreadSnapshotDTO {
+  return {
+    revision: threadFixture.revision,
+    thread: threadFixture,
+    entries: [],
+    queuedCommands: [],
+    modelInvocation: null,
+    toolInvocations: [],
+  }
+}
+
+function canvasSnapshot(threadId: UUIDString | null): CanvasSnapshotDTO {
+  return {
+    document: {
+      id: CANVAS_ID,
+      title: 'Board',
+      version: 3,
+      threadId,
+      createdAt: '2026-08-10T00:00:00Z',
+      updatedAt: '2026-08-10T00:00:00Z',
+    },
+    nodes: [],
+    groups: [],
+    links: [],
+  }
+}
 
 const INITIAL_STATE: CanvasLocalState = {
   view: 'editor',
-  canvasId: '1',
-  selectedIds: ['10', '11'],
+  canvasId: CANVAS_ID,
+  selectedIds: [],
   selectedLinks: [],
   positionDrafts: {},
   viewport: { x: 0, y: 0, zoom: 1 },
@@ -26,8 +134,6 @@ const INITIAL_STATE: CanvasLocalState = {
   addMenuOpen: false,
   addMenuIndex: 0,
   threadOpen: false,
-  agentPrompt: '',
-  messages: [],
   uploadProgress: {},
   commandPending: false,
   conflictMessage: null,
@@ -37,10 +143,41 @@ const INITIAL_STATE: CanvasLocalState = {
 beforeEach(() => {
   localStorage.clear()
   setLocale('zh-CN')
+  vi.clearAllMocks()
+  vi.mocked(agentService.listAgents).mockResolvedValue({
+    results: [assistantAgent],
+    total: 1,
+  })
+  vi.mocked(agentService.listModels).mockResolvedValue({
+    results: [{
+      providerName: 'minimax',
+      name: 'MiniMax',
+      description: null,
+      config: {
+        limit: { context: 100000, output: 1000 },
+        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        pricing: {
+          currency: 'CNY', pricingTier: 't1', serviceTier: 'standard', serviceTierMultiplier: 1,
+          inputPerMillionTokens: 1, outputPerMillionTokens: 2, cacheReadPerMillionTokens: 0,
+          cacheWritePerMillionTokens: 0, cacheWriteLongPerMillionTokens: 0, reasoningPerMillionTokens: 0,
+          version: '0',
+        },
+        defaultVariant: 'default',
+        variants: [{ id: 'default' }],
+      },
+      version: '0',
+      createTime: null,
+      updateTime: null,
+    }],
+    total: 1,
+  })
+  vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
+  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(threadSnapshot())
+  vi.mocked(harnessService.createThreadRealtimeStream).mockReturnValue(new FakeEventSource())
+  vi.mocked(createCanvasRealtimeStream).mockReturnValue(new FakeEventSource())
 })
 
 describe('Canvas add menu', () => {
-  // 键盘、鼠标和隐藏 file input 共享同一选择路径，避免只在点击场景可用。
   it('supports all keyboard navigation and dispatches non-file actions', async () => {
     const user = userEvent.setup()
     const harness = renderHarness(
@@ -117,82 +254,89 @@ describe('Canvas add menu', () => {
   })
 })
 
-describe('Canvas agent composer', () => {
-  // Enter 必须避开 Shift 换行和 IME composing，上传进度则保持纯本地呈现。
-  it('autosizes, edits, sends and renders upload progress without an add launcher', async () => {
+describe('Canvas blank thread', () => {
+  // 空 Thread：共享 Attachment Pill Composer + compact Agent/Environment/YOLO
+  // 选择；首次发送走 canvas-scoped 原子端点，成功后绑定返回的 document。
+  it('materializes a compact draft and sends the atomic first message', async () => {
     const user = userEvent.setup()
-    const harness = renderHarness(
-      <CanvasAgentComposer />,
-      {
-        agentPrompt: 'first',
-        uploadProgress: { 'clip.mp4:1:5': 0.456 },
-      },
-    )
-    const textarea = screen.getByRole('textbox', { name: /向 Agent/ })
-    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 140 })
-    harness.rerender({
-      agentPrompt: 'second',
-      uploadProgress: { 'clip.mp4:1:5': 0.456 },
+    const boundDocument = canvasSnapshot(THREAD_ID).document
+    vi.mocked(sendCanvasThreadFirstSend).mockResolvedValue({
+      threadId: THREAD_ID,
+      document: boundDocument,
     })
-    expect(textarea).toHaveStyle({ height: '104px', overflowY: 'auto' })
-    expect(screen.getByText(/clip.mp4 46%/)).toBeInTheDocument()
-    expect(document.querySelector('.agent-composer')).toHaveClass('panel')
-    // add launcher 已移入 CanvasToolRail，composer 不再渲染加号按钮。
-    expect(screen.queryByRole('button', { name: /添加资源/ })).not.toBeInTheDocument()
+    const harness = renderHarness(<CanvasAgentThread />, { threadOpen: true })
 
-    fireEvent.change(textarea, { target: { value: 'draft' } })
-    expect(harness.controller.setAgentPrompt).toHaveBeenLastCalledWith('draft')
+    // compact footer 展示 agent/model 选择；composer 为共享 Attachment Pill Composer。
+    await waitFor(() => expect(screen.getByRole('button', { name: 'agent:assistant' })).toBeInTheDocument())
+    expect(screen.getByText('minimax/MiniMax · default')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /消息|Message/i })).toBeInTheDocument()
 
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
-    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true })
-    expect(harness.controller.sendAgent).not.toHaveBeenCalled()
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false, isComposing: false })
-    expect(harness.controller.sendAgent).toHaveBeenCalledTimes(1)
+    await user.type(screen.getByRole('textbox', { name: /消息|Message/i }), '请检查这张画布')
+    await user.click(screen.getByRole('button', { name: /发送|Send/i }))
 
-    await user.click(screen.getByRole('button', { name: '发送给 Agent' }))
-    expect(harness.controller.sendAgent).toHaveBeenCalledTimes(2)
+    await waitFor(() => {
+      expect(sendCanvasThreadFirstSend).toHaveBeenCalledWith(CANVAS_ID, expect.objectContaining<CanvasThreadFirstSendRequestDTO>({
+        commandId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+        yoloEnabled: false,
+        branchSettings: {
+          environmentName: null,
+          agentName: 'assistant',
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          activeTools: [],
+        },
+        contents: [{ type: 'TEXT', text: '请检查这张画布' }],
+      }))
+    })
+    expect(harness.controller.bindThreadDocument).toHaveBeenCalledWith(boundDocument)
   })
 
-  it('uses minimum height and omits progress when no textarea measurement or upload exists', () => {
-    const harness = renderHarness(<CanvasAgentComposer />)
-    const textarea = screen.getByRole('textbox', { name: /向 Agent/ })
-    expect(textarea).toHaveStyle({ height: '37px', overflowY: 'hidden' })
-    expect(document.querySelector('.upload-progress-list')).not.toBeInTheDocument()
+  it('keeps the composer blocked and opens the agent picker when no agent is resolvable', async () => {
+    const user = userEvent.setup()
+    vi.mocked(agentService.listAgents).mockResolvedValue({ results: [], total: 0 })
+    renderHarness(<CanvasAgentThread />, { threadOpen: true })
 
-    harness.controller.agentPromptRef.current = null
-    harness.rerender({ agentPrompt: 'detached' })
-    expect(screen.getByRole('textbox', { name: /向 Agent/ })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'agent:（无 Agent）' })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: 'agent:（无 Agent）' }))
+    expect(screen.getByText('暂无可用 Agent')).toBeInTheDocument()
+    expect(screen.queryByText('暂无可解析的 Agent 配置，请先选择一个 Agent。')).not.toBeInTheDocument()
   })
-
 })
 
-describe('Canvas agent thread', () => {
-  // 普通聊天不隐式绑定 Canvas 选区，只负责消息滚动与呈现。
-  it('renders messages and scrolls without an implicit context switcher', () => {
-    const scrollHeight = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(240)
-    renderHarness(
-      <CanvasAgentThread />,
-      {
-        threadOpen: true,
-        messages: [
-          { kind: 'user', text: '用户消息' },
-          { kind: 'agent', text: 'Agent 消息' },
-        ],
-      },
-    )
-    const thread = screen.getByLabelText('Canvas 对话消息')
-    const messages = thread.querySelector('.thread-messages') as HTMLDivElement
-    expect(messages.scrollTop).toBe(240)
-    expect(screen.getByText('用户消息')).toHaveClass('user')
-    expect(screen.getByText('Agent 消息')).not.toHaveClass('user')
-    expect(screen.queryByRole('button', { name: /当前选区|整张画布/ })).not.toBeInTheDocument()
-    scrollHeight.mockRestore()
-  })
+describe('Canvas bound thread', () => {
+  // document.threadId 存在时复用真实 Harness Thread：controller 查询快照、
+  // 订阅实时流并把消息/工作状态渲染到共享 ChatPanel。
+  it('renders the real thread transcript and composer without an implicit canvas switcher', async () => {
+    const user = userEvent.setup()
+    renderHarness(<CanvasAgentThread />, {
+      threadOpen: true,
+      snapshot: canvasSnapshot(THREAD_ID),
+    })
 
-  it('stays inert and does not attempt scrolling while closed', () => {
-    renderHarness(<CanvasAgentThread />)
-    const thread = screen.getByLabelText('Canvas 对话消息', { selector: '[hidden]' })
-    expect(thread).toHaveAttribute('aria-hidden', 'true')
+    await waitFor(() => {
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID)
+    })
+    await waitFor(() => {
+      expect(harnessService.createThreadRealtimeStream).toHaveBeenCalled()
+    })
+    expect(document.querySelector('.chat-shell.thread-panel')).not.toBeNull()
+    expect(screen.getByRole('textbox', { name: /消息|Message/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /当前选区|整张画布/ })).not.toBeInTheDocument()
+
+    // 发送走 harness command batch（真实 Thread 的消息路径）。
+    vi.mocked(harnessService.enqueueCommands).mockResolvedValue([])
+    await user.type(screen.getByRole('textbox', { name: /消息|Message/i }), 'hello')
+    await user.click(screen.getByRole('button', { name: /发送|Send/i }))
+    await waitFor(() => {
+      expect(harnessService.enqueueCommands).toHaveBeenCalledWith(
+        THREAD_ID,
+        expect.objectContaining({
+          expectedHeadEntryId: 'h1',
+          expectedNextCommandSequence: '1',
+        }),
+      )
+    })
   })
 })
 
@@ -313,23 +457,22 @@ function renderHarness(
   initialState: Partial<CanvasLocalState> = {},
   extraController: Record<string, unknown> = {},
 ) {
-  const agentPromptRef = createRef<HTMLTextAreaElement>()
   const dockAddRef = createRef<HTMLButtonElement>()
   const actions = {
     closeAddMenu: vi.fn(),
     setAddMenuIndex: vi.fn(),
     handleAddAction: vi.fn(),
     uploadFiles: vi.fn(async () => undefined),
-    setAgentPrompt: vi.fn(),
-    sendAgent: vi.fn(),
     toggleAddMenu: vi.fn(),
     collapseThread: vi.fn(),
+    bindThreadDocument: vi.fn(),
   }
-  let state = { ...INITIAL_STATE, ...initialState }
+  let state = { ...INITIAL_STATE, ...initialState } as CanvasLocalState
+  let snapshotValue = (initialState as { snapshot?: CanvasSnapshotDTO | null }).snapshot ?? canvasSnapshot(null)
 
   const controller = {
     state,
-    agentPromptRef,
+    snapshot: snapshotValue,
     dockAddRef,
     ...actions,
     ...extraController,
@@ -338,22 +481,33 @@ function renderHarness(
   const value = () => ({
     ...controller,
     state,
+    snapshot: snapshotValue,
   }) as CanvasController
 
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
   const view = render(
-    <CanvasRuntimeContext.Provider value={value()}>
-      {children}
-    </CanvasRuntimeContext.Provider>,
+    <QueryClientProvider client={client}>
+      <CanvasRuntimeContext.Provider value={value()}>
+        {children}
+      </CanvasRuntimeContext.Provider>
+    </QueryClientProvider>,
   )
 
   return {
     controller,
-    rerender(patch: Partial<CanvasLocalState>) {
-      state = { ...state, ...patch }
+    rerender(patch: Partial<CanvasLocalState> & { snapshot?: CanvasSnapshotDTO | null }) {
+      state = { ...state, ...patch } as CanvasLocalState
+      if (patch.snapshot !== undefined) {
+        snapshotValue = patch.snapshot
+      }
       view.rerender(
-        <CanvasRuntimeContext.Provider value={value()}>
-          {children}
-        </CanvasRuntimeContext.Provider>,
+        <QueryClientProvider client={client}>
+          <CanvasRuntimeContext.Provider value={value()}>
+            {children}
+          </CanvasRuntimeContext.Provider>
+        </QueryClientProvider>,
       )
     },
   }
