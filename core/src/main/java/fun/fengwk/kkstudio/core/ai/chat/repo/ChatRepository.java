@@ -12,6 +12,9 @@ public interface ChatRepository {
 
   Chat getById(UUID id);
 
+  /** 行级锁定读取（{@code for update}），用于深删除时固定 Chat 版本与关联枚举。 */
+  Chat lockById(UUID id);
+
   boolean create(Chat chat);
 
   /** 基于 (id, expectedVersion) 的原子 CAS 更新。 */

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
@@ -201,8 +202,33 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
   }
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
+    ObjectProvider<ProviderResourceMaterializer> materializers =
+        new ObjectProvider<>() {
+          @Override
+          public ProviderResourceMaterializer getIfAvailable() {
+            return ProviderResourceMaterializer.withoutStorage();
+          }
+
+          @Override
+          public ProviderResourceMaterializer getObject(Object... args) {
+            return ProviderResourceMaterializer.withoutStorage();
+          }
+
+          @Override
+          public ProviderResourceMaterializer getObject() {
+            return ProviderResourceMaterializer.withoutStorage();
+          }
+
+          @Override
+          public ProviderResourceMaterializer getIfUnique() {
+            return ProviderResourceMaterializer.withoutStorage();
+          }
+        };
     return new DatabaseProviderResolutionService(
-        providerRepository, configurationCodec, new ProviderFactories(List.of(factories)));
+        providerRepository,
+        configurationCodec,
+        new ProviderFactories(List.of(factories)),
+        materializers);
   }
 
   private AgentProviderDTO createProvider(

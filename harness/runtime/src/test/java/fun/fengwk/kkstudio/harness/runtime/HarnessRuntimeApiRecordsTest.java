@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 
 import java.util.List;
 
@@ -70,6 +71,8 @@ class HarnessRuntimeApiRecordsTest {
                 1,
                 HarnessRuntimeTestSupport.userMessagePayload("a"),
                 TestIds.id(1),
+                ThreadCommandPayloadJsonCodec.requestHash(
+                    HarnessRuntimeTestSupport.userMessagePayload("a")),
                 null,
                 null,
                 T0));

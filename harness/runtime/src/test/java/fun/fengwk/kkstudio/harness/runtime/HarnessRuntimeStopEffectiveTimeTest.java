@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -46,6 +47,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
                       1,
                       userMessagePayload("late"),
                       TestIds.id(1),
+                      ThreadCommandPayloadJsonCodec.requestHash(userMessagePayload("late")),
                       null,
                       null,
                       T6)));

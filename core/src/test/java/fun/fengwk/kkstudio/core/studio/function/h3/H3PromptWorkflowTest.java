@@ -13,10 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
@@ -67,17 +64,18 @@ class H3PromptWorkflowTest {
             99L,
             "QUEUED",
             Map.of());
-    AgentMessage user =
-        promptBuilder.userMessage(
-            run, manifest, item -> "https://signed.test/" + item.reference().resourceId());
+    AgentMessage user = promptBuilder.userMessage(run, manifest);
 
     String text = assertInstanceOf(TextMessageContent.class, user.contents().get(0)).text();
     assertTrue(text.contains("Use <Picture 1> then <Video 1>"));
     assertTrue(text.contains("<Audio 1> | AUDIO"));
     assertTrue(text.contains("embedded audio, if present, belongs to this same video label"));
-    assertInstanceOf(ImageMessageContent.class, user.contents().get(2));
-    assertInstanceOf(VideoMessageContent.class, user.contents().get(4));
-    assertInstanceOf(AudioMessageContent.class, user.contents().get(6));
+    // durable-safe 消息：manifest 表格 + 每个引用一个 label 段落，媒体内容由入队 preflight 物化。
+    assertEquals(1 + manifest.items().size(), user.contents().size());
+    for (int i = 1; i < user.contents().size(); i++) {
+      String label = assertInstanceOf(TextMessageContent.class, user.contents().get(i)).text();
+      assertTrue(label.startsWith("\nThe next attachment is "), label);
+    }
 
     Map<Long, H3UploadedFile> uploads = new LinkedHashMap<>();
     uploads.put(11L, new H3UploadedFile("11.png", "kk-studio/7", "input"));

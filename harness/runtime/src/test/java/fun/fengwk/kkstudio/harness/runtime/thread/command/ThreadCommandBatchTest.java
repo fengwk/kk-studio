@@ -8,14 +8,15 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** 原子入队 batch 的 CAS 字段、顺序与 client command ID 不变量。 */
 class ThreadCommandBatchTest {
 
   @Test
   void preservesOrderedCommandsAndDefensivelyCopies() {
-    NewThreadCommand first = new NewThreadCommand(new SetAgentCommandPayload("coding"), id(1L));
-    NewThreadCommand second = new NewThreadCommand(new SetYoloCommandPayload(true), id(2L));
+    NewThreadCommand first = command(new SetAgentCommandPayload("coding"), id(1L));
+    NewThreadCommand second = command(new SetYoloCommandPayload(true), id(2L));
     ArrayList<NewThreadCommand> source = new ArrayList<>(List.of(first, second));
     ThreadCommandBatch batch = new ThreadCommandBatch(id(7L), id(42L), 10L, source);
     source.clear();
@@ -26,13 +27,13 @@ class ThreadCommandBatchTest {
     assertEquals(List.of(first, second), batch.commands());
     assertThrows(
         UnsupportedOperationException.class,
-        () -> batch.commands().add(new NewThreadCommand(new SetYoloCommandPayload(false), id(3L))));
+        () -> batch.commands().add(command(new SetYoloCommandPayload(false), id(3L))));
   }
 
   @Test
   void rejectsInvalidCasAndDuplicateClientCommandIds() {
-    NewThreadCommand first = new NewThreadCommand(new SetAgentCommandPayload("coding"), id(1L));
-    NewThreadCommand duplicate = new NewThreadCommand(new SetYoloCommandPayload(true), id(1L));
+    NewThreadCommand first = command(new SetAgentCommandPayload("coding"), id(1L));
+    NewThreadCommand duplicate = command(new SetYoloCommandPayload(true), id(1L));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ThreadCommandBatch(id(1L), id(1L), 0L, List.of(first)));
@@ -44,5 +45,10 @@ class ThreadCommandBatchTest {
         () -> new ThreadCommandBatch(id(1L), id(1L), 1L, List.of(first, duplicate)));
     assertThrows(
         NullPointerException.class, () -> new ThreadCommandBatch(id(1L), id(1L), 1L, null));
+  }
+
+  private static NewThreadCommand command(ThreadCommandPayload payload, UUID clientCommandId) {
+    return new NewThreadCommand(
+        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 }

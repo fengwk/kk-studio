@@ -76,6 +76,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -1992,11 +1993,13 @@ class TaskToolTest {
   }
 
   private static ThreadCommand queuedCommand() {
+    UserMessageCommandPayload payload = new UserMessageCommandPayload(AgentMessage.user("queued"));
     return new ThreadCommand(
         CHILD_THREAD_ID,
         1L,
-        new UserMessageCommandPayload(AgentMessage.user("queued")),
+        payload,
         id(1),
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
         NOW);

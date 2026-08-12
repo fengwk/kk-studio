@@ -18,13 +18,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /** history Entry payload codec：标准形态、严格边界拒绝与老字段拒绝。 */
 class HistoryEntryPayloadJsonCodecTest {
@@ -48,7 +49,10 @@ class HistoryEntryPayloadJsonCodecTest {
                 AgentMessageRole.USER,
                 List.of(
                     new TextMessageContent("hello"),
-                    new VideoMessageContent("video/mp4", "https://example.test/reference.mp4"))),
+                    new ResourceMessageContent(
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                        "reference.mp4",
+                        null))),
             null,
             null);
     EntryPayload assistant =

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
@@ -79,6 +80,7 @@ public abstract class HarnessStoreCommandContract {
             canonical.sequence(),
             canonical.payload(),
             canonical.clientCommandId(),
+            canonical.requestHash(),
             canonical.consumedTurnStartEntryId(),
             canonical.cancelledAt(),
             canonical.createdAt().plusNanos(1));
@@ -307,6 +309,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.sequence(),
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
@@ -315,6 +318,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.sequence() + 1,
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
@@ -323,6 +327,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.sequence(),
                 stored.payload(),
                 TestIds.id(888), // different clientCommandId
+                stored.requestHash(),
                 null,
                 null,
                 stored.createdAt()),
@@ -333,6 +338,11 @@ public abstract class HarnessStoreCommandContract {
                     new AgentMessage(
                         AgentMessageRole.USER, List.of(new TextMessageContent("other message")))),
                 stored.clientCommandId(),
+                ThreadCommandPayloadJsonCodec.requestHash(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER,
+                            List.of(new TextMessageContent("other message"))))),
                 null,
                 null,
                 stored.createdAt()),
@@ -341,6 +351,7 @@ public abstract class HarnessStoreCommandContract {
                 stored.sequence(),
                 stored.payload(),
                 stored.clientCommandId(),
+                stored.requestHash(),
                 null,
                 null,
                 T1));

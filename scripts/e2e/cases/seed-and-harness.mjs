@@ -248,8 +248,8 @@ registerCase({
 registerCase({
   id: 'thread.user_message_strict_wire',
   level: 'L1',
-  title: 'USER_MESSAGE 多模态严格 wire 与 exact replay',
-  docs: 'USER_MESSAGE 接受互斥的 text shorthand、结构化 contents(TEXT/IMAGE/AUDIO/VIDEO) 与现有 content shorthand；role、未知字段、空 contents、非法 mediaType/source => 400；202 payloadJson 是 canonical AgentMessage；同 batch exact replay 返回既有命令',
+  title: 'USER_MESSAGE 严格 wire（仅 contents TEXT/ATTACHMENT）与 exact replay',
+  docs: 'USER_MESSAGE 只接受一个非空有序 contents 列表（TEXT/ATTACHMENT）；text/content shorthand、role、未知字段、空 contents、IMAGE/AUDIO/VIDEO 内容类型与非 canonical uploadId => 400；202 payloadJson 是 canonical AgentMessage 且响应携带 64 位小写 hex requestHash；同 batch exact replay 返回既有命令（sequence/requestHash 稳定）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -260,35 +260,37 @@ registerCase({
       title: `e2e-user-wire-${cid().slice(0, 8)}`,
     })
     const thread = snapshot.thread
-    const textClientCommandId = cid()
+    const singleClientCommandId = cid()
     const structuredClientCommandId = cid()
-    const compatibilityClientCommandId = cid()
+    const secondClientCommandId = cid()
     const batch = () => ({
       expectedHeadEntryId: thread.headEntryId,
       expectedNextCommandSequence: thread.nextCommandSequence,
       commands: [
-        { type: 'USER_MESSAGE', clientCommandId: textClientCommandId, text: 'strict wire probe' },
+        {
+          type: 'USER_MESSAGE',
+          clientCommandId: singleClientCommandId,
+          contents: [{ type: 'TEXT', text: 'strict wire probe' }],
+        },
         {
           type: 'USER_MESSAGE',
           clientCommandId: structuredClientCommandId,
           contents: [
             { type: 'TEXT', text: 'animate this' },
-            { type: 'IMAGE', mediaType: 'image/png', source: 'https://example.test/image.png' },
-            { type: 'AUDIO', mediaType: 'audio/mpeg', source: 'https://example.test/audio.mp3' },
-            { type: 'VIDEO', mediaType: 'video/mp4', source: 'https://example.test/video.mp4' },
+            { type: 'TEXT', text: 'and this' },
           ],
         },
-        userMessageCommand('compatibility probe', compatibilityClientCommandId),
+        userMessageCommand('second probe', secondClientCommandId),
       ],
     })
     const commandsDto = await enqueueCommands(ctx, thread.threadId, batch())
     assert(commandsDto.length === 3, JSON.stringify(commandsDto))
     const command = commandsDto[0]
-    assert(String(command.clientCommandId) === textClientCommandId, JSON.stringify(command))
+    assert(String(command.clientCommandId) === singleClientCommandId, JSON.stringify(command))
     assert(commandsDto.every((item) => item.type === 'USER_MESSAGE' && item.state === 'QUEUED'), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => String(item.threadId) === String(thread.threadId)), JSON.stringify(commandsDto))
-    assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.commandId))), JSON.stringify(commandsDto))
     assert(commandsDto.every((item) => /^[1-9]\d*$/.test(String(item.sequence))), JSON.stringify(commandsDto))
+    assert(commandsDto.every((item) => /^[0-9a-f]{64}$/.test(String(item.requestHash))), JSON.stringify(commandsDto))
     const payload = JSON.parse(commandsDto[0].payloadJson)
     assert(
       isDeepStrictEqual(payload, { message: { role: 'USER', contents: [{ type: 'text', text: 'strict wire probe' }] } }),
@@ -301,62 +303,106 @@ registerCase({
           role: 'USER',
           contents: [
             { type: 'text', text: 'animate this' },
-            { type: 'image', mediaType: 'image/png', source: 'https://example.test/image.png' },
-            { type: 'audio', mediaType: 'audio/mpeg', source: 'https://example.test/audio.mp3' },
-            { type: 'video', mediaType: 'video/mp4', source: 'https://example.test/video.mp4' },
+            { type: 'text', text: 'and this' },
           ],
         },
       }),
       `structured USER_MESSAGE payload must be canonical: ${JSON.stringify(structuredPayload)}`,
     )
-    const compatibilityPayload = JSON.parse(commandsDto[2].payloadJson)
+    const secondPayload = JSON.parse(commandsDto[2].payloadJson)
     assert(
-      isDeepStrictEqual(compatibilityPayload, {
-        message: { role: 'USER', contents: [{ type: 'text', text: 'compatibility probe' }] },
+      isDeepStrictEqual(secondPayload, {
+        message: { role: 'USER', contents: [{ type: 'text', text: 'second probe' }] },
       }),
-      `content shorthand must remain compatible: ${JSON.stringify(compatibilityPayload)}`,
+      `contents TEXT payload must be canonical: ${JSON.stringify(secondPayload)}`,
     )
-    // Exact replay：同 clientCommandId + 同 payload 整批重放返回既有命令（无副作用），
+    // Exact replay：同 clientCommandId + 同 hash 整批重放返回既有命令（无副作用），
     // 不依赖异步 processor 是否已消费。
     const replay = await enqueueCommands(ctx, thread.threadId, batch())
     assert(
       replay.length === commandsDto.length
         && replay.every(
           (item, index) =>
-            String(item.commandId) === String(commandsDto[index].commandId)
-            && String(item.sequence) === String(commandsDto[index].sequence),
+            String(item.sequence) === String(commandsDto[index].sequence)
+            && String(item.requestHash) === String(commandsDto[index].requestHash),
         ),
       `replay must return the existing commands: ${JSON.stringify({ commandsDto, replay })}`,
     )
 
-    // 多余字段（role 等）=> 400（mapper requireForbidden）；400 不推进 cursor，可复用原 cursor。
+    // 文本 shorthand（text / content）已从 USER_MESSAGE wire 移除：text 是未知字段、content 对 USER_MESSAGE 禁用 => 400。
+    // 400 不推进 cursor，可复用原 cursor。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: thread.headEntryId,
           expectedNextCommandSequence: thread.nextCommandSequence,
           commands: [
-            { type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x', role: 'USER' },
+            { type: 'USER_MESSAGE', clientCommandId: cid(), text: 'x' },
+          ],
+        }),
+      { status: 400, messageIncludes: /unknown|text/i },
+    )
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: thread.headEntryId,
+          expectedNextCommandSequence: thread.nextCommandSequence,
+          commands: [
+            { type: 'USER_MESSAGE', clientCommandId: cid(), content: 'x' },
+          ],
+        }),
+      { status: 400, messageIncludes: /content|forbidden/i },
+    )
+    // 多余字段（role 等）=> 400（mapper requireForbidden）。
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: thread.headEntryId,
+          expectedNextCommandSequence: thread.nextCommandSequence,
+          commands: [
+            {
+              type: 'USER_MESSAGE',
+              clientCommandId: cid(),
+              contents: [{ type: 'TEXT', text: 'x' }],
+              role: 'USER',
+            },
           ],
         }),
       { status: 400, messageIncludes: /role/ },
     )
+    // 缺少 contents 字段 => 400。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: thread.headEntryId,
           expectedNextCommandSequence: thread.nextCommandSequence,
-          commands: [
-            {
-              type: 'USER_MESSAGE',
-              clientCommandId: cid(),
-              text: 'x',
-              contents: [{ type: 'TEXT', text: 'x' }],
-            },
-          ],
+          commands: [{ type: 'USER_MESSAGE', clientCommandId: cid() }],
         }),
-      { status: 400, messageIncludes: /exactly one|text|contents/i },
+      { status: 400, messageIncludes: /contents/i },
     )
+    // IMAGE/AUDIO/VIDEO 内容类型已从 wire 契约移除：确定性 400。
+    for (const [type, mediaType, source] of [
+      ['IMAGE', 'image/png', 'https://example.test/image.png'],
+      ['AUDIO', 'audio/mpeg', 'https://example.test/audio.mp3'],
+      ['VIDEO', 'video/mp4', 'https://example.test/video.mp4'],
+    ]) {
+      await expectHttpError(
+        () =>
+          enqueueCommands(ctx, thread.threadId, {
+            expectedHeadEntryId: thread.headEntryId,
+            expectedNextCommandSequence: thread.nextCommandSequence,
+            commands: [
+              {
+                type: 'USER_MESSAGE',
+                clientCommandId: cid(),
+                contents: [{ type, mediaType, source }],
+              },
+            ],
+          }),
+        { status: 400, messageIncludes: /TEXT, ATTACHMENT/i },
+      )
+    }
+    // ATTACHMENT：uploadId 必须是 canonical UUID string；非 UUID => 400。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
@@ -366,13 +412,27 @@ registerCase({
             {
               type: 'USER_MESSAGE',
               clientCommandId: cid(),
-              contents: [
-                { type: 'IMAGE', mediaType: 'audio/mpeg', source: 'not-an-image' },
-              ],
+              contents: [{ type: 'ATTACHMENT', uploadId: 'not-a-uuid' }],
             },
           ],
         }),
-      { status: 400, messageIncludes: /image|mediaType/i },
+      { status: 400, messageIncludes: /uploadId/i },
+    )
+    // ATTACHMENT 携带随机（不存在的）READY uploadId：无论 Storage 是否启用都确定性 400。
+    await expectHttpError(
+      () =>
+        enqueueCommands(ctx, thread.threadId, {
+          expectedHeadEntryId: thread.headEntryId,
+          expectedNextCommandSequence: thread.nextCommandSequence,
+          commands: [
+            {
+              type: 'USER_MESSAGE',
+              clientCommandId: cid(),
+              contents: [{ type: 'ATTACHMENT', uploadId: cid() }],
+            },
+          ],
+        }),
+      { status: 400 },
     )
   },
 })
@@ -381,7 +441,7 @@ registerCase({
   id: 'thread.custom_message_strict_wire',
   level: 'L1',
   title: 'CUSTOM_MESSAGE role 仅 SYSTEM|USER 且顺序稳定',
-  docs: '同一原子 batch 同时入队 SYSTEM+USER 两条 CUSTOM_MESSAGE，顺序与 payload 稳定；非法/缺失 role => 400；USER_MESSAGE 缺 content => 400',
+  docs: '同一原子 batch 同时入队 SYSTEM+USER 两条 CUSTOM_MESSAGE，顺序与 payload 稳定；非法/缺失 role => 400；USER_MESSAGE 缺 contents => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -436,7 +496,7 @@ registerCase({
         }),
       { status: 400, messageIncludes: /SYSTEM|USER|role/i },
     )
-    // 缺 content => 400（mapper requireText）。
+    // USER_MESSAGE 缺 contents => 400（仅 contents 形态）。
     await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
@@ -444,7 +504,7 @@ registerCase({
           expectedNextCommandSequence: thread.nextCommandSequence,
           commands: [{ type: 'USER_MESSAGE', clientCommandId: cid() }],
         }),
-      { status: 400, messageIncludes: /content/i },
+      { status: 400, messageIncludes: /contents/i },
     )
   },
 })
@@ -475,7 +535,8 @@ registerCase({
       commands: [userMessageCommand('idempotent replay', clientCommandId)],
     })
     assert(
-      String(replay[0].commandId) === String(first[0].commandId),
+      String(replay[0].sequence) === String(first[0].sequence)
+        && String(replay[0].requestHash) === String(first[0].requestHash),
       `replay must return the existing command: ${JSON.stringify({ first, replay })}`,
     )
     // 部分重放：新命令 + 已存在命令 => 409。

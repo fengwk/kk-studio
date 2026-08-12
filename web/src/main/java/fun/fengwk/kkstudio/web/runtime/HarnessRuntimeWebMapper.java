@@ -24,10 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponse
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -84,8 +82,6 @@ public final class HarnessRuntimeWebMapper {
 
   private static final Pattern POSITIVE_DECIMAL = Pattern.compile("[1-9][0-9]*");
   private static final Pattern NON_NEGATIVE_DECIMAL = Pattern.compile("0|[1-9][0-9]*");
-  private static final Pattern MEDIA_TYPE_SUBTYPE =
-      Pattern.compile("[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*");
 
   private static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS =
       new HistoryEntryPayloadJsonCodec();
@@ -211,6 +207,7 @@ public final class HarnessRuntimeWebMapper {
     dto.setType(command.type().name());
     dto.setState(command.state().name());
     dto.setClientCommandId(command.clientCommandId().toString());
+    dto.setRequestHash(command.requestHash());
     dto.setPayloadJson(COMMAND_PAYLOADS.encode(command.payload()));
     dto.setConsumedTurnStartEntryId(
         command.consumedTurnStartEntryId() == null
@@ -373,12 +370,15 @@ public final class HarnessRuntimeWebMapper {
         domain);
   }
 
-  /** 在严格字段规则下把一个 typed command DTO 映射为 domain payload。 */
+  /** 在严格字段规则下把一个 typed command DTO 映射为 domain payload，并按 raw 请求形态计算 requestHash。 */
   public static NewThreadCommand toNewThreadCommand(HarnessThreadCommandCreateDTO dto) {
     requireNonNull(dto, "commandDTO");
     ThreadCommandType type = requireType(dto.getType());
+    ThreadCommandPayload payload = toPayload(type, dto);
     return new NewThreadCommand(
-        toPayload(type, dto), parseUuid(dto.getClientCommandId(), "clientCommandId"));
+        payload,
+        parseUuid(dto.getClientCommandId(), "clientCommandId"),
+        ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   public static MoveHeadCommand toMoveHeadCommand(String threadId, HarnessThreadHeadUpdateDTO dto) {
@@ -424,20 +424,20 @@ public final class HarnessRuntimeWebMapper {
     return switch (type) {
       case USER_MESSAGE -> {
         requireForbidden(
-            dto, "role", "agentName", "model", "activeTools", "yoloEnabled", "environmentName");
-        yield new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
-      }
-      case CUSTOM_MESSAGE -> {
-        requireForbidden(
             dto,
-            "text",
-            "contents",
+            "content",
+            "role",
             "agentName",
             "model",
             "activeTools",
             "yoloEnabled",
             "environmentName");
+        yield new UserMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
+      }
+      case CUSTOM_MESSAGE -> {
+        requireForbidden(
+            dto, "contents", "agentName", "model", "activeTools", "yoloEnabled", "environmentName");
         AgentMessageRole role = requireRole(dto.getRole());
         yield new CustomMessageCommandPayload(
             new AgentMessage(
@@ -447,7 +447,6 @@ public final class HarnessRuntimeWebMapper {
         requireForbidden(
             dto,
             "content",
-            "text",
             "contents",
             "role",
             "model",
@@ -460,7 +459,6 @@ public final class HarnessRuntimeWebMapper {
         requireForbidden(
             dto,
             "content",
-            "text",
             "contents",
             "role",
             "agentName",
@@ -473,7 +471,6 @@ public final class HarnessRuntimeWebMapper {
         requireForbidden(
             dto,
             "content",
-            "text",
             "contents",
             "role",
             "agentName",
@@ -486,7 +483,6 @@ public final class HarnessRuntimeWebMapper {
         requireForbidden(
             dto,
             "content",
-            "text",
             "contents",
             "role",
             "agentName",
@@ -497,15 +493,7 @@ public final class HarnessRuntimeWebMapper {
       }
       case SET_ENVIRONMENT -> {
         requireForbidden(
-            dto,
-            "content",
-            "text",
-            "contents",
-            "role",
-            "agentName",
-            "model",
-            "activeTools",
-            "yoloEnabled");
+            dto, "content", "contents", "role", "agentName", "model", "activeTools", "yoloEnabled");
         yield new SetEnvironmentCommandPayload(toEnvironmentName(dto.getEnvironmentName()));
       }
     };
@@ -540,29 +528,14 @@ public final class HarnessRuntimeWebMapper {
 
   private static List<AgentMessageContent> toUserMessageContents(
       HarnessThreadCommandCreateDTO dto) {
-    int forms = 0;
-    if (dto.hasTextField()) {
-      forms++;
-    }
-    if (dto.hasContentField()) {
-      forms++;
-    }
-    if (dto.hasContentsField()) {
-      forms++;
-    }
-    if (forms != 1) {
+    if (!dto.hasContentsField()) {
       throw new IllegalArgumentException(
-          "USER_MESSAGE must contain exactly one of text, content, or contents");
+          "USER_MESSAGE must contain exactly one non-empty contents list of TEXT/ATTACHMENT");
     }
-    if (dto.hasTextField()) {
-      return List.of(new TextMessageContent(requireText(dto.getText(), "text")));
-    }
-    if (dto.hasContentField()) {
-      return List.of(new TextMessageContent(requireText(dto.getContent(), "content")));
-    }
-    List<HarnessUserMessageContentDTO> contents = requireList(dto.getContents(), "contents");
-    if (contents.isEmpty()) {
-      throw new IllegalArgumentException("contents must not be empty");
+    List<HarnessUserMessageContentDTO> contents = dto.getContents();
+    if (contents == null || contents.isEmpty()) {
+      throw new IllegalArgumentException(
+          "USER_MESSAGE contents must be a non-empty list of TEXT/ATTACHMENT");
     }
     List<AgentMessageContent> mapped = new ArrayList<>(contents.size());
     for (int i = 0; i < contents.size(); i++) {
@@ -577,29 +550,16 @@ public final class HarnessRuntimeWebMapper {
     String type = requireText(dto.getType(), context + ".type");
     return switch (type) {
       case "TEXT" -> {
-        requireContentForbidden(dto, context, "mediaType", "source");
+        requireContentForbidden(dto, context, "uploadId");
         yield new TextMessageContent(requireText(dto.getText(), context + ".text"));
       }
-      case "IMAGE" -> {
+      case "ATTACHMENT" -> {
         requireContentForbidden(dto, context, "text");
-        yield new ImageMessageContent(
-            requireMediaType(dto.getMediaType(), "image/", context + ".mediaType"),
-            requireText(dto.getSource(), context + ".source"));
-      }
-      case "AUDIO" -> {
-        requireContentForbidden(dto, context, "text");
-        yield new AudioMessageContent(
-            requireMediaType(dto.getMediaType(), "audio/", context + ".mediaType"),
-            requireText(dto.getSource(), context + ".source"));
-      }
-      case "VIDEO" -> {
-        requireContentForbidden(dto, context, "text");
-        yield new VideoMessageContent(
-            requireMediaType(dto.getMediaType(), "video/", context + ".mediaType"),
-            requireText(dto.getSource(), context + ".source"));
+        // 瞬时 upload 引用：canonical UUID string；READY upload 由应用 use-case 在入队事务内消费。
+        yield new AttachmentMessageContent(parseUuid(dto.getUploadId(), context + ".uploadId"));
       }
       default -> throw new IllegalArgumentException(
-          context + ".type must be one of TEXT, IMAGE, AUDIO, VIDEO: " + type);
+          context + ".type must be one of TEXT, ATTACHMENT: " + type);
     };
   }
 
@@ -609,8 +569,7 @@ public final class HarnessRuntimeWebMapper {
       Object value =
           switch (field) {
             case "text" -> dto.hasTextField() ? Boolean.TRUE : null;
-            case "mediaType" -> dto.hasMediaTypeField() ? Boolean.TRUE : null;
-            case "source" -> dto.hasSourceField() ? Boolean.TRUE : null;
+            case "uploadId" -> dto.hasUploadIdField() ? Boolean.TRUE : null;
             default -> throw new IllegalArgumentException("unknown content field: " + field);
           };
       if (value != null) {
@@ -625,7 +584,6 @@ public final class HarnessRuntimeWebMapper {
       Object value =
           switch (field) {
             case "content" -> dto.hasContentField() ? Boolean.TRUE : null;
-            case "text" -> dto.hasTextField() ? Boolean.TRUE : null;
             case "contents" -> dto.hasContentsField() ? Boolean.TRUE : null;
             case "role" -> dto.getRole();
             case "agentName" -> dto.getAgentName();
@@ -691,15 +649,6 @@ public final class HarnessRuntimeWebMapper {
       throw new IllegalArgumentException(field + " must not be blank");
     }
     return value;
-  }
-
-  private static String requireMediaType(String value, String prefix, String field) {
-    String mediaType = requireText(value, field);
-    if (!mediaType.startsWith(prefix)
-        || !MEDIA_TYPE_SUBTYPE.matcher(mediaType.substring(prefix.length())).matches()) {
-      throw new IllegalArgumentException(field + " must be a " + prefix + "* media type");
-    }
-    return mediaType;
   }
 
   private static boolean requireBoolean(Boolean value, String field) {

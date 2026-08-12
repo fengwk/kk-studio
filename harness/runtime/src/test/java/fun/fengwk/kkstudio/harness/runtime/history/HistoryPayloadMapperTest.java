@@ -48,6 +48,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** HistoryPayloadMapper 纯映射测试：ASSISTANT / ASSISTANT_ERROR / TOOL / synthetic 四种 payload 的精确结构。 */
 class HistoryPayloadMapperTest {
@@ -180,7 +181,7 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
-  void toolResultPayloadSucceededMapsResourceContentPreservingRefAndPreview() {
+  void toolResultPayloadSucceededRejectsResourceContentWithoutMaterializer() {
     ResourceRef resource =
         new ResourceRef(
             "file:///report.txt",
@@ -196,11 +197,25 @@ class HistoryPayloadMapperTest {
                 false,
                 "{}",
                 false));
-    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    // 无物化端口时 Resource 引用 fail-closed：瞬时 URI / ResourceStore 引用绝不进入持久化 message。
+    assertThrows(IllegalArgumentException.class, () -> MAPPER.toolResultPayload(invocation));
+  }
+
+  @Test
+  void toolResultPayloadSucceededUsesMaterializedContents() {
+    ToolInvocation invocation =
+        succeededInvocation(
+            new ToolResult("call-1", List.of(new TextToolContent("")), false, "{}", false));
+    MessagePayload payload =
+        MAPPER.toolResultPayload(
+            invocation,
+            List.of(
+                new ResourceMessageContent(new UUID(0L, 1L), "report.txt", "complete preview")));
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     ResourceMessageContent mapped = (ResourceMessageContent) result.contents().get(0);
-    assertEquals(resource, mapped.resource());
+    assertEquals(new UUID(0L, 1L), mapped.blobId());
+    assertEquals("report.txt", mapped.name());
     assertEquals("complete preview", mapped.preview());
   }
 

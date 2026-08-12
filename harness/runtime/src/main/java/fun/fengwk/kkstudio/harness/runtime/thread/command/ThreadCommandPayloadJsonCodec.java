@@ -13,7 +13,11 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,6 +52,9 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
+  private static final ThreadCommandPayloadJsonCodec REQUEST_HASH_CODEC =
+      new ThreadCommandPayloadJsonCodec();
+
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -59,6 +66,42 @@ public final class ThreadCommandPayloadJsonCodec {
   public String encode(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
+  }
+
+  /**
+   * 把 {@link ThreadCommandPayload} 编码为 client command 请求的 canonical JSON 文本：与 {@link #encode} 相同， 但
+   * USER message 内容允许瞬时 {@code attachment} 单元（含 ordered uploadId）。CUSTOM_MESSAGE 永远使用 durable
+   * 形态（attachment / media 内容确定性拒绝）。请求 hash 只基于该形态计算。
+   */
+  public String encodeRequest(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    return write(encodeRequestNode(payload));
+  }
+
+  /**
+   * 计算 client command 的 canonical request hash：SHA-256（小写 hex，64 字符）作用于显式 canonical 信封 {@code
+   * {"type":<ThreadCommandType>,"payload":<encodeRequest>}}。
+   *
+   * <p>信封同时包含 command type 与 raw 请求 payload（含 ordered contents 与 uploadId），因此不同 type 的 payload 即使
+   * JSON 形状相同也不会碰撞；同一 raw 请求永远得到同一 hash；durable 表示（如附件已物化为 RESOURCE）不影响 hash。
+   */
+  public static String requestHash(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    byte[] canonical = write(encodeRequestEnvelopeNode(payload)).getBytes(StandardCharsets.UTF_8);
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 is not available", error);
+    }
+  }
+
+  /** 编码 request hash 的 canonical 信封节点：{@code type}（command discriminator）+ {@code payload}。 */
+  public static ObjectNode encodeRequestEnvelopeNode(ThreadCommandPayload payload) {
+    Objects.requireNonNull(payload, "payload");
+    ObjectNode envelope = NODES.objectNode();
+    envelope.put("type", payload.type().name());
+    envelope.set("payload", encodeRequestNode(payload));
+    return envelope;
   }
 
   /**
@@ -92,10 +135,25 @@ public final class ThreadCommandPayloadJsonCodec {
   // ---------- 编码器 ----------
 
   private static ObjectNode encodeNode(ThreadCommandPayload payload) {
+    return encodeNode(payload, false);
+  }
+
+  /** 请求形态编码：USER/CUSTOM message 内容使用支持瞬时 ATTACHMENT 的请求 codec。 */
+  private static ObjectNode encodeRequestNode(ThreadCommandPayload payload) {
+    return encodeNode(payload, true);
+  }
+
+  private static ObjectNode encodeNode(ThreadCommandPayload payload, boolean requestForm) {
     return switch (payload) {
       case UserMessageCommandPayload value -> NODES
           .objectNode()
-          .set("message", MESSAGE_CODEC.encodeNode(value.message()));
+          .set(
+              "message",
+              requestForm
+                  ? MESSAGE_CODEC.encodeRequestNode(value.message())
+                  : MESSAGE_CODEC.encodeNode(value.message()));
+        // CUSTOM_MESSAGE 永远使用 durable message 形态：request hash 同样基于 durable 形态，
+        // attachment / media 内容在 durable codec 中确定性拒绝。
       case CustomMessageCommandPayload value -> NODES
           .objectNode()
           .set("message", MESSAGE_CODEC.encodeNode(value.message()));

@@ -209,6 +209,26 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   }
 
   @Override
+  public ReadyUpload lockReady(UUID uploadId) {
+    Objects.requireNonNull(uploadId, "uploadId must not be null");
+    return transactionTemplate.execute(
+        status -> {
+          StorageUpload locked = uploadRepository.getByIdForUpdate(uploadId);
+          if (locked == null) {
+            throw new StorageResourceNotFoundException("upload", uploadId.toString());
+          }
+          if (locked.getBlobId() == null) {
+            throw new StorageVerificationException(
+                "upload " + uploadId + " is PENDING; complete it before sending");
+          }
+          if (!locked.getExpiresAt().isAfter(Instant.now())) {
+            throw new StorageVerificationException("upload " + uploadId + " expired");
+          }
+          return new ReadyUpload(locked.getBlobId(), locked.getFilename());
+        });
+  }
+
+  @Override
   public int expireOnce() {
     Integer processed =
         transactionTemplate.execute(

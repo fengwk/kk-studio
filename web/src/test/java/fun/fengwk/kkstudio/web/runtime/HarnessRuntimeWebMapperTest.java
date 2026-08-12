@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
@@ -96,8 +97,10 @@ class HarnessRuntimeWebMapperTest {
 
   @Test
   void mapsAllSevenCommandTypesToCanonicalPayloadJson() {
+    HarnessUserMessageContentDTO userText = content("TEXT");
+    userText.setText("hello");
     HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-user");
-    user.setContent("hello");
+    user.setContents(List.of(userText));
 
     HarnessThreadCommandCreateDTO custom = command("CUSTOM_MESSAGE", "c-custom");
     custom.setContent("rules");
@@ -161,74 +164,69 @@ class HarnessRuntimeWebMapperTest {
   }
 
   @Test
-  void mapsTextAndExistingContentShorthandsToTheSameUserMessageShape() {
-    HarnessThreadCommandCreateDTO text = command("USER_MESSAGE", "c-text");
+  void rejectsUserMessageContentShorthandAndRequiresStructuredContents() {
+    // 旧 content shorthand：USER_MESSAGE 确定性拒绝（CUSTOM_MESSAGE 仍使用 content）。
+    HarnessThreadCommandCreateDTO viaContent = command("USER_MESSAGE", "c-content");
+    viaContent.setContent("hello");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(viaContent)));
+
+    // 完全没有 contents：拒绝。
+    HarnessThreadCommandCreateDTO missing = command("USER_MESSAGE", "c-missing");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(missing)));
+
+    // 唯一合法形态：非空 contents 列表。
+    HarnessUserMessageContentDTO text = content("TEXT");
     text.setText("hello");
-    HarnessThreadCommandCreateDTO content = command("USER_MESSAGE", "c-content");
-    content.setContent("hello");
-
+    HarnessThreadCommandCreateDTO structured = command("USER_MESSAGE", "c-structured-only");
+    structured.setContents(List.of(text));
     ThreadCommandBatch mapped =
-        HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(text, content));
-
-    String expected =
-        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}";
-    assertExactPayload(mapped, 0, ThreadCommandType.USER_MESSAGE, expected);
-    assertExactPayload(mapped, 1, ThreadCommandType.USER_MESSAGE, expected);
+        HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(structured));
+    assertExactPayload(
+        mapped,
+        0,
+        ThreadCommandType.USER_MESSAGE,
+        "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}");
   }
 
   @Test
   void mapsAllStructuredUserMessageContentsInOrder() {
     HarnessUserMessageContentDTO text = content("TEXT");
     text.setText("animate this");
-    HarnessUserMessageContentDTO image = content("IMAGE");
-    image.setMediaType("image/png");
-    image.setSource("https://example.test/image.png");
-    HarnessUserMessageContentDTO audio = content("AUDIO");
-    audio.setMediaType("audio/mpeg");
-    audio.setSource("https://example.test/audio.mp3");
-    HarnessUserMessageContentDTO video = content("VIDEO");
-    video.setMediaType("video/mp4");
-    video.setSource("https://example.test/video.mp4");
+    HarnessUserMessageContentDTO attachment = content("ATTACHMENT");
+    attachment.setUploadId(idText(1));
     HarnessThreadCommandCreateDTO user = command("USER_MESSAGE", "c-structured");
-    user.setContents(List.of(text, image, audio, video));
+    user.setContents(List.of(text, attachment));
 
     ThreadCommandBatch mapped = HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(user));
 
-    assertExactPayload(
+    assertExactRequestPayload(
         mapped,
         0,
         ThreadCommandType.USER_MESSAGE,
         "{\"message\":{\"role\":\"USER\",\"contents\":["
             + "{\"type\":\"text\",\"text\":\"animate this\"},"
-            + "{\"type\":\"image\",\"mediaType\":\"image/png\","
-            + "\"source\":\"https://example.test/image.png\"},"
-            + "{\"type\":\"audio\",\"mediaType\":\"audio/mpeg\","
-            + "\"source\":\"https://example.test/audio.mp3\"},"
-            + "{\"type\":\"video\",\"mediaType\":\"video/mp4\","
-            + "\"source\":\"https://example.test/video.mp4\"}]}}");
+            + "{\"type\":\"attachment\",\"uploadId\":\""
+            + idText(1)
+            + "\"}]}}");
   }
 
   @Test
-  void rejectsAmbiguousEmptyOrInvalidStructuredUserMessages() {
-    HarnessThreadCommandCreateDTO ambiguous = command("USER_MESSAGE", "c-ambiguous");
-    ambiguous.setText("hello");
-    ambiguous.setContents(List.of(content("TEXT")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(ambiguous)));
-
-    HarnessThreadCommandCreateDTO explicitNull = command("USER_MESSAGE", "c-null");
-    explicitNull.setText(null);
-    explicitNull.setContents(List.of(content("TEXT")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(explicitNull)));
-
+  void rejectsEmptyNullOrInvalidStructuredUserMessages() {
     HarnessThreadCommandCreateDTO empty = command("USER_MESSAGE", "c-empty");
     empty.setContents(List.of());
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(empty)));
+
+    HarnessThreadCommandCreateDTO nullContents = command("USER_MESSAGE", "c-null");
+    nullContents.setContents(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(nullContents)));
 
     HarnessUserMessageContentDTO tool = content("TOOL");
     HarnessThreadCommandCreateDTO hiddenType = command("USER_MESSAGE", "c-tool");
@@ -237,41 +235,31 @@ class HarnessRuntimeWebMapperTest {
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(hiddenType)));
 
-    HarnessUserMessageContentDTO invalidMedia = content("IMAGE");
-    invalidMedia.setMediaType("audio/mpeg");
-    invalidMedia.setSource("image-source");
-    HarnessThreadCommandCreateDTO wrongMedia = command("USER_MESSAGE", "c-media");
-    wrongMedia.setContents(List.of(invalidMedia));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(wrongMedia)));
-
-    HarnessUserMessageContentDTO malformedMedia = content("VIDEO");
-    malformedMedia.setMediaType("video/ ");
-    malformedMedia.setSource("video-source");
-    HarnessThreadCommandCreateDTO malformed = command("USER_MESSAGE", "c-malformed-media");
-    malformed.setContents(List.of(malformedMedia));
+    HarnessUserMessageContentDTO malformedUuid = content("ATTACHMENT");
+    malformedUuid.setUploadId("not-a-uuid");
+    HarnessThreadCommandCreateDTO malformed = command("USER_MESSAGE", "c-malformed-upload");
+    malformed.setContents(List.of(malformedUuid));
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(malformed)));
 
-    HarnessUserMessageContentDTO blankSource = content("VIDEO");
-    blankSource.setMediaType("video/mp4");
-    blankSource.setSource(" ");
-    HarnessThreadCommandCreateDTO invalidSource = command("USER_MESSAGE", "c-source");
-    invalidSource.setContents(List.of(blankSource));
+    HarnessUserMessageContentDTO attachmentWithText = content("ATTACHMENT");
+    attachmentWithText.setUploadId(idText(1));
+    attachmentWithText.setText("forbidden");
+    HarnessThreadCommandCreateDTO forbiddenAttachment = command("USER_MESSAGE", "c-field");
+    forbiddenAttachment.setContents(List.of(attachmentWithText));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(invalidSource)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(forbiddenAttachment)));
 
-    HarnessUserMessageContentDTO textWithMedia = content("TEXT");
-    textWithMedia.setText("hello");
-    textWithMedia.setMediaType(null);
-    HarnessThreadCommandCreateDTO forbiddenField = command("USER_MESSAGE", "c-field");
-    forbiddenField.setContents(List.of(textWithMedia));
+    HarnessUserMessageContentDTO textWithUpload = content("TEXT");
+    textWithUpload.setText("hello");
+    textWithUpload.setUploadId(idText(1));
+    HarnessThreadCommandCreateDTO forbiddenText = command("USER_MESSAGE", "c-field-2");
+    forbiddenText.setContents(List.of(textWithUpload));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(forbiddenField)));
+        () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(forbiddenText)));
   }
 
   @Test
@@ -284,15 +272,17 @@ class HarnessRuntimeWebMapperTest {
 
   @Test
   void rejectsForbiddenFieldsPerDiscriminator() {
+    HarnessUserMessageContentDTO userText = content("TEXT");
+    userText.setText("hello");
     HarnessThreadCommandCreateDTO userWithSettings = command("USER_MESSAGE", "c-1");
-    userWithSettings.setContent("hello");
+    userWithSettings.setContents(List.of(userText));
     userWithSettings.setAgentName("default-assistant");
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeWebMapper.toCommandBatch(THREAD_ID, batch(userWithSettings)));
 
     HarnessThreadCommandCreateDTO userWithRole = command("USER_MESSAGE", "c-2");
-    userWithRole.setContent("hello");
+    userWithRole.setContents(List.of(userText));
     userWithRole.setRole("user");
     assertThrows(
         IllegalArgumentException.class,
@@ -668,5 +658,17 @@ class HarnessRuntimeWebMapperTest {
       ThreadCommandBatch batch, int index, ThreadCommandType type, String expectedJson) {
     assertEquals(type, batch.commands().get(index).payload().type());
     assertEquals(expectedJson, COMMAND_PAYLOADS.encode(batch.commands().get(index).payload()));
+  }
+
+  /** 请求形态断言：瞬时 ATTACHMENT 内容只能按 raw request 编码（durable codec 会拒绝）。 */
+  private static void assertExactRequestPayload(
+      ThreadCommandBatch batch, int index, ThreadCommandType type, String expectedJson) {
+    ThreadCommandPayload payload = batch.commands().get(index).payload();
+    assertEquals(type, payload.type());
+    assertEquals(expectedJson, COMMAND_PAYLOADS.encodeRequest(payload));
+    assertEquals(
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        batch.commands().get(index).requestHash(),
+        "requestHash must cover the raw request form with ordered contents/uploadId");
   }
 }

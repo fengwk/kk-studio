@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Duration;
@@ -71,7 +73,23 @@ public final class HarnessOneShotService {
       EnvironmentName environmentName,
       String systemMessage,
       AgentMessage userMessage) {
+    return submit(
+        agentName, environmentName, systemMessage, userMessage, NewCommandPreflight.IDENTITY);
+  }
+
+  /**
+   * 带 media preflight 的一次性提交：在入队事务内（幂等重放检查之后）把 USER 消息中按 manifest 顺序的占位内容物化为 durable 内容（如 H3 的全局存储
+   * RESOURCE）；preflight 必须保持 clientCommandId/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable
+   * 形态计算，因此 USER 消息在提交时不得携带瞬时 media/attachment 内容。
+   */
+  public UUID submit(
+      String agentName,
+      EnvironmentName environmentName,
+      String systemMessage,
+      AgentMessage userMessage,
+      NewCommandPreflight preflight) {
     Objects.requireNonNull(userMessage, "userMessage");
+    Objects.requireNonNull(preflight, "preflight");
     if (userMessage.role() != AgentMessageRole.USER) {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
@@ -89,9 +107,15 @@ public final class HarnessOneShotService {
             List.of(
                 new NewThreadCommand(
                     new CustomMessageCommandPayload(AgentMessage.system(systemMessage)),
-                    UUID.randomUUID()),
+                    UUID.randomUUID(),
+                    ThreadCommandPayloadJsonCodec.requestHash(
+                        new CustomMessageCommandPayload(AgentMessage.system(systemMessage)))),
                 new NewThreadCommand(
-                    new CustomMessageCommandPayload(userMessage), UUID.randomUUID()))));
+                    new CustomMessageCommandPayload(userMessage),
+                    UUID.randomUUID(),
+                    ThreadCommandPayloadJsonCodec.requestHash(
+                        new CustomMessageCommandPayload(userMessage))))),
+        preflight);
     return created.thread().id();
   }
 

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 
 import java.time.Duration;
 import java.util.List;
@@ -30,6 +31,7 @@ class MiniMaxH3ConfigurationTest {
     H3WorkflowBuilder workflowBuilder = configuration.h3WorkflowBuilder(mapper);
     StandardComfyuiClient client = configuration.standardH3ComfyuiClient(properties, mapper);
     ObjectProvider<StandardComfyuiClient> clients = mock(ObjectProvider.class);
+    ObjectProvider<StorageBlobIngestService> ingestServices = mock(ObjectProvider.class);
 
     assertNotNull(preflight);
     assertNotNull(promptBuilder);
@@ -43,6 +45,7 @@ class MiniMaxH3ConfigurationTest {
             mock(HarnessOneShotService.class),
             workflowBuilder,
             clients,
+            ingestServices,
             mapper));
   }
 

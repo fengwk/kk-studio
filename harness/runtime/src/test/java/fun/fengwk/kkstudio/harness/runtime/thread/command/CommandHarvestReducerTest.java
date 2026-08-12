@@ -102,6 +102,7 @@ class CommandHarvestReducerTest {
             3L,
             new SetAgentCommandPayload("coding"),
             id(3L),
+            ThreadCommandPayloadJsonCodec.requestHash(new SetAgentCommandPayload("coding")),
             null,
             CREATED.plusSeconds(1),
             CREATED);
@@ -150,12 +151,28 @@ class CommandHarvestReducerTest {
 
   private static ThreadCommand queued(
       UUID id, long sequence, ThreadCommandPayload payload, UUID threadId) {
-    return new ThreadCommand(threadId, sequence, payload, id, null, null, CREATED);
+    return new ThreadCommand(
+        threadId,
+        sequence,
+        payload,
+        id,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        null,
+        null,
+        CREATED);
   }
 
   private static ThreadCommand applied(UUID id, long sequence) {
+    ThreadCommandPayload payload = new SetAgentCommandPayload("coding");
     return new ThreadCommand(
-        id(7L), sequence, new SetAgentCommandPayload("coding"), id, id(99L), null, CREATED);
+        id(7L),
+        sequence,
+        payload,
+        id,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        id(99L),
+        null,
+        CREATED);
   }
 
   private static AgentMessage user(String text) {

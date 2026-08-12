@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -205,12 +206,15 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadCommand queuedUserMessageCommand() {
+    UserMessageCommandPayload payload =
+        new UserMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
     return new ThreadCommand(
         id(1),
         4,
-        new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))),
+        payload,
         id(50),
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
         NOW);

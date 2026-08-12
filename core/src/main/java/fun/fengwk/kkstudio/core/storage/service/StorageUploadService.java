@@ -32,6 +32,19 @@ public interface StorageUploadService {
   void delete(UUID uploadId);
 
   /**
+   * 事务内锁定 READY 上传（加入调用方已有事务）并返回权威消费事实：blobId 与权威文件名（文件名取自上传行，绝不信任客户端消息内容）。
+   *
+   * <p>调用方随后必须：插入 session blob ref + retain（先于 release）、删除消费过的上传行并 release 其引用——全部在同一 事务内完成。
+   *
+   * @throws fun.fengwk.kkstudio.core.storage.error.StorageResourceNotFoundException 上传不存在
+   * @throws fun.fengwk.kkstudio.core.storage.error.StorageVerificationException 上传仍为 PENDING 或已过期
+   */
+  ReadyUpload lockReady(UUID uploadId);
+
+  /** READY 上传的权威消费事实。 */
+  record ReadyUpload(UUID blobId, String filename) {}
+
+  /**
    * 机会式过期回收（SKIP LOCKED 批次，上限 16）：批次选择与逐行处理在同一事务内完成（行锁全程持有）， 并发 sweeper
    * 不会重复选择/处理同一行；返回处理的行数，单行失败不中断批次。
    */

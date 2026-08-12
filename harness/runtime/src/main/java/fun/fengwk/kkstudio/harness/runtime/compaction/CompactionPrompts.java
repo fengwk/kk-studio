@@ -170,11 +170,11 @@ public final class CompactionPrompts {
   }
 
   private static String resourcePlaceholder(ResourceMessageContent resource) {
-    String label = resource.resource().name();
-    if (label == null) {
-      label = resource.resource().mediaType();
+    String label = resource.name();
+    if (label == null || label.isBlank()) {
+      label = resource.blobId().toString();
     }
-    return label == null ? "[Resource]" : "[Resource: " + label + "]";
+    return "[Resource: " + label + "]";
   }
 
   private static String contentText(List<AgentMessageContent> contents) {

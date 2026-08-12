@@ -30,6 +30,11 @@ public class PostgresqlChatRepository implements ChatRepository {
   }
 
   @Override
+  public Chat lockById(UUID id) {
+    return toModel(chatMapper.lockById(id));
+  }
+
+  @Override
   public boolean create(Chat chat) {
     return chatMapper.insert(toDO(chat)) == 1;
   }

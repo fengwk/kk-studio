@@ -21,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -57,16 +58,18 @@ class StudioHarnessThreadControllerTest {
   }
 
   private HarnessRuntime runtime;
+  private ChatThreadCommandService chatThreadCommandService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
+    chatThreadCommandService = mock(ChatThreadCommandService.class);
     RealtimeEventTail tail = mock(RealtimeEventTail.class);
     ThreadRevisionSseHub hub = mock(ThreadRevisionSseHub.class);
     Executor executor = Runnable::run;
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, tail, hub, executor);
+        new StudioHarnessThreadController(runtime, chatThreadCommandService, tail, hub, executor);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ResultResponseBodyAdvice())
@@ -95,7 +98,7 @@ class StudioHarnessThreadControllerTest {
 
   @Test
   void enqueueCommandsMapsOneBatchAndReturnsAccepted() throws Exception {
-    when(runtime.enqueueCommands(any(ThreadCommandBatch.class)))
+    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
         .thenReturn(List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()));
 
     String body =
@@ -104,7 +107,7 @@ class StudioHarnessThreadControllerTest {
           "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
           "expectedNextCommandSequence": 4,
           "commands": [
-            {"type": "USER_MESSAGE", "text": "hello", "clientCommandId": "00000000-0000-0000-0000-000000000101"},
+            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hello"}], "clientCommandId": "00000000-0000-0000-0000-000000000101"},
             {"type": "SET_AGENT", "agentName": "default-assistant", "clientCommandId": "00000000-0000-0000-0000-000000000102"},
             {"type": "SET_MODEL",
              "model": {"providerName": "openai", "modelName": "gpt-5", "variant": "default"},
@@ -130,7 +133,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data[0].clientCommandId").value(idText(50)));
 
     ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(captor.capture());
+    verify(chatThreadCommandService).submitCommands(captor.capture());
     ThreadCommandBatch batch = captor.getValue();
     assertEquals(id(1), batch.threadId());
     assertEquals(id(3), batch.expectedHeadEntryId());
@@ -155,7 +158,7 @@ class StudioHarnessThreadControllerTest {
           "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
           "expectedNextCommandSequence": 4,
           "commands": [
-            {"type": "USER_MESSAGE", "content": "hello", "agentName": "default-assistant", "clientCommandId": "00000000-0000-0000-0000-000000000101"}
+            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hello"}], "agentName": "default-assistant", "clientCommandId": "00000000-0000-0000-0000-000000000101"}
           ]
         }
         """;
@@ -185,12 +188,12 @@ class StudioHarnessThreadControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isBadRequest());
-    verify(runtime, never()).enqueueCommands(any(ThreadCommandBatch.class));
+    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
   }
 
   @Test
   void enqueueCommandsMapsStructuredUserContentsToCanonicalPersistentMessage() throws Exception {
-    when(runtime.enqueueCommands(any(ThreadCommandBatch.class)))
+    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
         .thenReturn(List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()));
     String body =
         """
@@ -202,9 +205,7 @@ class StudioHarnessThreadControllerTest {
             "clientCommandId": "00000000-0000-0000-0000-000000000201",
             "contents": [
               {"type": "TEXT", "text": "animate this"},
-              {"type": "IMAGE", "mediaType": "image/png", "source": "https://example.test/image.png"},
-              {"type": "AUDIO", "mediaType": "audio/mpeg", "source": "https://example.test/audio.mp3"},
-              {"type": "VIDEO", "mediaType": "video/mp4", "source": "https://example.test/video.mp4"}
+              {"type": "ATTACHMENT", "uploadId": "00000000-0000-0000-0000-000000000301"}
             ]
           }]
         }
@@ -218,17 +219,12 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isAccepted());
 
     ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(captor.capture());
+    verify(chatThreadCommandService).submitCommands(captor.capture());
     assertEquals(
         "{\"message\":{\"role\":\"USER\",\"contents\":["
             + "{\"type\":\"text\",\"text\":\"animate this\"},"
-            + "{\"type\":\"image\",\"mediaType\":\"image/png\","
-            + "\"source\":\"https://example.test/image.png\"},"
-            + "{\"type\":\"audio\",\"mediaType\":\"audio/mpeg\","
-            + "\"source\":\"https://example.test/audio.mp3\"},"
-            + "{\"type\":\"video\",\"mediaType\":\"video/mp4\","
-            + "\"source\":\"https://example.test/video.mp4\"}]}}",
-        COMMAND_PAYLOADS.encode(captor.getValue().commands().get(0).payload()));
+            + "{\"type\":\"attachment\",\"uploadId\":\"00000000-0000-0000-0000-000000000301\"}]}}",
+        COMMAND_PAYLOADS.encodeRequest(captor.getValue().commands().get(0).payload()));
   }
 
   @Test
@@ -285,7 +281,7 @@ class StudioHarnessThreadControllerTest {
                   .content(body))
           .andExpect(status().isBadRequest());
     }
-    verify(runtime, never()).enqueueCommands(any(ThreadCommandBatch.class));
+    verify(chatThreadCommandService, never()).submitCommands(any(ThreadCommandBatch.class));
   }
 
   @Test
@@ -296,7 +292,7 @@ class StudioHarnessThreadControllerTest {
         .perform(get("/api/ai/runtime/threads/" + idText(1) + "/snapshot"))
         .andExpect(status().isNotFound());
 
-    when(runtime.enqueueCommands(any(ThreadCommandBatch.class)))
+    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale cursor"));
@@ -424,7 +420,8 @@ class StudioHarnessThreadControllerTest {
 
   @Test
   void serializesSevenCommandBatchJson() throws Exception {
-    when(runtime.enqueueCommands(any(ThreadCommandBatch.class))).thenReturn(List.of());
+    when(chatThreadCommandService.submitCommands(any(ThreadCommandBatch.class)))
+        .thenReturn(List.of());
     // 保证 mapper 对 7 类 discriminator 的 JSON 反序列化边界（严格字段）与 HTTP 层一致。
     String body =
         """
@@ -432,7 +429,7 @@ class StudioHarnessThreadControllerTest {
           "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
           "expectedNextCommandSequence": 4,
           "commands": [
-            {"type": "USER_MESSAGE", "content": "hi", "clientCommandId": "00000000-0000-0000-0000-000000000101"},
+            {"type": "USER_MESSAGE", "contents": [{"type": "TEXT", "text": "hi"}], "clientCommandId": "00000000-0000-0000-0000-000000000101"},
             {"type": "CUSTOM_MESSAGE", "role": "USER", "content": "custom", "clientCommandId": "00000000-0000-0000-0000-000000000102"},
             {"type": "SET_AGENT", "agentName": "a", "clientCommandId": "00000000-0000-0000-0000-000000000103"},
             {"type": "SET_MODEL", "model": {"providerName": "p", "modelName": "m", "variant": "v"}, "clientCommandId": "00000000-0000-0000-0000-000000000104"},
@@ -450,7 +447,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isAccepted());
 
     ArgumentCaptor<ThreadCommandBatch> captor = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(captor.capture());
+    verify(chatThreadCommandService).submitCommands(captor.capture());
     ThreadCommandBatch batch = captor.getValue();
     assertEquals(7, batch.commands().size());
     assertEquals(
