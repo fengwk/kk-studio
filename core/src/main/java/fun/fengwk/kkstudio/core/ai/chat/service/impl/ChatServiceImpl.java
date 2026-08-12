@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /** Chat CRUD 服务。 */
@@ -94,7 +95,7 @@ public class ChatServiceImpl implements ChatService {
   @Transactional
   public void deleteChat(String id, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    long parsed = ChatIds.parsePositive(id, "id");
+    UUID parsed = ChatIds.parseUuid(id, "id");
     Chat existing = guard.requireChat(parsed);
     ensureExpectedVersion(existing, id, expectedVersion, expected);
     if (!repository.deleteById(existing.getId(), expected)) {

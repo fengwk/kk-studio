@@ -3,13 +3,14 @@ package fun.fengwk.kkstudio.core.ai.chat.service.model;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** Chat 集合领域行。 */
 @Data
 public class Chat {
 
-  /** 业务主键（bigint，由 kk_studio_id_seq 生成，> 0）。 */
-  private Long id;
+  /** 业务主键（PostgreSQL uuid，由应用生成）。 */
+  private UUID id;
 
   /** 标题，必填：非空白且不超过 256 字符。 */
   private String title;

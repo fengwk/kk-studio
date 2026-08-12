@@ -26,7 +26,7 @@ public class HarnessThreadCommandCreateDTO {
    */
   private String type;
 
-  /** 必填稳定客户端幂等键（canonical name）：同一批命令重放返回既有行。 */
+  /** 必填稳定客户端幂等键（canonical UUID string）：同一批命令重放返回既有行。 */
   private String clientCommandId;
 
   /**

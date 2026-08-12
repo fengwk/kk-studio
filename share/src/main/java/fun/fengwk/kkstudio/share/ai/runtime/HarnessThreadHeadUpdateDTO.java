@@ -5,7 +5,7 @@ import lombok.Data;
 /** Thread head 重定位请求；{@code expectedRevision} 是 exact revision CAS cursor。 */
 @Data
 public class HarnessThreadHeadUpdateDTO {
-  /** 必填 head 重定位目标 Entry 主键：strict positive decimal string。 */
+  /** 必填 head 重定位目标 Entry 主键：canonical UUID string。 */
   private String targetEntryId;
 
   /**

@@ -52,7 +52,7 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，非空 effects 只允许属于 terminal `SUCCEEDED` |
 | SubagentBinding | 冻结在 ModelInvocationRequest 中的子 Agent 名称 + 描述 allowlist 快照；task 执行绝不依据后续 Agent 配置扩权 |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；rootThreadId 在整棵委派树中不变 |
-| task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即十进制子 ThreadId；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
+| task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即子 ThreadId（canonical UUID）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照；以 `CUSTOM(goal/state@schemaVersion=1)` 追加，当前分支最近快照生效；状态仅 `active` / `complete` / `blocked` |
 | Resource | Tool Result 中 Text/Json ≤8KB 保持 inline ToolContent；超过阈值或 Binary 转为 canonical 引用 `{uri, mediaType, name, size, sha256}`（外部 `file:` URI）；file/s3 经同源 `GET /api/ai/runtime/resources/{sha256}` 下载 |

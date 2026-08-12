@@ -16,32 +16,77 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /** 模型描述、用量与成本公共契约测试。 */
 class ModelContractTest {
 
-  /** 模型描述必须使用非空 name；pricing 不可为空。 */
+  /** 模型描述必须使用非空 name；inputModalities 非空且不可变；pricing 不可为空。 */
   @Test
   void enforcesDescriptorResourceAndIdentityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("", "model", true, false, pricing()));
+        () ->
+            new ModelDescriptor(
+                "", "model", Set.of(ModelInputModality.TEXT), true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("provider", "", true, false, pricing()));
+        () ->
+            new ModelDescriptor(
+                "provider", "", Set.of(ModelInputModality.TEXT), true, false, pricing()));
     assertThrows(
         NullPointerException.class,
-        () -> new ModelDescriptor("provider", "model", true, false, null));
+        () -> new ModelDescriptor("provider", "model", null, true, false, pricing()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("\u2003provider", "model", true, false, pricing()));
+        () -> new ModelDescriptor("provider", "model", Set.of(), true, false, pricing()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelDescriptor(
+                "provider", "model", Set.of(ModelInputModality.TEXT), true, false, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("provider/alias", "model", true, false, pricing()));
+        () ->
+            new ModelDescriptor(
+                "\u2003provider",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                false,
+                pricing()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelDescriptor(
+                "provider/alias",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                false,
+                pricing()));
     assertDoesNotThrow(
-        () -> new ModelDescriptor("provider", "model/with/slash", true, false, pricing()));
+        () ->
+            new ModelDescriptor(
+                "provider",
+                "model/with/slash",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                false,
+                pricing()));
+  }
+
+  /** inputModalities 必须防御性拷贝：外部集合的后续修改不得影响 descriptor。 */
+  @Test
+  void descriptorCopiesInputModalities() {
+    Set<ModelInputModality> mutable = new HashSet<>();
+    mutable.add(ModelInputModality.TEXT);
+    ModelDescriptor descriptor =
+        new ModelDescriptor("provider", "model", mutable, true, false, pricing());
+    mutable.add(ModelInputModality.IMAGE);
+    assertEquals(Set.of(ModelInputModality.TEXT), descriptor.inputModalities());
   }
 
   /** Variant 标识与数值必须可稳定下发；惩罚项允许厂商支持的负值，但拒绝非有限数。 */

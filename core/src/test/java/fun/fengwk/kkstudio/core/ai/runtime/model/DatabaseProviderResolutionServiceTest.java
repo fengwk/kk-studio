@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderC
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -628,6 +629,7 @@ class DatabaseProviderResolutionServiceTest {
         new ModelDescriptor(
             PROVIDER_NAME,
             "model",
+            Set.of(ModelInputModality.TEXT),
             false,
             false,
             new ModelPricing(

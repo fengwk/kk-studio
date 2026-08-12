@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeWebMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
@@ -75,7 +76,7 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              long id = HarnessRuntimeWebMapper.parsePositiveId(threadId, "threadId");
+              UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
               return HarnessRuntimeWebMapper.toSnapshotDto(runtime.getThreadSnapshot(id));
             }));
   }
@@ -131,7 +132,7 @@ public class StudioHarnessThreadController {
               dto.setStoppedTurnEndEntryId(
                   result.stoppedTurnEndEntryId() == null
                       ? null
-                      : Long.toString(result.stoppedTurnEndEntryId()));
+                      : result.stoppedTurnEndEntryId().toString());
               dto.setCancelledCommandCount(result.cancelledCommandCount());
               return dto;
             }));
@@ -163,7 +164,7 @@ public class StudioHarnessThreadController {
       @PathVariable String threadId,
       @RequestParam(defaultValue = "0") String afterRevision,
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
-    long id = HarnessRuntimeWebMapper.parsePositiveId(threadId, "threadId");
+    UUID id = HarnessRuntimeWebMapper.parseUuid(threadId, "threadId");
     withRuntimeTranslation(() -> runtime.getThreadSnapshot(id));
     long revision =
         withRuntimeTranslation(

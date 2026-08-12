@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.plugin.BranchView;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.util.Objects;
+import java.util.UUID;
 
 /** 使用 Harness append-only Entry path 构造冻结插件 branch view。 */
 @Component
@@ -20,10 +21,8 @@ public class DatabasePluginBranchViewLoader implements PluginBranchViewLoader {
   }
 
   @Override
-  public BranchView load(long assistantEntryId) {
-    if (assistantEntryId <= 0) {
-      throw new IllegalArgumentException("assistantEntryId must be positive");
-    }
+  public BranchView load(UUID assistantEntryId) {
+    Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     return store.transaction(tx -> new BranchView(tx.loadEntryPath(assistantEntryId)));
   }
 }

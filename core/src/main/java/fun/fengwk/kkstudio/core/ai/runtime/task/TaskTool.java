@@ -60,9 +60,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 以普通 durable Harness Thread 运行隔离子 Agent 的内部 task 平台工具。 */
 public final class TaskTool implements Tool {
@@ -142,7 +143,7 @@ public final class TaskTool implements Tool {
     private final ToolExecutionRequest request;
     private final ToolExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
-    private final AtomicLong childThreadId = new AtomicLong();
+    private final AtomicReference<UUID> childThreadId = new AtomicReference<>();
 
     private TaskExecution(ToolExecutionRequest request, ToolExecutionListener listener) {
       this.request = request;
@@ -170,19 +171,18 @@ public final class TaskTool implements Tool {
           complete(
               call,
               arguments.subagentType(),
-              0L,
+              null,
               RunState.CANCELLED,
               "Cancelled before the subagent session started.");
           return;
         }
-        long resumeThreadId = arguments.sessionId() == null ? 0L : arguments.sessionId();
-        try (SubagentRunRegistry.Reservation reservation =
-            reserve(parent, resumeThreadId == 0 ? null : resumeThreadId)) {
+        UUID resumeThreadId = arguments.sessionId();
+        try (SubagentRunRegistry.Reservation reservation = reserve(parent, resumeThreadId)) {
           ThreadSnapshot child =
-              resumeThreadId == 0
+              resumeThreadId == null
                   ? createChild(runtime, parent, selected.name(), request.context().invocationId())
                   : resumeChild(runtime, parent, selected.name(), resumeThreadId);
-          long threadId = child.thread().id();
+          UUID threadId = child.thread().id();
           childThreadId.set(threadId);
           reservation.attach(threadId);
           if (cancelled.get()) {
@@ -198,12 +198,8 @@ public final class TaskTool implements Tool {
                   depth(child),
                   config);
           List<NewThreadCommand> commands =
-              taskCommands(
-                  request.context().invocationId(),
-                  child.entryPath().baseSettings(),
-                  target,
-                  arguments.prompt());
-          long sourceHeadEntryId = child.thread().headEntryId();
+              taskCommands(child.entryPath().baseSettings(), target, arguments.prompt());
+          UUID sourceHeadEntryId = child.thread().headEntryId();
           enqueue(runtime, child, commands);
           RunResult result =
               awaitResult(
@@ -232,8 +228,8 @@ public final class TaskTool implements Tool {
       if (!cancelled.compareAndSet(false, true)) {
         return;
       }
-      long threadId = childThreadId.get();
-      if (threadId > 0) {
+      UUID threadId = childThreadId.get();
+      if (threadId != null) {
         try {
           cancelChild(requireRuntime(), threadId, request.context().invocationId());
         } catch (RuntimeException ignored) {
@@ -248,7 +244,7 @@ public final class TaskTool implements Tool {
     }
 
     private void complete(
-        ToolCall call, String subagentType, long threadId, RunState state, String report) {
+        ToolCall call, String subagentType, UUID threadId, RunState state, String report) {
       TaskTool.this.complete(listener, call, subagentType, threadId, state, report);
     }
 
@@ -256,7 +252,7 @@ public final class TaskTool implements Tool {
         ToolCall call,
         String subagentType,
         ThreadSnapshot snapshot,
-        long sourceHeadEntryId,
+        UUID sourceHeadEntryId,
         List<SubagentRunRegistry.RelayedStatus> descendants) {
       TaskTool.this.publishStatus(
           listener, call, subagentType, snapshot, sourceHeadEntryId, descendants);
@@ -266,8 +262,8 @@ public final class TaskTool implements Tool {
         HarnessRuntime runtime,
         ToolCall call,
         String subagentType,
-        long threadId,
-        long sourceHeadEntryId,
+        UUID threadId,
+        UUID sourceHeadEntryId,
         int maxTurns) {
       int nextReminderTurn = maxTurns;
       String previousFingerprint = "";
@@ -302,9 +298,7 @@ public final class TaskTool implements Tool {
           return terminal;
         }
         int turns = countTurns(snapshot, sourceHeadEntryId);
-        if (turns >= nextReminderTurn
-            && enqueueReminder(
-                runtime, snapshot, request.context().invocationId(), nextReminderTurn)) {
+        if (turns >= nextReminderTurn && enqueueReminder(runtime, snapshot, nextReminderTurn)) {
           nextReminderTurn = Math.addExact(nextReminderTurn, MAX_TURNS_REMINDER_INTERVAL);
         }
         if (idleTimedOut(snapshot, lastActivityNanos)) {
@@ -340,11 +334,11 @@ public final class TaskTool implements Tool {
   }
 
   private ParentContext parentContext(HarnessRuntime runtime, ToolExecutionRequest request) {
-    long parentThreadId = request.context().threadId();
+    UUID parentThreadId = request.context().threadId();
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(parentThreadId);
     if (snapshot.model() == null
         || snapshot.toolSiblings().stream()
-            .noneMatch(tool -> tool.id() == request.context().invocationId())) {
+            .noneMatch(tool -> tool.id().equals(request.context().invocationId()))) {
       throw reject("task invocation is no longer attached to its parent Thread context");
     }
     RootPayload root = (RootPayload) snapshot.entryPath().root().payload();
@@ -356,12 +350,12 @@ public final class TaskTool implements Tool {
     if (allowed.isEmpty()) {
       throw reject("the frozen parent invocation does not allow subagent delegation");
     }
-    long rootThreadId =
+    UUID rootThreadId =
         root.subagentContext() == null ? parentThreadId : root.subagentContext().rootThreadId();
     return new ParentContext(snapshot, depth, rootThreadId, allowed);
   }
 
-  private SubagentRunRegistry.Reservation reserve(ParentContext parent, Long resumeThreadId) {
+  private SubagentRunRegistry.Reservation reserve(ParentContext parent, UUID resumeThreadId) {
     try {
       return runRegistry.reserve(
           parent.snapshot().thread().id(), parent.rootThreadId(), resumeThreadId, config);
@@ -371,7 +365,7 @@ public final class TaskTool implements Tool {
   }
 
   private ThreadSnapshot createChild(
-      HarnessRuntime runtime, ParentContext parent, String subagentType, long taskInvocationId) {
+      HarnessRuntime runtime, ParentContext parent, String subagentType, UUID taskInvocationId) {
     int childDepth = parent.depth() + 1;
     BranchSettings settings =
         settingsMaterializer.materialize(
@@ -382,7 +376,6 @@ public final class TaskTool implements Tool {
     CreatedThread created =
         runtime.createThread(
             new CreateThreadCommand(
-                "subagent:" + subagentType,
                 settings,
                 parent.snapshot().thread().yoloEnabled(),
                 new SubagentContext(
@@ -394,7 +387,7 @@ public final class TaskTool implements Tool {
   }
 
   private ThreadSnapshot resumeChild(
-      HarnessRuntime runtime, ParentContext parent, String subagentType, long threadId) {
+      HarnessRuntime runtime, ParentContext parent, String subagentType, UUID threadId) {
     ThreadSnapshot snapshot;
     try {
       snapshot = runtime.getThreadSnapshot(threadId);
@@ -404,8 +397,8 @@ public final class TaskTool implements Tool {
     RootPayload root = (RootPayload) snapshot.entryPath().root().payload();
     SubagentContext context = root.subagentContext();
     if (context == null
-        || context.parentThreadId() != parent.snapshot().thread().id()
-        || context.rootThreadId() != parent.rootThreadId()) {
+        || !context.parentThreadId().equals(parent.snapshot().thread().id())
+        || !context.rootThreadId().equals(parent.rootThreadId())) {
       throw reject("subagent session \"" + threadId + "\" does not belong to this parent");
     }
     if (snapshot.model() != null
@@ -425,28 +418,23 @@ public final class TaskTool implements Tool {
   }
 
   private static List<NewThreadCommand> taskCommands(
-      long invocationId, BranchSettings current, BranchSettings target, String prompt) {
+      BranchSettings current, BranchSettings target, String prompt) {
     List<NewThreadCommand> commands = new ArrayList<>();
-    int ordinal = 0;
     if (!current.agentName().equals(target.agentName())) {
-      commands.add(
-          command(new SetAgentCommandPayload(target.agentName()), invocationId, ordinal++));
+      commands.add(command(new SetAgentCommandPayload(target.agentName())));
     }
     if (!current.model().equals(target.model())) {
-      commands.add(command(new SetModelCommandPayload(target.model()), invocationId, ordinal++));
+      commands.add(command(new SetModelCommandPayload(target.model())));
     }
     if (!current.activeTools().equals(target.activeTools())) {
-      commands.add(
-          command(new SetActiveToolsCommandPayload(target.activeTools()), invocationId, ordinal++));
+      commands.add(command(new SetActiveToolsCommandPayload(target.activeTools())));
     }
-    commands.add(
-        command(new UserMessageCommandPayload(AgentMessage.user(prompt)), invocationId, ordinal));
+    commands.add(command(new UserMessageCommandPayload(AgentMessage.user(prompt))));
     return List.copyOf(commands);
   }
 
-  private static NewThreadCommand command(
-      ThreadCommandPayload payload, long invocationId, int ordinal) {
-    return new NewThreadCommand(payload, "task-" + invocationId + "-" + ordinal);
+  private static NewThreadCommand command(ThreadCommandPayload payload) {
+    return new NewThreadCommand(payload, UUID.randomUUID());
   }
 
   private static void enqueue(
@@ -463,15 +451,14 @@ public final class TaskTool implements Tool {
     }
   }
 
-  private boolean enqueueReminder(
-      HarnessRuntime runtime, ThreadSnapshot snapshot, long invocationId, int turn) {
+  private boolean enqueueReminder(HarnessRuntime runtime, ThreadSnapshot snapshot, int turn) {
     if (snapshot.model() == null && snapshot.toolSiblings().isEmpty()) {
       return false;
     }
     NewThreadCommand reminder =
         new NewThreadCommand(
             new CustomMessageCommandPayload(AgentMessage.system(TaskPrompts.maxTurnsReminder())),
-            "task-" + invocationId + "-limit-" + turn);
+            UUID.randomUUID());
     try {
       runtime.enqueueCommands(
           new ThreadCommandBatch(
@@ -490,7 +477,7 @@ public final class TaskTool implements Tool {
       ToolCall call,
       String subagentType,
       ThreadSnapshot snapshot,
-      long sourceHeadEntryId,
+      UUID sourceHeadEntryId,
       List<SubagentRunRegistry.RelayedStatus> descendants) {
     SubagentRunRegistry.RelayedStatus current =
         new SubagentRunRegistry.RelayedStatus(
@@ -532,7 +519,7 @@ public final class TaskTool implements Tool {
   }
 
   private static void writeStatus(ObjectNode node, SubagentRunRegistry.RelayedStatus status) {
-    node.put("threadId", Long.toString(status.threadId()));
+    node.put("threadId", status.threadId().toString());
     node.put("subagentType", status.subagentType());
     node.put("state", status.state());
     node.put("depth", status.depth());
@@ -542,13 +529,13 @@ public final class TaskTool implements Tool {
     var approvals = node.putArray("approvals");
     for (SubagentRunRegistry.RelayedApproval approval : status.approvals()) {
       ObjectNode item = approvals.addObject();
-      item.put("invocationId", Long.toString(approval.invocationId()));
+      item.put("invocationId", approval.invocationId().toString());
       item.put("toolName", approval.toolName());
       item.put("reason", approval.reason());
     }
   }
 
-  private RunResult terminalResult(ThreadSnapshot snapshot, long sourceHeadEntryId) {
+  private RunResult terminalResult(ThreadSnapshot snapshot, UUID sourceHeadEntryId) {
     if (!snapshot.queuedCommands().isEmpty()
         || snapshot.model() != null
         || !snapshot.toolSiblings().isEmpty()) {
@@ -569,7 +556,7 @@ public final class TaskTool implements Tool {
     };
   }
 
-  private static int countTurns(ThreadSnapshot snapshot, long sourceHeadEntryId) {
+  private static int countTurns(ThreadSnapshot snapshot, UUID sourceHeadEntryId) {
     int start = indexOf(snapshot, sourceHeadEntryId);
     int count = 0;
     for (int i = Math.max(0, start + 1); i < snapshot.entryPath().entries().size(); i++) {
@@ -581,7 +568,7 @@ public final class TaskTool implements Tool {
     return count;
   }
 
-  private static int countToolCalls(ThreadSnapshot snapshot, long sourceHeadEntryId) {
+  private static int countToolCalls(ThreadSnapshot snapshot, UUID sourceHeadEntryId) {
     int start = indexOf(snapshot, sourceHeadEntryId);
     int count = 0;
     for (int i = Math.max(0, start + 1); i < snapshot.entryPath().entries().size(); i++) {
@@ -598,7 +585,7 @@ public final class TaskTool implements Tool {
     return count;
   }
 
-  private static String lastReport(ThreadSnapshot snapshot, long sourceHeadEntryId) {
+  private static String lastReport(ThreadSnapshot snapshot, UUID sourceHeadEntryId) {
     int start = indexOf(snapshot, sourceHeadEntryId);
     String report = null;
     for (int i = Math.max(0, start + 1); i < snapshot.entryPath().entries().size(); i++) {
@@ -633,10 +620,10 @@ public final class TaskTool implements Tool {
     return String.join("", parts).trim();
   }
 
-  private static int indexOf(ThreadSnapshot snapshot, long entryId) {
+  private static int indexOf(ThreadSnapshot snapshot, UUID entryId) {
     List<Entry> entries = snapshot.entryPath().entries();
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }
@@ -709,13 +696,11 @@ public final class TaskTool implements Tool {
     return value.toString();
   }
 
-  private void cancelChild(HarnessRuntime runtime, long threadId, long taskInvocationId) {
+  private void cancelChild(HarnessRuntime runtime, UUID threadId, UUID taskInvocationId) {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        runtime.stop(
-            new StopCommand(
-                threadId, "task-" + taskInvocationId + "-cancel", snapshot.thread().revision()));
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().revision()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
         // revision 前进时重读后重试。
@@ -729,21 +714,22 @@ public final class TaskTool implements Tool {
       ToolExecutionListener listener,
       ToolCall call,
       String subagentType,
-      long threadId,
+      UUID threadId,
       RunState state,
       String report) {
     String canonicalReport =
         report == null || report.isBlank() ? "(no textual report produced)" : report;
     String boundedReport = truncate(canonicalReport);
+    String idText = threadId == null ? "" : threadId.toString();
     String text =
         state == RunState.COMPLETED
             ? "<task id=\""
-                + (threadId > 0 ? threadId : "")
+                + idText
                 + "\" state=\"completed\">\n<task_result>\n"
                 + boundedReport
                 + "\n</task_result>\n</task>"
             : "<task id=\""
-                + (threadId > 0 ? threadId : "")
+                + idText
                 + "\" state=\""
                 + state.wireName
                 + "\">\n<task_error>"
@@ -751,7 +737,7 @@ public final class TaskTool implements Tool {
                 + "</task_error>\n</task>";
     ObjectNode details = objectMapper.createObjectNode();
     details.put("kind", "task.result");
-    details.put("threadId", threadId > 0 ? Long.toString(threadId) : "");
+    details.put("threadId", idText);
     details.put("subagentType", subagentType);
     details.put("state", state.wireName);
     listener.onComplete(
@@ -794,20 +780,20 @@ public final class TaskTool implements Tool {
         throw reject("maxTurns must be a positive integer");
       }
     }
-    Long sessionId = null;
+    UUID sessionId = null;
     JsonNode sessionNode = node.get("session_id");
     if (sessionNode != null && !sessionNode.isNull()) {
       if (!sessionNode.isTextual()) {
-        throw reject("session_id must be a positive decimal string");
+        throw reject("session_id must be a canonical UUID string");
       }
       String raw = sessionNode.textValue();
       try {
-        sessionId = Long.parseLong(raw);
-      } catch (NumberFormatException error) {
-        throw reject("session_id must be a positive decimal string");
+        sessionId = UUID.fromString(raw);
+      } catch (IllegalArgumentException error) {
+        throw reject("session_id must be a canonical UUID string");
       }
-      if (sessionId <= 0 || !Long.toString(sessionId).equals(raw)) {
-        throw reject("session_id must be a positive decimal string");
+      if (!sessionId.toString().equals(raw)) {
+        throw reject("session_id must be a canonical UUID string");
       }
     }
     return new Arguments(subagentType, prompt, maxTurns, sessionId);
@@ -836,7 +822,7 @@ public final class TaskTool implements Tool {
         .orElse("none");
   }
 
-  private static String cancelledMessage(long threadId) {
+  private static String cancelledMessage(UUID threadId) {
     return "Cancelled by user. Session preserved as `" + threadId + "`; resume it with session_id.";
   }
 
@@ -851,12 +837,12 @@ public final class TaskTool implements Tool {
     return new TaskRejectedException(message);
   }
 
-  private record Arguments(String subagentType, String prompt, int maxTurns, Long sessionId) {}
+  private record Arguments(String subagentType, String prompt, int maxTurns, UUID sessionId) {}
 
   private record ParentContext(
       ThreadSnapshot snapshot,
       int depth,
-      long rootThreadId,
+      UUID rootThreadId,
       List<SubagentBinding> allowedSubagents) {}
 
   private record RunResult(RunState state, String report) {}

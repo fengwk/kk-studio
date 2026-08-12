@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.ai.runtime.task;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -95,6 +96,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -110,11 +112,19 @@ class TaskToolTest {
 
   private static final int DEFAULT_MAX_TURNS = 7;
   private static final Instant NOW = Instant.parse("2026-08-08T00:00:00Z");
-  private static final long PARENT_THREAD_ID = 11L;
-  private static final long ROOT_THREAD_ID = 9L;
-  private static final long TASK_INVOCATION_ID = 22L;
-  private static final long CHILD_THREAD_ID = 33L;
-  private static final long CHILD_ROOT_ENTRY_ID = 31L;
+  private static final UUID PARENT_THREAD_ID = new UUID(0L, 11L);
+  private static final UUID ROOT_THREAD_ID = new UUID(0L, 9L);
+  private static final UUID TASK_INVOCATION_ID = new UUID(0L, 22L);
+  private static final UUID CHILD_THREAD_ID = new UUID(0L, 33L);
+  private static final UUID CHILD_ROOT_ENTRY_ID = new UUID(0L, 31L);
+  private static final UUID RESUME_THREAD_ID = new UUID(0L, 40L);
+  private static final UUID PARENT_SESSION_ID = new UUID(0L, 10L);
+  private static final UUID SESSION_ID = new UUID(0L, 30L);
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
+
   private static final SubagentContext SUBAGENT_CONTEXT =
       new SubagentContext(PARENT_THREAD_ID, PARENT_THREAD_ID, TASK_INVOCATION_ID, 2);
   private static final ModelUsage USAGE = new ModelUsage(0, 0, 0, 0, 0, 0, 0);
@@ -220,7 +230,7 @@ class TaskToolTest {
                 TaskTool.NAME,
                 "{\"subagent_type\":\" researcher \",\"prompt\":\"do it\",\"session_id\":\"abc\"}"),
             Duration.ZERO,
-            new ToolExecutionContext(11, 22));
+            new ToolExecutionContext(id(11), id(22)));
 
     ToolExecutionHandle handle = tool.execute(request, listener);
 
@@ -245,8 +255,7 @@ class TaskToolTest {
     String report = "x".repeat(8_100);
     ThreadSnapshot terminal = completedChildSnapshot(child, report);
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID)).thenReturn(child, terminal);
@@ -261,18 +270,19 @@ class TaskToolTest {
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
     assertFalse(result.error(), result.toString());
     String text = ((TextToolContent) result.contents().getFirst()).text();
-    assertTrue(text.startsWith("<task id=\"33\" state=\"completed\">"), text);
+    assertTrue(text.startsWith("<task id=\"" + CHILD_THREAD_ID + "\" state=\"completed\">"), text);
     assertTrue(text.contains("... (truncated)"), text);
     assertFalse(text.contains("x".repeat(8_001)), "completed report must be bounded");
     assertEquals(
         "task.result", new ObjectMapper().readTree(result.detailsJson()).get("kind").asText());
-    assertEquals("33", new ObjectMapper().readTree(result.detailsJson()).get("threadId").asText());
+    assertEquals(
+        CHILD_THREAD_ID.toString(),
+        new ObjectMapper().readTree(result.detailsJson()).get("threadId").asText());
 
     ArgumentCaptor<CreateThreadCommand> createCaptor =
         ArgumentCaptor.forClass(CreateThreadCommand.class);
     verify(runtime).createThread(createCaptor.capture());
     CreateThreadCommand create = createCaptor.getValue();
-    assertEquals("subagent:reviewer", create.title());
     assertEquals(childSettings, create.branchSettings());
     assertTrue(create.yoloEnabled());
     assertEquals(
@@ -287,7 +297,7 @@ class TaskToolTest {
     assertEquals(CHILD_ROOT_ENTRY_ID, batch.expectedHeadEntryId());
     assertEquals(1L, batch.expectedNextCommandSequence());
     assertEquals(1, batch.commands().size());
-    assertEquals("task-22-0", batch.commands().getFirst().clientCommandId());
+    assertNotNull(batch.commands().getFirst().clientCommandId());
     UserMessageCommandPayload prompt =
         assertInstanceOf(UserMessageCommandPayload.class, batch.commands().getFirst().payload());
     assertEquals(AgentMessage.user("Review the change"), prompt.message());
@@ -297,7 +307,7 @@ class TaskToolTest {
     String statusText = ((TextToolContent) latestStatus.contents().getFirst()).text();
     var status = new ObjectMapper().readTree(statusText);
     assertEquals("task.status", status.get("kind").asText());
-    assertEquals("33", status.get("threadId").asText());
+    assertEquals(CHILD_THREAD_ID.toString(), status.get("threadId").asText());
     assertEquals(1, status.get("turns").asInt());
     assertEquals(
         "task.status",
@@ -342,7 +352,7 @@ class TaskToolTest {
             new ToolCall(
                 "call-3", TaskTool.NAME, "{\"subagent_type\":\"researcher\",\"prompt\":\"do it\"}"),
             Duration.ZERO,
-            new ToolExecutionContext(1, 1));
+            new ToolExecutionContext(id(1), id(1)));
 
     assertThrows(NullPointerException.class, () -> tool.execute(null, listener));
     assertThrows(NullPointerException.class, () -> tool.execute(request, null));
@@ -359,10 +369,10 @@ class TaskToolTest {
         parentSnapshot(
             settings("parent", "parent-model", List.of(TaskTool.NAME)),
             List.of(new SubagentBinding("reviewer", "Review")));
-    ThreadSnapshot resumed = quiescentResumeSnapshot(base, SUBAGENT_CONTEXT, false, 34L, 5L);
+    ThreadSnapshot resumed = quiescentResumeSnapshot(base, SUBAGENT_CONTEXT, false, id(34), 5L);
     ThreadSnapshot terminal = resumeTerminalSnapshot(resumed, "resumed and finished");
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
-    when(runtime.getThreadSnapshot(40L)).thenReturn(resumed, resumed, terminal);
+    when(runtime.getThreadSnapshot(RESUME_THREAD_ID)).thenReturn(resumed, resumed, terminal);
     when(settingsMaterializer.materialize(eq("reviewer"), isNull(), eq(2), any()))
         .thenReturn(target);
     RecordingListener listener = new RecordingListener();
@@ -370,13 +380,15 @@ class TaskToolTest {
     tool.execute(
         request(
             "call-resume",
-            "{\"subagent_type\":\"reviewer\",\"prompt\":\"Continue the work\",\"session_id\":\"40\"}"),
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"Continue the work\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         listener);
 
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
     assertFalse(result.error(), result.toString());
     String text = ((TextToolContent) result.contents().getFirst()).text();
-    assertTrue(text.startsWith("<task id=\"40\" state=\"completed\">"), text);
+    assertTrue(text.startsWith("<task id=\"" + RESUME_THREAD_ID + "\" state=\"completed\">"), text);
     assertTrue(text.contains("resumed and finished"), text);
     verify(runtime, never()).createThread(any());
 
@@ -384,11 +396,11 @@ class TaskToolTest {
         ArgumentCaptor.forClass(ThreadCommandBatch.class);
     verify(runtime).enqueueCommands(batchCaptor.capture());
     ThreadCommandBatch batch = batchCaptor.getValue();
-    assertEquals(40L, batch.threadId());
-    assertEquals(34L, batch.expectedHeadEntryId());
+    assertEquals(RESUME_THREAD_ID, batch.threadId());
+    assertEquals(id(34), batch.expectedHeadEntryId());
     assertEquals(2L, batch.expectedNextCommandSequence());
     assertEquals(4, batch.commands().size());
-    assertEquals("task-22-0", batch.commands().get(0).clientCommandId());
+    assertNotNull(batch.commands().get(0).clientCommandId());
     assertEquals(
         "beta",
         assertInstanceOf(SetAgentCommandPayload.class, batch.commands().get(0).payload())
@@ -416,29 +428,36 @@ class TaskToolTest {
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
 
-    when(runtime.getThreadSnapshot(40L)).thenThrow(new HarnessRuntimeNotFoundException("gone"));
+    when(runtime.getThreadSnapshot(RESUME_THREAD_ID))
+        .thenThrow(new HarnessRuntimeNotFoundException("gone"));
     RecordingListener missing = new RecordingListener();
     tool.execute(
         request(
-            "call-1", "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+            "call-1",
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         missing);
     ToolResult missingResult = missing.completed.get(5, TimeUnit.SECONDS);
     assertTrue(missingResult.error(), missingResult.toString());
     assertTrue(
         ((TextToolContent) missingResult.contents().getFirst())
             .text()
-            .contains("subagent session \"40\" was not found"),
+            .contains("subagent session \"" + RESUME_THREAD_ID + "\" was not found"),
         missingResult.toString());
 
     // 归属错误：subagentContext.parentThreadId 与当前 parent 不一致。
     ThreadSnapshot foreign =
         quiescentResumeSnapshot(
-            settings, new SubagentContext(99L, PARENT_THREAD_ID, 55L, 2), false, 34L, 1L);
-    doReturn(foreign).when(runtime).getThreadSnapshot(40L);
+            settings, new SubagentContext(id(99), PARENT_THREAD_ID, id(55), 2), false, id(34), 1L);
+    doReturn(foreign).when(runtime).getThreadSnapshot(RESUME_THREAD_ID);
     RecordingListener foreignListener = new RecordingListener();
     tool.execute(
         request(
-            "call-2", "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+            "call-2",
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         foreignListener);
     ToolResult foreignResult = foreignListener.completed.get(5, TimeUnit.SECONDS);
     assertTrue(foreignResult.error(), foreignResult.toString());
@@ -449,35 +468,42 @@ class TaskToolTest {
         foreignResult.toString());
 
     // 非 quiescent：Model 仍活跃。
-    ThreadSnapshot busy = quiescentResumeSnapshot(settings, SUBAGENT_CONTEXT, false, 34L, 1L);
+    ThreadSnapshot busy = quiescentResumeSnapshot(settings, SUBAGENT_CONTEXT, false, id(34), 1L);
     ThreadSnapshot busyWithModel =
         new ThreadSnapshot(
             busy.thread(),
             busy.entryPath(),
             busy.queuedCommands(),
-            modelInvocation(1L),
+            modelInvocation(id(1)),
             busy.toolSiblings());
-    doReturn(busyWithModel).when(runtime).getThreadSnapshot(40L);
+    doReturn(busyWithModel).when(runtime).getThreadSnapshot(RESUME_THREAD_ID);
     RecordingListener busyListener = new RecordingListener();
     tool.execute(
         request(
-            "call-3", "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+            "call-3",
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         busyListener);
     ToolResult busyResult = busyListener.completed.get(5, TimeUnit.SECONDS);
     assertTrue(busyResult.error(), busyResult.toString());
     assertTrue(
         ((TextToolContent) busyResult.contents().getFirst())
             .text()
-            .contains("subagent session \"40\" is not quiescent"),
+            .contains("subagent session \"" + RESUME_THREAD_ID + "\" is not quiescent"),
         busyResult.toString());
 
     // 非 quiescent：head 仍是 continueModel=true 的 open turn。
-    ThreadSnapshot continuing = quiescentResumeSnapshot(settings, SUBAGENT_CONTEXT, true, 34L, 1L);
-    doReturn(continuing).when(runtime).getThreadSnapshot(40L);
+    ThreadSnapshot continuing =
+        quiescentResumeSnapshot(settings, SUBAGENT_CONTEXT, true, id(34), 1L);
+    doReturn(continuing).when(runtime).getThreadSnapshot(RESUME_THREAD_ID);
     RecordingListener continuingListener = new RecordingListener();
     tool.execute(
         request(
-            "call-4", "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+            "call-4",
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         continuingListener);
     ToolResult continuingResult = continuingListener.completed.get(5, TimeUnit.SECONDS);
     assertTrue(continuingResult.error(), continuingResult.toString());
@@ -496,7 +522,7 @@ class TaskToolTest {
     BranchSettings settings = settings("parent", "parent-model", List.of(TaskTool.NAME));
     ThreadSnapshot deepParent =
         parentSnapshot(
-            new SubagentContext(7L, ROOT_THREAD_ID, 1L, 2),
+            new SubagentContext(id(7), ROOT_THREAD_ID, id(1), 2),
             settings,
             List.of(new SubagentBinding("reviewer", "Review")),
             List.of(taskInvocationSibling()));
@@ -575,7 +601,7 @@ class TaskToolTest {
     BranchSettings childSettings = settings("reviewer", "review-model", List.of("read"));
     ThreadSnapshot parent =
         parentSnapshot(
-            new SubagentContext(7L, ROOT_THREAD_ID, 1L, 2),
+            new SubagentContext(id(7), ROOT_THREAD_ID, id(1), 2),
             parentSettings,
             List.of(new SubagentBinding("reviewer", "Review")),
             List.of(taskInvocationSibling()));
@@ -585,8 +611,7 @@ class TaskToolTest {
             new SubagentContext(PARENT_THREAD_ID, ROOT_THREAD_ID, TASK_INVOCATION_ID, 3));
     ThreadSnapshot terminal = completedChildSnapshot(child, "nested report");
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID)).thenReturn(child, terminal);
@@ -671,8 +696,7 @@ class TaskToolTest {
         runningRootSnapshot(
             CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of(queuedCommand()));
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -715,7 +739,8 @@ class TaskToolTest {
     ToolResult result = listener.completed.get(5, TimeUnit.SECONDS);
     assertTrue(result.error(), result.toString());
     String text = ((TextToolContent) result.contents().getFirst()).text();
-    assertTrue(text.contains("Cancelled by user. Session preserved as `33`"), text);
+    assertTrue(
+        text.contains("Cancelled by user. Session preserved as `" + CHILD_THREAD_ID + "`"), text);
     assertEquals(
         "cancelled", new ObjectMapper().readTree(result.detailsJson()).get("state").asText());
     assertTrue(handle.isCancelled());
@@ -723,8 +748,9 @@ class TaskToolTest {
     ArgumentCaptor<StopCommand> stopCaptor = ArgumentCaptor.forClass(StopCommand.class);
     verify(runtime, times(2)).stop(stopCaptor.capture());
     for (StopCommand command : stopCaptor.getAllValues()) {
-      assertEquals(
-          new StopCommand(CHILD_THREAD_ID, "task-" + TASK_INVOCATION_ID + "-cancel", 1L), command);
+      assertEquals(CHILD_THREAD_ID, command.threadId());
+      assertNotNull(command.stopRequestId());
+      assertEquals(1L, command.expectedRevision());
     }
     assertEquals(1, listener.completedCalls.get());
   }
@@ -745,8 +771,7 @@ class TaskToolTest {
     ThreadSnapshot runningRev2 =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -794,7 +819,7 @@ class TaskToolTest {
     assertTrue(
         ((TextToolContent) result.contents().getFirst())
             .text()
-            .contains("Session preserved as `33`"),
+            .contains("Session preserved as `" + CHILD_THREAD_ID + "`"),
         result.toString());
 
     ArgumentCaptor<StopCommand> stopCaptor = ArgumentCaptor.forClass(StopCommand.class);
@@ -819,8 +844,7 @@ class TaskToolTest {
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -868,8 +892,7 @@ class TaskToolTest {
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -901,7 +924,7 @@ class TaskToolTest {
     assertTrue(
         ((TextToolContent) result.contents().getFirst())
             .text()
-            .contains("Session preserved as `33`"),
+            .contains("Session preserved as `" + CHILD_THREAD_ID + "`"),
         result.toString());
     verify(runtime, never()).stop(any());
   }
@@ -920,8 +943,7 @@ class TaskToolTest {
     ThreadSnapshot running =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 1L, List.of(), List.of());
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -953,10 +975,13 @@ class TaskToolTest {
     assertTrue(
         ((TextToolContent) result.contents().getFirst())
             .text()
-            .contains("Session preserved as `33`"),
+            .contains("Session preserved as `" + CHILD_THREAD_ID + "`"),
         result.toString());
-    verify(runtime, times(1))
-        .stop(new StopCommand(CHILD_THREAD_ID, "task-" + TASK_INVOCATION_ID + "-cancel", 1L));
+    ArgumentCaptor<StopCommand> stopCaptor = ArgumentCaptor.forClass(StopCommand.class);
+    verify(runtime, times(1)).stop(stopCaptor.capture());
+    assertEquals(CHILD_THREAD_ID, stopCaptor.getValue().threadId());
+    assertNotNull(stopCaptor.getValue().stopRequestId());
+    assertEquals(1L, stopCaptor.getValue().expectedRevision());
     assertEquals(1, listener.completedCalls.get());
   }
 
@@ -980,13 +1005,12 @@ class TaskToolTest {
             CHILD_THREAD_ID,
             CHILD_ROOT_ENTRY_ID,
             1L,
-            List.of(toolInvocation(51L, ToolApproval.notRequired())),
+            List.of(toolInvocation(id(51), ToolApproval.notRequired())),
             List.of());
     ThreadSnapshot idle =
         runningRootSnapshot(CHILD_THREAD_ID, CHILD_ROOT_ENTRY_ID, 2L, List.of(), List.of());
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -1006,7 +1030,7 @@ class TaskToolTest {
             });
     try (SubagentRunRegistry.Reservation nested =
         registry.reserve(CHILD_THREAD_ID, PARENT_THREAD_ID, null, idleConfig)) {
-      nested.attach(44L);
+      nested.attach(id(44));
       AtomicInteger relaySequence = new AtomicInteger();
       Thread relayUpdater =
           Thread.ofVirtual()
@@ -1017,7 +1041,7 @@ class TaskToolTest {
                         int sequence = relaySequence.incrementAndGet();
                         registry.publishStatus(
                             new SubagentRunRegistry.RelayedStatus(
-                                44L,
+                                id(44),
                                 "coder",
                                 "running_model",
                                 3,
@@ -1042,11 +1066,14 @@ class TaskToolTest {
         assertTrue(result.error(), result.toString());
         String text = ((TextToolContent) result.contents().getFirst()).text();
         assertTrue(text.contains("Subagent idle timeout after PT0.15S"), text);
-        assertTrue(text.contains("Session preserved as `33`"), text);
+        assertTrue(text.contains("Session preserved as `" + CHILD_THREAD_ID + "`"), text);
         assertEquals(
             "error", new ObjectMapper().readTree(result.detailsJson()).get("state").asText());
-        verify(runtime)
-            .stop(new StopCommand(CHILD_THREAD_ID, "task-" + TASK_INVOCATION_ID + "-cancel", 2L));
+        ArgumentCaptor<StopCommand> idleStop = ArgumentCaptor.forClass(StopCommand.class);
+        verify(runtime).stop(idleStop.capture());
+        assertEquals(CHILD_THREAD_ID, idleStop.getValue().threadId());
+        assertNotNull(idleStop.getValue().stopRequestId());
+        assertEquals(2L, idleStop.getValue().expectedRevision());
 
         // 观察到的状态序列：active tool 先于 quiescent，因此 idle 计时只在 tool 结束后生效。
         assertEquals(
@@ -1079,13 +1106,12 @@ class TaskToolTest {
             settings("parent", "parent-model", List.of(TaskTool.NAME)),
             List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot child = childRootSnapshot(childSettings);
-    ModelInvocation model = modelInvocation(1L);
+    ModelInvocation model = modelInvocation(id(1));
     ThreadSnapshot threeTurns = turnCountSnapshot(3, model, 1L);
     ThreadSnapshot eightTurns = turnCountSnapshot(8, model, 2L);
     ThreadSnapshot terminal = completedChildSnapshot(child, "done after turns");
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
@@ -1123,22 +1149,18 @@ class TaskToolTest {
     ArgumentCaptor<ThreadCommandBatch> batchCaptor =
         ArgumentCaptor.forClass(ThreadCommandBatch.class);
     verify(runtime, atLeast(2)).enqueueCommands(batchCaptor.capture());
-    List<String> reminderIds = new ArrayList<>();
+    List<UUID> reminderIds = new ArrayList<>();
     for (ThreadCommandBatch batch : batchCaptor.getAllValues()) {
-      String clientCommandId = batch.commands().getFirst().clientCommandId();
-      if (clientCommandId.startsWith("task-" + TASK_INVOCATION_ID + "-limit-")) {
-        reminderIds.add(clientCommandId);
-        CustomMessageCommandPayload payload =
-            assertInstanceOf(
-                CustomMessageCommandPayload.class, batch.commands().getFirst().payload());
+      if (batch.commands().getFirst().payload() instanceof CustomMessageCommandPayload reminder) {
+        reminderIds.add(batch.commands().getFirst().clientCommandId());
         assertEquals(
             TaskPrompts.maxTurnsReminder(),
-            ((TextMessageContent) payload.message().contents().getFirst()).text());
+            ((TextMessageContent) reminder.message().contents().getFirst()).text());
       }
     }
-    // 第 3 轮首次提醒，之后每 5 轮重复（3 -> 8）；第二次提醒入队冲突，只跳过本轮。
-    assertTrue(reminderIds.contains("task-22-limit-3"), reminderIds.toString());
-    assertTrue(reminderIds.contains("task-22-limit-8"), reminderIds.toString());
+    // 第 3 轮首次提醒，之后每 5 轮重复（3 -> 8）；第二次提醒入队冲突只跳过本轮 poll，重试后仍会成功。
+    assertTrue(reminderIds.size() >= 2, reminderIds.toString());
+    assertTrue(reminderIds.stream().distinct().count() >= 2, reminderIds.toString());
   }
 
   /** fingerprint 稳定时仍按 1s 心跳重发 task.status，直到 terminal 边界到达。 */
@@ -1155,8 +1177,7 @@ class TaskToolTest {
     ThreadSnapshot continueHead = continueModelHeadSnapshot(true, 1L);
     ThreadSnapshot terminal = continueModelHeadSnapshot(false, 1L);
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:reviewer", NOW), child.entryPath().root(), child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
@@ -1261,9 +1282,10 @@ class TaskToolTest {
     stubCreateFlow(runtime, childSettings);
     ToolApproval waiting = ToolApproval.request(NOW, "needs human");
     ToolApproval decided =
-        new ToolApproval(true, ToolApprovalDecision.ALLOWED, "dec-1", "admin", null, NOW, NOW);
+        new ToolApproval(true, ToolApprovalDecision.ALLOWED, id(1), "admin", null, NOW, NOW);
     ThreadSnapshot running =
-        toolCallSnapshot(1L, List.of(toolInvocation(51L, waiting), toolInvocation(52L, decided)));
+        toolCallSnapshot(
+            1L, List.of(toolInvocation(id(51), waiting), toolInvocation(id(52), decided)));
     ThreadSnapshot terminal = completedChildSnapshot(childRootSnapshot(childSettings), "done");
     when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
         .thenReturn(childRootSnapshot(childSettings), running, terminal);
@@ -1283,7 +1305,7 @@ class TaskToolTest {
     assertEquals("running web_search", status.get("lastActivity").asText());
     JsonNode approvals = status.get("approvals");
     assertEquals(1, approvals.size());
-    assertEquals("51", approvals.get(0).get("invocationId").asText());
+    assertEquals(id(51).toString(), approvals.get(0).get("invocationId").asText());
     assertEquals("web_search", approvals.get(0).get("toolName").asText());
     assertEquals("needs human", approvals.get(0).get("reason").asText());
   }
@@ -1305,17 +1327,17 @@ class TaskToolTest {
     tool = tool(nestedConfig, registry);
     try (SubagentRunRegistry.Reservation nested =
         registry.reserve(CHILD_THREAD_ID, PARENT_THREAD_ID, null, nestedConfig)) {
-      nested.attach(44L);
+      nested.attach(id(44));
       registry.publishStatus(
           new SubagentRunRegistry.RelayedStatus(
-              44L,
+              id(44),
               "coder",
               "waiting_approval",
               3,
               1,
               1,
               "waiting bash",
-              List.of(new SubagentRunRegistry.RelayedApproval(71L, "bash", "confirm"))));
+              List.of(new SubagentRunRegistry.RelayedApproval(id(71), "bash", "confirm"))));
       RecordingListener listener = new RecordingListener();
 
       tool.execute(
@@ -1326,9 +1348,11 @@ class TaskToolTest {
       JsonNode status = new ObjectMapper().readTree(listener.partials.getFirst().detailsJson());
       JsonNode descendants = status.get("descendants");
       assertEquals(1, descendants.size());
-      assertEquals("44", descendants.get(0).get("threadId").asText());
+      assertEquals(id(44).toString(), descendants.get(0).get("threadId").asText());
       assertEquals("waiting_approval", descendants.get(0).get("state").asText());
-      assertEquals("71", descendants.get(0).get("approvals").get(0).get("invocationId").asText());
+      assertEquals(
+          id(71).toString(),
+          descendants.get(0).get("approvals").get(0).get("invocationId").asText());
     }
   }
 
@@ -1347,22 +1371,22 @@ class TaskToolTest {
         "maxTurns must be a positive integer");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\"12.5\"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\"0\"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\"007\"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\"-5\"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\"abc\"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
     assertRejected(
         "{\"subagent_type\":\"a\",\"prompt\":\"p\",\"session_id\":\" 42 \"}",
-        "session_id must be a positive decimal string");
+        "session_id must be a canonical UUID string");
   }
 
   /** HarnessRuntime 不可用时以 listener.onError 上报，不伪造 ToolResult。 */
@@ -1461,14 +1485,14 @@ class TaskToolTest {
     ThreadSnapshot parent =
         parentSnapshot(settings, List.of(new SubagentBinding("reviewer", "Review")));
     ThreadSnapshot resumed =
-        quiescentResumeSnapshot(childSettings, SUBAGENT_CONTEXT, false, 34L, 5L);
+        quiescentResumeSnapshot(childSettings, SUBAGENT_CONTEXT, false, id(34), 5L);
     ThreadSnapshot running =
-        runningRootSnapshot(40L, CHILD_ROOT_ENTRY_ID, 6L, List.of(), List.of());
+        runningRootSnapshot(RESUME_THREAD_ID, CHILD_ROOT_ENTRY_ID, 6L, List.of(), List.of());
     when(runtime.getThreadSnapshot(PARENT_THREAD_ID)).thenReturn(parent);
     when(settingsMaterializer.materialize(any(), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     AtomicInteger reads = new AtomicInteger();
-    when(runtime.getThreadSnapshot(40L))
+    when(runtime.getThreadSnapshot(RESUME_THREAD_ID))
         .thenAnswer(
             inv -> {
               if (reads.incrementAndGet() == 1) {
@@ -1482,7 +1506,9 @@ class TaskToolTest {
         tool.execute(
             request(
                 "call-first",
-                "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+                "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                    + RESUME_THREAD_ID
+                    + "\"}"),
             first);
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (first.partials.isEmpty() && System.nanoTime() < deadline) {
@@ -1494,14 +1520,16 @@ class TaskToolTest {
     tool.execute(
         request(
             "call-second",
-            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\"40\"}"),
+            "{\"subagent_type\":\"reviewer\",\"prompt\":\"p\",\"session_id\":\""
+                + RESUME_THREAD_ID
+                + "\"}"),
         second);
     ToolResult secondResult = second.completed.get(5, TimeUnit.SECONDS);
     assertTrue(secondResult.error(), secondResult.toString());
     assertTrue(
         ((TextToolContent) secondResult.contents().getFirst())
             .text()
-            .contains("subagent session \"40\" is currently running"),
+            .contains("subagent session \"" + RESUME_THREAD_ID + "\" is currently running"),
         secondResult.toString());
 
     firstHandle.cancel();
@@ -1510,7 +1538,7 @@ class TaskToolTest {
     assertTrue(
         ((TextToolContent) firstResult.contents().getFirst())
             .text()
-            .contains("Session preserved as `40`"),
+            .contains("Session preserved as `" + RESUME_THREAD_ID + "`"),
         firstResult.toString());
     assertEquals(1, first.completedCalls.get());
   }
@@ -1535,10 +1563,7 @@ class TaskToolTest {
     when(settingsMaterializer.materialize(eq(childSettings.agentName()), isNull(), anyInt(), any()))
         .thenReturn(childSettings);
     CreatedThread created =
-        new CreatedThread(
-            new Session(30L, "subagent:" + childSettings.agentName(), NOW),
-            child.entryPath().root(),
-            child.thread());
+        new CreatedThread(new Session(SESSION_ID, NOW), child.entryPath().root(), child.thread());
     when(runtime.createThread(any(CreateThreadCommand.class))).thenReturn(created);
   }
 
@@ -1565,7 +1590,8 @@ class TaskToolTest {
       BranchSettings settings,
       List<SubagentBinding> allowedSubagents,
       List<ToolInvocation> toolSiblings) {
-    Entry root = new Entry(1L, 10L, null, new RootPayload(settings, rootContext), NOW);
+    Entry root =
+        new Entry(id(1), PARENT_SESSION_ID, null, new RootPayload(settings, rootContext), NOW);
     ThreadState thread = new ThreadState(PARENT_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
     ModelInvocationRequest modelRequest = mock(ModelInvocationRequest.class);
     when(modelRequest.subagentBindings()).thenReturn(allowedSubagents);
@@ -1586,7 +1612,8 @@ class TaskToolTest {
 
   private static ThreadSnapshot childRootSnapshot(
       BranchSettings settings, SubagentContext context) {
-    Entry root = new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, context), NOW);
+    Entry root =
+        new Entry(CHILD_ROOT_ENTRY_ID, SESSION_ID, null, new RootPayload(settings, context), NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
     return new ThreadSnapshot(thread, new EntryPath(List.of(root)), List.of(), null, List.of());
   }
@@ -1595,15 +1622,15 @@ class TaskToolTest {
     Entry root = initial.entryPath().root();
     Entry turn =
         new Entry(
-            34L,
+            id(34),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, initial.entryPath().baseSettings()),
             NOW);
-    Entry assistant = new Entry(35L, root.sessionId(), turn.id(), assistantMessage(report), NOW);
+    Entry assistant = new Entry(id(35), root.sessionId(), turn.id(), assistantMessage(report), NOW);
     Entry end =
         new Entry(
-            36L,
+            id(36),
             root.sessionId(),
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
@@ -1619,19 +1646,20 @@ class TaskToolTest {
       BranchSettings settings,
       SubagentContext context,
       boolean continueModel,
-      long headEntryId,
+      UUID headEntryId,
       long revision) {
-    Entry root = new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, context), NOW);
+    Entry root =
+        new Entry(CHILD_ROOT_ENTRY_ID, SESSION_ID, null, new RootPayload(settings, context), NOW);
     Entry turn =
         new Entry(
-            32L,
+            id(32),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry assistant =
         new Entry(
-            33L,
+            id(33),
             root.sessionId(),
             turn.id(),
             new MessagePayload(
@@ -1644,12 +1672,13 @@ class TaskToolTest {
             NOW);
     Entry end =
         new Entry(
-            34L,
+            id(34),
             root.sessionId(),
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
             NOW);
-    ThreadState thread = new ThreadState(40L, headEntryId, true, 2L, revision, NOW, NOW);
+    ThreadState thread =
+        new ThreadState(RESUME_THREAD_ID, headEntryId, true, 2L, revision, NOW, NOW);
     return new ThreadSnapshot(
         thread, new EntryPath(List.of(root, turn, assistant, end)), List.of(), null, List.of());
   }
@@ -1659,14 +1688,14 @@ class TaskToolTest {
     Entry last = entries.get(entries.size() - 1);
     Entry turn =
         new Entry(
-            100L,
+            id(100),
             last.sessionId(),
             last.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, resumed.entryPath().baseSettings()),
             NOW);
     Entry assistant =
         new Entry(
-            101L,
+            id(101),
             last.sessionId(),
             turn.id(),
             new MessagePayload(
@@ -1678,7 +1707,7 @@ class TaskToolTest {
             NOW);
     Entry end =
         new Entry(
-            102L,
+            id(102),
             last.sessionId(),
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
@@ -1699,14 +1728,19 @@ class TaskToolTest {
   }
 
   private static ThreadSnapshot runningRootSnapshot(
-      long threadId,
-      long headEntryId,
+      UUID threadId,
+      UUID headEntryId,
       long revision,
       List<ToolInvocation> tools,
       List<ThreadCommand> queued) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     ThreadState thread = new ThreadState(threadId, headEntryId, true, 1L, revision, NOW, NOW);
     return new ThreadSnapshot(thread, new EntryPath(List.of(root)), queued, null, tools);
   }
@@ -1714,17 +1748,22 @@ class TaskToolTest {
   private static ThreadSnapshot toolCallSnapshot(long revision, List<ToolInvocation> tools) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     Entry turn =
         new Entry(
-            200L,
+            id(200),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry assistant =
         new Entry(
-            201L,
+            id(201),
             root.sessionId(),
             turn.id(),
             new MessagePayload(
@@ -1747,17 +1786,26 @@ class TaskToolTest {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     List<Entry> entries = new ArrayList<>();
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     entries.add(root);
-    long id = 1000L;
-    long parent = root.id();
+    long nextId = 1000L;
+    UUID parent = root.id();
     Entry compactionTurn =
         new Entry(
-            id++, 30L, parent, new TurnStartPayload(TurnStartReason.COMPACTION, settings), NOW);
+            id(nextId++),
+            SESSION_ID,
+            parent,
+            new TurnStartPayload(TurnStartReason.COMPACTION, settings),
+            NOW);
     Entry compactionEnd =
         new Entry(
-            id++,
-            30L,
+            id(nextId++),
+            SESSION_ID,
             compactionTurn.id(),
             new TurnEndPayload(
                 compactionTurn.id(),
@@ -1772,16 +1820,21 @@ class TaskToolTest {
     for (int i = 0; i < turns; i++) {
       Entry turn =
           new Entry(
-              id++, 30L, parent, new TurnStartPayload(TurnStartReason.CONTINUATION, settings), NOW);
-      Entry assistant = new Entry(id++, 30L, turn.id(), assistantMessage("turn " + i), NOW);
+              id(nextId++),
+              SESSION_ID,
+              parent,
+              new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
+              NOW);
+      Entry assistant =
+          new Entry(id(nextId++), SESSION_ID, turn.id(), assistantMessage("turn " + i), NOW);
       entries.add(turn);
       entries.add(assistant);
       parent = assistant.id();
       if (i < turns - 1) {
         Entry end =
             new Entry(
-                id++,
-                30L,
+                id(nextId++),
+                SESSION_ID,
                 assistant.id(),
                 new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, true, null, null),
                 NOW);
@@ -1796,19 +1849,24 @@ class TaskToolTest {
   private static ThreadSnapshot continueModelHeadSnapshot(boolean continueModel, long revision) {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     Entry turn =
         new Entry(
-            300L,
+            id(300),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry assistant =
-        new Entry(301L, root.sessionId(), turn.id(), assistantMessage("pending"), NOW);
+        new Entry(id(301), root.sessionId(), turn.id(), assistantMessage("pending"), NOW);
     Entry end =
         new Entry(
-            302L,
+            id(302),
             root.sessionId(),
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, continueModel, null, null),
@@ -1821,24 +1879,29 @@ class TaskToolTest {
   private static ThreadSnapshot failedTerminalSnapshot() {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     Entry turn =
         new Entry(
-            400L,
+            id(400),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry error =
         new Entry(
-            401L,
+            id(401),
             root.sessionId(),
             turn.id(),
             new AssistantErrorPayload(new AssistantError("CHILD_FAILED", "child exploded")),
             NOW);
     Entry end =
         new Entry(
-            402L,
+            id(402),
             root.sessionId(),
             error.id(),
             new TurnEndPayload(
@@ -1852,17 +1915,22 @@ class TaskToolTest {
   private static ThreadSnapshot stoppedTerminalSnapshot() {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     Entry turn =
         new Entry(
-            410L,
+            id(410),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry aborted =
         new Entry(
-            411L,
+            id(411),
             root.sessionId(),
             turn.id(),
             new AssistantAbortedPayload(
@@ -1872,11 +1940,11 @@ class TaskToolTest {
             NOW);
     Entry end =
         new Entry(
-            412L,
+            id(412),
             root.sessionId(),
             aborted.id(),
             new TurnEndPayload(
-                turn.id(), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, "stop-1"),
+                turn.id(), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1)),
             NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
     return new ThreadSnapshot(
@@ -1886,17 +1954,22 @@ class TaskToolTest {
   private static ThreadSnapshot cancelledTerminalSnapshot() {
     BranchSettings settings = settings("reviewer", "review-model", List.of());
     Entry root =
-        new Entry(CHILD_ROOT_ENTRY_ID, 30L, null, new RootPayload(settings, SUBAGENT_CONTEXT), NOW);
+        new Entry(
+            CHILD_ROOT_ENTRY_ID,
+            SESSION_ID,
+            null,
+            new RootPayload(settings, SUBAGENT_CONTEXT),
+            NOW);
     Entry turn =
         new Entry(
-            420L,
+            id(420),
             root.sessionId(),
             root.id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings),
             NOW);
     Entry end =
         new Entry(
-            421L,
+            id(421),
             root.sessionId(),
             turn.id(),
             new TurnEndPayload(
@@ -1920,17 +1993,16 @@ class TaskToolTest {
 
   private static ThreadCommand queuedCommand() {
     return new ThreadCommand(
-        1L,
         CHILD_THREAD_ID,
         1L,
         new UserMessageCommandPayload(AgentMessage.user("queued")),
-        "q-1",
+        id(1),
         null,
         null,
         NOW);
   }
 
-  private static ModelInvocation modelInvocation(long id) {
+  private static ModelInvocation modelInvocation(UUID id) {
     ModelInvocation model = mock(ModelInvocation.class);
     when(model.id()).thenReturn(id);
     when(model.attempt()).thenReturn(1);
@@ -1939,7 +2011,7 @@ class TaskToolTest {
     return model;
   }
 
-  private static ToolInvocation toolInvocation(long id, ToolApproval approval) {
+  private static ToolInvocation toolInvocation(UUID id, ToolApproval approval) {
     ToolInvocation tool = mock(ToolInvocation.class);
     when(tool.id()).thenReturn(id);
     ToolInvocationRequest request = mock(ToolInvocationRequest.class);

@@ -49,6 +49,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -73,9 +74,9 @@ final class ToolGatewayTestSupport {
   static final Path ENVIRONMENT_ROOT = Path.of("/environment-root").toAbsolutePath().normalize();
   static final EnvironmentName ENV_A = new EnvironmentName("env-1");
   static final EnvironmentName ENV_B = new EnvironmentName("env-2");
-  static final long INVOCATION_ID = 42L;
-  static final long THREAD_ID = 7L;
-  static final long ASSISTANT_ENTRY_ID = 11L;
+  static final UUID INVOCATION_ID = new UUID(0L, 42L);
+  static final UUID THREAD_ID = new UUID(0L, 7L);
+  static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
 
   static final ToolGatewayConfig CONFIG =

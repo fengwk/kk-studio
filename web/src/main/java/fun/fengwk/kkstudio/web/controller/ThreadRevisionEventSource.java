@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /** 面向 SSE 的最小 revision 通知边界。 */
@@ -24,5 +25,5 @@ interface ThreadRevisionEventSource {
     }
   }
 
-  AutoCloseable subscribe(long threadId, long afterRevision, Consumer<Event> consumer);
+  AutoCloseable subscribe(UUID threadId, long afterRevision, Consumer<Event> consumer);
 }

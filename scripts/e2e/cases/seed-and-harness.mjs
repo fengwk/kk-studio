@@ -154,7 +154,7 @@ registerCase({
   id: 'thread.chat_scoped_create_atomic',
   level: 'L1',
   title: 'Chat-scoped Thread 原子创建返回完整快照',
-  docs: 'POST /api/ai/chat/{chatId}/threads body={title,branchSettings,yoloEnabled} => 201 HarnessThreadSnapshotDTO；thread 标识全为 decimal string，nextCommandSequence 从 1 开始，快照含 thread/entries/queuedCommands/modelInvocation/toolInvocations',
+  docs: 'POST /api/ai/chat/{chatId}/threads body={title,branchSettings,yoloEnabled} => 201 HarnessThreadSnapshotDTO；thread/entry/session/command 标识全为 canonical UUID string，nextCommandSequence 从 1 开始，快照含 thread/entries/queuedCommands/modelInvocation/toolInvocations',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)

@@ -13,7 +13,7 @@ public class HarnessToolApprovalDTO {
   /** 必填审批决策：仅 ALLOW（放行，invocation 恢复为 READY）或 DENY（拒绝，invocation 终止为 FAILED）。 */
   private String decision;
 
-  /** 必填稳定客户端幂等键；同一决策重放幂等，同 id 不同决策返回 409。 */
+  /** 必填稳定客户端幂等键（canonical UUID string）；同一决策重放幂等，同 id 不同决策返回 409。 */
   private String decisionId;
 
   /** 必填操作者用户标识（canonical name，≤128 字符）。 */

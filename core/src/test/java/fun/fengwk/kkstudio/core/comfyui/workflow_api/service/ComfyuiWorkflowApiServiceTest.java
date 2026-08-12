@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiDTO;
 import fun.fengwk.kkstudio.share.comfyui.ComfyuiWorkflowApiUpdateDTO;
 
 import java.util.NoSuchElementException;
+import java.util.UUID;
 
 /**
  * {@link ComfyuiWorkflowApiService} 在权威 PostgreSQL schema 上的端到端 CRUD 覆盖。
@@ -68,8 +69,10 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
     // 写入链路会把工作流、绑定、selector、enabled 全部持久化，并回填 id/timestamps。
     ComfyuiWorkflowApiDTO created = comfyuiWorkflowApiService.createWorkflow(createDTO);
     assertNotNull(created.getId());
-    // DTO 边界：id 必须是正的十进制字符串形式。
-    assertTrue(created.getId().matches("\\d+"));
+    // DTO 边界：id 必须是 canonical UUID string。
+    assertTrue(
+        created.getId().matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),
+        created.getId());
     assertEquals(apiName, created.getApiName());
     assertEquals("Demo", created.getName());
     assertTrue(created.getEnabled());
@@ -80,7 +83,7 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
         jdbcTemplate.queryForObject(
             "select version from comfyui_workflow_api where id = ?",
             Long.class,
-            Long.parseLong(created.getId())));
+            UUID.fromString(created.getId())));
 
     ComfyuiWorkflowApiUpdateDTO updateDTO = new ComfyuiWorkflowApiUpdateDTO();
     updateDTO.setName("Demo-renamed");
@@ -103,7 +106,7 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
         jdbcTemplate.queryForObject(
             "select version from comfyui_workflow_api where id = ?",
             Long.class,
-            Long.parseLong(created.getId())));
+            UUID.fromString(created.getId())));
 
     comfyuiWorkflowApiService.deleteWorkflow(created.getId());
     Page<ComfyuiWorkflowApiDTO> after =
@@ -164,7 +167,7 @@ public class ComfyuiWorkflowApiServiceTest extends PostgresSpringTestSupport {
     NoSuchElementException notFound =
         assertThrows(
             NoSuchElementException.class,
-            () -> comfyuiWorkflowApiService.deleteWorkflow("999999999999999"));
+            () -> comfyuiWorkflowApiService.deleteWorkflow("00000000-0000-0000-0000-000000000999"));
     assertTrue(notFound.getMessage().contains("comfyui workflow api not found"));
   }
 

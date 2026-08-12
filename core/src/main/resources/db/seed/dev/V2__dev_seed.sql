@@ -39,5 +39,5 @@ insert into agent_definition (
 on conflict (name) do nothing;
 
 -- Harness runtime policy rows are gone: retry and realtime stream policy are
--- no longer database tables. The runtime owns execution state via
--- harness_runtime_id_seq, so the business sequence needs no seed alignment.
+-- no longer database tables. The runtime owns execution state with
+-- application-generated UUID ids, so the business sequence needs no seed alignment.

@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository
 import fun.fengwk.kkstudio.core.ai.catalog.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.core.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -228,6 +229,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     return new ModelDescriptor(
         providerName,
         "model",
+        Set.of(ModelInputModality.TEXT),
         false,
         false,
         new ModelPricing(

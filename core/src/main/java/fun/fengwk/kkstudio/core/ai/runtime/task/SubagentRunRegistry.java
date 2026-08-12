@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.core.ai.runtime.task;
 
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -8,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 进程内 task 并发 reservation 与活动状态 relay。
@@ -16,14 +19,16 @@ import java.util.Set;
  */
 public final class SubagentRunRegistry {
 
-  private final Map<Long, Integer> activeByParent = new HashMap<>();
-  private final Map<Long, Integer> activeByRoot = new HashMap<>();
-  private final Set<Long> activeThreads = new HashSet<>();
-  private final Map<Long, Long> parentByThread = new HashMap<>();
-  private final Map<Long, RelayedStatus> statusByThread = new HashMap<>();
+  private final Map<UUID, Integer> activeByParent = new HashMap<>();
+  private final Map<UUID, Integer> activeByRoot = new HashMap<>();
+  private final Set<UUID> activeThreads = new HashSet<>();
+  private final Map<UUID, UUID> parentByThread = new HashMap<>();
+  private final Map<UUID, RelayedStatus> statusByThread = new HashMap<>();
 
   synchronized Reservation reserve(
-      long parentThreadId, long rootThreadId, Long resumeThreadId, SubagentConfig config) {
+      UUID parentThreadId, UUID rootThreadId, UUID resumeThreadId, SubagentConfig config) {
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
     if (resumeThreadId != null && activeThreads.contains(resumeThreadId)) {
       throw new IllegalArgumentException(
           "subagent session \"" + resumeThreadId + "\" is currently running");
@@ -51,14 +56,15 @@ public final class SubagentRunRegistry {
     return new Reservation(this, parentThreadId, rootThreadId, resumeThreadId);
   }
 
-  private synchronized void attach(Reservation reservation, long threadId) {
+  private synchronized void attach(Reservation reservation, UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
     if (reservation.closed) {
       return;
     }
-    if (reservation.threadId != null && reservation.threadId != threadId) {
+    if (reservation.threadId != null && !reservation.threadId.equals(threadId)) {
       throw new IllegalStateException("subagent reservation is already attached");
     }
-    if (!activeThreads.add(threadId) && !Long.valueOf(threadId).equals(reservation.threadId)) {
+    if (!activeThreads.add(threadId) && !threadId.equals(reservation.threadId)) {
       throw new IllegalArgumentException(
           "subagent session \"" + threadId + "\" is currently running");
     }
@@ -75,7 +81,8 @@ public final class SubagentRunRegistry {
     statusByThread.put(status.threadId(), status);
   }
 
-  synchronized List<RelayedStatus> descendantStatuses(long ancestorThreadId) {
+  synchronized List<RelayedStatus> descendantStatuses(UUID ancestorThreadId) {
+    Objects.requireNonNull(ancestorThreadId, "ancestorThreadId");
     List<RelayedStatus> descendants = new ArrayList<>();
     for (RelayedStatus status : statusByThread.values()) {
       if (isDescendant(status.threadId(), ancestorThreadId)) {
@@ -83,15 +90,16 @@ public final class SubagentRunRegistry {
       }
     }
     descendants.sort(
-        Comparator.comparingInt(RelayedStatus::depth).thenComparingLong(RelayedStatus::threadId));
+        Comparator.comparingInt(RelayedStatus::depth)
+            .thenComparing(RelayedStatus::threadId, UuidOrder.COMPARATOR));
     return List.copyOf(descendants);
   }
 
-  private boolean isDescendant(long threadId, long ancestorThreadId) {
-    Set<Long> visited = new HashSet<>();
-    Long parent = parentByThread.get(threadId);
+  private boolean isDescendant(UUID threadId, UUID ancestorThreadId) {
+    Set<UUID> visited = new HashSet<>();
+    UUID parent = parentByThread.get(threadId);
     while (parent != null && visited.add(parent)) {
-      if (parent == ancestorThreadId) {
+      if (parent.equals(ancestorThreadId)) {
         return true;
       }
       parent = parentByThread.get(parent);
@@ -113,7 +121,7 @@ public final class SubagentRunRegistry {
     }
   }
 
-  private static void decrement(Map<Long, Integer> counts, long key) {
+  private static void decrement(Map<UUID, Integer> counts, UUID key) {
     int next = counts.getOrDefault(key, 0) - 1;
     if (next > 0) {
       counts.put(key, next);
@@ -122,11 +130,9 @@ public final class SubagentRunRegistry {
     }
   }
 
-  record RelayedApproval(long invocationId, String toolName, String reason) {
+  record RelayedApproval(UUID invocationId, String toolName, String reason) {
     RelayedApproval {
-      if (invocationId <= 0) {
-        throw new IllegalArgumentException("invocationId must be positive");
-      }
+      Objects.requireNonNull(invocationId, "invocationId");
       if (toolName == null || toolName.isBlank()) {
         throw new IllegalArgumentException("toolName must not be blank");
       }
@@ -134,7 +140,7 @@ public final class SubagentRunRegistry {
   }
 
   record RelayedStatus(
-      long threadId,
+      UUID threadId,
       String subagentType,
       String state,
       int depth,
@@ -143,9 +149,7 @@ public final class SubagentRunRegistry {
       String lastActivity,
       List<RelayedApproval> approvals) {
     RelayedStatus {
-      if (threadId <= 0) {
-        throw new IllegalArgumentException("threadId must be positive");
-      }
+      Objects.requireNonNull(threadId, "threadId");
       if (subagentType == null || subagentType.isBlank()) {
         throw new IllegalArgumentException("subagentType must not be blank");
       }
@@ -164,20 +168,20 @@ public final class SubagentRunRegistry {
 
   static final class Reservation implements AutoCloseable {
     private final SubagentRunRegistry owner;
-    private final long parentThreadId;
-    private final long rootThreadId;
-    private Long threadId;
+    private final UUID parentThreadId;
+    private final UUID rootThreadId;
+    private UUID threadId;
     private boolean closed;
 
     private Reservation(
-        SubagentRunRegistry owner, long parentThreadId, long rootThreadId, Long threadId) {
+        SubagentRunRegistry owner, UUID parentThreadId, UUID rootThreadId, UUID threadId) {
       this.owner = owner;
       this.parentThreadId = parentThreadId;
       this.rootThreadId = rootThreadId;
       this.threadId = threadId;
     }
 
-    void attach(long threadId) {
+    void attach(UUID threadId) {
       owner.attach(this, threadId);
     }
 

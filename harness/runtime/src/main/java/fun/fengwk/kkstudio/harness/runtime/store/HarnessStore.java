@@ -26,9 +26,10 @@ import java.util.function.Function;
  * enqueue），更新只允许修改 Thread / Command / Invocation / Work 的 current state；Session 与 Entry 是
  * append-only 不可变记录。
  *
- * <p>事务语义（所有实现必须遵守）：回调正常返回即提交，抛出 {@link RuntimeException} 或 {@link Error} 时 完整回滚并原样重抛；回调返回 null
- * 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用；跨线程使用或回调结束后的任何句柄调用都必须被实现以 {@link IllegalStateException}
- * 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
+ * <p>事务语义（所有实现必须遵守）：回调正常返回即提交（除非实现选择加入调用方已有的外层事务，此时提交/回滚由外层事务决定），抛出 {@link RuntimeException} 或
+ * {@link Error} 时 完整回滚并原样重抛；回调返回 null 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用； 跨线程使用或回调结束后的任何句柄调用都必须被实现以
+ * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
+ * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
  * <p>多实体锁顺序（所有多行事务必须遵守，防止死锁）：先按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其 ModelInvocation， 再按
  * ordinal 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type,
@@ -49,6 +50,10 @@ public interface HarnessStore {
    *
    * <p>回调内只能通过句柄执行 typed primitives；回调正常返回即提交，抛出 {@link RuntimeException} 或 {@link Error}
    * 即回滚并重抛。句柄在回调返回后失效。
+   *
+   * <p>实现可以加入调用方已有的外层事务（例如 Spring {@code PROPAGATION_REQUIRED}）：此时回调正常返回只表示当前事务边界内
+   * 的写入已准备好，实际提交/回滚由外层事务决定；未加入外层事务的调用则保持回调返回即提交的语义。回调抛异常在两种模式下都会使当前事务 边界失效（标记 rollback-only
+   * 或直接回滚），外层事务随后提交时会被拒绝。
    */
   <T> T transaction(Function<Transaction, T> callback);
 

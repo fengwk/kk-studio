@@ -7,16 +7,15 @@ import java.time.LocalDateTime;
 /**
  * ComfyUI workflow API card 响应 DTO。
  *
- * <p>主键在 HTTP / DTO 边界以正的十进制字符串暴露，与项目内其它 durable 资源（如 AgentDefinition / HarnessSession）的边界约定保持一致；
- * 持久层在 {@link fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi} 仍为
- * {@code Long}。
+ * <p>主键在 HTTP / DTO 边界以 canonical UUID string 暴露（应用侧 {@code UUID.randomUUID()} 分配，PostgreSQL uuid）；
+ * apiName 保持为稳定自然键。
  *
  * @author fengwk
  */
 @Data
 public class ComfyuiWorkflowApiDTO {
 
-  /** workflow API card 主键：正十进制字符串（底层 bigint，由数据库序列分配）。 */
+  /** workflow API card 主键：canonical UUID string（PostgreSQL uuid，由应用生成）。 */
   private String id;
 
   /** 必填且全局唯一的 API 名（slug）：匹配 {@code ^[a-z][a-z0-9-]{0,63}$}。 */

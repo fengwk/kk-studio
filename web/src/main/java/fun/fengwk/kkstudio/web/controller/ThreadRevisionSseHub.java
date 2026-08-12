@@ -16,6 +16,7 @@ import java.sql.Statement;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
@@ -32,7 +33,7 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
   static final String CHANNEL = "harness_thread_revision";
 
   private final DataSource dataSource;
-  private final Map<Long, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
+  private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
   private volatile boolean running;
   private volatile Thread listenerThread;
 
@@ -41,10 +42,8 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
   }
 
   @Override
-  public AutoCloseable subscribe(long threadId, long afterRevision, Consumer<Event> consumer) {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+  public AutoCloseable subscribe(UUID threadId, long afterRevision, Consumer<Event> consumer) {
+    Objects.requireNonNull(threadId, "threadId");
     if (afterRevision < 0) {
       throw new IllegalArgumentException("afterRevision must be non-negative");
     }
@@ -132,15 +131,15 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
 
   private void publishCurrentRevision(Connection connection, String rawThreadId)
       throws SQLException {
-    long threadId;
+    UUID threadId;
     try {
-      threadId = Long.parseLong(rawThreadId);
-    } catch (NumberFormatException ignored) {
+      threadId = UUID.fromString(rawThreadId);
+    } catch (IllegalArgumentException ignored) {
       return;
     }
     try (PreparedStatement statement =
         connection.prepareStatement("select revision from harness_thread where id = ?")) {
-      statement.setLong(1, threadId);
+      statement.setObject(1, threadId);
       try (ResultSet result = statement.executeQuery()) {
         if (result.next()) {
           publish(threadId, new Event(result.getString(1), false));
@@ -149,11 +148,11 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
     }
   }
 
-  private long currentRevision(long threadId) {
+  private long currentRevision(UUID threadId) {
     try (Connection connection = dataSource.getConnection();
         PreparedStatement statement =
             connection.prepareStatement("select revision from harness_thread where id = ?")) {
-      statement.setLong(1, threadId);
+      statement.setObject(1, threadId);
       try (ResultSet result = statement.executeQuery()) {
         if (!result.next()) {
           throw new IllegalArgumentException("unknown thread: " + threadId);
@@ -169,7 +168,7 @@ final class ThreadRevisionSseHub implements SmartLifecycle, ThreadRevisionEventS
     subscribers.forEach((threadId, ignored) -> publish(threadId, new Event(null, true)));
   }
 
-  private void publish(long threadId, Event event) {
+  private void publish(UUID threadId, Event event) {
     Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
     if (threadSubscribers != null) {
       threadSubscribers.forEach(consumer -> consumer.accept(event));

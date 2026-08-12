@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -290,7 +291,9 @@ class PromptCacheRequestFinalizerTest {
       ProviderCacheControl forged,
       List<ProviderMessage> messages,
       List<ProviderToolDefinition> tools) {
-    ModelDescriptor model = new ModelDescriptor("provider", "m1", true, false, pricing());
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "provider", "m1", Set.of(ModelInputModality.TEXT), true, false, pricing());
     ModelVariant variant =
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(model, variant, messages, tools, forged);

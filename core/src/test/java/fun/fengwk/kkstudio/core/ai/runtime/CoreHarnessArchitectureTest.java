@@ -50,9 +50,9 @@ class CoreHarnessArchitectureTest {
   }
 
   /**
-   * Core V1 迁移以字节级相同的方式嵌入 runtime-spring schema 源文件：连续的代码块从 {@code create sequence
-   * harness_runtime_id_seq} 一直到 {@code harness_work} {@code lease_until} 索引必须与 runtime-spring
-   * 文件完全相等，因此两个 schema 源文件绝不能发生漂移。
+   * Core V1 迁移以字节级相同的方式嵌入 runtime-spring schema 源文件：连续的代码块从首行 {@code -- Harness Runtime durable
+   * schema.} 一直到整个 runtime-spring 文件末尾（含全部 comment）必须与 runtime-spring 文件完全相等，因此两个 schema
+   * 源文件绝不能发生漂移。
    */
   @Test
   void coreV1SchemaEmbedsRuntimeSpringSchemaByteIdentically() throws IOException {
@@ -62,14 +62,13 @@ class CoreHarnessArchitectureTest {
     byte[] runtimeSpringBytes = Files.readAllBytes(runtimeSpring);
 
     int blockStart =
-        indexOf(v1Bytes, "create sequence harness_runtime_id_seq".getBytes(StandardCharsets.UTF_8));
+        indexOf(v1Bytes, "-- Harness Runtime durable schema.".getBytes(StandardCharsets.UTF_8));
     assertTrue(blockStart >= 0, "V1 must contain the runtime-spring protocol block start");
-    int marker =
-        indexOf(
-            v1Bytes, "where lease_until is not null;".getBytes(StandardCharsets.UTF_8), blockStart);
-    assertTrue(marker > blockStart, "V1 must contain the runtime-spring protocol block end");
-    int blockEndExclusive = marker + "where lease_until is not null;".length() + 1;
-    byte[] embedded = Arrays.copyOfRange(v1Bytes, blockStart, blockEndExclusive);
+    assertTrue(
+        v1Bytes.length >= blockStart + runtimeSpringBytes.length,
+        "V1 must be long enough to embed the whole runtime-spring schema");
+    byte[] embedded =
+        Arrays.copyOfRange(v1Bytes, blockStart, blockStart + runtimeSpringBytes.length);
 
     assertArrayEquals(
         runtimeSpringBytes,
@@ -83,12 +82,8 @@ class CoreHarnessArchitectureTest {
   }
 
   private static int indexOf(byte[] haystack, byte[] needle) {
-    return indexOf(haystack, needle, 0);
-  }
-
-  private static int indexOf(byte[] haystack, byte[] needle, int fromIndex) {
     outer:
-    for (int i = fromIndex; i <= haystack.length - needle.length; i++) {
+    for (int i = 0; i <= haystack.length - needle.length; i++) {
       for (int j = 0; j < needle.length; j++) {
         if (haystack[i + j] != needle[j]) {
           continue outer;

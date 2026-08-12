@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
 
 class ToolCallVisibilityTest {
 
@@ -50,7 +52,9 @@ class ToolCallVisibilityTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO);
-    ModelDescriptor model = new ModelDescriptor("provider", "model", false, false, pricing);
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "provider", "model", Set.of(ModelInputModality.TEXT), false, false, pricing);
     ModelVariant variant =
         new ModelVariant("default", null, null, null, null, null, null, List.of(), null);
     return new ProviderRequest(model, variant, List.of(), tools, ProviderCacheControl.none());

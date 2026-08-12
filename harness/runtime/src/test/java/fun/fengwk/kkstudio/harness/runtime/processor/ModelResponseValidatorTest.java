@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationReque
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -223,6 +224,7 @@ class ModelResponseValidatorTest {
             new ModelDescriptor(
                 "provider",
                 "model",
+                Set.of(ModelInputModality.TEXT),
                 true,
                 true,
                 new ModelPricing(
@@ -267,6 +269,7 @@ class ModelResponseValidatorTest {
             new ModelDescriptor(
                 "provider",
                 "model",
+                Set.of(ModelInputModality.TEXT),
                 false,
                 false,
                 new ModelPricing(

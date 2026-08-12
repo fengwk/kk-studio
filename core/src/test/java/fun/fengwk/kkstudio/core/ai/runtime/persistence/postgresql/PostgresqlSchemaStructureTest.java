@@ -22,6 +22,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
  * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表，被禁止的遗留 harness
@@ -84,16 +85,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_goal",
           "agent_thread_goal");
 
-  /** 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供。 */
+  /** Canvas 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供（Chat/Comfy 已迁移到 UUID）。 */
   private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
-      Set.of(
-          "comfyui_workflow_api",
-          "canvas_document",
-          "canvas_group",
-          "canvas_node",
-          "canvas_resource",
-          "canvas_upload",
-          "chat");
+      Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource", "canvas_upload");
 
   @BeforeEach
   void setup() throws SQLException {
@@ -281,7 +275,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void harnessExecutionTablesExposeExactColumnContracts() throws SQLException {
-    assertColumns("harness_session", "id", "title", "created_at");
+    assertColumns("harness_session", "id", "created_at");
     assertColumns(
         "harness_entry",
         "id",
@@ -301,7 +295,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at");
     assertColumns(
         "harness_thread_command",
-        "id",
         "thread_id",
         "sequence",
         "command_type",
@@ -464,24 +457,31 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "lease_until");
 
     // lease_token 与 lease_until 必须同时被设置或清空。
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 920_001L, "token", null));
+    assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_001L), "token", null));
     assertThrows(
-        SQLException.class, () -> insertWork("THREAD", 920_002L, null, "current_timestamp"));
+        SQLException.class, () -> insertWork("THREAD", uuid(920_002L), null, "current_timestamp"));
     // lease_token 不得为空。
     assertThrows(
-        SQLException.class, () -> insertWork("THREAD", 920_003L, "   ", "current_timestamp"));
-    // target_type 与正数 id/wake_version 是持久化队列标识。
-    assertThrows(SQLException.class, () -> insertWork("SESSION", 920_004L, null, null));
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 0L, null, null));
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 920_005L, null, null, 0L));
+        SQLException.class, () -> insertWork("THREAD", uuid(920_003L), "   ", "current_timestamp"));
+    // target_type 与 wake_version 是持久化队列标识；(target_type, target_id) 主键拒绝重复目标。
+    assertThrows(SQLException.class, () -> insertWork("SESSION", uuid(920_004L), null, null));
+    assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_005L), null, null, 0L));
+    try (Connection conn = newConnection()) {
+      insertWork(conn, "TOOL", uuid(920_006L), "worker", "current_timestamp");
+      assertThrows(SQLException.class, () -> insertWork(conn, "TOOL", uuid(920_006L), null, null));
+    }
     // 完全合法的 leased 行可插入。
     try (Connection conn = newConnection()) {
-      insertWork(conn, "TOOL", 920_006L, "worker", "current_timestamp");
+      insertWork(conn, "TOOL", uuid(920_007L), "worker", "current_timestamp");
     }
   }
 
+  private static UUID uuid(long value) {
+    return new UUID(0L, value);
+  }
+
   private static void insertWork(
-      String targetType, long targetId, String leaseToken, String leaseUntilExpression)
+      String targetType, UUID targetId, String leaseToken, String leaseUntilExpression)
       throws SQLException {
     try (Connection conn = newConnection()) {
       insertWork(conn, targetType, targetId, leaseToken, leaseUntilExpression, 1L);
@@ -490,7 +490,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   private static void insertWork(
       String targetType,
-      long targetId,
+      UUID targetId,
       String leaseToken,
       String leaseUntilExpression,
       long wakeVersion)
@@ -501,7 +501,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   private static void insertWork(
-      Connection conn, String targetType, long targetId, String leaseToken, String leaseUntil)
+      Connection conn, String targetType, UUID targetId, String leaseToken, String leaseUntil)
       throws SQLException {
     insertWork(conn, targetType, targetId, leaseToken, leaseUntil, 1L);
   }
@@ -509,7 +509,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static void insertWork(
       Connection conn,
       String targetType,
-      long targetId,
+      UUID targetId,
       String leaseToken,
       String leaseUntil,
       long wakeVersion)
@@ -525,7 +525,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 + leaseUntilExpression
                 + ")")) {
       ps.setString(1, targetType);
-      ps.setLong(2, targetId);
+      ps.setObject(2, targetId);
       ps.setLong(3, wakeVersion);
       int index = 4;
       if (leaseToken != null) {
@@ -599,41 +599,75 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
     // 行为：trigger 在 INSERT 与 revision 写入时触发，但绝不修改存储的
     // revision 值；非 revision 的应用层更新则完全不会动到 revision。
-    ThreadFixture thread = ThreadFixture.insertFresh();
+    UUID threadId = uuid(700L);
+    UUID sessionId = uuid(701L);
+    UUID rootEntryId = uuid(702L);
+    try (Connection conn = newConnection()) {
+      insertThreadRow(conn, threadId, sessionId, rootEntryId);
+    }
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("update harness_thread set revision = 7 where id = ?")) {
-      ps.setLong(1, thread.threadId);
+      ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = " + thread.threadId),
+        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
         "revision must stay exactly what the application wrote");
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
-      ps.setLong(1, thread.threadId);
+      ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = " + thread.threadId),
+        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
         "a non-revision update must not touch revision");
   }
 
+  /** 插入一个最小合法 Thread 行：Session -> ROOT Entry -> Thread。 */
+  private static void insertThreadRow(Connection conn, UUID threadId, UUID sessionId, UUID entryId)
+      throws SQLException {
+    try (PreparedStatement session =
+            conn.prepareStatement(
+                "insert into harness_session (id, created_at) values (?, current_timestamp)");
+        PreparedStatement entry =
+            conn.prepareStatement(
+                "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+                    + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
+        PreparedStatement thread =
+            conn.prepareStatement(
+                "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                    + " next_command_sequence, revision, created_at, updated_at) values"
+                    + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
+      session.setObject(1, sessionId);
+      assertEquals(1, session.executeUpdate());
+      entry.setObject(1, entryId);
+      entry.setObject(2, sessionId);
+      assertEquals(1, entry.executeUpdate());
+      thread.setObject(1, threadId);
+      thread.setObject(2, entryId);
+      assertEquals(1, thread.executeUpdate());
+    }
+  }
+
   @Test
-  void generatedDurableEntityIdsUseBigint() throws SQLException {
+  void generatedDurableEntityIdsUseUuidAndBusinessSequenceBacksOnlyCanvas() throws SQLException {
     for (String table : BUSINESS_SEQUENCE_BACKED_TABLES) {
       assertColumnType("bigint", table, "id");
     }
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")) {
-        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
+      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)。
         continue;
       }
-      assertColumnType("bigint", table, "id");
+      assertColumnType("uuid", table, "id");
     }
+    assertColumnType("uuid", "chat", "id");
+    assertColumnType("uuid", "comfyui_workflow_api", "id");
+    assertColumnType("uuid", "chat_thread", "thread_id");
   }
 
   @Test
@@ -644,12 +678,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void harnessRuntimeSequenceAllocatesMonotonicIds() throws SQLException {
-    long a = singleLong("select nextval('harness_runtime_id_seq')");
-    long b = singleLong("select nextval('harness_runtime_id_seq')");
-    assertTrue(
-        a > 0 && b > a,
-        () -> "harness_runtime_id_seq must allocate positive monotonic ids, a=" + a + " b=" + b);
+  void harnessSchemaExposesNoSequences() throws SQLException {
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select sequence_name from information_schema.sequences"
+                    + " where sequence_schema = 'public' and sequence_name like 'harness\\_%'")) {
+      assertFalse(
+          rs.next(), "Harness 实体 id 全部由注入的 Supplier<UUID> 生成（生产：UUID::randomUUID），schema 不得提供任何序列");
+    }
   }
 
   @Test
@@ -689,9 +727,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("kk_studio_id_seq", "harness_runtime_id_seq"),
+        Set.of("kk_studio_id_seq"),
         sequences,
-        "schema must expose exactly the business and harness runtime sequences");
+        "schema must expose exactly the business sequence (Harness 实体 id 由应用侧 UUID 生成)");
 
     Set<String> sequenceBackedTables = new TreeSet<>();
     try (Connection conn = newConnection();
@@ -710,11 +748,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         sequenceBackedTables,
         "only business durable ids default from kk_studio_id_seq");
 
-    // Harness id 由 HarnessRuntime 从 harness_runtime_id_seq 分配并显式插入；
-    // 任何执行表都不得携带列默认值。
+    // Harness 实体 id 由 HarnessStore 注入的 Supplier<UUID> 生成（生产：UUID::randomUUID）并显式插入；
+    // 任何执行表都不得携带列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")) {
-        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
+      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键。
         continue;
       }
       try (Connection conn = newConnection();
@@ -812,8 +850,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_canvas_resource_canvas_id",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
-            "uk_harness_thread_command_sequence",
             "uk_harness_thread_command_client",
+            "uk_chat_thread_thread",
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",

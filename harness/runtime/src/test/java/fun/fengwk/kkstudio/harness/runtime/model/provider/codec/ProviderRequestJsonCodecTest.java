@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -182,6 +183,10 @@ class ProviderRequestJsonCodecTest {
         root -> model(root).remove("modelName"),
         root -> model(root).put("tools", "true"));
     assertStrictLayer(
+        root -> model(root).set("inputModalities", NODES.textNode("TEXT")),
+        root -> model(root).remove("inputModalities"),
+        root -> ((ArrayNode) model(root).path("inputModalities")).add(1));
+    assertStrictLayer(
         root -> variant(root).put("extra", true),
         root -> variant(root).remove("id"),
         root -> variant(root).put("maxOutputTokens", "1024"));
@@ -223,6 +228,9 @@ class ProviderRequestJsonCodecTest {
     assertRejected(
         root ->
             ((ArrayNode) cacheControl(root).path("breakpoints")).set(0, NODES.textNode("MESSAGE")));
+    assertRejected(
+        root ->
+            ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.textNode("FOREVER")));
     assertRejected(root -> content(root, 0, 0).put("type", "markdown"));
     assertRejected(root -> content(root, 0, 0).remove("type"));
   }
@@ -244,6 +252,7 @@ class ProviderRequestJsonCodecTest {
     assertRejected(
         root ->
             model(root).set("providerName", NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE))));
+    assertRejected(root -> ((ArrayNode) model(root).path("inputModalities")).removeAll());
     assertRejected(root -> variant(root).put("temperature", Double.NaN));
     assertRejected(root -> variant(root).put("temperature", "0.2"));
     assertRejected(
@@ -304,7 +313,13 @@ class ProviderRequestJsonCodecTest {
         new ModelVariant(
             "balanced", 1024, 0.2, 0.8, 40, -0.1, 0.1, List.of("END", "STOP"), "medium");
     ModelDescriptor model =
-        new ModelDescriptor("openai", "gpt-5-mini", true, true, canonicalPricing());
+        new ModelDescriptor(
+            "openai",
+            "gpt-5-mini",
+            Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+            true,
+            true,
+            canonicalPricing());
     ProviderToolCall call = new ProviderToolCall("call-1", "lookup", ARGUMENTS_JSON);
     return new ProviderRequest(
         model,

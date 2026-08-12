@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 /** 面向内部编排的一次性 Harness 调用器。它只创建无工具 root Thread、原子提交 SYSTEM/USER 消息、观察终态并提取最后一条 Assistant 文本。 */
@@ -65,8 +66,7 @@ public final class HarnessOneShotService {
     this.pollInterval = requirePositive(pollInterval, "pollInterval");
   }
 
-  public long submit(
-      String title,
+  public UUID submit(
       String agentName,
       EnvironmentName environmentName,
       String systemMessage,
@@ -80,7 +80,7 @@ public final class HarnessOneShotService {
         settingsMaterializer
             .materialize(agentName, environmentName, 1, subagentConfig)
             .withActiveTools(List.of());
-    CreatedThread created = runtime.createThread(new CreateThreadCommand(title, settings, false));
+    CreatedThread created = runtime.createThread(new CreateThreadCommand(settings, false));
     runtime.enqueueCommands(
         new ThreadCommandBatch(
             created.thread().id(),
@@ -89,16 +89,14 @@ public final class HarnessOneShotService {
             List.of(
                 new NewThreadCommand(
                     new CustomMessageCommandPayload(AgentMessage.system(systemMessage)),
-                    "one-shot-system"),
+                    UUID.randomUUID()),
                 new NewThreadCommand(
-                    new CustomMessageCommandPayload(userMessage), "one-shot-user"))));
+                    new CustomMessageCommandPayload(userMessage), UUID.randomUUID()))));
     return created.thread().id();
   }
 
-  public String await(long threadId, Duration timeout, BooleanSupplier continueWaiting) {
-    if (threadId <= 0L) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+  public String await(UUID threadId, Duration timeout, BooleanSupplier continueWaiting) {
+    Objects.requireNonNull(threadId, "threadId");
     Duration boundedTimeout = requirePositive(timeout, "timeout");
     Objects.requireNonNull(continueWaiting, "continueWaiting");
     HarnessRuntime runtime = requireRuntime();
@@ -121,10 +119,9 @@ public final class HarnessOneShotService {
     }
   }
 
-  public void stop(long threadId) {
-    if (threadId > 0L) {
-      stop(requireRuntime(), threadId);
-    }
+  public void stop(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    stop(requireRuntime(), threadId);
   }
 
   private static String terminalText(ThreadSnapshot snapshot) {
@@ -187,12 +184,11 @@ public final class HarnessOneShotService {
     return result;
   }
 
-  private static void stop(HarnessRuntime runtime, long threadId) {
+  private static void stop(HarnessRuntime runtime, UUID threadId) {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        runtime.stop(
-            new StopCommand(threadId, "one-shot-best-effort-stop", snapshot.thread().revision()));
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().revision()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
         // revision 前进时重读后重试。
