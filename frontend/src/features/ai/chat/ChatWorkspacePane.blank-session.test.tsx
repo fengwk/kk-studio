@@ -253,6 +253,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'tree',
       'stop',
       'new',
+      'upload',
     ])
     // /thread 仅切换面板，因此在任何 Thread 存在之前就能生效；/session 和 /tree
     // 会重新绑定*当前* Thread，因此在空面板上保持禁用。
@@ -261,6 +262,7 @@ describe('BlankComposerPane /thread and agent error handling', () => {
       'agent',
       'environment',
       'yolo',
+      'upload',
     ])
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'session')?.disabled).toBe(true)
     expect(BLANK_PANE_COMMANDS.find((command) => command.id === 'tree')?.disabled).toBe(true)

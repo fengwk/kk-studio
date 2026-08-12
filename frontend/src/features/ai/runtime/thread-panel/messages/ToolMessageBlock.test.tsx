@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
@@ -90,7 +90,8 @@ describe('ToolMessageBlock', () => {
     expect(screen.getByText('工具执行失败。')).toBeInTheDocument()
   })
 
-  it('renders image, linked file, and attachment fallbacks', () => {
+  it('renders image, markdown-style linked file, and attachment fallbacks', async () => {
+    const user = userEvent.setup()
     render(
       <ToolMessageBlock
         message={message({
@@ -119,9 +120,19 @@ describe('ToolMessageBlock', () => {
     )
     // file: URI 仅以文本形式展示（不作为内联媒体元素）
     expect(screen.getByText('file:///tmp/result.json')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '[result.json]' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/api/ai/runtime/resources/'),
+    )
     expect(screen.getByText('[audio] audio/mpeg')).toBeInTheDocument()
-    // 两个"打开原始内容"链接：file:（URI 以文本+链接形式展示）和 audio（无可预览 src，提供后备链接）
-    expect(screen.getAllByRole('link', { name: '打开原始内容' })).toHaveLength(2)
+    expect(screen.queryByRole('link', { name: /\[audio/ })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '预览 preview.png' }))
+    const dialog = screen.getByRole('dialog', { name: '预览 preview.png' })
+    expect(within(dialog).getByRole('img', { name: 'preview.png' })).toHaveAttribute(
+      'src',
+      'data:image/png;base64,aGVsbG8=',
+    )
   })
 
   it('renders previewable data audio and video attachments as media controls', () => {
@@ -433,7 +444,7 @@ describe('ToolMessageBlock', () => {
     // 远程资源绝不内联：只展示稳定 URI 文本 + 显式链接。
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
     expect(screen.getByText('https://example.com/remote.png')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '打开原始内容' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: '[remote.png]' })).toHaveAttribute(
       'rel',
       'noopener noreferrer',
     )

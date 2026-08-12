@@ -131,7 +131,7 @@ async function pasteFiles(editor: HTMLElement, ...files: File[]) {
 }
 
 async function waitForIdleUploads() {
-  await waitFor(() => expect(screen.queryByText('上传中…')).not.toBeInTheDocument())
+  await waitFor(() => expect(screen.queryByText(/上传中…/)).not.toBeInTheDocument())
 }
 
 function placeCaretInEditor(editor: HTMLElement, beforeChildIndex: number) {
@@ -218,6 +218,9 @@ describe('ThreadComposer attachment pills', () => {
     expect(pill?.getAttribute('data-part-id')).toBeTruthy()
     expect(pill?.getAttribute('data-upload-id')).toBeTruthy()
     expect((pill as HTMLElement).contentEditable).toBe('false')
+    expect(pill).toHaveTextContent('[photo.png](upload)')
+    expect(document.querySelector('.attachment-tile')).toBeNull()
+    expect(document.querySelector('.attachment-reference')).not.toBeNull()
 
     // 继续在 pill 之后输入文本：ordered parts 保持 text -> attachment -> text。
     await typeInEditor(editor, 'after')
@@ -266,8 +269,8 @@ describe('ThreadComposer attachment pills', () => {
     const uploadIds = partsSnapshot().map((part) => part.uploadId)
     expect(new Set(uploadIds).size).toBe(2)
     // 同名文件的展示后缀按顺序派生。
-    expect(screen.getByText('report.pdf (1)')).toBeInTheDocument()
-    expect(screen.getByText('report.pdf (2)')).toBeInTheDocument()
+    expect(screen.getByText('[report.pdf (1)](upload)')).toBeInTheDocument()
+    expect(screen.getByText('[report.pdf (2)](upload)')).toBeInTheDocument()
     // 提交 payload 中解析为互不相同的服务端 upload 句柄。
     await waitForIdleUploads()
     placeCaretAtEndOf(editor)
@@ -338,7 +341,7 @@ describe('ThreadComposer attachment pills', () => {
     await pasteFiles(editor, fileOf('photo.png', 'image/png', 64))
     // 上传中（hash 阶段）阻塞发送。
     await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled())
-    expect(screen.getByText('上传中…')).toBeInTheDocument()
+    expect(screen.getByText(/上传中… 10%/)).toBeInTheDocument()
     releaseHash()
     await waitForIdleUploads()
     // wire 请求只有 filename/mediaType/sizeBytes/sha256（mediaKind 是本地分类键）。
@@ -381,7 +384,7 @@ describe('ThreadComposer attachment pills', () => {
     expect(completeUpload).toHaveBeenCalledWith('dedup-aaaaaaaa')
   })
 
-  it('shows upload failure, retries, and removes the tile', async () => {
+  it('shows upload failure, retries, and removes the reference', async () => {
     const user = userEvent.setup()
     const { service, reserveUpload, deleteUpload } = fakeStorage({ failReserveTimes: 1 })
     render(<Harness service={service} />)
@@ -398,7 +401,7 @@ describe('ThreadComposer attachment pills', () => {
     await waitFor(() => expect(screen.queryByText('reserve unavailable')).not.toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /重试上传/ })).not.toBeInTheDocument()
 
-    // tile X：移除全部 occurrences 并释放 upload 句柄（绝不按 blobId 删除）。
+    // 引用后的 X：移除全部 occurrences 并释放 upload 句柄（绝不按 blobId 删除）。
     await user.click(screen.getByRole('button', { name: /移除附件/ }))
     await waitFor(() => expect(screen.queryAllByRole('listitem')).toHaveLength(0))
     expect(partsSnapshot()).toEqual([])
@@ -418,6 +421,44 @@ describe('ThreadComposer attachment pills', () => {
     fireEvent.change(input!, { target: { files: [fileOf('picked.txt', 'text/plain')] } })
     await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(2))
     expect(partsSnapshot()[1]).toEqual(expect.objectContaining({ type: 'attachment', filename: 'picked.txt' }) as Record<string, string>)
+  })
+
+  it('uploads clipboard item files while preserving ordinary text paste', async () => {
+    const { service } = fakeStorage()
+    render(<Harness service={service} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    editor.focus()
+    const pasted = fileOf('clipboard.png', 'image/png')
+
+    const filePasteAllowed = fireEvent.paste(editor, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: 'file', getAsFile: () => pasted }],
+        getData: () => '',
+      },
+    })
+    expect(filePasteAllowed).toBe(false)
+    await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
+    expect(partsSnapshot()[0]).toEqual(
+      expect.objectContaining({ type: 'attachment', filename: 'clipboard.png' }) as Record<string, string>,
+    )
+
+    placeCaretAtEndOf(editor)
+    const textPasteAllowed = fireEvent.paste(editor, {
+      clipboardData: {
+        files: [],
+        items: [{ kind: 'string', getAsFile: () => null }],
+        getData: (type: string) => type === 'text/plain' ? 'plain text' : '',
+      },
+    })
+    expect(textPasteAllowed).toBe(true)
+    // jsdom 不执行 contenteditable 的浏览器默认 paste；模拟默认插入后触发 input，
+    // 验证现有 onInput 回流路径保持普通文本。
+    await typeInEditor(editor, 'plain text')
+    expect(partsSnapshot()).toEqual([
+      expect.objectContaining({ type: 'attachment', filename: 'clipboard.png' }) as Record<string, string>,
+      { type: 'text', text: 'plain text' },
+    ])
   })
 
   it('rejects oversized video, audio and generic files with a visible error', async () => {
@@ -550,7 +591,7 @@ describe('ThreadComposer attachment pills', () => {
     const localUploadId = partsSnapshot()[1]?.uploadId
     await waitForIdleUploads()
     await user.keyboard('{Enter}')
-    // 恢复后 pill 与 tile 都还在，且没有触发 DELETE。
+    // 恢复后 pill 与紧凑引用都还在，且没有触发 DELETE。
     await waitFor(() => expect(document.querySelectorAll('.composer-pill')).toHaveLength(1))
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(1))
     expect(deleteUpload).not.toHaveBeenCalled()
