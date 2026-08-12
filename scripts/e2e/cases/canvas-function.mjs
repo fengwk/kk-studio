@@ -7,7 +7,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas fake Function 完整免费运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node（客户端 UUID nodeId）-> start -> poll -> snapshot Resource 替换 -> preview signed GET，且 document.version 按命令前进、run 不泄漏 stateJson',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node（客户端 UUID nodeId）-> start -> poll -> snapshot Resource 替换 -> preview signed GET，且 document.version 按命令、Run start 与 terminal 状态前进、run 不泄漏 stateJson',
   async run(ctx) {
     const { json: modelsJson } = await ctx.call('GET', '/api/canvas-function-models')
     const models = envelopeData(modelsJson)
@@ -74,7 +74,7 @@ registerCase({
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
     const snapshot = envelopeData(snapshotJson)
     const generated = snapshot.nodes.find((item) => item.id === node.id)
-    assert(snapshot.document.version === 1, JSON.stringify(snapshot.document))
+    assert(snapshot.document.version === 3, JSON.stringify(snapshot.document))
     assert(generated?.resources?.length === 1, JSON.stringify(generated))
     assert(generated.resources[0].kind === 'IMAGE', JSON.stringify(generated.resources[0]))
     assert(generated.resources[0].blobId != null, JSON.stringify(generated.resources[0]))

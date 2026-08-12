@@ -20,7 +20,7 @@ import { getCase, registerCase } from '../lib/registry.mjs'
  *
  * <p>通用存储端点 reserve -> 真实 presigned PUT -> complete -> READY uploadId 经命令 batch 的
  * ATTACHMENT(uploadId) 消费：入队响应携带 canonical requestHash、durable payload 为
- * resource(blobId/name)；同 batch 整批重放返回既有命令且不二次消费；upload 行消费后再次提交
+ * resource(blobId,name,preview)；同 batch 整批重放返回既有命令且不二次消费；upload 行消费后再次提交
  * 同一 uploadId 确定性 400；IMAGE/AUDIO/VIDEO 内容类型与 PENDING upload 均 400。
  */
 registerCase({
@@ -28,7 +28,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: 'USER_MESSAGE ATTACHMENT 消费与 requestHash 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 原子消费；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId/name)；整批重放幂等不二次消费；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 原子消费；响应 requestHash 为 64 位小写 hex，durable payload 为 resource(blobId,name,preview)；整批重放幂等不二次消费；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
