@@ -60,7 +60,7 @@ public final class StandardComfyuiClient {
   }
 
   public H3UploadedFile upload(
-      String filename, String mediaType, long contentLength, InputStream content, long canvasId) {
+      String filename, String mediaType, long contentLength, InputStream content, UUID canvasId) {
     requireFilename(filename);
     if (mediaType == null || mediaType.isBlank()) {
       throw new IllegalArgumentException("mediaType must not be blank");
@@ -69,9 +69,7 @@ public final class StandardComfyuiClient {
       throw new IllegalArgumentException("contentLength must be positive");
     }
     Objects.requireNonNull(content, "content");
-    if (canvasId <= 0L) {
-      throw new IllegalArgumentException("canvasId must be positive");
-    }
+    Objects.requireNonNull(canvasId, "canvasId");
     String boundary = "kkstudio-" + UUID.randomUUID();
     String subfolder = "kk-studio/" + canvasId;
     HttpRequest.BodyPublisher body =

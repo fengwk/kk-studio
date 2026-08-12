@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BiFunction;
@@ -59,7 +60,7 @@ public final class ToolProcessor implements AutoCloseable {
   private final ToolProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
-  private final ConcurrentHashMap<Long, ToolExecution> executions = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, ToolExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
 
@@ -96,7 +97,7 @@ public final class ToolProcessor implements AutoCloseable {
       throw new IllegalArgumentException(
           "ToolProcessor requires a TOOL work claim, got " + claim.target());
     }
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     String token = claim.leaseToken();
     if (!claimOwned(claim)) {
       return ProcessResult.LOST_OWNERSHIP;
@@ -135,10 +136,8 @@ public final class ToolProcessor implements AutoCloseable {
    *
    * @return 是否存在并已取消对应本地 execution
    */
-  public boolean cancel(long invocationId) {
-    if (invocationId <= 0) {
-      throw new IllegalArgumentException("invocationId must be positive");
-    }
+  public boolean cancel(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
     ToolExecution execution = executions.remove(invocationId);
     if (execution == null) {
       return false;
@@ -173,7 +172,7 @@ public final class ToolProcessor implements AutoCloseable {
   /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump revision。 */
   private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = clock.instant();
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     ToolInvocation peek = tx.findToolInvocation(invocationId).orElse(null);
     if (peek == null) {
       return new Prepare.Lost();
@@ -288,7 +287,7 @@ public final class ToolProcessor implements AutoCloseable {
    * revision 不变，按配置延迟 reschedule；所有结果提交前二次校验 claim + READY + attempt + approval null，lost 完整 no-op。
    */
   private ProcessResult preflight(ClaimedWork claim, Prepare.Preflight preflight) {
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     ToolExecution execution =
         newExecution(claim, preflight.threadId(), preflight.attempt(), preflight.request());
     ToolExecution existing = executions.putIfAbsent(invocationId, execution);
@@ -507,7 +506,7 @@ public final class ToolProcessor implements AutoCloseable {
    */
   private ProcessResult dispatch(
       ClaimedWork claim, Prepare.Dispatched dispatched, ToolExecution execution) {
-    long invocationId = claim.target().id();
+    UUID invocationId = claim.target().id();
     if (execution == null) {
       execution =
           newExecution(claim, dispatched.threadId(), dispatched.attempt(), dispatched.request());
@@ -611,7 +610,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   private ToolExecution newExecution(
-      ClaimedWork claim, long threadId, int attempt, ToolInvocationRequest request) {
+      ClaimedWork claim, UUID threadId, int attempt, ToolInvocationRequest request) {
     return new ToolExecution(
         store,
         realtimeEventSink,
@@ -744,15 +743,15 @@ public final class ToolProcessor implements AutoCloseable {
     record Lost() implements Prepare {}
 
     record Preflight(
-        long threadId,
-        long assistantEntryId,
+        UUID threadId,
+        UUID assistantEntryId,
         int attempt,
         ToolInvocationRequest request,
         boolean yoloEnabled)
         implements Prepare {}
 
     record Dispatched(
-        long threadId, long assistantEntryId, int attempt, ToolInvocationRequest request)
+        UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

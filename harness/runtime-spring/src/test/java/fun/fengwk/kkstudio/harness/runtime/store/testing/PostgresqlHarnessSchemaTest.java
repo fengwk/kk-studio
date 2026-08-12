@@ -115,7 +115,6 @@ class PostgresqlHarnessSchemaTest {
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_client",
-            "uk_harness_thread_command_sequence",
             "uk_harness_tool_invocation_ordinal",
             "uk_harness_tool_invocation_result"),
         indexes);

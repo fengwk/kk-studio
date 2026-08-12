@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,7 +14,7 @@ import java.util.Optional;
 /** Work initial/request/claim/renew/complete/reschedule 协议与 lost-wake fencing。 */
 class WorkTest {
 
-  private static final WorkTarget TARGET = new WorkTarget(WorkTargetType.THREAD, 1L);
+  private static final WorkTarget TARGET = new WorkTarget(WorkTargetType.THREAD, id(1L));
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
 
   @Test

@@ -3,13 +3,14 @@ package fun.fengwk.kkstudio.core.ai.chat.repo.impl.model;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** {@code chat} 行映射：持久化的多 Session 集合。 */
 @Data
 public class ChatDO {
 
-  /** 业务主键（bigint，由 kk_studio_id_seq 生成，> 0）。 */
-  private Long id;
+  /** 业务主键（PostgreSQL uuid，由应用生成）。 */
+  private UUID id;
 
   /** 标题，必填：非空白且不超过 256 字符。 */
   private String title;

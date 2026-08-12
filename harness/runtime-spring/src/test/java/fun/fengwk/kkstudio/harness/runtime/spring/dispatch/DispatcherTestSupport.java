@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -52,6 +53,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -104,14 +106,14 @@ final class DispatcherTestSupport {
   }
 
   /** 一次最小 THREAD 链：Session + ROOT + Thread(head=ROOT) + THREAD Work。 */
-  record ThreadSeed(long threadId) {}
+  record ThreadSeed(UUID threadId) {}
 
   static ThreadSeed seedThread(HarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertThread(thread(threadId, rootEntryId));
@@ -121,16 +123,16 @@ final class DispatcherTestSupport {
   }
 
   /** THREAD 链 + TURN_START + READY ModelInvocation + MODEL Work。 */
-  record ModelSeed(long threadId, long modelInvocationId) {}
+  record ModelSeed(UUID threadId, UUID modelInvocationId) {}
 
   static ModelSeed seedModel(HarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          long modelId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          UUID modelId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId));
@@ -158,19 +160,19 @@ final class DispatcherTestSupport {
   /**
    * MODEL 链 + USER/ASSISTANT(call-1) + terminal ModelInvocation + READY ToolInvocation + TOOL Work。
    */
-  record ToolSeed(long threadId, long modelInvocationId, long toolInvocationId) {}
+  record ToolSeed(UUID threadId, UUID modelInvocationId, UUID toolInvocationId) {}
 
   static ToolSeed seedTool(HarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long userEntryId = tx.nextId();
-          long assistantEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          long modelId = tx.nextId();
-          long toolId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          UUID modelId = tx.nextId();
+          UUID toolId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId));
@@ -556,15 +558,15 @@ final class DispatcherTestSupport {
     }
   }
 
-  private static Session session(long id) {
-    return new Session(id, "session-" + id, NOW);
+  private static Session session(UUID id) {
+    return new Session(id, NOW);
   }
 
-  private static Entry rootEntry(long id, long sessionId) {
+  private static Entry rootEntry(UUID id, UUID sessionId) {
     return new Entry(id, sessionId, null, new RootPayload(branchSettings()), NOW);
   }
 
-  private static Entry turnStartEntry(long id, long sessionId, long parentId) {
+  private static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId) {
     return new Entry(
         id,
         sessionId,
@@ -573,7 +575,7 @@ final class DispatcherTestSupport {
         NOW);
   }
 
-  private static Entry userEntry(long id, long sessionId, long parentId) {
+  private static Entry userEntry(UUID id, UUID sessionId, UUID parentId) {
     return new Entry(
         id,
         sessionId,
@@ -585,7 +587,7 @@ final class DispatcherTestSupport {
         NOW);
   }
 
-  private static Entry assistantEntry(long id, long sessionId, long parentId) {
+  private static Entry assistantEntry(UUID id, UUID sessionId, UUID parentId) {
     return new Entry(
         id,
         sessionId,
@@ -612,7 +614,7 @@ final class DispatcherTestSupport {
         NOW);
   }
 
-  private static ThreadState thread(long id, long headEntryId) {
+  private static ThreadState thread(UUID id, UUID headEntryId) {
     return new ThreadState(id, headEntryId, false, 1, 0, NOW, NOW);
   }
 
@@ -641,6 +643,7 @@ final class DispatcherTestSupport {
     return new ModelDescriptor(
         "provider",
         "model",
+        Set.of(ModelInputModality.TEXT),
         true,
         true,
         new ModelPricing(

@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.tool.execution;
 
+import java.util.Objects;
+import java.util.UUID;
+
 /** 提供给 Platform Tool 执行的 durable invocation/thread 归属。 */
-public record ToolExecutionContext(long invocationId, long threadId) {
+public record ToolExecutionContext(UUID invocationId, UUID threadId) {
   public ToolExecutionContext {
-    if (invocationId <= 0 || threadId <= 0) {
-      throw new IllegalArgumentException("invocation and thread ids must be positive");
-    }
+    Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(threadId, "threadId");
   }
 }

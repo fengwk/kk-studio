@@ -5,6 +5,8 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.service.model.ComfyuiWorkflowApi;
 
+import java.util.UUID;
+
 /**
  * @author fengwk
  */
@@ -12,7 +14,7 @@ public interface ComfyuiWorkflowApiRepository {
 
   Page<ComfyuiWorkflowApi> page(PageQuery pageQuery);
 
-  ComfyuiWorkflowApi getById(long id);
+  ComfyuiWorkflowApi getById(UUID id);
 
   ComfyuiWorkflowApi getByApiName(String apiName);
 
@@ -23,5 +25,5 @@ public interface ComfyuiWorkflowApiRepository {
 
   boolean updateById(ComfyuiWorkflowApi row);
 
-  boolean deleteById(long id);
+  boolean deleteById(UUID id);
 }

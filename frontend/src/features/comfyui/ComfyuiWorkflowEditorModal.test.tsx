@@ -149,8 +149,9 @@ describe('ComfyuiWorkflowEditorModal', () => {
     )
 
     expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled()
-    // 点击被禁用的 backdrop - 不应触发关闭回调。
+    // Header 与 backdrop 的 pending close handler 都是 no-op。
     await user.click(screen.getByText('关闭'))
+    fireEvent.mouseDown(document.querySelector('.modal-backdrop')!)
     expect(onClose).not.toHaveBeenCalled()
   })
 

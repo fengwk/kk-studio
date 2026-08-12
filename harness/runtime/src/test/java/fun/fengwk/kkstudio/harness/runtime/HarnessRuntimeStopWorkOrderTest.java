@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -25,6 +26,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -46,14 +48,14 @@ class HarnessRuntimeStopWorkOrderTest {
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(delegate, 3);
     seedThreadWork(delegate, baseline.threadId());
     seedModelWork(delegate, baseline.modelId());
-    for (long id : baseline.toolIds()) {
+    for (UUID id : baseline.toolIds()) {
       seedToolWork(delegate, id);
     }
     List<StoreCall> calls = new ArrayList<>();
     HarnessRuntime runtime =
         new HarnessRuntime(recordingStore(delegate, calls), Clock.fixed(T5, ZoneOffset.UTC));
 
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
     List<WorkTarget> expected =
         List.of(
@@ -95,7 +97,7 @@ class HarnessRuntimeStopWorkOrderTest {
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(delegate, 2);
     seedThreadWork(delegate, baseline.threadId());
     seedModelWork(delegate, baseline.modelId());
-    for (long id : baseline.toolIds()) {
+    for (UUID id : baseline.toolIds()) {
       seedToolWork(delegate, id);
     }
     HarnessRuntime runtime =
@@ -103,13 +105,13 @@ class HarnessRuntimeStopWorkOrderTest {
 
     assertThrows(
         IllegalStateException.class,
-        () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1)));
+        () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
 
     ThreadState thread =
         delegate.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.revision());
     assertEquals(baseline.assistantEntryId(), thread.headEntryId());
-    for (long id : baseline.toolIds()) {
+    for (UUID id : baseline.toolIds()) {
       assertEquals(
           ToolInvocationStatus.READY,
           delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow()).status());

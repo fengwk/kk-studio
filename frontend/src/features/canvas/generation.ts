@@ -2,13 +2,13 @@ import type {
   CanvasFunctionConfigDTO,
   CanvasFunctionModelDTO,
   CanvasResourceKind,
-  DecimalString,
+  UUIDString,
   PromptSegmentDTO,
 } from '@/shared/api/contracts/studio'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'
 
 export interface ReferenceCandidate {
-  nodeId: DecimalString
+  nodeId: UUIDString
   index: number
   node: ResourceNode
   resource: Resource
@@ -79,7 +79,7 @@ export function parseFunctionConfig(
 
 export function referenceCandidates(
   snapshot: CanvasSnapshot,
-  targetNodeId: DecimalString,
+  targetNodeId: UUIDString,
   model: CanvasFunctionModelDTO,
 ): ReferenceCandidate[] {
   const linkedIds = new Set(snapshot.links
@@ -248,7 +248,7 @@ export function promptVisibleText(segments: PromptSegmentDTO[]): string {
     .join('')
 }
 
-export function referenceKey(nodeId: DecimalString, index: number): string {
+export function referenceKey(nodeId: UUIDString, index: number): string {
   return `${nodeId}:${index}`
 }
 

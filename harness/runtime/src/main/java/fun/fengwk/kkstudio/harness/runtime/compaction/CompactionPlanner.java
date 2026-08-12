@@ -28,6 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 纯运行时压缩规划器：基于 root-to-head EntryPath 与 {@link CompactionConfig} 计算一次压缩 turn 的切分事实。
@@ -131,8 +132,8 @@ public final class CompactionPlanner {
       }
       firstKeptIndex--;
     }
-    long firstKeptEntryId = entries.get(firstKeptIndex).id();
-    long cutEntryId = entries.get(cutIndex).id();
+    UUID firstKeptEntryId = entries.get(firstKeptIndex).id();
+    UUID cutEntryId = entries.get(cutIndex).id();
 
     // 切分检测：cut 非 USER 时，只在 cut 所属同一 turn 内取第一个 USER/CUSTOM；CONTINUATION 不跨 turn 借用旧 USER。
     boolean cutIsUser = isUserLike(entries.get(cutIndex));
@@ -161,7 +162,7 @@ public final class CompactionPlanner {
       return Optional.empty();
     }
     String effectivePreviousSummary = phase == CompactionPhase.TURN_PREFIX ? null : previousSummary;
-    Long turnPrefixStartEntryId = split ? entries.get(turnPrefixStartIndex).id() : null;
+    UUID turnPrefixStartEntryId = split ? entries.get(turnPrefixStartIndex).id() : null;
     return Optional.of(
         new CompactionPreparation(
             phase,
@@ -440,9 +441,9 @@ public final class CompactionPlanner {
     return chars;
   }
 
-  private static int indexOfId(List<Entry> entries, long entryId) {
+  private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }

@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCompactionReadyClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -57,6 +58,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 
 /** ThreadProcessor 自动压缩 turn：阈值触发、输入不绕过、FULL 应用、HISTORY 部分延续与 overflow 语义。 */
 class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
@@ -68,7 +70,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   void thresholdCompactionRunsBeforeQueuedInputAndConsumesZeroCommands() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
-    long userCommand =
+    UUID userCommand =
         seedCommand(
             fixture.store,
             baseline.threadId(),
@@ -89,7 +91,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             tx -> {
               tx.lockThread(baseline.threadId());
               return tx.loadQueuedCommands(baseline.threadId()).stream()
-                  .anyMatch(c -> c.id() == userCommand);
+                  .anyMatch(c -> c.clientCommandId().equals(userCommand));
             });
     assertTrue(inputStillQueued);
     ModelInvocation compactionInvocation =
@@ -206,7 +208,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     Fixture fixture = fixture();
     // 种子切分场景：HISTORY 部分成功（complete=false）后，下一次处理必须机械延续 TURN_PREFIX 且冻结原切分事实。
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
-    long[] ids = seedClosedHistoryPartial(fixture, baseline);
+    UUID[] ids = seedClosedHistoryPartial(fixture, baseline);
 
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
@@ -227,9 +229,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .orElseThrow();
     assertEquals(CompactionPhase.TURN_PREFIX, continuation.request().compaction().phase());
     // 冻结复用 HISTORY payload 的切分事实（seed 布局：ROOT=2/TS1=3/USER1=4/ASST1=5），绝不重新选 cut。
-    assertEquals(3L, continuation.request().compaction().firstKeptEntryId());
-    assertEquals(5L, continuation.request().compaction().cutEntryId());
-    assertEquals(4L, continuation.request().compaction().turnPrefixStartEntryId());
+    assertEquals(id(3L), continuation.request().compaction().firstKeptEntryId());
+    assertEquals(id(5L), continuation.request().compaction().cutEntryId());
+    assertEquals(id(4L), continuation.request().compaction().turnPrefixStartEntryId());
     assertEquals(500L, continuation.request().compaction().tokensBefore());
     assertEquals(CompactionTrigger.THRESHOLD, continuation.request().compaction().trigger());
   }
@@ -501,9 +503,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   void failedCompactionTurnDoesNotSpin() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
-    long sessionId = baseline.sessionId();
-    long headId = baseline.turnEndEntryId();
-    long[] ids = new long[3]; // [turnStart, error, model]
+    UUID sessionId = baseline.sessionId();
+    UUID headId = baseline.turnEndEntryId();
+    UUID[] ids = new UUID[3]; // [turnStart, error, model]
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -542,7 +544,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[0],
                   new AssistantErrorPayload(new AssistantError("SUMMARIZATION_FAILED", "boom")),
                   NOW));
-          long endId = tx.nextId();
+          UUID endId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   endId,
@@ -610,10 +612,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
    * 关闭的 HISTORY partial 种子：COMPACTION turn（TURN_START + incomplete HISTORY payload + TURN_END）， 其
    * invocation 已 SUCCEEDED 并挂上 result。返回 [turnStartId, resultId, modelId]。
    */
-  private static long[] seedClosedHistoryPartial(Fixture fixture, ClosedTurnBaseline baseline) {
-    long sessionId = baseline.sessionId();
-    long headId = baseline.turnEndEntryId();
-    long[] ids = new long[3]; // [turnStart, result, model]
+  private static UUID[] seedClosedHistoryPartial(Fixture fixture, ClosedTurnBaseline baseline) {
+    UUID sessionId = baseline.sessionId();
+    UUID headId = baseline.turnEndEntryId();
+    UUID[] ids = new UUID[3]; // [turnStart, result, model]
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -656,11 +658,11 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       500L,
                       false,
                       "history summary",
-                      3L,
-                      5L,
-                      4L),
+                      id(3L),
+                      id(5L),
+                      id(4L)),
                   NOW));
-          long endId = tx.nextId();
+          UUID endId = tx.nextId();
           tx.insertEntry(
               new Entry(
                   endId,
@@ -684,22 +686,22 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
    * OVERFLOW 错误终止并挂上 error result。
    */
   private static ClosedTurnBaseline seedOverflowFailedClosedTurn(InMemoryHarnessStore store) {
-    long[] modelIdHolder = new long[1];
+    UUID[] modelIdHolder = new UUID[1];
     ClosedTurnBaseline baseline =
         store.transaction(
             tx -> {
-              long sessionId = tx.nextId();
-              long rootEntryId = tx.nextId();
-              long turnStartEntryId = tx.nextId(); // turn1 TURN_START
-              long userEntryId = tx.nextId();
-              long assistantEntryId = tx.nextId();
-              long turnEndEntryId = tx.nextId();
-              long secondTurnStartId = tx.nextId(); // turn2 TURN_START
-              long secondUserEntryId = tx.nextId();
-              long errorEntryId = tx.nextId();
-              long secondTurnEndEntryId = tx.nextId();
-              long threadId = tx.nextId();
-              tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+              UUID sessionId = tx.nextId();
+              UUID rootEntryId = tx.nextId();
+              UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+              UUID userEntryId = tx.nextId();
+              UUID assistantEntryId = tx.nextId();
+              UUID turnEndEntryId = tx.nextId();
+              UUID secondTurnStartId = tx.nextId(); // turn2 TURN_START
+              UUID secondUserEntryId = tx.nextId();
+              UUID errorEntryId = tx.nextId();
+              UUID secondTurnEndEntryId = tx.nextId();
+              UUID threadId = tx.nextId();
+              tx.insertSession(new Session(sessionId, NOW));
               tx.insertEntry(
                   new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
               tx.insertEntry(
@@ -824,13 +826,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   private static ClosedTurnBaseline seedStoppedCompactionTurn(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long abortedEntryId = tx.nextId();
-          long turnEndEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID abortedEntryId = tx.nextId();
+          UUID turnEndEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -859,7 +861,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       TurnEndOutcome.STOPPED,
                       false,
                       TurnEndReason.USER_STOP,
-                      "stop-1"),
+                      id(1L)),
                   NOW));
           tx.insertThread(new ThreadState(threadId, turnEndEntryId, false, 1, 0, NOW, NOW));
           return new ClosedTurnBaseline(
@@ -880,19 +882,19 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   private static ClosedTurnBaseline seedClosedTurnOwnedByOtherThread(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId(); // turn1 TURN_START
-          long userEntryId = tx.nextId();
-          long assistantEntryId = tx.nextId();
-          long turnEndEntryId = tx.nextId();
-          long secondTurnStartId = tx.nextId();
-          long secondUserEntryId = tx.nextId();
-          long secondAssistantEntryId = tx.nextId();
-          long secondTurnEndId = tx.nextId();
-          long threadId = tx.nextId(); // 被处理的 thread
-          long otherThreadId = tx.nextId(); // 拥有 turn2 invocation 的 thread
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId(); // turn1 TURN_START
+          UUID userEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
+          UUID turnEndEntryId = tx.nextId();
+          UUID secondTurnStartId = tx.nextId();
+          UUID secondUserEntryId = tx.nextId();
+          UUID secondAssistantEntryId = tx.nextId();
+          UUID secondTurnEndId = tx.nextId();
+          UUID threadId = tx.nextId(); // 被处理的 thread
+          UUID otherThreadId = tx.nextId(); // 拥有 turn2 invocation 的 thread
+          tx.insertSession(new Session(sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           tx.insertEntry(
@@ -953,7 +955,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   NOW));
           tx.insertThread(new ThreadState(threadId, secondUserEntryId, false, 1, 0, NOW, NOW));
           tx.insertThread(new ThreadState(otherThreadId, secondUserEntryId, false, 1, 0, NOW, NOW));
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -1019,7 +1021,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         BigDecimal.ZERO);
   }
 
-  private static Long modelResultEntryId(Fixture fixture, long modelId) {
+  private static UUID modelResultEntryId(Fixture fixture, UUID modelId) {
     return fixture
         .store
         .transaction(tx -> tx.findModelInvocation(modelId))
@@ -1036,9 +1038,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         CompactionTrigger.THRESHOLD,
         500L,
         100_000L,
-        3L,
-        5L,
-        4L,
+        id(3L),
+        id(5L),
+        id(4L),
         null,
         List.of());
   }

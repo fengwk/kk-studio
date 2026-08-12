@@ -1,10 +1,11 @@
-import { useNavigate } from 'react-router'
+import { ArrowLeft, MessageSquare } from 'lucide-react'
+import { Link, useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasEditor() {
-  const { state, snapshot, snapshotQuery } = useCanvasRuntime()
+  const { state, snapshot, snapshotQuery, openThread, collapseThread } = useCanvasRuntime()
   const { t } = useI18n()
   const navigate = useNavigate()
   const openLibrary = () => navigate('/canvas')
@@ -34,21 +35,40 @@ export function CanvasEditor() {
   return (
     <section className="view editor-view active" id="editorView" tabIndex={-1} aria-label={t('canvas.editor.ariaLabel')}>
       <header className="editor-header">
-        <button className="back-button" type="button" onClick={openLibrary}>
-          ←
-          {' '}
-          <span>{t('canvas.editor.library')}</span>
-        </button>
-        <span className="header-divider" />
+        <Link
+          className="sidebar-icon-btn canvas-back-button"
+          to="/canvas"
+          title={t('canvas.editor.backToLibrary')}
+          aria-label={t('canvas.editor.backToLibrary')}
+        >
+          <ArrowLeft aria-hidden="true" />
+        </Link>
         <div className="document-title">
           <strong>{snapshot.document.title}</strong>
           <span className="save-state" id="saveState" aria-live="polite">
             {state.commandPending ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
           </span>
-          <span className="revision-pill" title={t('canvas.editor.revision')}>
-            r{snapshot.document.graphRevision}
+          <span className="revision-pill" title={t('canvas.editor.version')}>
+            v{snapshot.document.version}
           </span>
         </div>
+        <button
+          type="button"
+          className={`thread-toggle${state.threadOpen ? ' active' : ''}`}
+          aria-label={t('canvas.editor.threadAria')}
+          aria-expanded={state.threadOpen}
+          aria-controls="agentPanel"
+          onClick={() => {
+            if (state.threadOpen) {
+              collapseThread()
+            } else {
+              openThread()
+            }
+          }}
+        >
+          <MessageSquare aria-hidden="true" />
+          <span>{t('canvas.editor.thread')}</span>
+        </button>
       </header>
       <CanvasStage />
     </section>

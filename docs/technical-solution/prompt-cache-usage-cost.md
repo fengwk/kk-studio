@@ -20,7 +20,7 @@ flowchart LR
 
 1. Resolver 先生成含 `ProviderCacheControl` 的 ProviderRequest（policy 由当前行的 `ProviderFactory` capability 解析）；
 2. `PromptCacheRequestFinalizer` 是 turn-time cache control 的唯一生成点；
-3. `ModelInvocationRequest` 冻结 ProviderRequest、route、ToolBinding、SkillBinding 与 YOLO；`ModelDescriptor` 只含 providerName/modelName/tools/reasoning/pricing 五个字段；
+3. `ModelInvocationRequest` 冻结 ProviderRequest、route、ToolBinding、SkillBinding 与 YOLO；`ModelDescriptor` 只含 providerName/modelName/inputModalities/tools/reasoning/pricing 六个字段；
 4. ModelProcessor 调度冻结 ProviderRequest；
 5. attempt 时按 `providerName` 读取当前 `agent_provider` 行构造 Provider；CoreModelGateway 仅按当前 `ProviderFactory` capability 规范化 cache control，其他 request 字段保持不变，不兼容能力降级为 `none()`；
 6. terminal `ProviderResponse` 的 `usage`/`cost` 冻结进 `resultJson`；

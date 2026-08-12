@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /** 已规范化、可冻结的 Canvas Function 用户配置。 */
 public record CanvasFunctionConfig(List<PromptSegment> segments, Map<String, Object> parameters) {
@@ -27,11 +28,9 @@ public record CanvasFunctionConfig(List<PromptSegment> segments, Map<String, Obj
     }
   }
 
-  public record ReferenceSegment(long nodeId, int index) implements PromptSegment {
+  public record ReferenceSegment(UUID nodeId, int index) implements PromptSegment {
     public ReferenceSegment {
-      if (nodeId <= 0L) {
-        throw new IllegalArgumentException("nodeId must be > 0");
-      }
+      Objects.requireNonNull(nodeId, "nodeId");
       if (index < 0) {
         throw new IllegalArgumentException("index must be >= 0");
       }

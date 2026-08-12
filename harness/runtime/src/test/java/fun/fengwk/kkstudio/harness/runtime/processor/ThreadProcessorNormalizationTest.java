@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * ThreadProcessor history normalization 与 MOVE_HEAD relocation：历史分支绝不恢复 / 复用，只补 synthetic 后新开 Turn。
@@ -204,7 +205,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     EntryPath aPath = path(fixture.store, shared.threadId());
     EntryPath bPath = path(fixture.store, second.threadId());
     // A 的 path 是 A 自己的 descendant 分支：与 B 共享的只可能是历史前缀（ROOT/TS/USER/ASSISTANT）。
-    List<Long> historicalPrefix =
+    List<UUID> historicalPrefix =
         List.of(
             shared.rootEntryId(),
             shared.turnStartEntryId(),
@@ -214,7 +215,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
       if (historicalPrefix.contains(entry.id())) {
         continue;
       }
-      assertFalse(bPath.entries().stream().anyMatch(other -> other.id() == entry.id()));
+      assertFalse(bPath.entries().stream().anyMatch(other -> other.id().equals(entry.id())));
     }
     // 各自都有独立 synthetic 结果与 HISTORY_CUT TURN_END。
     assertEquals(
@@ -259,7 +260,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
   void relocationToAttachedAssistantWithoutToolsNormalizesFreshTurn() {
     Fixture fixture = fixture();
     var baseline = seedOpenInputTurn(fixture.store);
-    long modelId =
+    UUID modelId =
         seedModelInvocation(
             fixture.store,
             baseline.threadId(),
@@ -269,7 +270,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             plainRequest(),
             successResponse(List.of(), "bash"),
             null);
-    long assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of());
+    UUID assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of());
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
@@ -305,14 +306,14 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             List.of("call-1", "call-2"),
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
-    long threadId = chain.turn().threadId();
-    long assistantId = chain.assistantEntryId();
+    UUID threadId = chain.turn().threadId();
+    UUID assistantId = chain.assistantEntryId();
     // 模拟已 apply 的 descendant：TOOL0/TOOL1 结果链 + 挂载 + head 推进到 TOOL1，再 MOVE_HEAD 回 assistant。
-    long tool0EntryId =
+    UUID tool0EntryId =
         inTx(
             fixture,
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       id,
@@ -326,11 +327,11 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
         fixture.store,
         chain.toolInvocationIds().get(0),
         t -> t.attachResultEntry(tool0EntryId, NOW));
-    long tool1EntryId =
+    UUID tool1EntryId =
         inTx(
             fixture,
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       id,
@@ -395,14 +396,14 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             List.of("call-1", "call-2"),
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.SUCCEEDED, ToolInvocationStatus.SUCCEEDED));
-    long threadId = chain.turn().threadId();
-    long assistantId = chain.assistantEntryId();
+    UUID threadId = chain.turn().threadId();
+    UUID assistantId = chain.assistantEntryId();
     // 部分结果链：TOOL0 已挂载且 head 停在 TOOL0（历史前缀）；tool1 terminal 但未挂载（真实 invocation 在别处）。
-    long tool0EntryId =
+    UUID tool0EntryId =
         inTx(
             fixture,
             tx -> {
-              long id = tx.nextId();
+              UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       id,

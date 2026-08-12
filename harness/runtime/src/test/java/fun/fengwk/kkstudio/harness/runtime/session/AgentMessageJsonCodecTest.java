@@ -5,9 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-
 import java.util.List;
+import java.util.UUID;
 
 /** Shared 严格 AgentMessage/content codec：canonical 顺序、round-trip 与 boundary 拒绝。 */
 class AgentMessageJsonCodecTest {
@@ -21,19 +20,12 @@ class AgentMessageJsonCodecTest {
             AgentMessageRole.ASSISTANT,
             List.of(
                 new TextMessageContent("answer"),
-                new ImageMessageContent("image/png", "data:image/png;base64,AA=="),
-                new AudioMessageContent("audio/wav", "https://example.test/audio.wav"),
-                new VideoMessageContent("video/mp4", "https://example.test/video.mp4"),
                 new ThinkingMessageContent("reasoning"),
                 new JsonMessageContent("[1,{\"ok\":true}]"),
                 new ToolCallMessageContent("call-1", "read", "read", "{\"path\":\"README.md\"}"),
                 new ResourceMessageContent(
-                    new ResourceRef(
-                        "data:text/plain,hello",
-                        "text/plain",
-                        "hello.txt",
-                        5L,
-                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                    UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                    "hello.txt",
                     "preview")));
 
     assertEquals(message, codec.decode(codec.encode(message)));
@@ -52,7 +44,10 @@ class AgentMessageJsonCodecTest {
                     "read",
                     List.of(
                         new TextMessageContent("ok"),
-                        new VideoMessageContent("video/mp4", "video-source"),
+                        new ResourceMessageContent(
+                            UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                            "result.txt",
+                            null),
                         new JsonMessageContent("{}")),
                     false,
                     "{\"exitCode\":0}")));
@@ -66,13 +61,6 @@ class AgentMessageJsonCodecTest {
         "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}",
         codec.encode(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
-    assertEquals(
-        "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\","
-            + "\"source\":\"https://example.test/video.mp4\"}]}",
-        codec.encode(
-            new AgentMessage(
-                AgentMessageRole.USER,
-                List.of(new VideoMessageContent("video/mp4", "https://example.test/video.mp4")))));
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"call-1\","
             + "\"toolName\":\"read\",\"rendererKey\":\"read\","
@@ -99,25 +87,17 @@ class AgentMessageJsonCodecTest {
                         List.of(new TextMessageContent("ok")),
                         false,
                         "{}")))));
-    // resource 是扁平精确字段：所有可空字段显式写出为 JSON null。
+    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 preview 显式写出为 JSON null。
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
-            + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-            + "\"name\":\"a.txt\",\"size\":3,"
-            + "\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\","
-            + "\"preview\":null}]}",
+            + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+            + "\"name\":\"a.txt\",\"preview\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
                     new ResourceMessageContent(
-                        new ResourceRef(
-                            "https://example.com/a",
-                            "text/plain",
-                            "a.txt",
-                            3L,
-                            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),
-                        null)))));
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "a.txt", null)))));
   }
 
   @Test
@@ -127,12 +107,8 @@ class AgentMessageJsonCodecTest {
             AgentMessageRole.ASSISTANT,
             List.of(
                 new ResourceMessageContent(
-                    new ResourceRef(
-                        "data:text/plain,hello",
-                        "text/plain",
-                        null,
-                        5L,
-                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                    UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                    "hello.txt",
                     "preview")));
     AgentMessage emptyText =
         new AgentMessage(
@@ -141,6 +117,53 @@ class AgentMessageJsonCodecTest {
 
     assertEquals(resource, codec.decode(codec.encode(resource)));
     assertEquals(emptyText, codec.decode(codec.encode(emptyText)));
+  }
+
+  @Test
+  void rejectsTransientMediaFormsOnEncode() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.encode(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(new ImageMessageContent("image/png", "data:image/png;base64,AA==")))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.encode(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(new AudioMessageContent("audio/wav", "https://example.test/a.wav")))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.encode(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(new VideoMessageContent("video/mp4", "https://example.test/v.mp4")))));
+  }
+
+  @Test
+  void rejectsTransientMediaFormsOnDecode() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"image\",\"mediaType\":\"image/png\","
+                    + "\"source\":\"data:image/png;base64,AA==\"}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"audio\",\"mediaType\":\"audio/wav\","
+                    + "\"source\":\"https://example.test/a.wav\"}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\","
+                    + "\"source\":\"https://example.test/v.mp4\"}]}"));
   }
 
   @Test
@@ -220,66 +243,43 @@ class AgentMessageJsonCodecTest {
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"image\",\"mediaType\":\" \",\"source\":\"x\"}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"audio\",\"mediaType\":\"a\",\"source\":5}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\",\"source\":\" \"}]}"));
+                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\",\"blobId\":\"x\","
+                    + "\"name\":\"a\",\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":5}]}"));
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"\","
-                    + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":null}]}"));
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"\",\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":null,\"size\":null,\"sha256\":null}]}"));
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":5,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":5,\"size\":null,\"sha256\":null,\"preview\":null}]}"));
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"a\",\"preview\":5}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":null,\"size\":true,\"sha256\":null,\"preview\":null}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":5}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
-                    + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
-                    + "\"name\":null,\"size\":null,\"sha256\":null,\"preview\":null,\"extra\":1}]}"));
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"a\",\"preview\":null,\"extra\":1}]}"));
   }
 
   @Test

@@ -5,27 +5,27 @@ import lombok.Data;
 import java.time.Instant;
 
 /**
- * HarnessThread 查询投影；id 均为 strict positive decimal string，{@code revision} 为 durable snapshot
- * cursor。
+ * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code revision} 为 durable snapshot
+ * cursor（非负十进制字符串）。
  *
  * <p>{@code status} 与 {@code processing} 由 Thread 快照确定性派生（processing 仅 IDLE 为 false）， 不属于 durable
  * 列；{@code branchSettings} 是 head Entry 分支的完整设置快照。
  */
 @Data
 public class HarnessThreadDTO {
-  /** Thread 主键：strict positive decimal string。 */
+  /** Thread 主键：canonical UUID string。 */
   private String threadId;
 
-  /** 当前 Session 主键（由 head Entry 派生）。 */
+  /** 当前 Session 主键（由 head Entry 派生）：canonical UUID string。 */
   private String sessionId;
 
-  /** 当前 head Entry。 */
+  /** 当前 head Entry：canonical UUID string。 */
   private String headEntryId;
 
   /** 当前 frozen YOLO runtime policy。 */
   private Boolean yoloEnabled;
 
-  /** 已分配的 command sequence 高水位 +1。 */
+  /** 已分配的 command sequence 高水位 +1（strict positive decimal string）。 */
   private String nextCommandSequence;
 
   /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string)。 */

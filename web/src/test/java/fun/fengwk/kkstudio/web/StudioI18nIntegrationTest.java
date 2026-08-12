@@ -59,7 +59,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
     MvcResult result =
         mockMvc
             .perform(
-                get("/api/ai/runtime/threads/999999999999/events/stream")
+                get("/api/ai/runtime/threads/00000000-0000-0000-0000-000000000999/events/stream")
                     .param("afterRevision", "0"))
             .andExpect(status().isNotFound())
             .andReturn();
@@ -68,7 +68,8 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
   }
 
   private void assertDomainMessage(String language, String expectedMessage) throws Exception {
-    MockHttpServletRequestBuilder request = get("/api/ai/chat/999999999999");
+    MockHttpServletRequestBuilder request =
+        get("/api/ai/chat/00000000-0000-0000-0000-000000000999");
     if (language != null) {
       request.header(HttpHeaders.ACCEPT_LANGUAGE, language);
     }
@@ -80,7 +81,9 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.code").value("resource_not_found"))
         .andExpect(jsonPath("$.message").value(expectedMessage))
         .andExpect(jsonPath("$.errors.resource").value("chat"))
-        .andExpect(jsonPath("$.errors.detail").value("chat not found: 999999999999"));
+        .andExpect(
+            jsonPath("$.errors.detail")
+                .value("chat not found: 00000000-0000-0000-0000-000000000999"));
   }
 
   private void assertResponseStatusMessage(
@@ -97,7 +100,6 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.type").value("about:blank"))
         .andExpect(jsonPath("$.errors.title").value(expectedTitle))
         .andExpect(
-            jsonPath("$.errors.detail")
-                .value("threadId must be an unsigned positive decimal: not-a-number"));
+            jsonPath("$.errors.detail").value("threadId must be a canonical UUID: not-a-number"));
   }
 }

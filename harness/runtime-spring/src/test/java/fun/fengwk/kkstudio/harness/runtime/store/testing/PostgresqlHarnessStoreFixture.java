@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import org.postgresql.Driver;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -15,6 +17,9 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /** 整个进程共用一个 PostgreSQL 容器，并为每个 contract 测试准备一份干净的七表 schema。 */
 final class PostgresqlHarnessStoreFixture {
@@ -30,6 +35,8 @@ final class PostgresqlHarnessStoreFixture {
           .withPassword("kk_studio");
 
   private static final DataSource DATA_SOURCE;
+
+  private static final AtomicLong UUID_GENERATOR = new AtomicLong(1);
 
   static {
     POSTGRES.start();
@@ -49,7 +56,12 @@ final class PostgresqlHarnessStoreFixture {
   }
 
   static HarnessStore create() {
-    return new PostgresqlHarnessStore(DATA_SOURCE);
+    PlatformTransactionManager transactionManager = new DataSourceTransactionManager(DATA_SOURCE);
+    return new PostgresqlHarnessStore(DATA_SOURCE, transactionManager, idGenerator());
+  }
+
+  static Supplier<UUID> idGenerator() {
+    return () -> new UUID(0L, UUID_GENERATOR.getAndIncrement());
   }
 
   static DataSource dataSource() {
@@ -57,6 +69,7 @@ final class PostgresqlHarnessStoreFixture {
   }
 
   static synchronized void reset() {
+    UUID_GENERATOR.set(1L);
     try (Connection connection = DATA_SOURCE.getConnection();
         Statement statement = connection.createStatement()) {
       statement.execute("drop schema if exists public cascade");

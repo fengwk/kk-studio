@@ -9,6 +9,8 @@ import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
 
+import java.util.UUID;
+
 /** Chat CRUD 路径的守卫。所有失败都是类型化领域错误，以便集中的 web 翻译器映射为 HTTP 状态码。 */
 @Component
 public class ChatGuard {
@@ -26,7 +28,7 @@ public class ChatGuard {
   }
 
   public Chat requireChat(String id) {
-    long parsed = ChatIds.parsePositive(id, "id");
+    UUID parsed = ChatIds.parseUuid(id, "id");
     Chat chat = chatRepository.getById(parsed);
     if (chat == null) {
       throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);
@@ -34,7 +36,7 @@ public class ChatGuard {
     return chat;
   }
 
-  public Chat requireChat(long id) {
+  public Chat requireChat(UUID id) {
     Chat chat = chatRepository.getById(id);
     if (chat == null) {
       throw new AiResourceNotFoundException(RESOURCE, RESOURCE + " not found: " + id);

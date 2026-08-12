@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
@@ -31,14 +32,14 @@ class HarnessRuntimeStopClockTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.READY);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
     TestClock clock = new TestClock(T0);
     HarnessRuntime runtime =
         new HarnessRuntime(storeAdvancingClockOnWorkLock(store, clock, T3), clock);
 
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
     assertEquals(T3, thread.updatedAt());
@@ -47,7 +48,7 @@ class HarnessRuntimeStopClockTest {
     assertEquals(T3, model.updatedAt());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByClientId(baseline.threadId(), "cid-1").orElseThrow());
+            tx -> tx.findCommandByClientId(baseline.threadId(), TestIds.id(1)).orElseThrow());
     assertEquals(T3, command.cancelledAt());
     // Stop 追加的 barrier 与 TURN_END（path 最后两个 Entry）必须使用 Work 锁后的时间。
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));

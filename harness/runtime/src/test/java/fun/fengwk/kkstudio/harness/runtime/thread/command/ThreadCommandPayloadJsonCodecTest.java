@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.util.List;
@@ -155,6 +157,40 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"agentName\":\"a\"}"));
+  }
+
+  @Test
+  void requestHashUsesCanonicalTypeEnvelopeAndRejectsTransientMedia() {
+    // 相同 message shape：USER_MESSAGE 与 CUSTOM_MESSAGE 的类型信封不同 → hash 必须不同。
+    AgentMessage hello = user("hello");
+    String userHash =
+        ThreadCommandPayloadJsonCodec.requestHash(new UserMessageCommandPayload(hello));
+    String customHash =
+        ThreadCommandPayloadJsonCodec.requestHash(
+            new CustomMessageCommandPayload(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
+    assertFalse(userHash.equals(customHash));
+    // 完全相同的 payload → 确定性 hash 相等。
+    assertEquals(
+        userHash, ThreadCommandPayloadJsonCodec.requestHash(new UserMessageCommandPayload(hello)));
+    // CUSTOM_MESSAGE request 走 durable codec：transient media 形式一律拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadCommandPayloadJsonCodec.requestHash(
+                new CustomMessageCommandPayload(
+                    new AgentMessage(
+                        AgentMessageRole.USER,
+                        List.of(new VideoMessageContent("video/mp4", "https://example.test/v"))))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.encode(
+                new CustomMessageCommandPayload(
+                    new AgentMessage(
+                        AgentMessageRole.USER,
+                        List.of(
+                            new ImageMessageContent("image/png", "data:image/png;base64,AA=="))))));
   }
 
   @Test

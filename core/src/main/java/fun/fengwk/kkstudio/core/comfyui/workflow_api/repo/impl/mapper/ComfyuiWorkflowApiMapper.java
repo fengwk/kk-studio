@@ -14,6 +14,7 @@ import org.apache.ibatis.annotations.Update;
 import fun.fengwk.kkstudio.core.comfyui.workflow_api.repo.impl.model.ComfyuiWorkflowApiDO;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * @author fengwk
@@ -74,7 +75,7 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
         where id = #{id}
         """)
   @ResultMap("comfyuiWorkflowApiResultMap")
-  ComfyuiWorkflowApiDO getById(@Param("id") long id);
+  ComfyuiWorkflowApiDO getById(@Param("id") UUID id);
 
   @Select(
       """
@@ -163,5 +164,5 @@ public interface ComfyuiWorkflowApiMapper extends BaseMapper {
   int updateById(@Param("row") ComfyuiWorkflowApiDO row);
 
   @Delete("delete from comfyui_workflow_api where id = #{id}")
-  int deleteById(@Param("id") long id);
+  int deleteById(@Param("id") UUID id);
 }

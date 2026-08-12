@@ -45,9 +45,9 @@ export const canvasCatalog = {
     'en-US': 'Blank canvas · Start now',
     'zh-CN': '空白画布 · 立即开始',
   },
-  'canvas.library.revision': {
-    'en-US': 'revision',
-    'zh-CN': '修订版',
+  'canvas.library.version': {
+    'en-US': 'version',
+    'zh-CN': '版本',
   },
   'canvas.library.realCanvas': {
     'en-US': 'Server snapshot',
@@ -68,10 +68,6 @@ export const canvasCatalog = {
   'canvas.editor.ariaLabel': {
     'en-US': 'Canvas resource editor',
     'zh-CN': 'Canvas 资源编辑器',
-  },
-  'canvas.editor.library': {
-    'en-US': 'Canvas library',
-    'zh-CN': '画布库',
   },
   'canvas.editor.save.saving': {
     'en-US': 'Saving…',
@@ -101,9 +97,25 @@ export const canvasCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
-  'canvas.editor.revision': {
-    'en-US': 'Canvas revision',
-    'zh-CN': '画布修订版',
+  'canvas.editor.version': {
+    'en-US': 'Canvas version',
+    'zh-CN': '画布版本',
+  },
+  'canvas.editor.thread': {
+    'en-US': 'Chat',
+    'zh-CN': '对话',
+  },
+  'canvas.editor.threadAria': {
+    'en-US': 'Toggle the Chat panel',
+    'zh-CN': '切换对话面板',
+  },
+  'canvas.agent.panelAria': {
+    'en-US': 'Canvas Chat panel',
+    'zh-CN': 'Canvas 对话面板',
+  },
+  'canvas.agent.resize': {
+    'en-US': 'Resize the Chat panel',
+    'zh-CN': '调整对话面板宽度',
   },
   'canvas.stage.ariaLabel': {
     'en-US': 'Infinite canvas. Drag resources, connect ResourceNodes to Function nodes, and drop media files to upload.',
@@ -112,26 +124,6 @@ export const canvasCatalog = {
   'canvas.stage.minimap': {
     'en-US': 'Canvas minimap',
     'zh-CN': '画布小地图',
-  },
-  'canvas.stage.selectionToolbar': {
-    'en-US': 'Selected canvas actions',
-    'zh-CN': '选区操作',
-  },
-  'canvas.stage.group': {
-    'en-US': 'Group',
-    'zh-CN': '分组',
-  },
-  'canvas.stage.ungroup': {
-    'en-US': 'Ungroup / remove from group',
-    'zh-CN': '解散 / 移出分组',
-  },
-  'canvas.stage.agent': {
-    'en-US': 'Ask Agent',
-    'zh-CN': '交给 Agent',
-  },
-  'canvas.stage.delete': {
-    'en-US': 'Delete',
-    'zh-CN': '删除',
   },
   'canvas.stage.hint.pan': {
     'en-US': 'pan',
@@ -149,18 +141,6 @@ export const canvasCatalog = {
     'en-US': 'Canvas zoom controls',
     'zh-CN': '画布缩放控制',
   },
-  'canvas.stage.toolControls': {
-    'en-US': 'Canvas tool controls',
-    'zh-CN': '画布工具控制',
-  },
-  'canvas.stage.toolSelect': {
-    'en-US': 'Select tool (V)',
-    'zh-CN': '选择工具 (V)',
-  },
-  'canvas.stage.toolHand': {
-    'en-US': 'Hand tool (H)',
-    'zh-CN': '抓手工具 (H)',
-  },
   'canvas.stage.zoomOut': {
     'en-US': 'Zoom out',
     'zh-CN': '缩小',
@@ -177,33 +157,37 @@ export const canvasCatalog = {
     'en-US': 'Zoom in',
     'zh-CN': '放大',
   },
-  'canvas.node.kind.image': {
-    'en-US': 'Image reference',
-    'zh-CN': '图片参考',
-  },
-  'canvas.node.kind.video': {
-    'en-US': 'Video reference',
-    'zh-CN': '视频参考',
-  },
-  'canvas.node.kind.audio': {
-    'en-US': 'Audio reference',
-    'zh-CN': '音频参考',
-  },
-  'canvas.node.kind.text': {
-    'en-US': 'Text',
-    'zh-CN': '文本',
-  },
   'canvas.node.kind.resource': {
     'en-US': 'Resource',
     'zh-CN': '资源',
   },
-  'canvas.node.kind.function': {
-    'en-US': 'Function',
-    'zh-CN': 'Function',
-  },
   'canvas.node.renameAria': {
     'en-US': 'Node name',
     'zh-CN': '节点名称',
+  },
+  'canvas.node.renameAction': {
+    'en-US': 'Edit the name of {{name}}',
+    'zh-CN': '编辑「{{name}}」的名称',
+  },
+  'canvas.node.deleteAction': {
+    'en-US': 'Delete node {{name}}',
+    'zh-CN': '删除节点「{{name}}」',
+  },
+  'canvas.node.deleteConfirmTitle': {
+    'en-US': 'Delete “{{name}}”?',
+    'zh-CN': '删除「{{name}}」？',
+  },
+  'canvas.node.deleteConfirmDescription': {
+    'en-US': 'This removes the node and its links from the canvas.',
+    'zh-CN': '该节点及其关联连线将从画布中移除。',
+  },
+  'canvas.node.deleteCancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'canvas.node.deleteConfirm': {
+    'en-US': 'Delete',
+    'zh-CN': '确认删除',
   },
   'canvas.node.editMarkdown': {
     'en-US': 'Edit Markdown',
@@ -429,36 +413,52 @@ export const canvasCatalog = {
     'en-US': 'Add resource, Function, or group',
     'zh-CN': '添加资源、Function 或分组',
   },
+  'canvas.add.imageResource': {
+    'en-US': 'Image resource',
+    'zh-CN': '图片资源',
+  },
+  'canvas.add.videoResource': {
+    'en-US': 'Video resource',
+    'zh-CN': '视频资源',
+  },
+  'canvas.add.audioResource': {
+    'en-US': 'Audio resource',
+    'zh-CN': '音频资源',
+  },
+  'canvas.add.textResource': {
+    'en-US': 'Text resource',
+    'zh-CN': '文本资源',
+  },
+  'canvas.add.imageFunction': {
+    'en-US': 'Image generation',
+    'zh-CN': '图片生成',
+  },
+  'canvas.add.videoFunction': {
+    'en-US': 'Video generation',
+    'zh-CN': '视频生成',
+  },
+  'canvas.add.group': {
+    'en-US': 'Group',
+    'zh-CN': '分组',
+  },
   'canvas.agent.thread.ariaLabel': {
-    'en-US': 'Canvas Agent messages',
-    'zh-CN': 'Canvas Agent 消息',
+    'en-US': 'Canvas Chat messages',
+    'zh-CN': 'Canvas 对话消息',
   },
-  'canvas.agent.context.ariaLabel': {
-    'en-US': 'Agent resource context',
-    'zh-CN': 'Agent 资源上下文',
+  'canvas.agent.blankTitle': {
+    'en-US': 'Start a Canvas thread',
+    'zh-CN': '开始 Canvas 对话',
   },
-  'canvas.agent.context.selection': {
-    'en-US': 'Current selection',
-    'zh-CN': '当前选区',
+  'canvas.agent.blankDescription': {
+    'en-US': 'Choose the agent below; the first message creates the thread bound to this canvas.',
+    'zh-CN': '在下方选择 Agent；第一条消息将创建绑定到本画布的对话。',
   },
-  'canvas.agent.context.whole': {
-    'en-US': 'Whole canvas',
-    'zh-CN': '整张画布',
+  'canvas.agent.agentMissing': {
+    'en-US': 'No resolvable agent configuration yet; pick an agent to continue.',
+    'zh-CN': '暂无可解析的 Agent 配置，请先选择一个 Agent。',
   },
   'canvas.agent.collapse': {
-    'en-US': 'Collapse Agent messages',
-    'zh-CN': '收起 Agent 消息',
-  },
-  'canvas.agent.prompt.ariaLabel': {
-    'en-US': 'Describe a task for Agent',
-    'zh-CN': '向 Agent 描述任务',
-  },
-  'canvas.agent.prompt.placeholder': {
-    'en-US': 'Tell Agent what to do with the current resources…',
-    'zh-CN': '告诉 Agent 如何处理当前资源…',
-  },
-  'canvas.agent.send': {
-    'en-US': 'Send to Agent',
-    'zh-CN': '发送给 Agent',
+    'en-US': 'Collapse the Chat panel',
+    'zh-CN': '收起对话面板',
   },
 } satisfies LocaleCatalog

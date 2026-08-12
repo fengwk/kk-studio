@@ -1,7 +1,7 @@
 /**
- * Canvas Resource storage application layer.
+ * Canvas 全局媒体集成：blob 媒体事实 ffprobe 探针、webp 预览生成与输出物化。
  *
- * <p>负责浏览器直传 reserve/finalize、服务端媒体 probe/preview、不可变 Resource 短事务提交与 provider
- * 流式物化；浏览器媒体字节始终直接流向对象存储。
+ * <p>浏览器直传与全局 blob 生命周期由 storage 基础负责；本包只做媒体增强（probe/preview）与 Canvas Resource 到 blob
+ * 的绑定（物化），所有确定性对象键来自 {@code StorageObjectKeys}。
  */
 package fun.fengwk.kkstudio.core.studio.resource;

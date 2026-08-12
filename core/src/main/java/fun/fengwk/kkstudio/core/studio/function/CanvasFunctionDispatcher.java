@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.studio.function;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -20,7 +21,7 @@ public final class CanvasFunctionDispatcher {
     this.worker = worker;
   }
 
-  public boolean dispatch(long nodeId, String requestId) {
+  public boolean dispatch(UUID nodeId, UUID requestId) {
     RunKey key = new RunKey(nodeId, requestId);
     if (!inFlight.add(key)) {
       return true;
@@ -42,9 +43,9 @@ public final class CanvasFunctionDispatcher {
     }
   }
 
-  boolean isDispatched(long nodeId, String requestId) {
+  boolean isDispatched(UUID nodeId, UUID requestId) {
     return inFlight.contains(new RunKey(nodeId, requestId));
   }
 
-  private record RunKey(long nodeId, String requestId) {}
+  private record RunKey(UUID nodeId, UUID requestId) {}
 }

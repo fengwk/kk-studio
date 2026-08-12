@@ -1,0 +1,18 @@
+package fun.fengwk.kkstudio.studio.canvas;
+
+import java.util.List;
+import java.util.UUID;
+
+/** Function Run 资源 pin 的持久化端口。 */
+public interface CanvasFunctionResourceRefRepository {
+
+  void addAll(List<CanvasFunctionResourceRef> refs);
+
+  List<CanvasFunctionResourceRef> findByRun(UUID canvasId, UUID nodeId, UUID requestId);
+
+  boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId);
+
+  int deleteByNode(UUID canvasId, UUID nodeId);
+
+  int deleteByCanvas(UUID canvasId);
+}

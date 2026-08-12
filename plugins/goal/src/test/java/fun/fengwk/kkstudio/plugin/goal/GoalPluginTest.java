@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /** Goal 插件的 branch snapshot、工具状态机、fork 与上下文投影测试。 */
 class GoalPluginTest {
@@ -71,7 +72,7 @@ class GoalPluginTest {
     assertEquals(1000L, active.tokenBudget());
     assertEquals(GoalStatus.ACTIVE, active.status());
     assertEquals(T1, active.createdAt());
-    BranchView activeBranch = append(root, payload(created), 2L, T1);
+    BranchView activeBranch = append(root, payload(created), new UUID(0L, 2), T1);
 
     PluginToolResult read =
         new GetGoalTool()
@@ -97,7 +98,7 @@ class GoalPluginTest {
     assertEquals(T1, complete.createdAt());
     assertEquals(T2, complete.updatedAt());
 
-    BranchView completedBranch = append(activeBranch, payload(updated), 3L, T2);
+    BranchView completedBranch = append(activeBranch, payload(updated), new UUID(0L, 3), T2);
     assertEquals(
         GoalStatus.COMPLETE, GoalToolSupport.latest(completedBranch).orElseThrow().status());
     assertTrue(
@@ -115,7 +116,7 @@ class GoalPluginTest {
             .execute(
                 new PluginToolContext(branch(), T1),
                 new ToolCall("create-1", CreateGoalTool.NAME, "{\"objective\":\"first\"}"));
-    BranchView firstBranch = append(branch(), payload(first), 2L, T1);
+    BranchView firstBranch = append(branch(), payload(first), new UUID(0L, 2), T1);
     PluginToolResult replaced =
         new CreateGoalTool()
             .execute(
@@ -191,7 +192,7 @@ class GoalPluginTest {
                 GoalPlugin.STATE_TYPE,
                 GoalStateCodec.SCHEMA_VERSION,
                 codec.encode(complete)),
-            2L,
+            new UUID(0L, 2),
             T1);
 
     PluginToolResult result =
@@ -245,7 +246,7 @@ class GoalPluginTest {
                 GoalPlugin.STATE_TYPE,
                 GoalStateCodec.SCHEMA_VERSION,
                 codec.encode(active)),
-            2L,
+            new UUID(0L, 2),
             T1);
     assertEquals(1, projector.project(activeBranch).size());
     assertTrue(
@@ -262,7 +263,7 @@ class GoalPluginTest {
                 GoalPlugin.STATE_TYPE,
                 GoalStateCodec.SCHEMA_VERSION,
                 codec.encode(complete)),
-            3L,
+            new UUID(0L, 3),
             T2);
     assertTrue(projector.project(completeBranch).isEmpty());
   }
@@ -301,10 +302,11 @@ class GoalPluginTest {
   }
 
   private static BranchView branch() {
+    UUID rootId = new UUID(0L, 1L);
     Entry root =
         new Entry(
-            1L,
-            1L,
+            rootId,
+            rootId,
             null,
             new RootPayload(
                 new BranchSettings(
@@ -317,7 +319,7 @@ class GoalPluginTest {
   }
 
   private static BranchView append(
-      BranchView branch, CustomEntryPayload payload, long entryId, Instant createdAt) {
+      BranchView branch, CustomEntryPayload payload, UUID entryId, Instant createdAt) {
     List<Entry> entries = new ArrayList<>(branch.path().entries());
     entries.add(
         new Entry(

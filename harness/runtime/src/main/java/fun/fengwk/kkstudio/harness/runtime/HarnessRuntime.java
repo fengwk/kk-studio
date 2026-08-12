@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -31,7 +32,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.LongConsumer;
+import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
@@ -50,13 +52,13 @@ import java.util.function.LongConsumer;
 @Slf4j
 public final class HarnessRuntime {
 
-  private static final LongConsumer NO_OP_CANCELLER = ignored -> {};
+  private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
 
   private final HarnessStore store;
   private final Clock clock;
   private final StopControl stopControl;
-  private final LongConsumer modelExecutionCanceller;
-  private final LongConsumer toolExecutionCanceller;
+  private final Consumer<UUID> modelExecutionCanceller;
+  private final Consumer<UUID> toolExecutionCanceller;
 
   /** 创建完整 Runtime facade，包含 durable Stop commit 之后的 process-local execution 取消能力。 */
   public HarnessRuntime(
@@ -64,6 +66,7 @@ public final class HarnessRuntime {
     this(
         store,
         clock,
+        null,
         modelExecutionCanceller(modelProcessor),
         toolExecutionCanceller(toolProcessor));
   }
@@ -74,18 +77,49 @@ public final class HarnessRuntime {
    * <p>Stop 通过 durable terminal state 与 Work fencing 仍然保持正确；缺失的仅是可选的同进程 best-effort 取消。
    */
   public HarnessRuntime(HarnessStore store, Clock clock) {
-    this(store, clock, NO_OP_CANCELLER, NO_OP_CANCELLER);
+    this(store, clock, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
+  }
+
+  /**
+   * 创建完整 Runtime facade，并注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时
+   * fail-closed）。
+   */
+  public HarnessRuntime(
+      HarnessStore store,
+      Clock clock,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer,
+      ModelProcessor modelProcessor,
+      ToolProcessor toolProcessor) {
+    this(
+        store,
+        clock,
+        toolResultHistoryMaterializer,
+        modelExecutionCanceller(modelProcessor),
+        toolExecutionCanceller(toolProcessor));
+  }
+
+  /**
+   * 创建完整 Runtime facade，并注入 process-local 的 Model / Tool execution 取消器（无物化端口，Resource 引用
+   * fail-closed）。
+   */
+  public HarnessRuntime(
+      HarnessStore store,
+      Clock clock,
+      Consumer<UUID> modelExecutionCanceller,
+      Consumer<UUID> toolExecutionCanceller) {
+    this(store, clock, null, modelExecutionCanceller, toolExecutionCanceller);
   }
 
   /** 由具体 Processor wiring 与 local execution adapter 共用的内部构造方法。 */
   HarnessRuntime(
       HarnessStore store,
       Clock clock,
-      LongConsumer modelExecutionCanceller,
-      LongConsumer toolExecutionCanceller) {
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer,
+      Consumer<UUID> modelExecutionCanceller,
+      Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
     this.clock = HarnessStoreTime.millisecondClock(clock);
-    this.stopControl = new StopControl(store, this.clock);
+    this.stopControl = new StopControl(store, this.clock, toolResultHistoryMaterializer);
     this.modelExecutionCanceller =
         Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
     this.toolExecutionCanceller =
@@ -105,10 +139,10 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           Instant now = clock.instant();
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
-          Session session = new Session(sessionId, command.title(), now);
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          Session session = new Session(sessionId, now);
           Entry rootEntry =
               new Entry(
                   rootEntryId,
@@ -125,24 +159,32 @@ public final class HarnessRuntime {
         });
   }
 
-  /**
-   * 原子入队一组有序 command。
-   *
-   * <p>对每个 {@code clientCommandId} 的幂等性查找发生在任何 head/sequence/live 检查之前。当每个 id 都已存在时，属于 <em>ordered
-   * command-set replay</em>（并非精确的 HTTP batch replay——刻意没有 batch identity）：当且仅当每个已存储 payload 与请求
-   * payload 相等、且已存储 sequence 在请求顺序中 连续（{@code seq[i] == seq[0] + i}）时，batch 才会被接受；忽略期望的 head/next
-   * sequence 与 QUEUED/APPLIED/CANCELLED 生命周期，原样返回已存在的行。仅部分 id 存在则冲突为 PARTIAL_COMMAND_REPLAY，复用 id 但
-   * payload 不同则冲突为 COMMAND_ID_REUSED，id 完全匹配但顺序不 连续则冲突为 COMMAND_REPLAY_ORDER_MISMATCH；缺失的 command
-   * 永远不会被补齐。
-   *
-   * <p>对于全新 batch，要求精确的 expected head + next command sequence 游标（否则 STALE_COMMAND_CURSOR），随后一次性原子预留
-   * N 个连续 sequence（revision +1），所有 command 插入 为 QUEUED，请求 THREAD Work，并原子提交。包含 SET_ENVIRONMENT 的新
-   * batch 还额外要求真正 quiescent 的 pre-state（无已入队 USER/CUSTOM message，共享分类器结果为 IDLE_OR_HISTORICAL，且完全不存在
-   * THREAD Work 行——存在行（无论是否 leased）都会 fence 掉 speculative Resolver/runnable mailbox）。 精确 replay 跳过该
-   * admission 检查。
-   */
+  /** 原子入队一组有序 command。 */
   public List<ThreadCommand> enqueueCommands(ThreadCommandBatch batch) {
+    return enqueueCommands(batch, NewCommandPreflight.IDENTITY);
+  }
+
+  /**
+   * 原子入队一组有序 command（应用 use-case 形态）。
+   *
+   * <p>对每个 {@code clientCommandId} 的幂等性查找发生在任何 head/sequence/live 检查与 upload 消费之前。当每个 id 都已存在 时，属于
+   * <em>ordered command-set replay</em>（并非精确的 HTTP batch replay——刻意没有 batch identity）：当且仅当每个已存储
+   * {@code requestHash} 与请求 hash 相等、且已存储 sequence 在请求顺序中连续时，batch 才会被接受；忽略期望的 head/next sequence 与
+   * QUEUED/APPLIED/CANCELLED 生命周期，原样返回已存在的行。仅部分 id 存在则冲突为 PARTIAL_COMMAND_REPLAY，复用 id 但 hash
+   * 不同则冲突为 COMMAND_ID_REUSED，id 完全匹配但顺序不连续则冲突为 COMMAND_REPLAY_ORDER_MISMATCH；缺失的 command
+   * 永远不会被补齐。hash 重放独立于 durable payload 形态，因此 replay 在一次性 upload 行被删除后仍然成立——preflight 绝不在重放路径上被调用。
+   *
+   * <p>对于全新 batch，要求精确的 expected head + next command sequence 游标（否则 STALE_COMMAND_CURSOR），随后
+   * 在同一事务内调用 {@code preflight}（仅新 batch；可把瞬时 ATTACHMENT 内容物化为 durable RESOURCE 并消费 upload / session
+   * blob ref，任何失败整体回滚），一次性原子预留 N 个连续 sequence（revision +1），所有 command 插入为 QUEUED，请求 THREAD
+   * Work，并原子提交。包含 SET_ENVIRONMENT 的新 batch 还额外要求真正 quiescent 的 pre-state（无已入队 USER/CUSTOM
+   * message，共享分类器结果为 IDLE_OR_HISTORICAL，且完全不存在 THREAD Work 行——存在行（无论是否 leased）都会 fence 掉
+   * speculative Resolver/runnable mailbox）。精确 replay 跳过该 admission 检查。
+   */
+  public List<ThreadCommand> enqueueCommands(
+      ThreadCommandBatch batch, NewCommandPreflight preflight) {
     Objects.requireNonNull(batch, "batch");
+    Objects.requireNonNull(preflight, "preflight");
     return store.transaction(
         tx -> {
           ThreadState thread =
@@ -170,7 +212,46 @@ public final class HarnessRuntime {
           if (present == existing.size()) {
             return replayExistingBatch(batch, existing);
           }
-          return enqueueNewBatch(tx, batch, thread, clock.instant());
+          // 全新 batch 的 admission 在 preflight（upload 消费）之前执行：stale cursor / 非静止
+          // 请求确定性拒绝，绝不触碰存储；幂等重放语义不受影响（replay 在上述分支已返回）。
+          validateNewBatchAdmission(batch, tx, thread);
+          List<NewThreadCommand> prepared =
+              preflight.prepare(
+                  tx, tx.loadEntryPath(thread.headEntryId()).root().sessionId(), batch.commands());
+          if (prepared == null) {
+            throw new IllegalStateException("command preflight returned null");
+          }
+          if (prepared.size() != batch.commands().size()) {
+            throw new IllegalStateException(
+                "command preflight must return exactly "
+                    + batch.commands().size()
+                    + " commands, got "
+                    + prepared.size());
+          }
+          for (int i = 0; i < prepared.size(); i++) {
+            NewThreadCommand request = batch.commands().get(i);
+            NewThreadCommand result = prepared.get(i);
+            if (result == null
+                || !result.clientCommandId().equals(request.clientCommandId())
+                || !result.requestHash().equals(request.requestHash())) {
+              throw new IllegalStateException(
+                  "command preflight must preserve clientCommandId and requestHash at index " + i);
+            }
+          }
+          return enqueueNewBatch(tx, batch, prepared, thread, clock.instant());
+        });
+  }
+
+  /** 按 Thread + clientCommandId 读取 durable command，用于应用层精确重放校验。 */
+  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID clientCommandId) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(clientCommandId, "clientCommandId");
+    return store.transaction(
+        tx -> {
+          if (tx.findThread(threadId).isEmpty()) {
+            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
+          }
+          return tx.findCommandByClientId(threadId, clientCommandId);
         });
   }
 
@@ -195,7 +276,7 @@ public final class HarnessRuntime {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "thread " + command.threadId() + " does not exist"));
-          if (thread.headEntryId() == command.targetEntryId()) {
+          if (thread.headEntryId().equals(command.targetEntryId())) {
             return thread;
           }
           if (thread.revision() != command.expectedRevision()) {
@@ -216,7 +297,7 @@ public final class HarnessRuntime {
                           new HarnessRuntimeNotFoundException(
                               "entry " + command.targetEntryId() + " does not exist"));
           EntryPath targetPath = tx.loadEntryPath(command.targetEntryId());
-          if (targetPath.root().sessionId() != headPath.root().sessionId()) {
+          if (!targetPath.root().sessionId().equals(headPath.root().sessionId())) {
             throw conflict(
                 HarnessRuntimeConflictException.Reason.MOVE_TARGET_CROSS_SESSION,
                 "target entry "
@@ -292,7 +373,7 @@ public final class HarnessRuntime {
           }
           ModelInvocation probeModel =
               tx.findModelInvocation(probe.modelInvocationId()).orElse(null);
-          if (probeModel == null || probeModel.threadId() != command.threadId()) {
+          if (probeModel == null || !probeModel.threadId().equals(command.threadId())) {
             throw approvalNotApplicable(
                 "tool invocation "
                     + probe.id()
@@ -322,7 +403,7 @@ public final class HarnessRuntime {
     if (commit.modelExecutionId() != null) {
       cancelLocalExecution(modelExecutionCanceller, "Model", commit.modelExecutionId());
     }
-    for (long toolExecutionId : commit.toolExecutionIds()) {
+    for (UUID toolExecutionId : commit.toolExecutionIds()) {
       cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
     }
     return commit.result();
@@ -336,7 +417,8 @@ public final class HarnessRuntime {
    * ModelInvocation / Tool siblings：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露任何东西， Model context
    * 仅暴露 Model，Tool context 暴露 Model 与全部 siblings。不持久化也不返回任何派生 状态。
    */
-  public ThreadSnapshot getThreadSnapshot(long threadId) {
+  public ThreadSnapshot getThreadSnapshot(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
           ThreadState thread =
@@ -364,19 +446,19 @@ public final class HarnessRuntime {
         });
   }
 
-  /** Ordered command-set replay：先比较 payload 是否相等，再按请求顺序校验 sequence 连续性。 */
+  /** Ordered command-set replay：先比较 requestHash（独立于 durable payload 形态），再按请求顺序校验 sequence 连续性。 */
   private static List<ThreadCommand> replayExistingBatch(
       ThreadCommandBatch batch, List<Optional<ThreadCommand>> found) {
     List<ThreadCommand> ordered = new ArrayList<>(found.size());
     for (int i = 0; i < found.size(); i++) {
       ThreadCommand existing = found.get(i).orElseThrow();
       NewThreadCommand request = batch.commands().get(i);
-      if (!existing.payload().equals(request.payload())) {
+      if (!existing.requestHash().equals(request.requestHash())) {
         throw conflict(
             HarnessRuntimeConflictException.Reason.COMMAND_ID_REUSED,
             "clientCommandId "
                 + request.clientCommandId()
-                + " is reused with a different payload on thread "
+                + " is reused with a different request hash on thread "
                 + batch.threadId());
       }
       ordered.add(existing);
@@ -396,29 +478,23 @@ public final class HarnessRuntime {
 
   /** 新 batch 入队：CAS 游标、可选 SET_ENVIRONMENT admission、insert + reserve + Work。 */
   private static List<ThreadCommand> enqueueNewBatch(
-      HarnessStore.Transaction tx, ThreadCommandBatch batch, ThreadState thread, Instant now) {
-    if (thread.headEntryId() != batch.expectedHeadEntryId()
-        || thread.nextCommandSequence() != batch.expectedNextCommandSequence()) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR,
-          "thread "
-              + thread.id()
-              + " head/next command sequence does not match the batch expectation");
-    }
-    if (containsSetEnvironment(batch)) {
-      requireQuiescentForSetEnvironment(tx, thread);
-    }
-    List<ThreadCommand> inserted = new ArrayList<>(batch.commands().size());
+      HarnessStore.Transaction tx,
+      ThreadCommandBatch batch,
+      List<NewThreadCommand> commands,
+      ThreadState thread,
+      Instant now) {
+    validateNewBatchAdmission(batch, tx, thread);
+    List<ThreadCommand> inserted = new ArrayList<>(commands.size());
     long nextSequence = thread.nextCommandSequence();
-    for (int i = 0; i < batch.commands().size(); i++) {
-      NewThreadCommand request = batch.commands().get(i);
+    for (int i = 0; i < commands.size(); i++) {
+      NewThreadCommand request = commands.get(i);
       inserted.add(
           new ThreadCommand(
-              tx.nextId(),
               thread.id(),
               nextSequence + i,
               request.payload(),
               request.clientCommandId(),
+              request.requestHash(),
               null,
               null,
               now));
@@ -436,6 +512,25 @@ public final class HarnessRuntime {
       }
     }
     return false;
+  }
+
+  /**
+   * 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）与 SET_ENVIRONMENT 非静止 都必须在任何
+   * preflight / upload 消费之前确定性拒绝。
+   */
+  private static void validateNewBatchAdmission(
+      ThreadCommandBatch batch, HarnessStore.Transaction tx, ThreadState thread) {
+    if (!thread.headEntryId().equals(batch.expectedHeadEntryId())
+        || thread.nextCommandSequence() != batch.expectedNextCommandSequence()) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR,
+          "thread "
+              + thread.id()
+              + " head/next command sequence does not match the batch expectation");
+    }
+    if (containsSetEnvironment(batch)) {
+      requireQuiescentForSetEnvironment(tx, thread);
+    }
   }
 
   /**
@@ -485,7 +580,7 @@ public final class HarnessRuntime {
                             + probe.modelInvocationId()
                             + " could not be locked for approval replay of tool "
                             + probe.id()));
-    if (model.threadId() != command.threadId()) {
+    if (!model.threadId().equals(command.threadId())) {
       throw approvalNotApplicable(
           "tool invocation " + probe.id() + " does not belong to thread " + command.threadId());
     }
@@ -497,7 +592,7 @@ public final class HarnessRuntime {
                         "tool invocation "
                             + probe.id()
                             + " could not be locked for approval replay"));
-    if (tool.modelInvocationId() != probe.modelInvocationId()) {
+    if (!tool.modelInvocationId().equals(probe.modelInvocationId())) {
       throw new IllegalStateException(
           "tool invocation " + tool.id() + " changed its model attachment during approval replay");
     }
@@ -539,7 +634,7 @@ public final class HarnessRuntime {
     }
     ToolInvocation tool = null;
     for (ToolInvocation sibling : active.siblings()) {
-      if (sibling.id() == probe.id()) {
+      if (sibling.id().equals(probe.id())) {
         tool = sibling;
         break;
       }
@@ -586,31 +681,31 @@ public final class HarnessRuntime {
     return right.isAfter(left) ? right : left;
   }
 
-  private static LongConsumer modelExecutionCanceller(ModelProcessor processor) {
+  private static Consumer<UUID> modelExecutionCanceller(ModelProcessor processor) {
     Objects.requireNonNull(processor, "modelProcessor");
     return processor::cancel;
   }
 
-  private static LongConsumer toolExecutionCanceller(ToolProcessor processor) {
+  private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
     Objects.requireNonNull(processor, "toolProcessor");
     return processor::cancel;
   }
 
   private static void cancelLocalExecution(
-      LongConsumer canceller, String executionType, long invocationId) {
+      Consumer<UUID> canceller, String executionType, UUID invocationId) {
     try {
       canceller.accept(invocationId);
-    } catch (RuntimeException failure) {
+    } catch (RuntimeException error) {
       log.warn(
-          "cannot cancel process-local {} execution {} after durable Stop commit",
+          "failed to cancel local {} execution {} after durable stop",
           executionType,
           invocationId,
-          failure);
+          error);
     }
   }
 
-  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
-    return conflict(HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
+  private static String contextName(ThreadContext context) {
+    return context.getClass().getSimpleName();
   }
 
   private static HarnessRuntimeConflictException conflict(
@@ -618,7 +713,25 @@ public final class HarnessRuntime {
     return new HarnessRuntimeConflictException(reason, message);
   }
 
-  private static String contextName(ThreadContext context) {
-    return context.getClass().getSimpleName();
+  private static HarnessRuntimeConflictException approvalNotApplicable(String message) {
+    return new HarnessRuntimeConflictException(
+        HarnessRuntimeConflictException.Reason.APPROVAL_NOT_APPLICABLE, message);
+  }
+
+  /**
+   * 新 command batch 入队前的窄 preflight 端口：在 store 事务内、幂等重放检查之后、任何 durable command 写入之前被调用 （只对全新 batch
+   * 调用），返回与入参一一对应、保持 {@code clientCommandId}/{@code requestHash} 的最终 command 列表。
+   *
+   * <p>应用 use-case 用它把瞬时 ATTACHMENT 内容物化为 durable RESOURCE（同一外事务内锁定 READY upload、写入 session blob
+   * ref、retain blob、删除已消费 upload）；任何失败向上传播使整个入队事务回滚。实现不得自行开启新事务。
+   */
+  @FunctionalInterface
+  public interface NewCommandPreflight {
+
+    /** 恒等 preflight：原样返回入参（纯非附件命令路径）。 */
+    NewCommandPreflight IDENTITY = (tx, sessionId, commands) -> commands;
+
+    List<NewThreadCommand> prepare(
+        HarnessStore.Transaction tx, UUID sessionId, List<NewThreadCommand> commands);
   }
 }

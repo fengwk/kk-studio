@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -42,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -66,6 +68,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -114,41 +117,41 @@ final class HarnessRuntimeTestSupport {
     }
   }
 
-  record Baseline(long sessionId, long rootEntryId, long threadId) {}
+  record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
-  record TurnBaseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
+  record TurnBaseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
   record ModelBaseline(
-      long sessionId, long rootEntryId, long turnStartEntryId, long threadId, long modelId) {}
+      UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId, UUID modelId) {}
 
   record ToolBaseline(
-      long sessionId,
-      long rootEntryId,
-      long turnStartEntryId,
-      long threadId,
-      long assistantEntryId,
-      long modelId,
-      long toolId) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID threadId,
+      UUID assistantEntryId,
+      UUID modelId,
+      UUID toolId) {}
 
   record MultiToolBaseline(
-      long sessionId,
-      long rootEntryId,
-      long turnStartEntryId,
-      long threadId,
-      long assistantEntryId,
-      long modelId,
-      List<Long> toolIds) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID threadId,
+      UUID assistantEntryId,
+      UUID modelId,
+      List<UUID> toolIds) {}
 
   record ContinuationBaseline(
-      long sessionId, long rootEntryId, long turnEndEntryId, long threadId) {}
+      UUID sessionId, UUID rootEntryId, UUID turnEndEntryId, UUID threadId) {}
 
   /** Session + ROOT + Thread(head 指向 ROOT)；静默的 IDLE_OR_HISTORICAL baseline。 */
   static Baseline seedBaseline(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertThread(thread(threadId, rootEntryId));
@@ -160,10 +163,10 @@ final class HarnessRuntimeTestSupport {
   static TurnBaseline seedOpenTurn(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
@@ -176,15 +179,15 @@ final class HarnessRuntimeTestSupport {
   static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
           tx.insertThread(thread(threadId, turnStartEntryId));
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
@@ -201,18 +204,18 @@ final class HarnessRuntimeTestSupport {
   static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
-          long userEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           ThreadState thread = thread(threadId, userEntryId);
           tx.insertThread(thread);
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, userEntryId, T1);
           tx.insertModelInvocation(model);
@@ -233,10 +236,10 @@ final class HarnessRuntimeTestSupport {
   static ModelBaseline seedRunningContinuationModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(
@@ -248,7 +251,7 @@ final class HarnessRuntimeTestSupport {
                   T1));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
@@ -262,15 +265,15 @@ final class HarnessRuntimeTestSupport {
   static ModelBaseline seedTerminalModel(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
           tx.insertThread(thread(threadId, turnStartEntryId));
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
@@ -309,20 +312,20 @@ final class HarnessRuntimeTestSupport {
     }
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
           ThreadState thread = thread(threadId, turnStartEntryId);
           tx.insertThread(thread);
-          long userEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
-          long assistantEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
           tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1, callIds));
-          long modelId = tx.nextId();
+          UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
@@ -333,9 +336,9 @@ final class HarnessRuntimeTestSupport {
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
-          List<Long> toolIds = new ArrayList<>(toolCount);
+          List<UUID> toolIds = new ArrayList<>(toolCount);
           for (int ordinal = 0; ordinal < toolCount; ordinal++) {
-            long toolId = tx.nextId();
+            UUID toolId = tx.nextId();
             toolIds.add(toolId);
             invocations.add(
                 toolInvocation(toolId, modelId, assistantEntryId, ordinal, callIds[ordinal], T1));
@@ -370,7 +373,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 id 的 ToolInvocation 标记为 terminal CANCELLED 但未应用结果。 */
-  static ToolInvocation cancelTool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation cancelTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -381,7 +384,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 tool 从 READY 推进到 DISPATCHING（approval preflight 已完成，attempt 保持为 0）。 */
-  static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -394,7 +397,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 tool 从 DISPATCHING 推进到 RUNNING（attempt 推进到 1）。 */
-  static ToolInvocation markRunningTool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -405,7 +408,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 在一次可重试尝试后将 RUNNING 转回 READY；已确认的 attempt 保持为正值。 */
-  static ToolInvocation retryReadyTool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation retryReadyTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -416,13 +419,13 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
-  static ToolInvocation succeedTool(InMemoryHarnessStore store, long toolId) {
+  static ToolInvocation succeedTool(InMemoryHarnessStore store, UUID toolId) {
     return succeedTool(store, toolId, ToolEffectBatch.EMPTY);
   }
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED，并原子携带真实 result 与 branch effects。 */
   static ToolInvocation succeedTool(
-      InMemoryHarnessStore store, long toolId, ToolEffectBatch effects) {
+      InMemoryHarnessStore store, UUID toolId, ToolEffectBatch effects) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -457,20 +460,20 @@ final class HarnessRuntimeTestSupport {
       InMemoryHarnessStore store, boolean headAtTurnEnd) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
           ThreadState thread = thread(threadId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
           tx.insertThread(thread);
-          long userEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
-          long assistantEntryId = tx.nextId();
+          UUID assistantEntryId = tx.nextId();
           tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1));
-          long turnEndEntryId = tx.nextId();
+          UUID turnEndEntryId = tx.nextId();
           tx.insertEntry(
               turnEndEntry(
                   turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
@@ -482,11 +485,11 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 另一个 Session，自带 ROOT（跨 session 的 MOVE_HEAD 目标来源）。 */
-  static long seedForeignRoot(InMemoryHarnessStore store) {
+  static UUID seedForeignRoot(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           return rootEntryId;
@@ -494,30 +497,30 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 在同一 Session 内增加一条 Thread，指向现有 head Entry。 */
-  static long seedThreadAt(InMemoryHarnessStore store, long headEntryId) {
+  static UUID seedThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
     return store.transaction(
         tx -> {
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertThread(thread(id, headEntryId));
           return id;
         });
   }
 
   /** 在同一 Session 内增加一条启用 YOLO 的 Thread，指向现有 head Entry。 */
-  static long seedYoloThreadAt(InMemoryHarnessStore store, long headEntryId) {
+  static UUID seedYoloThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
     return store.transaction(
         tx -> {
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertThread(thread(id, headEntryId, true));
           return id;
         });
   }
 
   /** 在 {@code parentEntryId} 下插入一个 TURN_START 子节点，并返回其 id。 */
-  static long seedChildTurnStart(InMemoryHarnessStore store, long sessionId, long parentEntryId) {
+  static UUID seedChildTurnStart(InMemoryHarnessStore store, UUID sessionId, UUID parentEntryId) {
     return store.transaction(
         tx -> {
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1));
           return id;
         });
@@ -596,24 +599,30 @@ final class HarnessRuntimeTestSupport {
   /** 在 thread 上插入一条 QUEUED command（必须是尚无 command 的全新 thread）。 */
   static void seedQueuedCommand(
       InMemoryHarnessStore store,
-      long threadId,
-      long commandId,
+      UUID threadId,
       long sequence,
       ThreadCommandPayload payload,
-      String clientCommandId) {
+      UUID clientCommandId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
           tx.insertCommands(
               List.of(
                   new ThreadCommand(
-                      commandId, threadId, sequence, payload, clientCommandId, null, null, T1)));
+                      threadId,
+                      sequence,
+                      payload,
+                      clientCommandId,
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      T1)));
           return null;
         });
   }
 
   /** 请求一条无 lease 的 THREAD Work 行（Resolver 邮箱的推测式围栏）。 */
-  static void seedThreadWork(InMemoryHarnessStore store, long threadId) {
+  static void seedThreadWork(InMemoryHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId).orElseThrow();
@@ -623,7 +632,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 请求一条无 lease 的 MODEL Work 行（在 Model 活跃期间被围栏）。 */
-  static void seedModelWork(InMemoryHarnessStore store, long modelId) {
+  static void seedModelWork(InMemoryHarnessStore store, UUID modelId) {
     store.transaction(
         tx -> {
           ModelInvocation model = tx.findModelInvocation(modelId).orElseThrow();
@@ -634,7 +643,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** 为指定 invocation 请求一条无 lease 的 TOOL Work 行。 */
-  static void seedToolWork(InMemoryHarnessStore store, long toolId) {
+  static void seedToolWork(InMemoryHarnessStore store, UUID toolId) {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
@@ -646,7 +655,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   /** Claim THREAD Work 行，使其带有 active lease 而存在。 */
-  static void seedClaimedThreadWork(InMemoryHarnessStore store, long threadId) {
+  static void seedClaimedThreadWork(InMemoryHarnessStore store, UUID threadId) {
     seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
@@ -655,15 +664,15 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  static Session session(long id) {
-    return new Session(id, "session-" + id, T0);
+  static Session session(UUID id) {
+    return new Session(id, T0);
   }
 
-  static Entry rootEntry(long id, long sessionId) {
+  static Entry rootEntry(UUID id, UUID sessionId) {
     return new Entry(id, sessionId, null, new RootPayload(settings()), T0);
   }
 
-  static Entry turnStartEntry(long id, long sessionId, long parentId, Instant createdAt) {
+  static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
     return new Entry(
         id,
         sessionId,
@@ -672,7 +681,7 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static Entry userMessageEntry(long id, long sessionId, long parentId, Instant createdAt) {
+  static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
     return new Entry(
         id,
         sessionId,
@@ -685,7 +694,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static Entry assistantEntry(
-      long id, long sessionId, long parentId, Instant createdAt, String... toolCallIds) {
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
       contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
@@ -705,11 +714,11 @@ final class HarnessRuntimeTestSupport {
   }
 
   static Entry turnEndEntry(
-      long id,
-      long sessionId,
-      long parentId,
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
       Instant createdAt,
-      long turnStartEntryId,
+      UUID turnStartEntryId,
       boolean continueModel) {
     return new Entry(
         id,
@@ -719,29 +728,31 @@ final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static ThreadState thread(long id, long headEntryId) {
+  static ThreadState thread(UUID id, UUID headEntryId) {
     return thread(id, headEntryId, false);
   }
 
-  static ThreadState thread(long id, long headEntryId, boolean yoloEnabled) {
+  static ThreadState thread(UUID id, UUID headEntryId, boolean yoloEnabled) {
     return new ThreadState(id, headEntryId, yoloEnabled, 1, 0, T0, T0);
   }
 
-  static ThreadCommand withConsumedTurnStart(ThreadCommand command, long turnStartEntryId) {
+  static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
     return new ThreadCommand(
-        command.id(),
         command.threadId(),
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         turnStartEntryId,
         null,
         command.createdAt());
   }
 
   /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
-  static NewThreadCommand userMessageCommand(String clientCommandId, String text) {
-    return new NewThreadCommand(userMessagePayload(text), clientCommandId);
+  static NewThreadCommand userMessageCommand(UUID clientCommandId, String text) {
+    UserMessageCommandPayload payload = userMessagePayload(text);
+    return new NewThreadCommand(
+        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   static UserMessageCommandPayload userMessagePayload(String text) {
@@ -750,7 +761,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static ModelInvocation modelInvocation(
-      long id, long threadId, long turnStartEntryId, long basisHeadEntryId, Instant createdAt) {
+      UUID id, UUID threadId, UUID turnStartEntryId, UUID basisHeadEntryId, Instant createdAt) {
     return new ModelInvocation(
         id,
         threadId,
@@ -768,9 +779,9 @@ final class HarnessRuntimeTestSupport {
   }
 
   static ToolInvocation toolInvocation(
-      long id,
-      long modelInvocationId,
-      long assistantEntryId,
+      UUID id,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
       int ordinal,
       String toolCallId,
       Instant createdAt) {
@@ -854,6 +865,7 @@ final class HarnessRuntimeTestSupport {
     return new ModelDescriptor(
         "provider",
         "model",
+        Set.of(ModelInputModality.TEXT),
         true,
         true,
         new ModelPricing(

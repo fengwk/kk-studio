@@ -37,7 +37,7 @@ flowchart TD
 | [technical-solution/harness-runtime-contracts.md](technical-solution/harness-runtime-contracts.md) | Runtime 契约 | JSON/DTO、命令 batch、CAS、replay、snapshot 与 wire 契约 |
 | [technical-solution/architecture.md](technical-solution/architecture.md) | 架构总览 | 模块边界、双域不变量与 Studio 当前事实 |
 | [technical-solution/storage-models.md](technical-solution/storage-models.md) | 关系存储摘要 | Chat、Harness（精确 7 表）、Canvas 当前持久化表；最终 schema 为 V1 |
-| [technical-solution/canvas-resource-function-v1.md](technical-solution/canvas-resource-function-v1.md) | Canvas v1 事实源 | ResourceNode、Resource、Function、Group、Link、typed commands 与九表持久化 |
+| [technical-solution/canvas-resource-function-v1.md](technical-solution/canvas-resource-function-v1.md) | Canvas v1 事实源 | ResourceNode、Resource、Function、Group、Link、typed commands 与八表持久化 |
 | [technical-solution/prompt-to-resource.md](technical-solution/prompt-to-resource.md) | 数据流 | Command → Turn → Resolver → Model → Tool → Resource 事实链 |
 
 ## 维护规则

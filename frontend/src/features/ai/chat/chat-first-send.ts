@@ -3,6 +3,7 @@ import type {
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { CommandBatchReplay } from '@/features/ai/runtime'
+import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import { chatService } from '@/shared/api/chat-service'
 import { harnessService } from '@/shared/api/harness-service'
 import {
@@ -19,11 +20,11 @@ export interface FirstSendResult {
 
 /**
  * 交给绑定面板的 first-send recovery：
- * - `replay` 存在：网络/不确定失败——恢复文本，并保留 exact batch（相同 command id + 原始 expected cursor），以便逐字节 replay；
- * - `replay` 不存在：已知 409——服务器明确拒绝了过期 batch，因此恢复文本，但下一次提交会重新构建最新 cursor + 最新 command id。
+ * - `replay` 存在：网络/不确定失败——恢复 ordered parts，并保留 exact batch（相同 command id + 原始 expected cursor），以便逐字节 replay；
+ * - `replay` 不存在：已知 409——服务器明确拒绝了过期 batch，因此恢复 parts，但下一次提交会重新构建最新 cursor + 最新 command id。
  */
 export interface FirstSendRecovery {
-  content: string
+  parts: ComposerPart[]
   replay?: CommandBatchReplay
 }
 
@@ -57,7 +58,7 @@ export class FirstSendMessageError extends Error {
  */
 export async function performBlankPaneFirstSend(options: {
   chatId: string
-  content: string
+  parts: ComposerPart[]
   title: string | null
   branchSettings: HarnessBranchSettingsDTO
   yoloEnabled: boolean
@@ -74,7 +75,7 @@ export async function performBlankPaneFirstSend(options: {
   })
   const plan = buildFirstSendMessagePlan({
     thread: snapshot.thread,
-    content: options.content,
+    parts: options.parts,
     clientCommandId: options.clientCommandId,
   })
   try {

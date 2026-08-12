@@ -5,8 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 
 import java.time.Clock;
 import java.util.List;
+import java.util.UUID;
 
 /** 执行一个 frozen run，并只通过 CAS terminal apply 收敛。 */
 @Component
@@ -29,11 +30,11 @@ public class CanvasFunctionWorker {
   private final CanvasFunctionRunStateCodec stateCodec;
   private final CanvasFunctionRunTransactions transactions;
   private final ObjectProvider<S3StorageService> storageServices;
-  private final ObjectProvider<S3PresignService> presignServices;
+  private final ObjectProvider<StorageBlobManager> blobManagers;
   private final ObjectProvider<CanvasResourceMaterializer> materializers;
   private final Clock clock;
 
-  public void run(long nodeId, String requestId) {
+  public void run(UUID nodeId, UUID requestId) {
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElse(null);
     if (current == null
         || current.status() != CanvasFunctionRunStatus.RUNNING
@@ -52,11 +53,11 @@ public class CanvasFunctionWorker {
               runRepository,
               stateCodec,
               storageServices,
-              presignServices,
+              blobManagers,
               materializers,
               clock,
               frozen);
-      List<Long> result = List.copyOf(registered.adapter().execute(context, frozen));
+      List<UUID> result = List.copyOf(registered.adapter().execute(context, frozen));
       if (!result.equals(List.of(frozen.targetResourceId()))) {
         throw new IllegalArgumentException(
             "adapter result must equal the preallocated target Resource id");
@@ -73,7 +74,7 @@ public class CanvasFunctionWorker {
           nodeId,
           requestId,
           error.getClass().getSimpleName());
-      transactions.failIfRunning(nodeId, requestId, PUBLIC_FAILURE);
+      transactions.failIfRunning(nodeId, requestId.toString(), PUBLIC_FAILURE);
     }
   }
 }

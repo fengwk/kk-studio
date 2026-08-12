@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -40,22 +41,28 @@ class ToolApprovalTest {
   void acceptsDecidedApprovalWithFullDecisionFacts() {
     ToolApproval allowed =
         new ToolApproval(
-            true, ToolApprovalDecision.ALLOWED, "d-1", "actor", null, REQUESTED, DECIDED);
+            true, ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED, DECIDED);
     assertFalse(allowed.isUndecided());
     assertEquals(ToolApprovalDecision.ALLOWED, allowed.decision());
-    assertEquals("d-1", allowed.decisionId());
+    assertEquals(id(1L), allowed.decisionId());
     assertEquals("actor", allowed.actor());
     assertEquals(DECIDED, allowed.decidedAt());
 
     ToolApproval denied =
         new ToolApproval(
-            true, ToolApprovalDecision.DENIED, "d-2", "actor", "denied reason", REQUESTED, DECIDED);
+            true,
+            ToolApprovalDecision.DENIED,
+            id(2L),
+            "actor",
+            "denied reason",
+            REQUESTED,
+            DECIDED);
     assertEquals(ToolApprovalDecision.DENIED, denied.decision());
     assertEquals("denied reason", denied.reason());
 
     ToolApproval decidedAtRequested =
         new ToolApproval(
-            true, ToolApprovalDecision.ALLOWED, "d-3", "actor", null, REQUESTED, REQUESTED);
+            true, ToolApprovalDecision.ALLOWED, id(3L), "actor", null, REQUESTED, REQUESTED);
     assertEquals(REQUESTED, decidedAtRequested.decidedAt());
   }
 
@@ -66,7 +73,7 @@ class ToolApprovalTest {
         () -> new ToolApproval(false, ToolApprovalDecision.ALLOWED, null, null, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolApproval(false, null, "d-1", null, null, null, null));
+        () -> new ToolApproval(false, null, id(1L), null, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolApproval(false, null, null, "actor", null, null, null));
@@ -85,7 +92,7 @@ class ToolApprovalTest {
   void rejectsUndecidedApprovalCarryingDecisionFacts() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolApproval(true, null, "d-1", null, null, REQUESTED, null));
+        () -> new ToolApproval(true, null, id(1L), null, null, REQUESTED, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolApproval(true, null, null, "actor", null, REQUESTED, null));
@@ -100,7 +107,7 @@ class ToolApprovalTest {
   @Test
   void rejectsDecidedApprovalMissingOrInvalidDecisionFacts() {
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ToolApproval(
                 true, ToolApprovalDecision.ALLOWED, null, "actor", null, REQUESTED, DECIDED));
@@ -108,24 +115,24 @@ class ToolApprovalTest {
         IllegalArgumentException.class,
         () ->
             new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, "d-1", null, null, REQUESTED, DECIDED));
+                true, ToolApprovalDecision.ALLOWED, id(1L), null, null, REQUESTED, DECIDED));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, "d-1", "actor", null, null, DECIDED));
+                true, ToolApprovalDecision.ALLOWED, id(1L), "actor", null, null, DECIDED));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, "d-1", "actor", null, REQUESTED, null));
+                true, ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolApproval(
                 true,
                 ToolApprovalDecision.ALLOWED,
-                "d-1",
+                id(1L),
                 "actor",
                 null,
                 DECIDED.plusSeconds(1),
@@ -138,35 +145,14 @@ class ToolApprovalTest {
         IllegalArgumentException.class,
         () ->
             new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, " ", "actor", null, REQUESTED, DECIDED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, " d-1", "actor", null, REQUESTED, DECIDED));
+                true, ToolApprovalDecision.ALLOWED, id(1L), " actor", null, REQUESTED, DECIDED));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolApproval(
                 true,
                 ToolApprovalDecision.ALLOWED,
-                "d".repeat(129),
-                "actor",
-                null,
-                REQUESTED,
-                DECIDED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, "d-1", " actor", null, REQUESTED, DECIDED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolApproval(
-                true,
-                ToolApprovalDecision.ALLOWED,
-                "d-1",
+                id(1L),
                 "a".repeat(129),
                 null,
                 REQUESTED,
@@ -177,7 +163,7 @@ class ToolApprovalTest {
             new ToolApproval(
                 true,
                 ToolApprovalDecision.ALLOWED,
-                "d-1",
+                id(1L),
                 "actor",
                 "r".repeat(1025),
                 REQUESTED,
@@ -186,7 +172,7 @@ class ToolApprovalTest {
         IllegalArgumentException.class,
         () ->
             new ToolApproval(
-                true, ToolApprovalDecision.ALLOWED, "d-1", "actor", " ", REQUESTED, DECIDED));
+                true, ToolApprovalDecision.ALLOWED, id(1L), "actor", " ", REQUESTED, DECIDED));
   }
 
   @Test
@@ -209,10 +195,10 @@ class ToolApprovalTest {
   void decideAppliesTheDecisionToAnUndecidedApproval() {
     ToolApproval requested = ToolApproval.request(REQUESTED, "why");
     ToolApproval decided =
-        requested.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+        requested.decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
     assertFalse(decided.isUndecided());
     assertEquals(ToolApprovalDecision.ALLOWED, decided.decision());
-    assertEquals("d-1", decided.decisionId());
+    assertEquals(id(1L), decided.decisionId());
     assertEquals("actor", decided.actor());
     assertEquals(REQUESTED, decided.requestedAt());
     assertEquals(DECIDED, decided.decidedAt());
@@ -222,38 +208,39 @@ class ToolApprovalTest {
   void decideIsExactIdempotentAndConflictsOnRewrites() {
     ToolApproval decided =
         ToolApproval.request(REQUESTED, null)
-            .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+            .decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
     // 完全相同的 decision payload 以 idempotent 方式重放
     assertEquals(
-        decided, decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED));
+        decided, decided.decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED));
     // 相同 decisionId 但不同 payload 视为冲突
     assertThrows(
         IllegalArgumentException.class,
-        () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "other", null, DECIDED));
+        () -> decided.decide(ToolApprovalDecision.ALLOWED, id(1L), "other", null, DECIDED));
     assertThrows(
         IllegalArgumentException.class,
-        () -> decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", "new reason", DECIDED));
+        () -> decided.decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", "new reason", DECIDED));
     // 已存在但不同的 decision 即使使用新 decisionId 仍视为冲突
     assertThrows(
         IllegalArgumentException.class,
-        () -> decided.decide(ToolApprovalDecision.DENIED, "d-9", "actor", null, DECIDED));
+        () -> decided.decide(ToolApprovalDecision.DENIED, id(9L), "actor", null, DECIDED));
     // 非 required 的 approval 永远不能被 decide
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ToolApproval.notRequired()
-                .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED));
+                .decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED));
   }
 
   @Test
   void decideIgnoresAFreshDecidedAtOnAnIdempotentNetworkRetry() {
     ToolApproval decided =
         ToolApproval.request(REQUESTED, null)
-            .decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED);
+            .decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
     // 客户端不发送 decidedAt，因此重试请求携带的是新的服务端当前时间：
     // 相同 decisionId + decision + actor + reason 必须原样返回已存储的 approval
     ToolApproval replayed =
-        decided.decide(ToolApprovalDecision.ALLOWED, "d-1", "actor", null, DECIDED.plusSeconds(30));
+        decided.decide(
+            ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED.plusSeconds(30));
     assertEquals(decided, replayed);
     assertEquals(DECIDED, replayed.decidedAt());
     // 任何标识事实发生变化的 retry 都是冲突，而非 replay
@@ -261,21 +248,25 @@ class ToolApprovalTest {
         IllegalArgumentException.class,
         () ->
             decided.decide(
-                ToolApprovalDecision.ALLOWED, "d-1", "other-actor", null, DECIDED.plusSeconds(30)));
+                ToolApprovalDecision.ALLOWED,
+                id(1L),
+                "other-actor",
+                null,
+                DECIDED.plusSeconds(30)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> decided.decide(ToolApprovalDecision.DENIED, "d-1", "actor", null, DECIDED));
+        () -> decided.decide(ToolApprovalDecision.DENIED, id(1L), "actor", null, DECIDED));
   }
 
   @Test
   void decideRejectsInvalidDecisionFacts() {
     ToolApproval requested = ToolApproval.request(REQUESTED, null);
     assertThrows(
-        NullPointerException.class, () -> requested.decide(null, "d-1", "actor", null, DECIDED));
+        NullPointerException.class, () -> requested.decide(null, id(1L), "actor", null, DECIDED));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             requested.decide(
-                ToolApprovalDecision.ALLOWED, "d-1", "actor", null, REQUESTED.minusSeconds(1)));
+                ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED.minusSeconds(1)));
   }
 }

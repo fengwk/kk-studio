@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * @author fengwk
@@ -35,7 +36,7 @@ public class PostgresqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowAp
   }
 
   @Override
-  public ComfyuiWorkflowApi getById(long id) {
+  public ComfyuiWorkflowApi getById(UUID id) {
     return convert(comfyuiWorkflowApiMapper.getById(id));
   }
 
@@ -60,7 +61,7 @@ public class PostgresqlComfyuiWorkflowApiRepository implements ComfyuiWorkflowAp
   }
 
   @Override
-  public boolean deleteById(long id) {
+  public boolean deleteById(UUID id) {
     return comfyuiWorkflowApiMapper.deleteById(id) == 1;
   }
 

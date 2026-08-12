@@ -32,6 +32,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.UUID;
 
 final class PostgresqlHarnessRows {
 
@@ -49,18 +50,15 @@ final class PostgresqlHarnessRows {
 
   static final RowMapper<Session> SESSION =
       (resultSet, rowNumber) ->
-          new Session(
-              resultSet.getLong("id"),
-              resultSet.getString("title"),
-              instant(resultSet, "created_at"));
+          new Session(uuid(resultSet, "id"), instant(resultSet, "created_at"));
 
   static final RowMapper<Entry> ENTRY =
       (resultSet, rowNumber) -> {
         EntryType type = EntryType.valueOf(resultSet.getString("entry_type"));
         return new Entry(
-            resultSet.getLong("id"),
-            resultSet.getLong("session_id"),
-            nullableLong(resultSet, "parent_entry_id"),
+            uuid(resultSet, "id"),
+            uuid(resultSet, "session_id"),
+            nullableUuid(resultSet, "parent_entry_id"),
             ENTRY_PAYLOADS.decode(type, resultSet.getString("payload")),
             instant(resultSet, "created_at"));
       };
@@ -68,8 +66,8 @@ final class PostgresqlHarnessRows {
   static final RowMapper<ThreadState> THREAD =
       (resultSet, rowNumber) ->
           new ThreadState(
-              resultSet.getLong("id"),
-              resultSet.getLong("head_entry_id"),
+              uuid(resultSet, "id"),
+              uuid(resultSet, "head_entry_id"),
               resultSet.getBoolean("yolo_enabled"),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("revision"),
@@ -80,12 +78,12 @@ final class PostgresqlHarnessRows {
       (resultSet, rowNumber) -> {
         ThreadCommandType type = ThreadCommandType.valueOf(resultSet.getString("command_type"));
         return new ThreadCommand(
-            resultSet.getLong("id"),
-            resultSet.getLong("thread_id"),
+            uuid(resultSet, "thread_id"),
             resultSet.getLong("sequence"),
             COMMAND_PAYLOADS.decode(type, resultSet.getString("payload")),
-            resultSet.getString("client_command_id"),
-            nullableLong(resultSet, "consumed_turn_start_entry_id"),
+            uuid(resultSet, "client_command_id"),
+            resultSet.getString("request_hash"),
+            nullableUuid(resultSet, "consumed_turn_start_entry_id"),
             nullableInstant(resultSet, "cancelled_at"),
             instant(resultSet, "created_at"));
       };
@@ -93,26 +91,26 @@ final class PostgresqlHarnessRows {
   static final RowMapper<ModelInvocation> MODEL_INVOCATION =
       (resultSet, rowNumber) ->
           new ModelInvocation(
-              resultSet.getLong("id"),
-              resultSet.getLong("thread_id"),
-              resultSet.getLong("turn_start_entry_id"),
-              resultSet.getLong("basis_head_entry_id"),
+              uuid(resultSet, "id"),
+              uuid(resultSet, "thread_id"),
+              uuid(resultSet, "turn_start_entry_id"),
+              uuid(resultSet, "basis_head_entry_id"),
               MODEL_REQUESTS.decode(resultSet.getString("request")),
               ModelInvocationStatus.valueOf(resultSet.getString("status")),
               resultSet.getInt("attempt"),
               decodeNullable(resultSet.getString("stream_checkpoint"), STREAM_CHECKPOINTS::decode),
               decodeNullable(resultSet.getString("result"), MODEL_RESULTS::decode),
               decodeNullable(resultSet.getString("error"), MODEL_ERRORS::decode),
-              nullableLong(resultSet, "result_entry_id"),
+              nullableUuid(resultSet, "result_entry_id"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
 
   static final RowMapper<ToolInvocation> TOOL_INVOCATION =
       (resultSet, rowNumber) ->
           new ToolInvocation(
-              resultSet.getLong("id"),
-              resultSet.getLong("model_invocation_id"),
-              resultSet.getLong("assistant_entry_id"),
+              uuid(resultSet, "id"),
+              uuid(resultSet, "model_invocation_id"),
+              uuid(resultSet, "assistant_entry_id"),
               resultSet.getInt("ordinal"),
               TOOL_REQUESTS.decode(resultSet.getString("request")),
               ToolInvocationStatus.valueOf(resultSet.getString("status")),
@@ -121,7 +119,7 @@ final class PostgresqlHarnessRows {
               decodeNullable(resultSet.getString("result"), ToolResultJsonCodec::decode),
               TOOL_EFFECTS.decode(resultSet.getString("effects")),
               decodeNullable(resultSet.getString("error"), TOOL_ERRORS::decode),
-              nullableLong(resultSet, "result_entry_id"),
+              nullableUuid(resultSet, "result_entry_id"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
 
@@ -130,7 +128,7 @@ final class PostgresqlHarnessRows {
           new Work(
               new WorkTarget(
                   WorkTargetType.valueOf(resultSet.getString("target_type")),
-                  resultSet.getLong("target_id")),
+                  uuid(resultSet, "target_id")),
               instant(resultSet, "available_at"),
               resultSet.getLong("wake_version"),
               resultSet.getString("lease_token"),
@@ -155,9 +153,12 @@ final class PostgresqlHarnessRows {
     return value == null ? null : value.toInstant();
   }
 
-  private static Long nullableLong(ResultSet resultSet, String column) throws SQLException {
-    long value = resultSet.getLong(column);
-    return resultSet.wasNull() ? null : value;
+  private static UUID uuid(ResultSet resultSet, String column) throws SQLException {
+    return resultSet.getObject(column, UUID.class);
+  }
+
+  private static UUID nullableUuid(ResultSet resultSet, String column) throws SQLException {
+    return resultSet.getObject(column, UUID.class);
   }
 
   private static <T> T decodeNullable(String json, Decoder<T> decoder) {

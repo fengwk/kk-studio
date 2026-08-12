@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -42,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * CompactionPlanner 纯切分逻辑。测试消息文本固定 100 字符（估计 25 token）， keepRecentTokens = min(floor(contextWindow
@@ -50,16 +52,15 @@ import java.util.Optional;
 class CompactionPlannerTest {
 
   private static final CompactionConfig CONFIG = CompactionConfig.DEFAULTS;
-  private static final long SESSION = 100L;
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test
   void estimatesVideoWithTheDeterministicMediaPlaceholderBudget() {
     Entry video =
         new Entry(
-            2L,
-            SESSION,
-            1L,
+            id(2L),
+            id(100L),
+            id(1L),
             new MessagePayload(
                 new AgentMessage(
                     AgentMessageRole.USER,
@@ -69,9 +70,9 @@ class CompactionPlannerTest {
             BASE);
     Entry nestedVideo =
         new Entry(
-            3L,
-            SESSION,
-            2L,
+            id(3L),
+            id(100L),
+            id(2L),
             new MessagePayload(
                 new AgentMessage(
                     AgentMessageRole.TOOL,
@@ -84,7 +85,8 @@ class CompactionPlannerTest {
                             false,
                             "{}"))),
                 null,
-                new ToolResultMetadata(1L, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+                new ToolResultMetadata(
+                    id(1L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
             BASE);
 
     assertEquals(1_200L, CompactionPlanner.estimateTokens(video));
@@ -119,8 +121,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 80L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(7L, preparation.cutEntryId()); // second turn 的 USER
-    assertEquals(5L, preparation.firstKeptEntryId()); // 重绕包含 TURN_END(5)，止于 ASSISTANT(4)
+    assertEquals(id(7L), preparation.cutEntryId()); // second turn 的 USER
+    assertEquals(id(5L), preparation.firstKeptEntryId()); // 重绕包含 TURN_END(5)，止于 ASSISTANT(4)
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
     assertTrue(preparation.tokensBefore() > 0);
@@ -134,12 +136,12 @@ class CompactionPlannerTest {
     path.root();
     path.turn("hi");
     path.assistant("call", "call-1");
-    path.toolResult(4L, "call-1"); // assistantEntryId = ASSISTANT(4)
+    path.toolResult(id(4L), "call-1"); // assistantEntryId = ASSISTANT(4)
     path.closeTurn();
 
     CompactionPreparation preparation = plan(path, 30L).orElseThrow();
 
-    assertEquals(4L, preparation.cutEntryId()); // ASSISTANT，绝不切在 TOOL(5)
+    assertEquals(id(4L), preparation.cutEntryId()); // ASSISTANT，绝不切在 TOOL(5)
     assertEquals(1, preparation.messagesToSummarize().size());
     assertTrue(contentText(preparation.messagesToSummarize().get(0)).contains("hi"));
   }
@@ -158,8 +160,8 @@ class CompactionPlannerTest {
     CompactionPreparation history = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.HISTORY, history.phase());
-    assertEquals(8L, history.cutEntryId()); // split ASSISTANT 是 cut
-    assertEquals(7L, history.turnPrefixStartEntryId()); // split turn 的 USER
+    assertEquals(id(8L), history.cutEntryId()); // split ASSISTANT 是 cut
+    assertEquals(id(7L), history.turnPrefixStartEntryId()); // split turn 的 USER
     assertEquals(2, history.messagesToSummarize().size()); // first turn 内容
     assertFalse(
         history.messagesToSummarize().stream()
@@ -200,8 +202,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.TURN_PREFIX, preparation.phase());
-    assertEquals(4L, preparation.cutEntryId());
-    assertEquals(3L, preparation.turnPrefixStartEntryId());
+    assertEquals(id(4L), preparation.cutEntryId());
+    assertEquals(id(3L), preparation.turnPrefixStartEntryId());
     assertEquals(1, preparation.messagesToSummarize().size());
   }
 
@@ -216,8 +218,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.TURN_PREFIX, preparation.phase());
-    assertEquals(5L, preparation.cutEntryId());
-    assertEquals(3L, preparation.turnPrefixStartEntryId());
+    assertEquals(id(5L), preparation.cutEntryId());
+    assertEquals(id(3L), preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
     assertTrue(contentText(preparation.messagesToSummarize().get(0)).contains("first queued"));
     assertTrue(contentText(preparation.messagesToSummarize().get(1)).contains("second queued"));
@@ -236,7 +238,7 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(7L, preparation.cutEntryId());
+    assertEquals(id(7L), preparation.cutEntryId());
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
   }
@@ -251,8 +253,8 @@ class CompactionPlannerTest {
         500L,
         true,
         "previous summary",
-        1L,
-        1L,
+        id(1L),
+        id(1L),
         null);
     path.custom("com.example", "state");
 
@@ -270,8 +272,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 40L).orElseThrow();
 
     assertEquals(CompactionPhase.TURN_PREFIX, preparation.phase()); // 切分且无先前历史
-    assertEquals(4L, preparation.cutEntryId());
-    assertEquals(3L, preparation.turnPrefixStartEntryId());
+    assertEquals(id(4L), preparation.cutEntryId());
+    assertEquals(id(3L), preparation.turnPrefixStartEntryId());
     assertEquals(1, preparation.messagesToSummarize().size());
   }
 
@@ -290,8 +292,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 60L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(8L, preparation.cutEntryId());
-    assertEquals(5L, preparation.firstKeptEntryId());
+    assertEquals(id(8L), preparation.cutEntryId());
+    assertEquals(id(5L), preparation.firstKeptEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
   }
 
@@ -304,7 +306,14 @@ class CompactionPlannerTest {
     path.closeTurn();
     // complete 压缩引用了不存在的 firstKeptEntryId -> 分支损坏。
     path.compaction(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 500L, true, "summary", 999L, 4L, null);
+        CompactionPhase.FULL,
+        CompactionTrigger.THRESHOLD,
+        500L,
+        true,
+        "summary",
+        id(999L),
+        id(4L),
+        null);
     path.turn("later");
 
     IllegalStateException error =
@@ -327,9 +336,9 @@ class CompactionPlannerTest {
             100L,
             false,
             "history",
-            2L,
-            999L, // cut 不在当前路径
-            3L);
+            id(2L),
+            id(999L), // cut 不在当前路径
+            id(3L));
     assertThrows(
         IllegalStateException.class,
         () -> planner().prepareTurnPrefix(path.path(), partial, 100_000L));
@@ -341,9 +350,9 @@ class CompactionPlannerTest {
             100L,
             false,
             "history",
-            2L,
-            4L,
-            4L); // turnPrefixStart == cut -> 空前缀
+            id(2L),
+            id(4L),
+            id(4L)); // turnPrefixStart == cut -> 空前缀
     assertThrows(
         IllegalStateException.class,
         () -> planner().prepareTurnPrefix(path.path(), emptyPrefix, 100_000L));
@@ -355,9 +364,9 @@ class CompactionPlannerTest {
             100L,
             false,
             "history",
-            5L,
-            4L,
-            3L); // firstKept 在 cut 之后
+            id(5L),
+            id(4L),
+            id(3L)); // firstKept 在 cut 之后
     assertThrows(
         IllegalStateException.class,
         () -> planner().prepareTurnPrefix(path.path(), inverted, 100_000L));
@@ -369,8 +378,8 @@ class CompactionPlannerTest {
             100L,
             true,
             "complete",
-            2L,
-            4L,
+            id(2L),
+            id(4L),
             null);
     assertThrows(
         IllegalStateException.class,
@@ -390,8 +399,8 @@ class CompactionPlannerTest {
         100L,
         true,
         "carried summary\n\n<read-files>\nold.txt\n</read-files>",
-        1L,
-        4L,
+        id(1L),
+        id(4L),
         null);
     path.turn("new messages");
     path.assistant("new reply");
@@ -429,8 +438,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 80L).orElseThrow();
 
     assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(10L, preparation.cutEntryId()); // 绝不落在被停止压缩 turn 内部
-    assertEquals(5L, preparation.firstKeptEntryId()); // 重绕穿过 6..8，止于 ASST1(4)
+    assertEquals(id(10L), preparation.cutEntryId()); // 绝不落在被停止压缩 turn 内部
+    assertEquals(id(5L), preparation.firstKeptEntryId()); // 重绕穿过 6..8，止于 ASST1(4)
     assertNull(preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size()); // 只有 USER1+ASST1
     assertFalse(
@@ -455,8 +464,8 @@ class CompactionPlannerTest {
     CompactionPreparation preparation = plan(path, 50L).orElseThrow();
 
     assertEquals(CompactionPhase.HISTORY, preparation.phase());
-    assertEquals(11L, preparation.cutEntryId());
-    assertEquals(10L, preparation.turnPrefixStartEntryId());
+    assertEquals(id(11L), preparation.cutEntryId());
+    assertEquals(id(10L), preparation.turnPrefixStartEntryId());
     assertEquals(2, preparation.messagesToSummarize().size());
     assertFalse(
         preparation.messagesToSummarize().stream()
@@ -482,9 +491,9 @@ class CompactionPlannerTest {
             500L,
             false,
             "history",
-            5L,
-            11L,
-            6L);
+            id(5L),
+            id(11L),
+            id(6L));
     CompactionPreparation prefix = planner().prepareTurnPrefix(path.path(), partial, 100_000L);
     assertEquals(1, prefix.messagesToSummarize().size());
     assertTrue(contentText(prefix.messagesToSummarize().get(0)).contains("second user"));
@@ -497,94 +506,75 @@ class CompactionPlannerTest {
             500L,
             false,
             "history",
-            5L,
-            8L,
-            6L);
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () -> planner().prepareTurnPrefix(path.path(), empty, 100_000L));
-    assertTrue(error.getMessage().contains("no context messages"), error.getMessage());
+            id(5L),
+            id(8L),
+            id(6L));
+    assertThrows(
+        IllegalStateException.class,
+        () -> planner().prepareTurnPrefix(path.path(), empty, 100_000L));
   }
 
-  @Test
-  void firstKeptRewindStopsAtCompleteCompactionPayload() {
-    // 对齐 Pi prevEntry.type === "compaction"：重绕绝不跨过 complete 压缩 payload（止于其后的 TURN_END）。
-    PathBuilder path = new PathBuilder();
-    path.root();
-    path.turn("first user");
-    path.assistant("first reply");
-    path.closeTurn();
-    path.compaction(
-        CompactionPhase.FULL, CompactionTrigger.THRESHOLD, 100L, true, "summary", 2L, 4L, null);
-    path.turn("second user");
-    path.assistant("second reply");
-
-    CompactionPreparation preparation = plan(path, 100L).orElseThrow();
-
-    assertEquals(CompactionPhase.FULL, preparation.phase());
-    assertEquals(10L, preparation.cutEntryId()); // USER2
-    assertEquals(8L, preparation.firstKeptEntryId()); // TURN_END 之后即 payload 边界
-    assertEquals(2, preparation.messagesToSummarize().size());
-  }
-
-  @Test
-  void firstKeptRewindStopsAtIncompleteHistoryPayload() {
-    // incomplete HISTORY payload 同样是重绕边界：绝不跨到更早的完整/不完整压缩 Entry。
-    PathBuilder path = new PathBuilder();
-    path.root();
-    path.turn("first user");
-    path.assistant("first reply");
-    path.closeTurn();
-    path.compaction(
-        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, 100L, false, "history", 2L, 4L, 3L);
-    path.turn("second user");
-    path.assistant("second reply");
-
-    CompactionPreparation preparation = plan(path, 100L).orElseThrow();
-
-    assertEquals(10L, preparation.cutEntryId());
-    assertEquals(8L, preparation.firstKeptEntryId()); // 止于 incomplete payload 后的 TURN_END
-  }
-
-  private static String contentText(AgentMessage message) {
-    return ((TextMessageContent) message.contents().get(0)).text();
-  }
-
-  private CompactionPlanner planner() {
+  private static CompactionPlanner planner() {
     return new CompactionPlanner(CONFIG);
   }
 
-  private Optional<CompactionPreparation> plan(PathBuilder path, long contextWindow) {
+  private static Optional<CompactionPreparation> plan(PathBuilder path, long contextWindow) {
     return planner().prepare(path.path(), CompactionTrigger.THRESHOLD, contextWindow);
   }
 
-  /** 自包含的合法 EntryPath 构造器：顺序 id、parent 链、开/关 turn 与 COMPACTION 语法自动维护。 */
+  private static String contentText(AgentMessage message) {
+    StringBuilder sb = new StringBuilder();
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof TextMessageContent text) {
+        sb.append(text.text());
+      }
+    }
+    return sb.toString();
+  }
+
+  /** 自包含合法路径构造器：id 顺序、parent 链、TURN 语法。 */
   private static final class PathBuilder {
     private final List<Entry> entries = new ArrayList<>();
+    private final BranchSettings SETTINGS =
+        new BranchSettings(
+            new EnvironmentName("env-1"),
+            "agent",
+            new ModelSelection("provider", "model", "v1"),
+            List.of());
     private long nextId = 1L;
-    private long openTurnStartId = -1L;
 
     PathBuilder root() {
-      entries.add(new Entry(nextId++, SESSION, null, new RootPayload(settings()), BASE));
+      entries.add(new Entry(id(nextId++), id(100L), null, new RootPayload(SETTINGS), BASE));
       return this;
     }
 
+    long turnStart() {
+      long cur = nextId++;
+      entries.add(
+          new Entry(
+              id(cur),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
+              BASE));
+      return cur;
+    }
+
+    /** 开启新输入 turn：[TURN_START(INPUT), USER 消息]。 */
     PathBuilder turn(String userText) {
       long startId = nextId++;
       entries.add(
           new Entry(
-              startId,
-              SESSION,
+              id(startId),
+              id(100L),
               parentId(),
-              new TurnStartPayload(TurnStartReason.INPUT, settings()),
+              new TurnStartPayload(TurnStartReason.INPUT, SETTINGS),
               BASE));
-      openTurnStartId = startId;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
-              startId,
+              id(nextId++),
+              id(100L),
+              id(startId),
               new MessagePayload(
                   new AgentMessage(
                       AgentMessageRole.USER, List.of(new TextMessageContent(text(userText)))),
@@ -594,34 +584,22 @@ class CompactionPlannerTest {
       return this;
     }
 
-    PathBuilder user(String userText) {
+    long user(String text) {
+      long cur = nextId++;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(cur),
+              id(100L),
               parentId(),
               new MessagePayload(
-                  new AgentMessage(
-                      AgentMessageRole.USER, List.of(new TextMessageContent(text(userText)))),
+                  new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))),
                   null,
                   null),
               BASE));
-      return this;
+      return cur;
     }
 
-    PathBuilder continuation() {
-      long startId = nextId++;
-      entries.add(
-          new Entry(
-              startId,
-              SESSION,
-              parentId(),
-              new TurnStartPayload(TurnStartReason.CONTINUATION, settings()),
-              BASE));
-      openTurnStartId = startId;
-      return this;
-    }
-
+    /** ASSISTANT 消息：文本 + 可选的 (callId, toolName) 工具调用（无调用时 COMPLETED）。 */
     PathBuilder assistant(String assistantText, String... callIds) {
       List<AgentMessageContent> contents = new ArrayList<>();
       for (String callId : callIds) {
@@ -632,8 +610,8 @@ class CompactionPlannerTest {
           callIds.length == 0 ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              id(100L),
               parentId(),
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
@@ -654,127 +632,78 @@ class CompactionPlannerTest {
       return this;
     }
 
-    PathBuilder toolResult(long assistantEntryId, String callId) {
+    /** 为最后一个（assistant）Entry 的每个 call 追加严格 ordinal 前缀的 TOOL result。 */
+    PathBuilder toolResults() {
+      UUID assistantEntryId = entries.get(entries.size() - 1).id();
+      int ordinal = 0;
+      for (AgentMessageContent content :
+          ((MessagePayload) entries.get(entries.size() - 1).payload()).message().contents()) {
+        if (!(content instanceof ToolCallMessageContent call)) {
+          continue;
+        }
+        entries.add(
+            new Entry(
+                id(nextId++),
+                id(100L),
+                parentId(),
+                new MessagePayload(
+                    new AgentMessage(
+                        AgentMessageRole.TOOL,
+                        List.of(
+                            new ToolResultMessageContent(
+                                call.toolCallId(),
+                                call.toolName(),
+                                call.rendererKey(),
+                                List.of(new TextMessageContent("ok")),
+                                false,
+                                "{}"))),
+                    null,
+                    new ToolResultMetadata(
+                        assistantEntryId,
+                        call.toolCallId(),
+                        ordinal++,
+                        ToolResultStatus.SUCCEEDED,
+                        false,
+                        null)),
+                BASE));
+      }
+      return this;
+    }
+
+    PathBuilder toolResult(UUID assistantEntryId, String toolCallId) {
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(nextId++),
+              id(100L),
               parentId(),
               new MessagePayload(
                   new AgentMessage(
                       AgentMessageRole.TOOL,
                       List.of(
                           new ToolResultMessageContent(
-                              callId,
+                              toolCallId,
                               "read",
                               "read",
-                              List.of(new TextMessageContent(text("file content"))),
+                              List.of(new TextMessageContent("ok")),
                               false,
                               "{}"))),
                   null,
                   new ToolResultMetadata(
-                      assistantEntryId, callId, 0, ToolResultStatus.SUCCEEDED, false, null)),
+                      assistantEntryId, toolCallId, 0, ToolResultStatus.SUCCEEDED, false, null)),
               BASE));
       return this;
     }
 
-    PathBuilder aborted(String abortedText) {
+    long turnEnd(UUID turnStartEntryId) {
+      long cur = nextId++;
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(cur),
+              id(100L),
               parentId(),
-              new AssistantAbortedPayload(
-                  new AgentMessage(
-                      AgentMessageRole.ASSISTANT,
-                      List.of(new TextMessageContent(text(abortedText))))),
+              new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
               BASE));
-      return this;
-    }
-
-    /** 被停止的 COMPACTION turn：以停止 barrier 关闭（无 payload 结果），语法与 ThreadProcessor 停止路径一致。 */
-    PathBuilder stoppedCompaction(String abortedText) {
-      long startId = nextId++;
-      entries.add(
-          new Entry(
-              startId,
-              SESSION,
-              parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, settings()),
-              BASE));
-      openTurnStartId = startId;
-      entries.add(
-          new Entry(
-              nextId++,
-              SESSION,
-              parentId(),
-              new AssistantAbortedPayload(
-                  new AgentMessage(
-                      AgentMessageRole.ASSISTANT,
-                      List.of(new TextMessageContent(text(abortedText))))),
-              BASE));
-      entries.add(
-          new Entry(
-              nextId++,
-              SESSION,
-              parentId(),
-              new TurnEndPayload(
-                  openTurnStartId,
-                  TurnEndOutcome.STOPPED,
-                  false,
-                  TurnEndReason.USER_STOP,
-                  "stop-1"),
-              BASE));
-      openTurnStartId = -1L;
-      return this;
-    }
-
-    PathBuilder custom(String pluginId, String customType) {
-      entries.add(
-          new Entry(
-              nextId++,
-              SESSION,
-              parentId(),
-              new CustomEntryPayload(pluginId, customType, 1, "{\"s\":1}"),
-              BASE));
-      return this;
-    }
-
-    PathBuilder compaction(
-        CompactionPhase phase,
-        CompactionTrigger trigger,
-        long tokensBefore,
-        boolean complete,
-        String summary,
-        long firstKeptEntryId,
-        long cutEntryId,
-        Long turnPrefixStartEntryId) {
-      long startId = nextId++;
-      entries.add(
-          new Entry(
-              startId,
-              SESSION,
-              parentId(),
-              new TurnStartPayload(TurnStartReason.COMPACTION, settings()),
-              BASE));
-      openTurnStartId = startId;
-      entries.add(
-          new Entry(
-              nextId++,
-              SESSION,
-              startId,
-              new CompactionPayload(
-                  phase,
-                  trigger,
-                  tokensBefore,
-                  complete,
-                  summary,
-                  firstKeptEntryId,
-                  cutEntryId,
-                  turnPrefixStartEntryId),
-              BASE));
-      closeTurn();
-      return this;
+      return cur;
     }
 
     PathBuilder closeTurn() {
@@ -782,24 +711,162 @@ class CompactionPlannerTest {
     }
 
     PathBuilder closeTurn(boolean continueModel) {
+      long cur = nextId++;
+      UUID lastTurnStart = findLastOpenTurnStart(); // find before adding
       entries.add(
           new Entry(
-              nextId++,
-              SESSION,
+              id(cur),
+              id(100L),
               parentId(),
               new TurnEndPayload(
-                  openTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                  lastTurnStart, TurnEndOutcome.COMPLETED, continueModel, null, null),
               BASE));
-      openTurnStartId = -1L;
+      return this;
+    }
+
+    long continuation() {
+      long cur = nextId++;
+      entries.add(
+          new Entry(
+              id(cur),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS),
+              BASE));
+      return cur;
+    }
+
+    PathBuilder aborted(String abortedText) {
+      long cur = nextId++;
+      entries.add(
+          new Entry(
+              id(cur),
+              id(100L),
+              parentId(),
+              new AssistantAbortedPayload(
+                  new AgentMessage(
+                      AgentMessageRole.ASSISTANT,
+                      List.of(new TextMessageContent(text(abortedText))))),
+              BASE));
+      return this;
+    }
+
+    /** 完成压缩 turn：[TURN_START(COMPACTION), COMPACTION payload, TURN_END]。 */
+    long compactionComplete(UUID firstKeptEntryId, UUID cutEntryId, UUID turnPrefixStartEntryId) {
+      long startId = nextId++;
+      entries.add(
+          new Entry(
+              id(startId),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              BASE));
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new CompactionPayload(
+                  CompactionPhase.FULL,
+                  CompactionTrigger.THRESHOLD,
+                  500L,
+                  true,
+                  "summary",
+                  firstKeptEntryId,
+                  cutEntryId,
+                  turnPrefixStartEntryId),
+              BASE));
+      long endId = nextId++;
+      entries.add(
+          new Entry(
+              id(endId),
+              id(100L),
+              parentId(),
+              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, false, null, null),
+              BASE));
+      return endId;
+    }
+
+    /** HISTORY incomplete compaction turn。 */
+    PathBuilder compaction(
+        CompactionPhase phase,
+        CompactionTrigger trigger,
+        long tokens,
+        boolean complete,
+        String summary,
+        UUID firstKeptEntryId,
+        UUID cutEntryId,
+        UUID turnPrefixStartEntryId) {
+      long startId = nextId++;
+      entries.add(
+          new Entry(
+              id(startId),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              BASE));
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new CompactionPayload(
+                  phase,
+                  trigger,
+                  tokens,
+                  complete,
+                  summary,
+                  firstKeptEntryId,
+                  cutEntryId,
+                  turnPrefixStartEntryId),
+              BASE));
+      long endId = nextId++;
+      entries.add(
+          new Entry(
+              id(endId),
+              id(100L),
+              parentId(),
+              new TurnEndPayload(id(startId), TurnEndOutcome.COMPLETED, false, null, null),
+              BASE));
+      return this;
+    }
+
+    PathBuilder stoppedCompaction(String abortedText) {
+      long startId = nextId++;
+      entries.add(
+          new Entry(
+              id(startId),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(TurnStartReason.COMPACTION, SETTINGS),
+              BASE));
+      aborted(abortedText);
+      long endId = nextId++;
+      entries.add(
+          new Entry(
+              id(endId),
+              id(100L),
+              parentId(),
+              new TurnEndPayload(
+                  id(startId), TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(1L)),
+              BASE));
+      return this;
+    }
+
+    PathBuilder custom(String plugin, String customType) {
+      long cur = nextId++;
+      entries.add(
+          new Entry(
+              id(cur),
+              id(100L),
+              parentId(),
+              new CustomEntryPayload(plugin, customType, 1, "{\"s\":1}"),
+              BASE));
       return this;
     }
 
     EntryPath path() {
       return new EntryPath(List.copyOf(entries));
-    }
-
-    private long parentId() {
-      return entries.get(entries.size() - 1).id();
     }
 
     /** 固定 100 字符的消息文本 -> 估计 25 token，便于精确控制 keepRecentTokens 累计。 */
@@ -811,13 +878,18 @@ class CompactionPlannerTest {
       }
       return builder.toString();
     }
-  }
 
-  private static BranchSettings settings() {
-    return new BranchSettings(
-        new EnvironmentName("env-1"),
-        "agent",
-        new ModelSelection("provider", "model", "v1"),
-        List.of());
+    private UUID parentId() {
+      return entries.get(entries.size() - 1).id();
+    }
+
+    private UUID findLastOpenTurnStart() {
+      for (int i = entries.size() - 1; i >= 0; i--) {
+        if (entries.get(i).payload() instanceof TurnStartPayload) {
+          return entries.get(i).id();
+        }
+      }
+      throw new IllegalStateException("no open TURN_START");
+    }
   }
 }

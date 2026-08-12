@@ -10,11 +10,15 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 
 /** 有界 executor 拒绝任务时必须移除进程内 dedup 标记，允许 durable run 后续重派发。 */
 class CanvasFunctionDispatcherTest {
+
+  private static final UUID NODE = UUID.randomUUID();
+  private static final UUID REQUEST = UUID.randomUUID();
 
   @Test
   void clearsDedupMarkerWhenExecutorRejects() {
@@ -23,10 +27,10 @@ class CanvasFunctionDispatcherTest {
     doThrow(new RejectedExecutionException("full")).when(executor).execute(any());
     CanvasFunctionDispatcher dispatcher = new CanvasFunctionDispatcher(executor, worker);
 
-    assertFalse(dispatcher.dispatch(1L, "request"));
-    assertFalse(dispatcher.dispatch(1L, "request"));
+    assertFalse(dispatcher.dispatch(NODE, REQUEST));
+    assertFalse(dispatcher.dispatch(NODE, REQUEST));
 
-    assertFalse(dispatcher.isDispatched(1L, "request"));
+    assertFalse(dispatcher.isDispatched(NODE, REQUEST));
     verify(executor, times(2)).execute(any());
   }
 
@@ -36,10 +40,10 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionDispatcher dispatcher =
         new CanvasFunctionDispatcher(executor, mock(CanvasFunctionWorker.class));
 
-    assertTrue(dispatcher.dispatch(1L, "request"));
-    assertTrue(dispatcher.dispatch(1L, "request"));
+    assertTrue(dispatcher.dispatch(NODE, REQUEST));
+    assertTrue(dispatcher.dispatch(NODE, REQUEST));
 
-    assertTrue(dispatcher.isDispatched(1L, "request"));
+    assertTrue(dispatcher.isDispatched(NODE, REQUEST));
     verify(executor).execute(any());
   }
 }

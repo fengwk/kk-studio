@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -66,7 +67,7 @@ public final class CompactionFileSections {
     List<Entry> entries = path.entries();
     // 从分支起点（索引 0）累计；HISTORY phase 只扫到 turnPrefixStartEntryId，完整阶段（FULL/TURN_PREFIX）扫到
     // cutEntryId。
-    long rangeEndId =
+    UUID rangeEndId =
         request.phase() == CompactionPhase.HISTORY && request.turnPrefixStartEntryId() != null
             ? request.turnPrefixStartEntryId()
             : request.cutEntryId();
@@ -134,9 +135,9 @@ public final class CompactionFileSections {
         && !RESERVED_TAG.matcher(path).find();
   }
 
-  private static int indexOfId(List<Entry> entries, long entryId) {
+  private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }

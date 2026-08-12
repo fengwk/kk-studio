@@ -5,10 +5,7 @@ import org.springframework.core.io.ClassPathResource;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.PromptSegment;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
@@ -23,9 +20,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Function;
+import java.util.UUID;
 
-/** 构造 H3 Prompt Agent 的固定 SYSTEM 与结构化多模态 USER 消息。 */
+/**
+ * 构造 H3 Prompt Agent 的固定 SYSTEM 与 USER 消息。
+ *
+ * <p>USER 消息只包含 durable-safe 的 TEXT 内容（manifest 表格 + 每个引用一个 label 段落）；媒体内容不进 durable JSON，由提交方在入队
+ * preflight 中按 manifest 顺序物化为全局存储 RESOURCE 内容（见 {@link MiniMaxH3CanvasFunctionAdapter}）。
+ */
 public final class H3PromptRequestBuilder {
 
   private static final String SYSTEM_RESOURCE =
@@ -45,13 +47,9 @@ public final class H3PromptRequestBuilder {
     return systemPrompt;
   }
 
-  public AgentMessage userMessage(
-      CanvasFunctionFrozenRun run,
-      H3ReferenceManifest manifest,
-      Function<H3ReferenceManifest.Item, String> sourceResolver) {
+  public AgentMessage userMessage(CanvasFunctionFrozenRun run, H3ReferenceManifest manifest) {
     Objects.requireNonNull(run, "run");
     Objects.requireNonNull(manifest, "manifest");
-    Objects.requireNonNull(sourceResolver, "sourceResolver");
     String ratio = (String) run.config().parameters().get("ratio");
     int duration = (Integer) run.config().parameters().get("duration");
     String userPrompt = renderUserPrompt(run, manifest);
@@ -87,7 +85,7 @@ public final class H3PromptRequestBuilder {
           .append(" | ")
           .append(reference.mediaType())
           .append(" | ")
-          .append(reference.size())
+          .append(reference.sizeBytes())
           .append(" | ")
           .append(note)
           .append(" |\n");
@@ -96,17 +94,9 @@ public final class H3PromptRequestBuilder {
     List<AgentMessageContent> contents = new ArrayList<>();
     contents.add(new TextMessageContent(body.toString()));
     for (H3ReferenceManifest.Item item : manifest.items()) {
-      String source = requireText(sourceResolver.apply(item), "source");
       contents.add(
           new TextMessageContent(
               "\nThe next attachment is " + item.label() + " from the frozen manifest.\n"));
-      contents.add(
-          switch (item.kind()) {
-            case IMAGE -> new ImageMessageContent(item.reference().mediaType(), source);
-            case VIDEO -> new VideoMessageContent(item.reference().mediaType(), source);
-            case AUDIO -> new AudioMessageContent(item.reference().mediaType(), source);
-            case TEXT -> throw new IllegalStateException("H3 manifest must not contain TEXT");
-          });
     }
     return new AgentMessage(AgentMessageRole.USER, contents);
   }
@@ -157,5 +147,5 @@ public final class H3PromptRequestBuilder {
     return value;
   }
 
-  private record ReferenceKey(long nodeId, int index) {}
+  private record ReferenceKey(UUID nodeId, int index) {}
 }

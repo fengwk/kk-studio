@@ -8,9 +8,9 @@ export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom:
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
-// v3 丢弃了本轮回归期间写入的 v2 视口：首次进入会重新 initial fit 到新布局。
+// v6 迁移 UUID 实体 id：v5 的十进制 id 时代条目不再读取。
 export function canvasViewportStorageKey(canvasId: string): string {
-  return `kkstudio.canvas.viewport.v3:${canvasId}`
+  return `kkstudio.canvas.viewport.v6:${canvasId}`
 }
 
 export function hasStoredCanvasViewport(

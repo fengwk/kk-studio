@@ -3,13 +3,17 @@ package fun.fengwk.kkstudio.core.ai.chat.repo;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 
 import java.util.List;
+import java.util.UUID;
 
 /** 持久化 Chat 集合仓库。 */
 public interface ChatRepository {
 
   List<Chat> listNewestFirst();
 
-  Chat getById(long id);
+  Chat getById(UUID id);
+
+  /** 行级锁定读取（{@code for update}），用于深删除时固定 Chat 版本与关联枚举。 */
+  Chat lockById(UUID id);
 
   boolean create(Chat chat);
 
@@ -17,5 +21,5 @@ public interface ChatRepository {
   boolean updateById(Chat chat, long expectedVersion);
 
   /** 基于 (id, expectedVersion) 的原子 CAS 删除。 */
-  boolean deleteById(long id, long expectedVersion);
+  boolean deleteById(UUID id, long expectedVersion);
 }

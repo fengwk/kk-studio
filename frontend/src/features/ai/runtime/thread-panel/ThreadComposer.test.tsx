@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { createTextPart } from '@/features/ai/composer/composer-parts'
 import {
   filterThreadCommands,
   threadCommandsForScene,
@@ -48,13 +49,13 @@ describe('ThreadComposer and commands', () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
     const onCommand = vi.fn()
-    const onDraftChange = vi.fn()
+    const onPartsChange = vi.fn()
     const { rerender } = render(
       <ThreadComposer
-        draft="hello"
+        parts={[createTextPart('hello')]}
         pending={false}
         disabled={false}
-        onDraftChange={onDraftChange}
+        onPartsChange={onPartsChange}
         onSubmit={onSubmit}
         onCommand={onCommand}
       />,
@@ -65,10 +66,10 @@ describe('ThreadComposer and commands', () => {
 
     rerender(
       <ThreadComposer
-        draft="/stop"
+        parts={[createTextPart('/stop')]}
         pending={false}
         disabled={false}
-        onDraftChange={onDraftChange}
+        onPartsChange={onPartsChange}
         onSubmit={onSubmit}
         onCommand={onCommand}
       />,
@@ -80,10 +81,10 @@ describe('ThreadComposer and commands', () => {
     onCommand.mockClear()
     rerender(
       <ThreadComposer
-        draft="/tree"
+        parts={[createTextPart('/tree')]}
         pending={false}
         disabled={false}
-        onDraftChange={onDraftChange}
+        onPartsChange={onPartsChange}
         onSubmit={onSubmit}
         onCommand={onCommand}
       />,
@@ -96,10 +97,10 @@ describe('ThreadComposer and commands', () => {
   it('blocks send when draft is blank or pending', () => {
     const { rerender } = render(
       <ThreadComposer
-        draft="   "
+        parts={[createTextPart('   ')]}
         pending={false}
         disabled={false}
-        onDraftChange={vi.fn()}
+        onPartsChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
       />,
@@ -107,10 +108,10 @@ describe('ThreadComposer and commands', () => {
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     rerender(
       <ThreadComposer
-        draft="/yolo"
+        parts={[createTextPart('/yolo')]}
         pending={false}
         disabled={false}
-        onDraftChange={vi.fn()}
+        onPartsChange={vi.fn()}
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
       />,

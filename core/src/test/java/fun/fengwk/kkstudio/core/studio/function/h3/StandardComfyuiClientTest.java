@@ -19,11 +19,14 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 标准客户端以本地 HTTP route 验证 multipart、严格 history、编码、流式 view 与 pending-only cancel。 */
 class StandardComfyuiClientTest {
+
+  private static final UUID CANVAS = new UUID(0L, 7L);
 
   private HttpServer server;
   private StandardComfyuiClient client;
@@ -31,7 +34,7 @@ class StandardComfyuiClientTest {
       new AtomicReference<>("{\"prompt_id\":\"p1\",\"node_errors\":{}}");
   private final AtomicReference<String> uploadResponse =
       new AtomicReference<>(
-          "{\"name\":\"12.mp4\",\"subfolder\":\"kk-studio/7\",\"type\":\"input\"}");
+          "{\"name\":\"12.mp4\",\"subfolder\":\"kk-studio/00000000-0000-0000-0000-000000000007\",\"type\":\"input\"}");
   private final AtomicReference<String> viewQuery = new AtomicReference<>();
   private final AtomicReference<String> queueDeleteBody = new AtomicReference<>();
   private final AtomicInteger queueDeleteStatus = new AtomicInteger(200);
@@ -108,8 +111,8 @@ class StandardComfyuiClientTest {
   void uploadsFixedLengthMultipartAndSubmitsStrictPrompt() {
     H3UploadedFile uploaded =
         client.upload(
-            "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), 7L);
-    assertEquals(new H3UploadedFile("12.mp4", "kk-studio/7", "input"), uploaded);
+            "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), CANVAS);
+    assertEquals(new H3UploadedFile("12.mp4", "kk-studio/" + CANVAS, "input"), uploaded);
 
     ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
     assertEquals("p1", client.submit(workflow, "client-1"));
@@ -120,7 +123,7 @@ class StandardComfyuiClientTest {
         IllegalArgumentException.class,
         () ->
             client.upload(
-                "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), 7L));
+                "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), CANVAS));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -129,7 +132,7 @@ class StandardComfyuiClientTest {
                 "video/mp4",
                 3L,
                 new ByteArrayInputStream(new byte[] {1, 2, 3}),
-                7L));
+                CANVAS));
   }
 
   @Test
@@ -217,15 +220,17 @@ class StandardComfyuiClientTest {
                 new ObjectMapper()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> client.upload("a.png", "", 1L, new ByteArrayInputStream(new byte[] {1}), 7L));
+        () -> client.upload("a.png", "", 1L, new ByteArrayInputStream(new byte[] {1}), CANVAS));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            client.upload("a.png", "image/png", 0L, new ByteArrayInputStream(new byte[] {1}), 7L));
+            client.upload(
+                "a.png", "image/png", 0L, new ByteArrayInputStream(new byte[] {1}), CANVAS));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
-            client.upload("a.png", "image/png", 1L, new ByteArrayInputStream(new byte[] {1}), 0L));
+            client.upload(
+                "a.png", "image/png", 1L, new ByteArrayInputStream(new byte[] {1}), null));
     assertThrows(
         IllegalArgumentException.class,
         () -> client.submit(new ObjectMapper().createObjectNode(), " "));
@@ -245,7 +250,7 @@ class StandardComfyuiClientTest {
     String multipart = new String(body, StandardCharsets.ISO_8859_1);
     assertTrue(multipart.contains("name=\"type\"\r\n\r\ninput"));
     assertTrue(multipart.contains("name=\"overwrite\"\r\n\r\ntrue"));
-    assertTrue(multipart.contains("name=\"subfolder\"\r\n\r\nkk-studio/7"));
+    assertTrue(multipart.contains("name=\"subfolder\"\r\n\r\nkk-studio/" + CANVAS));
     assertTrue(multipart.contains("name=\"image\"; filename=\"12.mp4\""));
     json(exchange, 200, uploadResponse.get());
   }

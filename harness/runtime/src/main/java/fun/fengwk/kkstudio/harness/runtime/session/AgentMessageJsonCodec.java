@@ -9,17 +9,16 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
-
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
- * 共享的 {@link AgentMessage} 与 9 类 {@link AgentMessageContent} 严格、确定性 JSON codec。
+ * 共享的 {@link AgentMessage} 与 6 类 durable {@link AgentMessageContent} 严格、确定性 JSON codec。
  *
  * <p>字段固定且顺序确定；content 通过 {@code type} discriminator 区分。codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON
  * null；trailing token（共享 {@link ObjectMapper} 启用 {@link
@@ -27,6 +26,10 @@ import java.util.Set;
  * JsonParser.Feature#STRICT_DUPLICATE_DETECTION}）；未知枚举；未知 content discriminator；raw {@code
  * argumentsJson} / {@code detailsJson} 非单一 JSON object；raw {@code json} 非单一 JSON value；{@code
  * tool_result} 嵌套 {@code tool_call} 或 {@code tool_result}。encode 端同样严格校验 raw JSON 字段。
+ *
+ * <p>durable 内容类型恰为 6 类：text / thinking / json / tool_call / tool_result / resource（resource 是唯一
+ * durable 媒体引用：blobId/name/preview）。瞬时 Provider 投影类型 Image / Audio / Video（携带 attempt-only source）在
+ * encode 与 decode 两端都确定性拒绝，绝不进入持久化 JSON。
  *
  * <p>String API 与 node API 都用于组合 codec（如 Entry payload / Thread command payload codec）。
  */
@@ -37,9 +40,6 @@ public final class AgentMessageJsonCodec {
 
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
   private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
-  private static final Set<String> IMAGE_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> AUDIO_FIELDS = orderedSet("type", "mediaType", "source");
-  private static final Set<String> VIDEO_FIELDS = orderedSet("type", "mediaType", "source");
   private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
@@ -48,7 +48,7 @@ public final class AgentMessageJsonCodec {
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
-      orderedSet("type", "uri", "mediaType", "name", "size", "sha256", "preview");
+      orderedSet("type", "blobId", "name", "preview");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -70,6 +70,28 @@ public final class AgentMessageJsonCodec {
     node.put("role", message.role().name());
     ArrayNode contents = node.putArray("contents");
     for (AgentMessageContent content : message.contents()) {
+      contents.add(encodeContent(content));
+    }
+    return node;
+  }
+
+  /**
+   * 把 {@link AgentMessage} 编码为 client command 请求的 canonical {@link ObjectNode}：与 {@link
+   * #encodeNode} 相同，但允许瞬时 {@link AttachmentMessageContent}（编码为 {@code
+   * {"type":"attachment","uploadId":...}}）。 请求 hash 只基于该形态计算，绝不进入 durable payload。
+   */
+  public ObjectNode encodeRequestNode(AgentMessage message) {
+    Objects.requireNonNull(message, "message");
+    ObjectNode node = NODES.objectNode();
+    node.put("role", message.role().name());
+    ArrayNode contents = node.putArray("contents");
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof AttachmentMessageContent attachment) {
+        ObjectNode item = contents.addObject();
+        item.put("type", "attachment");
+        item.put("uploadId", attachment.uploadId().toString());
+        continue;
+      }
       contents.add(encodeContent(content));
     }
     return node;
@@ -113,21 +135,12 @@ public final class AgentMessageJsonCodec {
         node.put("type", "text");
         node.put("text", value.text());
       }
-      case ImageMessageContent value -> {
-        node.put("type", "image");
-        node.put("mediaType", value.mediaType());
-        node.put("source", value.source());
-      }
-      case AudioMessageContent value -> {
-        node.put("type", "audio");
-        node.put("mediaType", value.mediaType());
-        node.put("source", value.source());
-      }
-      case VideoMessageContent value -> {
-        node.put("type", "video");
-        node.put("mediaType", value.mediaType());
-        node.put("source", value.source());
-      }
+      case ImageMessageContent value -> throw new IllegalArgumentException(
+          "image content is transient (provider projection only) and must never be persisted");
+      case AudioMessageContent value -> throw new IllegalArgumentException(
+          "audio content is transient (provider projection only) and must never be persisted");
+      case VideoMessageContent value -> throw new IllegalArgumentException(
+          "video content is transient (provider projection only) and must never be persisted");
       case ThinkingMessageContent value -> {
         node.put("type", "thinking");
         node.put("text", value.text());
@@ -165,15 +178,13 @@ public final class AgentMessageJsonCodec {
         node.put("detailsJson", value.detailsJson());
       }
       case ResourceMessageContent value -> {
-        ResourceRef resource = value.resource();
         node.put("type", "resource");
-        node.put("uri", resource.uri());
-        node.put("mediaType", resource.mediaType());
-        putNullableText(node, "name", resource.name());
-        putNullableLong(node, "size", resource.size());
-        putNullableText(node, "sha256", resource.sha256());
+        node.put("blobId", value.blobId().toString());
+        putNullableText(node, "name", value.name());
         putNullableText(node, "preview", value.preview());
       }
+      case AttachmentMessageContent value -> throw new IllegalArgumentException(
+          "attachment content is transient and must never be persisted");
     }
     return node;
   }
@@ -190,21 +201,6 @@ public final class AgentMessageJsonCodec {
         requireExactFields(node, TEXT_FIELDS, "content");
         // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
         yield new TextMessageContent(requiredTextAllowEmpty(node, "text", "content"));
-      }
-      case "image" -> {
-        requireExactFields(node, IMAGE_FIELDS, "content");
-        yield new ImageMessageContent(
-            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
-      }
-      case "audio" -> {
-        requireExactFields(node, AUDIO_FIELDS, "content");
-        yield new AudioMessageContent(
-            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
-      }
-      case "video" -> {
-        requireExactFields(node, VIDEO_FIELDS, "content");
-        yield new VideoMessageContent(
-            requiredText(node, "mediaType", "content"), requiredText(node, "source", "content"));
       }
       case "thinking" -> {
         requireExactFields(node, THINKING_FIELDS, "content");
@@ -247,15 +243,14 @@ public final class AgentMessageJsonCodec {
       case "resource" -> {
         requireExactFields(node, RESOURCE_FIELDS, "content");
         yield new ResourceMessageContent(
-            new ResourceRef(
-                requiredText(node, "uri", "content"),
-                requiredText(node, "mediaType", "content"),
-                nullableText(node, "name", "content"),
-                nullableLong(node, "size", "content"),
-                nullableText(node, "sha256", "content")),
+            canonicalUuid(node, "blobId", "content"),
+            nullableText(node, "name", "content"),
             nullableText(node, "preview", "content"));
       }
-      default -> throw new IllegalArgumentException("unknown agent message content type: " + type);
+      default -> throw new IllegalArgumentException(
+          "unknown agent message content type: "
+              + type
+              + " (attachment and media content are transient and cannot be persisted)");
     };
   }
 
@@ -373,16 +368,25 @@ public final class AgentMessageJsonCodec {
     return value.textValue();
   }
 
-  /** 可空整数字段：JSON null 或 integer（范围约束由 ResourceRef 构造校验）。 */
-  private static Long nullableLong(ObjectNode node, String field, String context) {
+  /** 必填 canonical UUID 文本字段（{@code UUID.fromString} 往返一致）。 */
+  private static UUID canonicalUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value.isNull()) {
-      return null;
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
     }
-    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new IllegalArgumentException(context + "." + field + " must be an integer or null");
+    String text = value.textValue();
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(text);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID: " + text, error);
     }
-    return value.longValue();
+    if (!parsed.toString().equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID: " + text);
+    }
+    return parsed;
   }
 
   private static void putNullableText(ObjectNode node, String field, String value) {
@@ -390,14 +394,6 @@ public final class AgentMessageJsonCodec {
       node.putNull(field);
     } else {
       node.put(field, value);
-    }
-  }
-
-  private static void putNullableLong(ObjectNode node, String field, Long value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value.longValue());
     }
   }
 

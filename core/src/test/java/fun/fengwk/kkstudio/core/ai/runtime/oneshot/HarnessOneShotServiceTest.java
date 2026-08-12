@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -46,17 +48,24 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** one-shot service 证明 root 配置、同批消息、恢复观察、终态文本与 timeout stop。 */
 class HarnessOneShotServiceTest {
 
   private static final Instant NOW = Instant.parse("2026-08-10T00:00:00Z");
+
+  private static UUID id(long value) {
+    return new UUID(0L, value);
+  }
+
   private static final EnvironmentName ENVIRONMENT = new EnvironmentName("h3-prompt");
   private static final BranchSettings SETTINGS =
       new BranchSettings(
@@ -87,14 +96,13 @@ class HarnessOneShotServiceTest {
 
   @Test
   void submitsSystemAndStructuredUserInOneBatchWithNoTools() {
-    Entry root = new Entry(2L, 1L, null, new RootPayload(SETTINGS, null), NOW);
-    ThreadState thread = new ThreadState(3L, root.id(), false, 1L, 0L, NOW, NOW);
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
+    ThreadState thread = new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW);
     when(runtime.createThread(any(CreateThreadCommand.class)))
-        .thenReturn(new CreatedThread(new Session(1L, "one-shot", NOW), root, thread));
+        .thenReturn(new CreatedThread(new Session(id(1), NOW), root, thread));
 
-    long threadId =
+    UUID threadId =
         service.submit(
-            "one-shot",
             "h3-agent",
             ENVIRONMENT,
             "system",
@@ -102,12 +110,12 @@ class HarnessOneShotServiceTest {
                 AgentMessageRole.USER,
                 List.of(new TextMessageContent("user"), new TextMessageContent(" media"))));
 
-    assertEquals(3L, threadId);
+    assertEquals(id(3), threadId);
     ArgumentCaptor<CreateThreadCommand> create = ArgumentCaptor.forClass(CreateThreadCommand.class);
     verify(runtime).createThread(create.capture());
     assertEquals(List.of(), create.getValue().branchSettings().activeTools());
     ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batch.capture());
+    verify(runtime).enqueueCommands(batch.capture(), any(NewCommandPreflight.class));
     assertEquals(2, batch.getValue().commands().size());
     assertEquals(
         AgentMessageRole.SYSTEM,
@@ -122,27 +130,50 @@ class HarnessOneShotServiceTest {
   }
 
   @Test
+  void passesPreflightThroughAndKeepsClientIdsAndHashes() {
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
+    ThreadState thread = new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW);
+    when(runtime.createThread(any(CreateThreadCommand.class)))
+        .thenReturn(new CreatedThread(new Session(id(1), NOW), root, thread));
+
+    NewCommandPreflight preflight = (tx, sessionId, commands) -> List.copyOf(commands);
+    UUID threadId =
+        service.submit(
+            "h3-agent",
+            ENVIRONMENT,
+            "system",
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("user"))),
+            preflight);
+
+    assertEquals(id(3), threadId);
+    ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
+    verify(runtime).enqueueCommands(batch.capture(), eq(preflight));
+    List<NewThreadCommand> prepared = preflight.prepare(null, id(1), batch.getValue().commands());
+    assertEquals(batch.getValue().commands(), prepared);
+  }
+
+  @Test
   void resumesByThreadIdAndExtractsLastAssistantText() {
     ThreadSnapshot completed = completed("final prompt");
-    when(runtime.getThreadSnapshot(3L)).thenReturn(completed);
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(completed);
 
-    assertEquals("final prompt", service.await(3L, Duration.ofSeconds(1), () -> true));
-    verify(runtime).getThreadSnapshot(3L);
+    assertEquals("final prompt", service.await(id(3), Duration.ofSeconds(1), () -> true));
+    verify(runtime).getThreadSnapshot(id(3));
   }
 
   @Test
   void timeoutStopsBestEffortAndEmptyTextFails() {
     ThreadSnapshot idle = idle();
-    when(runtime.getThreadSnapshot(3L)).thenReturn(idle);
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(idle);
 
     assertThrows(
-        IllegalStateException.class, () -> service.await(3L, Duration.ofNanos(1), () -> true));
+        IllegalStateException.class, () -> service.await(id(3), Duration.ofNanos(1), () -> true));
     verify(runtime).stop(any(StopCommand.class));
 
     ThreadSnapshot completed = completed(" ");
-    when(runtime.getThreadSnapshot(4L)).thenReturn(completed);
+    when(runtime.getThreadSnapshot(id(4))).thenReturn(completed);
     assertThrows(
-        IllegalStateException.class, () -> service.await(4L, Duration.ofSeconds(1), () -> true));
+        IllegalStateException.class, () -> service.await(id(4), Duration.ofSeconds(1), () -> true));
   }
 
   @Test
@@ -151,23 +182,23 @@ class HarnessOneShotServiceTest {
         IllegalArgumentException.class,
         () ->
             service.submit(
-                "title",
                 "h3-agent",
                 ENVIRONMENT,
                 "system",
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("wrong role")))));
     assertThrows(
-        IllegalArgumentException.class, () -> service.await(0L, Duration.ofSeconds(1), () -> true));
+        NullPointerException.class, () -> service.await(null, Duration.ofSeconds(1), () -> true));
 
     ThreadSnapshot idle = idle();
-    when(runtime.getThreadSnapshot(3L)).thenReturn(idle);
+    when(runtime.getThreadSnapshot(id(3))).thenReturn(idle);
     assertThrows(
-        IllegalStateException.class, () -> service.await(3L, Duration.ofSeconds(1), () -> false));
+        IllegalStateException.class,
+        () -> service.await(id(3), Duration.ofSeconds(1), () -> false));
     verify(runtime).stop(any(StopCommand.class));
 
-    service.stop(0L);
-    verify(runtime, never()).getThreadSnapshot(0L);
+    assertThrows(NullPointerException.class, () -> service.stop(null));
+    verify(runtime, never()).getThreadSnapshot(null);
   }
 
   @Test
@@ -183,15 +214,15 @@ class HarnessOneShotServiceTest {
                     AgentMessageRole.ASSISTANT,
                     List.of(new TextMessageContent("partial response")))),
             TurnEndOutcome.STOPPED);
-    when(runtime.getThreadSnapshot(5L)).thenReturn(error);
-    when(runtime.getThreadSnapshot(6L)).thenReturn(aborted);
+    when(runtime.getThreadSnapshot(id(5))).thenReturn(error);
+    when(runtime.getThreadSnapshot(id(6))).thenReturn(aborted);
     assertThrows(
-        IllegalStateException.class, () -> service.await(5L, Duration.ofSeconds(1), () -> true));
+        IllegalStateException.class, () -> service.await(id(5), Duration.ofSeconds(1), () -> true));
     assertThrows(
-        IllegalStateException.class, () -> service.await(6L, Duration.ofSeconds(1), () -> true));
+        IllegalStateException.class, () -> service.await(id(6), Duration.ofSeconds(1), () -> true));
 
     ThreadSnapshot idle = idle();
-    when(runtime.getThreadSnapshot(9L))
+    when(runtime.getThreadSnapshot(id(9)))
         .thenReturn(idle)
         .thenThrow(new HarnessRuntimeNotFoundException("gone"));
     doThrow(
@@ -199,13 +230,13 @@ class HarnessOneShotServiceTest {
                 HarnessRuntimeConflictException.Reason.STALE_REVISION, "stale"))
         .when(runtime)
         .stop(any(StopCommand.class));
-    service.stop(9L);
+    service.stop(id(9));
   }
 
   private static ThreadSnapshot idle() {
-    Entry root = new Entry(2L, 1L, null, new RootPayload(SETTINGS, null), NOW);
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     return new ThreadSnapshot(
-        new ThreadState(3L, root.id(), false, 1L, 0L, NOW, NOW),
+        new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW),
         new EntryPath(List.of(root)),
         List.of(),
         null,
@@ -213,13 +244,14 @@ class HarnessOneShotServiceTest {
   }
 
   private static ThreadSnapshot completed(String text) {
-    Entry root = new Entry(2L, 1L, null, new RootPayload(SETTINGS, null), NOW);
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
-        new Entry(4L, 1L, root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+        new Entry(
+            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
     Entry user =
         new Entry(
-            5L,
-            1L,
+            id(5),
+            id(1),
             turn.id(),
             new MessagePayload(
                 new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("request"))),
@@ -230,8 +262,8 @@ class HarnessOneShotServiceTest {
     when(metadata.stopReason()).thenReturn(ProviderStopReason.COMPLETED);
     Entry assistant =
         new Entry(
-            6L,
-            1L,
+            id(6),
+            id(1),
             user.id(),
             new MessagePayload(
                 new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
@@ -240,13 +272,13 @@ class HarnessOneShotServiceTest {
             NOW);
     Entry end =
         new Entry(
-            7L,
-            1L,
+            id(7),
+            id(1),
             assistant.id(),
             new TurnEndPayload(turn.id(), TurnEndOutcome.COMPLETED, false, null, null),
             NOW);
     return new ThreadSnapshot(
-        new ThreadState(3L, end.id(), false, 2L, 2L, NOW, NOW),
+        new ThreadState(id(3), end.id(), false, 2L, 2L, NOW, NOW),
         new EntryPath(List.of(root, turn, user, assistant, end)),
         List.of(),
         null,
@@ -254,24 +286,25 @@ class HarnessOneShotServiceTest {
   }
 
   private static ThreadSnapshot terminalFailure(EntryPayload failure, TurnEndOutcome outcome) {
-    Entry root = new Entry(2L, 1L, null, new RootPayload(SETTINGS, null), NOW);
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
     Entry turn =
-        new Entry(4L, 1L, root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
+        new Entry(
+            id(4), id(1), root.id(), new TurnStartPayload(TurnStartReason.INPUT, SETTINGS), NOW);
     Entry user =
         new Entry(
-            5L,
-            1L,
+            id(5),
+            id(1),
             turn.id(),
             new MessagePayload(
                 new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("request"))),
                 null,
                 null),
             NOW);
-    Entry failureEntry = new Entry(6L, 1L, user.id(), failure, NOW);
+    Entry failureEntry = new Entry(id(6), id(1), user.id(), failure, NOW);
     Entry end =
         new Entry(
-            7L,
-            1L,
+            id(7),
+            id(1),
             failureEntry.id(),
             new TurnEndPayload(
                 turn.id(),
@@ -280,10 +313,10 @@ class HarnessOneShotServiceTest {
                 outcome == TurnEndOutcome.FAILED
                     ? TurnEndReason.TURN_FAILED
                     : TurnEndReason.USER_STOP,
-                outcome == TurnEndOutcome.STOPPED ? "STOP/3/request" : null),
+                outcome == TurnEndOutcome.STOPPED ? id(3) : null),
             NOW);
     return new ThreadSnapshot(
-        new ThreadState(3L, end.id(), false, 2L, 2L, NOW, NOW),
+        new ThreadState(id(3), end.id(), false, 2L, 2L, NOW, NOW),
         new EntryPath(List.of(root, turn, user, failureEntry, end)),
         List.of(),
         null,

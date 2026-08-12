@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -42,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -58,6 +60,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
@@ -88,17 +91,17 @@ final class StoreTestSupport {
   }
 
   /** 最小已提交 baseline：包含 ROOT 的一个 session，以及指向该 ROOT 的一个 thread。 */
-  record Baseline(long sessionId, long rootEntryId, long threadId) {}
+  record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
   /** 包含一条开放的 TURN_START chain 的 baseline；thread head 指向该 TURN_START。 */
-  record TurnBaseline(long sessionId, long rootEntryId, long turnStartEntryId, long threadId) {}
+  record TurnBaseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
   static Baseline seedThreadBaseline(HarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertThread(thread(threadId, rootEntryId));
@@ -109,10 +112,10 @@ final class StoreTestSupport {
   static TurnBaseline seedTurnBaseline(HarnessStore store) {
     return store.transaction(
         tx -> {
-          long sessionId = tx.nextId();
-          long rootEntryId = tx.nextId();
-          long turnStartEntryId = tx.nextId();
-          long threadId = tx.nextId();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1));
@@ -122,39 +125,39 @@ final class StoreTestSupport {
   }
 
   /** 在 {@code parentEntryId} 下插入一个带新 id 的子 Entry，并返回该 id。 */
-  static long insertChildEntry(
-      HarnessStore store, long sessionId, long parentEntryId, EntryPayload payload) {
+  static UUID insertChildEntry(
+      HarnessStore store, UUID sessionId, UUID parentEntryId, EntryPayload payload) {
     return store.transaction(
         tx -> {
-          long id = tx.nextId();
+          UUID id = tx.nextId();
           tx.insertEntry(new Entry(id, sessionId, parentEntryId, payload, T1));
           return id;
         });
   }
 
-  static Session session(long id) {
-    return new Session(id, "session-" + id, T0);
+  static Session session(UUID id) {
+    return new Session(id, T0);
   }
 
-  static Entry rootEntry(long id, long sessionId) {
+  static Entry rootEntry(UUID id, UUID sessionId) {
     return new Entry(id, sessionId, null, rootPayload(), T0);
   }
 
-  static Entry turnStartEntry(long id, long sessionId, long parentId, Instant createdAt) {
+  static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
     return new Entry(id, sessionId, parentId, turnStartPayload(), createdAt);
   }
 
   static Entry assistantEntry(
-      long id, long sessionId, long parentId, Instant createdAt, String... toolCallIds) {
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, String... toolCallIds) {
     return new Entry(id, sessionId, parentId, assistantPayload(toolCallIds), createdAt);
   }
 
   static Entry toolResultEntry(
-      long id,
-      long sessionId,
-      long parentId,
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
       Instant createdAt,
-      long assistantEntryId,
+      UUID assistantEntryId,
       int ordinal,
       String toolCallId) {
     return new Entry(
@@ -216,18 +219,18 @@ final class StoreTestSupport {
   }
 
   /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / ordinal / call id 匹配。 */
-  static EntryPayload toolResultPayload(long assistantEntryId, int ordinal, String toolCallId) {
+  static EntryPayload toolResultPayload(UUID assistantEntryId, int ordinal, String toolCallId) {
     return toolResultPayload(assistantEntryId, ordinal, toolCallId, ToolResultStatus.SUCCEEDED);
   }
 
   /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
   static EntryPayload toolResultPayload(
-      long assistantEntryId, int ordinal, String toolCallId, ToolResultStatus status) {
+      UUID assistantEntryId, int ordinal, String toolCallId, ToolResultStatus status) {
     return toolResultPayload(assistantEntryId, ordinal, toolCallId, status, "bash");
   }
 
   static EntryPayload toolResultPayload(
-      long assistantEntryId,
+      UUID assistantEntryId,
       int ordinal,
       String toolCallId,
       ToolResultStatus status,
@@ -243,7 +246,7 @@ final class StoreTestSupport {
 
   /** 用于 history-normalization 的合成 ToolResult entry；禁止关联真实 ToolInvocation。 */
   static EntryPayload syntheticToolResultPayload(
-      long assistantEntryId, int ordinal, String toolCallId) {
+      UUID assistantEntryId, int ordinal, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
@@ -259,32 +262,38 @@ final class StoreTestSupport {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  static ThreadState thread(long id, long headEntryId) {
+  static ThreadState thread(UUID id, UUID headEntryId) {
     return new ThreadState(id, headEntryId, false, 1, 0, T0, T0);
   }
 
-  static ThreadCommand command(long id, long threadId, long sequence, String clientCommandId) {
-    return new ThreadCommand(
-        id,
-        threadId,
-        sequence,
+  /**
+   * 命令 helper：ThreadCommand 不再携带代理 id，签名仅为 {@code (threadId, sequence, clientCommandId)}。
+   * clientCommandId 必须为非空 UUID。
+   */
+  static ThreadCommand command(UUID threadId, long sequence, UUID clientCommandId) {
+    UserMessageCommandPayload payload =
         new UserMessageCommandPayload(
             new AgentMessage(
-                AgentMessageRole.USER, List.of(new TextMessageContent("message " + sequence)))),
+                AgentMessageRole.USER, List.of(new TextMessageContent("message " + sequence))));
+    return new ThreadCommand(
+        threadId,
+        sequence,
+        payload,
         clientCommandId,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
         T0);
   }
 
   /** 返回仅设置了 consumed marker 的 command；其余身份信息保持不变。 */
-  static ThreadCommand withConsumedTurnStart(ThreadCommand command, long turnStartEntryId) {
+  static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
     return new ThreadCommand(
-        command.id(),
         command.threadId(),
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         turnStartEntryId,
         null,
         command.createdAt());
@@ -293,11 +302,11 @@ final class StoreTestSupport {
   /** 返回仅设置了 cancelled marker 的 command；其余身份信息保持不变。 */
   static ThreadCommand withCancelledAt(ThreadCommand command, Instant cancelledAt) {
     return new ThreadCommand(
-        command.id(),
         command.threadId(),
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         null,
         cancelledAt,
         command.createdAt());
@@ -305,12 +314,12 @@ final class StoreTestSupport {
 
   /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 model invocation。 */
   static ModelInvocation modelInvocation(
-      long id,
-      long threadId,
-      long turnStartEntryId,
-      long basisHeadEntryId,
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID basisHeadEntryId,
       ModelInvocationStatus status,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant createdAt) {
     if (status != ModelInvocationStatus.READY && status != ModelInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException("fixture supports READY and CANCELLED only");
@@ -334,13 +343,13 @@ final class StoreTestSupport {
 
   /** READY（非 terminal）或 CANCELLED（terminal，可携带 resultEntryId）的 tool invocation。 */
   static ToolInvocation toolInvocation(
-      long id,
-      long modelInvocationId,
-      long assistantEntryId,
+      UUID id,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
       int ordinal,
       String toolCallId,
       ToolInvocationStatus status,
-      Long resultEntryId,
+      UUID resultEntryId,
       Instant createdAt) {
     if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException("fixture supports READY and CANCELLED only");
@@ -451,6 +460,7 @@ final class StoreTestSupport {
     return new ModelDescriptor(
         "provider",
         "model",
+        Set.of(ModelInputModality.TEXT),
         true,
         true,
         new ModelPricing(

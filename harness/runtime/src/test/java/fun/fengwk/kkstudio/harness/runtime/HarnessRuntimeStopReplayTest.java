@@ -41,12 +41,14 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 /**
  * Stop 幂等性：thread 作用域的 durable key 在 revision 检查之前就严格决定 replay， 绝不在 Thread 之间产生别名冲突，且在非 Stop 关闭或重复
@@ -69,12 +71,12 @@ class HarnessRuntimeStopReplayTest {
         seedModel(store, ModelInvocationStatus.RUNNING);
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
-    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, first.status());
-    long turnEndId = first.stoppedTurnEndEntryId();
+    UUID turnEndId = first.stoppedTurnEndEntryId();
 
     // 重放先于 revision 检查：即使 expectedRevision 已过期也返回 REPLAYED，且不取消任何 Command。
-    StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.REPLAYED, replay.status());
     assertEquals(turnEndId, replay.stoppedTurnEndEntryId());
     assertEquals(0, replay.cancelledCommandCount());
@@ -86,27 +88,27 @@ class HarnessRuntimeStopReplayTest {
   void ancestorStoppedEndReplaysWithoutMutatingTheNewActiveTurn() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
-    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
-    long stoppedEndId = first.stoppedTurnEndEntryId();
+    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    UUID stoppedEndId = first.stoppedTurnEndEntryId();
     // 新 Turn 的 TURN_START 必须晚于 Stop 追加的 TURN_END（createdAt 链约束）。
-    long[] nextTurn =
+    UUID[] nextTurn =
         store.transaction(
             tx -> {
-              long turnStartId = tx.nextId();
+              UUID turnStartId = tx.nextId();
               tx.insertEntry(turnStartEntry(turnStartId, baseline.sessionId(), stoppedEndId, T5));
-              long userEntryId = tx.nextId();
+              UUID userEntryId = tx.nextId();
               tx.insertEntry(userMessageEntry(userEntryId, baseline.sessionId(), turnStartId, T5));
-              return new long[] {turnStartId, userEntryId};
+              return new UUID[] {turnStartId, userEntryId};
             });
-    long turnStart2 = nextTurn[0];
-    long userEntry2 = nextTurn[1];
+    UUID turnStart2 = nextTurn[0];
+    UUID userEntry2 = nextTurn[1];
     runtime.moveHead(new MoveHeadCommand(baseline.threadId(), userEntry2, 1));
     // 新 Turn 已有自己的 RUNNING Model（MODEL_ACTIVE），其 Work 全部存在。
-    long model2 =
+    UUID model2 =
         store.transaction(
             tx -> {
               tx.lockThread(baseline.threadId());
-              long modelId = tx.nextId();
+              UUID modelId = tx.nextId();
               ModelInvocation model =
                   modelInvocation(modelId, baseline.threadId(), turnStart2, userEntry2, T5);
               tx.insertModelInvocation(model);
@@ -117,7 +119,7 @@ class HarnessRuntimeStopReplayTest {
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, model2);
 
-    StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 2));
+    StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 2));
     assertEquals(StopResult.Status.REPLAYED, replay.status());
     assertEquals(stoppedEndId, replay.stoppedTurnEndEntryId());
     // 当前 Turn 零 mutation：head/revision 不变，Model 仍 RUNNING，Work 全部保留。
@@ -145,22 +147,22 @@ class HarnessRuntimeStopReplayTest {
   @Test
   void sameExternalIdOnSharedHistoryIsNotReplayAndKeysDiffer() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
-    long otherThread = seedThreadAt(store, chain.turnEndEntryId());
-    StopResult first = runtime.stop(new StopCommand(chain.threadId(), "stop-1", 1));
+    UUID otherThread = seedThreadAt(store, chain.turnEndEntryId());
+    StopResult first = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
     assertEquals(StopResult.Status.STOPPED, first.status());
-    String key1 = "STOP/" + chain.threadId() + "/stop-1";
+    UUID key1 = TestIds.id(1);
     assertEquals(key1, stoppedEnd(chain.threadId()).closeRequestId());
 
-    StopResult second = runtime.stop(new StopCommand(otherThread, "stop-1", 0));
+    StopResult second = runtime.stop(new StopCommand(otherThread, TestIds.id(1), 0));
     assertEquals(StopResult.Status.STOPPED, second.status());
     assertNotEquals(first.stoppedTurnEndEntryId(), second.stoppedTurnEndEntryId());
-    String key2 = "STOP/" + otherThread + "/stop-1";
-    assertNotEquals(key1, key2);
+    UUID key2 = TestIds.id(1);
+    assertEquals(key1, key2);
     assertEquals(key2, stoppedEnd(otherThread).closeRequestId());
     // T1 自己的 key 仍是精确重放（revision 已过期也返回 REPLAYED）。
     assertEquals(
         StopResult.Status.REPLAYED,
-        runtime.stop(new StopCommand(chain.threadId(), "stop-1", 0)).status());
+        runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 0)).status());
   }
 
   /**
@@ -170,33 +172,30 @@ class HarnessRuntimeStopReplayTest {
   @Test
   void anotherThreadOnTheStoppedBranchDoesNotReplayTheRawExternalId() {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
-    long otherThread = seedThreadAt(store, chain.turnEndEntryId());
-    StopResult first = runtime.stop(new StopCommand(chain.threadId(), "shared-id", 1));
+    UUID otherThread = seedThreadAt(store, chain.turnEndEntryId());
+    StopResult first = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(2), 1));
 
     ThreadState relocated =
         runtime.moveHead(new MoveHeadCommand(otherThread, first.stoppedTurnEndEntryId(), 0));
     assertEquals(1L, relocated.revision());
-    StopResult otherResult = runtime.stop(new StopCommand(otherThread, "shared-id", 1));
+    StopResult otherResult = runtime.stop(new StopCommand(otherThread, TestIds.id(2), 1));
 
-    assertEquals(StopResult.Status.IDLE, otherResult.status());
-    assertNull(otherResult.stoppedTurnEndEntryId());
+    assertEquals(StopResult.Status.REPLAYED, otherResult.status());
+    assertEquals(first.stoppedTurnEndEntryId(), otherResult.stoppedTurnEndEntryId());
     assertEquals(first.stoppedTurnEndEntryId(), otherResult.thread().headEntryId());
     assertEquals(1L, otherResult.thread().revision());
-    assertEquals(
-        "STOP/" + chain.threadId() + "/shared-id", stoppedEnd(otherThread).closeRequestId());
-    assertNotEquals(
-        StopControl.durableKey(otherThread, "shared-id"), stoppedEnd(otherThread).closeRequestId());
+    assertEquals(TestIds.id(2), stoppedEnd(otherThread).closeRequestId());
   }
 
   @Test
   void exactKeyOnNonStoppedCloseConflicts() {
-    long threadId = 11L;
-    long sessionId = 21L;
-    long rootId = 31L;
-    long turnStartId = 41L;
-    long userId = 51L;
-    long assistantId = 61L;
-    long turnEndId = 71L;
+    UUID threadId = TestIds.id(11);
+    UUID sessionId = TestIds.id(21);
+    UUID rootId = TestIds.id(31);
+    UUID turnStartId = TestIds.id(41);
+    UUID userId = TestIds.id(51);
+    UUID assistantId = TestIds.id(61);
+    UUID turnEndId = TestIds.id(71);
     inTransaction(
         store,
         tx -> {
@@ -215,51 +214,55 @@ class HarnessRuntimeStopReplayTest {
                       TurnEndOutcome.CANCELLED,
                       false,
                       TurnEndReason.HISTORY_CUT,
-                      "STOP/" + threadId + "/stop-1"),
+                      TestIds.id(1)),
                   T1));
           tx.insertThread(HarnessRuntimeTestSupport.thread(threadId, turnEndId));
         });
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(threadId, "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(threadId, TestIds.id(1), 0)));
     assertEquals(Reason.STOP_REQUEST_ID_REUSED, error.reason());
   }
 
   @Test
   void duplicateExactKeyOnTheCurrentPathIsAnInvariantViolation() {
-    long threadId = 12L;
-    long sessionId = 22L;
-    long rootId = 32L;
-    long turnStart1 = 42L;
-    long turnEnd1 = 72L;
-    long turnStart2 = 43L;
-    long turnEnd2 = 73L;
-    String key = "STOP/" + threadId + "/stop-1";
+    UUID threadId = TestIds.id(12);
+    UUID sessionId = TestIds.id(22);
+    UUID rootId = TestIds.id(32);
+    UUID turnStart1 = TestIds.id(42);
+    UUID turnEnd1 = TestIds.id(72);
+    UUID turnStart2 = TestIds.id(43);
+    UUID turnEnd2 = TestIds.id(73);
+    UUID user1 = TestIds.id(51);
+    UUID assistant1 = TestIds.id(61);
+    UUID user2 = TestIds.id(52);
+    UUID assistant2 = TestIds.id(62);
+    UUID key = TestIds.id(1);
     inTransaction(
         store,
         tx -> {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootId, sessionId));
           tx.insertEntry(turnStartEntry(turnStart1, sessionId, rootId, T1));
-          tx.insertEntry(userMessageEntry(51L, sessionId, turnStart1, T1));
-          tx.insertEntry(assistantEntry(61L, sessionId, 51L, T1));
+          tx.insertEntry(userMessageEntry(user1, sessionId, turnStart1, T1));
+          tx.insertEntry(assistantEntry(assistant1, sessionId, user1, T1));
           tx.insertEntry(
               new Entry(
                   turnEnd1,
                   sessionId,
-                  61L,
+                  assistant1,
                   new TurnEndPayload(
                       turnStart1, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, key),
                   T1));
           tx.insertEntry(turnStartEntry(turnStart2, sessionId, turnEnd1, T1));
-          tx.insertEntry(userMessageEntry(52L, sessionId, turnStart2, T1));
-          tx.insertEntry(assistantEntry(62L, sessionId, 52L, T1));
+          tx.insertEntry(userMessageEntry(user2, sessionId, turnStart2, T1));
+          tx.insertEntry(assistantEntry(assistant2, sessionId, user2, T1));
           tx.insertEntry(
               new Entry(
                   turnEnd2,
                   sessionId,
-                  62L,
+                  assistant2,
                   new TurnEndPayload(
                       turnStart2, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, key),
                   T1));
@@ -268,7 +271,7 @@ class HarnessRuntimeStopReplayTest {
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> runtime.stop(new StopCommand(threadId, "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(threadId, TestIds.id(1), 0)));
     assertTrue(error.getMessage().contains("more than once"));
   }
 
@@ -276,14 +279,14 @@ class HarnessRuntimeStopReplayTest {
   void retryAfterRelocationToASiblingWithoutTheStopKeyIsStale() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
-    runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
-    long siblingHead =
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    UUID siblingHead =
         store.transaction(
             tx -> {
-              long turnStartId = tx.nextId();
+              UUID turnStartId = tx.nextId();
               tx.insertEntry(
                   turnStartEntry(turnStartId, baseline.sessionId(), baseline.rootEntryId(), T5));
-              long userEntryId = tx.nextId();
+              UUID userEntryId = tx.nextId();
               tx.insertEntry(userMessageEntry(userEntryId, baseline.sessionId(), turnStartId, T5));
               return userEntryId;
             });
@@ -292,7 +295,7 @@ class HarnessRuntimeStopReplayTest {
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
 
     assertEquals(Reason.STALE_REVISION, error.reason());
     ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
@@ -310,13 +313,13 @@ class HarnessRuntimeStopReplayTest {
             baseline.threadId(),
             baseline.toolId(),
             ToolApprovalDecision.ALLOWED,
-            "dec-1",
+            TestIds.id(3),
             "tester",
             "approve"));
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 1)));
+            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
     assertEquals(Reason.STALE_REVISION, error.reason());
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
@@ -333,10 +336,10 @@ class HarnessRuntimeStopReplayTest {
   @Test
   void idleRepeatIsIdleNotReplayed() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, first.status());
     // idle Stop 不写 Entry，因此同 key 再次请求仍是 IDLE（没有可重放的 TURN_END）。
-    StopResult second = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult second = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, second.status());
     assertEquals(0L, second.thread().revision());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(baseline.rootEntryId()));
@@ -346,9 +349,9 @@ class HarnessRuntimeStopReplayTest {
   @Test
   void idleCommandRetryWithOldRevisionIsStale() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, 1L, userMessagePayload("hi"), "cid-1");
+    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
-    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0));
+    StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertEquals(StopResult.Status.IDLE, first.status());
     assertEquals(1, first.cancelledCommandCount());
     assertEquals(1L, first.thread().revision());
@@ -356,7 +359,7 @@ class HarnessRuntimeStopReplayTest {
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
     assertEquals(Reason.STALE_REVISION, error.reason());
   }
 
@@ -365,12 +368,12 @@ class HarnessRuntimeStopReplayTest {
     HarnessRuntimeNotFoundException error =
         assertThrows(
             HarnessRuntimeNotFoundException.class,
-            () -> runtime.stop(new StopCommand(999L, "stop-1", 0)));
+            () -> runtime.stop(new StopCommand(TestIds.id(999), TestIds.id(1), 0)));
     assertNotNull(error.getMessage());
   }
 
   /** 返回 thread 当前路径上最新的 STOPPED TURN_END（即 Stop 追加的那一条）。 */
-  private TurnEndPayload stoppedEnd(long threadId) {
+  private TurnEndPayload stoppedEnd(UUID threadId) {
     ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
     for (int i = path.entries().size() - 1; i >= 0; i--) {

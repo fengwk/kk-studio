@@ -88,8 +88,8 @@ public final class CompactionSummaryAssembler {
         && !payload.complete()) {
       if (payload.trigger() != request.trigger()
           || payload.tokensBefore() != request.tokensBefore()
-          || payload.firstKeptEntryId() != request.firstKeptEntryId()
-          || payload.cutEntryId() != request.cutEntryId()
+          || !payload.firstKeptEntryId().equals(request.firstKeptEntryId())
+          || !payload.cutEntryId().equals(request.cutEntryId())
           || !Objects.equals(payload.turnPrefixStartEntryId(), request.turnPrefixStartEntryId())) {
         throw new IllegalStateException(
             "preceding incomplete HISTORY payload must match the frozen TURN_PREFIX request: "

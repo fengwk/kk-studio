@@ -5,7 +5,7 @@
 | 域 | 职责 |
 | --- | --- |
 | Harness / AI | Chat、Session Entry Tree、Thread 执行、Model/Tool Invocation、命令 batch 与实时投影 |
-| Studio / Canvas | Canvas document、node、link 与 command dedup |
+| Studio / Canvas | Canvas document、Resource/Function、Blob 生命周期、Patch/SSE 与 Harness Thread 绑定 |
 
 浏览器把当前语言通过 `Accept-Language` 发送给 Web；后端只本地化用户可见错误，不改变稳定字段和领域事实。
 
@@ -62,7 +62,7 @@ flowchart LR
 | `plugins/goal` | Goal 插件：`create_goal` / `get_goal` / `update_goal` v2、branch-scoped `goal/state` 快照与 active goal 上下文投影 |
 | `harness-runtime-spring` | `HarnessStore` PostgreSQL 适配、`harness_work` dispatcher（claim/NOTIFY/poll）、Redis realtime overlay、本地 Resource store |
 | `harness-daemon` | 独立 Environment 进程适配器，只依赖 `harness-tool` |
-| `core` | Catalog、`DatabaseTurnResolver`、`CoreModelGateway`/`CoreToolGateway`、Environment registry/daemon gateway 与 Chat 应用服务；装配并执行受信任插件，**不写 `harness_*` 表** |
+| `core` | Catalog、全局 Blob Storage、`DatabaseTurnResolver`、Model/Tool Gateway、Environment、Chat 与 Canvas 应用服务；装配并执行受信任插件；Harness 执行表只经 Runtime/Store 端口写入 |
 | `web` | **生产组合根**：装配 Runtime、runtime-spring 与 Core ports，管理 dispatcher/listener 生命周期，并提供 HTTP、SSE、WebSocket v2 与静态资源适配 |
 | `share` | HTTP DTO 与公开 JSON 结构 |
 | `frontend` | React 页面、Pane、本地状态与 API client |
@@ -108,7 +108,7 @@ Catalog 只有 `agent_provider`、`agent_model`、`agent_definition` 三张名�
 | ThreadCommand | 有序 mailbox，只允许七类 command（见 [harness-runtime-contracts.md](harness-runtime-contracts.md)） |
 | ModelInvocation | 一次冻结的 `ModelInvocationRequest`（route/provider/tools/skills/subagentBindings/YOLO/contextWindow/可空 compaction metadata）及其状态、attempt 与 terminal 事实 |
 | ToolInvocation | 一次 ToolCall 的冻结 binding、approval、状态、结果与 `effects`；插件 provenance/access 随 binding 冻结，非空 effects 只允许出现在 `SUCCEEDED` 且 terminal immutable |
-| SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即十进制子 ThreadId |
+| SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；task id/session_id 即子 ThreadId（canonical UUID） |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照：`CUSTOM(pluginId=goal, customType=state, schemaVersion=1)`；只取当前分支最近快照，无独立 Goal 表 |
 | Live Environment | 已绑定 Daemon 的服务器内存投影，按 canonical `environmentName` 唯一，状态为 `CONNECTING`/`READY`；可用性 = READY + 连接打开 + 心跳未过期 |
@@ -141,17 +141,33 @@ Blank first send:
 
 ## 6. Canvas
 
-Canvas 使用独立的 `CanvasDocument` 聚合：所有业务节点都是 `ResourceNode`，当前内容通过有序 `Resource[]` 表达，资源生产能力通过可选 Function 表达；Group 与 Link 独立存在，Link target 必须有 Function。用户 typed command batch 通过 document 行 `graphRevision` CAS 原子提交，并以 `(canvasId, commandId) + requestHash` 幂等；FunctionRun 与资源替换不递增 graphRevision。Canvas 不引用 Harness Session/Thread。
+Canvas 使用 `CanvasDocument` 聚合：所有业务节点都是 `ResourceNode`，当前内容通过直接 owner 的有序
+`Resource[]` 表达，资源生产能力通过可选 Function 表达；Group 与 Link 独立存在，Link target
+必须有 Function且允许成环。用户 typed command batch 通过 document 行 `version` CAS 原子提交，并以
+`(canvasId, commandId) + requestHash` 幂等。Function start 与 terminal 状态也前进同一 version，
+checkpoint 不前进。
+
+媒体 Resource 只引用全局 `storage_blob`；`canvas_resource` 的
+`ownerNodeId + resourceIndex` 是成对可空字段，使 Function target 和 pinned orphan 可以暂时无 owner。
+`canvas_function_resource_ref` 的 INPUT/OUTPUT pin 只保护 Resource 生命周期，不增加 Blob ref_count。
+Canvas 首次 Chat 发送会在同一事务创建并绑定真实 Harness 根 Thread；ordered ATTACHMENT 复用共享 Chat
+command use-case 物化为 durable `resource(blobId,name,preview)`。
 
 ## 7. Realtime 与恢复
 
-PostgreSQL 是唯一 durable truth，`harness_work` 是唯一调度 mailbox（NOTIFY 只是可用性提示）。Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable `revision` 打开 SSE。Redis 丢失时重新加载 snapshot，不从 delta 重建状态。
+PostgreSQL 是唯一 durable truth，`harness_work` 是 Harness 唯一调度 mailbox（NOTIFY 只是可用性
+提示）。Harness Redis Streams 只保存有界 realtime overlay；浏览器先读取 REST snapshot，再以 durable
+`revision` 打开 SSE。
+
+Canvas 使用同一原则：PostgreSQL 实体与 `canvas_document.version` 是事实源，Redis Stream 只保存事务
+提交后的 bounded Patch Cache，PostgreSQL `NOTIFY canvas_version` 只唤醒 SSE hub。`/changes` 仅在
+cache 覆盖连续版本时返回 Patch；任何 gap、损坏或 Redis 不可用都回退权威 Snapshot。
 
 ## 8. Subagent 委派（task）
 
 `task` 是内部 `PLATFORM` Tool（`rendererKey=task`、`NON_IDEMPOTENT`）：Model 调用后，Core 的 `TaskTool` 以普通 durable Harness Thread 创建子 Agent Session，复用现有 ToolInvocation/approval/stop/Work 与 Thread 状态机——**没有新表、新状态机或新调度器**。关键事实：
 
-- 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是十进制子 ThreadId。
+- 子 Thread ROOT payload 携带可选 `subagentContext {parentThreadId, rootThreadId, taskInvocationId, depth}`；`task` 的 id/session_id 是子 ThreadId（canonical UUID）。
 - 委派权限在父 ModelInvocationRequest 冻结为 `subagentBindings`（Agent 名称 + 描述 allowlist）；执行绝不重读父 Agent 配置扩权。子 Agent branch settings 由 `AgentBranchSettingsMaterializer` 按最新 catalog 物化（`activeTools = config.tools + skills 非空时 load_skill + subagents 非空且未达最大深度时 task`）。
 - 运行期控制全部是配置（`SubagentConfig`）：`maxDepth`、每父/每根并发上限、idle 超时、`maxTurns` 软预算、轮询间隔；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth。恢复（`session_id`）要求同 parent/root 归属且子 Thread quiescent；Stop/取消保留可恢复 Session。
 - 进度经非 durable Redis `TOOL_PARTIAL` 心跳（约 1s）发布完整 JSON 快照（`details.kind=task.status`：threadId/subagentType/state/depth/turns/toolCalls/lastActivity/approvals/descendants）；`descendants` 是进程内 relay 的扁平活动子树状态，使根 Thread 可直接处理任意深度审批，且不参与调度或终态判定。前端整帧替换而非增量合并。最终 ToolResult 是 `<task id state>` envelope（`<task_result>` / `<task_error>`），`details.kind=task.result`。

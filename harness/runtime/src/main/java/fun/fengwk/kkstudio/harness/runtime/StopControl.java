@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -38,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 特性本地的同步 Stop transaction。
@@ -47,7 +50,6 @@ import java.util.Objects;
  */
 final class StopControl {
 
-  private static final String DURABLE_KEY_PREFIX = "STOP/";
   private static final String CANCELLED_MESSAGE = "Cancelled by user";
   private static final ToolInvocationError TOOL_CANCELLED_ERROR =
       new ToolInvocationError(
@@ -57,15 +59,20 @@ final class StopControl {
           "USER_STOP_UNCERTAIN", "Stopped by user while the tool execution outcome was uncertain");
   private static final Comparator<WorkTarget> WORK_TARGET_ORDER =
       Comparator.comparingInt((WorkTarget target) -> workTypeRank(target.type()))
-          .thenComparingLong(WorkTarget::id);
+          .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
   private final HarnessStore store;
   private final Clock clock;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
 
-  StopControl(HarnessStore store, Clock clock) {
+  StopControl(
+      HarnessStore store,
+      Clock clock,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
   }
 
   Commit stop(StopCommand command) {
@@ -81,8 +88,7 @@ final class StopControl {
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    String durableKey = durableKey(thread.id(), command.stopRequestId());
-    StopResult replay = findReplay(path, durableKey, thread);
+    StopResult replay = findReplay(path, command.stopRequestId(), thread);
     if (replay != null) {
       return new Commit(replay, null, List.of());
     }
@@ -118,9 +124,9 @@ final class StopControl {
     if (!cancelledCommands.isEmpty()) {
       tx.updateCommands(cancelledCommands);
     }
-    Long modelExecutionId =
+    UUID modelExecutionId =
         context instanceof ThreadContext.ModelActive active ? active.model().id() : null;
-    List<Long> toolExecutionIds =
+    List<UUID> toolExecutionIds =
         context instanceof ThreadContext.ToolActive active
             ? active.siblings().stream()
                 .filter(sibling -> !sibling.status().isTerminal())
@@ -133,11 +139,17 @@ final class StopControl {
           case ThreadContext.IdleOrHistorical ignored -> stopIdle(
               tx, thread, cancelledCommands.size(), now);
           case ThreadContext.ContinuationDue ignored -> stopContinuation(
-              tx, thread, path, durableKey, cancelledCommands.size(), now);
+              tx, thread, path, command.stopRequestId(), cancelledCommands.size(), now);
           case ThreadContext.ModelActive active -> stopModel(
-              tx, thread, path, active.model(), durableKey, cancelledCommands.size(), now);
+              tx,
+              thread,
+              path,
+              active.model(),
+              command.stopRequestId(),
+              cancelledCommands.size(),
+              now);
           case ThreadContext.ToolActive active -> stopTools(
-              tx, thread, path, active, durableKey, cancelledCommands.size(), now);
+              tx, thread, path, active, command.stopRequestId(), cancelledCommands.size(), now);
           case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
               "terminal Model context escaped the Stop guard");
           case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
@@ -149,15 +161,15 @@ final class StopControl {
     return new Commit(result, modelExecutionId, toolExecutionIds);
   }
 
-  private StopResult findReplay(EntryPath path, String durableKey, ThreadState thread) {
+  private StopResult findReplay(EntryPath path, UUID stopRequestId, ThreadState thread) {
     Entry match = null;
     TurnEndPayload matchedEnd = null;
     for (Entry entry : path.entries()) {
       if (entry.payload() instanceof TurnEndPayload end
-          && durableKey.equals(end.closeRequestId())) {
+          && stopRequestId.equals(end.closeRequestId())) {
         if (match != null) {
           throw new IllegalStateException(
-              "stop durable key " + durableKey + " appears more than once on the current path");
+              "stop request id " + stopRequestId + " appears more than once on the current path");
         }
         match = entry;
         matchedEnd = end;
@@ -170,7 +182,7 @@ final class StopControl {
         || matchedEnd.reason() != TurnEndReason.USER_STOP) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.STOP_REQUEST_ID_REUSED,
-          "stop durable key " + durableKey + " was used by another close operation");
+          "stop request id " + stopRequestId + " was used by another close operation");
     }
     return new StopResult(StopResult.Status.REPLAYED, thread, match.id(), 0);
   }
@@ -244,11 +256,11 @@ final class StopControl {
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
-      String durableKey,
+      UUID stopRequestId,
       int cancelledCommandCount,
       Instant now) {
-    long sessionId = path.root().sessionId();
-    long turnStartId = tx.nextId();
+    UUID sessionId = path.root().sessionId();
+    UUID turnStartId = tx.nextId();
     tx.insertEntry(
         new Entry(
             turnStartId,
@@ -256,7 +268,7 @@ final class StopControl {
             path.head().id(),
             new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings()),
             now));
-    long barrierId = tx.nextId();
+    UUID barrierId = tx.nextId();
     tx.insertEntry(
         new Entry(
             barrierId,
@@ -264,9 +276,10 @@ final class StopControl {
             turnStartId,
             new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE)),
             now));
-    long turnEndId = tx.nextId();
+    UUID turnEndId = tx.nextId();
     tx.insertEntry(
-        new Entry(turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, durableKey), now));
+        new Entry(
+            turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
     ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
     tx.updateThread(stopped);
     return new StopResult(StopResult.Status.STOPPED, stopped, turnEndId, cancelledCommandCount);
@@ -277,24 +290,24 @@ final class StopControl {
       ThreadState thread,
       EntryPath path,
       ModelInvocation model,
-      String durableKey,
+      UUID stopRequestId,
       int cancelledCommandCount,
       Instant now) {
     StreamCheckpoint checkpoint = model.streamCheckpoint();
     EntryPayload barrier = modelStopBarrier(checkpoint);
     ModelInvocationError error =
         new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
-    long barrierId = tx.nextId();
+    UUID barrierId = tx.nextId();
     tx.insertEntry(new Entry(barrierId, path.root().sessionId(), path.head().id(), barrier, now));
     ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
     tx.updateModelInvocation(cancelled);
-    long turnEndId = tx.nextId();
+    UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
             turnEndId,
             path.root().sessionId(),
             barrierId,
-            stoppedTurnEnd(model.turnStartEntryId(), durableKey),
+            stoppedTurnEnd(model.turnStartEntryId(), stopRequestId),
             now));
     ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
     tx.updateThread(stopped);
@@ -306,11 +319,11 @@ final class StopControl {
       ThreadState thread,
       EntryPath path,
       ThreadContext.ToolActive active,
-      String durableKey,
+      UUID stopRequestId,
       int cancelledCommandCount,
       Instant now) {
     List<ToolInvocation> updated = new ArrayList<>(active.siblings().size());
-    long parentId = active.assistant().id();
+    UUID parentId = active.assistant().id();
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
           switch (sibling.status()) {
@@ -319,18 +332,19 @@ final class StopControl {
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
+          ToolOutcomeAppender.append(
+              tx, path.root().sessionId(), parentId, terminal, now, toolResultHistoryMaterializer);
       updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }
     tx.updateToolInvocations(updated);
-    long turnEndId = tx.nextId();
+    UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
             turnEndId,
             path.root().sessionId(),
             parentId,
-            stoppedTurnEnd(active.model().turnStartEntryId(), durableKey),
+            stoppedTurnEnd(active.model().turnStartEntryId(), stopRequestId),
             now));
     ThreadState stopped = thread.advanceHead(turnEndId, thread.yoloEnabled(), now);
     tx.updateThread(stopped);
@@ -354,17 +368,9 @@ final class StopControl {
     return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
   }
 
-  private static TurnEndPayload stoppedTurnEnd(long turnStartEntryId, String durableKey) {
+  private static TurnEndPayload stoppedTurnEnd(UUID turnStartEntryId, UUID stopRequestId) {
     return new TurnEndPayload(
-        turnStartEntryId, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, durableKey);
-  }
-
-  static String durableKey(long threadId, String externalStopRequestId) {
-    if (threadId <= 0) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
-    Objects.requireNonNull(externalStopRequestId, "externalStopRequestId");
-    return DURABLE_KEY_PREFIX + threadId + "/" + externalStopRequestId;
+        turnStartEntryId, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, stopRequestId);
   }
 
   private static HarnessRuntimeConflictException conflict(
@@ -373,19 +379,11 @@ final class StopControl {
   }
 
   /** Durable Stop 结果，加上 transaction 提交后需取消的 process-local execution。 */
-  record Commit(StopResult result, Long modelExecutionId, List<Long> toolExecutionIds) {
+  record Commit(StopResult result, UUID modelExecutionId, List<UUID> toolExecutionIds) {
 
     Commit {
       result = Objects.requireNonNull(result, "result");
-      if (modelExecutionId != null && modelExecutionId <= 0) {
-        throw new IllegalArgumentException("modelExecutionId must be positive");
-      }
       toolExecutionIds = List.copyOf(Objects.requireNonNull(toolExecutionIds, "toolExecutionIds"));
-      for (long toolExecutionId : toolExecutionIds) {
-        if (toolExecutionId <= 0) {
-          throw new IllegalArgumentException("toolExecutionIds must be positive");
-        }
-      }
       if (modelExecutionId != null && !toolExecutionIds.isEmpty()) {
         throw new IllegalArgumentException("a Stop commit cannot cancel Model and Tool executions");
       }

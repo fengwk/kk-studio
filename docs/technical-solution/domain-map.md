@@ -52,10 +52,10 @@ Catalog 没有 bigint resource ID。Catalog 的版本仍作为并发更新 token
 | ToolInvocation | 按冻结 ToolBinding 执行的一次 ToolCall durable 事实（approval/status/result/effects）；插件 binding 冻结 owner、contribution 与 state accesses，非空 effects 只允许属于 terminal `SUCCEEDED` |
 | SubagentBinding | 冻结在 ModelInvocationRequest 中的子 Agent 名称 + 描述 allowlist 快照；task 执行绝不依据后续 Agent 配置扩权 |
 | SubagentContext | 子 Agent Thread ROOT 上冻结的委派归属 `{parentThreadId, rootThreadId, taskInvocationId, depth}`；rootThreadId 在整棵委派树中不变 |
-| task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即十进制子 ThreadId；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
+| task | 内部 `PLATFORM` Tool（rendererKey=task、NON_IDEMPOTENT）：以普通 durable Harness Thread 运行子 Agent，`task` 的 id/session_id 即子 ThreadId（canonical UUID）；进程内 `SubagentRunRegistry` 只做并发 reservation，不是 durable truth |
 | Work | 唯一调度 mailbox：`(target_type, target_id)` 的 `available_at`/`wake_version`/lease |
 | Goal state | `goal` 插件拥有的 branch-scoped 完整快照；以 `CUSTOM(goal/state@schemaVersion=1)` 追加，当前分支最近快照生效；状态仅 `active` / `complete` / `blocked` |
-| Resource | Tool Result 中 Text/Json ≤8KB 保持 inline ToolContent；超过阈值或 Binary 转为 canonical 引用 `{uri, mediaType, name, size, sha256}`（外部 `file:` URI）；file/s3 经同源 `GET /api/ai/runtime/resources/{sha256}` 下载 |
+| Resource | Tool 边界可产生瞬时 `ResourceRef(uri,mediaType,name,size,sha256)`；写入 Entry history 前摄入全局 Blob，durable message 只保存 `resource(blobId,name,preview)`，Session 通过 `harness_session_blob_ref` 持有引用 |
 | Environment | 已绑定 Daemon 的服务器内存资源，以 canonical `environmentName`（bounded 小写路由名称）唯一，状态为 CONNECTING/READY；可用性 = READY + 连接打开 + 心跳未过期 |
 | Realtime projection | Redis Streams 中有界、可丢失的输出覆盖层（非 durable） |
 
@@ -81,14 +81,14 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 
 | 概念 | 含义 |
 | --- | --- |
-| CanvasDocument | 画布身份、标题、`graphRevision` 与创建/更新时间 |
+| CanvasDocument | 画布身份、标题、单调 `version`、可空唯一 `threadId` 与创建/更新时间 |
 | ResourceNode | 唯一业务节点；包含 name/world transform/groupId、当前有序 `Resource[]` 与可选 Function |
-| Resource | Canvas 内 immutable 的 IMAGE/VIDEO/AUDIO/TEXT 内容事实；对象 key 不落库 |
+| Resource | Canvas 内内容事实；可见资源直接 owner 到 Node，Function target/pinned orphan 可暂时无 owner；媒体只引用全局 Blob，TEXT 内联 |
 | Function | ResourceNode 上可选的 `modelKey + configJson` 资源生产能力 |
-| FunctionRun | Function 节点当前或最后一次运行；状态变化不修改 `graphRevision` |
+| FunctionRun | Function 节点当前或最后一次运行；start/terminal 前进 Canvas version，checkpoint 不前进 |
 | CanvasGroup | 不嵌套、使用 world 绝对坐标的节点分组 |
-| CanvasLink | 以 `(canvasId, sourceNodeId, targetNodeId)` 标识；target 必须有 Function |
-| CanvasCommand | `expectedRevision + commandId + typed commands[]` 原子批次；成功批次只递增一次 `graphRevision` |
+| CanvasLink | 以 `(canvasId, sourceNodeId, targetNodeId)` 标识；target 必须有 Function；只表示候选引用并允许成环 |
+| CanvasCommand | `expectedVersion + commandId + typed commands[]` 原子批次；成功批次前进一次 version 并返回实体 Patch |
 
 节点没有 kind、nodeType、dataJson 或 resourceKind；普通节点类型由当前 Resource 决定，Function 节点生产类型由服务端 model registry 决定。
 
@@ -108,16 +108,26 @@ Agent 的 tools/skills/subagents 决定本次运行能力；每次 turn 通过 `
 | `POST /api/ai/runtime/threads/{threadId}/stop` | stopRequestId + revision CAS |
 | `POST /api/ai/runtime/threads/{threadId}/tool-invocations/{id}/approval` | Tool approval 决定（父/子 Thread 同一端点） |
 | `GET /api/ai/runtime/threads/{threadId}/events/stream` | durable revision SSE + realtime overlay |
-| `GET /api/ai/runtime/resources/{sha256}` | 按内容身份（mediaType/size/name）同源下载 managed Resource（attachment + nosniff） |
+| `GET /api/ai/runtime/resources/{sha256}` | 读取仍处于瞬时/Invocation `ResourceRef` 形态的 managed Resource；Entry history 的 Blob Resource 不走该端点 |
 | `GET /api/ai/catalog/tools` | Agent 可选择的 Platform/Environment ToolCatalog（不含内部 load_skill/task） |
 | `GET /api/ai/environment` | 当前 live Environment 内存投影（含 CONNECTING/READY status） |
 | WebSocket `/api/ai/environment/daemon/v2` | Daemon v2 连接 |
 | `GET/POST /api/canvases` | Canvas 列表与创建 |
 | `GET /api/canvases/{canvasId}` | Canvas document、ResourceNode/Resource/Function/Run、Group、Link 完整快照 |
-| `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；revision CAS 与 commandId/hash 幂等 |
+| `POST /api/canvases/{canvasId}/commands` | typed Canvas command batch；version CAS、commandId/hash 幂等与实体 Patch |
+| `GET /api/canvases/{canvasId}/changes` | 连续 Patch 或 gap Snapshot 恢复 |
+| `GET /api/canvases/{canvasId}/events/stream` | Canvas version/resync SSE |
+| `POST /api/canvases/{canvasId}/thread/messages` | 首次创建并绑定真实 Harness Thread；ordered TEXT/ATTACHMENT |
+| `POST /api/storage/uploads` | 全局 Upload reserve；PENDING 返回带 checksum 的 create-only PUT |
+| `POST /api/storage/uploads/{uploadId}/complete` | 校验并绑定 READY Blob |
+| `GET /api/storage/blobs/{blobId}/presigned-original` | durable Blob Resource 的渲染期原件 URL，并返回权威 `mediaType/sizeBytes` |
+| `GET /api/storage/blobs/{blobId}/presigned-preview` | durable Blob Resource 的渲染期预览 URL |
 
 **不存在**的 API：无全局 Thread 列表、无 Session/Usage/settings/artifacts/interactions 端点、无 `/messages` 或 `/messages/custom`（消息由 `/commands` 命令表达）、无 `expectedExecutionEpoch`。
 
 ## 7. 一句话实现
 
-Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread 记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮 Catalog/Environment/插件上下文解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；Studio 独立承载 Canvas。
+Harness 以 Session Entry Tree 记录语义事实（含插件 `CUSTOM` branch state），以 head 非空的 Thread
+记录执行控制面（revision CAS + 命令 mailbox），以 `BranchSettings` 驱动逐轮
+Catalog/Environment/插件上下文解析并冻结请求，以 Model/Tool Invocation + Work 支持恢复；全局 Blob
+Storage 为 Chat、Harness history 与 Canvas 提供统一内容身份，Canvas 可绑定一个 Harness 根 Thread。

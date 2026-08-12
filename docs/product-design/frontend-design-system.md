@@ -24,7 +24,7 @@
 | Brand / Topnav / Avatar | 已统一 | 全站 K mark、下划线导航、统一 avatar |
 | CSS 业务硬编码色 | 已清零 | `styles.css` 业务规则与 `canvas.css` 不再含裸 hex |
 | Canvas 色板 | 已收敛 | `canvas.css` 只消费全局 token |
-| Canvas Agent 面板结构 | 已模块化 | Dock / Thread / Composer / 分型消息 |
+| Canvas Agent 面板结构 | 已模块化 | Dock / Thread / Composer / ToolRail / 分型消息 |
 | Canvas 快捷键 | 已拆分 | `useCanvasKeyboard` 独立于主 controller |
 | Canvas 计时器 | 已拆分 | `useCanvasTimers` 独立管理 toast/save/run |
 | CSS 业务 rgba | 已收敛 | 业务规则使用 token / color-mix，无旁路硬编码色板 |
@@ -56,7 +56,7 @@
    AI、Canvas、后续 Workflow / Asset 共享同一视觉体系，不允许按路由切换产品皮肤。
 
 2. **规范与实现共同约束视觉**
-   色板以本文和全局 token 为准；壳层、Agent Dock、生成操作台、选区工具条以当前实现为准。AI 控制台是同一体系下的信息密集界面，不是第二套主题。
+   色板以本文和全局 token 为准；壳层、Agent Dock、生成操作台、节点卡片以当前实现为准。AI 控制台是同一体系下的信息密集界面，不是第二套主题。
 
 3. **Token 优先，禁止旁路色值**
    新代码不得新增裸 hex/rgb；必须使用 `:root` token 或语义别名。历史硬编码只能在迁移切片中消除。
@@ -168,6 +168,7 @@
 | Token / 规则 | 值 |
 | --- | --- |
 | `--font` | `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif` |
+| Canvas UI 字体 | `Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif`；显式避开 Linux `system-ui` 落到 DejaVu Sans |
 | 基础字号 | `13px` |
 | 基础行高 | `1.5` |
 | 标题字重 | `700` ~ `750` |
@@ -257,7 +258,7 @@ Shell 约定：
 | --- | --- |
 | 搜索框 / 表单输入 | surface 底 + border，focus 用 green-border |
 | Chat Composer | 独立容器，focus-within 用 green 边 |
-| Canvas Agent Dock textarea | 自适应高度，最小约 `37px`，最大约 `104px` |
+| Canvas Chat Composer textarea | 自适应高度，最小约 `37px`，最大约 `104px`；单行使用对称垂直 padding 居中，仅在右侧 Chat panel 内展示 |
 | placeholder | `--fg-dim` / `--dim` |
 
 ### 5.3 卡片与列表
@@ -290,18 +291,21 @@ ChatPanel
     └── ThreadStatusFooter
 ```
 
-Canvas Agent 现有模块：
+Canvas Chat 现有模块：
 
 ```text
-CanvasAgentDock
-├── CanvasAgentConversation
-│   └── CanvasAgentMessage
-│       ├── UserThreadMessage
-│       ├── AssistantThreadMessage
-│       ├── GenerationThreadMessage
-│       └── RunThreadMessage
-├── CanvasAddMenu
+CanvasAgentDock（threadOpen 时右侧可调宽 aside）
+├── agent-panel-resize-handle
+├── agent-panel-head（标题 + collapse）
+├── CanvasAgentThread（普通消息流，不隐式绑定选区）
 └── CanvasAgentComposer
+
+CanvasToolRail（左侧垂直居中的功能轨）
+├── dock-add launcher（dockAddRef / aria-controls / toggleAddMenu）
+└── CanvasAddMenu
+
+canvas-zoom-controls（左下）
+└── zoom controls（− / Fit All / % / ＋）
 ```
 
 规则：
@@ -319,12 +323,13 @@ CanvasAgentDock
 | 区域 | 规则 |
 | --- | --- |
 | Stage | `--stage-bg`，点阵 `--stage-dot` |
-| 节点 | 中性单表面；统一 `preview → kind → title → summary → footer` 信息层级，真实媒体预览内嵌而不吞没整张卡片 |
-| 首屏视口 | 无有效持久化视口时 fit 内容，允许在稀疏画布上放大到 160%；Fit All 同策略，Focus Selection 可到 180% |
-| Selection toolbar | 按选区 world bounds 投影后就近附着；空间不足时上下翻转，不固定在 viewport 顶部 |
-| Function Workbench | 保持真实 Function 类型与参数；桌面默认 560px、展开 720px，围绕选中节点并避让 Dock，窄屏切为 bottom sheet |
-| Agent Dock | 底部居中，最大 720px、低视觉重量；Thread / Add Menu 向上展开且互斥 |
-| MiniMap | 桌面可见，移动端可隐藏 |
+| 节点 | 内容优先。整张卡片均可抓取拖动，按钮、输入框和音视频控件等交互区域除外。图片/视频节点按源媒体比例自适应尺寸（最长边 320px，24px 标题栏），不显示固定 footer 或厚重卡片外壳；Pencil/X 在 hover、选中或键盘聚焦时出现，原件操作仅在媒体 hover 或键盘聚焦时出现。文本和未产出媒体的 Function 保留必要的结构化内容；X 删除继续使用节点内二次确认 |
+| 首屏视口 | 无有效持久化视口时直接 fit 内容，允许在稀疏画布上放大到 160%；Fit All 同策略，Focus Selection 可到 180%。Chat panel 开关和拖拽调宽只按宽度差平移 viewport 以保持 world center，zoom 和卡片尺寸不变，面板内发生的用户缩放在收起后继续保留 |
+| 选区操作 | 不渲染额外悬浮工具栏；节点编辑/删除使用卡片标题栏，删除选区使用键盘，分组使用 Add Menu |
+| Function Workbench | 保持真实 Function 类型与参数；默认 560px、展开 720px，优先紧贴选中 Function 卡片下方，空间不足时回退上方 |
+| Chat panel | threadOpen 时右侧默认 480px aside（head + 普通 Thread + composer），桌面可通过左边缘在 360-720px 内调宽且至少为画布保留 480px；≤900px 变 overlay；收起时不渲染 composer |
+| Tool rail | add launcher + add menu 位于左侧垂直居中的纵向功能轨，后续功能按钮向下追加；缩放控制独立位于左下；不展示 V/H 模式按钮 |
+| MiniMap | 右下，容器和 SVG 使用同一圆角裁切；≤1180px 或 Function Workbench 打开时隐藏 |
 
 ## 6. 布局与响应式
 
@@ -332,7 +337,7 @@ CanvasAgentDock
 | --- | --- |
 | 桌面优先 | 默认按桌面工作台设计 |
 | 窄屏 | 禁止横向溢出；Dock / Workbench 仍可用 |
-| 画布编辑器 | Stage 占满剩余高度；top editor bar + bottom dock 固定层 |
+| 画布编辑器 | Stage 占满剩余高度；editor header 使用与 AI Chat 相同的 ArrowLeft 返回按钮，右侧含「Chat / 对话」toggle；左侧 canvas 区 + 右侧可调宽 Chat aside（≤900px overlay）；左侧中部功能轨 + 左下缩放控制 |
 | AI Chat | sidebar + main 分栏；窄屏可折叠侧栏（实现按现有代码演进） |
 
 ## 7. 图标与动效

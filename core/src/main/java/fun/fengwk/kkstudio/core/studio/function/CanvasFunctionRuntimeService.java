@@ -11,6 +11,9 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionRunException;
 
+import java.util.Objects;
+import java.util.UUID;
+
 /** Function run API orchestration：短事务优先，adapter cancel 仅 best effort。 */
 @Service
 @RequiredArgsConstructor
@@ -26,12 +29,14 @@ public class CanvasFunctionRuntimeService {
   private final CanvasFunctionModelRegistry registry;
   private final CanvasFunctionRunStateCodec stateCodec;
 
-  public CanvasFunctionRun start(long canvasId, long nodeId, String requestId) {
+  public CanvasFunctionRun start(UUID canvasId, UUID nodeId, String requestId) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
     CanvasFunctionStartResult result = transactions.start(canvasId, nodeId, requestId);
     CanvasFunctionRun run = result.run();
     if (run.status() == CanvasFunctionRunStatus.RUNNING
         && !dispatcher.dispatch(run.nodeId(), run.requestId())) {
-      transactions.failIfRunning(run.nodeId(), run.requestId(), DISPATCH_FAILURE);
+      transactions.failIfRunning(run.nodeId(), run.requestId().toString(), DISPATCH_FAILURE);
       CanvasFunctionRun terminal =
           runRepository
               .findByNodeId(run.nodeId())
@@ -49,14 +54,14 @@ public class CanvasFunctionRuntimeService {
     return run;
   }
 
-  public CanvasFunctionRun get(long canvasId, long nodeId) {
+  public CanvasFunctionRun get(UUID canvasId, UUID nodeId) {
     requireNode(canvasId, nodeId);
     return runRepository
         .findByNodeId(nodeId)
         .orElseThrow(() -> notFound("Canvas Function run not found"));
   }
 
-  public CanvasFunctionRun cancel(long canvasId, long nodeId, String requestId) {
+  public CanvasFunctionRun cancel(UUID canvasId, UUID nodeId, String requestId) {
     CanvasFunctionRun result = transactions.cancel(canvasId, nodeId, requestId);
     if (result.status() == CanvasFunctionRunStatus.CANCELLED) {
       bestEffortAdapterCancel(result);
@@ -79,8 +84,8 @@ public class CanvasFunctionRuntimeService {
     }
   }
 
-  private void requireNode(long canvasId, long nodeId) {
-    if (canvasId <= 0L || nodeId <= 0L || nodeMapper.getById(canvasId, nodeId) == null) {
+  private void requireNode(UUID canvasId, UUID nodeId) {
+    if (nodeMapper.getById(canvasId, nodeId) == null) {
       throw notFound("Canvas Function node not found");
     }
   }

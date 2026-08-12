@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 一条不可变的 root-to-head Entry 链（Thread head cursor 指向的完整历史路径）。
@@ -29,13 +30,13 @@ public record EntryPath(List<Entry> entries) {
   }
 
   private static void validate(List<Entry> entries) {
-    long sessionId = entries.get(0).sessionId();
+    UUID sessionId = entries.get(0).sessionId();
     boolean rootSeen = false;
-    Set<Long> ids = new HashSet<>();
+    Set<UUID> ids = new HashSet<>();
     TurnPathValidator turns = new TurnPathValidator();
     for (int i = 0; i < entries.size(); i++) {
       Entry entry = entries.get(i);
-      if (entry.sessionId() != sessionId) {
+      if (!entry.sessionId().equals(sessionId)) {
         throw new IllegalArgumentException("entry path must belong to one session");
       }
       if (!ids.add(entry.id())) {

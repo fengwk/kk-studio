@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 持久化到 ToolInvocation 上的 durable Tool approval 状态。
@@ -18,7 +19,7 @@ import java.util.Objects;
 public record ToolApproval(
     boolean required,
     ToolApprovalDecision decision,
-    String decisionId,
+    UUID decisionId,
     String actor,
     String reason,
     Instant requestedAt,
@@ -41,7 +42,7 @@ public record ToolApproval(
       }
       requestedAt = Objects.requireNonNull(requestedAt, "requestedAt");
     } else {
-      decisionId = requireCanonical(decisionId, "decisionId");
+      Objects.requireNonNull(decisionId, "decisionId");
       actor = requireCanonical(actor, "actor");
       requestedAt = Objects.requireNonNull(requestedAt, "requestedAt");
       decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
@@ -79,7 +80,7 @@ public record ToolApproval(
    */
   public ToolApproval decide(
       ToolApprovalDecision decision,
-      String decisionId,
+      UUID decisionId,
       String actor,
       String reason,
       Instant decidedAt) {

@@ -85,6 +85,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 生产 Core 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的 {@link
@@ -160,7 +161,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   @Override
   public Result resolve(
-      long threadId,
+      UUID threadId,
       EntryPath path,
       boolean yoloEnabled,
       CompactionPreparation compactionPreparation) {
@@ -179,7 +180,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private ModelInvocationRequest resolveLive(EntryPath path, boolean yoloEnabled) {
     BranchSettings settings = path.baseSettings();
-    long sessionId = path.root().sessionId();
+    UUID sessionId = path.root().sessionId();
 
     AgentDefinition agent =
         require(
@@ -245,6 +246,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new ModelDescriptor(
             selection.providerName(),
             selection.modelName(),
+            parsedModel.inputModalities(),
             parsedModel.tools(),
             parsedModel.reasoning(),
             parsedModel.pricing());
@@ -339,6 +341,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             new ModelDescriptor(
                 selection.providerName(),
                 selection.modelName(),
+                parsedModel.inputModalities(),
                 parsedModel.tools(),
                 parsedModel.reasoning(),
                 parsedModel.pricing()),
@@ -385,9 +388,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return latest;
   }
 
-  private static int indexOfId(List<Entry> entries, long entryId) {
+  private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }
@@ -608,7 +611,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       List<SubagentBinding> subagentBindings,
       EntryPath path,
       List<ToolBinding> toolBindings,
-      long sessionId,
+      UUID sessionId,
       PromptCachePolicy cachePolicy) {
     List<AgentMessage> semanticMessages = new ArrayList<>();
     String composedPrompt =

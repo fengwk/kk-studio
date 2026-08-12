@@ -53,7 +53,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 插件 Tool 的 frozen provenance、intent 校验顺序与 effects 交付测试。 */
 class CoreToolGatewayPluginTest {
@@ -104,7 +105,7 @@ class CoreToolGatewayPluginTest {
             ToolGatewayTestSupport.RecordingListener.Event.Succeeded.class,
             fixture.listener.events.get(0));
     assertEquals(List.of(payload), succeeded.effects().customEntries());
-    assertEquals(11L, fixture.loadedAssistantId.get());
+    assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, fixture.loadedAssistantId.get());
   }
 
   @Test
@@ -160,7 +161,7 @@ class CoreToolGatewayPluginTest {
       @Override
       public PluginToolResult execute(PluginToolContext context, ToolCall call) {
         assertEquals("plugin_tool", call.toolName());
-        assertEquals(1L, context.branch().path().head().id());
+        assertEquals(new UUID(0L, 1L), context.branch().path().head().id());
         return result;
       }
     };
@@ -179,7 +180,7 @@ class CoreToolGatewayPluginTest {
               registrar.registerTool("write", tool, ToolVisibility.SELECTABLE);
             });
     PluginCatalog catalog = PluginCatalog.from(List.of(plugin));
-    AtomicLong loadedAssistantId = new AtomicLong();
+    AtomicReference<UUID> loadedAssistantId = new AtomicReference<>();
     PluginBranchViewLoader loader =
         assistantEntryId -> {
           loadedAssistantId.set(assistantEntryId);
@@ -211,10 +212,11 @@ class CoreToolGatewayPluginTest {
   }
 
   private static BranchView rootBranch() {
+    UUID id = new UUID(0L, 1L);
     Entry root =
         new Entry(
-            1L,
-            1L,
+            id,
+            id,
             null,
             new RootPayload(
                 new BranchSettings(
@@ -231,7 +233,7 @@ class CoreToolGatewayPluginTest {
       ToolGatewayTestSupport.ManualExecutor executor,
       ToolGatewayTestSupport.FakeResourceStore resourceStore,
       ToolGatewayTestSupport.RecordingListener listener,
-      AtomicLong loadedAssistantId) {
+      AtomicReference<UUID> loadedAssistantId) {
 
     ToolGateway.Execution execution(String contributionLocalName) {
       PluginToolBinding plugin =
@@ -243,7 +245,12 @@ class CoreToolGatewayPluginTest {
           new ToolInvocationRequest(
               new ToolCall("call-1", "plugin_tool", "{}"),
               new ToolBinding(DESCRIPTOR, ToolType.PLATFORM, null, plugin));
-      return new ToolGateway.Execution(42L, 7L, 11L, 1, request);
+      return new ToolGateway.Execution(
+          ToolGatewayTestSupport.INVOCATION_ID,
+          ToolGatewayTestSupport.THREAD_ID,
+          ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+          1,
+          request);
     }
   }
 }

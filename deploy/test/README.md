@@ -35,13 +35,14 @@
 ./deploy/test/run.sh --with-app
 ```
 
-`--with-app` 还会使用仓库内极小 PNG/MP4 fixture 执行完整的 Canvas Resource
-`create canvas -> reserve -> browser-style direct PUT -> complete -> preview-url -> direct GET`
-smoke，并验证 create-only PUT 的首次写入成功、不同内容的重复写入被 MinIO 拒绝、
-original 字节不变，以及 Canvas DTO 不暴露 bucket/key。随后显式开启
+`--with-app` 还会使用仓库内极小 PNG/MP4 fixture 执行完整的全局 Blob + Canvas Resource
+`create canvas -> reserve -> checksummed create-only PUT -> complete -> CREATE_RESOURCE_NODE ->
+preview signed GET` smoke，并验证首次写入成功、不同内容的重复写入被 MinIO 拒绝、
+original 字节不变，以及 URL DTO 不暴露 bucket/key。随后显式开启
 `kk-studio.canvas.function.fake-enabled`，执行
 `create fake-image Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET`，
-并验证 FunctionRun 不修改 `graphRevision` 且公开 DTO 不包含 `stateJson`。最后启用仅指向
+并验证 `document.version` 按 resource command、Function start 与 terminal success 前进到 4
+（checkpoint 不前进，不存在 `graphRevision`）且公开 DTO 不包含 `stateJson`。最后启用仅指向
 容器内 HTTP mock 的 OpenCLI Hub/GPT Image/Seedance 开关，执行
 `gpt-image-2 -> fake Hub PNG -> materialize` 与
 `seedance2.0fast -> fake submit/status -> fake Hub MP4 -> materialize` 两条完整 adapter

@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -26,12 +27,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 /** 面向内部编排的一次性 Harness 调用器。它只创建无工具 root Thread、原子提交 SYSTEM/USER 消息、观察终态并提取最后一条 Assistant 文本。 */
@@ -65,13 +68,28 @@ public final class HarnessOneShotService {
     this.pollInterval = requirePositive(pollInterval, "pollInterval");
   }
 
-  public long submit(
-      String title,
+  public UUID submit(
       String agentName,
       EnvironmentName environmentName,
       String systemMessage,
       AgentMessage userMessage) {
+    return submit(
+        agentName, environmentName, systemMessage, userMessage, NewCommandPreflight.IDENTITY);
+  }
+
+  /**
+   * 带 media preflight 的一次性提交：在入队事务内（幂等重放检查之后）把 USER 消息中按 manifest 顺序的占位内容物化为 durable 内容（如 H3 的全局存储
+   * RESOURCE）；preflight 必须保持 clientCommandId/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable
+   * 形态计算，因此 USER 消息在提交时不得携带瞬时 media/attachment 内容。
+   */
+  public UUID submit(
+      String agentName,
+      EnvironmentName environmentName,
+      String systemMessage,
+      AgentMessage userMessage,
+      NewCommandPreflight preflight) {
     Objects.requireNonNull(userMessage, "userMessage");
+    Objects.requireNonNull(preflight, "preflight");
     if (userMessage.role() != AgentMessageRole.USER) {
       throw new IllegalArgumentException("one-shot userMessage must use USER role");
     }
@@ -80,7 +98,7 @@ public final class HarnessOneShotService {
         settingsMaterializer
             .materialize(agentName, environmentName, 1, subagentConfig)
             .withActiveTools(List.of());
-    CreatedThread created = runtime.createThread(new CreateThreadCommand(title, settings, false));
+    CreatedThread created = runtime.createThread(new CreateThreadCommand(settings, false));
     runtime.enqueueCommands(
         new ThreadCommandBatch(
             created.thread().id(),
@@ -89,16 +107,20 @@ public final class HarnessOneShotService {
             List.of(
                 new NewThreadCommand(
                     new CustomMessageCommandPayload(AgentMessage.system(systemMessage)),
-                    "one-shot-system"),
+                    UUID.randomUUID(),
+                    ThreadCommandPayloadJsonCodec.requestHash(
+                        new CustomMessageCommandPayload(AgentMessage.system(systemMessage)))),
                 new NewThreadCommand(
-                    new CustomMessageCommandPayload(userMessage), "one-shot-user"))));
+                    new CustomMessageCommandPayload(userMessage),
+                    UUID.randomUUID(),
+                    ThreadCommandPayloadJsonCodec.requestHash(
+                        new CustomMessageCommandPayload(userMessage))))),
+        preflight);
     return created.thread().id();
   }
 
-  public String await(long threadId, Duration timeout, BooleanSupplier continueWaiting) {
-    if (threadId <= 0L) {
-      throw new IllegalArgumentException("threadId must be positive");
-    }
+  public String await(UUID threadId, Duration timeout, BooleanSupplier continueWaiting) {
+    Objects.requireNonNull(threadId, "threadId");
     Duration boundedTimeout = requirePositive(timeout, "timeout");
     Objects.requireNonNull(continueWaiting, "continueWaiting");
     HarnessRuntime runtime = requireRuntime();
@@ -121,10 +143,9 @@ public final class HarnessOneShotService {
     }
   }
 
-  public void stop(long threadId) {
-    if (threadId > 0L) {
-      stop(requireRuntime(), threadId);
-    }
+  public void stop(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    stop(requireRuntime(), threadId);
   }
 
   private static String terminalText(ThreadSnapshot snapshot) {
@@ -187,12 +208,11 @@ public final class HarnessOneShotService {
     return result;
   }
 
-  private static void stop(HarnessRuntime runtime, long threadId) {
+  private static void stop(HarnessRuntime runtime, UUID threadId) {
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-        runtime.stop(
-            new StopCommand(threadId, "one-shot-best-effort-stop", snapshot.thread().revision()));
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().revision()));
         return;
       } catch (HarnessRuntimeConflictException stale) {
         // revision 前进时重读后重试。

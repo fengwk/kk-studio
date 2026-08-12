@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -35,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -47,10 +47,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Supplier;
 
 final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
-
-  private static final String SEQUENCE_NAME = "harness_runtime_id_seq";
 
   private static final String CLAIM_NEXT_WORK =
       """
@@ -84,29 +84,30 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       """;
 
   private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
-      Comparator.comparingLong(ThreadCommand::threadId)
-          .thenComparingLong(ThreadCommand::sequence)
-          .thenComparingLong(ThreadCommand::id);
+      Comparator.comparing(ThreadCommand::threadId, UuidOrder.COMPARATOR)
+          .thenComparingLong(ThreadCommand::sequence);
   private static final Comparator<ToolInvocation> TOOL_LOCK_ORDER =
-      Comparator.comparingLong(ToolInvocation::assistantEntryId)
+      Comparator.comparing(ToolInvocation::assistantEntryId, UuidOrder.COMPARATOR)
           .thenComparingInt(ToolInvocation::ordinal)
-          .thenComparingLong(ToolInvocation::id);
+          .thenComparing(ToolInvocation::id, UuidOrder.COMPARATOR);
   private static final Comparator<WorkTarget> WORK_LOCK_ORDER =
       Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
-          .thenComparingLong(WorkTarget::id);
+          .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
   private final JdbcTemplate jdbc;
+  private final Supplier<UUID> idGenerator;
   private final Set<LockKey> locked = new HashSet<>();
-  private final Map<Long, Integer> highestToolOrdinalByAssistant = new HashMap<>();
+  private final Map<UUID, Integer> highestToolOrdinalByAssistant = new HashMap<>();
   private final Thread owner = Thread.currentThread();
   private RuntimeException databaseFailure;
   private LockRank highestLockRank;
-  private Long highestThreadId;
+  private UUID highestThreadId;
   private WorkTarget highestWorkTarget;
   private boolean closed;
 
-  PostgresqlHarnessTransaction(JdbcTemplate jdbc) {
+  PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+    this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
   }
 
   void close() {
@@ -120,20 +121,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public long nextId() {
+  public UUID nextId() {
     checkOpen();
-    try {
-      Long id = jdbc.queryForObject("select nextval('" + SEQUENCE_NAME + "')", Long.class);
-      if (id == null || id <= 0) {
-        throw new ArithmeticException("durable id sequence did not return a positive id");
-      }
-      return id;
-    } catch (DataAccessException error) {
-      if (hasSqlState(error, "2200H") || hasSqlState(error, "22003")) {
-        throw remember(new ArithmeticException("durable id sequence exhausted"));
-      }
-      throw remember(error);
+    UUID id = idGenerator.get();
+    if (id == null) {
+      throw new IllegalStateException("id generator returned null");
     }
+    return id;
   }
 
   @Override
@@ -141,14 +135,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     Objects.requireNonNull(session, "session");
     update(
-        "insert into harness_session (id, title, created_at) values (?, ?, ?)",
+        "insert into harness_session (id, created_at) values (?, ?)",
         session.id(),
-        session.title(),
         PostgresqlHarnessRows.timestamp(session.createdAt()));
   }
 
   @Override
-  public Optional<Session> findSession(long id) {
+  public Optional<Session> findSession(UUID id) {
     checkOpen();
     return queryOne(
         "select * from harness_session where id = ?", PostgresqlHarnessRows.SESSION, id);
@@ -195,17 +188,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<Entry> findEntry(long id) {
+  public Optional<Entry> findEntry(UUID id) {
     checkOpen();
     return queryOne("select * from harness_entry where id = ?", PostgresqlHarnessRows.ENTRY, id);
   }
 
   @Override
-  public EntryPath loadEntryPath(long headEntryId) {
+  public EntryPath loadEntryPath(UUID headEntryId) {
     checkOpen();
     List<Entry> path = new ArrayList<>();
-    Set<Long> visited = new HashSet<>();
-    Long cursor = headEntryId;
+    Set<UUID> visited = new HashSet<>();
+    UUID cursor = headEntryId;
     while (cursor != null) {
       if (!visited.add(cursor)) {
         throw new IllegalArgumentException("entry parent cycle detected at " + cursor);
@@ -242,13 +235,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ThreadState> findThread(long id) {
+  public Optional<ThreadState> findThread(UUID id) {
     checkOpen();
     return queryOne("select * from harness_thread where id = ?", PostgresqlHarnessRows.THREAD, id);
   }
 
   @Override
-  public Optional<ThreadState> lockThread(long id) {
+  public Optional<ThreadState> lockThread(UUID id) {
     checkOpen();
     requireCanLockThread(id);
     Optional<ThreadState> thread =
@@ -292,7 +285,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ThreadCommand> findCommandByClientId(long threadId, String clientCommandId) {
+  public Optional<ThreadCommand> findCommandByClientId(UUID threadId, UUID clientCommandId) {
     checkOpen();
     Objects.requireNonNull(clientCommandId, "clientCommandId");
     return queryOne(
@@ -307,7 +300,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ThreadCommand> loadQueuedCommands(long threadId) {
+  public List<ThreadCommand> loadQueuedCommands(UUID threadId) {
     checkOpen();
     requireLocked(LockKey.thread(threadId));
     requireCanLockRank(LockRank.COMMAND);
@@ -325,7 +318,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             PostgresqlHarnessRows.COMMAND,
             threadId);
     for (ThreadCommand command : commands) {
-      lock(LockKey.command(command.id()));
+      lock(LockKey.command(command.threadId(), command.sequence()));
     }
     return commands;
   }
@@ -334,15 +327,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public void insertCommands(List<ThreadCommand> commands) {
     checkOpen();
     List<ThreadCommand> copied = List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
-    Set<Long> ids = new HashSet<>();
     Set<CommandSequenceKey> sequences = new HashSet<>();
     Set<CommandClientKey> clientIds = new HashSet<>();
     for (ThreadCommand command : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(command.cancelledAt());
       PostgresqlHarnessRows.requireMillisecondPrecision(command.createdAt());
-      if (!ids.add(command.id())) {
-        throw new IllegalArgumentException("duplicate command id " + command.id());
-      }
       if (!sequences.add(new CommandSequenceKey(command.threadId(), command.sequence()))) {
         throw new IllegalArgumentException(
             "duplicate command sequence "
@@ -356,9 +345,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 + command.clientCommandId()
                 + " on thread "
                 + command.threadId());
-      }
-      if (findCommand(command.id()).isPresent()) {
-        throw new IllegalArgumentException("duplicate command id " + command.id());
       }
       if (command.state() != ThreadCommandState.QUEUED) {
         throw new IllegalArgumentException("inserted commands must be QUEUED");
@@ -376,20 +362,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       update(
           """
           insert into harness_thread_command (
-              id, thread_id, sequence, command_type, payload, client_command_id,
-              consumed_turn_start_entry_id, cancelled_at, created_at
-          ) values (?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?)
+              thread_id, sequence, command_type, payload, client_command_id,
+              request_hash, consumed_turn_start_entry_id, cancelled_at, created_at
+          ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?)
           """,
-          command.id(),
           command.threadId(),
           command.sequence(),
           command.type().name(),
           PostgresqlHarnessRows.COMMAND_PAYLOADS.encode(command.payload()),
           command.clientCommandId(),
+          command.requestHash(),
           command.consumedTurnStartEntryId(),
           PostgresqlHarnessRows.timestamp(command.cancelledAt()),
           PostgresqlHarnessRows.timestamp(command.createdAt()));
-      lock(LockKey.command(command.id()));
+      lock(LockKey.command(command.threadId(), command.sequence()));
     }
   }
 
@@ -397,19 +383,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public void updateCommands(List<ThreadCommand> commands) {
     checkOpen();
     List<ThreadCommand> copied = List.copyOf(commands).stream().sorted(COMMAND_LOCK_ORDER).toList();
-    Set<Long> ids = new HashSet<>();
     for (ThreadCommand command : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(command.cancelledAt());
       PostgresqlHarnessRows.requireMillisecondPrecision(command.createdAt());
-      if (!ids.add(command.id())) {
-        throw new IllegalArgumentException("duplicate command id " + command.id());
-      }
-      requireLocked(LockKey.command(command.id()));
       ThreadCommand stored =
-          findCommand(command.id())
+          findCommand(command.threadId(), command.sequence())
               .orElseThrow(
                   () ->
-                      new IllegalArgumentException("command " + command.id() + " does not exist"));
+                      new IllegalArgumentException(
+                          "command "
+                              + command.threadId()
+                              + "/"
+                              + command.sequence()
+                              + " does not exist"));
+      requireLocked(LockKey.command(command.threadId(), command.sequence()));
       requireSameCommandIdentity(stored, command);
       requireLocked(LockKey.thread(command.threadId()));
       requireValidCommandLifecycle(stored, command);
@@ -421,17 +408,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               """
               update harness_thread_command
               set consumed_turn_start_entry_id = ?, cancelled_at = ?
-              where id = ?
+              where thread_id = ? and sequence = ?
               """,
               command.consumedTurnStartEntryId(),
               PostgresqlHarnessRows.timestamp(command.cancelledAt()),
-              command.id());
-      requireSingleUpdate(updated, "command", command.id());
+              command.threadId(),
+              command.sequence());
+      requireSingleUpdate(updated, "command", command.threadId() + "/" + command.sequence());
     }
   }
 
   @Override
-  public Optional<ModelInvocation> findModelInvocation(long id) {
+  public Optional<ModelInvocation> findModelInvocation(UUID id) {
     checkOpen();
     return queryOne(
         "select * from harness_model_invocation where id = ?",
@@ -440,7 +428,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ModelInvocation> lockModelInvocation(long id) {
+  public Optional<ModelInvocation> lockModelInvocation(UUID id) {
     checkOpen();
     LockKey lockKey = LockKey.model(id);
     requireCanLock(lockKey);
@@ -454,7 +442,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ModelInvocation> findModelInvocationByTurn(long threadId, long turnStartEntryId) {
+  public Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartEntryId) {
     checkOpen();
     return queryOne(
         """
@@ -468,7 +456,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public boolean hasModelInvocationForTurn(long turnStartEntryId) {
+  public boolean hasModelInvocationForTurn(UUID turnStartEntryId) {
     checkOpen();
     return Boolean.TRUE.equals(
         queryForObject(
@@ -512,7 +500,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
       throw new IllegalArgumentException("new model invocations must be READY with attempt 0");
     }
-    if (thread.headEntryId() != invocation.basisHeadEntryId()) {
+    if (!thread.headEntryId().equals(invocation.basisHeadEntryId())) {
       throw new IllegalArgumentException(
           "basisHeadEntryId must equal the current thread head entry");
     }
@@ -584,7 +572,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ToolInvocation> findToolInvocation(long id) {
+  public Optional<ToolInvocation> findToolInvocation(UUID id) {
     checkOpen();
     return queryOne(
         "select * from harness_tool_invocation where id = ?",
@@ -593,7 +581,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<ToolInvocation> lockToolInvocation(long id) {
+  public Optional<ToolInvocation> lockToolInvocation(UUID id) {
     checkOpen();
     Optional<ToolInvocation> current = findToolInvocation(id);
     if (current.isEmpty()) {
@@ -610,7 +598,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ToolInvocation> loadToolInvocationsByAssistantEntryId(long assistantEntryId) {
+  public List<ToolInvocation> loadToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
     checkOpen();
     return queryList(
         """
@@ -624,7 +612,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(long assistantEntryId) {
+  public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
     checkOpen();
     requireCanLockRank(LockRank.TOOL);
     List<ToolInvocation> current = loadToolInvocationsByAssistantEntryId(assistantEntryId);
@@ -651,7 +639,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
-    Set<Long> ids = new HashSet<>();
+    Set<UUID> ids = new HashSet<>();
     Set<ToolOrdinalKey> ordinals = new HashSet<>();
     for (ToolInvocation invocation : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.createdAt());
@@ -715,8 +703,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream().sorted(TOOL_LOCK_ORDER).toList();
-    Set<Long> ids = new HashSet<>();
-    Set<Long> resultEntryIds = new HashSet<>();
+    Set<UUID> ids = new HashSet<>();
+    Set<UUID> resultEntryIds = new HashSet<>();
     for (ToolInvocation invocation : copied) {
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.createdAt());
       PostgresqlHarnessRows.requireMillisecondPrecision(invocation.updatedAt());
@@ -842,6 +830,105 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return true;
   }
 
+  // ---------- 应用侧深删除原语 ----------
+
+  @Override
+  public int deleteCommands(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_thread_command where thread_id = ?", threadId);
+  }
+
+  @Override
+  public int deleteToolInvocations(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update(
+        """
+        delete from harness_tool_invocation
+        where model_invocation_id in (
+            select id from harness_model_invocation where thread_id = ?
+        )
+        """,
+        threadId);
+  }
+
+  @Override
+  public int deleteModelInvocations(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_model_invocation where thread_id = ?", threadId);
+  }
+
+  @Override
+  public boolean deleteThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_thread where id = ?", threadId) == 1;
+  }
+
+  @Override
+  public int deleteEntries(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    int total = 0;
+    while (true) {
+      // 叶子优先：同一语句只删除父不在批内的行（parent FK 顺序天然成立），逐层剥到 ROOT。
+      int deleted =
+          update(
+              """
+              delete from harness_entry e
+              where e.session_id = ?
+                and not exists (
+                    select 1
+                    from harness_entry child
+                    where child.session_id = e.session_id
+                      and child.parent_entry_id = e.id
+                )
+              """,
+              sessionId);
+      total += deleted;
+      if (deleted == 0) {
+        return total;
+      }
+    }
+  }
+
+  @Override
+  public boolean deleteSession(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    return update("delete from harness_session where id = ?", sessionId) == 1;
+  }
+
+  @Override
+  public int deleteWorkByThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update(
+        """
+        delete from harness_work
+        where (target_type = 'THREAD' and target_id = ?)
+           or target_id in (
+               select id from harness_model_invocation where thread_id = ?
+           )
+           or target_id in (
+               select tool.id
+               from harness_tool_invocation tool
+               join harness_model_invocation model on model.id = tool.model_invocation_id
+               where model.thread_id = ?
+           )
+        """,
+        threadId,
+        threadId,
+        threadId);
+  }
+
   @Override
   public void requestWork(WorkTarget target, Instant requestedAt) {
     checkOpen();
@@ -869,7 +956,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(leaseUntil, "leaseUntil");
-    Work.initial(new WorkTarget(targetType, 1L), now).claim(now, leaseToken, leaseUntil);
+    Work.initial(new WorkTarget(targetType, new UUID(0L, 0L)), now)
+        .claim(now, leaseToken, leaseUntil);
     requireCanClaimWork();
     Optional<Work> claimed =
         writeOne(
@@ -939,12 +1027,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     notifyWorkAvailable();
   }
 
-  private Optional<ThreadCommand> findCommand(long id) {
+  private Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
     return queryOne(
-        "select * from harness_thread_command where id = ?", PostgresqlHarnessRows.COMMAND, id);
+        "select * from harness_thread_command where thread_id = ? and sequence = ?",
+        PostgresqlHarnessRows.COMMAND,
+        threadId,
+        sequence);
   }
 
-  private boolean hasRoot(long sessionId) {
+  private boolean hasRoot(UUID sessionId) {
     Boolean exists =
         queryForObject(
             """
@@ -959,7 +1050,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return Boolean.TRUE.equals(exists);
   }
 
-  private Entry requireExistingEntry(long entryId) {
+  private Entry requireExistingEntry(UUID entryId) {
     return findEntry(entryId)
         .orElseThrow(() -> new IllegalArgumentException("entry " + entryId + " does not exist"));
   }
@@ -1006,7 +1097,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void requireValidConsumedTurnStart(ThreadCommand command) {
-    Long consumedTurnStartEntryId = command.consumedTurnStartEntryId();
+    UUID consumedTurnStartEntryId = command.consumedTurnStartEntryId();
     if (consumedTurnStartEntryId == null) {
       return;
     }
@@ -1015,15 +1106,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException(
           "consumedTurnStartEntryId must reference a TURN_START entry");
     }
-    long turnStartSessionId = loadEntryPath(consumedTurnStartEntryId).root().sessionId();
+    UUID turnStartSessionId = loadEntryPath(consumedTurnStartEntryId).root().sessionId();
     ThreadState thread =
         findThread(command.threadId())
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
                         "thread " + command.threadId() + " does not exist"));
-    long threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-    if (turnStartSessionId != threadSessionId) {
+    UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
+    if (!turnStartSessionId.equals(threadSessionId)) {
       throw new IllegalArgumentException(
           "consumed turn start must be in the command thread's current head session");
     }
@@ -1047,13 +1138,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private static void requireSameCommandIdentity(ThreadCommand stored, ThreadCommand command) {
-    if (stored.threadId() != command.threadId()
+    if (!stored.threadId().equals(command.threadId())
         || !stored.payload().equals(command.payload())
         || !stored.clientCommandId().equals(command.clientCommandId())
+        || !stored.requestHash().equals(command.requestHash())
         || stored.sequence() != command.sequence()
         || !stored.createdAt().equals(command.createdAt())) {
       throw new IllegalArgumentException(
-          "command identity (thread/payload/clientCommandId/sequence/createdAt) must not change");
+          "command identity (thread/payload/clientCommandId/requestHash/sequence/createdAt) must not change");
     }
   }
 
@@ -1081,21 +1173,22 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   private void requireValidModelBranch(ModelInvocation invocation, ThreadState thread) {
     EntryPath basisPath = loadEntryPath(invocation.basisHeadEntryId());
-    long basisSessionId = basisPath.root().sessionId();
+    UUID basisSessionId = basisPath.root().sessionId();
     boolean turnStartOnBasisPath =
-        basisPath.entries().stream().anyMatch(entry -> entry.id() == invocation.turnStartEntryId());
+        basisPath.entries().stream()
+            .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
     if (!turnStartOnBasisPath) {
       throw new IllegalArgumentException(
           "turnStartEntryId must be on the basisHeadEntryId entry path");
     }
-    long threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
-    if (threadSessionId != basisSessionId) {
+    UUID threadSessionId = loadEntryPath(thread.headEntryId()).root().sessionId();
+    if (!threadSessionId.equals(basisSessionId)) {
       throw new IllegalArgumentException("thread head session must match the basis path session");
     }
   }
 
   private void requireValidModelResultEntry(ModelInvocation invocation) {
-    Long resultEntryId = invocation.resultEntryId();
+    UUID resultEntryId = invocation.resultEntryId();
     if (resultEntryId == null) {
       return;
     }
@@ -1115,10 +1208,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     EntryPath resultPath = loadEntryPath(resultEntryId);
     boolean onBasisPath =
         resultPath.entries().stream()
-            .anyMatch(entry -> entry.id() == invocation.basisHeadEntryId());
+            .anyMatch(entry -> entry.id().equals(invocation.basisHeadEntryId()));
     boolean sameTurnStart =
         resultPath.entries().stream()
-            .anyMatch(entry -> entry.id() == invocation.turnStartEntryId());
+            .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
     if (!onBasisPath || !sameTurnStart) {
       throw new IllegalArgumentException(
           "model result entry must be on the basis path and in the same turn");
@@ -1156,8 +1249,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (payload.phase() != request.phase()
         || payload.trigger() != request.trigger()
         || payload.tokensBefore() != request.tokensBefore()
-        || payload.firstKeptEntryId() != request.firstKeptEntryId()
-        || payload.cutEntryId() != request.cutEntryId()
+        || !payload.firstKeptEntryId().equals(request.firstKeptEntryId())
+        || !payload.cutEntryId().equals(request.cutEntryId())
         || !Objects.equals(payload.turnPrefixStartEntryId(), request.turnPrefixStartEntryId())) {
       throw new IllegalArgumentException(
           "compaction result payload metadata must match the frozen compaction request");
@@ -1166,7 +1259,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     int resultIndex = entries.size() - 1; // result 是路径 head，其引用必须全部在其之前
     int firstKeptIndex = indexOfId(entries, request.firstKeptEntryId());
     int cutIndex = indexOfId(entries, request.cutEntryId());
-    Long prefixId = request.turnPrefixStartEntryId();
+    UUID prefixId = request.turnPrefixStartEntryId();
     int prefixIndex = prefixId == null ? -1 : indexOfId(entries, prefixId);
     boolean referencesBeforeResult =
         firstKeptIndex >= 0
@@ -1183,9 +1276,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private static int indexOfId(List<Entry> entries, long entryId) {
+  private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
-      if (entries.get(i).id() == entryId) {
+      if (entries.get(i).id().equals(entryId)) {
         return i;
       }
     }
@@ -1232,7 +1325,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 () ->
                     new IllegalArgumentException(
                         "model invocation " + invocation.modelInvocationId() + " does not exist"));
-    if (model.resultEntryId() == null || model.resultEntryId() != invocation.assistantEntryId()) {
+    if (model.resultEntryId() == null
+        || !model.resultEntryId().equals(invocation.assistantEntryId())) {
       throw new IllegalArgumentException(
           "model invocation resultEntryId must equal the tool assistantEntryId");
     }
@@ -1276,7 +1370,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void requireValidToolResultEntry(ToolInvocation invocation) {
-    Long resultEntryId = invocation.resultEntryId();
+    UUID resultEntryId = invocation.resultEntryId();
     if (resultEntryId == null) {
       return;
     }
@@ -1287,7 +1381,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     ToolResultMetadata metadata = ((MessagePayload) result.payload()).toolResultMetadata();
     ToolResultMessageContent content =
         (ToolResultMessageContent) ((MessagePayload) result.payload()).message().contents().get(0);
-    if (metadata.assistantEntryId() != invocation.assistantEntryId()
+    if (!metadata.assistantEntryId().equals(invocation.assistantEntryId())
         || metadata.ordinal() != invocation.ordinal()
         || !metadata.toolCallId().equals(invocation.request().call().id())
         || !content.toolCallId().equals(invocation.request().call().id())
@@ -1317,7 +1411,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     boolean assistantOnResultPath =
         loadEntryPath(resultEntryId).entries().stream()
-            .anyMatch(entry -> entry.id() == invocation.assistantEntryId());
+            .anyMatch(entry -> entry.id().equals(invocation.assistantEntryId()));
     if (!assistantOnResultPath) {
       throw new IllegalArgumentException(
           "tool result entry must be in the same branch as the assistant entry");
@@ -1341,7 +1435,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void requireWorkOwnerLocked(WorkTarget target) {
-    long threadId =
+    UUID threadId =
         switch (target.type()) {
           case THREAD -> findThread(target.id())
               .orElseThrow(
@@ -1548,13 +1642,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private void requireCanLockThread(long threadId) {
+  private void requireCanLockThread(UUID threadId) {
     LockKey key = LockKey.thread(threadId);
     if (locked.contains(key)) {
       return;
     }
     requireCanLock(key);
-    if (highestThreadId != null && threadId <= highestThreadId) {
+    if (highestThreadId != null && UuidOrder.COMPARATOR.compare(threadId, highestThreadId) <= 0) {
       throw new IllegalStateException(
           "thread locks must be acquired by ascending id: "
               + highestThreadId
@@ -1563,7 +1657,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private void recordThreadLock(long threadId) {
+  private void recordThreadLock(UUID threadId) {
     requireCanLockThread(threadId);
     LockKey key = LockKey.thread(threadId);
     if (!locked.contains(key)) {
@@ -1586,7 +1680,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void requireCanLockTools(List<ToolInvocation> invocations) {
-    Map<Long, Integer> ordinals = new HashMap<>(highestToolOrdinalByAssistant);
+    Map<UUID, Integer> ordinals = new HashMap<>(highestToolOrdinalByAssistant);
     for (ToolInvocation invocation : invocations) {
       LockKey key = LockKey.tool(invocation.id());
       if (locked.contains(key)) {
@@ -1650,22 +1744,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private static void requireSingleUpdate(int updated, String kind, long id) {
+  private static void requireSingleUpdate(int updated, String kind, Object id) {
     if (updated != 1) {
       throw new IllegalArgumentException(kind + " " + id + " does not exist");
     }
-  }
-
-  private static boolean hasSqlState(Throwable error, String expected) {
-    Throwable cursor = error;
-    while (cursor != null) {
-      if (cursor instanceof SQLException sqlException
-          && expected.equals(sqlException.getSQLState())) {
-        return true;
-      }
-      cursor = cursor.getCause();
-    }
-    return false;
   }
 
   private enum LockRank {
@@ -1676,31 +1758,31 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     WORK
   }
 
-  private record LockKey(LockRank rank, String kind, long id) {
-    static LockKey thread(long id) {
-      return new LockKey(LockRank.THREAD, "thread", id);
+  private record LockKey(LockRank rank, String key) {
+    static LockKey thread(UUID id) {
+      return new LockKey(LockRank.THREAD, "thread:" + id);
     }
 
-    static LockKey command(long id) {
-      return new LockKey(LockRank.COMMAND, "command", id);
+    static LockKey command(UUID threadId, long sequence) {
+      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence);
     }
 
-    static LockKey model(long id) {
-      return new LockKey(LockRank.MODEL, "model", id);
+    static LockKey model(UUID id) {
+      return new LockKey(LockRank.MODEL, "model:" + id);
     }
 
-    static LockKey tool(long id) {
-      return new LockKey(LockRank.TOOL, "tool", id);
+    static LockKey tool(UUID id) {
+      return new LockKey(LockRank.TOOL, "tool:" + id);
     }
 
     static LockKey work(WorkTarget target) {
-      return new LockKey(LockRank.WORK, "work:" + target.type(), target.id());
+      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id());
     }
   }
 
-  private record CommandSequenceKey(long threadId, long sequence) {}
+  private record CommandSequenceKey(UUID threadId, long sequence) {}
 
-  private record CommandClientKey(long threadId, String clientCommandId) {}
+  private record CommandClientKey(UUID threadId, UUID clientCommandId) {}
 
-  private record ToolOrdinalKey(long assistantEntryId, int ordinal) {}
+  private record ToolOrdinalKey(UUID assistantEntryId, int ordinal) {}
 }

@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.util.UUID;
 
 /** 幂等 Chat↔Thread 关联的 MyBatis mapper。 */
 @Mapper
@@ -18,7 +19,7 @@ public interface ChatThreadMapper extends BaseMapper {
       values (#{chatId}, #{threadId})
       on conflict (chat_id, thread_id) do nothing
       """)
-  int insert(@Param("chatId") long chatId, @Param("threadId") long threadId);
+  int insert(@Param("chatId") UUID chatId, @Param("threadId") UUID threadId);
 
   @Select(
       """
@@ -27,5 +28,5 @@ public interface ChatThreadMapper extends BaseMapper {
       where chat_id = #{chatId}
       order by created_at desc, thread_id desc
       """)
-  List<Long> listThreadIds(@Param("chatId") long chatId);
+  List<UUID> listThreadIds(@Param("chatId") UUID chatId);
 }

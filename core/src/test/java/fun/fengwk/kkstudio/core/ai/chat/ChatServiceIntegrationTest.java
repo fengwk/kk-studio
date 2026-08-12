@@ -38,9 +38,13 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import java.sql.Connection;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /** PostgreSQL 后端的 Chat 覆盖：可见名称配置、yolo、过时 Agent 和 CAS。 */
 class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
+
+  private static final UUID THREAD_ID = new UUID(0L, 1L);
+  private static final UUID SESSION_ID = new UUID(0L, 100L);
 
   @Autowired private ChatService chatService;
   @Autowired private AgentDefinitionService agentDefinitionService;
@@ -122,8 +126,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
           new EntryPath(
               List.of(
                   new Entry(
-                      1L,
-                      100L,
+                      THREAD_ID,
+                      SESSION_ID,
                       null,
                       new RootPayload(
                           new BranchSettings(
@@ -132,7 +136,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                               new ModelSelection("stub", "acceptance-stub", "default"),
                               List.of())),
                       Instant.parse("2026-08-02T00:00:00Z"))));
-      TurnResolver.Result resolution = turnResolver.resolve(1L, path, false, null);
+      TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, false, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);
       assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
       assertEquals("agent not found: default-assistant", rejected.error().message());
@@ -151,7 +155,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setSystemPrompt(reboundSystemPrompt);
       AgentDefinitionDTO reboundAgent = agentDefinitionService.createAgent(rebound);
       try {
-        TurnResolver.Result reboundResolution = turnResolver.resolve(1L, path, false, null);
+        TurnResolver.Result reboundResolution = turnResolver.resolve(THREAD_ID, path, false, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
         ProviderMessage leadingSystem = resolved.request().providerRequest().messages().get(0);

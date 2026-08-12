@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 class RemoteToolTest {
@@ -41,7 +42,7 @@ class RemoteToolTest {
             descriptor,
             new ToolCall("c1", "echo", "{}"),
             Duration.ofSeconds(5),
-            new ToolExecutionContext(9L, 3L));
+            new ToolExecutionContext(new UUID(0L, 9L), new UUID(0L, 3L)));
     RecordingListener listener = new RecordingListener();
 
     ToolExecutionHandle handle = tool.execute(request, listener);
@@ -78,7 +79,7 @@ class RemoteToolTest {
             descriptor,
             new ToolCall("c1", "echo", "{}"),
             Duration.ofSeconds(1),
-            new ToolExecutionContext(1L, 1L));
+            new ToolExecutionContext(new UUID(0L, 1L), new UUID(0L, 1L)));
     assertThrows(
         RemoteToolUnavailableException.class,
         () -> unavailable.execute(request, new RecordingListener()));

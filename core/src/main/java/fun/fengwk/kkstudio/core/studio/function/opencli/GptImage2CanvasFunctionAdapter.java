@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /** 通过 OpenCLI Hub + chatgpt-agent 执行 GPT Image 2。 */
 public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
@@ -85,8 +86,8 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
     for (CanvasFunctionFrozenReference reference : run.manifest()) {
       if (reference.kind() != CanvasResourceKind.IMAGE
           || !reference.mediaType().toLowerCase().startsWith("image/")
-          || reference.size() <= 0L
-          || reference.size() > MAX_REFERENCE_SIZE) {
+          || reference.sizeBytes() <= 0L
+          || reference.sizeBytes() > MAX_REFERENCE_SIZE) {
         throw new IllegalArgumentException(
             "GPT Image references must be image/* and at most 20 MiB each");
       }
@@ -94,7 +95,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String executionId =
@@ -131,9 +132,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
     context.checkpoint("GPT_IMAGE_MATERIALIZING", state);
     ExecutionResource output = execution.resources().get(0);
     try (HubResourceStream stream = client.openResource(output)) {
-      long resourceId =
-          context.materializeTarget(
-              run.targetResourceId(), stream.mediaType(), stream.size(), stream.content());
+      UUID resourceId = context.materializeTarget(run.targetResourceId(), stream.content());
       return List.of(resourceId);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to close GPT Image Hub resource", exception);
@@ -206,7 +205,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       throw new IllegalArgumentException("checkpoint uploads do not cover frozen manifest");
     }
     for (int index = 0; index < uploads.size(); index++) {
-      if (uploads.get(index).resourceId() != run.manifest().get(index).resourceId()) {
+      if (!uploads.get(index).resourceId().equals(run.manifest().get(index).resourceId())) {
         throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
       }
     }

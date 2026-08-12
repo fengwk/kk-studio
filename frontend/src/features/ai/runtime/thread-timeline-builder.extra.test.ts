@@ -119,6 +119,61 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
+  it('projects durable blob resources from lowercase runtime message contents', () => {
+    const blobId = '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01'
+    const timeline = buildThreadTimeline(
+      [
+        entry(
+          'user-resource',
+          'MESSAGE',
+          messagePayload('USER', [{ type: 'resource', blobId, name: 'input.png', preview: null }]),
+        ),
+        entry(
+          'assistant-call',
+          'MESSAGE',
+          messagePayload('ASSISTANT', [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-resource',
+              toolName: 'read',
+              rendererKey: 'read',
+              argumentsJson: '{}',
+            },
+          ]),
+        ),
+        entry(
+          'tool-resource',
+          'MESSAGE',
+          messagePayload('TOOL', [
+            {
+              type: 'tool_result',
+              toolCallId: 'call-resource',
+              toolName: 'read',
+              rendererKey: 'read',
+              error: false,
+              detailsJson: '{}',
+              contents: [
+                { type: 'resource', blobId, name: 'result.txt', preview: 'excerpt' },
+              ],
+            },
+          ]),
+        ),
+      ],
+      [],
+      [],
+    )
+
+    expect(timeline.messages).toMatchObject([
+      { role: 'user', attachments: [{ blobId, name: 'input.png' }] },
+      { role: 'tool', phase: 'call' },
+      {
+        role: 'tool',
+        phase: 'result',
+        attachments: [{ blobId, name: 'result.txt', preview: 'excerpt' }],
+      },
+    ])
+  })
+
   it('suppresses the entire compaction turn and its realtime model overlay', () => {
     const timeline = buildThreadTimeline(
       [
@@ -182,19 +237,19 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
 }
 
 function command(
-  commandId: string,
+  label: string,
   sequence: string,
   type: 'USER_MESSAGE' | 'CUSTOM_MESSAGE',
   payload: Record<string, unknown>,
   state: 'QUEUED' | 'APPLIED',
 ): HarnessThreadCommandDTO {
   return {
-    commandId,
     threadId: 't1',
     sequence,
     type,
     state,
-    clientCommandId: `cid-${commandId}`,
+    clientCommandId: `cid-${label}`,
+    requestHash: '0123456789abcdef'.repeat(4),
     payloadJson: JSON.stringify(payload),
     consumedTurnStartEntryId: null,
     cancelledAt: null,

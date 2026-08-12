@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,7 +44,7 @@ class TurnResolverTest {
     TurnResolver resolver =
         (threadId, path, yoloEnabled, preparation) ->
             new TurnResolver.Rejected(new AssistantError("PLANNING_FAILED", "rejected"));
-    TurnResolver.Result result = resolver.resolve(1L, null, true, null);
+    TurnResolver.Result result = resolver.resolve(id(1L), null, true, null);
     assertTrue(result instanceof TurnResolver.Rejected);
     assertEquals("rejected", ((TurnResolver.Rejected) result).error().message());
   }

@@ -6,12 +6,13 @@
 node scripts/e2e/run-matrix.mjs --list
 ```
 
-当前注册 **66** 个 API case；标准入口默认执行免费的 **L1 57** 个 case。Canvas
-Resource 与通用 S3 预签名命名空间 contract 需要 backend 已启用 S3，并通过
+当前注册 **68** 个 API case；标准入口默认执行免费的 **L1 58** 个 case（其中
+`canvas.api_version_contract` 免费验证 Canvas UUID/version/patch/changes 契约）。Canvas
+Resource 直读预签名与全局 Blob 存储 contract 需要 backend 已启用 S3，并通过
 `--with-canvas-storage` 显式执行；免费 fake Function 完整链路还需通过
 `--with-canvas-function` 显式开启 fake
 model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或 Environment Tool 开关。UI smoke
-由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 66 个 Node API case。
+由 `scripts/e2e.sh --ui` 另行附加，默认注册 15 个免费 UI case，不计入这 68 个 Node API case。
 
 ## 1. 入口与开关
 
@@ -21,7 +22,7 @@ model 并重启 backend；L2/L3/L4 需要显式打开真实 Provider、分支或
 ./scripts/e2e.sh --real                  # L2 真实 MiniMax
 ./scripts/e2e.sh --real --with-branch    # L3 同 Session 分支
 ./scripts/e2e.sh --with-tools            # L4 Environment projection
-./scripts/e2e.sh --with-canvas-storage   # Canvas Resource / 通用 S3 命名空间边界（需 S3 配置）
+./scripts/e2e.sh --with-canvas-storage   # Canvas Resource 直读预签名 / 全局 Blob 存储边界（需 S3 配置）
 ./scripts/e2e.sh --with-canvas-function  # 免费 fake Function（隐含 storage + rebuild）
 ./scripts/e2e.sh --real --with-tools     # L4 真实 Tool turn
 ./scripts/e2e.sh --ui                    # Playwright UI smoke
@@ -80,7 +81,7 @@ env \
 docker compose -f deploy/test/compose.yaml down --volumes --remove-orphans
 ```
 
-该命令选择 59 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
+该命令选择 61 个免费 API case 和 15 个免费 UI case，不启用真实 Provider、Tool 或
 Branch。`--with-canvas-function` 自动启用 fake Function、Canvas storage 与 backend
 rebuild；不得为这条回归追加 `--real`。
 
@@ -113,7 +114,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 59，默认 57）
+### L1（注册 61，默认 58）
 
 ```text
 seed.structured_model_config
@@ -175,6 +176,8 @@ config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
 canvas.storage_upload_contract
 canvas.function_fake_runtime
+chat.attachment_upload_contract
+canvas.api_version_contract
 ```
 
 L1 的关键语义断言：
@@ -184,25 +187,37 @@ L1 的关键语义断言：
 - `GET /api/ai/catalog/tools` 只返回可选 Platform/Environment 目录：`load_skill`/`task` 两个内部 Platform Tool 绝不出现；Goal 插件 `create_goal/get_goal/update_goal` 必须作为可选 ToolCatalog 能力通过 Agent config 校验；
 - Chat CRUD 仅持久化 `agentName`、`yoloEnabled` 与可选默认 `environmentName`（可为 null）；先建 Thread 再更新 Chat 后 reread 同一 Thread，branchSettings 逐字段不变；
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
-- Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId`、`nextCommandSequence`、`revision` 均为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
+- Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
-- `USER_MESSAGE` 支持互斥的 `text` shorthand 或非空结构化 `contents(TEXT/IMAGE/AUDIO/VIDEO)`，未知/多余字段与非法 mediaType/source 返回 400；现有 `content` shorthand 保持兼容；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
-- 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
+- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
+- 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO` 五类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
 - 未知 Thread snapshot 404；
 - `Accept-Language` 验证错误 message/title 本地化而稳定字段不变。
+- `canvas.api_version_contract` 免费 L1：create/list/get/commands 使用 canonical UUID id 与
+  long `version`（`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
+  同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
+  409；`changes?afterVersion=0` 恒为权威 snapshot，尾部版本返回连续 patches 或同样
+  回退 snapshot；深删除后画布 404。
 - `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
-  S3 配置；IMAGE reserve 返回 `uploadId + PUT + public URL + headers + expiresAt`，不暴露
-  bucket/key，并包含签名覆盖的 `If-None-Match: *`；TEXT 与客户端注入 key 均返回
-  400。完整 create-only PUT 拒绝覆盖、finalize、original/preview 字节链路由
-  `deploy/test` MinIO smoke 和后端定向测试覆盖。
+  S3 配置；通用 S3 预签名端点不能签名 `blobs/` 命名空间 key；全局
+  upload reserve（`sha256` 必填）→ 浏览器直传 PUT → complete 绑定 READY blob，
+  `CREATE_RESOURCE_NODE` 在同一事务消费上传后 Resource DTO 携带 `blobId`/`kind`/
+  `mediaType`/`sizeBytes`；`download-url`/`preview-url` 只暴露
+  method/url/headers/expiresAt（不暴露 bucket/key），download 字节与上传一致；
+  TEXT 资源 URL 400、未知 resource/canvas 404；深删除画布后不可达。
 - `canvas.function_fake_runtime` 仅在 `--with-canvas-function` 下执行：显式注册
-  `fake-image`，验证 Function node 创建、start/poll、成功 Resource 原子替换、
-  `320×260 @ (100,100)` transform 精确回读、`graphRevision` 不变、公开 run DTO 无
-  `stateJson`，以及 preview signed GET。
+  `fake-image`，验证 Function node 创建（客户端 UUID nodeId）、start/poll、成功 Resource
+  原子替换、`320×260 @ (100,100)` transform 精确回读、`document.version` 按命令与 Run
+  状态前进、公开 run DTO 无 `stateJson`，以及 preview signed GET 的 WEBP 字节。
+- `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
+  reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
+  原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
+  `resource(blobId,name,preview)`；整批重放幂等不二次消费；已消费/未 READY upload 与
+  `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
 
 ### L2/L3/L4（7）
 
@@ -224,7 +239,7 @@ tool.read_turn
 | `real.stop_partial_continue` | `--real` | 流式 stop => `STOPPED`/revision+1/`stoppedTurnEndEntryId`；同 `stopRequestId` + 原 revision exact replay => `REPLAYED` 且不重复 bump；后续轮次在 ASSISTANT_ABORTED barrier 后 |
 | `branch.same_session_move_head` | `--real --with-branch` | 同一 Thread 从 TURN_END head 回退到该 Session 内历史 assistant Entry；sessionId 不变、revision+1、root-to-head 路径切换并继续 |
 | `daemon.ready` | `--with-tools` | READY Environment、canonical 路由名称与固定十一个 Tool（9 coding + 2 MCP 桥接）；skills + mcpServers 摘要形状；公共查询不泄露 READY operatingSystem/timeZone/note metadata |
-| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 经 externalizer 外部化为 Resource；durable TOOL MESSAGE 的 `tool_result.contents` 携带 canonical `file:` URI（uri/mediaType/size/sha256）；按内容身份请求 `GET /api/ai/runtime/resources/{sha256}?mediaType&size&name` 下载并验证返回字节数、mediaType、`X-Content-Type-Options: nosniff` 与 sha256 一致 |
+| `tool.read_turn` | `--real --with-tools` | yolo=false：`TOOL_WAITING_APPROVAL` 下冻结 `environmentName`；输入 `ALLOW`、durable decision 为 `ALLOWED`（decisionId 幂等 replay 保留 decidedAt）；`>8KB` fixture 先外部化为瞬时 ResourceRef，Entry 写入前摄入全局 Blob；durable `tool_result.contents` 只携带 `resource(blobId,name,preview)`，不复制 uri/mediaType/size/sha256；经 `/api/storage/blobs/{blobId}/presigned-original` 下载并验证权威 mediaType/sizeBytes 与 fixture 字节一致 |
 
 ### L5 UI（默认 15，`--real` 追加 1）
 
@@ -248,9 +263,12 @@ ui.provider.create_edit_delete_flow
 ui.chat.blank_workspace_shell
 ```
 
-其中 `ui.canvas.page_loads` 验证 `/canvas` library 可达，点击或创建后进入正整数
-`/canvas/:canvasId`，首屏 fit 产生的动态缩放值位于合法区间，点击缩放值可重置为
-`100%` 且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
+其中 `ui.canvas.page_loads` 验证 `/canvas` library 保留全局顶栏，点击或创建后进入
+canonical UUID 形式 `/canvas/:canvasId`：编辑器无全局顶栏且挂 `canvas-immersive` class；Chat 面板默认收起且底部不渲染
+composer，点击 header「Chat / 对话」toggle 展开/收起；默认面板宽于 360px，左边缘拖拽调宽后 zoom
+保持不变；add launcher（左侧中部功能轨）仍可打开菜单，V/H 按钮不展示，缩放控制位于左下；首屏 fit
+产生的动态缩放值位于合法区间，Chat 面板展开/收起不改变该缩放值，点击缩放值可重置为 `100%`
+且刷新后恢复该持久化视口，浏览器 back 返回 library、forward 再进入编辑器；
 Function 生成的付费路径不进入默认 UI smoke，前端组件测试使用 fake Function runtime
 隔离。
 `--real` 额外执行 `ui.chat.blank_first_send_real`。Headless 模式只对 Chromium 子进程移除
@@ -297,7 +315,12 @@ POST /api/ai/runtime/threads/{threadId}/stop
 POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/approval
 GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
 
-GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 同源 managed Resource 下载（attachment + nosniff）
+GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 仅瞬时/Invocation ResourceRef 兼容下载
+
+POST /api/storage/uploads                       -> 通用存储 reserve（PENDING + presigned PUT）
+POST /api/storage/uploads/{uploadId}/complete   -> READY（blobId；供 ATTACHMENT 消费）
+DELETE /api/storage/uploads/{uploadId}
+GET  /api/storage/blobs/{blobId}/presigned-original|preview
 ```
 
 Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
@@ -319,21 +342,25 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
 
 ```json
 {
-  "expectedHeadEntryId": "1",
+  "expectedHeadEntryId": "00000000-0000-0000-0000-000000000003",
   "expectedNextCommandSequence": "1",
   "commands": [
-    { "type": "USER_MESSAGE", "clientCommandId": "...", "text": "..." }
+    {
+      "type": "USER_MESSAGE",
+      "clientCommandId": "00000000-0000-0000-0000-000000000101",
+      "contents": [{ "type": "TEXT", "text": "..." }]
+    }
   ]
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带 `text` shorthand 或非空结构化 `contents`；结构化元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`。已有 `content` shorthand 继续兼容。`CUSTOM_MESSAGE` 额外携带 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId,name,preview)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
 ```json
-{ "targetEntryId": "1", "expectedRevision": "0" }
-{ "stopRequestId": "...", "expectedRevision": "0" }
+{ "targetEntryId": "00000000-0000-0000-0000-000000000005", "expectedRevision": "0" }
+{ "stopRequestId": "00000000-0000-0000-0000-000000000201", "expectedRevision": "0" }
 ```
 
 - `PUT /head`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision、非静止、跨 Session target、TURN_END continuation 义务均为 409；成功 revision+1；
@@ -342,18 +369,68 @@ head move 与 stop 均为 revision CAS：
   - `REPLAYED`：同 `stopRequestId` 再次调用命中持久 TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；
   - `IDLE`：无活动 Turn（无持久 marker，`stoppedTurnEndEntryId=null`；同 `stopRequestId` 再调用仍是 IDLE）；
   - stale revision 409；
-- 命令 batch 整批同 `clientCommandId` 重放返回既有命令；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
+- 命令 batch 整批同 `clientCommandId` + 同 `requestHash` 重放返回既有命令（sequence/requestHash 稳定）；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
 
 Tool approval：
 
 ```json
-{ "decision": "ALLOW", "decisionId": "...", "actor": "web", "reason": null }
+{ "decision": "ALLOW", "decisionId": "00000000-0000-0000-0000-000000000301", "actor": "web", "reason": null }
 ```
 
 - `decision` 输入仅 `ALLOW|DENY`，durable `approvalJson.decision` 编码为 `ALLOWED|DENIED`（ToolApprovalDecision 枚举）；`decisionId` 是客户端稳定幂等键，已决策后 exact replay 保留原 `decidedAt`；
 - yolo=false 时工具调用进入 `TOOL_WAITING_APPROVAL`（快照 `toolInvocations` 含 `WAITING_APPROVAL` 项）；ALLOWED 恢复为 READY 并请求 Tool Work，DENIED 终止为 FAILED；
 - 快照 `toolInvocations` 只暴露 classifier-applicable active siblings：IDLE 后为空，不可回查历史 invocation；工具终态结果从 durable TOOL MESSAGE entry 的嵌套 `tool_result.contents` 读取；
 - INPUT turn 的 durable entry 顺序固定为 `TURN_START -> USER/CUSTOM Message -> assistant MESSAGE -> TURN_END`（TurnPlanBuilder 先追加 TURN_START 再追加消息）。
+
+### Canvas
+
+```text
+GET    /api/canvases
+POST   /api/canvases                        -> 200 CREATED CanvasDocumentDTO
+GET    /api/canvases/{canvasId}             -> CanvasSnapshotDTO
+POST   /api/canvases/{canvasId}/commands    -> CanvasPatchDTO
+DELETE /api/canvases/{canvasId}             -> 深删除（含绑定 Thread）
+GET    /api/canvases/{canvasId}/changes?afterVersion=N -> CanvasChangesDTO
+GET    /api/canvases/{canvasId}/events/stream?afterVersion=N -> SSE（'version'/'resync'）
+POST   /api/canvases/{canvasId}/thread/messages -> 200 CREATED 原子首次发送
+GET    /api/canvas-function-models
+POST   /api/canvases/{canvasId}/nodes/{nodeId}/runs
+GET    /api/canvases/{canvasId}/nodes/{nodeId}/run
+POST   /api/canvases/{canvasId}/nodes/{nodeId}/run/cancel
+POST   /api/canvases/{canvasId}/resources/{resourceId}/download-url
+POST   /api/canvases/{canvasId}/resources/{resourceId}/preview-url
+
+POST /api/storage/uploads
+POST /api/storage/uploads/{uploadId}/complete
+DELETE /api/storage/uploads/{uploadId}
+GET  /api/storage/blobs/{blobId}/presigned-original
+GET  /api/storage/blobs/{blobId}/presigned-preview
+```
+
+- 所有实体 id（canvas/node/group/resource/blob/upload/thread）都是 canonical UUID 字符串
+  （shape-only，不限定 version/variant 位）；graph 版本是 long `version`
+  （`canvas_document.version`），不存在 `graphRevision` 字段；
+- `POST /commands` body 为 `{expectedVersion, commandId, commands[]}`：`expectedVersion`
+  是精确 CAS 游标（stale 409 `VERSION_CONFLICT`）；`commandId` 是整批幂等键——同 id 同
+  内容精确回放返回 `{baseVersion:version, version, [], [], []}` 空 patch，同 id 不同内容
+  409 `IDEMPOTENCY_CONFLICT`；创建类命令携带客户端生成的实体 UUID
+  （`CREATE_TEXT_NODE(nodeId,name,markdown,transform)`、
+  `CREATE_RESOURCE_NODE(nodeId,name,uploadIds,transform)`、
+  `CREATE_FUNCTION_NODE(nodeId,name,modelKey,configJson,transform)`、
+  `CREATE_GROUP(groupId,title,transform,memberNodeIds)`）；
+- `CanvasResourceDTO` 的 `kind` 由 API 按 blob mediaType 派生，TEXT 资源无 blob；
+  `mediaType/sizeBytes/width/height/durationMs` 来自 blob 权威事实列；
+- `GET /changes`：要么返回从 `afterVersion` 起连续 patches（客户端逐个应用），要么返回
+  必须整体替换的权威 snapshot（初始加载/gap/缓存损坏）；未知 canvas 400；
+- SSE `events/stream`：`afterVersion` 与 `Last-Event-ID` 都是非负十进制 version；
+  `version` 事件只携带前进版本（客户端随后拉 changes），`resync` 事件要求整体快照；
+- `POST /thread/messages` 原子首次发送：单事务创建根 Thread、入队有序
+  `USER_MESSAGE contents`（`commandId` 作为 `clientCommandId` 幂等键）并绑定
+  `canvas_document.thread_id`；已绑定 Thread 时原样重放；`branchSettings` 是冻结的
+  provider/model/variant 三元组，与 Harness `HarnessBranchSettingsDTO` 同构；
+- Resource 直读 URL 由服务端解析 Resource → blobId → blob 预签名，响应只含
+  method/url/headers/expiresAt；TEXT 资源 400，未知 resource/canvas 404；全局
+  storage 端点同样不暴露 bucket 与对象物理 key。
 
 Environment 路由身份：
 
@@ -365,8 +442,8 @@ WebSocket /api/ai/environment/daemon/v2
 - Thread create / `SET_ENVIRONMENT` 的 `environmentName` 只接受 canonical bounded 小写路由名称（或 null 清除），非法名称 400；mapper 不查注册表；turn 规划时 ENVIRONMENT 工具按最新名称绑定、缺失/未 READY **不拒绝**（实际 start 时确定性 `Rejected`，durable `FAILED` ToolResult 模型可见），Agent skills 则要求最新选中 Environment live（缺失/未 READY/无名称精确拒绝）；
 - daemon 由 `scripts/e2e/lib.sh` 以唯一 `--workdir "$DAEMON_ENV_ROOT"` 和显式 `--note "$DAEMON_NOTE"` 启动；`DAEMON_NOTE` 默认稳定为 `E2E daemon environment.`，可由环境变量覆盖。workdir 只作为 CodingTools 本地边界，note 只经真实 CLI/READY 进入模型上下文；`GET /api/ai/environment` 继续只返回既有投影，`daemon.ready` 显式断言不存在 `operatingSystem` / `workingDirectory` / `timeZone` / `note` 字段；
 - Chat 默认值（agentName/yoloEnabled/environmentName）仅作 blank pane 初始值（environmentName 可为 null，发送前可改/清空）；Thread `branchSettings` 独立持久化，Environment route immutable；
-- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会被外部化为 Resource（`file:///` URI，携带 mediaType/size/sha256）；daemon preview 阈值默认 2000 行 / 50KB；
-- managed Resource 只按内容身份（mediaType/size/sha256/name）经 `GET /api/ai/runtime/resources/{sha256}` 同源下载：响应 `attachment` + `X-Content-Type-Options: nosniff`，字节与 sha256 一致；未知/不完整身份不产生链接。
+- daemon `read` 输出超过 core externalizer 内联阈值（8KB）的 Text content 会先外部化为瞬时 ResourceRef（`file:///` URI，携带 mediaType/size/sha256）；Entry 写入前再摄入全局 Blob，durable message 为 `resource(blobId,name,preview)`；daemon preview 阈值默认 2000 行 / 50KB；
+- durable Blob Resource 经 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview` 渲染，原件响应提供权威 mediaType/sizeBytes；`GET /api/ai/runtime/resources/{sha256}` 只保留给瞬时/Invocation file/s3 ResourceRef 兼容，未知或不完整内容身份不产生链接。
 
 默认 L1 不覆盖 task 心跳与 UI 呈现：`task.status` 心跳、renderer 分发、TaskStatusWidget 与浏览器通知等呈现契约由前端单测覆盖，真实 task 委派只由显式 `--real` 的 `real.task_delegation` 覆盖。
 

@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from 'react'
-import type { CanvasTool, CanvasView } from '@/features/canvas/types'
+import type { CanvasView } from '@/features/canvas/types'
 
 type KeyboardApi = {
   view: CanvasView
@@ -9,8 +9,7 @@ type KeyboardApi = {
   zoomRef: RefObject<((scale: number) => void) | null>
   clearSelection: () => void
   deleteSelection: () => void
-  focusAgentPrompt: () => void
-  setTool: (tool: CanvasTool, silent?: boolean) => void
+  focusThread: () => void
   createTextNode: () => void
   closeOverlays: () => void
 }
@@ -25,8 +24,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     zoomRef,
     clearSelection,
     deleteSelection,
-    focusAgentPrompt,
-    setTool,
+    focusThread,
     createTextNode,
     closeOverlays,
   } = api
@@ -46,7 +44,7 @@ export function useCanvasKeyboard(api: KeyboardApi) {
           return
         }
         event.preventDefault()
-        focusAgentPrompt()
+        focusThread()
         return
       }
 
@@ -83,12 +81,6 @@ export function useCanvasKeyboard(api: KeyboardApi) {
       } else if (event.key.toLowerCase() === 'f') {
         event.preventDefault()
         focusSelectionRef.current?.()
-      } else if (event.key.toLowerCase() === 'v') {
-        event.preventDefault()
-        setTool('select')
-      } else if (event.key.toLowerCase() === 'h') {
-        event.preventDefault()
-        setTool('hand')
       } else if (event.key.toLowerCase() === 't') {
         event.preventDefault()
         createTextNode()
@@ -103,9 +95,8 @@ export function useCanvasKeyboard(api: KeyboardApi) {
     createTextNode,
     deleteSelection,
     fitViewRef,
-    focusAgentPrompt,
+    focusThread,
     focusSelectionRef,
-    setTool,
     stageElementRef,
     view,
     zoomRef,

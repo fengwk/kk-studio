@@ -27,6 +27,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -48,8 +49,8 @@ final class ModelExecution implements ModelGateway.Listener {
   private final HarnessStore store;
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
-  private final long invocationId;
-  private final long threadId;
+  private final UUID invocationId;
+  private final UUID threadId;
   private final int attempt;
   private final ModelInvocationRequest request;
   private final ModelProcessorConfig config;
@@ -71,7 +72,7 @@ final class ModelExecution implements ModelGateway.Listener {
       HarnessStore store,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
-      long threadId,
+      UUID threadId,
       int attempt,
       ModelInvocationRequest request,
       ModelProcessorConfig config,
@@ -97,7 +98,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
   }
 
-  long invocationId() {
+  UUID invocationId() {
     return invocationId;
   }
 

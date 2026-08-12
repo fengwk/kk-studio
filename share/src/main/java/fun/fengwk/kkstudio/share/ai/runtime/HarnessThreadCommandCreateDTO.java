@@ -16,6 +16,9 @@ import java.util.List;
  * <p>{@code type} 是 discriminator（USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_MODEL /
  * SET_ACTIVE_TOOLS / SET_YOLO / SET_ENVIRONMENT）；mapper 按 discriminator 严格校验 required/forbidden
  * 可选字段。{@code clientCommandId} 是稳定幂等键。
+ *
+ * <p>USER_MESSAGE 只接受一个非空、有序的 {@link #contents}（内容为 TEXT / ATTACHMENT）；不提供任何文本 shorthand。
+ * CUSTOM_MESSAGE 使用 {@link #content} 单文本正文。
  */
 @Data
 public class HarnessThreadCommandCreateDTO {
@@ -26,27 +29,17 @@ public class HarnessThreadCommandCreateDTO {
    */
   private String type;
 
-  /** 必填稳定客户端幂等键（canonical name）：同一批命令重放返回既有行。 */
+  /** 必填稳定客户端幂等键（canonical UUID string）：同一批命令重放返回既有行。 */
   private String clientCommandId;
 
-  /**
-   * 兼容消息正文：CUSTOM_MESSAGE 必填；旧 USER_MESSAGE 调用继续接受。新 USER_MESSAGE 推荐使用 {@link #text} 或 {@link
-   * #contents}。
-   */
+  /** CUSTOM_MESSAGE 必填的单文本正文；其余类型禁止提供（USER_MESSAGE 只接受 {@link #contents}）。 */
   private String content;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean contentFieldPresent;
 
-  /** USER_MESSAGE 的纯文本 shorthand，与 {@link #content} / {@link #contents} 互斥。 */
-  private String text;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean textFieldPresent;
-
-  /** USER_MESSAGE 的非空结构化内容，与 {@link #text} / {@link #content} 互斥。 */
+  /** USER_MESSAGE 必填的非空有序结构化内容（TEXT / ATTACHMENT）；其余类型禁止提供。 */
   private List<HarnessUserMessageContentDTO> contents;
 
   @Getter(AccessLevel.NONE)
@@ -77,12 +70,6 @@ public class HarnessThreadCommandCreateDTO {
     this.contentFieldPresent = true;
   }
 
-  @JsonSetter("text")
-  public void setText(String text) {
-    this.text = text;
-    this.textFieldPresent = true;
-  }
-
   @JsonSetter("contents")
   public void setContents(List<HarnessUserMessageContentDTO> contents) {
     this.contents = contents;
@@ -92,11 +79,6 @@ public class HarnessThreadCommandCreateDTO {
   @JsonIgnore
   public boolean hasContentField() {
     return contentFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasTextField() {
-    return textFieldPresent;
   }
 
   @JsonIgnore

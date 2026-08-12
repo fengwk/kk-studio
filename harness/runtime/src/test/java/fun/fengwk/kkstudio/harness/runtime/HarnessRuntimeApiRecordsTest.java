@@ -14,8 +14,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 
 import java.util.List;
 
@@ -24,9 +26,9 @@ class HarnessRuntimeApiRecordsTest {
 
   @Test
   void createThreadCommandRequiresBranchSettings() {
-    assertThrows(NullPointerException.class, () -> new CreateThreadCommand("t", null, false));
-    assertEquals("t", new CreateThreadCommand("t", settings(), false).title());
-    assertTrue(new CreateThreadCommand(null, settings(), true).yoloEnabled());
+    assertThrows(NullPointerException.class, () -> new CreateThreadCommand(null, false));
+    assertEquals(settings(), new CreateThreadCommand(settings(), false).branchSettings());
+    assertTrue(new CreateThreadCommand(settings(), true).yoloEnabled());
   }
 
   @Test
@@ -35,14 +37,16 @@ class HarnessRuntimeApiRecordsTest {
     CreatedThread created =
         store.transaction(
             tx -> {
-              Session session = new Session(1, "s", T0);
-              Entry root = new Entry(2, 1, null, new RootPayload(settings()), T0);
-              ThreadState thread = new ThreadState(3, 2, false, 1, 0, T0, T0);
+              Session session = new Session(TestIds.id(1), T0);
+              Entry root =
+                  new Entry(TestIds.id(2), TestIds.id(1), null, new RootPayload(settings()), T0);
+              ThreadState thread =
+                  new ThreadState(TestIds.id(3), TestIds.id(2), false, 1, 0, T0, T0);
               return new CreatedThread(session, root, thread);
             });
-    assertEquals(1L, created.session().id());
-    assertEquals(2L, created.rootEntry().id());
-    assertEquals(3L, created.thread().id());
+    assertEquals(TestIds.id(1), created.session().id());
+    assertEquals(TestIds.id(2), created.rootEntry().id());
+    assertEquals(TestIds.id(3), created.thread().id());
     assertThrows(
         NullPointerException.class,
         () -> new CreatedThread(null, created.rootEntry(), created.thread()));
@@ -63,11 +67,12 @@ class HarnessRuntimeApiRecordsTest {
     List<ThreadCommand> queued =
         List.of(
             new ThreadCommand(
-                1,
                 thread.id(),
                 1,
                 HarnessRuntimeTestSupport.userMessagePayload("a"),
-                "cid",
+                TestIds.id(1),
+                ThreadCommandPayloadJsonCodec.requestHash(
+                    HarnessRuntimeTestSupport.userMessagePayload("a")),
                 null,
                 null,
                 T0));
@@ -102,7 +107,7 @@ class HarnessRuntimeApiRecordsTest {
 
   @Test
   void moveHeadCommandValidationIsExact() {
-    assertEquals(7L, new MoveHeadCommand(1, 2, 7).expectedRevision());
-    assertThrows(IllegalArgumentException.class, () -> new MoveHeadCommand(-1, 2, 0));
+    assertEquals(7L, new MoveHeadCommand(TestIds.id(1), TestIds.id(2), 7).expectedRevision());
+    assertThrows(NullPointerException.class, () -> new MoveHeadCommand(null, TestIds.id(2), 0));
   }
 }

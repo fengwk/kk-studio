@@ -5,11 +5,12 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.core.ai.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.core.ai.chat.service.model.Chat;
 import fun.fengwk.kkstudio.core.ai.error.AiValidationException;
-import fun.fengwk.kkstudio.core.persistence.id.PostgresqlSequenceIdGenerator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
+
+import java.util.UUID;
 
 /**
  * 规范化 Chat 可变字段并分配 Chat id。
@@ -24,15 +25,11 @@ public class ChatMutationFactory {
   private static final int TITLE_MAX_LENGTH = 256;
 
   private final AgentEditableSupport editableSupport;
-  private final PostgresqlSequenceIdGenerator idGenerator;
   private final ToolSettingsProvider toolSettingsProvider;
 
   public ChatMutationFactory(
-      AgentEditableSupport editableSupport,
-      PostgresqlSequenceIdGenerator idGenerator,
-      ToolSettingsProvider toolSettingsProvider) {
+      AgentEditableSupport editableSupport, ToolSettingsProvider toolSettingsProvider) {
     this.editableSupport = editableSupport;
-    this.idGenerator = idGenerator;
     this.toolSettingsProvider = toolSettingsProvider;
   }
 
@@ -41,7 +38,7 @@ public class ChatMutationFactory {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
     Chat chat = new Chat();
-    chat.setId(idGenerator.next());
+    chat.setId(UUID.randomUUID());
     String title = editableSupport.trimToNull(createDTO.getTitle());
     if (title == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " title must not be blank");

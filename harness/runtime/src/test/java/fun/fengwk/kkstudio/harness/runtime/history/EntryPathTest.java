@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -33,18 +34,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** EntryPath 链的不变量：同一 head 的 settings、turn 顺序、tool 前缀与结局。 */
 class EntryPathTest {
 
-  private static final long SESSION = 1L;
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
   @Test
   void validPathWithOpenTurnDerivesHeadSettingsAndOpenTurnStart() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     EntryPath path = new EntryPath(List.of(root, start, user));
 
@@ -58,12 +59,12 @@ class EntryPathTest {
   @Test
   void acceptsStructuredVideoUserMessageInInputTurn() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
     Entry videoUser =
         new Entry(
-            3L,
-            SESSION,
-            2L,
+            id(3L),
+            SESSION_ID,
+            id(2L),
             new MessagePayload(
                 new AgentMessage(
                     AgentMessageRole.USER,
@@ -73,7 +74,7 @@ class EntryPathTest {
                             "video/mp4", "https://example.test/reference.mp4"))),
                 null,
                 null),
-            time(3L));
+            time(id(3L)));
 
     EntryPath path = new EntryPath(List.of(root, start, videoUser));
 
@@ -84,11 +85,12 @@ class EntryPathTest {
   @Test
   void closedTurnThenSecondOpenTurnDerivesLatestSnapshot() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("first"));
-    Entry user = userMessage(3L, 2L);
-    Entry end = turnEnd(4L, 3L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
-    Entry secondStart = turnStart(5L, 4L, TurnStartReason.INPUT, settings("second"));
-    Entry secondUser = userMessage(6L, 5L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("first"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry end =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry secondStart = turnStart(id(5L), id(4L), TurnStartReason.INPUT, settings("second"));
+    Entry secondUser = userMessage(id(6L), id(5L));
 
     EntryPath path = new EntryPath(List.of(root, start, user, end, secondStart, secondUser));
 
@@ -107,12 +109,14 @@ class EntryPathTest {
             .withActiveTools(List.of("read", "bash"));
     BranchSettings latestTurn = settings(null, "latest-agent");
     Entry root = root(rootSettings);
-    Entry start1 = turnStart(2L, 1L, TurnStartReason.INPUT, firstTurn);
-    Entry user1 = userMessage(3L, 2L);
-    Entry end1 = turnEnd(4L, 3L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
-    Entry start2 = turnStart(5L, 4L, TurnStartReason.INPUT, latestTurn);
-    Entry user2 = userMessage(6L, 5L);
-    Entry end2 = turnEnd(7L, 6L, 5L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
+    Entry user1 = userMessage(id(3L), id(2L));
+    Entry end1 =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start2 = turnStart(id(5L), id(4L), TurnStartReason.INPUT, latestTurn);
+    Entry user2 = userMessage(id(6L), id(5L));
+    Entry end2 =
+        turnEnd(id(7L), id(6L), id(5L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
 
     EntryPath path = new EntryPath(List.of(root, start1, user1, end1, start2, user2, end2));
 
@@ -129,8 +133,8 @@ class EntryPathTest {
   @Test
   void baseSettingsFallsBackToRootAndRelocationHead() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     EntryPath relocationPath = new EntryPath(List.of(root, start, user));
     EntryPath rootOnlyPath = new EntryPath(List.of(root));
@@ -146,8 +150,9 @@ class EntryPathTest {
   @Test
   void relocationPathMayEndAtAnyHistoryHead() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry end = turnEnd(3L, 2L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry end =
+        turnEnd(id(3L), id(2L), id(2L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
 
     assertEquals(start, new EntryPath(List.of(root, start)).head());
     assertEquals(end, new EntryPath(List.of(root, start, end)).head());
@@ -158,8 +163,8 @@ class EntryPathTest {
   @Test
   void sameHeadPathsDeriveIdenticalSettings() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
     List<Entry> entries = List.of(root, start, user);
 
     EntryPath first = new EntryPath(entries);
@@ -183,12 +188,12 @@ class EntryPathTest {
   @Test
   void acceptsCompleteInputTurnWithOrderedToolLoop() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
-    Entry assistant = assistantMessage(4L, 3L, "call-1:read", "call-2:grep");
-    Entry tool0 = toolResult(5L, 4L, 0, 4L, "call-1", "read");
-    Entry tool1 = toolResult(6L, 5L, 1, 4L, "call-2", "grep");
-    Entry end = turnEnd(7L, 6L, 2L, TurnEndOutcome.COMPLETED, null, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L), "call-1:read", "call-2:grep");
+    Entry tool0 = toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read");
+    Entry tool1 = toolResult(id(6L), id(5L), 1, id(4L), "call-2", "grep");
+    Entry end = turnEnd(id(7L), id(6L), id(2L), TurnEndOutcome.COMPLETED, null, null);
 
     EntryPath path = new EntryPath(List.of(root, start, user, assistant, tool0, tool1, end));
 
@@ -199,10 +204,10 @@ class EntryPathTest {
   @Test
   void acceptsCustomInputAndCompletedTurnWithoutToolCalls() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry custom = customMessage(3L, 2L);
-    Entry assistant = assistantMessage(4L, 3L);
-    Entry end = turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry custom = customMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L));
+    Entry end = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null);
 
     new EntryPath(List.of(root, start, custom, assistant, end));
   }
@@ -210,9 +215,9 @@ class EntryPathTest {
   @Test
   void acceptsContinuationTurnWithoutInput() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.CONTINUATION, settings("turn"));
-    Entry assistant = assistantMessage(3L, 2L);
-    Entry end = turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.CONTINUATION, settings("turn"));
+    Entry assistant = assistantMessage(id(3L), id(2L));
+    Entry end = turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null);
 
     new EntryPath(List.of(root, start, assistant, end));
   }
@@ -223,24 +228,26 @@ class EntryPathTest {
     for (CompactionPhase phase :
         List.of(CompactionPhase.FULL, CompactionPhase.HISTORY, CompactionPhase.TURN_PREFIX)) {
       boolean complete = phase != CompactionPhase.HISTORY;
-      Long prefix = phase == CompactionPhase.FULL ? null : 3L;
+      UUID prefix = phase == CompactionPhase.FULL ? null : id(3L);
       new EntryPath(
           List.of(
               root,
-              compactionStart(2L, 1L, settings("turn")),
-              compactionResult(3L, 2L, phase, complete, prefix),
-              turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null)));
+              compactionStart(id(2L), id(1L), settings("turn")),
+              compactionResult(id(3L), id(2L), phase, complete, prefix),
+              turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null)));
     }
   }
 
   @Test
   void completedCompactionContinueModelMatchesOverflowRecoverySemantics() {
     Entry root = root(settings("root"));
-    Entry start = compactionStart(2L, 1L, settings("turn"));
+    Entry start = compactionStart(id(2L), id(1L), settings("turn"));
     Entry threshold =
-        compactionResult(3L, 2L, CompactionPhase.FULL, CompactionTrigger.THRESHOLD, true, null);
+        compactionResult(
+            id(3L), id(2L), CompactionPhase.FULL, CompactionTrigger.THRESHOLD, true, null);
     Entry overflow =
-        compactionResult(3L, 2L, CompactionPhase.FULL, CompactionTrigger.OVERFLOW, true, null);
+        compactionResult(
+            id(3L), id(2L), CompactionPhase.FULL, CompactionTrigger.OVERFLOW, true, null);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -250,7 +257,7 @@ class EntryPathTest {
                     root,
                     start,
                     threshold,
-                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, true, null, null))));
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -259,14 +266,14 @@ class EntryPathTest {
                     root,
                     start,
                     overflow,
-                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, false, null, null))));
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, false, null, null))));
 
     new EntryPath(
         List.of(
             root,
             start,
             overflow,
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, true, null, null)));
+            turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null)));
   }
 
   @Test
@@ -279,10 +286,10 @@ class EntryPathTest {
             new EntryPath(
                 List.of(
                     root,
-                    turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-                    userMessage(3L, 2L),
-                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+                    userMessage(id(3L), id(2L)),
+                    compactionResult(id(4L), id(3L), CompactionPhase.FULL, true, null),
+                    turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     // COMPACTION turn 绝不消费 USER / CUSTOM / 普通 ASSISTANT 结果。
     assertThrows(
         IllegalArgumentException.class,
@@ -290,29 +297,29 @@ class EntryPathTest {
             new EntryPath(
                 List.of(
                     root,
-                    compactionStart(2L, 1L, settings("turn")),
-                    userMessage(3L, 2L),
-                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    compactionStart(id(2L), id(1L), settings("turn")),
+                    userMessage(id(3L), id(2L)),
+                    compactionResult(id(4L), id(3L), CompactionPhase.FULL, true, null),
+                    turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EntryPath(
                 List.of(
                     root,
-                    compactionStart(2L, 1L, settings("turn")),
-                    customMessage(3L, 2L),
-                    compactionResult(4L, 3L, CompactionPhase.FULL, true, null),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    compactionStart(id(2L), id(1L), settings("turn")),
+                    customMessage(id(3L), id(2L)),
+                    compactionResult(id(4L), id(3L), CompactionPhase.FULL, true, null),
+                    turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EntryPath(
                 List.of(
                     root,
-                    compactionStart(2L, 1L, settings("turn")),
-                    assistantMessage(3L, 2L),
-                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    compactionStart(id(2L), id(1L), settings("turn")),
+                    assistantMessage(id(3L), id(2L)),
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     // COMPACTION turn 不能以普通 ASSISTANT 结果完成。
     assertThrows(
         IllegalArgumentException.class,
@@ -320,9 +327,9 @@ class EntryPathTest {
             new EntryPath(
                 List.of(
                     root,
-                    compactionStart(2L, 1L, settings("turn")),
-                    assistantMessage(3L, 2L),
-                    turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    compactionStart(id(2L), id(1L), settings("turn")),
+                    assistantMessage(id(3L), id(2L)),
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
   }
 
   @Test
@@ -332,16 +339,18 @@ class EntryPathTest {
     new EntryPath(
         List.of(
             root,
-            compactionStart(2L, 1L, settings("turn")),
-            assistantError(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
+            compactionStart(id(2L), id(1L), settings("turn")),
+            assistantError(id(3L), id(2L)),
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
     // 停止压缩：ASSISTANT_ABORTED + STOPPED。
     new EntryPath(
         List.of(
             root,
-            compactionStart(2L, 1L, settings("turn")),
-            assistantAborted(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1")));
+            compactionStart(id(2L), id(1L), settings("turn")),
+            assistantAborted(id(3L), id(2L)),
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
   }
 
   @Test
@@ -351,49 +360,64 @@ class EntryPathTest {
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-            userMessage(3L, 2L),
-            assistantError(4L, 3L),
-            turnEnd(5L, 4L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
+            turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+            userMessage(id(3L), id(2L)),
+            assistantError(id(4L), id(3L)),
+            turnEnd(
+                id(5L), id(4L), id(2L), TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
 
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-            userMessage(3L, 2L),
-            assistantAborted(4L, 3L),
-            turnEnd(5L, 4L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1")));
+            turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+            userMessage(id(3L), id(2L)),
+            assistantAborted(id(4L), id(3L)),
+            turnEnd(
+                id(5L), id(4L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
 
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-            turnEnd(3L, 2L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null)));
+            turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+            turnEnd(
+                id(3L),
+                id(2L),
+                id(2L),
+                TurnEndOutcome.CANCELLED,
+                TurnEndReason.HISTORY_CUT,
+                null)));
 
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-            userMessage(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null)));
+            turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+            userMessage(id(3L), id(2L)),
+            turnEnd(
+                id(4L),
+                id(3L),
+                id(2L),
+                TurnEndOutcome.CANCELLED,
+                TurnEndReason.HISTORY_CUT,
+                null)));
 
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn")),
-            userMessage(3L, 2L),
-            assistantMessage(4L, 3L, "call-1:read"),
-            toolResult(5L, 4L, 0, 4L, "call-1", "read"),
-            turnEnd(6L, 5L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1")));
+            turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn")),
+            userMessage(id(3L), id(2L)),
+            assistantMessage(id(4L), id(3L), "call-1:read"),
+            toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"),
+            turnEnd(
+                id(6L), id(5L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
   }
 
   @Test
   void acceptsPartialToolPrefixesAtAnyHead() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
-    Entry assistant = assistantMessage(4L, 3L, "call-1:read", "call-2:grep");
-    Entry tool0 = toolResult(5L, 4L, 0, 4L, "call-1", "read");
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L), "call-1:read", "call-2:grep");
+    Entry tool0 = toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read");
 
     new EntryPath(List.of(root, start));
     new EntryPath(List.of(root, start, user));
@@ -404,107 +428,116 @@ class EntryPathTest {
   @Test
   void rejectsEntriesOutsideOpenTurn() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry end = turnEnd(3L, 2L, 2L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry end =
+        turnEnd(id(3L), id(2L), id(2L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
 
     assertThrows(
-        IllegalArgumentException.class, () -> new EntryPath(List.of(root, userMessage(2L, 1L))));
-    assertThrows(
-        IllegalArgumentException.class, () -> new EntryPath(List.of(root, customMessage(2L, 1L))));
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, userMessage(id(2L), id(1L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, end, userMessage(4L, 3L))));
+        () -> new EntryPath(List.of(root, customMessage(id(2L), id(1L)))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, start, end, userMessage(id(4L), id(3L)))));
   }
 
   @Test
   void rejectsInputPhaseViolations() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, toolResult(3L, 2L, 0, 99L, "call-1", "read"))));
+        () ->
+            new EntryPath(
+                List.of(root, start, toolResult(id(3L), id(2L), 0, id(99L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, assistantError(3L, 2L))));
+        () -> new EntryPath(List.of(root, start, assistantError(id(3L), id(2L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, assistantAborted(3L, 2L))));
+        () -> new EntryPath(List.of(root, start, assistantAborted(id(3L), id(2L)))));
   }
 
   @Test
   void rejectsInputTurnWithoutInputBeforeAssistantResult() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, assistantMessage(3L, 2L))));
+        () -> new EntryPath(List.of(root, start, assistantMessage(id(3L), id(2L)))));
   }
 
   @Test
   void rejectsRepeatedOrLateAssistantResults() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
-    Entry assistant = assistantMessage(4L, 3L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, user, assistant, assistantMessage(5L, 4L))));
+        () ->
+            new EntryPath(List.of(root, start, user, assistant, assistantMessage(id(5L), id(4L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, user, assistant, assistantAborted(5L, 4L))));
+        () ->
+            new EntryPath(List.of(root, start, user, assistant, assistantAborted(id(5L), id(4L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, user, assistant, assistantError(5L, 4L))));
+        () -> new EntryPath(List.of(root, start, user, assistant, assistantError(id(5L), id(4L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, user, assistant, userMessage(5L, 4L))));
+        () -> new EntryPath(List.of(root, start, user, assistant, userMessage(id(5L), id(4L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, user, assistant, customMessage(5L, 4L))));
+        () -> new EntryPath(List.of(root, start, user, assistant, customMessage(id(5L), id(4L)))));
   }
 
   @Test
   void rejectsMessagesInContinuationTurns() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.CONTINUATION, settings("turn"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.CONTINUATION, settings("turn"));
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, userMessage(3L, 2L))));
+        () -> new EntryPath(List.of(root, start, userMessage(id(3L), id(2L)))));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EntryPath(List.of(root, start, customMessage(3L, 2L))));
+        () -> new EntryPath(List.of(root, start, customMessage(id(3L), id(2L)))));
 
     // Continuation 无需 input 即偿还上一条 TURN_END.continueModel 的义务。
     new EntryPath(
         List.of(
             root,
             start,
-            assistantMessage(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null)));
+            assistantMessage(id(3L), id(2L)),
+            turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null)));
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.CONTINUATION, settings("turn")),
-            assistantError(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
+            turnStart(id(2L), id(1L), TurnStartReason.CONTINUATION, settings("turn")),
+            assistantError(id(3L), id(2L)),
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
     new EntryPath(
         List.of(
             root,
-            turnStart(2L, 1L, TurnStartReason.CONTINUATION, settings("turn")),
-            assistantAborted(3L, 2L),
-            turnEnd(4L, 3L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1")));
+            turnStart(id(2L), id(1L), TurnStartReason.CONTINUATION, settings("turn")),
+            assistantAborted(id(3L), id(2L)),
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
   }
 
   @Test
   void rejectsToolResultsWithoutMatchingAssistantMessage() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -514,8 +547,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"))));
+                    assistantMessage(id(4L), id(3L)),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -524,8 +557,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantAborted(4L, 3L),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"))));
+                    assistantAborted(id(4L), id(3L)),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -534,15 +567,15 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantError(4L, 3L),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"))));
+                    assistantError(id(4L), id(3L)),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"))));
   }
 
   @Test
   void rejectsNonPrefixOrMismatchedToolResults() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -552,8 +585,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 1, 4L, "call-1", "read"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 1, id(4L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -562,8 +595,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read", "call-2:grep"),
-                    toolResult(5L, 4L, 1, 4L, "call-2", "grep"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read", "call-2:grep"),
+                    toolResult(id(5L), id(4L), 1, id(4L), "call-2", "grep"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -572,8 +605,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 0, 4L, "call-9", "read"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-9", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -582,8 +615,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "grep"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "grep"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -592,8 +625,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 0, 99L, "call-1", "read"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 0, id(99L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -602,9 +635,9 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"),
-                    toolResult(6L, 5L, 0, 4L, "call-1", "read"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"),
+                    toolResult(id(6L), id(5L), 0, id(4L), "call-1", "read"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -613,23 +646,26 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"),
-                    toolResult(6L, 5L, 1, 4L, "call-1", "read"))));
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"),
+                    toolResult(id(6L), id(5L), 1, id(4L), "call-1", "read"))));
   }
 
   @Test
   void rejectsTurnEndOutcomeViolations() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(3L, 2L);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EntryPath(
                 List.of(
-                    root, start, user, turnEnd(4L, 3L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    root,
+                    start,
+                    user,
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -638,8 +674,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantAborted(4L, 3L),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    assistantAborted(id(4L), id(3L)),
+                    turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -648,8 +684,8 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantError(4L, 3L),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    assistantError(id(4L), id(3L)),
+                    turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -658,9 +694,9 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read", "call-2:grep"),
-                    toolResult(5L, 4L, 0, 4L, "call-1", "read"),
-                    turnEnd(6L, 5L, 2L, TurnEndOutcome.COMPLETED, null, null))));
+                    assistantMessage(id(4L), id(3L), "call-1:read", "call-2:grep"),
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"),
+                    turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, null, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -670,7 +706,12 @@ class EntryPathTest {
                     start,
                     user,
                     turnEnd(
-                        4L, 3L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1"))));
+                        id(4L),
+                        id(3L),
+                        id(2L),
+                        TurnEndOutcome.STOPPED,
+                        TurnEndReason.USER_STOP,
+                        id(1L)))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -679,9 +720,14 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L, "call-1:read"),
+                    assistantMessage(id(4L), id(3L), "call-1:read"),
                     turnEnd(
-                        5L, 4L, 2L, TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, "stop-1"))));
+                        id(5L),
+                        id(4L),
+                        id(2L),
+                        TurnEndOutcome.STOPPED,
+                        TurnEndReason.USER_STOP,
+                        id(1L)))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -690,8 +736,14 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantAborted(4L, 3L),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null))));
+                    assistantAborted(id(4L), id(3L)),
+                    turnEnd(
+                        id(5L),
+                        id(4L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.TURN_FAILED,
+                        null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -700,16 +752,28 @@ class EntryPathTest {
                     root,
                     start,
                     user,
-                    assistantMessage(4L, 3L),
-                    turnEnd(5L, 4L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null))));
+                    assistantMessage(id(4L), id(3L)),
+                    turnEnd(
+                        id(5L),
+                        id(4L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.TURN_FAILED,
+                        null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EntryPath(
                 List.of(
                     root,
-                    turnStart(2L, 1L, TurnStartReason.CONTINUATION, settings("turn")),
-                    turnEnd(3L, 2L, 2L, TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null))));
+                    turnStart(id(2L), id(1L), TurnStartReason.CONTINUATION, settings("turn")),
+                    turnEnd(
+                        id(3L),
+                        id(2L),
+                        id(2L),
+                        TurnEndOutcome.FAILED,
+                        TurnEndReason.TURN_FAILED,
+                        null))));
   }
 
   @Test
@@ -722,15 +786,20 @@ class EntryPathTest {
     Entry root = root(settings("root"));
     Entry other =
         new Entry(
-            2L, 2L, 1L, new TurnStartPayload(TurnStartReason.INPUT, settings("turn")), time(2L));
+            id(2L),
+            id(2L),
+            id(1L),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("turn")),
+            time(id(2L)));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, other)));
   }
 
   @Test
   void rejectsRootNotFirstAndMultipleRoots() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry secondRoot = new Entry(3L, SESSION, null, new RootPayload(settings("other")), time(3L));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry secondRoot =
+        new Entry(id(3L), SESSION_ID, null, new RootPayload(settings("other")), time(id(3L)));
 
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(start, root)));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, secondRoot)));
@@ -741,13 +810,21 @@ class EntryPathTest {
     Entry root = root(settings("root"));
     Entry broken =
         new Entry(
-            3L, SESSION, 5L, new TurnStartPayload(TurnStartReason.INPUT, settings("t")), time(3L));
+            id(3L),
+            SESSION_ID,
+            id(5L),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("t")),
+            time(id(3L)));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, broken)));
 
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
     Entry duplicate =
         new Entry(
-            2L, SESSION, 2L, new TurnStartPayload(TurnStartReason.INPUT, settings("t")), time(3L));
+            id(2L),
+            SESSION_ID,
+            id(2L),
+            new TurnStartPayload(TurnStartReason.INPUT, settings("t")),
+            time(id(3L)));
     assertThrows(
         IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, duplicate)));
   }
@@ -757,9 +834,9 @@ class EntryPathTest {
     Entry root = root(settings("root"));
     Entry child =
         new Entry(
-            2L,
-            SESSION,
-            1L,
+            id(2L),
+            SESSION_ID,
+            id(1L),
             new TurnStartPayload(TurnStartReason.INPUT, settings("turn")),
             BASE.minusSeconds(1));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, child)));
@@ -768,38 +845,39 @@ class EntryPathTest {
   @Test
   void rejectsSecondOpenTurnStart() {
     Entry root = root(settings("root"));
-    Entry first = turnStart(2L, 1L, TurnStartReason.INPUT, settings("first"));
-    Entry second = turnStart(3L, 2L, TurnStartReason.INPUT, settings("second"));
+    Entry first = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("first"));
+    Entry second = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("second"));
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, first, second)));
   }
 
   @Test
   void rejectsTurnEndWithoutOpenTurnStart() {
     Entry root = root(settings("root"));
-    Entry user = userMessage(2L, 1L);
-    Entry end = turnEnd(3L, 2L, 2L, TurnEndOutcome.COMPLETED, null, null);
+    Entry user = userMessage(id(2L), id(1L));
+    Entry end = turnEnd(id(3L), id(2L), id(2L), TurnEndOutcome.COMPLETED, null, null);
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, user, end)));
   }
 
   @Test
   void rejectsTurnEndWithWrongTurnStartReference() {
     Entry root = root(settings("root"));
-    Entry start = turnStart(2L, 1L, TurnStartReason.INPUT, settings("turn"));
-    Entry end = turnEnd(3L, 2L, 99L, TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry end =
+        turnEnd(id(3L), id(2L), id(99L), TurnEndOutcome.CANCELLED, TurnEndReason.HISTORY_CUT, null);
     assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, end)));
   }
 
   @Test
   void customEntriesAreTransparentToTurnGrammar() {
     Entry root = root(settings("root"));
-    Entry customBeforeTurn = customEntry(2L, 1L, "goal");
-    Entry start = turnStart(3L, 2L, TurnStartReason.INPUT, settings("turn"));
-    Entry customInsideTurn = customEntry(4L, 3L, "goal");
-    Entry user = userMessage(5L, 4L);
-    Entry assistant = assistantMessage(6L, 5L);
-    Entry customAfterAssistant = customEntry(7L, 6L, "goal");
-    Entry end = turnEnd(8L, 7L, 3L, TurnEndOutcome.COMPLETED, null, null);
-    Entry customAfterTurn = customEntry(9L, 8L, "goal");
+    Entry customBeforeTurn = customEntry(id(2L), id(1L), "goal");
+    Entry start = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("turn"));
+    Entry customInsideTurn = customEntry(id(4L), id(3L), "goal");
+    Entry user = userMessage(id(5L), id(4L));
+    Entry assistant = assistantMessage(id(6L), id(5L));
+    Entry customAfterAssistant = customEntry(id(7L), id(6L), "goal");
+    Entry end = turnEnd(id(8L), id(7L), id(3L), TurnEndOutcome.COMPLETED, null, null);
+    Entry customAfterTurn = customEntry(id(9L), id(8L), "goal");
 
     EntryPath path =
         new EntryPath(
@@ -827,51 +905,53 @@ class EntryPathTest {
   @Test
   void customEntryAfterRootWithoutAnyTurnIsAccepted() {
     Entry root = root(settings("root"));
-    Entry custom = customEntry(2L, 1L, "goal");
+    Entry custom = customEntry(id(2L), id(1L), "goal");
     EntryPath path = new EntryPath(List.of(root, custom));
     assertEquals(custom, path.head());
     assertEquals(Optional.empty(), path.openTurnStart());
   }
 
+  private static final UUID SESSION_ID = id(1L);
+
   private static Entry root(BranchSettings settings) {
-    return new Entry(1L, SESSION, null, new RootPayload(settings), BASE);
+    return new Entry(id(1L), SESSION_ID, null, new RootPayload(settings), BASE);
   }
 
   private static Entry turnStart(
-      long id, long parentId, TurnStartReason reason, BranchSettings settings) {
-    return new Entry(id, SESSION, parentId, new TurnStartPayload(reason, settings), time(id));
+      UUID id, UUID parentId, TurnStartReason reason, BranchSettings settings) {
+    return new Entry(id, SESSION_ID, parentId, new TurnStartPayload(reason, settings), time(id));
   }
 
   private static Entry turnEnd(
-      long id,
-      long parentId,
-      long turnStartEntryId,
+      UUID id,
+      UUID parentId,
+      UUID turnStartEntryId,
       TurnEndOutcome outcome,
       TurnEndReason reason,
-      String closeRequestId) {
+      UUID closeRequestId) {
     return turnEnd(id, parentId, turnStartEntryId, outcome, false, reason, closeRequestId);
   }
 
   private static Entry turnEnd(
-      long id,
-      long parentId,
-      long turnStartEntryId,
+      UUID id,
+      UUID parentId,
+      UUID turnStartEntryId,
       TurnEndOutcome outcome,
       boolean continueModel,
       TurnEndReason reason,
-      String closeRequestId) {
+      UUID closeRequestId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new TurnEndPayload(turnStartEntryId, outcome, continueModel, reason, closeRequestId),
         time(id));
   }
 
-  private static Entry userMessage(long id, long parentId) {
+  private static Entry userMessage(UUID id, UUID parentId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new MessagePayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hi"))),
@@ -880,10 +960,10 @@ class EntryPathTest {
         time(id));
   }
 
-  private static Entry customMessage(long id, long parentId) {
+  private static Entry customMessage(UUID id, UUID parentId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new CustomMessagePayload(
             CustomMessagePayload.CORE_PLUGIN_ID,
@@ -894,16 +974,16 @@ class EntryPathTest {
         time(id));
   }
 
-  private static Entry customEntry(long id, long parentId, String customType) {
+  private static Entry customEntry(UUID id, UUID parentId, String customType) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new CustomEntryPayload("com.example.goal", customType, 1, "{\"s\":1}"),
         time(id));
   }
 
-  private static Entry assistantMessage(long id, long parentId, String... toolCalls) {
+  private static Entry assistantMessage(UUID id, UUID parentId, String... toolCalls) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCall : toolCalls) {
       int separator = toolCall.indexOf(':');
@@ -921,7 +1001,7 @@ class EntryPathTest {
         toolCalls.length == 0 ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS;
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, contents), metadata(stopReason), null),
@@ -929,15 +1009,15 @@ class EntryPathTest {
   }
 
   private static Entry toolResult(
-      long id,
-      long parentId,
+      UUID id,
+      UUID parentId,
       int ordinal,
-      long assistantEntryId,
+      UUID assistantEntryId,
       String toolCallId,
       String toolName) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new MessagePayload(
             new AgentMessage(
@@ -956,54 +1036,54 @@ class EntryPathTest {
         time(id));
   }
 
-  private static Entry compactionStart(long id, long parentId, BranchSettings settings) {
+  private static Entry compactionStart(UUID id, UUID parentId, BranchSettings settings) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new TurnStartPayload(TurnStartReason.COMPACTION, settings),
         time(id));
   }
 
   private static Entry compactionResult(
-      long id,
-      long parentId,
+      UUID id,
+      UUID parentId,
       CompactionPhase phase,
       boolean complete,
-      Long turnPrefixStartEntryId) {
+      UUID turnPrefixStartEntryId) {
     return compactionResult(
         id, parentId, phase, CompactionTrigger.THRESHOLD, complete, turnPrefixStartEntryId);
   }
 
   private static Entry compactionResult(
-      long id,
-      long parentId,
+      UUID id,
+      UUID parentId,
       CompactionPhase phase,
       CompactionTrigger trigger,
       boolean complete,
-      Long turnPrefixStartEntryId) {
+      UUID turnPrefixStartEntryId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new CompactionPayload(
-            phase, trigger, 500L, complete, "summary", 2L, 4L, turnPrefixStartEntryId),
+            phase, trigger, 500L, complete, "summary", id(2L), id(4L), turnPrefixStartEntryId),
         time(id));
   }
 
-  private static Entry assistantError(long id, long parentId) {
+  private static Entry assistantError(UUID id, UUID parentId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "down")),
         time(id));
   }
 
-  private static Entry assistantAborted(long id, long parentId) {
+  private static Entry assistantAborted(UUID id, UUID parentId) {
     return new Entry(
         id,
-        SESSION,
+        SESSION_ID,
         parentId,
         new AssistantAbortedPayload(
             new AgentMessage(
@@ -1026,8 +1106,8 @@ class EntryPathTest {
     return new AssistantMessageMetadata(reason, usage, cost);
   }
 
-  private static Instant time(long id) {
-    return BASE.plusSeconds(id);
+  private static Instant time(UUID id) {
+    return BASE.plusSeconds(id.getLeastSignificantBits());
   }
 
   private static BranchSettings settings(String agentName) {

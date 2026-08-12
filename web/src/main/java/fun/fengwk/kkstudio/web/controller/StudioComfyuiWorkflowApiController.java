@@ -27,7 +27,8 @@ import java.util.NoSuchElementException;
 /**
  * ComfyUI 工作流卡片 CRUD 接口。
  *
- * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence），由服务层在内部严格解析为 {@code long} 后再访问数据库。
+ * <p>所有路径 / DTO 边界上的 id 都是 canonical UUID string（PostgreSQL uuid，由应用生成），由服务层在内部严格解析为 {@link
+ * java.util.UUID} 后再访问数据库。
  *
  * <p>错误映射：malformed / nonpositive id → 400；id 解析通过但找不到记录 → 404；其它业务校验（workflowJson 非法、apiName 重复等）→
  * 400。

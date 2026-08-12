@@ -6,6 +6,8 @@ import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumMode;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -84,6 +86,37 @@ public class S3StorageServiceImpl implements S3StorageService {
         contentLength != null && contentLength >= 0L,
         "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
     return new S3ObjectMetadata(contentLength, response.contentType(), response.eTag());
+  }
+
+  @Override
+  public S3ObjectMetadata headObjectWithChecksum(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    HeadObjectResponse response =
+        s3Client.headObject(
+            HeadObjectRequest.builder()
+                .bucket(properties.getBucket())
+                .key(normalizedKey)
+                .checksumMode(ChecksumMode.ENABLED)
+                .build());
+    Long contentLength = response.contentLength();
+    Assert.isTrue(
+        contentLength != null && contentLength >= 0L,
+        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
+    return new S3ObjectMetadata(
+        contentLength, response.contentType(), response.eTag(), response.checksumSHA256());
+  }
+
+  @Override
+  public void copyObject(String sourceKey, String targetKey) {
+    String normalizedSource = S3ObjectKeyNormalizer.normalize(sourceKey);
+    String normalizedTarget = S3ObjectKeyNormalizer.normalize(targetKey);
+    s3Client.copyObject(
+        CopyObjectRequest.builder()
+            .sourceBucket(properties.getBucket())
+            .sourceKey(normalizedSource)
+            .destinationBucket(properties.getBucket())
+            .destinationKey(normalizedTarget)
+            .build());
   }
 
   @Override

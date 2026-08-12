@@ -1,33 +1,31 @@
+import { createUuid } from '@/shared/lib/uuid'
 import type {
   HarnessThreadCommandBatchDTO,
   HarnessThreadCommandCreateDTO,
   HarnessThreadDTO,
+  HarnessUserMessageContentDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   branchDraftFromThread,
   buildBranchDiffCommands,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
+import {
+  partsToMessageContents,
+  trimMessageParts,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 
 export function createCommandId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return createUuid()
 }
 
 export function createStopRequestId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `stop-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return createUuid()
 }
 
 export function createDecisionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `dec-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  return createUuid()
 }
 
 /**
@@ -48,6 +46,40 @@ export interface CommandBatchPlan {
 }
 
 /**
+ * USER_MESSAGE 序列化 ordered contents：所有消息（含纯文本）都使用 `contents`
+ * 数组——TEXT parts 与 ATTACHMENT {uploadId} 按 ComposerPart 顺序排列。
+ * USER_MESSAGE 绝不携带 role（strict mapper 会拒绝它）。contents 必须非空
+ *（调用方已用 hasMessageContent 保证至少一个可发送 part）。
+ */
+function createUserMessageCommand(
+  parts: ComposerPart[],
+  clientCommandId: string,
+): HarnessThreadCommandCreateDTO {
+  const contents = partsToMessageContents(parts)
+  if (contents.length === 0) {
+    throw new Error('USER_MESSAGE contents must not be empty')
+  }
+  return {
+    type: 'USER_MESSAGE',
+    clientCommandId,
+    contents: contents as [HarnessUserMessageContentDTO, ...HarnessUserMessageContentDTO[]],
+  }
+}
+
+/** 消息身份：`{threadId, contents, draft}`——ordered contents 是 wire 的唯一表示。 */
+function messageIdentity(
+  threadId: string,
+  trimmed: ComposerPart[],
+  draft: BranchDraft,
+): string {
+  return JSON.stringify({
+    threadId,
+    contents: partsToMessageContents(trimmed),
+    draft,
+  })
+}
+
+/**
  * 为已有 Thread 构造发送 batch：对 effective base（由持久化 base 投影穿过 QUEUED settings）
  * 取最小 settings diff，随后拼接 USER_MESSAGE command。CAS cursor 取自最新 snapshot Thread DTO。
  */
@@ -55,17 +87,13 @@ export function buildMessageBatchPlan(options: {
   thread: HarnessThreadDTO
   effectiveBase: BranchDraft
   draft: BranchDraft
-  content: string
+  parts: ComposerPart[]
   createCommandId?: () => string
 }): CommandBatchPlan {
   const createId = options.createCommandId ?? createCommandId
   const settingsCommands = buildBranchDiffCommands(options.effectiveBase, options.draft, createId)
-  // USER_MESSAGE 绝不能携带 role：strict mapper 会拒绝它（role 始终是 USER）。
-  const messageCommand: HarnessThreadCommandCreateDTO = {
-    type: 'USER_MESSAGE',
-    clientCommandId: createId(),
-    content: options.content,
-  }
+  const trimmed = trimMessageParts(options.parts)
+  const messageCommand = createUserMessageCommand(trimmed, createId())
   const commands = [...settingsCommands, messageCommand]
   return {
     batch: {
@@ -73,13 +101,9 @@ export function buildMessageBatchPlan(options: {
       expectedNextCommandSequence: options.thread.nextCommandSequence,
       commands,
     },
-    // 不可变的用户意图：thread + content + target draft。effectiveBase 故意不参与——
+    // 不可变的用户意图：thread + ordered contents + target draft。effectiveBase 故意不参与——
     // queued SET_* 投影会改变它，但用户意图并未变化。
-    identity: JSON.stringify({
-      threadId: options.thread.threadId,
-      content: options.content,
-      draft: options.draft,
-    }),
+    identity: messageIdentity(options.thread.threadId, trimmed, options.draft),
   }
 }
 
@@ -87,21 +111,20 @@ export function buildMessageBatchPlan(options: {
  * 针对新创建 Thread 的首次发送 batch：仅含 USER_MESSAGE command；完整的
  * branch draft 已在创建 Thread 时烘焙进去。
  *
- * 语义 identity 与 {@link buildMessageBatchPlan}（{threadId, content, draft}）共享同一
- * 不可变意图结构：首次发送失败后通过绑定面板 replay（同一 thread、同一 content、同一 target
- * draft）会得到一致的 identity，并逐字节复用同一 batch，保留 message command id。
+ * 语义 identity 与 {@link buildMessageBatchPlan}（{threadId, contents, draft}）共享同一
+ * 不可变意图结构：首次发送失败后通过绑定面板 replay（同一 thread、同一 contents、同一
+ * target draft）会得到一致的 identity，并逐字节复用同一 batch，保留 message command id。
  */
 export function buildFirstSendMessagePlan(options: {
   thread: HarnessThreadDTO
-  content: string
+  parts: ComposerPart[]
   clientCommandId?: string
 }): CommandBatchPlan {
-  // USER_MESSAGE 绝不能携带 role：strict mapper 会拒绝它（role 始终是 USER）。
-  const messageCommand: HarnessThreadCommandCreateDTO = {
-    type: 'USER_MESSAGE',
-    clientCommandId: options.clientCommandId ?? createCommandId(),
-    content: options.content,
-  }
+  const trimmed = trimMessageParts(options.parts)
+  const messageCommand = createUserMessageCommand(
+    trimmed,
+    options.clientCommandId ?? createCommandId(),
+  )
   const base = branchDraftFromThread(options.thread)
   return {
     batch: {
@@ -109,10 +132,6 @@ export function buildFirstSendMessagePlan(options: {
       expectedNextCommandSequence: options.thread.nextCommandSequence,
       commands: [messageCommand],
     },
-    identity: JSON.stringify({
-      threadId: options.thread.threadId,
-      content: options.content,
-      draft: base,
-    }),
+    identity: messageIdentity(options.thread.threadId, trimmed, base),
   }
 }

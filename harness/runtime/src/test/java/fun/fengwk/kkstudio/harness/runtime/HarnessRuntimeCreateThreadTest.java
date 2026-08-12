@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -33,8 +34,7 @@ class HarnessRuntimeCreateThreadTest {
 
   @Test
   void createsSessionRootAndThreadAtomicallyWithExactInitialFacts() {
-    CreatedThread created =
-        runtime.createThread(new CreateThreadCommand("my session", settings(), true));
+    CreatedThread created = runtime.createThread(new CreateThreadCommand(settings(), true));
 
     assertNotNull(created.session());
     assertNotNull(created.rootEntry());
@@ -44,7 +44,6 @@ class HarnessRuntimeCreateThreadTest {
     assertNotEquals(created.rootEntry().id(), created.thread().id());
 
     Session session = store.transaction(tx -> tx.findSession(created.session().id()).orElseThrow());
-    assertEquals("my session", session.title());
     assertEquals(T0, session.createdAt());
 
     Entry root = store.transaction(tx -> tx.findEntry(created.rootEntry().id()).orElseThrow());
@@ -70,7 +69,7 @@ class HarnessRuntimeCreateThreadTest {
 
   @Test
   void createThreadDoesNotRequestAnyWork() {
-    CreatedThread created = runtime.createThread(new CreateThreadCommand(null, settings(), false));
+    CreatedThread created = runtime.createThread(new CreateThreadCommand(settings(), false));
     assertTrue(
         store.<Boolean>transaction(
             tx ->
@@ -84,20 +83,19 @@ class HarnessRuntimeCreateThreadTest {
   }
 
   @Test
-  void invalidCreateRollsBackAllDurableRows() {
+  void nullSettingsAreRejectedBeforeAnyRowsAreAllocated() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.createThread(new CreateThreadCommand("   ", settings(), false)));
-    // 回滚只保证 durable 行不落库；nextId 允许被事务消耗（HarnessStore 契约），不断言复用。
-    assertTrue(store.transaction(tx -> tx.findSession(1)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findEntry(2)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findThread(3)).isEmpty());
+        NullPointerException.class,
+        () -> runtime.createThread(new CreateThreadCommand(null, false)));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(1)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findEntry(TestIds.id(2)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(3)).isEmpty()));
   }
 
   @Test
   void createIsDocumentedNonIdempotentWithoutCreateRequestId() {
-    CreatedThread first = runtime.createThread(new CreateThreadCommand("a", settings(), false));
-    CreatedThread second = runtime.createThread(new CreateThreadCommand("b", settings(), true));
+    CreatedThread first = runtime.createThread(new CreateThreadCommand(settings(), false));
+    CreatedThread second = runtime.createThread(new CreateThreadCommand(settings(), true));
     assertNotEquals(first.session().id(), second.session().id());
     assertNotEquals(first.rootEntry().id(), second.rootEntry().id());
     assertNotEquals(first.thread().id(), second.thread().id());
@@ -109,6 +107,6 @@ class HarnessRuntimeCreateThreadTest {
     assertThrows(NullPointerException.class, () -> runtime.createThread(null));
     assertThrows(
         NullPointerException.class,
-        () -> runtime.createThread(new CreateThreadCommand("a", null, false)));
+        () -> runtime.createThread(new CreateThreadCommand(null, false)));
   }
 }

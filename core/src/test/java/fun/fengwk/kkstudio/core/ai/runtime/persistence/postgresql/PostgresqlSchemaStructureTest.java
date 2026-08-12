@@ -22,10 +22,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 
 /**
- * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表，被禁止的遗留 harness
- * 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
+ * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表 + 应用层的 Session blob
+ * 引用表，被禁止的遗留 harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
  */
@@ -41,26 +42,29 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_document",
           "canvas_group",
           "canvas_node",
-          "canvas_node_resource",
           "canvas_link",
           "canvas_function_run",
           "canvas_resource",
-          "canvas_upload",
           "canvas_command_dedup",
+          "canvas_function_resource_ref",
           "chat",
           "chat_thread",
           "harness_session",
+          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
           "harness_model_invocation",
           "harness_tool_invocation",
-          "harness_work");
+          "harness_work",
+          "storage_blob",
+          "storage_upload");
 
-  /** 精确的 runtime-spring 执行协议；只有这些表能使用 harness_ 前缀。 */
+  /** 精确的 runtime-spring 执行协议 + 应用层 Session blob 引用表；只有这些表能使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
       Set.of(
           "harness_session",
+          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -82,16 +86,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_goal",
           "agent_thread_goal");
 
-  /** 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供。 */
-  private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
-      Set.of(
-          "comfyui_workflow_api",
-          "canvas_document",
-          "canvas_group",
-          "canvas_node",
-          "canvas_resource",
-          "canvas_upload",
-          "chat");
+  /** Canvas 与 Chat/Comfy 一样完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
+  private static final Set<String> CANVAS_UUID_ID_TABLES =
+      Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource");
 
   @BeforeEach
   void setup() throws SQLException {
@@ -111,7 +108,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void harnessSchemaContainsExactlyTheSevenRuntimeTables() throws SQLException {
+  void harnessSchemaContainsExactlyTheRuntimeTables() throws SQLException {
     Set<String> harnessTables = new TreeSet<>();
     for (String table : tableNames()) {
       if (table.startsWith("harness_")) {
@@ -121,7 +118,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         new TreeSet<>(HARNESS_TABLES),
         harnessTables,
-        "exactly the seven runtime-spring execution tables may use the harness_ prefix");
+        "only the runtime-spring execution tables and the session blob ref table may use the harness_ prefix");
   }
 
   @Test
@@ -187,14 +184,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns("canvas_document", "id", "title", "graph_revision", "created_at", "updated_at");
+    assertColumns(
+        "canvas_document", "id", "title", "version", "thread_id", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
         "canvas_node",
         "id",
         "canvas_id",
         "name",
-        "name_normalized",
         "x",
         "y",
         "width",
@@ -202,7 +199,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "group_id",
         "model_key",
         "function_config_json");
-    assertColumns("canvas_node_resource", "canvas_id", "node_id", "resource_index", "resource_id");
     assertColumns("canvas_link", "canvas_id", "source_node_id", "target_node_id");
     assertColumns(
         "canvas_function_run",
@@ -216,30 +212,26 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "canvas_resource",
         "id",
         "canvas_id",
-        "kind",
-        "media_type",
+        "owner_node_id",
+        "resource_index",
+        "blob_id",
         "name",
-        "size",
         "text_content",
-        "metadata_json",
-        "created_at");
-    assertColumns(
-        "canvas_upload",
-        "id",
-        "canvas_id",
-        "kind",
-        "filename",
-        "declared_media_type",
-        "declared_size",
-        "expires_at",
         "created_at");
     assertColumns(
         "canvas_command_dedup",
         "canvas_id",
         "command_id",
         "request_hash",
-        "applied_revision",
+        "applied_version",
         "created_at");
+    assertColumns(
+        "canvas_function_resource_ref",
+        "canvas_id",
+        "node_id",
+        "request_id",
+        "role",
+        "resource_id");
     assertColumns(
         "chat",
         "id",
@@ -251,11 +243,35 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("chat_thread", "chat_id", "thread_id", "created_at");
+    assertColumns(
+        "storage_blob",
+        "id",
+        "sha256",
+        "size_bytes",
+        "media_type",
+        "width",
+        "height",
+        "duration_ms",
+        "ref_count",
+        "state",
+        "created_at",
+        "updated_at");
+    assertColumns(
+        "storage_upload",
+        "id",
+        "candidate_blob_id",
+        "blob_id",
+        "filename",
+        "declared_media_type",
+        "declared_size",
+        "declared_sha256",
+        "expires_at",
+        "created_at");
   }
 
   @Test
   void harnessExecutionTablesExposeExactColumnContracts() throws SQLException {
-    assertColumns("harness_session", "id", "title", "created_at");
+    assertColumns("harness_session", "id", "created_at");
     assertColumns(
         "harness_entry",
         "id",
@@ -275,12 +291,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at");
     assertColumns(
         "harness_thread_command",
-        "id",
         "thread_id",
         "sequence",
         "command_type",
         "payload",
         "client_command_id",
+        "request_hash",
         "consumed_turn_start_entry_id",
         "cancelled_at",
         "created_at");
@@ -378,7 +394,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "agent_model", "config");
     assertColumnType("jsonb", "agent_definition", "config");
     assertColumnType("jsonb", "canvas_node", "function_config_json");
-    assertColumnType("jsonb", "canvas_resource", "metadata_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
   }
 
@@ -412,8 +427,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "canvas_document", "created_at");
     assertColumnType("timestamp with time zone", "canvas_document", "updated_at");
     assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
-    assertColumnType("timestamp with time zone", "canvas_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "canvas_command_dedup", "created_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
+    assertColumnType("timestamp with time zone", "storage_blob", "created_at");
+    assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
+    assertColumnType("timestamp with time zone", "storage_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "storage_upload", "created_at");
   }
 
   @Test
@@ -434,24 +453,31 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "lease_until");
 
     // lease_token 与 lease_until 必须同时被设置或清空。
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 920_001L, "token", null));
+    assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_001L), "token", null));
     assertThrows(
-        SQLException.class, () -> insertWork("THREAD", 920_002L, null, "current_timestamp"));
+        SQLException.class, () -> insertWork("THREAD", uuid(920_002L), null, "current_timestamp"));
     // lease_token 不得为空。
     assertThrows(
-        SQLException.class, () -> insertWork("THREAD", 920_003L, "   ", "current_timestamp"));
-    // target_type 与正数 id/wake_version 是持久化队列标识。
-    assertThrows(SQLException.class, () -> insertWork("SESSION", 920_004L, null, null));
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 0L, null, null));
-    assertThrows(SQLException.class, () -> insertWork("THREAD", 920_005L, null, null, 0L));
+        SQLException.class, () -> insertWork("THREAD", uuid(920_003L), "   ", "current_timestamp"));
+    // target_type 与 wake_version 是持久化队列标识；(target_type, target_id) 主键拒绝重复目标。
+    assertThrows(SQLException.class, () -> insertWork("SESSION", uuid(920_004L), null, null));
+    assertThrows(SQLException.class, () -> insertWork("THREAD", uuid(920_005L), null, null, 0L));
+    try (Connection conn = newConnection()) {
+      insertWork(conn, "TOOL", uuid(920_006L), "worker", "current_timestamp");
+      assertThrows(SQLException.class, () -> insertWork(conn, "TOOL", uuid(920_006L), null, null));
+    }
     // 完全合法的 leased 行可插入。
     try (Connection conn = newConnection()) {
-      insertWork(conn, "TOOL", 920_006L, "worker", "current_timestamp");
+      insertWork(conn, "TOOL", uuid(920_007L), "worker", "current_timestamp");
     }
   }
 
+  private static UUID uuid(long value) {
+    return new UUID(0L, value);
+  }
+
   private static void insertWork(
-      String targetType, long targetId, String leaseToken, String leaseUntilExpression)
+      String targetType, UUID targetId, String leaseToken, String leaseUntilExpression)
       throws SQLException {
     try (Connection conn = newConnection()) {
       insertWork(conn, targetType, targetId, leaseToken, leaseUntilExpression, 1L);
@@ -460,7 +486,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   private static void insertWork(
       String targetType,
-      long targetId,
+      UUID targetId,
       String leaseToken,
       String leaseUntilExpression,
       long wakeVersion)
@@ -471,7 +497,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   private static void insertWork(
-      Connection conn, String targetType, long targetId, String leaseToken, String leaseUntil)
+      Connection conn, String targetType, UUID targetId, String leaseToken, String leaseUntil)
       throws SQLException {
     insertWork(conn, targetType, targetId, leaseToken, leaseUntil, 1L);
   }
@@ -479,7 +505,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   private static void insertWork(
       Connection conn,
       String targetType,
-      long targetId,
+      UUID targetId,
       String leaseToken,
       String leaseUntil,
       long wakeVersion)
@@ -495,7 +521,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 + leaseUntilExpression
                 + ")")) {
       ps.setString(1, targetType);
-      ps.setLong(2, targetId);
+      ps.setObject(2, targetId);
       ps.setLong(3, wakeVersion);
       int index = 4;
       if (leaseToken != null) {
@@ -507,7 +533,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void revisionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesRevision() throws SQLException {
-    // 整个 public schema 中唯一的用户 trigger 是仅起 hint 作用的 revision notify。
+    // 整个 public schema 中仅有两个用户 trigger：harness thread revision hint 与 canvas document version hint。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -520,7 +546,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("trg_harness_thread_revision_notify"),
+        Set.of("trg_harness_thread_revision_notify", "trg_canvas_document_version_notify"),
         triggers,
         "no legacy trigger (revision bump, activation notify, child revision) may remain");
 
@@ -550,7 +576,27 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         !functionSource.contains("revision := ") && !functionSource.contains("revision = revision"),
         () -> "notify function must never mutate revision: " + functionSource);
 
-    // 除 notify 辅助函数外不存在其它 public 函数：revision 自增/子节点自增函数已移除。
+    // canvas version hint 触发器同样只做 NOTIFY，永不写版本。
+    String canvasDefinition =
+        singleString(
+            "select pg_get_triggerdef(oid) from pg_trigger"
+                + " where tgname = 'trg_canvas_document_version_notify'");
+    assertTrue(
+        canvasDefinition.contains("AFTER INSERT OR UPDATE OF version"),
+        () -> "canvas trigger must fire after insert or version update: " + canvasDefinition);
+    String canvasFunctionSource =
+        singleString(
+            "select prosrc from pg_proc"
+                + " where pronamespace = 'public'::regnamespace"
+                + " and proname = 'canvas_document_version_notify'");
+    assertTrue(
+        canvasFunctionSource.contains("pg_notify"),
+        () -> "canvas notify function must call pg_notify");
+    assertTrue(
+        canvasFunctionSource.contains("canvas_version"),
+        () -> "canvas notify function must use the canvas_version channel");
+
+    // 除两个 notify 辅助函数外不存在其它 public 函数：revision/version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -563,63 +609,114 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("harness_thread_revision_notify"),
+        Set.of("harness_thread_revision_notify", "canvas_document_version_notify"),
         functions,
-        "the database must never mutate revision; only the notify helper may exist");
+        "the database must never mutate revision/version; only the notify helpers may exist");
 
     // 行为：trigger 在 INSERT 与 revision 写入时触发，但绝不修改存储的
     // revision 值；非 revision 的应用层更新则完全不会动到 revision。
-    ThreadFixture thread = ThreadFixture.insertFresh();
+    UUID threadId = uuid(700L);
+    UUID sessionId = uuid(701L);
+    UUID rootEntryId = uuid(702L);
+    try (Connection conn = newConnection()) {
+      insertThreadRow(conn, threadId, sessionId, rootEntryId);
+    }
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("update harness_thread set revision = 7 where id = ?")) {
-      ps.setLong(1, thread.threadId);
+      ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = " + thread.threadId),
+        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
         "revision must stay exactly what the application wrote");
     try (Connection conn = newConnection();
         PreparedStatement ps =
             conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
-      ps.setLong(1, thread.threadId);
+      ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
     assertEquals(
         7L,
-        singleLong("select revision from harness_thread where id = " + thread.threadId),
+        singleLong("select revision from harness_thread where id = '" + threadId + "'"),
         "a non-revision update must not touch revision");
   }
 
-  @Test
-  void generatedDurableEntityIdsUseBigint() throws SQLException {
-    for (String table : BUSINESS_SEQUENCE_BACKED_TABLES) {
-      assertColumnType("bigint", table, "id");
+  /** 插入一个最小合法 Thread 行：Session -> ROOT Entry -> Thread。 */
+  private static void insertThreadRow(Connection conn, UUID threadId, UUID sessionId, UUID entryId)
+      throws SQLException {
+    try (PreparedStatement session =
+            conn.prepareStatement(
+                "insert into harness_session (id, created_at) values (?, current_timestamp)");
+        PreparedStatement entry =
+            conn.prepareStatement(
+                "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+                    + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)");
+        PreparedStatement thread =
+            conn.prepareStatement(
+                "insert into harness_thread (id, head_entry_id, yolo_enabled,"
+                    + " next_command_sequence, revision, created_at, updated_at) values"
+                    + " (?, ?, false, 1, 0, current_timestamp, current_timestamp)")) {
+      session.setObject(1, sessionId);
+      assertEquals(1, session.executeUpdate());
+      entry.setObject(1, entryId);
+      entry.setObject(2, sessionId);
+      assertEquals(1, entry.executeUpdate());
+      thread.setObject(1, threadId);
+      thread.setObject(2, entryId);
+      assertEquals(1, thread.executeUpdate());
     }
+  }
+
+  @Test
+  void generatedDurableEntityIdsUseUuidAndNoBusinessSequence() throws SQLException {
+    for (String table : CANVAS_UUID_ID_TABLES) {
+      assertColumnType("uuid", table, "id");
+    }
+    assertColumnType("uuid", "canvas_function_run", "node_id");
+    assertColumnType("uuid", "canvas_function_run", "request_id");
+    assertColumnType("uuid", "canvas_link", "source_node_id");
+    assertColumnType("uuid", "canvas_link", "target_node_id");
+    assertColumnType("uuid", "canvas_function_resource_ref", "resource_id");
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")) {
-        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
+      if (table.equals("harness_work")
+          || table.equals("harness_thread_command")
+          || table.equals("harness_session_blob_ref")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)；
+        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
         continue;
       }
-      assertColumnType("bigint", table, "id");
+      assertColumnType("uuid", table, "id");
+    }
+    assertColumnType("uuid", "chat", "id");
+    assertColumnType("uuid", "comfyui_workflow_api", "id");
+    assertColumnType("uuid", "chat_thread", "thread_id");
+  }
+
+  @Test
+  void publicSchemaExposesNoSequences() throws SQLException {
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select sequence_name from information_schema.sequences"
+                    + " where sequence_schema = 'public'")) {
+      assertFalse(rs.next(), "Canvas 与 Harness 实体 id 全部由应用侧 Supplier<UUID> 生成，schema 不得提供任何序列");
     }
   }
 
   @Test
-  void globalSequenceAllocatesMonotonicIds() throws SQLException {
-    long a = singleLong("select nextval('kk_studio_id_seq')");
-    long b = singleLong("select nextval('kk_studio_id_seq')");
-    assertTrue(b > a, () -> "sequence must monotonically increase, a=" + a + " b=" + b);
-  }
-
-  @Test
-  void harnessRuntimeSequenceAllocatesMonotonicIds() throws SQLException {
-    long a = singleLong("select nextval('harness_runtime_id_seq')");
-    long b = singleLong("select nextval('harness_runtime_id_seq')");
-    assertTrue(
-        a > 0 && b > a,
-        () -> "harness_runtime_id_seq must allocate positive monotonic ids, a=" + a + " b=" + b);
+  void harnessSchemaExposesNoSequences() throws SQLException {
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select sequence_name from information_schema.sequences"
+                    + " where sequence_schema = 'public' and sequence_name like 'harness\\_%'")) {
+      assertFalse(
+          rs.next(), "Harness 实体 id 全部由注入的 Supplier<UUID> 生成（生产：UUID::randomUUID），schema 不得提供任何序列");
+    }
   }
 
   @Test
@@ -646,45 +743,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void generatedEntityIdsUseOnlyTheDeclaredSequences() throws SQLException {
-    Set<String> sequences = new TreeSet<>();
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery(
-                "select sequence_name from information_schema.sequences"
-                    + " where sequence_schema = 'public'")) {
-      while (rs.next()) {
-        sequences.add(rs.getString(1));
-      }
-    }
-    assertEquals(
-        Set.of("kk_studio_id_seq", "harness_runtime_id_seq"),
-        sequences,
-        "schema must expose exactly the business and harness runtime sequences");
-
-    Set<String> sequenceBackedTables = new TreeSet<>();
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery(
-                "select table_name from information_schema.columns"
-                    + " where table_schema = 'public' and column_name = 'id'"
-                    + " and column_default = 'nextval(''kk_studio_id_seq''::regclass)'")) {
-      while (rs.next()) {
-        sequenceBackedTables.add(rs.getString(1));
-      }
-    }
-    assertEquals(
-        new TreeSet<>(BUSINESS_SEQUENCE_BACKED_TABLES),
-        sequenceBackedTables,
-        "only business durable ids default from kk_studio_id_seq");
-
-    // Harness id 由 HarnessRuntime 从 harness_runtime_id_seq 分配并显式插入；
-    // 任何执行表都不得携带列默认值。
+  void noColumnCarriesASequenceDefault() throws SQLException {
+    // Canvas / Harness / Chat / Comfy 实体 id 均由应用侧 UUID 生成并显式插入；
+    // 任何表都不得携带序列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work")) {
-        // harness_work 通过 (target_type, target_id) 标识目标，而非通过生成 id。
+      if (table.equals("harness_work")
+          || table.equals("harness_thread_command")
+          || table.equals("harness_session_blob_ref")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键；
+        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
         continue;
       }
       try (Connection conn = newConnection();
@@ -698,6 +765,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           assertNull(
               rs.getString(1),
               () -> "harness table " + table + " id must not carry a column default");
+        }
+      }
+    }
+    for (String table : CANVAS_UUID_ID_TABLES) {
+      try (Connection conn = newConnection();
+          PreparedStatement ps =
+              conn.prepareStatement(
+                  "select column_default from information_schema.columns"
+                      + " where table_schema = 'public' and table_name = ? and column_name = 'id'")) {
+        ps.setString(1, table);
+        try (ResultSet rs = ps.executeQuery()) {
+          assertTrue(rs.next(), () -> "canvas table " + table + " must declare an id column");
+          assertNull(
+              rs.getString(1),
+              () -> "canvas table " + table + " id must not carry a column default");
         }
       }
     }
@@ -776,18 +858,22 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         Set.of(
             "uk_comfyui_workflow_api_api_name",
-            "uk_canvas_group_canvas_id",
-            "uk_canvas_node_canvas_id",
-            "uk_canvas_node_name_normalized",
-            "uk_canvas_resource_canvas_id",
+            "uk_canvas_document_thread",
+            "uk_canvas_function_run_request",
+            "uk_canvas_group_canvas",
+            "uk_canvas_node_canvas",
+            "uk_canvas_resource_canvas",
+            "uk_canvas_resource_owner_index",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
-            "uk_harness_thread_command_sequence",
             "uk_harness_thread_command_client",
+            "uk_chat_thread_thread",
             "uk_harness_model_invocation_turn",
             "uk_harness_model_invocation_result",
             "uk_harness_tool_invocation_ordinal",
-            "uk_harness_tool_invocation_result"),
+            "uk_harness_tool_invocation_result",
+            "uk_storage_blob_active_hash",
+            "uk_storage_upload_candidate"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -800,13 +886,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model', 'fk_canvas_group_canvas',"
                     + " 'fk_canvas_node_canvas', 'fk_canvas_node_group',"
-                    + " 'fk_canvas_resource_canvas', 'fk_canvas_upload_canvas',"
-                    + " 'fk_canvas_node_resource_node',"
-                    + " 'fk_canvas_node_resource_resource',"
-                    + " 'fk_canvas_command_dedup_canvas',"
+                    + " 'fk_canvas_resource_canvas', 'fk_canvas_resource_owner',"
+                    + " 'fk_canvas_resource_blob', 'fk_canvas_command_dedup_canvas',"
                     + " 'fk_canvas_link_source',"
                     + " 'fk_canvas_link_target',"
-                    + " 'fk_canvas_function_run_node')")) {
+                    + " 'fk_canvas_function_run_node',"
+                    + " 'fk_canvas_function_resource_ref_node',"
+                    + " 'fk_canvas_document_thread',"
+                    + " 'fk_chat_thread_chat', 'fk_chat_thread_thread')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -819,13 +906,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_node_canvas",
             "fk_canvas_node_group",
             "fk_canvas_resource_canvas",
-            "fk_canvas_upload_canvas",
-            "fk_canvas_node_resource_node",
-            "fk_canvas_node_resource_resource",
+            "fk_canvas_resource_owner",
+            "fk_canvas_resource_blob",
             "fk_canvas_command_dedup_canvas",
             "fk_canvas_link_source",
             "fk_canvas_link_target",
-            "fk_canvas_function_run_node"),
+            "fk_canvas_function_run_node",
+            "fk_canvas_function_resource_ref_node",
+            "fk_canvas_document_thread",
+            "fk_chat_thread_chat",
+            "fk_chat_thread_thread"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }

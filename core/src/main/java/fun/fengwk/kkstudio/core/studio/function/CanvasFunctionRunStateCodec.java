@@ -23,13 +23,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** FunctionRun typed/versioned stateJson 的唯一 codec。 */
 @Component
 public final class CanvasFunctionRunStateCodec {
 
-  public static final int VERSION = 1;
+  public static final int VERSION = 2;
   public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
@@ -51,11 +52,14 @@ public final class CanvasFunctionRunStateCodec {
           "sourceNodeId",
           "sourceIndex",
           "resourceId",
+          "blobId",
           "kind",
           "name",
           "mediaType",
-          "size",
-          "metadataJson");
+          "sizeBytes",
+          "width",
+          "height",
+          "durationMs");
 
   private final ObjectMapper mapper;
   private final CanvasFunctionConfigCodec configCodec;
@@ -77,27 +81,30 @@ public final class CanvasFunctionRunStateCodec {
     ObjectNode root = mapper.createObjectNode();
     root.put("version", VERSION);
     ObjectNode plan = root.putObject("plan");
-    plan.put("canvasId", Long.toString(run.canvasId()));
-    plan.put("nodeId", Long.toString(run.nodeId()));
+    plan.put("canvasId", run.canvasId().toString());
+    plan.put("nodeId", run.nodeId().toString());
     plan.put("nodeName", run.nodeName());
-    plan.put("requestId", run.requestId());
+    plan.put("requestId", run.requestId().toString());
     plan.put("modelKey", run.model().key());
     plan.put("outputKind", run.model().outputKind().name());
     plan.set("config", configCodec.encodeNode(run.config()));
     ArrayNode manifest = plan.putArray("manifest");
     for (CanvasFunctionFrozenReference reference : run.manifest()) {
       ObjectNode item = manifest.addObject();
-      item.put("sourceNodeId", Long.toString(reference.sourceNodeId()));
+      item.put("sourceNodeId", reference.sourceNodeId().toString());
       item.put("sourceIndex", reference.sourceIndex());
-      item.put("resourceId", Long.toString(reference.resourceId()));
+      item.put("resourceId", reference.resourceId().toString());
+      item.put("blobId", reference.blobId().toString());
       item.put("kind", reference.kind().name());
       item.put("name", reference.name());
       item.put("mediaType", reference.mediaType());
-      item.put("size", Long.toString(reference.size()));
-      item.put("metadataJson", reference.metadataJson());
+      item.put("sizeBytes", reference.sizeBytes());
+      item.put("width", reference.width());
+      item.put("height", reference.height());
+      item.put("durationMs", reference.durationMs());
     }
     plan.put("outputName", run.outputName());
-    plan.put("targetResourceId", Long.toString(run.targetResourceId()));
+    plan.put("targetResourceId", run.targetResourceId().toString());
     root.put("stage", run.stage());
     JsonNode adapterState = mapper.valueToTree(run.adapterState());
     if (!adapterState.isObject()) {
@@ -122,7 +129,7 @@ public final class CanvasFunctionRunStateCodec {
       requireExactFields(root, ROOT_FIELDS, "state");
       JsonNode version = required(root, "version");
       if (!version.isIntegralNumber() || version.intValue() != VERSION) {
-        throw invalid("state.version must be 1");
+        throw invalid("state.version must be " + VERSION);
       }
       ObjectNode plan = object(required(root, "plan"), "state.plan");
       requireExactFields(plan, PLAN_FIELDS, "state.plan");
@@ -146,15 +153,15 @@ public final class CanvasFunctionRunStateCodec {
       String configJson = mapper.writeValueAsString(required(plan, "config"));
       CanvasFunctionConfig config = configCodec.decode(configJson, model);
       return new CanvasFunctionFrozenRun(
-          positiveLong(plan, "canvasId"),
-          positiveLong(plan, "nodeId"),
+          uuid(plan, "canvasId"),
+          uuid(plan, "nodeId"),
           text(plan, "nodeName"),
-          text(plan, "requestId"),
+          uuid(plan, "requestId"),
           model,
           config,
           decodeManifest(required(plan, "manifest")),
           text(plan, "outputName"),
-          positiveLong(plan, "targetResourceId"),
+          uuid(plan, "targetResourceId"),
           stage,
           adapterState);
     } catch (JsonProcessingException exception) {
@@ -210,14 +217,17 @@ public final class CanvasFunctionRunStateCodec {
       requireExactFields(item, REFERENCE_FIELDS, "state.plan.manifest[" + index + "]");
       manifest.add(
           new CanvasFunctionFrozenReference(
-              positiveLong(item, "sourceNodeId"),
+              uuid(item, "sourceNodeId"),
               nonnegativeInt(item, "sourceIndex"),
-              positiveLong(item, "resourceId"),
+              uuid(item, "resourceId"),
+              uuid(item, "blobId"),
               enumKind(text(item, "kind"), "kind"),
               text(item, "name"),
               text(item, "mediaType"),
-              nonnegativeLong(item, "size"),
-              text(item, "metadataJson")));
+              nonnegativeLong(item, "sizeBytes"),
+              nullablePositiveLong(item, "width"),
+              nullablePositiveLong(item, "height"),
+              nullablePositiveLong(item, "durationMs")));
     }
     return List.copyOf(manifest);
   }
@@ -236,32 +246,35 @@ public final class CanvasFunctionRunStateCodec {
     }
   }
 
-  private static long positiveLong(ObjectNode node, String field) {
-    long value = decimalLong(node, field);
-    if (value <= 0L) {
-      throw invalid(field + " must be positive");
+  private static UUID uuid(ObjectNode node, String field) {
+    JsonNode value = required(node, field);
+    if (!value.isTextual()) {
+      throw invalid(field + " must be a canonical UUID string");
     }
-    return value;
+    try {
+      return UUID.fromString(value.textValue());
+    } catch (IllegalArgumentException exception) {
+      throw invalid(field + " must be a canonical UUID string", exception);
+    }
   }
 
   private static long nonnegativeLong(ObjectNode node, String field) {
-    long value = decimalLong(node, field);
-    if (value < 0L) {
-      throw invalid(field + " must be nonnegative");
+    JsonNode value = required(node, field);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0L) {
+      throw invalid(field + " must be a nonnegative integer");
     }
-    return value;
+    return value.longValue();
   }
 
-  private static long decimalLong(ObjectNode node, String field) {
-    JsonNode value = required(node, field);
-    if (!value.isTextual() || !value.textValue().matches("0|[1-9][0-9]*")) {
-      throw invalid(field + " must be a canonical decimal string");
+  private static Long nullablePositiveLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
     }
-    try {
-      return Long.parseLong(value.textValue());
-    } catch (NumberFormatException exception) {
-      throw invalid(field + " is outside bigint range", exception);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0L) {
+      throw invalid(field + " must be null or a positive integer");
     }
+    return value.longValue();
   }
 
   private static int nonnegativeInt(ObjectNode node, String field) {
