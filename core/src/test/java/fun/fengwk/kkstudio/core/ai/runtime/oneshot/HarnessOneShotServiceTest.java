@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -19,6 +20,7 @@ import fun.fengwk.kkstudio.core.ai.runtime.task.SubagentConfig;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime.NewCommandPreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -46,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
@@ -112,7 +115,7 @@ class HarnessOneShotServiceTest {
     verify(runtime).createThread(create.capture());
     assertEquals(List.of(), create.getValue().branchSettings().activeTools());
     ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
-    verify(runtime).enqueueCommands(batch.capture());
+    verify(runtime).enqueueCommands(batch.capture(), any(NewCommandPreflight.class));
     assertEquals(2, batch.getValue().commands().size());
     assertEquals(
         AgentMessageRole.SYSTEM,
@@ -124,6 +127,29 @@ class HarnessOneShotServiceTest {
         ((CustomMessageCommandPayload) batch.getValue().commands().get(1).payload())
             .message()
             .role());
+  }
+
+  @Test
+  void passesPreflightThroughAndKeepsClientIdsAndHashes() {
+    Entry root = new Entry(id(2), id(1), null, new RootPayload(SETTINGS, null), NOW);
+    ThreadState thread = new ThreadState(id(3), root.id(), false, 1L, 0L, NOW, NOW);
+    when(runtime.createThread(any(CreateThreadCommand.class)))
+        .thenReturn(new CreatedThread(new Session(id(1), NOW), root, thread));
+
+    NewCommandPreflight preflight = (tx, sessionId, commands) -> List.copyOf(commands);
+    UUID threadId =
+        service.submit(
+            "h3-agent",
+            ENVIRONMENT,
+            "system",
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("user"))),
+            preflight);
+
+    assertEquals(id(3), threadId);
+    ArgumentCaptor<ThreadCommandBatch> batch = ArgumentCaptor.forClass(ThreadCommandBatch.class);
+    verify(runtime).enqueueCommands(batch.capture(), eq(preflight));
+    List<NewThreadCommand> prepared = preflight.prepare(null, id(1), batch.getValue().commands());
+    assertEquals(batch.getValue().commands(), prepared);
   }
 
   @Test

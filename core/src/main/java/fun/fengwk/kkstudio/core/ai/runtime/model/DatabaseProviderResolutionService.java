@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.core.ai.runtime.model;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
@@ -42,15 +43,22 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   private final AgentProviderRepository providerRepository;
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
   private final ProviderFactories providerFactories;
+  private final ProviderResourceMaterializer resourceMaterializer;
 
   public DatabaseProviderResolutionService(
       AgentProviderRepository providerRepository,
       AgentProviderConfigurationCodec providerConfigurationCodec,
-      ProviderFactories providerFactories) {
+      ProviderFactories providerFactories,
+      ObjectProvider<ProviderResourceMaterializer> resourceMaterializerProvider) {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.providerConfigurationCodec =
         Objects.requireNonNull(providerConfigurationCodec, "providerConfigurationCodec");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
+    ProviderResourceMaterializer materializer =
+        resourceMaterializerProvider == null ? null : resourceMaterializerProvider.getIfAvailable();
+    // Storage 不可用（S3 未启用）时降级为 no-op 物化端口：Resource 块只投影为确定性文本回退，模型仍可感知资源存在。
+    this.resourceMaterializer =
+        materializer == null ? ProviderResourceMaterializer.withoutStorage() : materializer;
   }
 
   @Override
@@ -96,7 +104,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         new ProviderRequest(
             request.model(),
             request.variant(),
-            request.messages(),
+            // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，media URL 仅存在于有效请求。
+            resourceMaterializer.materialize(request.messages(), request.model().inputModalities()),
             request.tools(),
             normalizeCacheControl(request, factory.promptCacheCapability()));
     return new ResolvedExecution(

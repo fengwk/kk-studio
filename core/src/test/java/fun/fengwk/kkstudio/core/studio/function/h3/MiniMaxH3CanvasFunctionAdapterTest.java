@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.core.studio.function.h3;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.runtime.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionConfig.TextSegment;
@@ -41,6 +43,10 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   private final ObjectMapper mapper = new ObjectMapper();
   private static final UUID THREAD_ID = new UUID(0L, 55L);
   private HarnessOneShotService oneShot;
+
+  @SuppressWarnings("rawtypes")
+  private ObjectProvider ingestServices;
+
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
   private MiniMaxH3Properties properties;
@@ -58,6 +64,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     properties.setPromptEnvironmentName("h3-prompt");
     properties.setComfyPollInterval(Duration.ofMillis(1));
     properties.setComfyMaxWait(Duration.ofSeconds(1));
+    ingestServices = mock(ObjectProvider.class);
+    when(ingestServices.getIfAvailable()).thenReturn(mock(StorageBlobIngestService.class));
     adapter =
         new MiniMaxH3CanvasFunctionAdapter(
             properties,
@@ -66,13 +74,14 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             oneShot,
             new H3WorkflowBuilder(mapper),
             clients,
+            ingestServices,
             mapper);
   }
 
   @Test
   void executesAllStagesAndMaterializesOnlyTarget() {
     RecordingContext context = new RecordingContext();
-    when(oneShot.submit(anyString(), any(), anyString(), any())).thenReturn(THREAD_ID);
+    when(oneShot.submit(anyString(), any(), anyString(), any(), any())).thenReturn(THREAD_ID);
     when(oneShot.await(any(), any(), any())).thenReturn("enhanced prompt");
     when(comfy.upload(anyString(), anyString(), anyLong(), any(), anyLong()))
         .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
@@ -98,7 +107,10 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             MiniMaxH3CanvasFunctionAdapter.COMFY_READY,
             MiniMaxH3CanvasFunctionAdapter.COMPLETE),
         context.stages);
-    assertEquals("https://signed/11", context.lastPresign);
+    // 媒体外部化已移入入队 preflight（one-shot submit 被 mock，不执行）：prompt 阶段只构建 preflight，
+    // 绝不 presign；ingest 端口在构建时探测（S3 缺失时确定性失败）。
+    verify(ingestServices).getIfAvailable();
+    assertNull(context.lastPresign);
     assertEquals(99L, context.materializedTarget);
     assertEquals("video/mp4", context.materializedMediaType);
     assertEquals(List.of(9, 8, 7), context.materializedBytes);
@@ -116,7 +128,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                         MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING,
                         H3AdapterState.empty().withSeed(1L).encode())));
     assertFalse(prompt.getMessage().isBlank());
-    verify(oneShot, never()).submit(anyString(), any(), anyString(), any());
+    verify(oneShot, never()).submit(anyString(), any(), anyString(), any(), any());
 
     IllegalStateException comfyError =
         assertThrows(

@@ -21,6 +21,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.user
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.withConsumedTurnStart;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandP
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetYoloCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -51,6 +53,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** enqueueCommands：有序命令集合入队、replay 语义、CAS 与 SET_ENVIRONMENT admission。 */
 class HarnessRuntimeEnqueueTest {
@@ -376,6 +379,35 @@ class HarnessRuntimeEnqueueTest {
    * createdAt/updatedAt=T0）。
    */
   @Test
+  void staleCursorRejectsBeforeInvokingPreflight() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    runtime.enqueueCommands(
+        new ThreadCommandBatch(
+            baseline.threadId(),
+            baseline.rootEntryId(),
+            1,
+            List.of(userMessageCommand(TestIds.id(1), "a"))));
+    AtomicBoolean preflightRan = new AtomicBoolean(false);
+    HarnessRuntimeConflictException stale =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.enqueueCommands(
+                    new ThreadCommandBatch(
+                        baseline.threadId(),
+                        baseline.rootEntryId(),
+                        1, // 已被前一批消费：stale sequence
+                        List.of(userMessageCommand(TestIds.id(2), "b"))),
+                    (tx, sessionId, commands) -> {
+                      preflightRan.set(true);
+                      return commands;
+                    }));
+    assertEquals(Reason.STALE_COMMAND_CURSOR, stale.reason());
+    assertFalse(
+        preflightRan.get(), "preflight must not run when stale cursor rejects the new batch");
+  }
+
+  @Test
   void timestampIsCapturedAfterTheThreadLock() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     TestClock clock = new TestClock(T0);
@@ -692,10 +724,14 @@ class HarnessRuntimeEnqueueTest {
 
   private static NewThreadCommand setEnvironment(
       UUID clientCommandId, EnvironmentName environmentName) {
-    return new NewThreadCommand(new SetEnvironmentCommandPayload(environmentName), clientCommandId);
+    SetEnvironmentCommandPayload payload = new SetEnvironmentCommandPayload(environmentName);
+    return new NewThreadCommand(
+        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   private static NewThreadCommand setYolo(UUID clientCommandId, boolean yolo) {
-    return new NewThreadCommand(new SetYoloCommandPayload(yolo), clientCommandId);
+    SetYoloCommandPayload payload = new SetYoloCommandPayload(yolo);
+    return new NewThreadCommand(
+        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 }

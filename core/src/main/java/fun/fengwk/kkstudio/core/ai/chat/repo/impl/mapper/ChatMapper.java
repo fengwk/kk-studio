@@ -42,6 +42,10 @@ public interface ChatMapper extends BaseMapper {
   @ResultMap("chatResultMap")
   ChatDO getById(@Param("id") UUID id);
 
+  @Select("select " + COLUMNS + " from chat where id = #{id} for update")
+  @ResultMap("chatResultMap")
+  ChatDO lockById(@Param("id") UUID id);
+
   @Insert(
       """
       insert into chat (

@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -46,6 +47,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -81,9 +83,7 @@ class ProviderRequestJsonCodecTest {
     assertEquals(
         Set.of(
             ProviderTextBlock.class,
-            ProviderImageBlock.class,
-            ProviderAudioBlock.class,
-            ProviderVideoBlock.class,
+            ProviderResourceBlock.class,
             ProviderThinkingBlock.class,
             ProviderJsonBlock.class,
             ProviderToolCallBlock.class,
@@ -94,7 +94,7 @@ class ProviderRequestJsonCodecTest {
             .collect(Collectors.toSet()));
     assertEquals(
         JSON_BLOCK,
-        assertInstanceOf(ProviderJsonBlock.class, decoded.messages().get(1).contents().get(5))
+        assertInstanceOf(ProviderJsonBlock.class, decoded.messages().get(1).contents().get(3))
             .json());
     assertEquals(
         ARGUMENTS_JSON,
@@ -287,8 +287,8 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> toolResult(root).put("detailsJson", "[]"));
     assertRejected(root -> toolResult(root).put("detailsJson", "{"));
     assertRejected(root -> toolResult(root).put("detailsJson", " "));
-    assertRejected(root -> content(root, 1, 5).put("json", "not-json"));
-    assertRejected(root -> content(root, 1, 5).put("json", " "));
+    assertRejected(root -> content(root, 1, 3).put("json", "not-json"));
+    assertRejected(root -> content(root, 1, 3).put("json", " "));
   }
 
   private void assertStrictLayer(
@@ -298,6 +298,62 @@ class ProviderRequestJsonCodecTest {
     assertRejected(unknownMutation);
     assertRejected(missingMutation);
     assertRejected(wrongTypeMutation);
+  }
+
+  /** 媒体块携带 attempt-only 的 presigned source：durable codec 对 encode/decode 一律确定性拒绝。 */
+  @Test
+  void rejectsTransientMediaBlocksOnEncodeAndDecode() {
+    ProviderRequest request = canonicalRequest();
+    List<ProviderContentBlock> mediaBlocks =
+        List.of(
+            new ProviderImageBlock("image/png", "data:image/png;base64,AAA"),
+            new ProviderAudioBlock("audio/wav", "https://example.test/audio.wav"),
+            new ProviderVideoBlock("video/mp4", "https://example.test/video.mp4"));
+    for (ProviderContentBlock media : mediaBlocks) {
+      ProviderRequest mediaRequest =
+          new ProviderRequest(
+              request.model(),
+              request.variant(),
+              List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(media))),
+              request.tools(),
+              request.cacheControl());
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.encode(mediaRequest),
+          media.getClass().getSimpleName());
+      // decode 拒绝：完整 canonical 结构上把 USER 消息内容替换为媒体块（避免提前在顶层结构失败）。
+      ObjectNode mediaJson = canonicalNode();
+      ArrayNode contents = NODES.arrayNode();
+      contents.add(mediaBlockNode(media));
+      ((ObjectNode) mediaJson.path("messages").get(1)).set("contents", contents);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(mediaJson.toString()),
+          media.getClass().getSimpleName());
+    }
+  }
+
+  private static ObjectNode mediaBlockNode(ProviderContentBlock media) {
+    ObjectNode node = NODES.objectNode();
+    if (media instanceof ProviderImageBlock value) {
+      node.put("type", "image");
+      node.put("mediaType", value.mediaType());
+      node.put("source", value.source());
+      return node;
+    }
+    if (media instanceof ProviderAudioBlock value) {
+      node.put("type", "audio");
+      node.put("mediaType", value.mediaType());
+      node.put("source", value.source());
+      return node;
+    }
+    if (media instanceof ProviderVideoBlock value) {
+      node.put("type", "video");
+      node.put("mediaType", value.mediaType());
+      node.put("source", value.source());
+      return node;
+    }
+    throw new IllegalArgumentException("unexpected media block: " + media.getClass());
   }
 
   private void assertRejected(Consumer<ObjectNode> mutation) {
@@ -332,9 +388,10 @@ class ProviderRequestJsonCodecTest {
                 ProviderMessageRole.USER,
                 List.of(
                     new ProviderTextBlock("What is the capital of France?"),
-                    new ProviderImageBlock("image/png", "data:image/png;base64,AAA"),
-                    new ProviderAudioBlock("audio/wav", "https://example.test/audio.wav"),
-                    new ProviderVideoBlock("video/mp4", "https://example.test/video.mp4"),
+                    new ProviderResourceBlock(
+                        UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                        "scan.png",
+                        "tiny preview"),
                     new ProviderThinkingBlock("the user asks geography"),
                     new ProviderJsonBlock(JSON_BLOCK))),
             new ProviderMessage(

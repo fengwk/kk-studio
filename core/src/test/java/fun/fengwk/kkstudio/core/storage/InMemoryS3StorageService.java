@@ -37,6 +37,11 @@ public class InMemoryS3StorageService implements S3StorageService {
     return objects.containsKey(key);
   }
 
+  /** 当前对象总数（回滚清理与泄漏断言用）。 */
+  public int objectCount() {
+    return objects.size();
+  }
+
   public byte[] objectBytes(String key) {
     byte[] bytes = objects.get(key);
     return bytes == null ? null : bytes.clone();

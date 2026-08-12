@@ -39,6 +39,7 @@ class ThreadCommandTest {
             "sequence",
             "payload",
             "clientCommandId",
+            "requestHash",
             "consumedTurnStartEntryId",
             "cancelledAt",
             "createdAt"),
@@ -53,21 +54,28 @@ class ThreadCommandTest {
     assertThrows(IllegalArgumentException.class, () -> command(1L, 1L, -1L, null, null));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadCommand(id(1L), 1L, payload(), null, null, null, CREATED));
+        () -> new ThreadCommand(id(1L), 1L, payload(), null, HASH, null, null, CREATED));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ThreadCommand(id(1L), 0L, payload(), id(99L), null, null, CREATED));
+        () -> new ThreadCommand(id(1L), 0L, payload(), id(99L), HASH, null, null, CREATED));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), id(99L), CANCELLED, CREATED));
+        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), HASH, id(99L), CANCELLED, CREATED));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadCommand(
-                id(1L), 1L, payload(), id(99L), null, CREATED.minusSeconds(1), CREATED));
+                id(1L), 1L, payload(), id(99L), HASH, null, CREATED.minusSeconds(1), CREATED));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), null, null, null));
+        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), HASH, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), "not-a-hash", null, null, CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadCommand(id(1L), 1L, payload(), id(99L), "A".repeat(64), null, null, CREATED));
   }
 
   @Test
@@ -115,8 +123,17 @@ class ThreadCommandTest {
   private static ThreadCommand command(
       long id, long threadId, long sequence, UUID consumedTurnStartEntryId, Instant cancelledAt) {
     return new ThreadCommand(
-        id(threadId), sequence, payload(), id(id), consumedTurnStartEntryId, cancelledAt, CREATED);
+        id(threadId),
+        sequence,
+        payload(),
+        id(id),
+        HASH,
+        consumedTurnStartEntryId,
+        cancelledAt,
+        CREATED);
   }
+
+  private static final String HASH = ThreadCommandPayloadJsonCodec.requestHash(payload());
 
   private static ThreadCommandPayload payload() {
     return new SetAgentCommandPayload("coding");

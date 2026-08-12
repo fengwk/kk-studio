@@ -25,8 +25,8 @@ import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表，被禁止的遗留 harness
- * 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
+ * 断言最终的 PostgreSQL schema 结构：所有必需的表与列类型都存在，harness 执行协议恰好是 runtime-spring 的七张表 + 应用层的 Session blob
+ * 引用表，被禁止的遗留 harness 表不存在，且结构化载荷使用 jsonb（绝不使用 bytea）。
  *
  * <p>public schema 的相等性校验是严格的：{@code public} 中 {@code BASE TABLE} 的集合必须与期望列表完全一致，因此任何残留或桩表都会立即被发现。
  */
@@ -51,6 +51,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat",
           "chat_thread",
           "harness_session",
+          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -60,10 +61,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "storage_blob",
           "storage_upload");
 
-  /** 精确的 runtime-spring 执行协议；只有这些表能使用 harness_ 前缀。 */
+  /** 精确的 runtime-spring 执行协议 + 应用层 Session blob 引用表；只有这些表能使用 harness_ 前缀。 */
   private static final Set<String> HARNESS_TABLES =
       Set.of(
           "harness_session",
+          "harness_session_blob_ref",
           "harness_entry",
           "harness_thread",
           "harness_thread_command",
@@ -107,7 +109,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void harnessSchemaContainsExactlyTheSevenRuntimeTables() throws SQLException {
+  void harnessSchemaContainsExactlyTheRuntimeTables() throws SQLException {
     Set<String> harnessTables = new TreeSet<>();
     for (String table : tableNames()) {
       if (table.startsWith("harness_")) {
@@ -117,7 +119,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         new TreeSet<>(HARNESS_TABLES),
         harnessTables,
-        "exactly the seven runtime-spring execution tables may use the harness_ prefix");
+        "only the runtime-spring execution tables and the session blob ref table may use the harness_ prefix");
   }
 
   @Test
@@ -300,6 +302,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "command_type",
         "payload",
         "client_command_id",
+        "request_hash",
         "consumed_turn_start_entry_id",
         "cancelled_at",
         "created_at");
@@ -659,8 +662,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       assertColumnType("bigint", table, "id");
     }
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
-        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)。
+      if (table.equals("harness_work")
+          || table.equals("harness_thread_command")
+          || table.equals("harness_session_blob_ref")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 身份为 (thread_id, sequence)；
+        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
         continue;
       }
       assertColumnType("uuid", table, "id");
@@ -751,8 +757,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     // Harness 实体 id 由 HarnessStore 注入的 Supplier<UUID> 生成（生产：UUID::randomUUID）并显式插入；
     // 任何执行表都不得携带列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
     for (String table : HARNESS_TABLES) {
-      if (table.equals("harness_work") || table.equals("harness_thread_command")) {
-        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键。
+      if (table.equals("harness_work")
+          || table.equals("harness_thread_command")
+          || table.equals("harness_session_blob_ref")) {
+        // harness_work 通过 (target_type, target_id) 标识目标；ThreadCommand 无代理主键；
+        // Session blob 引用是复合主键 (session_id, blob_id) 的纯关联表。
         continue;
       }
       try (Connection conn = newConnection();

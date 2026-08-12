@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.tool.TextToolContent;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -434,7 +435,8 @@ public final class TaskTool implements Tool {
   }
 
   private static NewThreadCommand command(ThreadCommandPayload payload) {
-    return new NewThreadCommand(payload, UUID.randomUUID());
+    return new NewThreadCommand(
+        payload, UUID.randomUUID(), ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   private static void enqueue(
@@ -455,10 +457,13 @@ public final class TaskTool implements Tool {
     if (snapshot.model() == null && snapshot.toolSiblings().isEmpty()) {
       return false;
     }
+    CustomMessageCommandPayload reminderPayload =
+        new CustomMessageCommandPayload(AgentMessage.system(TaskPrompts.maxTurnsReminder()));
     NewThreadCommand reminder =
         new NewThreadCommand(
-            new CustomMessageCommandPayload(AgentMessage.system(TaskPrompts.maxTurnsReminder())),
-            UUID.randomUUID());
+            reminderPayload,
+            UUID.randomUUID(),
+            ThreadCommandPayloadJsonCodec.requestHash(reminderPayload));
     try {
       runtime.enqueueCommands(
           new ThreadCommandBatch(

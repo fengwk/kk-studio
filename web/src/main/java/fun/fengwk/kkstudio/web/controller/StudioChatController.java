@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -38,9 +39,11 @@ import java.util.function.Supplier;
 /**
  * Chat 集合 CRUD 与 Chat 作用域内 Thread 关联 API。
  *
- * <p>所有路径 / DTO 边界上的 id 都是正的十进制字符串（PostgreSQL sequence）。Chat Thread 列表、创建与 关联由本 Controller 编排
- * {@link HarnessRuntime} 与 {@link ChatThreadService}：创建先调用 {@code runtime.createThread} 再关联；关联前通过
- * {@code runtime.getThreadSnapshot} 校验 Thread 快照存在。 Runtime rejections 翻译为 404/409，非法请求为 400。
+ * <p>{@code chatId} 与 {@code threadId} 都是 canonical UUID string（应用生成，经 {@link
+ * HarnessRuntimeWebMapper#parseUuid} / {@code ChatIds.parseUuid} 严格解析）。Chat Thread 列表、创建与 关联由本
+ * Controller 编排 {@link HarnessRuntime} 与 {@link ChatThreadService}：创建通过 {@link
+ * ChatThreadCommandService} 在 单一应用事务内原子创建并关联；关联前通过 {@code runtime.getThreadSnapshot} 校验 Thread
+ * 快照存在。 Runtime rejections 翻译为 404/409，非法请求为 400。
  */
 @AllArgsConstructor
 @RequestMapping("/api/ai/chat")
@@ -49,6 +52,7 @@ public class StudioChatController {
 
   private final ChatService chatService;
   private final ChatThreadService chatThreadService;
+  private final ChatThreadCommandService chatThreadCommandService;
   private final HarnessRuntime runtime;
 
   @GetMapping
@@ -97,19 +101,18 @@ public class StudioChatController {
     return Results.ok(threads);
   }
 
-  /** 以完整 branch settings 原子创建 Thread，关联到 Chat 后返回创建快照。 */
+  /** 以完整 branch settings 在单一应用事务内原子创建 Thread 并关联到 Chat，返回创建快照。 */
   @PostMapping("/{chatId}/threads")
   public Result<HarnessThreadSnapshotDTO> createChatThread(
       @PathVariable String chatId, @RequestBody HarnessThreadCreateDTO createDTO) {
     HarnessThreadSnapshotDTO snapshot =
         withRuntimeTranslation(
             () -> {
-              chatThreadService.requireChat(chatId);
               CreatedThread created =
-                  runtime.createThread(HarnessRuntimeWebMapper.toCreateThreadCommand(createDTO));
-              UUID threadId = created.thread().id();
-              chatThreadService.associateThread(chatId, threadId);
-              return HarnessRuntimeWebMapper.toSnapshotDto(runtime.getThreadSnapshot(threadId));
+                  chatThreadCommandService.createChatThread(
+                      chatId, HarnessRuntimeWebMapper.toCreateThreadCommand(createDTO));
+              return HarnessRuntimeWebMapper.toSnapshotDto(
+                  runtime.getThreadSnapshot(created.thread().id()));
             });
     return Results.created(snapshot);
   }

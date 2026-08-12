@@ -82,6 +82,7 @@ final class PostgresqlHarnessRows {
             resultSet.getLong("sequence"),
             COMMAND_PAYLOADS.decode(type, resultSet.getString("payload")),
             uuid(resultSet, "client_command_id"),
+            resultSet.getString("request_hash"),
             nullableUuid(resultSet, "consumed_turn_start_entry_id"),
             nullableInstant(resultSet, "cancelled_at"),
             instant(resultSet, "created_at"));

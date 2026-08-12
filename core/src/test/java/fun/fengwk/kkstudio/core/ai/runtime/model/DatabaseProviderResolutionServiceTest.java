@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.ai.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.core.ai.catalog.provider.repo.AgentProviderRepository;
@@ -582,8 +583,11 @@ class DatabaseProviderResolutionServiceTest {
   // ---------- 测试基座 ----------
 
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
+    @SuppressWarnings("unchecked")
+    ObjectProvider<ProviderResourceMaterializer> materializers = mock(ObjectProvider.class);
+    when(materializers.getIfAvailable()).thenReturn(ProviderResourceMaterializer.withoutStorage());
     return new DatabaseProviderResolutionService(
-        repository, configurationCodec, new ProviderFactories(List.of(factories)));
+        repository, configurationCodec, new ProviderFactories(List.of(factories)), materializers);
   }
 
   private static ProviderFactory openAiFactory(PromptCacheCapability capability) {

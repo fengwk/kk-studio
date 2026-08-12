@@ -15,17 +15,24 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
+import fun.fengwk.kkstudio.core.ai.runtime.model.ProviderResourceMaterializer;
+import fun.fengwk.kkstudio.core.ai.runtime.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3PresignServiceImpl;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
 import fun.fengwk.kkstudio.core.storage.S3StorageServiceImpl;
 import fun.fengwk.kkstudio.core.storage.StorageStartupRecovery;
+import fun.fengwk.kkstudio.core.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.core.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.core.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.core.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.core.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.core.storage.service.impl.HeadOnlyStorageMediaProbe;
+import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlSessionBlobRefManager;
+import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobIngestService;
 import fun.fengwk.kkstudio.core.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.core.storage.service.impl.StorageUploadServiceImpl;
 
@@ -139,6 +146,45 @@ public class S3StorageConfiguration {
   public StorageStartupRecovery storageStartupRecovery(
       StorageUploadService storageUploadService, StorageBlobManager storageBlobManager) {
     return new StorageStartupRecovery(storageUploadService, storageBlobManager);
+  }
+
+  /** Session blob 引用边的显式 owner：insert/delete 与 blob retain/release 成对维护（MANDATORY 事务）。 */
+  @Bean
+  @ConditionalOnMissingBean(SessionBlobRefManager.class)
+  public SessionBlobRefManager sessionBlobRefManager(
+      SessionBlobRefRepository refRepository, StorageBlobManager blobManager) {
+    return new PostgresqlSessionBlobRefManager(refRepository, blobManager);
+  }
+
+  /** 服务端字节内容的 blob 摄入：Tool/Daemon Resource 外部化的存储入口（MANDATORY 事务）。 */
+  @Bean
+  @ConditionalOnMissingBean(StorageBlobIngestService.class)
+  public StorageBlobIngestService storageBlobIngestService(
+      StorageBlobRepository blobRepository,
+      StorageBlobManager blobManager,
+      SessionBlobRefManager refManager,
+      S3StorageService s3StorageService) {
+    return new PostgresqlStorageBlobIngestService(
+        blobRepository, blobManager, refManager, s3StorageService);
+  }
+
+  /** Provider attempt 的 Resource 物化端口（每次 attempt 生成新鲜预签名 URL，绝不持久化）。 */
+  @Bean
+  @ConditionalOnMissingBean(ProviderResourceMaterializer.class)
+  public ProviderResourceMaterializer providerResourceMaterializer(
+      StorageBlobManager storageBlobManager) {
+    return ProviderResourceMaterializer.withStorage(storageBlobManager);
+  }
+
+  /** Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history。 */
+  @Bean
+  @ConditionalOnMissingBean(GlobalStorageToolResultHistoryMaterializer.class)
+  public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
+      StorageBlobIngestService ingestService,
+      S3StorageService s3StorageService,
+      S3StorageProperties s3Properties) {
+    return new GlobalStorageToolResultHistoryMaterializer(
+        ingestService, s3StorageService, s3Properties);
   }
 
   private S3Configuration newS3Configuration() {

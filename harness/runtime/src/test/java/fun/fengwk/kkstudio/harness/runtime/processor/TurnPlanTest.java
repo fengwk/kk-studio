@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.time.Instant;
@@ -116,6 +117,8 @@ class TurnPlanTest {
             1L,
             new CustomMessageCommandPayload(AgentMessage.system("finish now")),
             TestIds.id(5),
+            ThreadCommandPayloadJsonCodec.requestHash(
+                new CustomMessageCommandPayload(AgentMessage.system("finish now"))),
             null,
             null,
             Instant.EPOCH);
@@ -125,6 +128,8 @@ class TurnPlanTest {
             1L,
             new CustomMessageCommandPayload(AgentMessage.user("later input")),
             TestIds.id(6),
+            ThreadCommandPayloadJsonCodec.requestHash(
+                new CustomMessageCommandPayload(AgentMessage.user("later input"))),
             null,
             null,
             Instant.EPOCH);

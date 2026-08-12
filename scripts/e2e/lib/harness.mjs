@@ -187,8 +187,8 @@ export async function listEnvironments(ctx) {
 export function userMessageCommand(content, clientCommandId) {
   assert(typeof content === 'string' && content.trim(), 'content required')
   assert(clientCommandId && typeof clientCommandId === 'string', 'clientCommandId required')
-  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/content.
-  return { type: 'USER_MESSAGE', clientCommandId, content }
+  // Strict wire: USER_MESSAGE carries ONLY type/clientCommandId/contents（TEXT/ATTACHMENT，无文本 shorthand）。
+  return { type: 'USER_MESSAGE', clientCommandId, contents: [{ type: 'TEXT', text: content }] }
 }
 
 export function customMessageCommand(role, content, clientCommandId) {

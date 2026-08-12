@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
@@ -123,6 +124,7 @@ public final class ThreadProcessor {
   private final ThreadProcessorConfig config;
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
@@ -135,11 +137,23 @@ public final class ThreadProcessor {
       ThreadProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler) {
+    this(store, resolver, config, clock, scheduler, null);
+  }
+
+  /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
+  public ThreadProcessor(
+      HarnessStore store,
+      TurnResolver resolver,
+      ThreadProcessorConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
     this.compactionPlanner = new CompactionPlanner(config.compaction());
   }
 
@@ -744,7 +758,8 @@ public final class ThreadProcessor {
     List<ToolInvocation> updated = new ArrayList<>(siblings.size());
     for (ToolInvocation sibling : siblings) {
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, sessionId, parentId, sibling, mutationNow);
+          ToolOutcomeAppender.append(
+              tx, sessionId, parentId, sibling, mutationNow, toolResultHistoryMaterializer);
       updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }

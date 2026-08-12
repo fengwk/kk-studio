@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
@@ -54,6 +55,7 @@ import java.util.function.Supplier;
 @RequestMapping("/api/ai/runtime/threads")
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
+  private final ChatThreadCommandService chatThreadCommandService;
   private final RealtimeEventTail realtimeEventTail;
   private final ThreadRevisionSseHub revisionHub;
   private final Executor eventStreamExecutor;
@@ -61,10 +63,13 @@ public class StudioHarnessThreadController {
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
+      ChatThreadCommandService chatThreadCommandService,
       RealtimeEventTail realtimeEventTail,
       ThreadRevisionSseHub revisionHub,
       @Qualifier("harnessEventStreamTaskExecutor") Executor eventStreamExecutor) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
+    this.chatThreadCommandService =
+        Objects.requireNonNull(chatThreadCommandService, "chatThreadCommandService");
     this.realtimeEventTail = Objects.requireNonNull(realtimeEventTail, "realtimeEventTail");
     this.revisionHub = Objects.requireNonNull(revisionHub, "revisionHub");
     this.eventStreamExecutor = Objects.requireNonNull(eventStreamExecutor, "eventStreamExecutor");
@@ -82,8 +87,8 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * 将一个 typed command batch 原子入队；202 仅表示已接受，不代表模型已完成。所有 8 类命令由 mapper 按 discriminator 严格校验后映射为一个
-   * {@link ThreadCommandBatch}。
+   * 将一个 typed command batch 原子入队（应用 use-case 事务：幂等 hash 重放优先，新命令消费附件后入队）；202 仅表示已接受， 不代表模型已完成。所有 7
+   * 类命令由 mapper 按 discriminator 严格校验后映射为一个 {@link ThreadCommandBatch}。
    */
   @PostMapping("/{threadId}/commands")
   public Result<List<HarnessThreadCommandDTO>> enqueueCommands(
@@ -92,7 +97,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () -> {
               ThreadCommandBatch batch = HarnessRuntimeWebMapper.toCommandBatch(threadId, batchDTO);
-              List<ThreadCommand> commands = runtime.enqueueCommands(batch);
+              List<ThreadCommand> commands = chatThreadCommandService.submitCommands(batch);
               List<HarnessThreadCommandDTO> mapped = new ArrayList<>(commands.size());
               for (ThreadCommand command : commands) {
                 mapped.add(HarnessRuntimeWebMapper.toCommandDto(command));

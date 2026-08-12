@@ -448,6 +448,7 @@ create table harness_thread_command (
     command_type varchar(32) not null,
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     client_command_id uuid not null,
+    request_hash char(64) not null,
     consumed_turn_start_entry_id uuid,
     cancelled_at timestamptz(3),
     created_at timestamptz(3) not null,
@@ -468,6 +469,9 @@ create table harness_thread_command (
             'SET_ENVIRONMENT'
         )
     ),
+    constraint ck_harness_thread_command_request_hash check (
+        request_hash ~ '^[0-9a-f]{64}$'
+    ),
     constraint ck_harness_thread_command_terminal check (
         consumed_turn_start_entry_id is null or cancelled_at is null
     ),
@@ -482,6 +486,7 @@ comment on column harness_thread_command.sequence is 'Thread 内单调递增序�
 comment on column harness_thread_command.command_type is 'Command payload 类型';
 comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
 comment on column harness_thread_command.client_command_id is '客户端幂等 ID（UUID），同一 Thread 内唯一';
+comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 clientCommandId 重放必须精确匹配';
 comment on column harness_thread_command.consumed_turn_start_entry_id is 'APPLIED 时消费的 TURN_START Entry；与 cancelled_at 互斥';
 comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间；不得早于 created_at';
 comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
@@ -677,6 +682,7 @@ create table chat_thread (
 
 create index idx_chat_thread_thread
     on chat_thread (thread_id, chat_id);
+
 
 ------------------------------------------------------------------------------
 -- 4. Thread revision NOTIFY hint
@@ -885,3 +891,29 @@ comment on index uk_storage_upload_candidate is
 comment on index idx_storage_upload_expiry is
     'Expiry sweep: opportunistic SKIP LOCKED batches and startup recovery scan'
     ' expired uploads oldest-first in bounded batches.';
+
+-- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
+-- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），
+-- 绝不依赖 ON DELETE CASCADE 或触发器；两个 FK 都是 RESTRICT，删除 Session / blob 前必须先删除本表对应行。
+create table harness_session_blob_ref (
+    session_id  uuid          not null,
+    blob_id     uuid          not null,
+    created_at  timestamptz(3) not null default current_timestamp,
+    constraint pk_harness_session_blob_ref primary key (session_id, blob_id),
+    constraint fk_harness_session_blob_ref_session foreign key (session_id)
+        references harness_session (id),
+    constraint fk_harness_session_blob_ref_blob foreign key (blob_id)
+        references storage_blob (id)
+);
+
+create index idx_harness_session_blob_ref_blob
+    on harness_session_blob_ref (blob_id, session_id);
+
+comment on table harness_session_blob_ref is
+    'Session 与 storage_blob 的显式引用边：每行恰好对应一次 blob retain，删除时由应用层逐行 release；'
+    'FK 均为 RESTRICT，深删除必须先删本表';
+comment on column harness_session_blob_ref.session_id is '所属 Harness Session（RESTRICT FK）';
+comment on column harness_session_blob_ref.blob_id is '被引用的全局 blob（RESTRICT FK，ACTIVE 行）';
+comment on column harness_session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
+
+comment on index idx_harness_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';

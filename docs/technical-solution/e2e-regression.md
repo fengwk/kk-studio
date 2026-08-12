@@ -113,7 +113,7 @@ FunctionRun，不下载或导入视频。它只准备页面，不触发生成；
 
 下面的 ID 与 `node scripts/e2e/run-matrix.mjs --list` 一致。
 
-### L1（注册 59，默认 57）
+### L1（注册 60，默认 58）
 
 ```text
 seed.structured_model_config
@@ -175,6 +175,7 @@ config.agent.invalid.unknown_field_rejected
 matrix.agent.teardown_model
 canvas.storage_upload_contract
 canvas.function_fake_runtime
+chat.attachment_upload_contract
 ```
 
 L1 的关键语义断言：
@@ -187,8 +188,8 @@ L1 的关键语义断言：
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
 - 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
-- `USER_MESSAGE` 支持互斥的 `text` shorthand 或非空结构化 `contents(TEXT/IMAGE/AUDIO/VIDEO)`，未知/多余字段与非法 mediaType/source 返回 400；现有 `content` shorthand 保持兼容；`CUSTOM_MESSAGE` role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
-- 同 `clientCommandId` 整批重放幂等返回既有命令；部分重放 409；replay/400 不依赖异步消费时序；
+- `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
+- 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO` 五类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；
 - `PUT /head` body `{targetEntryId,expectedRevision}`：同 target 在 revision 校验前 no-op（即使 stale 也不 bump）；非同 target stale revision 409；跨 Session target 409；
 - `POST /stop` body `{stopRequestId,expectedRevision}`：IDLE 无 queued 时 status=IDLE、无 stopped TURN_END、revision 不变；IDLE stop 不写持久 marker，同 `stopRequestId` 再次调用仍是 IDLE no-op（不是 REPLAYED）；stale revision 409；真实 STOPPED/REPLAYED 语义由 L2 覆盖；
@@ -203,6 +204,11 @@ L1 的关键语义断言：
   `fake-image`，验证 Function node 创建、start/poll、成功 Resource 原子替换、
   `320×260 @ (100,100)` transform 精确回读、`graphRevision` 不变、公开 run DTO 无
   `stateJson`，以及 preview signed GET。
+- `chat.attachment_upload_contract` 仅在 `--with-canvas-storage` 下执行：通用存储
+  reserve -> 真实 presigned PUT -> complete -> USER_MESSAGE `ATTACHMENT(uploadId)`
+  原子消费；入队响应 `requestHash` 为 64 位小写 hex、durable payload 为
+  `resource(blobId/name)`；整批重放幂等不二次消费；已消费/未 READY upload 与
+  `IMAGE/AUDIO/VIDEO` 内容类型确定性 400。
 
 ### L2/L3/L4（7）
 
@@ -301,6 +307,11 @@ POST /api/ai/runtime/threads/{threadId}/tool-invocations/{toolInvocationId}/appr
 GET  /api/ai/runtime/threads/{threadId}/events/stream?afterRevision={revision}
 
 GET  /api/ai/runtime/resources/{sha256}?mediaType=&size=&name=  -> 同源 managed Resource 下载（attachment + nosniff）
+
+POST /api/storage/uploads                       -> 通用存储 reserve（PENDING + presigned PUT）
+POST /api/storage/uploads/{uploadId}/complete   -> READY（blobId；供 ATTACHMENT 消费）
+DELETE /api/storage/uploads/{uploadId}
+GET  /api/storage/blobs/{blobId}/presigned-original|preview
 ```
 
 Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
@@ -325,12 +336,16 @@ Chat-scoped Thread create body（完整 branch draft；`title` nullable）：
   "expectedHeadEntryId": "1",
   "expectedNextCommandSequence": "1",
   "commands": [
-    { "type": "USER_MESSAGE", "clientCommandId": "...", "text": "..." }
+    {
+      "type": "USER_MESSAGE",
+      "clientCommandId": "...",
+      "contents": [{ "type": "TEXT", "text": "..." }]
+    }
   ]
 }
 ```
 
-`USER_MESSAGE` 必须且只能携带 `text` shorthand 或非空结构化 `contents`；结构化元素只允许 `TEXT(text)`、`IMAGE(mediaType,source)`、`AUDIO(mediaType,source)`、`VIDEO(mediaType,source)`。已有 `content` shorthand 继续兼容。`CUSTOM_MESSAGE` 额外携带 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
+`USER_MESSAGE` 必须且只能携带一个非空有序 `contents` 列表，元素只允许 `TEXT(text)` 与 `ATTACHMENT(uploadId)`——`uploadId` 是通用存储 reserve/complete 得到的 READY upload（canonical UUID string），入队事务内原子消费：锁定 upload 行 -> 以权威文件名物化为 durable `resource(blobId/name)` -> session blob ref -> 删除已消费 upload 行；整批重放（同 `clientCommandId` + 同 hash）绝不二次消费。`text`/`content` 文本 shorthand 已移除：`text` 按未知字段拒绝，`content` 对 USER_MESSAGE 禁用；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段、空 `contents` 与非 canonical uploadId 一律 400。命令响应（`HarnessThreadCommandDTO`）携带 `requestHash`（raw 命令的 canonical SHA-256，64 位小写 hex）与 `sequence`（Thread 内从 1 开始的正整数）。`CUSTOM_MESSAGE` 使用 `content` 与 `role`（仅 `SYSTEM|USER`）。五类 SET 命令各自只携带目标字段：`SET_ENVIRONMENT(environmentName)`、`SET_AGENT(agentName)`、`SET_MODEL(model)`、`SET_ACTIVE_TOOLS(activeTools)`、`SET_YOLO(yoloEnabled)`，多余字段一律 400。
 
 head move 与 stop 均为 revision CAS：
 
@@ -345,7 +360,7 @@ head move 与 stop 均为 revision CAS：
   - `REPLAYED`：同 `stopRequestId` 再次调用命中持久 TURN_END（在 revision CAS 之前，revision 不再变化，返回同一 `stoppedTurnEndEntryId`）；
   - `IDLE`：无活动 Turn（无持久 marker，`stoppedTurnEndEntryId=null`；同 `stopRequestId` 再调用仍是 IDLE）；
   - stale revision 409；
-- 命令 batch 整批同 `clientCommandId` 重放返回既有命令；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
+- 命令 batch 整批同 `clientCommandId` + 同 `requestHash` 重放返回既有命令（sequence/requestHash 稳定）；仅部分存在 409 `PARTIAL_COMMAND_REPLAY`。
 
 Tool approval：
 

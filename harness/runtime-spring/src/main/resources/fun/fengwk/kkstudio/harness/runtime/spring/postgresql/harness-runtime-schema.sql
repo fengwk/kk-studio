@@ -94,6 +94,7 @@ create table harness_thread_command (
     command_type varchar(32) not null,
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     client_command_id uuid not null,
+    request_hash char(64) not null,
     consumed_turn_start_entry_id uuid,
     cancelled_at timestamptz(3),
     created_at timestamptz(3) not null,
@@ -114,6 +115,9 @@ create table harness_thread_command (
             'SET_ENVIRONMENT'
         )
     ),
+    constraint ck_harness_thread_command_request_hash check (
+        request_hash ~ '^[0-9a-f]{64}$'
+    ),
     constraint ck_harness_thread_command_terminal check (
         consumed_turn_start_entry_id is null or cancelled_at is null
     ),
@@ -128,6 +132,7 @@ comment on column harness_thread_command.sequence is 'Thread 内单调递增序�
 comment on column harness_thread_command.command_type is 'Command payload 类型';
 comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
 comment on column harness_thread_command.client_command_id is '客户端幂等 ID（UUID），同一 Thread 内唯一';
+comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 clientCommandId 重放必须精确匹配';
 comment on column harness_thread_command.consumed_turn_start_entry_id is 'APPLIED 时消费的 TURN_START Entry；与 cancelled_at 互斥';
 comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间；不得早于 created_at';
 comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';

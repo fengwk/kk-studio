@@ -60,7 +60,14 @@ class HarnessStoreContractTest {
               "claimNextWork",
               "renewWork",
               "completeWork",
-              "rescheduleWork"));
+              "rescheduleWork",
+              "deleteCommands",
+              "deleteToolInvocations",
+              "deleteModelInvocations",
+              "deleteThread",
+              "deleteEntries",
+              "deleteSession",
+              "deleteWorkByThread"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {
@@ -90,6 +97,7 @@ class HarnessStoreContractTest {
       if (returnType == void.class
           || returnType == long.class
           || returnType == boolean.class
+          || returnType == int.class
           || returnType == UUID.class) {
         continue;
       }

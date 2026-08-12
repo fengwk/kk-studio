@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -607,7 +608,15 @@ final class HarnessRuntimeTestSupport {
           tx.lockThread(threadId);
           tx.insertCommands(
               List.of(
-                  new ThreadCommand(threadId, sequence, payload, clientCommandId, null, null, T1)));
+                  new ThreadCommand(
+                      threadId,
+                      sequence,
+                      payload,
+                      clientCommandId,
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      T1)));
           return null;
         });
   }
@@ -733,6 +742,7 @@ final class HarnessRuntimeTestSupport {
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         turnStartEntryId,
         null,
         command.createdAt());
@@ -740,7 +750,9 @@ final class HarnessRuntimeTestSupport {
 
   /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
   static NewThreadCommand userMessageCommand(UUID clientCommandId, String text) {
-    return new NewThreadCommand(userMessagePayload(text), clientCommandId);
+    UserMessageCommandPayload payload = userMessagePayload(text);
+    return new NewThreadCommand(
+        payload, clientCommandId, ThreadCommandPayloadJsonCodec.requestHash(payload));
   }
 
   static UserMessageCommandPayload userMessagePayload(String text) {

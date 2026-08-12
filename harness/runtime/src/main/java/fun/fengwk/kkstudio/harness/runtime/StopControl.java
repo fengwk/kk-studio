@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -62,11 +63,16 @@ final class StopControl {
 
   private final HarnessStore store;
   private final Clock clock;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
 
-  StopControl(HarnessStore store, Clock clock) {
+  StopControl(
+      HarnessStore store,
+      Clock clock,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
   }
 
   Commit stop(StopCommand command) {
@@ -326,7 +332,8 @@ final class StopControl {
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
+          ToolOutcomeAppender.append(
+              tx, path.root().sessionId(), parentId, terminal, now, toolResultHistoryMaterializer);
       updated.add(applied.invocation());
       parentId = applied.headEntryId();
     }

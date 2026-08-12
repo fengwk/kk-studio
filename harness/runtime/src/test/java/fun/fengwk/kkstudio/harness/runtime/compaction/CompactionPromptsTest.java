@@ -16,10 +16,10 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
-import fun.fengwk.kkstudio.harness.tool.ResourceRef;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * CompactionPrompts 契约：全部 prompt 文本与 classpath 资源逐字一致（Pi 逐字复制），严格渲染 conversation / previousSummary
@@ -131,10 +131,7 @@ class CompactionPromptsTest {
                 new ImageMessageContent("image/png", "image-data"),
                 new AudioMessageContent("audio/mp3", "audio-data"),
                 new VideoMessageContent("video/mp4", "video-data"),
-                new ResourceMessageContent(
-                    new ResourceRef(
-                        "http://example.test/res.png", "image/png", "res.png", 3L, null),
-                    null)));
+                new ResourceMessageContent(new UUID(0L, 1L), "res.png", null)));
     AgentMessage assistant =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,

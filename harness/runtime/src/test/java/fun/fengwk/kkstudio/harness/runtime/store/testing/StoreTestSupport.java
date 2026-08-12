@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
@@ -270,13 +271,16 @@ final class StoreTestSupport {
    * clientCommandId 必须为非空 UUID。
    */
   static ThreadCommand command(UUID threadId, long sequence, UUID clientCommandId) {
+    UserMessageCommandPayload payload =
+        new UserMessageCommandPayload(
+            new AgentMessage(
+                AgentMessageRole.USER, List.of(new TextMessageContent("message " + sequence))));
     return new ThreadCommand(
         threadId,
         sequence,
-        new UserMessageCommandPayload(
-            new AgentMessage(
-                AgentMessageRole.USER, List.of(new TextMessageContent("message " + sequence)))),
+        payload,
         clientCommandId,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
         null,
         null,
         T0);
@@ -289,6 +293,7 @@ final class StoreTestSupport {
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         turnStartEntryId,
         null,
         command.createdAt());
@@ -301,6 +306,7 @@ final class StoreTestSupport {
         command.sequence(),
         command.payload(),
         command.clientCommandId(),
+        command.requestHash(),
         null,
         cancelledAt,
         command.createdAt());

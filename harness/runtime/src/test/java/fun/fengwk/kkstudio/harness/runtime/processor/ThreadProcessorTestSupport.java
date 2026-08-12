@@ -56,6 +56,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -322,7 +323,14 @@ final class ThreadProcessorTestSupport {
           tx.insertCommands(
               List.of(
                   new ThreadCommand(
-                      threadId, sequence, payload, clientCommandId, null, null, NOW)));
+                      threadId,
+                      sequence,
+                      payload,
+                      clientCommandId,
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      NOW)));
           tx.updateThread(thread.reserveCommandSequences(1, NOW));
           return clientCommandId;
         });

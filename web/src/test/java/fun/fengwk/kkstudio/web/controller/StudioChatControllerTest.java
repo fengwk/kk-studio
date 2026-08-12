@@ -27,6 +27,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatService;
+import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadCommandService;
 import fun.fengwk.kkstudio.core.ai.chat.service.ChatThreadService;
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
@@ -56,6 +57,7 @@ class StudioChatControllerTest {
 
   private ChatService chatService;
   private ChatThreadService chatThreadService;
+  private ChatThreadCommandService chatThreadCommandService;
   private HarnessRuntime runtime;
   private MockMvc mockMvc;
 
@@ -63,9 +65,10 @@ class StudioChatControllerTest {
   void setUp() {
     chatService = mock(ChatService.class);
     chatThreadService = mock(ChatThreadService.class);
+    chatThreadCommandService = mock(ChatThreadCommandService.class);
     runtime = mock(HarnessRuntime.class);
     StudioChatController controller =
-        new StudioChatController(chatService, chatThreadService, runtime);
+        new StudioChatController(chatService, chatThreadService, chatThreadCommandService, runtime);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new ResultResponseBodyAdvice())
@@ -92,7 +95,7 @@ class StudioChatControllerTest {
 
   @Test
   void createChatThreadCreatesAssociatesAndReturnsCreatedSnapshot() throws Exception {
-    when(runtime.createThread(any(CreateThreadCommand.class)))
+    when(chatThreadCommandService.createChatThread(any(), any(CreateThreadCommand.class)))
         .thenReturn(
             new CreatedThread(
                 HarnessRuntimeTestFixtures.session(),
@@ -122,12 +125,11 @@ class StudioChatControllerTest {
         .andExpect(jsonPath("$.data.thread.branchSettings.agentName").value("default-assistant"));
 
     ArgumentCaptor<CreateThreadCommand> captor = ArgumentCaptor.forClass(CreateThreadCommand.class);
-    verify(runtime).createThread(captor.capture());
+    verify(chatThreadCommandService).createChatThread(eq("7"), captor.capture());
     assertEquals("default-assistant", captor.getValue().branchSettings().agentName());
     assertEquals("gpt-5", captor.getValue().branchSettings().model().modelName());
     assertEquals(List.of("web_search"), captor.getValue().branchSettings().activeTools());
     assertEquals(true, captor.getValue().yoloEnabled());
-    verify(chatThreadService).associateThread("7", id(1));
   }
 
   @Test

@@ -363,14 +363,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_thread_command (
               thread_id, sequence, command_type, payload, client_command_id,
-              consumed_turn_start_entry_id, cancelled_at, created_at
-          ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?)
+              request_hash, consumed_turn_start_entry_id, cancelled_at, created_at
+          ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?)
           """,
           command.threadId(),
           command.sequence(),
           command.type().name(),
           PostgresqlHarnessRows.COMMAND_PAYLOADS.encode(command.payload()),
           command.clientCommandId(),
+          command.requestHash(),
           command.consumedTurnStartEntryId(),
           PostgresqlHarnessRows.timestamp(command.cancelledAt()),
           PostgresqlHarnessRows.timestamp(command.createdAt()));
@@ -829,6 +830,105 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return true;
   }
 
+  // ---------- 应用侧深删除原语 ----------
+
+  @Override
+  public int deleteCommands(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_thread_command where thread_id = ?", threadId);
+  }
+
+  @Override
+  public int deleteToolInvocations(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update(
+        """
+        delete from harness_tool_invocation
+        where model_invocation_id in (
+            select id from harness_model_invocation where thread_id = ?
+        )
+        """,
+        threadId);
+  }
+
+  @Override
+  public int deleteModelInvocations(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_model_invocation where thread_id = ?", threadId);
+  }
+
+  @Override
+  public boolean deleteThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update("delete from harness_thread where id = ?", threadId) == 1;
+  }
+
+  @Override
+  public int deleteEntries(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    int total = 0;
+    while (true) {
+      // 叶子优先：同一语句只删除父不在批内的行（parent FK 顺序天然成立），逐层剥到 ROOT。
+      int deleted =
+          update(
+              """
+              delete from harness_entry e
+              where e.session_id = ?
+                and not exists (
+                    select 1
+                    from harness_entry child
+                    where child.session_id = e.session_id
+                      and child.parent_entry_id = e.id
+                )
+              """,
+              sessionId);
+      total += deleted;
+      if (deleted == 0) {
+        return total;
+      }
+    }
+  }
+
+  @Override
+  public boolean deleteSession(UUID sessionId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    return update("delete from harness_session where id = ?", sessionId) == 1;
+  }
+
+  @Override
+  public int deleteWorkByThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    requireLocked(LockKey.thread(threadId));
+    return update(
+        """
+        delete from harness_work
+        where (target_type = 'THREAD' and target_id = ?)
+           or target_id in (
+               select id from harness_model_invocation where thread_id = ?
+           )
+           or target_id in (
+               select tool.id
+               from harness_tool_invocation tool
+               join harness_model_invocation model on model.id = tool.model_invocation_id
+               where model.thread_id = ?
+           )
+        """,
+        threadId,
+        threadId,
+        threadId);
+  }
+
   @Override
   public void requestWork(WorkTarget target, Instant requestedAt) {
     checkOpen();
@@ -1041,10 +1141,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (!stored.threadId().equals(command.threadId())
         || !stored.payload().equals(command.payload())
         || !stored.clientCommandId().equals(command.clientCommandId())
+        || !stored.requestHash().equals(command.requestHash())
         || stored.sequence() != command.sequence()
         || !stored.createdAt().equals(command.createdAt())) {
       throw new IllegalArgumentException(
-          "command identity (thread/payload/clientCommandId/sequence/createdAt) must not change");
+          "command identity (thread/payload/clientCommandId/requestHash/sequence/createdAt) must not change");
     }
   }
 
