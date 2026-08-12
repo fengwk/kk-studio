@@ -311,6 +311,21 @@ function decodeNullableInt(value: unknown, path: string): number | null {
   return value
 }
 
+function requireFiniteNumber(value: unknown, path: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw invalidPayload(`${path} must be a finite number`)
+  }
+  return value
+}
+
+function requirePositiveFiniteNumber(value: unknown, path: string): number {
+  const number = requireFiniteNumber(value, path)
+  if (number <= 0) {
+    throw invalidPayload(`${path} must be greater than zero`)
+  }
+  return number
+}
+
 function requireInt(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw invalidPayload(`${path} must be a non-negative integer`)
@@ -401,10 +416,10 @@ function decodeCanvasResourceNode(value: unknown): CanvasResourceNodeDTO {
 function decodeTransform(value: unknown, path: string): CanvasResourceNodeDTO['transform'] {
   const candidate = requireRecord(value, path)
   return {
-    x: requireInt(candidate.x, `${path}.x`),
-    y: requireInt(candidate.y, `${path}.y`),
-    width: requireInt(candidate.width, `${path}.width`),
-    height: requireInt(candidate.height, `${path}.height`),
+    x: requireFiniteNumber(candidate.x, `${path}.x`),
+    y: requireFiniteNumber(candidate.y, `${path}.y`),
+    width: requirePositiveFiniteNumber(candidate.width, `${path}.width`),
+    height: requirePositiveFiniteNumber(candidate.height, `${path}.height`),
   }
 }
 

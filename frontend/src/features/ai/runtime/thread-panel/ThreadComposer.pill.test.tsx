@@ -53,7 +53,13 @@ function fakeStorage(overrides: {
   const completeUpload = vi.fn(async (uploadId: string): Promise<StorageUploadDTO> => {
     void reservations.get(uploadId)
     // 同一句柄：complete 不产生新 id，blobId 是落库后的持久资源（客户端不使用）。
-    return { id: uploadId, state: 'READY', blobId: `blob-${uploadId}`, expiresAt: null }
+    return {
+      id: uploadId,
+      state: 'READY',
+      blobId: `blob-${uploadId}`,
+      presignedPut: null,
+      expiresAt: null,
+    }
   })
   const deleteUpload = vi.fn(async () => undefined)
   const getBlobOriginalUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null }))
@@ -361,6 +367,7 @@ describe('ThreadComposer attachment pills', () => {
         id: `dedup-${request.sha256.slice(0, 8)}`,
         state: 'READY',
         blobId: 'blob-existing',
+        presignedPut: null,
         expiresAt: null,
       }),
     })

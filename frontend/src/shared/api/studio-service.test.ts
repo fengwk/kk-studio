@@ -294,6 +294,42 @@ describe('studio-service', () => {
     expect(snapshot.nodes[0]?.resources[0]?.resourceIndex).toBe(0)
   })
 
+  it('preserves finite negative and fractional Canvas coordinates', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(result({
+      document: documentFixture('1'),
+      nodes: [{
+        ...nodeFixture({
+          id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_ID,
+          resourceIndex: 0,
+          blobId: null,
+          name: 'note',
+          textContent: 'body',
+          kind: 'TEXT',
+          mediaType: null,
+          sizeBytes: null,
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }),
+        transform: { x: -12.5, y: 3.25, width: 320.5, height: 260.75 },
+      }],
+      groups: [],
+      links: [],
+    }))
+
+    const snapshot = await getCanvas(CANVAS_ID)
+
+    expect(snapshot.nodes[0]?.transform).toEqual({
+      x: -12.5,
+      y: 3.25,
+      width: 320.5,
+      height: 260.75,
+    })
+  })
+
   it('fails closed on non-canonical version fields instead of casting', async () => {
     const invalidVersions = [7, '01', '-1', '1.5', '', null]
     for (const version of invalidVersions) {
@@ -335,6 +371,44 @@ describe('studio-service', () => {
       name: 'ApiError',
       message: expect.stringContaining('resource.durationMs'),
     })
+  })
+
+  it('fails closed on non-finite coordinates and non-positive dimensions', async () => {
+    for (const transform of [
+      { x: Number.NaN, y: 0, width: 1, height: 1 },
+      { x: 0, y: Number.POSITIVE_INFINITY, width: 1, height: 1 },
+      { x: 0, y: 0, width: 0, height: 1 },
+      { x: 0, y: 0, width: 1, height: -1 },
+    ]) {
+      vi.mocked(fetch).mockResolvedValueOnce(result({
+        document: documentFixture('0'),
+        nodes: [{
+          ...nodeFixture({
+            id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            canvasId: CANVAS_ID,
+            ownerNodeId: NODE_ID,
+            resourceIndex: 0,
+            blobId: null,
+            name: 'note',
+            textContent: 'body',
+            kind: 'TEXT',
+            mediaType: null,
+            sizeBytes: null,
+            width: null,
+            height: null,
+            durationMs: null,
+            createdAt: '2026-08-10T00:00:00Z',
+          }),
+          transform,
+        }],
+        groups: [],
+        links: [],
+      }))
+      await expect(getCanvas(CANVAS_ID)).rejects.toMatchObject({
+        name: 'ApiError',
+        message: expect.stringContaining('node.transform'),
+      })
+    }
   })
 })
 

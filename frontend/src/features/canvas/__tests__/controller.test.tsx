@@ -314,6 +314,7 @@ describe('useCanvasController real snapshot runtime', () => {
       id: UPLOAD_ID,
       state: 'READY',
       blobId: 'blob-upload',
+      presignedPut: null,
       expiresAt: '2026-08-10T00:15:00Z',
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
@@ -540,13 +541,15 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.mocked(storageService.reserveUpload).mockResolvedValue({
       id: 'eeeeeeee-0000-4000-8000-000000000090',
       state: 'READY',
-      blobId: null,
+      blobId: 'blob-existing',
+      presignedPut: null,
       expiresAt: '2026-08-10T00:15:00Z',
     })
     vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
       id: uploadId,
       state: 'READY',
       blobId: 'blob-dedup',
+      presignedPut: null,
       expiresAt: '2026-08-10T00:15:00Z',
     }))
 
