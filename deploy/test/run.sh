@@ -112,6 +112,9 @@ step "Validating Compose configuration"
 "${COMPOSE[@]}" config --quiet
 "${COMPOSE[@]}" --profile app config --quiet
 
+step "Resetting isolated test stack"
+"${COMPOSE[@]}" --profile app down --volumes --remove-orphans
+
 step "Building the current application Dockerfile"
 docker build \
   --file "$PROJECT_ROOT/deploy/local/Dockerfile" \
@@ -146,6 +149,10 @@ postgres_result=$(
 )
 [[ "$postgres_result" == "1" ]] || die "PostgreSQL SELECT 1 returned '$postgres_result'"
 
+step "Checking Redis"
+redis_result=$("${COMPOSE[@]}" exec -T redis redis-cli ping)
+[[ "$redis_result" == "PONG" ]] || die "Redis ping returned '$redis_result'"
+
 step "Checking MinIO and initialized bucket"
 "${COMPOSE[@]}" exec -T minio-init \
   /bin/sh -ec 'mc ready local >/dev/null && mc stat "local/$MINIO_BUCKET" >/dev/null'
@@ -169,6 +176,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -198,6 +206,11 @@ def header(headers: dict, name: str) -> str:
     return next(value for key, value in headers.items() if key.lower() == name.lower())
 
 
+def decimal_version(value: object) -> int:
+    assert isinstance(value, str) and re.fullmatch(r"0|[1-9][0-9]*", value), value
+    return int(value)
+
+
 def upserted_node(patch: dict, node_id: str) -> dict:
     return next(
         item["node"]
@@ -208,7 +221,7 @@ def upserted_node(patch: dict, node_id: str) -> dict:
 
 canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
 assert uuid.UUID(canvas["id"]).version == 4
-assert canvas["version"] == 0
+assert decimal_version(canvas["version"]) == 0
 assert canvas["threadId"] is None
 sha256 = hashlib.sha256(image).hexdigest()
 reservation = json_call(
@@ -281,7 +294,7 @@ resource_patch = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/commands",
     {
-        "expectedVersion": 0,
+        "expectedVersion": "0",
         "commandId": new_id(),
         "commands": [
             {
@@ -294,13 +307,24 @@ resource_patch = json_call(
         ],
     },
 )
-assert resource_patch["baseVersion"] == 0 and resource_patch["version"] == 1
+assert decimal_version(resource_patch["baseVersion"]) == 0
+assert decimal_version(resource_patch["version"]) == 1
 resource_node = upserted_node(resource_patch, resource_node_id)
 resource = resource_node["resources"][0]
 assert resource["blobId"] == completed["blobId"]
 assert resource["mediaType"] == "image/png"
 assert resource["width"] > 0 and resource["height"] > 0
-assert resource["sizeBytes"] == len(image)
+assert resource["sizeBytes"] == str(len(image))
+
+changes = json_call(
+    "GET",
+    f"/api/canvases/{canvas['id']}/changes?afterVersion=0",
+)
+assert changes["snapshot"] is None, changes
+assert len(changes["patches"]) == 1, changes
+cached_patch = changes["patches"][0]
+assert decimal_version(cached_patch["baseVersion"]) == 0
+assert decimal_version(cached_patch["version"]) == 1
 
 original = json_call(
     "POST",
@@ -325,7 +349,7 @@ function_patch = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/commands",
     {
-        "expectedVersion": 1,
+        "expectedVersion": "1",
         "commandId": new_id(),
         "commands": [
             {
@@ -349,7 +373,8 @@ function_patch = json_call(
         ],
     },
 )
-assert function_patch["baseVersion"] == 1 and function_patch["version"] == 2
+assert decimal_version(function_patch["baseVersion"]) == 1
+assert decimal_version(function_patch["version"]) == 2
 function_node = upserted_node(function_patch, function_node_id)
 request_id = new_id()
 started = json_call(
@@ -375,7 +400,7 @@ generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
 generated_node = next(
     node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
 )
-assert generated_snapshot["document"]["version"] == 4
+assert decimal_version(generated_snapshot["document"]["version"]) == 4
 assert len(generated_node["resources"]) == 1
 generated_resource = generated_node["resources"][0]
 assert generated_resource["kind"] == "IMAGE"
@@ -404,6 +429,7 @@ assert all(item["key"] != "seedance2.0mini" for item in models)
 
 def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
     current = json_call("GET", f"/api/canvases/{canvas['id']}")
+    current_version = decimal_version(current["document"]["version"])
     node_id = new_id()
     patch = json_call(
         "POST",
@@ -434,7 +460,8 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
         },
     )
     assert patch["baseVersion"] == current["document"]["version"]
-    assert patch["version"] == current["document"]["version"] + 1
+    patch_version = decimal_version(patch["version"])
+    assert patch_version == current_version + 1
     node = upserted_node(patch, node_id)
     request_id = new_id()
     run = json_call(
@@ -451,7 +478,7 @@ def create_and_run(model_key: str, name: str, parameters: dict) -> dict:
         )
     assert run["status"] == "SUCCEEDED", run
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-    assert snapshot["document"]["version"] == patch["version"] + 2
+    assert decimal_version(snapshot["document"]["version"]) == patch_version + 2
     return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
 
 
