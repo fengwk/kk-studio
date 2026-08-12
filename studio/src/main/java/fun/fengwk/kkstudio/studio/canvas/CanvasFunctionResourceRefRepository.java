@@ -11,4 +11,8 @@ public interface CanvasFunctionResourceRefRepository {
   List<CanvasFunctionResourceRef> findByRun(UUID canvasId, UUID nodeId, UUID requestId);
 
   boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId);
+
+  int deleteByNode(UUID canvasId, UUID nodeId);
+
+  int deleteByCanvas(UUID canvasId);
 }

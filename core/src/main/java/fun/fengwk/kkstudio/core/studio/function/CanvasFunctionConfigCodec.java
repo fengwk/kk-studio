@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
+import java.util.UUID;
 
 /** Function config 的唯一严格 parser 与 canonical encoder。 */
 @Component
@@ -34,7 +34,6 @@ public final class CanvasFunctionConfigCodec {
   private static final Set<String> PROMPT_FIELDS = Set.of("segments");
   private static final Set<String> TEXT_FIELDS = Set.of("type", "text");
   private static final Set<String> REFERENCE_FIELDS = Set.of("type", "nodeId", "index");
-  private static final Pattern POSITIVE_DECIMAL = Pattern.compile("[1-9][0-9]*");
 
   private final ObjectMapper mapper;
 
@@ -78,7 +77,7 @@ public final class CanvasFunctionConfigCodec {
         }
         case ReferenceSegment reference -> {
           item.put("type", "REFERENCE");
-          item.put("nodeId", Long.toString(reference.nodeId()));
+          item.put("nodeId", reference.nodeId().toString());
           item.put("index", reference.index());
         }
       }
@@ -164,14 +163,15 @@ public final class CanvasFunctionConfigCodec {
   private ReferenceSegment decodeReference(ObjectNode segment, int index) {
     requireExactFields(segment, REFERENCE_FIELDS, "prompt.segments[" + index + "]");
     JsonNode nodeIdValue = required(segment, "nodeId");
-    if (!nodeIdValue.isTextual() || !POSITIVE_DECIMAL.matcher(nodeIdValue.textValue()).matches()) {
-      throw invalid("prompt.segments[" + index + "].nodeId must be a positive decimal string");
+    if (!nodeIdValue.isTextual()) {
+      throw invalid("prompt.segments[" + index + "].nodeId must be a canonical UUID string");
     }
-    long nodeId;
+    UUID nodeId;
     try {
-      nodeId = Long.parseLong(nodeIdValue.textValue());
-    } catch (NumberFormatException exception) {
-      throw invalid("prompt.segments[" + index + "].nodeId is outside bigint range", exception);
+      nodeId = UUID.fromString(nodeIdValue.textValue());
+    } catch (IllegalArgumentException exception) {
+      throw invalid(
+          "prompt.segments[" + index + "].nodeId must be a canonical UUID string", exception);
     }
     JsonNode indexValue = required(segment, "index");
     if (!indexValue.isIntegralNumber()
@@ -293,5 +293,5 @@ public final class CanvasFunctionConfigCodec {
     return new IllegalArgumentException(message, cause);
   }
 
-  private record ReferenceKey(long nodeId, int index) {}
+  private record ReferenceKey(UUID nodeId, int index) {}
 }

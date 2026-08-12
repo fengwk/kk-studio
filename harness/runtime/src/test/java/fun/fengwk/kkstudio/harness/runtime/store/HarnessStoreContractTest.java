@@ -96,6 +96,7 @@ class HarnessStoreContractTest {
       Class<?> returnType = method.getReturnType();
       if (returnType == void.class
           || returnType == long.class
+          || returnType == int.class
           || returnType == boolean.class
           || returnType == int.class
           || returnType == UUID.class) {

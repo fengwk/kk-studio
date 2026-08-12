@@ -242,6 +242,19 @@ public final class HarnessRuntime {
         });
   }
 
+  /** 按 Thread + clientCommandId 读取 durable command，用于应用层精确重放校验。 */
+  public Optional<ThreadCommand> findThreadCommand(UUID threadId, UUID clientCommandId) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(clientCommandId, "clientCommandId");
+    return store.transaction(
+        tx -> {
+          if (tx.findThread(threadId).isEmpty()) {
+            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
+          }
+          return tx.findCommandByClientId(threadId, clientCommandId);
+        });
+  }
+
   /**
    * 同步重定位 Thread head cursor。
    *

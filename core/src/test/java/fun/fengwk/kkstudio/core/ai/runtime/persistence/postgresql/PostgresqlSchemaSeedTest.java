@@ -39,14 +39,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     // 快照确定性列。
     String devFingerprintBefore = devSeedFingerprint();
     long maxVersionBefore = maxVersionAcrossAgentTables();
-    long sequenceBeforeReapply = nextSequenceValue();
     // 重新执行：行内容必须保持一致（无版本变化、无时间戳变化）。
     applyAndAssertDevSeed();
     assertEquals(devFingerprintBefore, devSeedFingerprint(), "dev seed must be idempotent");
     assertEquals(maxVersionBefore, maxVersionAcrossAgentTables(), "version must stay 0");
-    assertTrue(
-        nextSequenceValue() > sequenceBeforeReapply,
-        "re-applying a seed must never move the global sequence backwards");
   }
 
   @Test
@@ -57,14 +53,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertProfileMigrationRecorded(conn, "e2e seed");
       // 重新运行 profile migration，并断言确定性列不发生变化。
       String before = e2eFingerprint();
-      long sequenceBeforeReapply = nextSequenceValue();
       applyE2eDatabase(conn);
       assertEquals(before, e2eFingerprint(), "e2e seed must be idempotent");
       assertE2eSeedContent(conn);
       assertProfileMigrationRecorded(conn, "e2e seed");
-      assertTrue(
-          nextSequenceValue() > sequenceBeforeReapply,
-          "re-applying a seed must preserve sequence progress");
     }
     // Catalog 标识就是名称；任何 seed 行都不会消耗业务序列。
     // 后续插入必须不会与确定性 seed id 冲突。
@@ -252,15 +244,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       max = rs.getLong(1);
     }
     return max;
-  }
-
-  private static long nextSequenceValue() throws Exception {
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs = st.executeQuery("select nextval('kk_studio_id_seq')")) {
-      assertTrue(rs.next());
-      return rs.getLong(1);
-    }
   }
 
   private static String e2eFingerprint() throws Exception {

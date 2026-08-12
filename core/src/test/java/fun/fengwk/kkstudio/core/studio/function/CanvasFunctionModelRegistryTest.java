@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionReferencePolicy;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Registry key 唯一、稳定排序与 adapter availability。 */
 class CanvasFunctionModelRegistryTest {
@@ -75,7 +76,7 @@ class CanvasFunctionModelRegistryTest {
       public void preflight(CanvasFunctionFrozenRun run) {}
 
       @Override
-      public List<Long> execute(
+      public List<UUID> execute(
           CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
         throw new UnsupportedOperationException();
       }

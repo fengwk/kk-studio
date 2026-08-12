@@ -1,4 +1,4 @@
-import { assert, envelopeData, sleep } from '../lib/http.mjs'
+import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -7,7 +7,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas fake Function 完整免费运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node -> start -> poll -> snapshot Resource 替换 -> preview signed GET，且 graphRevision 不变、run 不泄漏 stateJson',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证 create Function node（客户端 UUID nodeId）-> start -> poll -> snapshot Resource 替换 -> preview signed GET，且 document.version 按命令前进、run 不泄漏 stateJson',
   async run(ctx) {
     const { json: modelsJson } = await ctx.call('GET', '/api/canvas-function-models')
     const models = envelopeData(modelsJson)
@@ -24,15 +24,17 @@ registerCase({
       parameters: { ratio: '16:9' },
     })
     const expectedTransform = { x: 100, y: 100, width: 320, height: 260 }
+    const nodeId = cid()
     const { json: commandJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/commands`,
       {
-        expectedRevision: '0',
-        commandId: crypto.randomUUID(),
+        expectedVersion: 0,
+        commandId: cid(),
         commands: [
           {
             type: 'CREATE_FUNCTION_NODE',
+            nodeId,
             name: 'generated',
             modelKey: 'fake-image',
             configJson,
@@ -42,8 +44,10 @@ registerCase({
       },
     )
     const created = envelopeData(commandJson)
-    const node = created.nodes.find((item) => item.name === 'generated')
-    assert(node && created.document.graphRevision === '1', JSON.stringify(created))
+    assert(created.baseVersion === 0 && created.version === 1, JSON.stringify(created))
+    const upsert = created.nodes.find((item) => item.op === 'UPSERT' && item.node.id === nodeId)
+    assert(upsert, JSON.stringify(created.nodes))
+    const node = upsert.node
     assert(
       Object.keys(node.transform).length === Object.keys(expectedTransform).length
         && Object.entries(expectedTransform).every(([key, value]) => node.transform[key] === value),
@@ -53,7 +57,7 @@ registerCase({
     const { json: startJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/nodes/${node.id}/runs`,
-      { requestId: crypto.randomUUID() },
+      { requestId: cid() },
     )
     let run = envelopeData(startJson)
     for (let attempt = 0; attempt < 120 && run.status === 'RUNNING'; attempt++) {
@@ -70,9 +74,10 @@ registerCase({
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
     const snapshot = envelopeData(snapshotJson)
     const generated = snapshot.nodes.find((item) => item.id === node.id)
-    assert(snapshot.document.graphRevision === '1', JSON.stringify(snapshot.document))
+    assert(snapshot.document.version === 1, JSON.stringify(snapshot.document))
     assert(generated?.resources?.length === 1, JSON.stringify(generated))
     assert(generated.resources[0].kind === 'IMAGE', JSON.stringify(generated.resources[0]))
+    assert(generated.resources[0].blobId != null, JSON.stringify(generated.resources[0]))
     const { json: previewJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/resources/${generated.resources[0].id}/preview-url`,

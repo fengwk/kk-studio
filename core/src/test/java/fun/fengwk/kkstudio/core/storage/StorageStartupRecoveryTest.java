@@ -100,11 +100,6 @@ class StorageStartupRecoveryTest {
       return result;
     }
 
-    @Override
-    public ReadyUpload lockReady(UUID uploadId) {
-      throw new UnsupportedOperationException();
-    }
-
     private int expireCalls() {
       return expireCalls;
     }
@@ -121,6 +116,11 @@ class StorageStartupRecoveryTest {
 
     @Override
     public void delete(UUID uploadId) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public ReadyUpload lockReady(UUID uploadId) {
       throw new UnsupportedOperationException();
     }
   }

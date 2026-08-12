@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.core.studio.function.fake;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -19,9 +18,16 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /** fake descriptors 精确声明 v1 能力，执行至少 checkpoint 一次并只写 frozen target。 */
 class FakeCanvasFunctionAdapterTest {
+
+  private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
+  private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000003");
+  private static final UUID IMAGE_TARGET = UUID.fromString("00000000-0000-0000-0000-000000000004");
+  private static final UUID VIDEO_TARGET = UUID.fromString("00000000-0000-0000-0000-000000000005");
 
   @Test
   void exposesExactModelsAndExecutesMainResourceFixture() {
@@ -42,41 +48,37 @@ class FakeCanvasFunctionAdapterTest {
     RecordingContext context = new RecordingContext();
     CanvasFunctionFrozenRun run =
         new CanvasFunctionFrozenRun(
-            1L,
-            2L,
+            CANVAS,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             image,
             new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of("ratio", "AUTO")),
             List.of(),
             "output.png",
-            3L,
+            IMAGE_TARGET,
             "QUEUED",
             Map.of());
-    assertEquals(List.of(3L), adapter.execute(context, run));
+    assertEquals(List.of(IMAGE_TARGET), adapter.execute(context, run));
     assertEquals(List.of("FAKE_RENDERING"), context.stages);
-    assertEquals(3L, context.targetId);
-    assertEquals("image/png", context.mediaType);
-    assertTrue(context.size > 0L);
+    assertEquals(IMAGE_TARGET, context.targetId);
 
     RecordingContext videoContext = new RecordingContext();
     CanvasFunctionFrozenRun videoRun =
         new CanvasFunctionFrozenRun(
-            1L,
-            2L,
+            CANVAS,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             video,
             new CanvasFunctionConfig(
                 List.of(new TextSegment("prompt")), Map.of("ratio", "16:9", "duration", 5)),
             List.of(),
             "output.mp4",
-            4L,
+            VIDEO_TARGET,
             "QUEUED",
             Map.of());
-    assertEquals(List.of(4L), adapter.execute(videoContext, videoRun));
-    assertEquals("video/mp4", videoContext.mediaType);
-    assertTrue(videoContext.size > 0L);
+    assertEquals(List.of(VIDEO_TARGET), adapter.execute(videoContext, videoRun));
 
     CanvasFunctionModel unsupported =
         new CanvasFunctionModel(
@@ -87,15 +89,15 @@ class FakeCanvasFunctionAdapterTest {
             image.parameters());
     CanvasFunctionFrozenRun unsupportedRun =
         new CanvasFunctionFrozenRun(
-            1L,
-            2L,
+            CANVAS,
+            NODE,
             "output",
-            "request",
+            REQUEST,
             unsupported,
             run.config(),
             List.of(),
             "output.png",
-            5L,
+            IMAGE_TARGET,
             "QUEUED",
             Map.of());
     assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
@@ -103,7 +105,7 @@ class FakeCanvasFunctionAdapterTest {
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {
     private final List<String> stages = new ArrayList<>();
-    private long targetId;
+    private UUID targetId;
     private String mediaType;
     private long size;
 
@@ -128,11 +130,8 @@ class FakeCanvasFunctionAdapterTest {
     }
 
     @Override
-    public long materializeTarget(
-        long targetResourceId, String mediaType, long size, InputStream content) {
+    public UUID materializeTarget(UUID targetResourceId, InputStream content) {
       this.targetId = targetResourceId;
-      this.mediaType = mediaType;
-      this.size = size;
       return targetResourceId;
     }
   }

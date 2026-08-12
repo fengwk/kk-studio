@@ -41,7 +41,7 @@ public class CanvasFunctionRecovery {
     for (CanvasFunctionRun run : running) {
       try {
         if (!dispatcher.dispatch(run.nodeId(), run.requestId())) {
-          transactions.failIfRunning(run.nodeId(), run.requestId(), DISPATCH_FAILURE);
+          transactions.failIfRunning(run.nodeId(), run.requestId().toString(), DISPATCH_FAILURE);
         }
       } catch (RuntimeException ex) {
         log.warn(

@@ -26,7 +26,7 @@ class MiniMaxH3ConfigurationTest {
   @SuppressWarnings("unchecked")
   void createsAllBeansForValidConfiguration() {
     MiniMaxH3Properties properties = validProperties();
-    H3MediaPreflight preflight = configuration.h3MediaPreflight(mapper);
+    H3MediaPreflight preflight = configuration.h3MediaPreflight();
     H3PromptRequestBuilder promptBuilder = configuration.h3PromptRequestBuilder();
     H3WorkflowBuilder workflowBuilder = configuration.h3WorkflowBuilder(mapper);
     StandardComfyuiClient client = configuration.standardH3ComfyuiClient(properties, mapper);

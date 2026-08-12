@@ -8,8 +8,8 @@ import java.util.UUID;
 /**
  * Run 启动时从 Link 和 source 节点当前资源冻结出的不可变引用。
  *
- * <p>{@code resourceId} 用于 Run 生命周期 pin 与 manifest 关联，{@code blobId} 用于对象访问；
- * 执行所需媒体事实（kind/name/mediaType/size/metadata）作为快照数据保留。
+ * <p>{@code resourceId} 用于 Run 生命周期 pin 与 manifest 关联，{@code blobId} 用于对象访问； 执行所需媒体事实
+ * （kind/name/mediaType/sizeBytes/width/height/durationMs）作为权威 blob 事实的快照保留。
  */
 public record CanvasFunctionFrozenReference(
     UUID sourceNodeId,
@@ -19,8 +19,10 @@ public record CanvasFunctionFrozenReference(
     CanvasResourceKind kind,
     String name,
     String mediaType,
-    long size,
-    String metadataJson) {
+    long sizeBytes,
+    Long width,
+    Long height,
+    Long durationMs) {
 
   public CanvasFunctionFrozenReference {
     Objects.requireNonNull(sourceNodeId, "sourceNodeId");
@@ -32,10 +34,18 @@ public record CanvasFunctionFrozenReference(
     Objects.requireNonNull(kind, "kind");
     requireText(name, "name");
     requireText(mediaType, "mediaType");
-    if (size < 0L) {
-      throw new IllegalArgumentException("size must be >= 0");
+    if (sizeBytes < 0L) {
+      throw new IllegalArgumentException("sizeBytes must be >= 0");
     }
-    requireText(metadataJson, "metadataJson");
+    if ((width == null) != (height == null)) {
+      throw new IllegalArgumentException("width and height must both be set or both be null");
+    }
+    if (width != null && (width <= 0 || height <= 0)) {
+      throw new IllegalArgumentException("width and height must be positive when set");
+    }
+    if (durationMs != null && durationMs <= 0) {
+      throw new IllegalArgumentException("durationMs must be positive when set");
+    }
   }
 
   private static void requireText(String value, String field) {

@@ -14,7 +14,9 @@ import org.apache.ibatis.annotations.Update;
 import fun.fengwk.kkstudio.core.studio.repo.impl.model.CanvasGroupDO;
 
 import java.util.List;
+import java.util.UUID;
 
+/** {@code canvas_group} 的原子 SQL 入口。 */
 @Mapper
 public interface CanvasGroupMapper extends BaseMapper {
 
@@ -27,7 +29,6 @@ public interface CanvasGroupMapper extends BaseMapper {
       """)
   int insert(CanvasGroupDO group);
 
-  @Select("select " + COLUMNS + " from canvas_group where canvas_id = #{canvasId} order by id")
   @Results(
       id = "canvasGroupMap",
       value = {
@@ -39,17 +40,21 @@ public interface CanvasGroupMapper extends BaseMapper {
         @Result(column = "width", property = "width"),
         @Result(column = "height", property = "height")
       })
-  List<CanvasGroupDO> listByCanvas(@Param("canvasId") long canvasId);
+  @Select("select " + COLUMNS + " from canvas_group where canvas_id = #{canvasId} order by id")
+  List<CanvasGroupDO> listByCanvas(@Param("canvasId") UUID canvasId);
 
-  @Select("select " + COLUMNS + " from canvas_group where canvas_id = #{canvasId} and id = #{id}")
+  @Select("select " + COLUMNS + " from canvas_group where id = #{id} and canvas_id = #{canvasId}")
   @ResultMap("canvasGroupMap")
-  CanvasGroupDO getById(@Param("canvasId") long canvasId, @Param("id") long id);
+  CanvasGroupDO getById(@Param("canvasId") UUID canvasId, @Param("id") UUID id);
 
   @Update(
-      "update canvas_group set x = #{x}, y = #{y}"
-          + " where canvas_id = #{canvasId} and id = #{id}")
+      """
+      update canvas_group
+      set x = #{x}, y = #{y}
+      where id = #{id} and canvas_id = #{canvasId}
+      """)
   int updatePosition(CanvasGroupDO group);
 
-  @Delete("delete from canvas_group where canvas_id = #{canvasId} and id = #{id}")
-  int deleteById(@Param("canvasId") long canvasId, @Param("id") long id);
+  @Delete("delete from canvas_group where id = #{id} and canvas_id = #{canvasId}")
+  int deleteById(@Param("canvasId") UUID canvasId, @Param("id") UUID id);
 }

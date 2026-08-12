@@ -16,8 +16,8 @@ import fun.fengwk.kkstudio.core.storage.service.StorageBlobIngestService;
 public class MiniMaxH3Configuration {
 
   @Bean
-  public H3MediaPreflight h3MediaPreflight(ObjectMapper objectMapper) {
-    return new H3MediaPreflight(objectMapper);
+  public H3MediaPreflight h3MediaPreflight() {
+    return new H3MediaPreflight();
   }
 
   @Bean

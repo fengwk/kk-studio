@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /** 使用同一 frozen manifest 渲染 provider prompt 中的稳定引用编号。 */
 final class CanvasPromptRenderer {
@@ -84,7 +85,7 @@ final class CanvasPromptRenderer {
     abstract String marker(CanvasResourceKind kind, int number);
   }
 
-  private record ReferenceKey(long nodeId, int index) {}
+  private record ReferenceKey(UUID nodeId, int index) {}
 
   private record NumberedReference(CanvasFunctionFrozenReference reference, int number) {}
 }

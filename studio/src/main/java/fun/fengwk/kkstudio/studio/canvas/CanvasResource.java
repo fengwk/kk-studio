@@ -4,7 +4,12 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 已完成校验并持久化的不可变资源，内容要么是 Storage blob 要么是内联文本。 */
+/**
+ * 已完成校验并持久化的不可变资源，内容要么是 Storage blob 要么是内联文本。
+ *
+ * <p>可见资源由 {@code ownerNodeId + resourceIndex} 直接归属节点；Function Run 物化中的目标资源或已删除源节点留下的 pinned
+ * 输入资源可以暂时无 owner，直到成功挂接或最后一个 pin 释放。
+ */
 public record CanvasResource(
     UUID id,
     UUID canvasId,

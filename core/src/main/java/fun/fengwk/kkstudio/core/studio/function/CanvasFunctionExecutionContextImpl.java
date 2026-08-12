@@ -3,13 +3,13 @@ package fun.fengwk.kkstudio.core.studio.function;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.core.storage.S3ObjectStream;
-import fun.fengwk.kkstudio.core.storage.S3PresignService;
 import fun.fengwk.kkstudio.core.storage.S3StorageService;
+import fun.fengwk.kkstudio.core.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.core.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResourceMaterializer;
-import fun.fengwk.kkstudio.studio.canvas.CanvasResourcePaths;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.studio.canvas.function.CanvasFunctionFrozenRun;
@@ -20,15 +20,16 @@ import java.io.InputStream;
 import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 单个 frozen run 的受限执行上下文。 */
+/** 单个 frozen run 的受限执行上下文（blob 访问经全局 StorageBlobManager 的对象键）。 */
 final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutionContext {
 
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunStateCodec stateCodec;
   private final S3StorageService storageService;
-  private final S3PresignService presignService;
+  private final StorageBlobManager blobManager;
   private final CanvasResourceMaterializer materializer;
   private final Clock clock;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
@@ -37,7 +38,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionRunStateCodec stateCodec,
       ObjectProvider<S3StorageService> storageServices,
-      ObjectProvider<S3PresignService> presignServices,
+      ObjectProvider<StorageBlobManager> blobManagers,
       ObjectProvider<CanvasResourceMaterializer> materializers,
       Clock clock,
       CanvasFunctionFrozenRun frozen) {
@@ -46,10 +47,10 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     storageService =
         Objects.requireNonNull(
             storageServices.getIfAvailable(), "S3 storage is required for Canvas Function runtime");
-    presignService =
+    blobManager =
         Objects.requireNonNull(
-            presignServices.getIfAvailable(),
-            "S3 presign service is required for Canvas Function runtime");
+            blobManagers.getIfAvailable(),
+            "StorageBlobManager is required for Canvas Function runtime");
     materializer =
         Objects.requireNonNull(
             materializers.getIfAvailable(),
@@ -86,18 +87,17 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   @Override
   public CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference) {
-    CanvasFunctionFrozenRun frozen = requireManifestReference(reference);
+    requireManifestReference(reference);
     ensureRunning();
     S3ObjectStream object =
-        storageService.readObject(
-            CanvasResourcePaths.original(frozen.canvasId(), reference.resourceId()));
-    if (object.metadata().contentLength() != reference.size()) {
+        storageService.readObject(StorageObjectKeys.blobOriginal(reference.blobId()));
+    if (object.metadata().contentLength() != reference.sizeBytes()) {
       try {
         object.close();
       } catch (IOException closeError) {
         throw new IllegalStateException("failed to close mismatched S3 object stream", closeError);
       }
-      throw new IllegalArgumentException("S3 original length does not match frozen Resource size");
+      throw new IllegalArgumentException("S3 original length does not match frozen blob size");
     }
     return new CanvasFunctionResourceStream(
         object.inputStream(), object.metadata().contentLength(), object);
@@ -105,35 +105,26 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   @Override
   public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-    CanvasFunctionFrozenRun frozen = requireManifestReference(reference);
+    requireManifestReference(reference);
     ensureRunning();
-    return presignService
-        .presignDownload(
-            CanvasResourcePaths.original(frozen.canvasId(), reference.resourceId()), expiresSeconds)
-        .getUrl();
+    return blobManager.presignOriginalUrl(reference.blobId()).getUrl();
   }
 
   @Override
-  public long materializeTarget(
-      long targetResourceId, String mediaType, long size, InputStream content) {
+  public UUID materializeTarget(UUID targetResourceId, InputStream content) {
     CanvasFunctionFrozenRun frozen = current.get();
-    if (targetResourceId != frozen.targetResourceId()) {
+    if (!frozen.targetResourceId().equals(targetResourceId)) {
       throw new IllegalArgumentException(
           "adapter may only materialize the frozen targetResourceId");
     }
     ensureRunning();
     CanvasResource resource =
         materializer.materialize(
-            frozen.canvasId(),
-            frozen.targetResourceId(),
-            frozen.model().outputKind(),
-            frozen.outputName(),
-            mediaType,
-            size,
-            content);
-    if (resource.id() != frozen.targetResourceId()
-        || resource.canvasId() != frozen.canvasId()
-        || resource.kind() != frozen.model().outputKind()) {
+            frozen.canvasId(), frozen.targetResourceId(), frozen.outputName(), content);
+    if (!resource.id().equals(frozen.targetResourceId())
+        || !resource.canvasId().equals(frozen.canvasId())
+        || resource.ownerNodeId() != null
+        || resource.resourceIndex() != null) {
       throw new IllegalStateException("materializer returned a Resource outside the frozen target");
     }
     return resource.id();
@@ -149,12 +140,10 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     }
   }
 
-  private CanvasFunctionFrozenRun requireManifestReference(
-      CanvasFunctionFrozenReference reference) {
+  private void requireManifestReference(CanvasFunctionFrozenReference reference) {
     CanvasFunctionFrozenRun frozen = current.get();
     if (!frozen.manifest().contains(reference)) {
       throw new IllegalArgumentException("reference is not part of the frozen manifest");
     }
-    return frozen;
   }
 }

@@ -32,10 +32,16 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /** Checkpoint、上传恢复和配置边界必须在调用 provider 前 fail closed。 */
 class OpenCliAdapterSupportTest {
+
+  private static final UUID RESOURCE_7 = new UUID(0L, 7L);
+  private static final UUID RESOURCE_100 = new UUID(0L, 100L);
+  private static final UUID RESOURCE_101 = new UUID(0L, 101L);
+  private static final UUID RESOURCE_999 = new UUID(0L, 999L);
 
   @Test
   void adapterStateRoundTripsUploadsAndRejectsMalformedCheckpointValues() {
@@ -50,11 +56,11 @@ class OpenCliAdapterSupportTest {
     assertThrows(
         IllegalArgumentException.class, () -> OpenCliAdapterState.optionalString(state, "text"));
 
-    List<UploadedInput> expected = List.of(new UploadedInput(7L, "/resources/date/a.png"));
+    List<UploadedInput> expected = List.of(new UploadedInput(RESOURCE_7, "/resources/date/a.png"));
     OpenCliAdapterState.putUploads(state, expected);
     assertEquals(expected, OpenCliAdapterState.uploads(state));
     assertEquals(
-        Map.of("resourceId", "7", "resourcePath", "/resources/date/a.png"),
+        Map.of("resourceId", RESOURCE_7.toString(), "resourcePath", "/resources/date/a.png"),
         ((List<?>) state.get("uploads")).get(0));
 
     for (Object malformed :
@@ -93,14 +99,14 @@ class OpenCliAdapterSupportTest {
         .thenReturn(new UploadedResource("/resources/date/second.png"));
     Map<String, Object> state = new LinkedHashMap<>();
     OpenCliAdapterState.putUploads(
-        state, List.of(new UploadedInput(100L, "/resources/date/first.png")));
+        state, List.of(new UploadedInput(RESOURCE_100, "/resources/date/first.png")));
 
     OpenCliReferenceUploader.UploadResult result = uploader.uploadAll(context, run, state);
 
     assertEquals(
         List.of(
-            new UploadedInput(100L, "/resources/date/first.png"),
-            new UploadedInput(101L, "/resources/date/second.png")),
+            new UploadedInput(RESOURCE_100, "/resources/date/first.png"),
+            new UploadedInput(RESOURCE_101, "/resources/date/second.png")),
         result.uploads());
     verify(context).openOriginal(second);
     verify(context, never()).openOriginal(first);
@@ -122,13 +128,13 @@ class OpenCliAdapterSupportTest {
     OpenCliAdapterState.putUploads(
         tooMany,
         List.of(
-            new UploadedInput(100L, "/resources/a.png"),
-            new UploadedInput(101L, "/resources/b.png")));
+            new UploadedInput(RESOURCE_100, "/resources/a.png"),
+            new UploadedInput(RESOURCE_101, "/resources/b.png")));
     assertThrows(IllegalArgumentException.class, () -> uploader.uploadAll(context, run, tooMany));
 
     Map<String, Object> wrongOrder = new LinkedHashMap<>();
     OpenCliAdapterState.putUploads(
-        wrongOrder, List.of(new UploadedInput(999L, "/resources/a.png")));
+        wrongOrder, List.of(new UploadedInput(RESOURCE_999, "/resources/a.png")));
     assertThrows(
         IllegalArgumentException.class, () -> uploader.uploadAll(context, run, wrongOrder));
 
@@ -213,15 +219,19 @@ class OpenCliAdapterSupportTest {
   }
 
   private static CanvasFunctionFrozenReference image(long resourceId, String name) {
+    UUID resource = new UUID(0L, resourceId);
     return new CanvasFunctionFrozenReference(
-        1L,
+        new UUID(0L, 1L),
         0,
-        resourceId,
+        resource,
+        resource,
         CanvasResourceKind.IMAGE,
         name,
         "image/png",
         2L,
-        "{\"container\":\"png\"}");
+        null,
+        null,
+        null);
   }
 
   private static void assertInvalidHub(Consumer<OpenCliHubProperties> mutation) {

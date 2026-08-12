@@ -18,22 +18,19 @@
 -- mutates them. The only V1 additions around it are the application business
 -- tables and the thread revision NOTIFY hint trigger (section 4).
 --
+-- Canvas is fully UUID: every Canvas-generated id is allocated by the
+-- application (client for node/group/request/command ids, server for
+-- document/resource/run-target ids) and inserted explicitly; there are no
+-- id sequences. `canvas_document.version` is the single graph version cursor;
+-- version changes are hinted to the Canvas SSE hub via the `canvas_version`
+-- NOTIFY trigger (section 5). Resource blobs are owned by the global
+-- `storage_blob` refcount lifecycle; Canvas rows only reference them (RESTRICT).
+--
 -- DDL is grouped so cycle-closing and forward foreign keys are appended only
 -- after both target tables exist.
 
 ------------------------------------------------------------------------------
--- 0. Sequences
-------------------------------------------------------------------------------
-
-create sequence kk_studio_id_seq
-    as bigint
-    increment by 1
-    start with 1
-    minvalue 1
-    no cycle;
-
-------------------------------------------------------------------------------
--- 1. Non-harness business tables (no mutual dependencies)
+-- 1. Business tables (no mutual dependencies)
 ------------------------------------------------------------------------------
 
 create table agent_provider (
@@ -117,30 +114,36 @@ create unique index uk_comfyui_workflow_api_api_name
     on comfyui_workflow_api (api_name);
 
 create table canvas_document (
-    id              bigint         primary key default nextval('kk_studio_id_seq'),
-    title           varchar(256)   not null,
-    graph_revision  bigint         not null default 0,
-    created_at      timestamptz(3) not null default current_timestamp,
-    updated_at      timestamptz(3) not null default current_timestamp,
+    id uuid primary key,
+    title varchar(256) not null,
+    version bigint not null default 0,
+    thread_id uuid,
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
     constraint ck_canvas_document_title_nonblank check (btrim(title) <> ''),
-    constraint ck_canvas_document_revision_nonneg check (graph_revision >= 0),
-    constraint ck_canvas_document_time_order check (updated_at >= created_at),
-    constraint ck_canvas_document_id_pos check (id > 0)
+    constraint ck_canvas_document_version_nonneg check (version >= 0),
+    constraint uk_canvas_document_thread unique (thread_id)
 );
+
+comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准），thread_id 可空并唯一绑定至多一个根 Harness Thread';
+comment on column canvas_document.id is 'Canvas 全局唯一 UUID（服务端生成）';
+comment on column canvas_document.title is '规范化标题（NFKC trim 后非空，<= 256 字符）';
+comment on column canvas_document.version is 'graph 版本：任何成功命令批或 Function Run 状态前进恰好 +1';
+comment on column canvas_document.thread_id is '绑定的根 Harness Thread（可空，深删除显式执行）';
+comment on column canvas_document.created_at is '创建时间（毫秒精度）';
+comment on column canvas_document.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 
 create index idx_canvas_document_updated
     on canvas_document (updated_at, id);
 
 create table canvas_group (
-    id           bigint         primary key default nextval('kk_studio_id_seq'),
-    canvas_id    bigint         not null,
-    title        varchar(256)   not null,
-    x            double precision not null,
-    y            double precision not null,
-    width        double precision not null,
-    height       double precision not null,
-    constraint ck_canvas_group_id_pos check (id > 0),
-    constraint ck_canvas_group_canvas_id_pos check (canvas_id > 0),
+    id uuid primary key,
+    canvas_id uuid not null,
+    title varchar(256) not null,
+    x double precision not null,
+    y double precision not null,
+    width double precision not null,
+    height double precision not null,
     constraint ck_canvas_group_title_nonblank check (btrim(title) <> ''),
     constraint ck_canvas_group_geometry check (
         x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
@@ -149,28 +152,32 @@ create table canvas_group (
         and height not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
         and width > 0 and height > 0
     ),
-    constraint uk_canvas_group_canvas_id unique (canvas_id, id)
+    constraint uk_canvas_group_canvas unique (canvas_id, id)
 );
+
+comment on table canvas_group is '不嵌套、使用 world 坐标的 Canvas group';
+comment on column canvas_group.id is 'Group 全局唯一 UUID（客户端生成）';
+comment on column canvas_group.canvas_id is '所属 Canvas';
+comment on column canvas_group.title is '规范化标题（<= 256 字符）';
+comment on column canvas_group.x is 'world 坐标 x（有限数）';
+comment on column canvas_group.y is 'world 坐标 y（有限数）';
+comment on column canvas_group.width is '正宽度（有限数）';
+comment on column canvas_group.height is '正高度（有限数）';
 
 create index idx_canvas_group_canvas on canvas_group (canvas_id, id);
 
 create table canvas_node (
-    id                    bigint         primary key default nextval('kk_studio_id_seq'),
-    canvas_id             bigint         not null,
-    name                  varchar(256)   not null,
-    name_normalized       varchar(256)   not null,
-    x                     double precision not null,
-    y                     double precision not null,
-    width                 double precision not null,
-    height                double precision not null,
-    group_id              bigint,
-    model_key             varchar(256),
-    function_config_json  jsonb,
-    constraint ck_canvas_node_id_pos check (id > 0),
-    constraint ck_canvas_node_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_node_group_id_pos check (group_id is null or group_id > 0),
+    id uuid primary key,
+    canvas_id uuid not null,
+    name varchar(256) not null,
+    x double precision not null,
+    y double precision not null,
+    width double precision not null,
+    height double precision not null,
+    group_id uuid,
+    model_key varchar(256),
+    function_config_json jsonb,
     constraint ck_canvas_node_name_nonblank check (btrim(name) <> ''),
-    constraint ck_canvas_node_name_normalized_nonblank check (btrim(name_normalized) <> ''),
     constraint ck_canvas_node_geometry check (
         x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
         and y not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
@@ -187,127 +194,140 @@ create table canvas_node (
             and jsonb_typeof(function_config_json) = 'object'
         )
     ),
-    constraint uk_canvas_node_canvas_id unique (canvas_id, id)
+    constraint uk_canvas_node_canvas unique (canvas_id, id)
 );
+
+comment on table canvas_node is 'Canvas 中唯一的业务节点形态：普通资源节点（文本/媒体）或 Function 节点（可携带资源输出）';
+comment on column canvas_node.id is 'Node 全局唯一 UUID（客户端生成）';
+comment on column canvas_node.canvas_id is '所属 Canvas';
+comment on column canvas_node.name is '规范化节点名（<= 256 字符）';
+comment on column canvas_node.x is 'world 坐标 x（有限数）';
+comment on column canvas_node.y is 'world 坐标 y（有限数）';
+comment on column canvas_node.width is '正宽度（有限数）';
+comment on column canvas_node.height is '正高度（有限数）';
+comment on column canvas_node.group_id is '所属 Group（可空）';
+comment on column canvas_node.model_key is 'Function model 标识（与 function_config_json 同存同缺）';
+comment on column canvas_node.function_config_json is '规范化 Function 配置（JSON object，与 model_key 同存同缺）';
 
 create index idx_canvas_node_canvas on canvas_node (canvas_id, id);
 create index idx_canvas_node_group on canvas_node (canvas_id, group_id)
     where group_id is not null;
-create unique index uk_canvas_node_name_normalized
-    on canvas_node (canvas_id, name_normalized);
-
-create table canvas_resource (
-    id             bigint         primary key default nextval('kk_studio_id_seq'),
-    canvas_id      bigint         not null,
-    kind           varchar(16)    not null,
-    media_type     varchar(256)   not null,
-    name           varchar(256)   not null,
-    size           bigint         not null,
-    text_content   text,
-    metadata_json  jsonb          not null,
-    created_at     timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_resource_id_pos check (id > 0),
-    constraint ck_canvas_resource_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_resource_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO', 'TEXT')),
-    constraint ck_canvas_resource_media_type_nonblank check (btrim(media_type) <> ''),
-    constraint ck_canvas_resource_name_nonblank check (btrim(name) <> ''),
-    constraint ck_canvas_resource_size_nonneg check (size >= 0),
-    constraint ck_canvas_resource_text_shape check (
-        (kind = 'TEXT' and text_content is not null)
-        or (kind <> 'TEXT' and text_content is null)
-    ),
-    constraint ck_canvas_resource_metadata_object check (jsonb_typeof(metadata_json) = 'object'),
-    constraint uk_canvas_resource_canvas_id unique (canvas_id, id)
-);
-
-create index idx_canvas_resource_canvas_created
-    on canvas_resource (canvas_id, created_at, id);
-
-create table canvas_upload (
-    id                   bigint         primary key default nextval('kk_studio_id_seq'),
-    canvas_id            bigint         not null,
-    kind                 varchar(16)    not null,
-    filename             varchar(512)   not null,
-    declared_media_type  varchar(256)   not null,
-    declared_size        bigint         not null,
-    expires_at           timestamptz(3) not null,
-    created_at           timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_upload_id_pos check (id > 0),
-    constraint ck_canvas_upload_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_upload_kind check (kind in ('IMAGE', 'VIDEO', 'AUDIO')),
-    constraint ck_canvas_upload_filename_nonblank check (btrim(filename) <> ''),
-    constraint ck_canvas_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
-    constraint ck_canvas_upload_size_nonneg check (declared_size >= 0),
-    constraint ck_canvas_upload_expiry check (expires_at > created_at)
-);
-
-create index idx_canvas_upload_canvas_expiry
-    on canvas_upload (canvas_id, expires_at, id);
-
-create table canvas_node_resource (
-    canvas_id       bigint   not null,
-    node_id         bigint   not null,
-    resource_index  integer  not null,
-    resource_id     bigint   not null,
-    constraint pk_canvas_node_resource primary key (canvas_id, node_id, resource_index),
-    constraint ck_canvas_node_resource_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_node_resource_node_id_pos check (node_id > 0),
-    constraint ck_canvas_node_resource_index_nonneg check (resource_index >= 0),
-    constraint ck_canvas_node_resource_resource_id_pos check (resource_id > 0)
-);
-
-create index idx_canvas_node_resource_resource
-    on canvas_node_resource (canvas_id, resource_id);
 
 create table canvas_link (
-    canvas_id       bigint        not null,
-    source_node_id  bigint        not null,
-    target_node_id  bigint        not null,
+    canvas_id uuid not null,
+    source_node_id uuid not null,
+    target_node_id uuid not null,
     constraint pk_canvas_link primary key (canvas_id, source_node_id, target_node_id),
-    constraint ck_canvas_link_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_link_source_id_pos check (source_node_id > 0),
-    constraint ck_canvas_link_target_id_pos check (target_node_id > 0),
     constraint ck_canvas_link_distinct check (source_node_id <> target_node_id)
 );
+
+comment on table canvas_link is 'Link 以 (canvas_id, source_node_id, target_node_id) 作为身份；target 必须是 Function 节点且 source 至少拥有一个当前资源';
+comment on column canvas_link.canvas_id is '所属 Canvas';
+comment on column canvas_link.source_node_id is 'source 节点（必须与 target 不同）';
+comment on column canvas_link.target_node_id is 'target Function 节点';
 
 create index idx_canvas_link_target
     on canvas_link (canvas_id, target_node_id, source_node_id);
 
-create table canvas_function_run (
-    node_id      bigint         primary key,
-    request_id   varchar(128)   not null,
-    status       varchar(16)    not null,
-    state_json   jsonb          not null,
-    error        text,
-    updated_at   timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_function_run_node_id_pos check (node_id > 0),
-    constraint ck_canvas_function_run_request_id check (
-        btrim(request_id) <> ''
-        and request_id = btrim(request_id)
-        and request_id !~ '[[:cntrl:]]'
+create table canvas_resource (
+    id uuid primary key,
+    canvas_id uuid not null,
+    owner_node_id uuid,
+    resource_index integer,
+    blob_id uuid,
+    name varchar(256) not null,
+    text_content text,
+    created_at timestamptz(3) not null default current_timestamp,
+    constraint ck_canvas_resource_owner_pair check (
+        (owner_node_id is null) = (resource_index is null)
     ),
+    constraint ck_canvas_resource_index_nonneg check (
+        resource_index is null or resource_index >= 0
+    ),
+    constraint ck_canvas_resource_name_nonblank check (btrim(name) <> ''),
+    constraint ck_canvas_resource_content check (
+        (blob_id is null) <> (text_content is null)
+    ),
+    constraint uk_canvas_resource_canvas unique (canvas_id, id),
+    constraint uk_canvas_resource_owner_index unique (canvas_id, owner_node_id, resource_index)
+);
+
+comment on table canvas_resource is '不可变资源行：可见资源直接属于节点（owner_node_id + resource_index）；Function 目标物化和 pinned orphan 可暂时无 owner；内容要么是全局 Storage blob 引用要么是内联文本';
+comment on column canvas_resource.id is 'Resource 全局唯一 UUID（服务端生成）';
+comment on column canvas_resource.canvas_id is '所属 Canvas';
+comment on column canvas_resource.owner_node_id is '所属节点；与 resource_index 同存同缺，无 owner 的资源只可由 Function pin 保活';
+comment on column canvas_resource.resource_index is '节点内从 0 递增的资源序号；与 owner_node_id 同存同缺';
+comment on column canvas_resource.blob_id is '全局 Storage blob 引用（TEXT 资源为 null，blob 持有者计数由全局存储管理）';
+comment on column canvas_resource.name is '资源显示名（<= 256 字符）';
+comment on column canvas_resource.text_content is 'TEXT 资源的内联内容（blob 资源为 null），与 blob_id 恰好互斥';
+comment on column canvas_resource.created_at is '创建时间（毫秒精度）';
+
+create index idx_canvas_resource_canvas_created
+    on canvas_resource (canvas_id, created_at, id);
+
+create table canvas_function_run (
+    node_id uuid primary key,
+    request_id uuid not null,
+    status varchar(16) not null,
+    state_json jsonb not null,
+    error text,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint uk_canvas_function_run_request unique (node_id, request_id),
     constraint ck_canvas_function_run_status check (
         status in ('RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
     ),
     constraint ck_canvas_function_run_state_object check (jsonb_typeof(state_json) = 'object')
 );
 
+comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 全 UUID 且 (node_id, request_id) 唯一';
+comment on column canvas_function_run.node_id is 'Function 节点（一个节点同时至多一个 Run 行）';
+comment on column canvas_function_run.request_id is 'Run 请求 UUID（客户端生成，幂等键）';
+comment on column canvas_function_run.status is '生命周期：RUNNING / SUCCEEDED / FAILED / CANCELLED';
+comment on column canvas_function_run.state_json is 'typed/versioned 冻结计划与 checkpoint（JSON object）';
+comment on column canvas_function_run.error is '公开错误信息（terminal 失败时非空）';
+comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
+
 create index idx_canvas_function_run_running
     on canvas_function_run (node_id)
     where status = 'RUNNING';
 
 create table canvas_command_dedup (
-    canvas_id        bigint         not null,
-    command_id       varchar(128)   not null,
-    request_hash     varchar(64)    not null,
-    applied_revision bigint         not null,
-    created_at       timestamptz(3) not null default current_timestamp,
+    canvas_id uuid not null,
+    command_id uuid not null,
+    request_hash char(64) not null,
+    applied_version bigint not null,
+    created_at timestamptz(3) not null default current_timestamp,
     constraint pk_canvas_command_dedup primary key (canvas_id, command_id),
-    constraint ck_canvas_command_dedup_canvas_id_pos check (canvas_id > 0),
-    constraint ck_canvas_command_dedup_command_id_nonblank check (btrim(command_id) <> ''),
     constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$'),
-    constraint ck_canvas_command_dedup_applied_revision_nonneg check (applied_revision >= 0)
+    constraint ck_canvas_command_dedup_applied_version_nonneg check (applied_version >= 0)
 );
+
+comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, command_id) 只能以相同 request_hash 精确回放一次，applied_version 记录应用的 graph 版本';
+comment on column canvas_command_dedup.canvas_id is '所属 Canvas';
+comment on column canvas_command_dedup.command_id is '客户端幂等 UUID';
+comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
+comment on column canvas_command_dedup.applied_version is '应用后达到的 graph 版本';
+comment on column canvas_command_dedup.created_at is '创建时间（毫秒精度）';
+
+create table canvas_function_resource_ref (
+    canvas_id uuid not null,
+    node_id uuid not null,
+    request_id uuid not null,
+    role varchar(16) not null,
+    resource_id uuid not null,
+    constraint pk_canvas_function_resource_ref primary key (canvas_id, node_id, request_id, role, resource_id),
+    constraint ck_canvas_function_resource_ref_role check (role in ('INPUT', 'OUTPUT'))
+);
+
+comment on table canvas_function_resource_ref is 'Function Run 生命周期内对资源的 pin：INPUT 为启动时冻结的引用资源，OUTPUT 为预分配的目标资源；只保护生命周期，绝不参与 blob 引用计数';
+comment on column canvas_function_resource_ref.canvas_id is '所属 Canvas';
+comment on column canvas_function_resource_ref.node_id is 'Function 节点';
+comment on column canvas_function_resource_ref.request_id is 'Run 请求 UUID';
+comment on column canvas_function_resource_ref.role is 'pin 角色：INPUT / OUTPUT';
+comment on column canvas_function_resource_ref.resource_id is '被 pin 的资源（OUTPUT 可为尚未物化的预分配 id）';
+
+create index idx_canvas_function_resource_ref_resource
+    on canvas_function_resource_ref (canvas_id, resource_id);
 
 create table chat (
     id                  uuid          primary key,
@@ -667,7 +687,6 @@ comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 ------------------------------------------------------------------------------
 -- 3. Application-owned tables referencing harness_thread
 ------------------------------------------------------------------------------
-
 create table chat_thread (
     chat_id     uuid          not null,
     thread_id   uuid          not null,
@@ -709,59 +728,85 @@ create trigger trg_harness_thread_revision_notify
     for each row execute function harness_thread_revision_notify();
 
 ------------------------------------------------------------------------------
--- 5. Canvas ownership and same-canvas composite FKs.
+-- 5. Canvas ownership, same-canvas composite FKs, thread binding and version
+--    NOTIFY hint.
+--
+-- All Canvas ownership FKs are ON DELETE RESTRICT: deletion is always driven
+-- by the application in explicit order (pins -> runs -> resources -> links ->
+-- nodes -> groups -> dedup -> document), never by cascades that could bypass
+-- StorageBlobManager refcounts.
 ------------------------------------------------------------------------------
+
+alter table canvas_document
+    add constraint fk_canvas_document_thread foreign key (thread_id)
+    references harness_thread (id) on delete restrict;
 
 alter table canvas_group
     add constraint fk_canvas_group_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete cascade;
+    references canvas_document (id) on delete restrict;
 
 alter table canvas_node
     add constraint fk_canvas_node_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete cascade;
+    references canvas_document (id) on delete restrict;
 
 alter table canvas_node
     add constraint fk_canvas_node_group
     foreign key (canvas_id, group_id)
     references canvas_group (canvas_id, id);
 
-alter table canvas_resource
-    add constraint fk_canvas_resource_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete cascade;
-
-alter table canvas_upload
-    add constraint fk_canvas_upload_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete cascade;
-
-alter table canvas_node_resource
-    add constraint fk_canvas_node_resource_node
-    foreign key (canvas_id, node_id)
-    references canvas_node (canvas_id, id) on delete cascade;
-
-alter table canvas_node_resource
-    add constraint fk_canvas_node_resource_resource
-    foreign key (canvas_id, resource_id)
-    references canvas_resource (canvas_id, id);
-
-alter table canvas_command_dedup
-    add constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete cascade;
-
 alter table canvas_link
     add constraint fk_canvas_link_source
     foreign key (canvas_id, source_node_id)
-    references canvas_node (canvas_id, id) on delete cascade;
+    references canvas_node (canvas_id, id) on delete restrict;
 
 alter table canvas_link
     add constraint fk_canvas_link_target
     foreign key (canvas_id, target_node_id)
-    references canvas_node (canvas_id, id) on delete cascade;
+    references canvas_node (canvas_id, id) on delete restrict;
+
+alter table canvas_resource
+    add constraint fk_canvas_resource_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete restrict;
+
+alter table canvas_resource
+    add constraint fk_canvas_resource_owner
+    foreign key (canvas_id, owner_node_id)
+    references canvas_node (canvas_id, id) on delete restrict;
+
+alter table canvas_command_dedup
+    add constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
+    references canvas_document (id) on delete restrict;
 
 alter table canvas_function_run
     add constraint fk_canvas_function_run_node foreign key (node_id)
-    references canvas_node (id) on delete cascade;
+    references canvas_node (id) on delete restrict;
 
-------------------------------------------------------------------------------
+alter table canvas_function_resource_ref
+    add constraint fk_canvas_function_resource_ref_node
+    foreign key (canvas_id, node_id)
+    references canvas_node (canvas_id, id) on delete restrict;
+
+-- Canvas document version NOTIFY hint.
+--
+-- version is owned by the application; PostgreSQL never bumps it. This trigger
+-- is only a wake-up hint for the in-process Canvas SSE hub: it notifies when a
+-- canvas_document row is inserted or its version column actually changed, and
+-- never mutates the row. The NOTIFY payload is the parsable text
+-- `{canvasId}:{version}`.
+
+create or replace function canvas_document_version_notify()
+returns trigger language plpgsql as $$
+begin
+    if tg_op = 'INSERT' or new.version is distinct from old.version then
+        perform pg_notify('canvas_version', new.id::text || ':' || new.version::text);
+    end if;
+    return new;
+end $$;
+
+create trigger trg_canvas_document_version_notify
+    after insert or update of version on canvas_document
+    for each row execute function canvas_document_version_notify();
+
 -- 6. Global blob storage
 --
 -- storage_blob is the deduplicated immutable content address of the global
@@ -917,3 +962,11 @@ comment on column harness_session_blob_ref.blob_id is '被引用的全局 blob�
 comment on column harness_session_blob_ref.created_at is '引用创建时间（timestamptz，毫秒精度）';
 
 comment on index idx_harness_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
+
+------------------------------------------------------------------------------
+-- 7. Canvas resource blob FK (must follow the global blob storage section)
+------------------------------------------------------------------------------
+
+alter table canvas_resource
+    add constraint fk_canvas_resource_blob foreign key (blob_id)
+    references storage_blob (id) on delete restrict;

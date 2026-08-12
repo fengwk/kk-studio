@@ -42,12 +42,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_document",
           "canvas_group",
           "canvas_node",
-          "canvas_node_resource",
           "canvas_link",
           "canvas_function_run",
           "canvas_resource",
-          "canvas_upload",
           "canvas_command_dedup",
+          "canvas_function_resource_ref",
           "chat",
           "chat_thread",
           "harness_session",
@@ -87,9 +86,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_goal",
           "agent_thread_goal");
 
-  /** Canvas 业务表的持久化 id 默认由 {@code kk_studio_id_seq} 提供（Chat/Comfy 已迁移到 UUID）。 */
-  private static final Set<String> BUSINESS_SEQUENCE_BACKED_TABLES =
-      Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource", "canvas_upload");
+  /** Canvas 与 Chat/Comfy 一样完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
+  private static final Set<String> CANVAS_UUID_ID_TABLES =
+      Set.of("canvas_document", "canvas_group", "canvas_node", "canvas_resource");
 
   @BeforeEach
   void setup() throws SQLException {
@@ -185,14 +184,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "created_at",
         "updated_at",
         "version");
-    assertColumns("canvas_document", "id", "title", "graph_revision", "created_at", "updated_at");
+    assertColumns(
+        "canvas_document", "id", "title", "version", "thread_id", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
         "canvas_node",
         "id",
         "canvas_id",
         "name",
-        "name_normalized",
         "x",
         "y",
         "width",
@@ -200,7 +199,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "group_id",
         "model_key",
         "function_config_json");
-    assertColumns("canvas_node_resource", "canvas_id", "node_id", "resource_index", "resource_id");
     assertColumns("canvas_link", "canvas_id", "source_node_id", "target_node_id");
     assertColumns(
         "canvas_function_run",
@@ -214,30 +212,26 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "canvas_resource",
         "id",
         "canvas_id",
-        "kind",
-        "media_type",
+        "owner_node_id",
+        "resource_index",
+        "blob_id",
         "name",
-        "size",
         "text_content",
-        "metadata_json",
-        "created_at");
-    assertColumns(
-        "canvas_upload",
-        "id",
-        "canvas_id",
-        "kind",
-        "filename",
-        "declared_media_type",
-        "declared_size",
-        "expires_at",
         "created_at");
     assertColumns(
         "canvas_command_dedup",
         "canvas_id",
         "command_id",
         "request_hash",
-        "applied_revision",
+        "applied_version",
         "created_at");
+    assertColumns(
+        "canvas_function_resource_ref",
+        "canvas_id",
+        "node_id",
+        "request_id",
+        "role",
+        "resource_id");
     assertColumns(
         "chat",
         "id",
@@ -400,7 +394,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "agent_model", "config");
     assertColumnType("jsonb", "agent_definition", "config");
     assertColumnType("jsonb", "canvas_node", "function_config_json");
-    assertColumnType("jsonb", "canvas_resource", "metadata_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
   }
 
@@ -434,7 +427,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "canvas_document", "created_at");
     assertColumnType("timestamp with time zone", "canvas_document", "updated_at");
     assertColumnType("timestamp with time zone", "canvas_resource", "created_at");
-    assertColumnType("timestamp with time zone", "canvas_upload", "expires_at");
+    assertColumnType("timestamp with time zone", "canvas_command_dedup", "created_at");
     assertColumnType("timestamp with time zone", "canvas_function_run", "updated_at");
     assertColumnType("timestamp with time zone", "storage_blob", "created_at");
     assertColumnType("timestamp with time zone", "storage_blob", "updated_at");
@@ -540,7 +533,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
   @Test
   void revisionNotifyTriggerIsTheOnlyHarnessTriggerAndNeverMutatesRevision() throws SQLException {
-    // 整个 public schema 中唯一的用户 trigger 是仅起 hint 作用的 revision notify。
+    // 整个 public schema 中仅有两个用户 trigger：harness thread revision hint 与 canvas document version hint。
     Set<String> triggers = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -553,7 +546,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("trg_harness_thread_revision_notify"),
+        Set.of("trg_harness_thread_revision_notify", "trg_canvas_document_version_notify"),
         triggers,
         "no legacy trigger (revision bump, activation notify, child revision) may remain");
 
@@ -583,7 +576,27 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         !functionSource.contains("revision := ") && !functionSource.contains("revision = revision"),
         () -> "notify function must never mutate revision: " + functionSource);
 
-    // 除 notify 辅助函数外不存在其它 public 函数：revision 自增/子节点自增函数已移除。
+    // canvas version hint 触发器同样只做 NOTIFY，永不写版本。
+    String canvasDefinition =
+        singleString(
+            "select pg_get_triggerdef(oid) from pg_trigger"
+                + " where tgname = 'trg_canvas_document_version_notify'");
+    assertTrue(
+        canvasDefinition.contains("AFTER INSERT OR UPDATE OF version"),
+        () -> "canvas trigger must fire after insert or version update: " + canvasDefinition);
+    String canvasFunctionSource =
+        singleString(
+            "select prosrc from pg_proc"
+                + " where pronamespace = 'public'::regnamespace"
+                + " and proname = 'canvas_document_version_notify'");
+    assertTrue(
+        canvasFunctionSource.contains("pg_notify"),
+        () -> "canvas notify function must call pg_notify");
+    assertTrue(
+        canvasFunctionSource.contains("canvas_version"),
+        () -> "canvas notify function must use the canvas_version channel");
+
+    // 除两个 notify 辅助函数外不存在其它 public 函数：revision/version 自增函数已移除。
     Set<String> functions = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -596,9 +609,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of("harness_thread_revision_notify"),
+        Set.of("harness_thread_revision_notify", "canvas_document_version_notify"),
         functions,
-        "the database must never mutate revision; only the notify helper may exist");
+        "the database must never mutate revision/version; only the notify helpers may exist");
 
     // 行为：trigger 在 INSERT 与 revision 写入时触发，但绝不修改存储的
     // revision 值；非 revision 的应用层更新则完全不会动到 revision。
@@ -657,10 +670,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void generatedDurableEntityIdsUseUuidAndBusinessSequenceBacksOnlyCanvas() throws SQLException {
-    for (String table : BUSINESS_SEQUENCE_BACKED_TABLES) {
-      assertColumnType("bigint", table, "id");
+  void generatedDurableEntityIdsUseUuidAndNoBusinessSequence() throws SQLException {
+    for (String table : CANVAS_UUID_ID_TABLES) {
+      assertColumnType("uuid", table, "id");
     }
+    assertColumnType("uuid", "canvas_function_run", "node_id");
+    assertColumnType("uuid", "canvas_function_run", "request_id");
+    assertColumnType("uuid", "canvas_link", "source_node_id");
+    assertColumnType("uuid", "canvas_link", "target_node_id");
+    assertColumnType("uuid", "canvas_function_resource_ref", "resource_id");
     for (String table : HARNESS_TABLES) {
       if (table.equals("harness_work")
           || table.equals("harness_thread_command")
@@ -677,10 +695,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void globalSequenceAllocatesMonotonicIds() throws SQLException {
-    long a = singleLong("select nextval('kk_studio_id_seq')");
-    long b = singleLong("select nextval('kk_studio_id_seq')");
-    assertTrue(b > a, () -> "sequence must monotonically increase, a=" + a + " b=" + b);
+  void publicSchemaExposesNoSequences() throws SQLException {
+    try (Connection conn = newConnection();
+        Statement st = conn.createStatement();
+        ResultSet rs =
+            st.executeQuery(
+                "select sequence_name from information_schema.sequences"
+                    + " where sequence_schema = 'public'")) {
+      assertFalse(rs.next(), "Canvas 与 Harness 实体 id 全部由应用侧 Supplier<UUID> 生成，schema 不得提供任何序列");
+    }
   }
 
   @Test
@@ -720,42 +743,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void generatedEntityIdsUseOnlyTheDeclaredSequences() throws SQLException {
-    Set<String> sequences = new TreeSet<>();
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery(
-                "select sequence_name from information_schema.sequences"
-                    + " where sequence_schema = 'public'")) {
-      while (rs.next()) {
-        sequences.add(rs.getString(1));
-      }
-    }
-    assertEquals(
-        Set.of("kk_studio_id_seq"),
-        sequences,
-        "schema must expose exactly the business sequence (Harness 实体 id 由应用侧 UUID 生成)");
-
-    Set<String> sequenceBackedTables = new TreeSet<>();
-    try (Connection conn = newConnection();
-        Statement st = conn.createStatement();
-        ResultSet rs =
-            st.executeQuery(
-                "select table_name from information_schema.columns"
-                    + " where table_schema = 'public' and column_name = 'id'"
-                    + " and column_default = 'nextval(''kk_studio_id_seq''::regclass)'")) {
-      while (rs.next()) {
-        sequenceBackedTables.add(rs.getString(1));
-      }
-    }
-    assertEquals(
-        new TreeSet<>(BUSINESS_SEQUENCE_BACKED_TABLES),
-        sequenceBackedTables,
-        "only business durable ids default from kk_studio_id_seq");
-
-    // Harness 实体 id 由 HarnessStore 注入的 Supplier<UUID> 生成（生产：UUID::randomUUID）并显式插入；
-    // 任何执行表都不得携带列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
+  void noColumnCarriesASequenceDefault() throws SQLException {
+    // Canvas / Harness / Chat / Comfy 实体 id 均由应用侧 UUID 生成并显式插入；
+    // 任何表都不得携带序列默认值。ThreadCommand 无代理主键（身份为 (thread_id, sequence)）。
     for (String table : HARNESS_TABLES) {
       if (table.equals("harness_work")
           || table.equals("harness_thread_command")
@@ -775,6 +765,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           assertNull(
               rs.getString(1),
               () -> "harness table " + table + " id must not carry a column default");
+        }
+      }
+    }
+    for (String table : CANVAS_UUID_ID_TABLES) {
+      try (Connection conn = newConnection();
+          PreparedStatement ps =
+              conn.prepareStatement(
+                  "select column_default from information_schema.columns"
+                      + " where table_schema = 'public' and table_name = ? and column_name = 'id'")) {
+        ps.setString(1, table);
+        try (ResultSet rs = ps.executeQuery()) {
+          assertTrue(rs.next(), () -> "canvas table " + table + " must declare an id column");
+          assertNull(
+              rs.getString(1),
+              () -> "canvas table " + table + " id must not carry a column default");
         }
       }
     }
@@ -853,10 +858,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertEquals(
         Set.of(
             "uk_comfyui_workflow_api_api_name",
-            "uk_canvas_group_canvas_id",
-            "uk_canvas_node_canvas_id",
-            "uk_canvas_node_name_normalized",
-            "uk_canvas_resource_canvas_id",
+            "uk_canvas_document_thread",
+            "uk_canvas_function_run_request",
+            "uk_canvas_group_canvas",
+            "uk_canvas_node_canvas",
+            "uk_canvas_resource_canvas",
+            "uk_canvas_resource_owner_index",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_client",
@@ -879,13 +886,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model', 'fk_canvas_group_canvas',"
                     + " 'fk_canvas_node_canvas', 'fk_canvas_node_group',"
-                    + " 'fk_canvas_resource_canvas', 'fk_canvas_upload_canvas',"
-                    + " 'fk_canvas_node_resource_node',"
-                    + " 'fk_canvas_node_resource_resource',"
-                    + " 'fk_canvas_command_dedup_canvas',"
+                    + " 'fk_canvas_resource_canvas', 'fk_canvas_resource_owner',"
+                    + " 'fk_canvas_resource_blob', 'fk_canvas_command_dedup_canvas',"
                     + " 'fk_canvas_link_source',"
                     + " 'fk_canvas_link_target',"
-                    + " 'fk_canvas_function_run_node')")) {
+                    + " 'fk_canvas_function_run_node',"
+                    + " 'fk_canvas_function_resource_ref_node',"
+                    + " 'fk_canvas_document_thread',"
+                    + " 'fk_chat_thread_chat', 'fk_chat_thread_thread')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -898,13 +906,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_node_canvas",
             "fk_canvas_node_group",
             "fk_canvas_resource_canvas",
-            "fk_canvas_upload_canvas",
-            "fk_canvas_node_resource_node",
-            "fk_canvas_node_resource_resource",
+            "fk_canvas_resource_owner",
+            "fk_canvas_resource_blob",
             "fk_canvas_command_dedup_canvas",
             "fk_canvas_link_source",
             "fk_canvas_link_target",
-            "fk_canvas_function_run_node"),
+            "fk_canvas_function_run_node",
+            "fk_canvas_function_resource_ref_node",
+            "fk_canvas_document_thread",
+            "fk_chat_thread_chat",
+            "fk_chat_thread_thread"),
         foreignKeys,
         "all non-Harness ownership relations must be enforced by PostgreSQL");
   }

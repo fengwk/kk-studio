@@ -129,7 +129,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   }
 
   @Override
-  public List<Long> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     requireModel(run);
     H3ReferenceManifest manifest = H3ReferenceManifest.from(run.manifest());
     H3AdapterState state = H3AdapterState.decode(run.adapterState(), mapper);
@@ -183,7 +183,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     StandardComfyuiClient comfy = requireComfyClient();
     if (COMFY_UPLOADING.equals(stage)) {
       for (H3ReferenceManifest.Item item : manifest.items()) {
-        long resourceId = item.reference().resourceId();
+        UUID resourceId = item.reference().resourceId();
         if (state.uploads().containsKey(resourceId)) {
           continue;
         }
@@ -238,8 +238,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       ensureRunning(context);
       try (H3ComfyDownload download =
           comfy.download(Objects.requireNonNull(state.output(), "output"))) {
-        context.materializeTarget(
-            run.targetResourceId(), download.mediaType(), download.length(), download.content());
+        context.materializeTarget(run.targetResourceId(), download.content());
       } catch (IOException error) {
         throw new IllegalStateException("cannot close ComfyUI output stream", error);
       }
