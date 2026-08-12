@@ -21,6 +21,6 @@ public class CanvasRealtimeConfiguration {
     return new RedisCanvasPatchStore(
         Objects.requireNonNull(stringRedisTemplate, "stringRedisTemplate"),
         Objects.requireNonNull(properties, "properties"),
-        Objects.requireNonNull(objectMapper, "objectMapper"));
+        new CanvasPatchJsonCodec(Objects.requireNonNull(objectMapper, "objectMapper")));
   }
 }

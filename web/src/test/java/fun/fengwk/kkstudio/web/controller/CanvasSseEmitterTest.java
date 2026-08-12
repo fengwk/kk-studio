@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,10 +11,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -88,6 +93,21 @@ class CanvasSseEmitterTest {
     assertNotNull(submitted.get());
     plainEmitter.complete();
     verify(source, times(2)).subscribe(eq(CANVAS), anyLong(), any());
+  }
+
+  /** 'version' 事件帧：payload version 必须是字符串值，生产 ObjectMapper 下 wire 为十进制字符串。 */
+  @Test
+  void versionEventCarriesDecimalStringPayload() throws Exception {
+    SseEmitter.SseEventBuilder event = CanvasSseEmitter.versionEvent(7L);
+    Set<ResponseBodyEmitter.DataWithMediaType> frame = event.build();
+    Object data =
+        frame.stream()
+            .map(ResponseBodyEmitter.DataWithMediaType::getData)
+            .filter(Map.class::isInstance)
+            .findFirst()
+            .orElseThrow();
+    assertEquals(Map.of("version", "7"), data);
+    assertEquals("{\"version\":\"7\"}", ObjectMapperHolder.getInstance().writeValueAsString(data));
   }
 
   private static CanvasVersionEventSource source() {

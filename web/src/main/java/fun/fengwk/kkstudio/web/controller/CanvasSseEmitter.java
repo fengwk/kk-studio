@@ -84,11 +84,7 @@ final class CanvasSseEmitter {
               if (versionPending.getAndSet(false)) {
                 long version = latestVersion.get();
                 if (version > sentVersion) {
-                  emitter.send(
-                      SseEmitter.event()
-                          .id(Long.toString(version))
-                          .name("version")
-                          .data(Map.of("version", version)));
+                  emitter.send(versionEvent(version));
                   sentVersion = version;
                 }
               }
@@ -138,5 +134,16 @@ final class CanvasSseEmitter {
     FutureTask<Void> task = new FutureTask<>(work, null);
     executor.execute(task);
     return task;
+  }
+
+  /**
+   * 'version' 事件帧：event id 与 payload version 都必须是规范非负十进制字符串（id 用作 Last-Event-ID 游标，payload 是客户端拉取
+   * changes 的提示）。
+   */
+  static SseEmitter.SseEventBuilder versionEvent(long version) {
+    return SseEmitter.event()
+        .id(Long.toString(version))
+        .name("version")
+        .data(Map.of("version", Long.toString(version)));
   }
 }

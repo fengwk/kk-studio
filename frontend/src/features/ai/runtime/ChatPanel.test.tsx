@@ -106,10 +106,10 @@ describe('ChatPanel', () => {
 
     expect(await screen.findByText('资源不可用')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /下载 image\.png/ })).not.toBeInTheDocument()
-    expect(document.querySelector('img.resource-attachment-preview')).toBeNull()
+    expect(screen.queryByRole('img', { name: 'image.png' })).not.toBeInTheDocument()
   })
 
-  it('keeps authoritative download facts when only preview resolution fails', async () => {
+  it('renders the authoritative original inline when preview resolution fails', async () => {
     storageMocks.getBlobOriginalUrl.mockResolvedValue({
       url: 'https://s3.test/original',
       expiresAt: '2026-08-12T00:00:00Z',
@@ -161,12 +161,11 @@ describe('ChatPanel', () => {
       />,
     )
 
-    expect(await screen.findByRole('link', { name: /下载 image\.png/ })).toHaveAttribute(
-      'href',
+    expect(await screen.findByRole('img', { name: 'image.png' })).toHaveAttribute(
+      'src',
       'https://s3.test/original',
     )
-    expect(screen.getByTitle('image.png')).toHaveClass('is-image')
+    expect(screen.getByRole('button', { name: '预览 image.png' })).toBeInTheDocument()
     expect(screen.queryByText('资源不可用')).not.toBeInTheDocument()
-    expect(document.querySelector('img.resource-attachment-preview')).toBeNull()
   })
 })

@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Paperclip } from 'lucide-react'
+import { ArrowUp, Plus } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
@@ -32,6 +32,7 @@ import {
   renderPartsToEditor,
 } from '@/features/ai/composer/composer-dom'
 import {
+  createTextPart,
   mergeTextParts,
   partsKey,
   removePartsByIds,
@@ -112,7 +113,7 @@ export function ThreadComposer({
 
   const slashQuery = slashQueryOf(parts)
   const slashMode = slashQuery != null
-  const query = slashMode ? slashQuery : ''
+  const query = slashQuery ?? ''
   const filteredCommands = useFilteredThreadCommands(query, commands)
   const [activeIndex, setActiveIndex] = useState(0)
 
@@ -338,7 +339,12 @@ export function ThreadComposer({
     if (command.disabled) {
       return
     }
-    closeSlashMode()
+    onPartsChange([])
+    if (command.id === 'upload') {
+      fileInputRef.current?.click()
+      return
+    }
+    focusComposer()
     onCommand(command)
   }
 
@@ -417,20 +423,12 @@ export function ThreadComposer({
   }
 
   function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
-    const files = Array.from(event.clipboardData?.files ?? [])
+    const files = clipboardFiles(event.clipboardData)
     if (files.length > 0) {
       event.preventDefault()
       addFilesToDraft(files)
-      return
     }
-    // 纯文本粘贴：拒绝富文本 HTML，保持 editor 只含文本节点与 pill。
-    event.preventDefault()
-    const text = event.clipboardData?.getData('text/plain') ?? ''
-    const el = editorRef.current
-    if (el) {
-      insertTextAtCaret(el, text)
-      syncFromDom()
-    }
+    // 无文件时保留浏览器默认粘贴；随后由 onInput 统一回流 ordered parts。
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -457,6 +455,7 @@ export function ThreadComposer({
       addFilesToDraft(files)
     }
     event.target.value = ''
+    focusComposer()
   }
 
   function handleRemoveUpload(upload: AttachmentUpload) {
@@ -490,12 +489,21 @@ export function ThreadComposer({
       <div className="thread-dock">
         <button
           type="button"
-          className="thread-dock-attach"
-          aria-label={t('ai.runtime.composer.attach')}
+          className="thread-dock-add"
+          aria-label={t('ai.runtime.composer.openCommands')}
+          aria-expanded={slashMode}
           disabled={disabled}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            const draftIsEmpty = parts.every(
+              (part) => part.type === 'text' && part.text.trim() === '',
+            )
+            if (draftIsEmpty && !slashMode) {
+              onPartsChange([createTextPart('/')])
+            }
+            focusComposer()
+          }}
         >
-          <Paperclip aria-hidden="true" />
+          <Plus aria-hidden="true" />
         </button>
         <div
           ref={editorRef}
@@ -529,10 +537,26 @@ export function ThreadComposer({
         ref={fileInputRef}
         type="file"
         multiple
+        hidden
+        className="composer-file-input-hidden"
         tabIndex={-1}
         aria-hidden="true"
         onChange={handleFileInputChange}
       />
     </div>
   )
+}
+
+function clipboardFiles(clipboard: DataTransfer | null): File[] {
+  if (!clipboard) {
+    return []
+  }
+  const direct = Array.from(clipboard.files ?? [])
+  if (direct.length > 0) {
+    return direct
+  }
+  return Array.from(clipboard.items ?? [])
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file != null)
 }

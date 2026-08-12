@@ -79,6 +79,19 @@ SET_* diff（固定顺序 SET_ENVIRONMENT -> SET_AGENT -> SET_MODEL ->
 - `USER_MESSAGE` 之外的命令携带 pane 本地 draft 的对应字段（diff 相对 `effectiveBase`，避免重发 in-flight 设置）。
 - 服务端 202 只表示已接受；queued 命令由 ThreadProcessor 收割，前端以 snapshot 轮询/SSE 投影。
 
+### 共享 Attachment Pill Composer
+
+Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
+
+- 草稿是 ordered `TEXT/ATTACHMENT` parts；`contenteditable=false` pill 在 DOM 仅保存
+  `data-part-id`、`data-upload-id`、`data-filename`，展示为 `[name](upload)`；
+- 左侧 `+` 仅在空草稿中注入 `/` 并聚焦 editor，随后完全复用 slash palette 状态机；
+  `/upload` 由 Composer 本地消费并点击 `display:none` 的原生 file input；
+- editor 收到含文件的 paste 时从 `clipboardData.files` 或 `items[].getAsFile()` 取文件并走同一上传链路；
+  纯文本 paste 仍只插入 `text/plain`；
+- 上传状态只用紧凑 Markdown 引用显示，不创建独立媒体 tile；发送前必须全部 READY，
+  payload 中 attachment 的客户端 localId 才解析为服务端 uploadId。
+
 ## 5. Ambiguous exact replay 与 409 rebuild
 
 `replayRef` 保存 `{plan, content}`；`CommandBatchPlan.identity = {threadId, content, draft}`（**不含 effectiveBase**：queued SET_* 投影变化不改变用户意图）。
@@ -125,7 +138,10 @@ sha256。`ChatPanel` 在渲染期通过 `ResourceBlobUrlContext` 并行请求
 `/api/storage/blobs/{blobId}/presigned-original|presigned-preview`：
 
 - 原件响应的 `mediaType/sizeBytes` 是权威媒体事实；`ResourceAttachmentChip` 依此分类 image/audio/video/file，不按文件扩展名猜测；
-- image/video 可使用 preview URL，下载始终使用 original URL；解析失败只显示名称与不可用提示；
+- image 在正文内直接使用权威 original 完整展示；video 优先使用 WebP poster，poster
+  缺失或加载失败时回退 original video；hover/focus 在左上角显示半透明文件名，
+  点击以 original 打开 Lightbox，Escape 可关闭；
+- 非媒体资源使用紧凑 `[name]` 链接；original 缺失或解析失败时只显示名称与不可用提示；
 - preview 保持纯文本视口，不执行富内容；durable message 与 DOM 都不保存长期 URL。
 
 瞬时/Invocation `ResourceRef {uri,mediaType,name,size,sha256}` 仍有兼容 renderer：

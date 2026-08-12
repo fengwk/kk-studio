@@ -123,13 +123,11 @@ public class StudioCanvasController {
     try {
       UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
       UUID commandId = StudioWebMapper.parseUuid(request.getCommandId(), "commandId");
+      long expectedVersion = parseVersion(request.getExpectedVersion(), "expectedVersion");
       return Results.ok(
           mapper.toDto(
               canvasCommandService.applyCommands(
-                  canvasId,
-                  request.getExpectedVersion(),
-                  commandId,
-                  mapper.toCommands(request.getCommands()))));
+                  canvasId, expectedVersion, commandId, mapper.toCommands(request.getCommands()))));
     } catch (CanvasConflictException ex) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, ex.reason().name(), ex);
     } catch (IllegalArgumentException ex) {
@@ -154,7 +152,7 @@ public class StudioCanvasController {
       @RequestParam(defaultValue = "0") String afterVersion) {
     try {
       UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      long version = parseAfterVersion(afterVersion);
+      long version = parseVersion(afterVersion, "afterVersion");
       return Results.ok(mapper.toDto(realtimeService.readChanges(canvasId, version)));
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -172,7 +170,7 @@ public class StudioCanvasController {
       @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
     try {
       UUID canvasId = StudioWebMapper.parseUuid(canvasIdText, "canvasId");
-      long version = parseAfterVersion(lastEventId == null ? afterVersion : lastEventId);
+      long version = parseVersion(lastEventId == null ? afterVersion : lastEventId, "afterVersion");
       return CanvasSseEmitter.stream(canvasId, version, versionEventSource, eventStreamExecutor);
     } catch (IllegalArgumentException ex) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
@@ -233,14 +231,14 @@ public class StudioCanvasController {
     return HarnessRuntimeWebMapper.toUserMessageContents(contents);
   }
 
-  static long parseAfterVersion(String raw) {
+  static long parseVersion(String raw, String name) {
     if (raw == null || !raw.matches("0|[1-9]\\d*")) {
-      throw new IllegalArgumentException("afterVersion must be a non-negative decimal");
+      throw new IllegalArgumentException(name + " must be a non-negative decimal");
     }
     try {
       return Long.parseLong(raw);
     } catch (NumberFormatException error) {
-      throw new IllegalArgumentException("afterVersion exceeds long range", error);
+      throw new IllegalArgumentException(name + " exceeds long range", error);
     }
   }
 }

@@ -76,6 +76,27 @@ class CanvasRealtimeServiceTest {
     assertSame(snapshot, gap.snapshot());
   }
 
+  @Test
+  void readChangesReplaysVersionOneFromZeroAndFallsBackWhenItIsMissing() {
+    CanvasPatchStore store = mock(CanvasPatchStore.class);
+    CanvasQueryService query = mock(CanvasQueryService.class);
+    CanvasSnapshot snapshot = snapshot(1L);
+    CanvasPatch first = patch(0L, 1L);
+    when(query.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot));
+    when(store.readAll(CANVAS)).thenReturn(List.of(first));
+    CanvasRealtimeService service = new CanvasRealtimeService(store, query);
+
+    CanvasChanges contiguous = service.readChanges(CANVAS, 0L);
+
+    assertEquals(List.of(first), contiguous.patches());
+    assertNull(contiguous.snapshot());
+
+    when(store.readAll(CANVAS)).thenReturn(List.of());
+    CanvasChanges missing = service.readChanges(CANVAS, 0L);
+    assertEquals(List.of(), missing.patches());
+    assertSame(snapshot, missing.snapshot());
+  }
+
   private static CanvasPatch patch(long baseVersion, long version) {
     return new CanvasPatch(baseVersion, version, List.of(), List.of(), List.of());
   }

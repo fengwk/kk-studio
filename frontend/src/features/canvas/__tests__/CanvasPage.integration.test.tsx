@@ -162,7 +162,7 @@ function canvasDocument(id = CANVAS_ID, title = '真实画布'): CanvasDocumentD
   return {
     id,
     title,
-    version: 0,
+    version: '0',
     threadId: null,
     createdAt: '2026-08-10T00:00:00Z',
     updatedAt: '2026-08-10T00:00:00Z',
@@ -213,12 +213,12 @@ function installBackend(options: BackendOptions = {}) {
   let listFailures = options.listFailures ?? 0
   const missing = new Set(options.missingCanvasIds ?? [])
   const commandBodies: Array<{
-    expectedVersion: number
+    expectedVersion: string
     commandId: string
     commands: CanvasCommandDTO[]
   }> = []
   const createBodies: unknown[] = []
-  const changesQueries: Array<{ canvasId: string; afterVersion: number }> = []
+  const changesQueries: Array<{ canvasId: string; afterVersion: string }> = []
 
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -271,7 +271,7 @@ function installBackend(options: BackendOptions = {}) {
     const changesMatch = /^\/api\/canvases\/([^/]+)\/changes\?afterVersion=(\d+)$/.exec(url)
     if (changesMatch && method === 'GET') {
       const canvasId = changesMatch[1] as string
-      const afterVersion = Number(changesMatch[2])
+      const afterVersion = changesMatch[2] as string
       changesQueries.push({ canvasId, afterVersion })
       return envelope({ patches: [], snapshot: null })
     }
@@ -279,7 +279,7 @@ function installBackend(options: BackendOptions = {}) {
     if (commandMatch && method === 'POST') {
       const canvasId = commandMatch[1] as string
       const body = JSON.parse(String(init?.body)) as {
-        expectedVersion: number
+        expectedVersion: string
         commandId: string
         commands: CanvasCommandDTO[]
       }
@@ -324,7 +324,8 @@ function installBackend(options: BackendOptions = {}) {
       return envelope({
         id: STORAGE_UPLOAD_ID,
         state: 'READY',
-        blobId: 'blob-tiny-png',
+        blobId: '00000000-0000-4000-8000-0000000000aa',
+        presignedPut: null,
         expiresAt: '2026-08-10T00:15:00Z',
       })
     }
@@ -347,7 +348,12 @@ function installBackend(options: BackendOptions = {}) {
 /**
  * 把命令批折叠为一张连续 patch（baseVersion -> version+1）。只覆盖本测试
  * 实际发送的命令类型；CREATE_TEXT_NODE 等新命令一律携带客户端 UUID。
+ * wire 版本是十进制字符串，前进用 bigint-safe 避免 JS number 精度问题。
  */
+function nextVersion(version: string): string {
+  return String(BigInt(version) + 1n)
+}
+
 function buildPatch(
   current: CanvasSnapshotDTO,
   commands: CanvasCommandDTO[],
@@ -385,7 +391,8 @@ function buildPatch(
           textContent: command.markdown,
           kind: 'TEXT',
           mediaType: 'text/markdown',
-          sizeBytes: command.markdown.length,
+          // wire long：十进制字符串（studio-service adapter 归一化为 number）。
+          sizeBytes: String(command.markdown.length),
           width: null,
           height: null,
           durationMs: null,
@@ -401,7 +408,7 @@ function buildPatch(
           ...node,
           resources: node.resources.map((resource) => (
             resource.kind === 'TEXT'
-              ? { ...resource, textContent: command.markdown, sizeBytes: command.markdown.length }
+              ? { ...resource, textContent: command.markdown, sizeBytes: String(command.markdown.length) }
               : resource
           )),
         })
@@ -430,12 +437,13 @@ function buildPatch(
           canvasId: current.document.id,
           ownerNodeId: command.nodeId,
           resourceIndex: 0,
-          blobId: 'blob-tiny-png',
+          blobId: '00000000-0000-4000-8000-0000000000aa',
           name: command.name,
           textContent: null,
           kind: 'IMAGE',
           mediaType: 'image/png',
-          sizeBytes: 3,
+          // wire long：十进制字符串（studio-service adapter 归一化为 number）。
+          sizeBytes: '3',
           width: 1,
           height: 1,
           durationMs: null,
@@ -523,7 +531,7 @@ function buildPatch(
 
   return {
     baseVersion: current.document.version,
-    version: current.document.version + 1,
+    version: nextVersion(current.document.version),
     groups: groupPatches,
     nodes: nodePatches,
     links: linkPatches,
@@ -596,8 +604,8 @@ describe('CanvasPage real list/create/load integration', () => {
         : true
       ))
       && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.commandId)
-      && typeof body.expectedVersion === 'number'
-      && body.expectedVersion >= 0
+      && typeof body.expectedVersion === 'string'
+      && /^(0|[1-9][0-9]*)$/.test(body.expectedVersion)
     ))).toBe(true)
     // An empty canvas waits for its first measured node, then performs the initial fit exactly once.
     await waitFor(() => {
@@ -760,7 +768,7 @@ describe('CanvasPage real list/create/load integration', () => {
 
     await screen.findByLabelText(/无限画布/)
     await waitFor(() => {
-      expect(changesQueries).toContainEqual({ canvasId: CANVAS_ID, afterVersion: 0 })
+      expect(changesQueries).toContainEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
     })
     expect(eventSourceHarness.instances).toHaveLength(1)
     expect(eventSourceHarness.instances[0]?.url).toBe(
@@ -771,15 +779,15 @@ describe('CanvasPage real list/create/load integration', () => {
       dispatch: (type: string, data?: string) => void
     }
     act(() => {
-      source.dispatch('version', JSON.stringify({ version: 2 }))
+      source.dispatch('version', JSON.stringify({ version: '2' }))
     })
     act(() => {
-      source.dispatch('version', JSON.stringify({ version: 0 }))
+      source.dispatch('version', JSON.stringify({ version: '0' }))
     })
     await waitFor(() => {
       expect(changesQueries).toHaveLength(2)
     })
-    expect(changesQueries[1]).toEqual({ canvasId: CANVAS_ID, afterVersion: 0 })
+    expect(changesQueries[1]).toEqual({ canvasId: CANVAS_ID, afterVersion: '0' })
   })
 
   it('collapses the Chat panel by default and toggles it from the editor header', async () => {
@@ -1031,7 +1039,7 @@ describe('CanvasPage real list/create/load integration', () => {
           textContent: 'note',
           kind: 'TEXT',
           mediaType: 'text/markdown',
-          sizeBytes: 4,
+          sizeBytes: '4',
           width: null,
           height: null,
           durationMs: null,
@@ -1091,12 +1099,12 @@ describe('CanvasPage real list/create/load integration', () => {
           canvasId: CANVAS_ID,
           ownerNodeId: NODE_A,
           resourceIndex: 0,
-          blobId: 'blob-image',
+          blobId: '00000000-0000-4000-8000-0000000000bb',
           name: 'image.png',
           textContent: null,
           kind: 'IMAGE',
           mediaType: 'image/png',
-          sizeBytes: 3,
+          sizeBytes: '3',
           width: null,
           height: null,
           durationMs: null,

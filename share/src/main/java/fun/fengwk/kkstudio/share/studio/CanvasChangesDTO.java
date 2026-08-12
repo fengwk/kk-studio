@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.studio;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.util.ArrayList;
@@ -15,6 +16,8 @@ public class CanvasChangesDTO {
 
   private List<CanvasPatchDTO> patches = new ArrayList<>();
 
+  /** required-nullable：纯增量响应没有 snapshot，必须显式输出 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private CanvasSnapshotDTO snapshot;
 
   @JsonAnySetter

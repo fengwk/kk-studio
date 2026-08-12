@@ -22,7 +22,7 @@ import java.util.UUID;
  *
  * <p>PostgreSQL 行与 {@code canvas_document.version} 是事实源；Redis Stream 只是严格在事务提交后写入的 bounded
  * best-effort patch 缓存（写入失败只告警，客户端通过 changes gap/snapshot 自愈）。{@code /changes} 从缓存回放连续
- * patches，任何缺失/gap/损坏/初始加载都返回权威 snapshot。
+ * patches，任何缺失/gap/损坏都返回权威 snapshot。
  */
 @Slf4j
 @Service
@@ -54,8 +54,8 @@ public class CanvasRealtimeService {
   }
 
   /**
-   * {@code GET /canvases/{id}/changes?afterVersion=N}：从缓存读取从 afterVersion 起连续的 patches； 初始加载
-   * （afterVersion = 0）、缓存缺失/gap/损坏或 Redis 不可用都返回权威 snapshot。
+   * {@code GET /canvases/{id}/changes?afterVersion=N}：从缓存读取从 afterVersion 起连续的 patches；
+   * 缓存缺失/gap/损坏或 Redis 不可用时返回权威 snapshot。{@code afterVersion = 0} 与其它版本使用同一规则。
    */
   public CanvasChanges readChanges(UUID canvasId, long afterVersion) {
     Objects.requireNonNull(canvasId, "canvasId");
@@ -66,9 +66,6 @@ public class CanvasRealtimeService {
         queryService
             .findSnapshot(canvasId)
             .orElseThrow(() -> new IllegalArgumentException("Canvas not found: " + canvasId));
-    if (afterVersion == 0L) {
-      return new CanvasChanges(List.of(), snapshot);
-    }
     long currentVersion = snapshot.document().version();
     if (afterVersion >= currentVersion) {
       return new CanvasChanges(List.of(), null);
