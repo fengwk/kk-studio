@@ -19,7 +19,8 @@ public sealed interface CanvasCommand
         CanvasCommand.CreateGroup,
         CanvasCommand.MoveGroup,
         CanvasCommand.Ungroup,
-        CanvasCommand.DeleteGroup {
+        CanvasCommand.DeleteGroup,
+        CanvasCommand.RenameGroup {
 
   record CreateTextNode(UUID nodeId, String name, String markdown, CanvasTransform transform)
       implements CanvasCommand {
@@ -153,6 +154,13 @@ public sealed interface CanvasCommand
   record DeleteGroup(UUID groupId) implements CanvasCommand {
     public DeleteGroup {
       Objects.requireNonNull(groupId, "groupId");
+    }
+  }
+
+  record RenameGroup(UUID groupId, String title) implements CanvasCommand {
+    public RenameGroup {
+      Objects.requireNonNull(groupId, "groupId");
+      CanvasValidation.requireNonBlank(title, "title");
     }
   }
 

@@ -304,6 +304,11 @@ export type CanvasCommandDTO =
       type: 'DELETE_GROUP'
       groupId: UUIDString
     }
+  | {
+      type: 'RENAME_GROUP'
+      groupId: UUIDString
+      title: string
+    }
 
 /**
  * Canvas Thread 的 branch settings 快照。与 harness runtime 的

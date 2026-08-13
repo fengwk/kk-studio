@@ -202,7 +202,8 @@ L1 的关键语义断言：
   非负十进制字符串，`graphRevision` 字段不存在）；`expectedVersion` CAS stale 409；
   同 `commandId` 精确回放返回当前版本的确定性空 patch（version 不前进），同 id 不同内容
   409；`changes?afterVersion=0` 在缓存完整时返回连续 `0→1` patch，缓存缺失/gap 时回退
-  权威 snapshot，尾部版本返回空 delta；深删除后画布 404。
+  权威 snapshot，尾部版本返回空 delta；`RENAME_GROUP` 更新标题只发 group UPSERT patch
+  （成员关系与几何不变），空白 title 与未知 group 400；深删除后画布 404。
 - `canvas.storage_upload_contract` 仅在 `--with-canvas-storage` 下执行：backend 必须启用
   S3 配置；通用 S3 预签名端点不能签名 `blobs/` 命名空间 key；全局
   upload reserve（`sha256` 必填）→ 浏览器直传 PUT → complete 绑定 READY blob，

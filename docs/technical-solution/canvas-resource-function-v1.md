@@ -229,6 +229,7 @@ CREATE_GROUP
 MOVE_GROUP
 UNGROUP
 DELETE_GROUP
+RENAME_GROUP
 ```
 
 聚合 Snapshot 在装配前后同时核对 `canvas_document` 与有序 FunctionRun 列表；任一 version、Thread 绑定或 Run

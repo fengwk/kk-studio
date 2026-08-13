@@ -266,6 +266,7 @@ public class DurableCanvasService implements CanvasCommandService {
       case CanvasCommand.MoveGroup value -> moveGroup(canvasId, value, accumulator);
       case CanvasCommand.Ungroup value -> ungroup(canvasId, value, accumulator);
       case CanvasCommand.DeleteGroup value -> deleteGroup(canvasId, value, accumulator);
+      case CanvasCommand.RenameGroup value -> renameGroup(canvasId, value, accumulator);
     }
   }
 
@@ -539,6 +540,16 @@ public class DurableCanvasService implements CanvasCommandService {
     accumulator.removeGroup(command.groupId());
   }
 
+  private void renameGroup(
+      UUID canvasId, CanvasCommand.RenameGroup command, PatchAccumulator accumulator) {
+    CanvasGroupDO group = requireGroup(canvasId, command.groupId());
+    group.setTitle(canonicalDisplayName(command.title(), null, "title"));
+    if (groupMapper.updateTitle(group) != 1) {
+      throw new IllegalArgumentException("Unknown group: " + command.groupId());
+    }
+    accumulator.upsertGroup(projectGroup(group));
+  }
+
   private CanvasResourceDO consumeUpload(
       UUID canvasId, UUID nodeId, int resourceIndex, UUID uploadId, String nodeName) {
     StorageUploadService uploadService = uploadServices.getIfAvailable();
@@ -718,6 +729,7 @@ public class DurableCanvasService implements CanvasCommandService {
       case CanvasCommand.MoveGroup ignored -> "MOVE_GROUP";
       case CanvasCommand.Ungroup ignored -> "UNGROUP";
       case CanvasCommand.DeleteGroup ignored -> "DELETE_GROUP";
+      case CanvasCommand.RenameGroup ignored -> "RENAME_GROUP";
     };
   }
 

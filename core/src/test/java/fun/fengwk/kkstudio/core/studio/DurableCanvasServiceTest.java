@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasGroupPatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLinkPatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
@@ -313,6 +314,95 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
     CanvasSnapshot afterDelete = snapshot(canvas);
     assertTrue(afterDelete.groups().isEmpty());
     assertNull(node(afterDelete, secondId).groupId());
+  }
+
+  @Test
+  void renameGroupUpdatesTitleAndKeepsMembersAndGeometry() {
+    CanvasDocument canvas = commandService.createCanvas("rename-group");
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    apply(
+        canvas,
+        0,
+        uuid("members"),
+        new CanvasCommand.CreateTextNode(firstId, "a", "a", new CanvasTransform(10, 20, 100, 80)),
+        new CanvasCommand.CreateTextNode(secondId, "b", "b", new CanvasTransform(30, 50, 110, 90)));
+    UUID groupId = UUID.randomUUID();
+    apply(
+        canvas,
+        1,
+        uuid("group"),
+        new CanvasCommand.CreateGroup(
+            groupId, "G", new CanvasTransform(0, 0, 300, 200), List.of(firstId, secondId)));
+    apply(canvas, 2, uuid("move-group"), new CanvasCommand.MoveGroup(groupId, 100, 50));
+    CanvasSnapshot beforeRename = snapshot(canvas);
+
+    CanvasPatch renamed =
+        apply(
+            canvas,
+            3,
+            uuid("rename-group"),
+            new CanvasCommand.RenameGroup(groupId, " Renamed Group "));
+    assertEquals(4L, renamed.version());
+    assertEquals(
+        List.of(
+            new CanvasGroupPatch.Upsert(
+                new CanvasGroup(
+                    groupId,
+                    canvas.id(),
+                    "Renamed Group",
+                    new CanvasTransform(100, 50, 300, 200)))),
+        renamed.groups());
+    assertTrue(renamed.nodes().isEmpty(), "title rename must not touch node patches");
+    assertTrue(renamed.links().isEmpty(), "title rename must not touch link patches");
+
+    CanvasSnapshot afterRename = snapshot(canvas);
+    CanvasGroup group = afterRename.groups().get(0);
+    assertEquals("Renamed Group", group.title());
+    assertEquals(new CanvasTransform(100, 50, 300, 200), group.transform());
+    assertEquals(groupId, node(afterRename, firstId).groupId());
+    assertEquals(groupId, node(afterRename, secondId).groupId());
+    assertEquals(
+        beforeRename.nodes().stream().map(CanvasResourceNode::transform).toList(),
+        afterRename.nodes().stream().map(CanvasResourceNode::transform).toList(),
+        "title rename must keep member geometry");
+  }
+
+  @Test
+  void renameGroupRejectsBlankTitleUnknownGroupAndStaleVersion() {
+    CanvasDocument canvas = commandService.createCanvas("rename-errors");
+    UUID nodeId = UUID.randomUUID();
+    UUID groupId = UUID.randomUUID();
+    apply(
+        canvas,
+        0,
+        uuid("group"),
+        new CanvasCommand.CreateTextNode(nodeId, "a", "a", T),
+        new CanvasCommand.CreateGroup(
+            groupId, "G", new CanvasTransform(0, 0, 300, 200), List.of(nodeId)));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasCommand.RenameGroup(groupId, " "),
+        "blank title is rejected by the domain command constructor");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                canvas,
+                1,
+                uuid("unknown-group"),
+                new CanvasCommand.RenameGroup(UUID.randomUUID(), "x")),
+        "missing group is rejected deterministically");
+    assertThrows(
+        CanvasConflictException.class,
+        () -> apply(canvas, 3, uuid("stale-rename"), new CanvasCommand.RenameGroup(groupId, "x")),
+        "stale expectedVersion conflicts without mutation");
+
+    CanvasSnapshot after = snapshot(canvas);
+    assertEquals(1L, after.document().version());
+    assertEquals("G", after.groups().get(0).title());
+    assertEquals(groupId, node(after, nodeId).groupId());
   }
 
   @Test

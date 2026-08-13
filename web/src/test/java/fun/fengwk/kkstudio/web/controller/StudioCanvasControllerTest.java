@@ -256,7 +256,8 @@ class StudioCanvasControllerTest {
         List.of(
             new CanvasCommandDTO.CreateTextNode(
                 NODE_1.toString(), "note", "hello", new CanvasTransformDTO(1, 2, 100, 80)),
-            new CanvasCommandDTO.CreateLink(NODE_1.toString(), NODE_2.toString())));
+            new CanvasCommandDTO.CreateLink(NODE_1.toString(), NODE_2.toString()),
+            new CanvasCommandDTO.RenameGroup(GROUP.toString(), "renamed group")));
 
     mockMvc
         .perform(
@@ -278,7 +279,8 @@ class StudioCanvasControllerTest {
                 List.of(
                     new CanvasCommand.CreateTextNode(
                         NODE_1, "note", "hello", new CanvasTransform(1, 2, 100, 80)),
-                    new CanvasCommand.CreateLink(NODE_1, NODE_2))));
+                    new CanvasCommand.CreateLink(NODE_1, NODE_2),
+                    new CanvasCommand.RenameGroup(GROUP, "renamed group"))));
   }
 
   @Test
