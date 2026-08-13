@@ -617,6 +617,7 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(screen.getByText('v0')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '添加资源或 Function' }))
+    expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: /分组/ })).not.toBeInTheDocument()
     await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /文本资源/ }))
     await user.clear(screen.getByLabelText('Markdown 内容'))
     await user.type(screen.getByLabelText('Markdown 内容'), '# E2E 文本')
@@ -1293,6 +1294,21 @@ describe('CanvasPage real list/create/load integration', () => {
     await user.click(await screen.findByRole('button', { name: /真实画布/ }))
     await screen.findByLabelText(/无限画布/)
 
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+    const groupedNodeMenu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(groupedNodeMenu).queryByRole('menuitem', { name: '打组' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
     const rightClickGroup = () => act(() => {
       ;(flowHarness.current as {
         onNodeContextMenu: (
@@ -1395,6 +1411,128 @@ describe('CanvasPage real list/create/load integration', () => {
       memberNodeIds: [NODE_A, NODE_B],
     }])
     expect(ungroupBody?.commands.some((command) => command.type === 'DELETE_GROUP')).toBe(false)
+  })
+
+  it('groups a single ungrouped resource node from its right-click menu', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'image.png',
+          textContent: null,
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          sizeBytes: '3',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    await user.click(screen.getByRole('button', { name: '添加资源或 Function' }))
+    expect(within(screen.getByRole('menu')).queryByRole('menuitem', { name: /分组/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+    const menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '打组' })).toBeInTheDocument()
+    await user.click(within(menu).getByRole('menuitem', { name: '打组' }))
+
+    await waitFor(() => expect(commandBodies.filter((body) => (
+      body.commands[0]?.type === 'CREATE_GROUP'
+    ))).toHaveLength(1))
+    expect(commandBodies.find((body) => body.commands[0]?.type === 'CREATE_GROUP')?.commands).toEqual([
+      expect.objectContaining({
+        type: 'CREATE_GROUP',
+        memberNodeIds: [NODE_A],
+      }),
+    ])
+  })
+
+  it('synchronizes selection state before grouping from a selection context menu', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Image 2',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          nodes: Array<{ id: string }>,
+        ) => void
+      }).onSelectionContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        [{ id: NODE_A }, { id: NODE_B }],
+      )
+    })
+    const menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '打组' })).toBeInTheDocument()
+    await user.click(within(menu).getByRole('menuitem', { name: '打组' }))
+
+    await waitFor(() => expect(commandBodies.filter((body) => (
+      body.commands[0]?.type === 'CREATE_GROUP'
+    ))).toHaveLength(1))
+    expect(commandBodies.find((body) => body.commands[0]?.type === 'CREATE_GROUP')?.commands).toEqual([
+      expect.objectContaining({
+        type: 'CREATE_GROUP',
+        memberNodeIds: [NODE_A, NODE_B],
+      }),
+    ])
   })
 
   it('closes the context menu on Escape, outside pointer, pane click, and viewport move', async () => {
@@ -1655,7 +1793,9 @@ describe('CanvasPage real list/create/load integration', () => {
     const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
     expect(anchor.href).toBe('https://s3.example/original')
     expect(anchor.target).toBe('_blank')
-    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+    })
 
     act(() => {
       ;(flowHarness.current as {

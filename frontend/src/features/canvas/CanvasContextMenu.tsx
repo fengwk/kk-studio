@@ -292,6 +292,14 @@ function ResourceMenuItems({
           }}
         />
       ) : null}
+      {!node.groupId ? (
+        <MenuButton
+          icon={<GroupIcon aria-hidden="true" />}
+          label={t('canvas.menu.group')}
+          onClick={() => runtime.createGroup()}
+          onClose={onClose}
+        />
+      ) : null}
       {binaryResource ? (
         <ResourceActionItems resource={binaryResource} onClose={onClose} />
       ) : null}
