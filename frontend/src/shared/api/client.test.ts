@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, apiClient, isConflictError, isNotFoundError } from '@/shared/api/client'
+import {
+  ApiError,
+  apiClient,
+  isConflictError,
+  isConflictReason,
+  isNotFoundError,
+} from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
 
 const axiosMock = vi.hoisted(() => {
@@ -97,6 +103,15 @@ describe('apiClient', () => {
       errors: { resource: 'agent_model' },
     })
     expect(isConflictError(new ApiError('thread conflict', 409))).toBe(true)
+    expect(
+      isConflictReason(
+        new ApiError('stale', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+        'STALE_COMMAND_CURSOR',
+      ),
+    ).toBe(true)
+    expect(
+      isConflictReason(new ApiError('generic', 409, 'CONFLICT'), 'STALE_COMMAND_CURSOR'),
+    ).toBe(false)
   })
 
   it('classifies not-found errors without matching other failures', () => {

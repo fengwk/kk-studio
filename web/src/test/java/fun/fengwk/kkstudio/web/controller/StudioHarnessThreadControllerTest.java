@@ -34,6 +34,8 @@ import fun.fengwk.kkstudio.harness.runtime.spring.redis.RealtimeEventTail;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandBatch;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
@@ -72,7 +74,9 @@ class StudioHarnessThreadControllerTest {
         new StudioHarnessThreadController(runtime, chatThreadCommandService, tail, hub, executor);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .setControllerAdvice(
+                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
+                new ResultResponseBodyAdvice())
             .build();
   }
 
@@ -309,7 +313,9 @@ class StudioHarnessThreadControllerTest {
             post("/api/ai/runtime/threads/" + idText(1) + "/commands")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
-        .andExpect(status().isConflict());
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.errors.reason").value("STALE_COMMAND_CURSOR"))
+        .andExpect(jsonPath("$.errors.detail").value("stale cursor"));
 
     mockMvc.perform(get("/api/ai/runtime/threads/0/snapshot")).andExpect(status().isBadRequest());
     mockMvc

@@ -18,15 +18,21 @@ import {
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import {
+  branchDraftFromThread,
+  branchDraftsEqual,
+  projectPendingTarget,
+} from '@/features/ai/chat/branch-draft'
+import {
   hasMessageContent,
   partsKey,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
-import { isConflictError } from '@/shared/api/client'
+import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
 
@@ -62,6 +68,39 @@ export interface PendingStopOperation {
   expectedRevision: string
   basisHeadEntryId: string
   basisRevision: string
+}
+
+const MAX_STALE_MESSAGE_CURSOR_RETRIES = 2
+
+/**
+ * 只有纯消息 batch 才能在 cursor 冲突后原样换用新 cursor；SET_* 必须重新计算 diff。
+ * 旧 head 仍位于最新 root-to-head 路径时，变化只是同一分支向前推进。
+ */
+export function canRetryStaleMessageBatch(
+  plan: CommandBatchPlan,
+  snapshot: HarnessThreadSnapshotDTO,
+): boolean {
+  if (
+    plan.batch.commands.length === 0
+    || plan.batch.commands.some((command) => command.type !== 'USER_MESSAGE')
+  ) {
+    return false
+  }
+  if (
+    snapshot.thread.headEntryId === plan.batch.expectedHeadEntryId
+    && snapshot.thread.nextCommandSequence === plan.batch.expectedNextCommandSequence
+  ) {
+    return false
+  }
+  const latestTarget = projectPendingTarget(
+    branchDraftFromThread(snapshot.thread),
+    snapshot.queuedCommands,
+  )
+  if (!branchDraftsEqual(latestTarget, plan.targetDraft)) {
+    return false
+  }
+  return snapshot.thread.headEntryId === plan.batch.expectedHeadEntryId
+    || snapshot.entries.some((entry) => entry.entryId === plan.batch.expectedHeadEntryId)
 }
 
 /**
@@ -287,17 +326,17 @@ export function useAgentThreadController(
     const reused = previous != null && previous.plan.identity === plan.identity
       ? previous.plan
       : plan
-    replayRef.current = { plan: reused, parts: localDraft }
+    let submittedPlan = reused
+    replayRef.current = { plan: submittedPlan, parts: localDraft }
     setReplayPending(true)
     // 先捕获 parts + id，随后立即清空 draft，以便输入下一条消息。
     draftRef.current = []
     setDraftState([])
     setInFlightSubmissions((count) => count + 1)
-    return batchMutation
-      .mutateAsync(reused.batch)
+    return enqueueMessagePlanWithCursorRecovery(submittedPlan)
       .then(() => {
         // 仅当身份仍属于这个正在完成的请求时才清除它。
-        if (replayRef.current?.plan === reused) {
+        if (replayRef.current?.plan === submittedPlan) {
           replayRef.current = null
           setReplayPending(false)
         }
@@ -314,7 +353,7 @@ export function useAgentThreadController(
             setReplayPending(false)
           } else {
             // 网络/不确定的失败会保留精确 batch，用于逐字节回放。
-            replayRef.current = { plan: reused, parts: localDraft }
+            replayRef.current = { plan: submittedPlan, parts: localDraft }
             setReplayPending(true)
           }
           // 恢复本地草稿（客户端 localId），与提交 payload 分开。
@@ -325,6 +364,49 @@ export function useAgentThreadController(
       .finally(() => {
         setInFlightSubmissions((count) => Math.max(0, count - 1))
       })
+
+    async function enqueueMessagePlanWithCursorRecovery(
+      initialPlan: CommandBatchPlan,
+    ): Promise<void> {
+      submittedPlan = initialPlan
+      for (let retryCount = 0; ; retryCount += 1) {
+        try {
+          await batchMutation.mutateAsync(submittedPlan.batch)
+          return
+        } catch (error) {
+          if (
+            retryCount >= MAX_STALE_MESSAGE_CURSOR_RETRIES
+            || !isConflictReason(error, 'STALE_COMMAND_CURSOR')
+          ) {
+            throw error
+          }
+          let latest: HarnessThreadSnapshotDTO
+          try {
+            // 直接读取权威 snapshot，不能复用可能早于失败请求启动的 query refetch。
+            latest = await harnessService.getThreadSnapshot(threadId)
+          } catch {
+            throw error
+          }
+          if (
+            latest.thread.threadId !== threadId
+            || !canRetryStaleMessageBatch(submittedPlan, latest)
+          ) {
+            throw error
+          }
+          queryClient.setQueryData(queryKeys.threads.snapshot(threadId), latest)
+          submittedPlan = {
+            ...submittedPlan,
+            batch: {
+              ...submittedPlan.batch,
+              expectedHeadEntryId: latest.thread.headEntryId,
+              expectedNextCommandSequence: latest.thread.nextCommandSequence,
+            },
+          }
+          // stale batch 明确未被接受：保留 command IDs/payload，只替换权威 cursor。
+          replayRef.current = { plan: submittedPlan, parts: localDraft }
+        }
+      }
+    }
   }
 
   function runCommand(command: ThreadCommand) {

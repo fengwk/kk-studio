@@ -16,6 +16,7 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.HandlerMapping;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioComfyuiRuntimeController;
@@ -61,6 +62,9 @@ public class StudioResponseStatusErrorAdvice {
     errorContext.put("type", "about:blank");
     errorContext.put("title", messageService.httpTitle(status));
     errorContext.put("detail", error.getReason());
+    if (error.getCause() instanceof HarnessRuntimeConflictException conflict) {
+      errorContext.put("reason", conflict.reason().name());
+    }
     ImmutableResolvedConventionErrorCode errorCode =
         new ImmutableResolvedConventionErrorCode(
             status,

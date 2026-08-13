@@ -570,16 +570,21 @@ registerCase({
     })
     const thread = snapshot.thread
     const before = await getThreadSnapshot(ctx, thread.threadId)
-    await expectHttpError(
+    const staleHead = await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
-          expectedHeadEntryId: '999999999',
+          expectedHeadEntryId: cid(),
           expectedNextCommandSequence: thread.nextCommandSequence,
           commands: [userMessageCommand('stale head', cid())],
         }),
       { status: 409, messageIncludes: /head|conflict|stale/i },
     )
-    await expectHttpError(
+    const staleHeadBody = JSON.parse(staleHead.body)
+    assert(
+      staleHeadBody.errors?.reason === 'STALE_COMMAND_CURSOR',
+      `stale head conflict reason: ${staleHead.body}`,
+    )
+    const staleSequence = await expectHttpError(
       () =>
         enqueueCommands(ctx, thread.threadId, {
           expectedHeadEntryId: thread.headEntryId,
@@ -587,6 +592,11 @@ registerCase({
           commands: [userMessageCommand('stale sequence', cid())],
         }),
       { status: 409, messageIncludes: /sequence|conflict|stale/i },
+    )
+    const staleSequenceBody = JSON.parse(staleSequence.body)
+    assert(
+      staleSequenceBody.errors?.reason === 'STALE_COMMAND_CURSOR',
+      `stale sequence conflict reason: ${staleSequence.body}`,
     )
     const after = await getThreadSnapshot(ctx, thread.threadId)
     assert(

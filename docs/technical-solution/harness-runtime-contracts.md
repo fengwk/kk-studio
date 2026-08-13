@@ -135,7 +135,7 @@ SET_ACTIVE_TOOLS, SET_YOLO
 | 命令 batch 被接受进入 mailbox | 202 |
 | Thread 创建成功 | 201 |
 
-typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_NOT_QUIESCENT`、`TERMINAL_APPLY_PENDING`、`MOVE_TARGET_CROSS_SESSION`、`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
+typed 冲突 reason 全集：`STALE_REVISION`、`STALE_COMMAND_CURSOR`、`COMMAND_ID_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_NOT_QUIESCENT`、`TERMINAL_APPLY_PENDING`、`MOVE_TARGET_CROSS_SESSION`、`MOVE_TARGET_HAS_CONTINUATION_OBLIGATION`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`。409 的统一错误信封在 `errors.reason` 暴露该稳定枚举，并在 `errors.detail` 保留诊断文本；客户端只能按稳定 reason 做恢复决策。持久化不变量破坏（错误 ownership、mixed sibling、非连续 ordinal、count mismatch）保持 `IllegalStateException`，绝不降级为业务冲突。注意 approval 路径的 Thread/target 缺失同样映射 409（`APPROVAL_NOT_APPLICABLE`），不是 404。
 
 ## 6. MOVE_HEAD
 

@@ -872,6 +872,71 @@ describe('ChatWorkspacePane commands', () => {
     )
   })
 
+  it('recovers a queued message when the running Thread advances past the rendered cursor', async () => {
+    const user = userEvent.setup()
+    const initial = thread({
+      headEntryId: 'e-assistant',
+      nextCommandSequence: '1',
+      revision: '0',
+    })
+    const advanced = thread({
+      headEntryId: 'e-turn-start',
+      nextCommandSequence: '2',
+      revision: '2',
+      status: 'MODEL_STREAMING',
+      processing: true,
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshot(initial))
+      .mockResolvedValue(
+        snapshot(advanced, {
+          entries: [
+            entry('e-assistant', null, 'ASSISTANT', 'previous answer'),
+            {
+              entryId: 'e-turn-start',
+              sessionId: 's1',
+              parentEntryId: 'e-assistant',
+              entryType: 'TURN_START',
+              payloadJson: '{}',
+              createTime: null,
+            },
+          ],
+        }),
+      )
+    vi.mocked(harnessService.enqueueCommands)
+      .mockRejectedValueOnce(
+        new ApiError(
+          'The request conflicts with the current resource state.',
+          409,
+          'CONFLICT',
+          { reason: 'STALE_COMMAND_CURSOR' },
+        ),
+      )
+      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.type(composer, 'queued while the model advances')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(2))
+    const calls = vi.mocked(harnessService.enqueueCommands).mock.calls
+    expect(calls[0]?.[1]).toMatchObject({
+      expectedHeadEntryId: 'e-assistant',
+      expectedNextCommandSequence: '1',
+    })
+    expect(calls[1]?.[1]).toMatchObject({
+      expectedHeadEntryId: 'e-turn-start',
+      expectedNextCommandSequence: '2',
+    })
+    expect(calls[1]?.[1].commands[0]?.clientCommandId).toBe(
+      calls[0]?.[1].commands[0]?.clientCommandId,
+    )
+    expect(screen.queryByText(/Thread 状态已变化/)).not.toBeInTheDocument()
+    await waitFor(() => expect(composer).toBeEmptyDOMElement())
+  })
+
   it('surfaces a 409 from send as the threadStateChanged message without clearing the draft', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.enqueueCommands).mockRejectedValueOnce(
