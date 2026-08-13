@@ -43,6 +43,8 @@ export function createDecisionId(): string {
 export interface CommandBatchPlan {
   batch: HarnessThreadCommandBatchDTO
   identity: string
+  /** 用户提交时的完整 branch target；cursor 恢复不得悄悄切换 Agent/Model/Environment。 */
+  targetDraft: BranchDraft
 }
 
 /**
@@ -79,6 +81,14 @@ function messageIdentity(
   })
 }
 
+function copyBranchDraft(draft: BranchDraft): BranchDraft {
+  return {
+    ...draft,
+    model: { ...draft.model },
+    activeTools: [...draft.activeTools],
+  }
+}
+
 /**
  * 为已有 Thread 构造发送 batch：对 effective base（由持久化 base 投影穿过 QUEUED settings）
  * 取最小 settings diff，随后拼接 USER_MESSAGE command。CAS cursor 取自最新 snapshot Thread DTO。
@@ -104,6 +114,7 @@ export function buildMessageBatchPlan(options: {
     // 不可变的用户意图：thread + ordered contents + target draft。effectiveBase 故意不参与——
     // queued SET_* 投影会改变它，但用户意图并未变化。
     identity: messageIdentity(options.thread.threadId, trimmed, options.draft),
+    targetDraft: copyBranchDraft(options.draft),
   }
 }
 
@@ -133,5 +144,6 @@ export function buildFirstSendMessagePlan(options: {
       commands: [messageCommand],
     },
     identity: messageIdentity(options.thread.threadId, trimmed, base),
+    targetDraft: copyBranchDraft(base),
   }
 }

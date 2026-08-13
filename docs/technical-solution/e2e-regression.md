@@ -189,7 +189,7 @@ L1 的关键语义断言：
 - Chat-scoped Thread create body 携带完整 `branchSettings`，201 返回 `HarnessThreadSnapshotDTO`；`title` 可空（null 保持 null）；
 - Thread/snapshot 的 `threadId`、`sessionId`、`headEntryId` 均为 canonical UUID string；`nextCommandSequence`、`revision` 为 strict decimal string；`nextCommandSequence` 从 **1** 开始；
 - snapshot 结构固定为 `thread`、`entries`（当前 root→head 路径）、`queuedCommands`、`modelInvocation|null`（只暴露 active invocation）、`toolInvocations`（只暴露 classifier-applicable active siblings）；
-- 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 且 Thread 状态（sequence/revision/head）逐字段不变；
+- 命令 batch 携带 `expectedHeadEntryId` + `expectedNextCommandSequence` CAS cursor；stale cursor 409 的统一信封携带 `errors.reason=STALE_COMMAND_CURSOR`，且 Thread 状态（sequence/revision/head）逐字段不变；
 - `USER_MESSAGE` 只接受一个非空有序 `contents(TEXT/ATTACHMENT)` 列表：`TEXT(text)` 与 `ATTACHMENT(uploadId)`（READY upload 的 canonical UUID string，入队事务内原子消费并删除 upload 行）；`text`/`content` 文本 shorthand 已移除（`text` 为未知字段、`content` 对 USER_MESSAGE 禁用）；`IMAGE/AUDIO/VIDEO` 内容类型、未知/多余字段与非 canonical uploadId 返回 400；`CUSTOM_MESSAGE` 仍使用 `content` 且 role 仅 `SYSTEM|USER`（SYSTEM+USER 同一原子 batch 顺序与 payload 稳定）；
 - 命令响应携带 `requestHash`（raw 命令 canonical SHA-256，64 位小写 hex）与 `sequence`；同 `clientCommandId` + 同 hash 整批重放幂等返回既有命令且不二次消费 upload；部分重放 409；replay/400 不依赖异步消费时序；
 - `SET_ENVIRONMENT/SET_AGENT/SET_MODEL/SET_ACTIVE_TOOLS/SET_YOLO` 五类命令按前端固定顺序与 `USER_MESSAGE` 一个原子 batch 入队；case 使用 canonical 但不存在的 Agent，使 Resolver 在调用 Provider 前确定性 `PLANNING_FAILED`。消费后 `branchSettings`/`yoloEnabled` 精确投影、queue 清空，durable `ASSISTANT_ERROR` 与最终 `TURN_END(FAILED, continueModel=false)` 收敛到 IDLE，USER MESSAGE 自身不算消费证据；

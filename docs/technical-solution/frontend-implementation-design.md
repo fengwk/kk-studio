@@ -98,7 +98,8 @@ Blank Chat、Bound Thread 与 Canvas Chat 共用唯一 `ThreadComposer`：
 
 - 发送失败（网络/不确定）：composer 为空时恢复文本并保留 exact plan——重试发送**完全相同的 batch**（同 command ids/payload/order + 原始 expected cursors）；服务端 ordered command-set replay 绕过移动的 cursors。
 - 编辑内容或目标 draft → identity 变化 → mint 全新 batch。
-- **known 409**：batch 未被接受 → 清 `replayRef`，下一次发送基于刷新后 snapshot 重建（新 cursors + 新 command IDs）。
+- **`STALE_COMMAND_CURSOR` + 纯 `USER_MESSAGE` + 同一分支向前推进**：直接读取权威 snapshot，保留原 command IDs/payload，仅替换 head/sequence cursor 后有界重试；用于消除快速连续发送与后台 Turn 推进之间的正常 CAS 竞争。
+- **其他 known 409**：batch 未被接受 → 清 `replayRef`，恢复 draft；下一次发送基于刷新后 snapshot 重建（新 cursors + 新 command IDs）。含 `SET_*` 的 batch、旧 head 已不在当前 root-to-head 路径、未知 reason 均不自动重试。
 
 ## 6. Pane 门禁（dirty/pending）
 

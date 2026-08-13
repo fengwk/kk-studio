@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
@@ -66,6 +67,30 @@ class StudioResponseStatusErrorAdviceTest {
     assertEquals(
         Map.of("type", "about:blank", "title", "HTTP Error", "detail", "upstream detail"),
         body.getErrors());
+  }
+
+  @Test
+  void exposesTheStableHarnessConflictReasonForClientRecovery() {
+    HarnessRuntimeConflictException conflict =
+        new HarnessRuntimeConflictException(
+            HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale cursor");
+    ResponseStatusException error =
+        new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict);
+
+    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+
+    assertEquals(409, response.getStatusCode().value());
+    assertEquals(
+        Map.of(
+            "type",
+            "about:blank",
+            "title",
+            "Conflict",
+            "detail",
+            "stale cursor",
+            "reason",
+            "STALE_COMMAND_CURSOR"),
+        response.getBody().getErrors());
   }
 
   @Test

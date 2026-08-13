@@ -2,7 +2,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useAgentThreadController, retireStaleStopPending } from '@/features/ai/runtime/useAgentThreadController'
+import {
+  canRetryStaleMessageBatch,
+  useAgentThreadController,
+  retireStaleStopPending,
+} from '@/features/ai/runtime/useAgentThreadController'
 import {
   buildMessageBatchPlan,
   type CommandBatchPlan,
@@ -326,6 +330,206 @@ describe('useAgentThreadController', () => {
     )
     // 失败的 draft 会被恢复，用户无需重新输入即可重试。
     expect(partsToText(result.current.draft)).toBe('stale message')
+  })
+
+  it('refreshes and retries a pure message after a typed stale cursor conflict', async () => {
+    const currentThread = threadFixture()
+    const advancedThread = threadFixture({
+      headEntryId: 'h2',
+      nextCommandSequence: '2',
+      revision: '2',
+      status: 'MODEL_STREAMING',
+      processing: true,
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(currentThread))
+      .mockResolvedValue(
+        snapshotOf(advancedThread, {
+          entries: [
+            {
+              entryId: 'h1',
+              sessionId: 's1',
+              parentEntryId: null,
+              entryType: 'ROOT',
+              payloadJson: '{}',
+              createTime: null,
+            },
+            {
+              entryId: 'h2',
+              sessionId: 's1',
+              parentEntryId: 'h1',
+              entryType: 'TURN_START',
+              payloadJson: '{}',
+              createTime: null,
+            },
+          ],
+        }),
+      )
+    vi.mocked(harnessService.enqueueCommands)
+      .mockRejectedValueOnce(
+        new ApiError(
+          'The request conflicts with the current resource state.',
+          409,
+          'CONFLICT',
+          { reason: 'STALE_COMMAND_CURSOR' },
+        ),
+      )
+      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+    const base = branchDraftFromThread(currentThread)
+
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          '',
+          undefined,
+          buildBatchFor(currentThread, base, base),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('queue after current turn')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    const calls = vi.mocked(harnessService.enqueueCommands).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.[1]).toMatchObject({
+      expectedHeadEntryId: 'h1',
+      expectedNextCommandSequence: '1',
+    })
+    expect(calls[1]?.[1]).toMatchObject({
+      expectedHeadEntryId: 'h2',
+      expectedNextCommandSequence: '2',
+    })
+    expect(calls[1]?.[1].commands[0]?.clientCommandId).toBe(
+      calls[0]?.[1].commands[0]?.clientCommandId,
+    )
+    expect(result.current.actionError).toBeNull()
+    expect(partsToText(result.current.draft)).toBe('')
+  })
+
+  it('does not retry a stale message cursor after the current branch changed', async () => {
+    const currentThread = threadFixture()
+    const switchedThread = threadFixture({
+      headEntryId: 'other-head',
+      nextCommandSequence: '2',
+      revision: '2',
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(currentThread))
+      .mockResolvedValue(
+        snapshotOf(switchedThread, {
+          entries: [
+            {
+              entryId: 'other-head',
+              sessionId: 's1',
+              parentEntryId: null,
+              entryType: 'ROOT',
+              payloadJson: '{}',
+              createTime: null,
+            },
+          ],
+        }),
+      )
+    vi.mocked(harnessService.enqueueCommands).mockRejectedValueOnce(
+      new ApiError('stale', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+    )
+    const base = branchDraftFromThread(currentThread)
+
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          '',
+          undefined,
+          buildBatchFor(currentThread, base, base),
+          new Map(),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('do not move across branches')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    expect(harnessService.enqueueCommands).toHaveBeenCalledTimes(1)
+    expect(result.current.actionError).toContain('Thread 状态已变化')
+    expect(partsToText(result.current.draft)).toBe('do not move across branches')
+  })
+
+  it('only retries stale batches that contain USER_MESSAGE commands on the same branch', () => {
+    const currentThread = threadFixture()
+    const base = branchDraftFromThread(currentThread)
+    const messagePlan = buildMessageBatchPlan({
+      thread: currentThread,
+      effectiveBase: base,
+      draft: base,
+      parts: [createTextPart('hello')],
+      createCommandId: () => 'message-id',
+    })
+    const advanced = snapshotOf(
+      threadFixture({ headEntryId: 'h2', nextCommandSequence: '2' }),
+      {
+        entries: [
+          {
+            entryId: 'h1',
+            sessionId: 's1',
+            parentEntryId: null,
+            entryType: 'ROOT',
+            payloadJson: '{}',
+            createTime: null,
+          },
+        ],
+      },
+    )
+    expect(canRetryStaleMessageBatch(messagePlan, advanced)).toBe(true)
+
+    const settingsPlan = buildMessageBatchPlan({
+      thread: currentThread,
+      effectiveBase: base,
+      draft: { ...base, agentName: 'coder' },
+      parts: [createTextPart('hello')],
+      createCommandId: () => 'settings-id',
+    })
+    expect(canRetryStaleMessageBatch(settingsPlan, advanced)).toBe(false)
+    expect(
+      canRetryStaleMessageBatch(
+        messagePlan,
+        snapshotOf(
+          threadFixture({
+            headEntryId: 'h2',
+            nextCommandSequence: '2',
+            branchSettings: branchSettings({ agentName: 'other-agent' }),
+          }),
+          {
+            entries: [
+              {
+                entryId: 'h1',
+                sessionId: 's1',
+                parentEntryId: null,
+                entryType: 'ROOT',
+                payloadJson: '{}',
+                createTime: null,
+              },
+            ],
+          },
+        ),
+      ),
+    ).toBe(false)
+    expect(
+      canRetryStaleMessageBatch(
+        messagePlan,
+        snapshotOf(threadFixture({ headEntryId: 'other', nextCommandSequence: '2' }), {
+          entries: [],
+        }),
+      ),
+    ).toBe(false)
   })
 
   it('restores the local-id draft, not the resolved payload, after a send failure with attachments', async () => {

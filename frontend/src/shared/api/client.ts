@@ -31,6 +31,11 @@ export function isConflictError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409
 }
 
+/** 仅匹配后端显式暴露的稳定冲突分类；通用 409 不能据此自动重试。 */
+export function isConflictReason(error: unknown, reason: string): boolean {
+  return error instanceof ApiError && error.status === 409 && error.errors?.reason === reason
+}
+
 /** 请求的资源已不存在；调用方可以丢弃过期的本地引用。 */
 export function isNotFoundError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 404

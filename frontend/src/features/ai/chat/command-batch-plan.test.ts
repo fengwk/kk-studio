@@ -77,6 +77,7 @@ describe('command batch replay identity (immutable user intent)', () => {
       parts: partsOf(createTextPart('same intent')),
     })
     expect(before.identity).toBe(afterProjection.identity)
+    expect(before.targetDraft).toEqual(draftB)
     // 不同的 base 会生成不同的 batch（settings diff），但 replay 决策依据的是
     // identity，因此重试时仍由 ORIGINAL batch 胜出。
     expect(before.batch).not.toEqual(afterProjection.batch)
@@ -134,6 +135,7 @@ describe('command batch replay identity (immutable user intent)', () => {
     // Identity 匹配：controller 的 replay 复用 ORIGINAL plan（cid-stable），
     // 而不是新构建的 batch（unused-fresh-id）。
     expect(boundPane.identity).toBe(firstSend.identity)
+    expect(boundPane.targetDraft).toEqual(firstSend.targetDraft)
     expect(boundPane.batch.commands[0]?.clientCommandId).not.toBe(firstSend.batch.commands[0]?.clientCommandId)
   })
 })
