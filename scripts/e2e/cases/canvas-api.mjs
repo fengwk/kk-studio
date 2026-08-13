@@ -115,21 +115,87 @@ registerCase({
     assert(tailChanges.patches.length === 0, JSON.stringify(tailChanges))
     assert(tailChanges.snapshot === null, JSON.stringify(tailChanges))
 
+    // RENAME_GROUP：标题更新只发 group UPSERT patch；空白 title 与未知 group 都是 400。
+    const groupId = cid()
+    await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+      expectedVersion: '1',
+      commandId: cid(),
+      commands: [
+        {
+          type: 'CREATE_GROUP',
+          groupId,
+          title: 'G',
+          transform: { x: 0, y: 0, width: 300, height: 200 },
+          memberNodeIds: [nodeId],
+        },
+      ],
+    })
+    const { json: renameJson } = await ctx.call(
+      'POST',
+      `/api/canvases/${canvas.id}/commands`,
+      {
+        expectedVersion: '2',
+        commandId: cid(),
+        commands: [{ type: 'RENAME_GROUP', groupId, title: 'Renamed' }],
+      },
+    )
+    const renamePatch = envelopeData(renameJson)
+    assert(
+      renamePatch.baseVersion === '2' && renamePatch.version === '3',
+      JSON.stringify(renamePatch),
+    )
+    const groupUpsert = renamePatch.groups.find(
+      (item) => item.op === 'UPSERT' && item.group.id === groupId,
+    )
+    assert(groupUpsert?.group.title === 'Renamed', JSON.stringify(renamePatch.groups))
+    assert(
+      renamePatch.nodes.length === 0 && renamePatch.links.length === 0,
+      JSON.stringify(renamePatch),
+    )
+    await expectHttpError(
+      () =>
+        ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+          expectedVersion: '3',
+          commandId: cid(),
+          commands: [{ type: 'RENAME_GROUP', groupId, title: ' ' }],
+        }),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () =>
+        ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+          expectedVersion: '3',
+          commandId: cid(),
+          commands: [{ type: 'RENAME_GROUP', groupId: cid(), title: 'x' }],
+        }),
+      { status: 400 },
+    )
+
     // snapshot/list：canonical UUID id、version 与 threadId 契约；删除后 404。
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
     const snapshot = envelopeData(snapshotJson)
     assertDecimalVersion(snapshot.document.version, 'snapshot.document.version')
-    assert(snapshot.document.version === '1', JSON.stringify(snapshot.document))
+    assert(snapshot.document.version === '3', JSON.stringify(snapshot.document))
     assert(
       snapshot.nodes.some((item) => item.id === nodeId && item.resources[0].kind === 'TEXT'),
       JSON.stringify(snapshot.nodes),
+    )
+    assert(
+      snapshot.nodes.some((item) => item.id === nodeId && item.groupId === groupId),
+      JSON.stringify(snapshot.nodes),
+    )
+    assert(
+      snapshot.groups.some(
+        (item) => item.id === groupId && item.title === 'Renamed',
+      ),
+      JSON.stringify(snapshot.groups),
     )
     const { json: listJson } = await ctx.call('GET', '/api/canvases')
     const list = envelopeData(listJson)
     assert(list.some((item) => item.id === canvas.id), JSON.stringify(list))
     const listed = list.find((item) => item.id === canvas.id)
     assertDecimalVersion(listed?.version, 'listed canvas.version')
-    assert(listed?.version === '1', JSON.stringify(listed))
+    assert(listed?.version === '3', JSON.stringify(listed))
 
     await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
     await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })

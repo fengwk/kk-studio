@@ -269,6 +269,8 @@ public class StudioWebMapper {
           parseUuids(value.memberNodeIds(), "memberNodeIds"));
       case CanvasCommandDTO.DeleteGroup value -> new CanvasCommand.DeleteGroup(
           parseUuid(value.groupId(), "groupId"));
+      case CanvasCommandDTO.RenameGroup value -> new CanvasCommand.RenameGroup(
+          parseUuid(value.groupId(), "groupId"), value.title());
     };
   }
 

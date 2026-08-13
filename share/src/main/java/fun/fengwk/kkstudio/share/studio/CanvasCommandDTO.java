@@ -28,7 +28,8 @@ import java.util.List;
   @JsonSubTypes.Type(value = CanvasCommandDTO.CreateGroup.class, name = "CREATE_GROUP"),
   @JsonSubTypes.Type(value = CanvasCommandDTO.MoveGroup.class, name = "MOVE_GROUP"),
   @JsonSubTypes.Type(value = CanvasCommandDTO.Ungroup.class, name = "UNGROUP"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteGroup.class, name = "DELETE_GROUP")
+  @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteGroup.class, name = "DELETE_GROUP"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.RenameGroup.class, name = "RENAME_GROUP")
 })
 public sealed interface CanvasCommandDTO
     permits CanvasCommandDTO.CreateTextNode,
@@ -44,7 +45,8 @@ public sealed interface CanvasCommandDTO
         CanvasCommandDTO.CreateGroup,
         CanvasCommandDTO.MoveGroup,
         CanvasCommandDTO.Ungroup,
-        CanvasCommandDTO.DeleteGroup {
+        CanvasCommandDTO.DeleteGroup,
+        CanvasCommandDTO.RenameGroup {
 
   @JsonAnySetter
   default void rejectUnknownField(String field, Object value) {
@@ -93,4 +95,6 @@ public sealed interface CanvasCommandDTO
   record Ungroup(String groupId, List<String> memberNodeIds) implements CanvasCommandDTO {}
 
   record DeleteGroup(String groupId) implements CanvasCommandDTO {}
+
+  record RenameGroup(String groupId, String title) implements CanvasCommandDTO {}
 }
