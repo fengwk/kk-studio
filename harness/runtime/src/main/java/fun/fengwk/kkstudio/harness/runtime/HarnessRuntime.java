@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
@@ -431,19 +432,52 @@ public final class HarnessRuntime {
           LockedThreadContext locked = ThreadContextLock.load(tx, thread);
           return switch (locked.context()) {
             case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
-                thread, locked.path(), queued, null, List.of());
+                thread, locked.path(), queued, null, List.of(), List.of());
             case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
-                thread, locked.path(), queued, null, List.of());
+                thread, locked.path(), queued, null, List.of(), List.of());
             case ThreadContext.ModelActive active -> new ThreadSnapshot(
-                thread, locked.path(), queued, active.model(), List.of());
+                thread,
+                locked.path(),
+                queued,
+                active.model(),
+                List.of(),
+                projectModelAttemptFailures(active.model()));
             case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
-                thread, locked.path(), queued, pending.model(), List.of());
+                thread,
+                locked.path(),
+                queued,
+                pending.model(),
+                List.of(),
+                projectModelAttemptFailures(pending.model()));
             case ThreadContext.ToolActive active -> new ThreadSnapshot(
-                thread, locked.path(), queued, active.model(), active.siblings());
+                thread, locked.path(), queued, active.model(), active.siblings(), List.of());
             case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
-                thread, locked.path(), queued, pending.model(), pending.siblings());
+                thread, locked.path(), queued, pending.model(), pending.siblings(), List.of());
           };
         });
+  }
+
+  private static List<ModelAttemptFailureProjection> projectModelAttemptFailures(
+      ModelInvocation invocation) {
+    if (invocation.request().compaction() != null || invocation.failedAttempts().isEmpty()) {
+      return List.of();
+    }
+    List<ModelAttemptFailureProjection> projections = new ArrayList<>();
+    for (ModelAttemptFailure failure : invocation.failedAttempts()) {
+      projections.add(
+          new ModelAttemptFailureProjection(
+              invocation.id(),
+              invocation.turnStartEntryId(),
+              invocation.basisHeadEntryId(),
+              failure.attempt(),
+              failure.sequence(),
+              failure.text(),
+              failure.thinking(),
+              failure.error(),
+              failure.failedAt(),
+              failure.retryAt()));
+    }
+    return List.copyOf(projections);
   }
 
   /** Ordered command-set replay：先比较 requestHash（独立于 durable payload 形态），再按请求顺序校验 sequence 连续性。 */

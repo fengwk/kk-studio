@@ -435,6 +435,7 @@ final class ThreadProcessorTestSupport {
                       null,
                       null,
                       null,
+                      List.of(),
                       NOW,
                       NOW));
               return id;
@@ -582,6 +583,7 @@ final class ThreadProcessorTestSupport {
                 model.result(),
                 model.error(),
                 model.resultEntryId(),
+                model.failedAttempts(),
                 model.createdAt(),
                 updatedAt));
   }
@@ -879,6 +881,7 @@ final class ThreadProcessorTestSupport {
                       null,
                       null,
                       null,
+                      List.of(),
                       NOW,
                       NOW));
               tx.insertEntry(

@@ -108,13 +108,13 @@ public final class HarnessRuntimeTestFixtures {
   /** IDLE 快照：仅 ROOT，无 open Turn、无 Invocation。 */
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(thread(id(1)), path, List.of(), null, List.of());
+    return new ThreadSnapshot(thread(id(1)), path, List.of(), null, List.of(), List.of());
   }
 
   /** IDLE 快照（指定 thread id）。 */
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(thread(threadId, id(1)), path, List.of(), null, List.of());
+    return new ThreadSnapshot(thread(threadId, id(1)), path, List.of(), null, List.of(), List.of());
   }
 
   /** CONTINUATION_DUE 快照：ROOT -> TURN_START -> USER -> ASSISTANT -> continueModel TURN_END。 */
@@ -135,7 +135,7 @@ public final class HarnessRuntimeTestFixtures {
         new EntryPath(
             List.of(
                 rootEntry(), turnStartEntry(), userMessageEntry(), plainAssistantEntry(), turnEnd));
-    return new ThreadSnapshot(thread(threadId, id(5)), path, List.of(), null, List.of());
+    return new ThreadSnapshot(thread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
   }
 
   public static ModelUsage usage() {

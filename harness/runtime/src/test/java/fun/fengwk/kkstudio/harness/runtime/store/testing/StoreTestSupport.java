@@ -31,7 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -202,8 +204,34 @@ final class StoreTestSupport {
         null);
   }
 
+  static ProviderResponse assistantResponse(String... toolCallIds) {
+    List<ProviderToolCall> calls = new ArrayList<>();
+    for (String toolCallId : toolCallIds) {
+      calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
+    }
+    return new ProviderResponse(
+        "assistant reply",
+        "",
+        calls,
+        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        "req-1",
+        null,
+        "{}");
+  }
+
   static EntryPayload assistantErrorPayload() {
-    return new AssistantErrorPayload(new AssistantError("MODEL_ERROR", "model failed"));
+    return new AssistantErrorPayload(
+        new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "model failed"), null);
   }
 
   static EntryPayload assistantAbortedPayload() {
@@ -337,6 +365,7 @@ final class StoreTestSupport {
         null,
         error,
         resultEntryId,
+        List.of(),
         createdAt,
         createdAt);
   }

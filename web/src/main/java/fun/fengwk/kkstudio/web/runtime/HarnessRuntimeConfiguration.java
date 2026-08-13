@@ -147,10 +147,7 @@ public class HarnessRuntimeConfiguration {
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicy retryPolicy) {
     return new ModelProcessorConfig(
-        leaseConfig,
-        properties.getModelCheckpointFlushInterval(),
-        retryPolicy,
-        properties.getModelDispatchBusyFallbackDelay());
+        leaseConfig, retryPolicy, properties.getModelDispatchBusyFallbackDelay());
   }
 
   @Bean

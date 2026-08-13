@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
@@ -293,15 +294,13 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   null,
                   T1));
           ModelInvocation model = tx.lockModelInvocation(id(1L)).orElseThrow();
-          tx.updateModelInvocation(
-              modelInvocation(
-                  id(1L),
-                  baseline.threadId(),
-                  baseline.turnStartEntryId(),
-                  baseline.turnStartEntryId(),
-                  ModelInvocationStatus.CANCELLED,
-                  assistantEntryId,
-                  model.createdAt()));
+          tx.updateModelInvocation(model.beginDispatch(T1));
+          model = tx.lockModelInvocation(id(1L)).orElseThrow();
+          tx.updateModelInvocation(model.markRunning(T1));
+          model = tx.lockModelInvocation(id(1L)).orElseThrow();
+          tx.updateModelInvocation(model.succeed(assistantResponse("call-1", "call-2"), T1));
+          model = tx.lockModelInvocation(id(1L)).orElseThrow();
+          tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });
     ToolInvocation ordinal0 =
         toolInvocation(

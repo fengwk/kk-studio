@@ -10,6 +10,7 @@ public sealed interface EntryPayload
         TurnStartPayload,
         MessagePayload,
         CustomEntryPayload,
+        ModelAttemptFailurePayload,
         CustomMessagePayload,
         AssistantErrorPayload,
         AssistantAbortedPayload,

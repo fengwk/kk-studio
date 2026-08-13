@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -512,10 +513,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_model_invocation (
             id, thread_id, turn_start_entry_id, basis_head_entry_id, request, status, attempt,
-            stream_checkpoint, result, error, result_entry_id, created_at, updated_at
+            stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at
         ) values (
             ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-            cast(? as jsonb), ?, ?, ?
+            cast(? as jsonb), ?, cast(? as jsonb), ?, ?
         )
         """,
         invocation.id(),
@@ -529,6 +530,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         encodeModelResult(invocation),
         encodeModelError(invocation),
         invocation.resultEntryId(),
+        PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
         PostgresqlHarnessRows.timestamp(invocation.createdAt()),
         PostgresqlHarnessRows.timestamp(invocation.updatedAt()));
     lock(lockKey);
@@ -547,6 +549,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                         "model invocation " + invocation.id() + " does not exist"));
     ModelInvocation.validateTransition(stored, invocation);
     requireValidModelResultEntry(invocation);
+    if (stored.resultEntryId() == null && invocation.resultEntryId() != null) {
+      ModelAttemptMaterialization.validate(
+          stored, invocation, loadEntryPath(invocation.resultEntryId()));
+    }
     int updated =
         update(
             """
@@ -557,6 +563,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 result = cast(? as jsonb),
                 error = cast(? as jsonb),
                 result_entry_id = ?,
+                failed_attempts = cast(? as jsonb),
                 updated_at = ?
             where id = ?
             """,
@@ -566,6 +573,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             encodeModelResult(invocation),
             encodeModelError(invocation),
             invocation.resultEntryId(),
+            PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
             PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
             invocation.id());
     requireSingleUpdate(updated, "model invocation", invocation.id());

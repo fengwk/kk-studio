@@ -353,7 +353,7 @@ class CompactionSummaryAssemblerTest {
               id(nextId++),
               SESSION_ID,
               parentId(),
-              new AssistantErrorPayload(new AssistantError("SUMMARIZATION_FAILED", "boom")),
+              new AssistantErrorPayload(new AssistantError("SUMMARIZATION_FAILED", "boom"), null),
               BASE));
       entries.add(
           new Entry(

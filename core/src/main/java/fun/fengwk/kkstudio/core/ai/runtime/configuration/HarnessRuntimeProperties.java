@@ -41,9 +41,6 @@ public class HarnessRuntimeProperties {
   /** ThreadProcessor 的 Resolver 异常 / null、heartbeat 失败与 step limit 共用的重排延迟。 */
   private Duration threadResolveFailureDelay = Duration.ofSeconds(1);
 
-  /** ModelProcessor safe checkpoint 的节流写入间隔。 */
-  private Duration modelCheckpointFlushInterval = Duration.ofMillis(100);
-
   /** ModelProcessor 在 Gateway start 抛异常（肯定未接受）时的 reschedule 延迟。 */
   private Duration modelDispatchBusyFallbackDelay = Duration.ofSeconds(1);
 

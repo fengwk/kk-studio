@@ -111,6 +111,81 @@ class ModelStreamAccumulatorTest {
                 response("", "", List.of(new ProviderToolCall("other", "bash", "{}")))));
   }
 
+  /** reconcile 校验失败不得把尚未发布的 final text/thinking gap 混入用户已见 partial。 */
+  @Test
+  void failedReconcileDoesNotMutateVisibleTextOrThinking() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.TextDelta("hel"));
+    accumulator.append(new ProviderStreamEvent.ThinkingDelta("thin"));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{}"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> accumulator.complete(response("hello", "thinking", List.of())));
+    assertEquals("hel", accumulator.text());
+    assertEquals("thin", accumulator.thinking());
+  }
+
+  /** 后序 tool-call 冲突不得提交前序 tool-call 的 preview gap。 */
+  @Test
+  void failedReconcileDoesNotPartiallyMutateToolCalls() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(0, "call", "bas", "{\"a\""));
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(1, "call_2", "bash", "{}"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            accumulator.complete(
+                response(
+                    "",
+                    "",
+                    List.of(
+                        new ProviderToolCall("call_1", "bash", "{\"a\":1}"),
+                        new ProviderToolCall("other", "bash", "{}")))));
+
+    ModelStreamAccumulator.Completion completion =
+        accumulator.complete(
+            response(
+                "",
+                "",
+                List.of(
+                    new ProviderToolCall("call_1", "bash", "{\"a\":1}"),
+                    new ProviderToolCall("call_2", "bash", "{}"))));
+    assertEquals(
+        List.of(new ProviderStreamEvent.ToolCallDelta(0, "_1", "h", ":1}")), completion.gaps());
+  }
+
+  /** 未 stream 的 final tool call 也必须等全部 preview 成功后才进入 accumulator。 */
+  @Test
+  void failedReconcileDoesNotCreateUnpublishedToolCalls() {
+    ModelStreamAccumulator accumulator = new ModelStreamAccumulator();
+    accumulator.append(new ProviderStreamEvent.ToolCallDelta(1, "call_2", "bash", "{}"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            accumulator.complete(
+                response(
+                    "",
+                    "",
+                    List.of(
+                        new ProviderToolCall("ghost", "read", "{}"),
+                        new ProviderToolCall("other", "bash", "{}")))));
+
+    ModelStreamAccumulator.Completion completion =
+        accumulator.complete(
+            response(
+                "",
+                "",
+                List.of(
+                    new ProviderToolCall("real", "write", "{\"ok\":true}"),
+                    new ProviderToolCall("call_2", "bash", "{}"))));
+    assertEquals(
+        List.of(new ProviderStreamEvent.ToolCallDelta(0, "real", "write", "{\"ok\":true}")),
+        completion.gaps());
+  }
+
   private static ProviderResponse response(
       String text, String thinking, List<ProviderToolCall> calls) {
     return new ProviderResponse(

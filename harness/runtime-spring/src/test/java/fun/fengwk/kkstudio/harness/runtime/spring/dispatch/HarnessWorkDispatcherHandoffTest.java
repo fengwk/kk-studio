@@ -364,8 +364,7 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(
-                leaseConfig, Duration.ofSeconds(5), noRetry, Duration.ofSeconds(5)),
+            new ModelProcessorConfig(leaseConfig, noRetry, Duration.ofSeconds(5)),
             clock,
             processorScheduler);
     ToolProcessor toolProcessor =

@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.tool.EnvironmentName;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -39,7 +40,7 @@ class HistoryEntryPayloadJsonCodecTest {
   private static final HistoryEntryPayloadJsonCodec CODEC = new HistoryEntryPayloadJsonCodec();
 
   @Test
-  void roundTripsAllSevenPayloadTypes() {
+  void roundTripsAllPayloadTypes() {
     BranchSettings settings = settings(ENV);
     EntryPayload root = new RootPayload(settings);
     EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings);
@@ -70,7 +71,15 @@ class HistoryEntryPayloadJsonCodecTest {
             system("system"),
             CustomMessagePayload.CORE_DETAILS_JSON);
     EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", 2, "{\"s\":1}");
-    EntryPayload error = new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "down"));
+    EntryPayload attemptFailure =
+        new ModelAttemptFailurePayload(
+            new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
+            new AssistantError("TRANSIENT", "down"),
+            Instant.parse("2026-01-01T00:00:02Z"));
+    EntryPayload error =
+        new AssistantErrorPayload(
+            new AssistantError("MODEL_FAILED", "down"),
+            new ModelAttemptSnapshot(2, 9, "final partial", ""));
     EntryPayload aborted =
         new AssistantAbortedPayload(
             new AgentMessage(
@@ -80,7 +89,17 @@ class HistoryEntryPayloadJsonCodecTest {
 
     for (EntryPayload payload :
         List.of(
-            root, turnStart, user, assistant, tool, custom, customEntry, error, aborted, turnEnd)) {
+            root,
+            turnStart,
+            user,
+            assistant,
+            tool,
+            custom,
+            customEntry,
+            attemptFailure,
+            error,
+            aborted,
+            turnEnd)) {
       assertEquals(payload, CODEC.decode(payload.type(), CODEC.encode(payload)));
       assertEquals(payload, CODEC.decodeNode(payload.type(), CODEC.encodeNode(payload)));
     }
@@ -140,6 +159,22 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hi\"}]},"
             + "\"assistantMetadata\":null,\"toolResultMetadata\":null}",
         CODEC.encode(new MessagePayload(user("hi"), null, null)));
+    assertEquals(
+        "{\"attempt\":{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"\"},"
+            + "\"error\":{\"code\":\"TRANSIENT\",\"message\":\"down\"},"
+            + "\"retryAt\":\"2026-01-01T00:00:02Z\"}",
+        CODEC.encode(
+            new ModelAttemptFailurePayload(
+                new ModelAttemptSnapshot(1, 7, "partial", ""),
+                new AssistantError("TRANSIENT", "down"),
+                Instant.parse("2026-01-01T00:00:02Z"))));
+    assertEquals(
+        "{\"error\":{\"code\":\"MODEL_FAILED\",\"message\":\"down\"},"
+            + "\"attempt\":{\"attempt\":2,\"sequence\":9,\"text\":\"final\",\"thinking\":\"\"}}",
+        CODEC.encode(
+            new AssistantErrorPayload(
+                new AssistantError("MODEL_FAILED", "down"),
+                new ModelAttemptSnapshot(2, 9, "final", ""))));
   }
 
   @Test

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -577,6 +578,20 @@ public final class ThreadProcessor {
     return -1;
   }
 
+  private static ModelAttemptSnapshot modelAttemptSnapshot(ModelInvocation model) {
+    if (model.failedAttempts().size() == model.attempt()) {
+      return null;
+    }
+    if (model.streamCheckpoint() == null) {
+      return new ModelAttemptSnapshot(model.attempt(), 0, "", "");
+    }
+    return new ModelAttemptSnapshot(
+        model.streamCheckpoint().attempt(),
+        model.streamCheckpoint().sequence(),
+        model.streamCheckpoint().text(),
+        model.streamCheckpoint().thinking());
+  }
+
   /**
    * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序）。全部低序 mutation 完成后最后执行 claimed
    * THREAD Work fence，fence 失败抛 {@link ClaimLostSignal} 整事务回滚；fence 通过后按 id 升序请求 TOOL Work。
@@ -597,7 +612,7 @@ public final class ThreadProcessor {
     Instant mutationNow =
         durableMutationTime(now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
     UUID sessionId = path.root().sessionId();
-    UUID parentId = path.head().id();
+    UUID parentId = ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model);
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
     ProviderResponse response = model.result();
     CompactionRequest compactionRequest = model.request().compaction();
@@ -612,7 +627,7 @@ public final class ThreadProcessor {
                     ? CompactionSummaryAssembler.resultPayload(
                         compactionRequest, response.text(), path)
                     : payloadMapper.assistantPayload(response, model.request().toolBindings())
-                : payloadMapper.assistantErrorPayload(model.error()),
+                : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow));
     tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
     UUID head = resultEntryId;
@@ -939,6 +954,7 @@ public final class ThreadProcessor {
               null,
               null,
               null,
+              List.of(),
               mutationNow,
               mutationNow));
     } else {
@@ -949,7 +965,7 @@ public final class ThreadProcessor {
               errorEntryId,
               plan.sessionId(),
               plan.candidateHeadEntryId(),
-              new AssistantErrorPayload(rejected.error()),
+              new AssistantErrorPayload(rejected.error(), null),
               mutationNow));
       UUID turnEndId = tx.nextId();
       tx.insertEntry(

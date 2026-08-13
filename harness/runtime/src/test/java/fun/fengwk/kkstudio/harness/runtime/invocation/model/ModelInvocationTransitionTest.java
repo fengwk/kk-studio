@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 /** ModelInvocation 纯 transition 方法以及共享的 transition 校验。 */
 class ModelInvocationTransitionTest {
@@ -30,6 +31,12 @@ class ModelInvocationTransitionTest {
   private static final Instant T1 = CREATED.plusSeconds(1);
   private static final Instant T2 = CREATED.plusSeconds(2);
   private static final Instant T3 = CREATED.plusSeconds(3);
+
+  private static ModelAttemptFailure failure(int attempt) {
+    Instant failedAt = CREATED.plusSeconds(attempt * 2L);
+    return new ModelAttemptFailure(
+        attempt, attempt, "partial-" + attempt, "", error(), failedAt, failedAt.plusSeconds(1));
+  }
 
   private static ModelInvocation ready(int attempt) {
     return invocation(ModelInvocationStatus.READY, attempt, null, null, null, null);
@@ -70,8 +77,20 @@ class ModelInvocationTransitionTest {
         result,
         error,
         resultEntryId,
+        failures(status, attempt),
         CREATED,
         CREATED);
+  }
+
+  private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {
+    int count =
+        switch (status) {
+          case READY, DISPATCHING -> attempt;
+          case RUNNING, SUCCEEDED, UNKNOWN, FAILED, CANCELLED -> Math.max(0, attempt - 1);
+        };
+    return IntStream.rangeClosed(1, count)
+        .mapToObj(ModelInvocationTransitionTest::failure)
+        .toList();
   }
 
   @Test
@@ -129,7 +148,7 @@ class ModelInvocationTransitionTest {
     ModelInvocation running = running(1, null);
     assertEquals(first, running.checkpoint(first, T1).streamCheckpoint());
     // 更大但仍是严格前缀的 sequence
-    StreamCheckpoint grown = new StreamCheckpoint(1, 2L, "partial-extended", null);
+    StreamCheckpoint grown = new StreamCheckpoint(1, 2L, "partial-extended", "");
     ModelInvocation withCheckpoint = running.checkpoint(first, T1).checkpoint(grown, T2);
     assertEquals(grown, withCheckpoint.streamCheckpoint());
     // 相同 sequence 要求完全 idempotent
@@ -137,17 +156,17 @@ class ModelInvocationTransitionTest {
     // 更小 sequence 或分叉均被拒绝
     assertThrows(
         IllegalArgumentException.class,
-        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 1L, "partial", null), T3));
+        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 1L, "partial", ""), T3));
     assertThrows(
         IllegalArgumentException.class,
-        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 2L, "different", null), T3));
+        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 2L, "different", ""), T3));
     assertThrows(
         IllegalArgumentException.class,
-        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 3L, "partial-other", null), T3));
+        () -> withCheckpoint.checkpoint(new StreamCheckpoint(1, 3L, "partial-other", ""), T3));
     // checkpoint 保持在同一 attempt 上
     assertThrows(
         IllegalArgumentException.class,
-        () -> withCheckpoint.checkpoint(new StreamCheckpoint(2, 0L, "other attempt", null), T3));
+        () -> withCheckpoint.checkpoint(new StreamCheckpoint(2, 0L, "other attempt", ""), T3));
     // 仍在 running 时不能清除 checkpoint（transition 校验会拒绝）
     assertThrows(
         IllegalArgumentException.class,
@@ -207,16 +226,51 @@ class ModelInvocationTransitionTest {
   @Test
   void retryReadyReturnsToReadyKeepingAttemptAndDroppingCheckpoint() {
     ModelInvocation withCheckpoint = running(1, checkpoint(1));
-    ModelInvocation next = withCheckpoint.retryReady(T1);
+    ModelInvocation next = withCheckpoint.retryReady(failure(1), T1);
     assertEquals(ModelInvocationStatus.READY, next.status());
     assertEquals(1, next.attempt());
     assertNull(next.streamCheckpoint());
     assertNull(next.result());
     assertNull(next.error());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).retryReady(T1));
-    assertThrows(IllegalArgumentException.class, () -> dispatching(0).retryReady(T1));
-    assertThrows(IllegalArgumentException.class, () -> succeeded(1).retryReady(T1));
-    assertThrows(IllegalArgumentException.class, () -> failed(1).retryReady(T1));
+    assertEquals(List.of(failure(1)), next.failedAttempts());
+    assertThrows(IllegalArgumentException.class, () -> ready(0).retryReady(failure(1), T1));
+    assertThrows(IllegalArgumentException.class, () -> dispatching(0).retryReady(failure(1), T1));
+    assertThrows(IllegalArgumentException.class, () -> succeeded(1).retryReady(failure(1), T1));
+    assertThrows(IllegalArgumentException.class, () -> failed(1).retryReady(failure(1), T1));
+  }
+
+  /** failedAttempts 只能由 RUNNING -> READY 追加一条，历史前缀不可改写或跨状态注入。 */
+  @Test
+  void failedAttemptsAreAppendOnlyAcrossTransitions() {
+    ModelInvocation running = running(1, checkpoint(1));
+    ModelInvocation retried = running.retryReady(failure(1), T1);
+    ModelInvocation nextRunning = retried.beginDispatch(T2).markRunning(T3);
+    ModelAttemptFailure second = failure(2);
+    ModelInvocation secondRetry = nextRunning.retryReady(second, T3.plusSeconds(2));
+    assertEquals(List.of(failure(1), second), secondRetry.failedAttempts());
+
+    ModelAttemptFailure rewritten =
+        new ModelAttemptFailure(
+            1, 9, "rewritten", "", error(), failure(1).failedAt(), failure(1).retryAt());
+    ModelInvocation rewrittenHistory =
+        new ModelInvocation(
+            secondRetry.id(),
+            secondRetry.threadId(),
+            secondRetry.turnStartEntryId(),
+            secondRetry.basisHeadEntryId(),
+            secondRetry.request(),
+            secondRetry.status(),
+            secondRetry.attempt(),
+            secondRetry.streamCheckpoint(),
+            secondRetry.result(),
+            secondRetry.error(),
+            secondRetry.resultEntryId(),
+            List.of(rewritten, second),
+            secondRetry.createdAt(),
+            secondRetry.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelInvocation.validateTransition(secondRetry, rewrittenHistory));
   }
 
   @Test
@@ -240,7 +294,7 @@ class ModelInvocationTransitionTest {
                 invocation(
                     ModelInvocationStatus.SUCCEEDED,
                     1,
-                    new StreamCheckpoint(1, 1L, "partial+", null),
+                    new StreamCheckpoint(1, 1L, "partial+", ""),
                     response(),
                     null,
                     null)));
@@ -263,7 +317,7 @@ class ModelInvocationTransitionTest {
                 invocation(
                     ModelInvocationStatus.SUCCEEDED,
                     1,
-                    new StreamCheckpoint(1, 1L, "partial+", null),
+                    new StreamCheckpoint(1, 1L, "partial+", ""),
                     response(),
                     null,
                     null)));
@@ -275,7 +329,8 @@ class ModelInvocationTransitionTest {
                 dispatching(0),
                 invocation(ModelInvocationStatus.RUNNING, 1, checkpoint(1), null, null, null)));
     // RUNNING -> READY（retry）丢弃 checkpoint，RUNNING -> RUNNING 仍允许增长
-    ModelInvocation.validateTransition(runningWithCheckpoint, runningWithCheckpoint.retryReady(T1));
+    ModelInvocation.validateTransition(
+        runningWithCheckpoint, runningWithCheckpoint.retryReady(failure(1), T1));
     ModelInvocation.validateTransition(
         runningWithCheckpoint, runningWithCheckpoint.checkpoint(checkpoint(1), T1));
   }
@@ -309,12 +364,18 @@ class ModelInvocationTransitionTest {
             response(),
             null,
             null,
+            failures(ModelInvocationStatus.SUCCEEDED, 1),
             CREATED,
             CREATED);
     ModelInvocation attachedWithCheckpoint = terminalWithCheckpoint.attachResultEntry(id(99L), T2);
     assertEquals(id(99L), attachedWithCheckpoint.resultEntryId());
     assertNull(attachedWithCheckpoint.streamCheckpoint());
     assertEquals(response(), attachedWithCheckpoint.result());
+    ModelInvocation terminalWithFailure =
+        running(1, checkpoint(1)).retryReady(failure(1), T1).fail(error(), T2);
+    ModelInvocation attachedWithFailure = terminalWithFailure.attachResultEntry(id(99L), T3);
+    assertEquals(List.of(), attachedWithFailure.failedAttempts());
+    assertNull(attachedWithFailure.streamCheckpoint());
     assertThrows(IllegalArgumentException.class, () -> ready(0).attachResultEntry(id(1L), T1));
     assertThrows(
         IllegalArgumentException.class,
@@ -338,6 +399,7 @@ class ModelInvocationTransitionTest {
             stored.result(),
             stored.error(),
             stored.resultEntryId(),
+            stored.failedAttempts(),
             stored.createdAt(),
             stored.updatedAt());
     ModelInvocation.validateTransition(stored, replay);
@@ -356,6 +418,7 @@ class ModelInvocationTransitionTest {
             terminal.result(),
             terminal.error(),
             terminal.resultEntryId(),
+            terminal.failedAttempts(),
             terminal.createdAt(),
             T1);
     ModelInvocation.validateTransition(terminal, touched);
@@ -467,6 +530,7 @@ class ModelInvocationTransitionTest {
             differentResponse(),
             succeeded.error(),
             succeeded.resultEntryId(),
+            succeeded.failedAttempts(),
             succeeded.createdAt(),
             T1);
     ModelInvocation changedError =
@@ -482,6 +546,7 @@ class ModelInvocationTransitionTest {
             failed.result(),
             new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "other"),
             failed.resultEntryId(),
+            failed.failedAttempts(),
             failed.createdAt(),
             T1);
     assertThrows(
@@ -519,9 +584,9 @@ class ModelInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                running, running(1, new StreamCheckpoint(1, 0L, "other", null))));
+                running, running(1, new StreamCheckpoint(1, 0L, "other", ""))));
     // 回退 sequence
-    ModelInvocation grown = running.checkpoint(new StreamCheckpoint(1, 1L, "partial+", null), T1);
+    ModelInvocation grown = running.checkpoint(new StreamCheckpoint(1, 1L, "partial+", ""), T1);
     assertThrows(
         IllegalArgumentException.class, () -> ModelInvocation.validateTransition(grown, running));
     // 非前缀式增长
@@ -529,7 +594,7 @@ class ModelInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                grown, running(1, new StreamCheckpoint(1, 2L, "other", null))));
+                grown, running(1, new StreamCheckpoint(1, 2L, "other", ""))));
     // 在终态清除是唯一允许的清除
     ModelInvocation.validateTransition(running, running.fail(error(), T1));
   }
@@ -579,6 +644,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }
@@ -596,6 +662,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }
@@ -613,6 +680,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }
@@ -630,6 +698,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }
@@ -647,6 +716,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }
@@ -664,6 +734,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         T1,
         T1);
   }
@@ -681,6 +752,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         source.resultEntryId(),
+        source.failedAttempts(),
         source.createdAt(),
         updatedAt);
   }
@@ -698,6 +770,7 @@ class ModelInvocationTransitionTest {
         source.result(),
         source.error(),
         resultEntryId,
+        source.failedAttempts(),
         source.createdAt(),
         source.updatedAt());
   }

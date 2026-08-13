@@ -45,6 +45,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -813,6 +815,25 @@ class DatabaseTurnResolverTest {
     assertEquals("custom note", textOf(messages.get(3)));
   }
 
+  /** failed-attempt 与 terminal error partial 都是 UI/audit 事实，绝不进入 Provider messages。 */
+  @Test
+  void excludesModelAttemptFailuresAndAssistantErrorPartialsFromProviderContext() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings(null, "default");
+
+    ModelInvocationRequest request = fixture.resolved(failedAttemptPath(settings));
+
+    List<ProviderMessage> messages = request.providerRequest().messages();
+    assertEquals(2, messages.size());
+    assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
+    assertEquals(ProviderMessageRole.USER, messages.get(1).role());
+    assertEquals("visible user", textOf(messages.get(1)));
+    String projected = messages.stream().map(DatabaseTurnResolverTest::textOf).toList().toString();
+    assertFalse(projected.contains("retry-only-secret"));
+    assertFalse(projected.contains("terminal-only-secret"));
+    assertFalse(projected.contains("provider exploded"));
+  }
+
   @Test
   void escapesXmlInAvailableSkillsSection() {
     Fixture fixture =
@@ -1037,7 +1058,7 @@ class DatabaseTurnResolverTest {
                 id(8),
                 SESSION_ID,
                 id(7),
-                new AssistantErrorPayload(new AssistantError("PLANNING_FAILED", "boom")),
+                new AssistantErrorPayload(new AssistantError("PLANNING_FAILED", "boom"), null),
                 NOW),
             new Entry(
                 id(9),
@@ -1046,6 +1067,52 @@ class DatabaseTurnResolverTest {
                 new TurnEndPayload(
                     id(6), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
                 NOW)));
+  }
+
+  private static EntryPath failedAttemptPath(BranchSettings settings) {
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new TurnStartPayload(TurnStartReason.INPUT, settings),
+                NOW),
+            new Entry(
+                id(3),
+                SESSION_ID,
+                id(2),
+                new MessagePayload(
+                    new AgentMessage(
+                        AgentMessageRole.USER, List.of(new TextMessageContent("visible user"))),
+                    null,
+                    null),
+                NOW),
+            new Entry(
+                id(4),
+                SESSION_ID,
+                id(3),
+                new ModelAttemptFailurePayload(
+                    new ModelAttemptSnapshot(1, 4, "retry-only-secret", ""),
+                    new AssistantError("TRANSIENT", "provider unavailable"),
+                    NOW.plusSeconds(2)),
+                NOW),
+            new Entry(
+                id(5),
+                SESSION_ID,
+                id(4),
+                new AssistantErrorPayload(
+                    new AssistantError("TRANSIENT", "provider exploded"),
+                    new ModelAttemptSnapshot(2, 6, "terminal-only-secret", "")),
+                NOW.plusSeconds(3)),
+            new Entry(
+                id(6),
+                SESSION_ID,
+                id(5),
+                new TurnEndPayload(
+                    id(2), TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                NOW.plusSeconds(3))));
   }
 
   private static ToolDescriptor platformDescriptor(String name) {

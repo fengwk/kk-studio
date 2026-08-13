@@ -24,5 +24,10 @@ public record Entry(
     } else if (parentEntryId == null) {
       throw new IllegalArgumentException("non-ROOT entry must carry a parentEntryId");
     }
+    if (payload instanceof ModelAttemptFailurePayload failure
+        && failure.retryAt().isBefore(createdAt)) {
+      throw new IllegalArgumentException(
+          "model attempt failure retryAt must not precede entry createdAt");
+    }
   }
 }

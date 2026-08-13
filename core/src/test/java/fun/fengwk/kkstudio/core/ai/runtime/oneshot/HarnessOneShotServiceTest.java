@@ -205,7 +205,7 @@ class HarnessOneShotServiceTest {
   void reportsTerminalFailureAndBestEffortStopHandlesRaces() {
     ThreadSnapshot error =
         terminalFailure(
-            new AssistantErrorPayload(new AssistantError("PROVIDER_FAILED", "provider boom")),
+            new AssistantErrorPayload(new AssistantError("PROVIDER_FAILED", "provider boom"), null),
             TurnEndOutcome.FAILED);
     ThreadSnapshot aborted =
         terminalFailure(
@@ -240,6 +240,7 @@ class HarnessOneShotServiceTest {
         new EntryPath(List.of(root)),
         List.of(),
         null,
+        List.of(),
         List.of());
   }
 
@@ -282,6 +283,7 @@ class HarnessOneShotServiceTest {
         new EntryPath(List.of(root, turn, user, assistant, end)),
         List.of(),
         null,
+        List.of(),
         List.of());
   }
 
@@ -320,6 +322,7 @@ class HarnessOneShotServiceTest {
         new EntryPath(List.of(root, turn, user, failureEntry, end)),
         List.of(),
         null,
+        List.of(),
         List.of());
   }
 }

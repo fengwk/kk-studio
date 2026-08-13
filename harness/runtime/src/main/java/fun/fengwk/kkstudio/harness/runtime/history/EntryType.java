@@ -10,6 +10,8 @@ public enum EntryType {
   MESSAGE,
   /** 业务插件追加的透明 branch state 节点：不参与 turn grammar，默认不投影给 provider。 */
   CUSTOM,
+  /** Model retry failure audit node：透明、不属于对话语义，也不关闭 Turn。 */
+  MODEL_ATTEMPT_FAILURE,
   /** 由业务扩展注入的对话消息。 */
   CUSTOM_MESSAGE,
   /** Provider/Assistant-side 错误审计。 */

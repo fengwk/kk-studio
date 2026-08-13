@@ -402,13 +402,23 @@ class HarnessRuntimeWebMapperTest {
                 HarnessRuntimeTestFixtures.turnStartEntry()));
     ThreadSnapshot active =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(id(2)), path, List.of(), running, List.of());
+            HarnessRuntimeTestFixtures.thread(id(2)),
+            path,
+            List.of(),
+            running,
+            List.of(),
+            List.of());
     assertThreadStatus(active, "MODEL_RUNNING", true);
 
     ModelInvocation terminal = model(ModelInvocationStatus.SUCCEEDED, null);
     ThreadSnapshot pending =
         new ThreadSnapshot(
-            HarnessRuntimeTestFixtures.thread(id(2)), path, List.of(), terminal, List.of());
+            HarnessRuntimeTestFixtures.thread(id(2)),
+            path,
+            List.of(),
+            terminal,
+            List.of(),
+            List.of());
     assertThreadStatus(pending, "APPLYING", true);
   }
 
@@ -429,7 +439,8 @@ class HarnessRuntimeWebMapperTest {
             path,
             List.of(),
             succeeded,
-            List.of(HarnessRuntimeTestFixtures.waitingApprovalTool()));
+            List.of(HarnessRuntimeTestFixtures.waitingApprovalTool()),
+            List.of());
     assertThreadStatus(snapshot, "TOOL_WAITING_APPROVAL", true);
   }
 
@@ -450,7 +461,8 @@ class HarnessRuntimeWebMapperTest {
             path,
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
             succeeded,
-            List.of(HarnessRuntimeTestFixtures.waitingApprovalTool()));
+            List.of(HarnessRuntimeTestFixtures.waitingApprovalTool()),
+            List.of());
 
     HarnessThreadSnapshotDTO dto = HarnessRuntimeWebMapper.toSnapshotDto(snapshot);
     JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(dto));

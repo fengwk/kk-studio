@@ -80,6 +80,7 @@ class PostgresqlHarnessSchemaTest {
         List.of(
             "harness_entry.payload",
             "harness_model_invocation.error",
+            "harness_model_invocation.failed_attempts",
             "harness_model_invocation.request",
             "harness_model_invocation.result",
             "harness_model_invocation.stream_checkpoint",

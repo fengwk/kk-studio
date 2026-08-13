@@ -119,7 +119,7 @@ final class InvocationTestData {
   }
 
   static StreamCheckpoint checkpoint(int attempt) {
-    return new StreamCheckpoint(attempt, 0L, "partial", null);
+    return new StreamCheckpoint(attempt, 0L, "partial", "");
   }
 
   static ModelInvocationRequest request(List<ToolBinding> bindings, boolean yoloEnabled) {

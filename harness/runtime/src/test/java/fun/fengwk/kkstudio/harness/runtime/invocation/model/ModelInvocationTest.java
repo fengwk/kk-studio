@@ -13,16 +13,31 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 /** ModelInvocation 各 status 下持久化字段的不变式。 */
 class ModelInvocationTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
   private static final Instant UPDATED = CREATED.plusSeconds(10);
+
+  private static ModelAttemptFailure failure(int attempt) {
+    Instant failedAt = CREATED.plusSeconds(attempt * 2L);
+    return new ModelAttemptFailure(
+        attempt,
+        attempt,
+        "partial-" + attempt,
+        "",
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-" + attempt),
+        failedAt,
+        failedAt.plusSeconds(1));
+  }
 
   @Test
   void acceptsValidStates() {
@@ -63,7 +78,7 @@ class ModelInvocationTest {
         invocation(ModelInvocationStatus.RUNNING, 2, null, null, null, null);
 
     ModelInvocation succeeded =
-        invocation(ModelInvocationStatus.SUCCEEDED, 1, checkpoint(1), response(), null, id(99L));
+        invocation(ModelInvocationStatus.SUCCEEDED, 1, null, response(), null, id(99L));
     assertEquals(response().text(), succeeded.result().text());
     assertEquals(id(99L), succeeded.resultEntryId());
 
@@ -135,6 +150,7 @@ class ModelInvocationTest {
                 null,
                 null,
                 null,
+                List.of(),
                 CREATED,
                 UPDATED));
     assertThrows(
@@ -152,6 +168,7 @@ class ModelInvocationTest {
                 null,
                 null,
                 null,
+                List.of(),
                 CREATED,
                 CREATED.minusSeconds(1)));
     assertThrows(
@@ -169,14 +186,15 @@ class ModelInvocationTest {
                 null,
                 null,
                 null,
+                List.of(),
                 CREATED,
                 UPDATED));
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelInvocation(
-                id(1L), id(1L), id(1L), id(1L), request(), null, 0, null, null, null, null, CREATED,
-                UPDATED));
+                id(1L), id(1L), id(1L), id(1L), request(), null, 0, null, null, null, null,
+                List.of(), CREATED, UPDATED));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -192,6 +210,7 @@ class ModelInvocationTest {
                 null,
                 null,
                 null,
+                List.of(),
                 null,
                 UPDATED));
   }
@@ -273,6 +292,39 @@ class ModelInvocationTest {
         () -> invocation(ModelInvocationStatus.RUNNING, 1, null, null, null, id(5L)));
   }
 
+  /** failedAttempts 必须形成连续 1..N 前缀，并遵守 retry schedule 的时间顺序。 */
+  @Test
+  void rejectsInvalidFailedAttemptSequenceAndTimeOrder() {
+    ModelAttemptFailure first = failure(1);
+    ModelAttemptFailure skipped =
+        new ModelAttemptFailure(
+            2,
+            2,
+            "partial-2",
+            "",
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-2"),
+            first.retryAt(),
+            first.retryAt().plusSeconds(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> invocation(ModelInvocationStatus.READY, 2, null, null, null, null, List.of(skipped)));
+
+    ModelAttemptFailure tooEarly =
+        new ModelAttemptFailure(
+            2,
+            2,
+            "partial-2",
+            "",
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-2"),
+            first.retryAt().minusMillis(1),
+            first.retryAt());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            invocation(
+                ModelInvocationStatus.READY, 2, null, null, null, null, List.of(first, tooEarly)));
+  }
+
   private static ModelInvocation invocation(
       ModelInvocationStatus status,
       int attempt,
@@ -292,7 +344,42 @@ class ModelInvocationTest {
         result,
         error,
         resultEntryId,
+        failures(status, attempt),
         CREATED,
         UPDATED);
+  }
+
+  private static ModelInvocation invocation(
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts) {
+    return new ModelInvocation(
+        id(1L),
+        id(1L),
+        id(1L),
+        id(1L),
+        request(),
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        CREATED,
+        UPDATED);
+  }
+
+  private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {
+    int count =
+        switch (status) {
+          case READY, DISPATCHING -> attempt;
+          case RUNNING, SUCCEEDED, UNKNOWN, FAILED, CANCELLED -> Math.max(0, attempt - 1);
+        };
+    return IntStream.rangeClosed(1, count).mapToObj(ModelInvocationTest::failure).toList();
   }
 }

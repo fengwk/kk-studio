@@ -76,19 +76,22 @@ class HarnessRuntimeApiRecordsTest {
                 null,
                 null,
                 T0));
-    ThreadSnapshot snapshot = new ThreadSnapshot(thread, path, queued, null, List.of());
+    ThreadSnapshot snapshot = new ThreadSnapshot(thread, path, queued, null, List.of(), List.of());
     assertEquals(1, snapshot.queuedCommands().size());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.queuedCommands().add(null));
     assertThrows(UnsupportedOperationException.class, () -> snapshot.toolSiblings().add(null));
     assertThrows(
-        NullPointerException.class, () -> new ThreadSnapshot(null, path, queued, null, List.of()));
+        NullPointerException.class,
+        () -> new ThreadSnapshot(null, path, queued, null, List.of(), List.of()));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadSnapshot(thread, null, queued, null, List.of()));
+        () -> new ThreadSnapshot(thread, null, queued, null, List.of(), List.of()));
     assertThrows(
-        NullPointerException.class, () -> new ThreadSnapshot(thread, path, null, null, List.of()));
+        NullPointerException.class,
+        () -> new ThreadSnapshot(thread, path, null, null, List.of(), List.of()));
     assertThrows(
-        NullPointerException.class, () -> new ThreadSnapshot(thread, path, queued, null, null));
+        NullPointerException.class,
+        () -> new ThreadSnapshot(thread, path, queued, null, null, List.of()));
   }
 
   @Test

@@ -21,8 +21,8 @@ public final class StreamCheckpointJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.put("attempt", checkpoint.attempt());
     node.put("sequence", checkpoint.sequence());
-    InvocationJsonSupport.putNullable(node, "text", checkpoint.text());
-    InvocationJsonSupport.putNullable(node, "thinking", checkpoint.thinking());
+    node.put("text", checkpoint.text());
+    node.put("thinking", checkpoint.thinking());
     return node;
   }
 
@@ -36,7 +36,7 @@ public final class StreamCheckpointJsonCodec {
     return new StreamCheckpoint(
         InvocationJsonSupport.positiveInt(node, "attempt", CONTEXT),
         InvocationJsonSupport.nonNegativeLong(node, "sequence", CONTEXT),
-        InvocationJsonSupport.nullableText(node, "text", CONTEXT),
-        InvocationJsonSupport.nullableText(node, "thinking", CONTEXT));
+        InvocationJsonSupport.text(node, "text", CONTEXT),
+        InvocationJsonSupport.text(node, "thinking", CONTEXT));
   }
 }

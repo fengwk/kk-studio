@@ -419,7 +419,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void nonSucceededModelAttachedToAssistantMessageIsInvariantViolation() {
+  void nonSucceededModelCannotAttachToAssistantMessage() {
     for (ModelInvocationStatus status :
         List.of(
             ModelInvocationStatus.FAILED,
@@ -438,15 +438,15 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
               null,
               new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
       UUID assistantId = insertAssistantWithCalls(fixture.store, baseline, List.of("call-1"));
-      transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
-      requestThreadWork(fixture.store, baseline.threadId());
-      ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
-      // 非 SUCCEEDED model 挂到 assistant Message：不变量违反（旧行为静默历史 fallback）-> ISE 回滚，resolver 不被调用。
-      assertThrows(IllegalStateException.class, () -> fixture.processor.process(claim));
+      // Store 在 result attach 边界即拒绝非 SUCCEEDED model 指向普通 Assistant MESSAGE。
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW)));
       assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
       assertEquals(assistantId, thread(fixture.store, baseline.threadId()).headEntryId());
-      assertEquals(assistantId, model(fixture.store, modelId).resultEntryId());
+      assertNull(model(fixture.store, modelId).resultEntryId());
       assertEquals(0, fixture.resolver.calls);
     }
   }

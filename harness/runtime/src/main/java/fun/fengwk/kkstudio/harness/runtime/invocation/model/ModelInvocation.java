@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -12,7 +15,7 @@ import java.util.UUID;
  *
  * <p>{@code attempt} 统计已确认的 Provider 调用启动次数；BUSY/OVERLOADED 或启动前的明确拒绝不会增加它。 {@code resultEntryId}
  * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
- * partial，永远不是第二个 result。
+ * partial，永远不是第二个 result。{@code failedAttempts} 是 append-only 的瞬态失败 attempt 审计，不属于对话语义。
  *
  * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被 durable
  * 确认。纯转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
@@ -30,6 +33,7 @@ public record ModelInvocation(
     ProviderResponse result,
     ModelInvocationError error,
     UUID resultEntryId,
+    List<ModelAttemptFailure> failedAttempts,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -43,10 +47,25 @@ public record ModelInvocation(
     if (attempt < 0) {
       throw new IllegalArgumentException("attempt must not be negative");
     }
+    failedAttempts = List.copyOf(Objects.requireNonNull(failedAttempts, "failedAttempts"));
+    for (int index = 0; index < failedAttempts.size(); index++) {
+      ModelAttemptFailure failure = failedAttempts.get(index);
+      if (failure.attempt() != index + 1) {
+        throw new IllegalArgumentException("failedAttempts must contain consecutive attempts 1..N");
+      }
+      if (failure.attempt() > attempt) {
+        throw new IllegalArgumentException("failed attempt must not exceed invocation attempt");
+      }
+      if (index > 0 && failure.failedAt().isBefore(failedAttempts.get(index - 1).retryAt())) {
+        throw new IllegalArgumentException(
+            "a failed attempt must not precede the previous retry schedule");
+      }
+    }
     if (streamCheckpoint != null && streamCheckpoint.attempt() != attempt) {
       throw new IllegalArgumentException("streamCheckpoint attempt must match invocation attempt");
     }
-    validateStatusFields(status, attempt, result, error, resultEntryId, streamCheckpoint);
+    validateStatusFields(
+        status, attempt, failedAttempts, result, error, resultEntryId, streamCheckpoint);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {
@@ -58,8 +77,8 @@ public record ModelInvocation(
    * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt 仅在
    * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN（已确认启动）以及 DISPATCHING-&gt;CANCELLED（Stop
    * 窗口内调用可能已开始）这几种情形下恰好 +1；terminal 事实不可变 （仅 {@code resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在
-   * RUNNING-&gt;RUNNING 时被引入 或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它。
-   * 精确 replay 始终被接受。
+   * RUNNING-&gt;RUNNING 时被引入 或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它；
+   * terminal 结果 Entry 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay 始终被接受。
    */
   public static void validateTransition(ModelInvocation stored, ModelInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -81,6 +100,7 @@ public record ModelInvocation(
       requireTerminalImmutability(stored, next);
     }
     requireCheckpointTransition(stored, next);
+    requireFailedAttemptsTransition(stored, next);
   }
 
   private static void requireStableIdentity(ModelInvocation stored, ModelInvocation next) {
@@ -211,15 +231,56 @@ public record ModelInvocation(
     }
   }
 
+  private static void requireFailedAttemptsTransition(
+      ModelInvocation stored, ModelInvocation next) {
+    List<ModelAttemptFailure> storedFailures = stored.failedAttempts();
+    List<ModelAttemptFailure> nextFailures = next.failedAttempts();
+    boolean materializationTransition =
+        stored.resultEntryId() == null && next.resultEntryId() != null;
+    if (materializationTransition) {
+      if (!nextFailures.isEmpty()) {
+        throw new IllegalArgumentException(
+            "linking a terminal result entry must clear materialized failedAttempts");
+      }
+      return;
+    }
+    boolean retryTransition =
+        stored.status() == ModelInvocationStatus.RUNNING
+            && next.status() == ModelInvocationStatus.READY;
+    if (!retryTransition) {
+      if (!storedFailures.equals(nextFailures)) {
+        throw new IllegalArgumentException(
+            "failedAttempts may only change on a RUNNING -> READY retry transition");
+      }
+      return;
+    }
+    if (nextFailures.size() != storedFailures.size() + 1) {
+      throw new IllegalArgumentException(
+          "a retry transition must append exactly one failed attempt");
+    }
+    for (int i = 0; i < storedFailures.size(); i++) {
+      if (!storedFailures.get(i).equals(nextFailures.get(i))) {
+        throw new IllegalArgumentException("failedAttempts is append-only");
+      }
+    }
+    ModelAttemptFailure appended = nextFailures.get(nextFailures.size() - 1);
+    if (appended.attempt() != stored.attempt()) {
+      throw new IllegalArgumentException(
+          "failed attempt must equal the current invocation attempt");
+    }
+    if (appended.error().kind() != ProviderErrorKind.TRANSIENT) {
+      throw new IllegalArgumentException("failed attempt requires a TRANSIENT error");
+    }
+  }
+
   private static boolean isPrefix(String prefix, String value) {
-    String actualPrefix = prefix == null ? "" : prefix;
-    String actualValue = value == null ? "" : value;
-    return actualValue.startsWith(actualPrefix);
+    return value.startsWith(prefix);
   }
 
   /** READY -&gt; DISPATCHING：Work lease 已持有，Gateway admission 启动；attempt 不变。 */
   public ModelInvocation beginDispatch(Instant now) {
-    return withState(ModelInvocationStatus.DISPATCHING, attempt, null, null, null, null, now);
+    return withState(
+        ModelInvocationStatus.DISPATCHING, attempt, null, null, null, null, failedAttempts, now);
   }
 
   /**
@@ -231,7 +292,8 @@ public record ModelInvocation(
     if (status != ModelInvocationStatus.DISPATCHING) {
       throw new IllegalArgumentException("rejectDispatch requires DISPATCHING status");
     }
-    return withState(ModelInvocationStatus.FAILED, attempt, null, null, error, null, now);
+    return withState(
+        ModelInvocationStatus.FAILED, attempt, null, null, error, null, failedAttempts, now);
   }
 
   /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
@@ -239,34 +301,61 @@ public record ModelInvocation(
     if (status != ModelInvocationStatus.DISPATCHING) {
       throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
     }
-    return withState(ModelInvocationStatus.READY, attempt, null, null, null, null, now);
+    return withState(
+        ModelInvocationStatus.READY, attempt, null, null, null, null, failedAttempts, now);
   }
 
   /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
   public ModelInvocation markRunning(Instant now) {
     return withState(
-        ModelInvocationStatus.RUNNING, Math.addExact(attempt, 1), null, null, null, null, now);
+        ModelInvocationStatus.RUNNING,
+        Math.addExact(attempt, 1),
+        null,
+        null,
+        null,
+        null,
+        failedAttempts,
+        now);
   }
 
-  /** RUNNING -&gt; READY：执行端报告了可重试的失败，因此同一个 attempt 被从头重新调度；attempt 保持已确认， 安全 checkpoint 被丢弃。 */
-  public ModelInvocation retryReady(Instant now) {
+  /** RUNNING -&gt; READY：记录一次瞬态失败后从头重新调度；attempt 保持已确认，安全 checkpoint 被丢弃。 */
+  public ModelInvocation retryReady(ModelAttemptFailure failure, Instant now) {
+    Objects.requireNonNull(failure, "failure");
     if (status != ModelInvocationStatus.RUNNING) {
       throw new IllegalArgumentException("retryReady requires RUNNING status");
     }
-    return withState(ModelInvocationStatus.READY, attempt, null, null, null, null, now);
+    if (failure.attempt() != attempt) {
+      throw new IllegalArgumentException(
+          "failed attempt must equal the current invocation attempt");
+    }
+    if (failure.error().kind() != ProviderErrorKind.TRANSIENT) {
+      throw new IllegalArgumentException("retryReady requires a TRANSIENT error");
+    }
+    List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
+    nextFailures.add(failure);
+    return withState(
+        ModelInvocationStatus.READY, attempt, null, null, null, null, nextFailures, now);
   }
 
   /** RUNNING -&gt; RUNNING，附带当前 attempt 的一个单调安全 text/thinking checkpoint。 */
   public ModelInvocation checkpoint(StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(checkpoint, "checkpoint");
-    return withState(ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, now);
+    return withState(
+        ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null, failedAttempts, now);
   }
 
   /** RUNNING -&gt; SUCCEEDED，并附带完整的 Provider result；attempt 必须为正数。 */
   public ModelInvocation succeed(ProviderResponse result, Instant now) {
     Objects.requireNonNull(result, "result");
     return withState(
-        ModelInvocationStatus.SUCCEEDED, attempt, streamCheckpoint, result, null, null, now);
+        ModelInvocationStatus.SUCCEEDED,
+        attempt,
+        streamCheckpoint,
+        result,
+        null,
+        null,
+        failedAttempts,
+        now);
   }
 
   /**
@@ -280,7 +369,15 @@ public record ModelInvocation(
           "fail requires READY or RUNNING status; a DISPATCHING invocation must use"
               + " rejectDispatch");
     }
-    return withState(ModelInvocationStatus.FAILED, attempt, null, null, error, null, now);
+    return withState(
+        ModelInvocationStatus.FAILED,
+        attempt,
+        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        null,
+        error,
+        null,
+        failedAttempts,
+        now);
   }
 
   /**
@@ -291,7 +388,15 @@ public record ModelInvocation(
     Objects.requireNonNull(error, "error");
     int nextAttempt =
         status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
-    return withState(ModelInvocationStatus.CANCELLED, nextAttempt, null, null, error, null, now);
+    return withState(
+        ModelInvocationStatus.CANCELLED,
+        nextAttempt,
+        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        null,
+        error,
+        null,
+        failedAttempts,
+        now);
   }
 
   /**
@@ -302,12 +407,22 @@ public record ModelInvocation(
     Objects.requireNonNull(error, "error");
     int nextAttempt =
         status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
-    return withState(ModelInvocationStatus.UNKNOWN, nextAttempt, null, null, error, null, now);
+    return withState(
+        ModelInvocationStatus.UNKNOWN,
+        nextAttempt,
+        status == ModelInvocationStatus.RUNNING ? streamCheckpoint : null,
+        null,
+        error,
+        null,
+        failedAttempts,
+        now);
   }
 
-  /** Terminal -&gt; 同一 terminal 状态，并链接执行结果 Entry；可以清除安全 checkpoint，其他 terminal 事实保持不变。 */
+  /**
+   * Terminal -&gt; 同一 terminal 状态，并链接执行结果 Entry；已物化的 checkpoint / failedAttempts 从 invocation 清空。
+   */
   public ModelInvocation attachResultEntry(UUID resultEntryId, Instant now) {
-    return withState(status, attempt, null, result, error, resultEntryId, now);
+    return withState(status, attempt, null, result, error, resultEntryId, List.of(), now);
   }
 
   /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen request 和 createdAt 通过构造得以保留。 */
@@ -318,6 +433,7 @@ public record ModelInvocation(
       ProviderResponse result,
       ModelInvocationError error,
       UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
       Instant now) {
     ModelInvocation next =
         new ModelInvocation(
@@ -332,6 +448,7 @@ public record ModelInvocation(
             result,
             error,
             resultEntryId,
+            failedAttempts,
             createdAt,
             effectiveMutationTime(now));
     validateTransition(this, next);
@@ -346,15 +463,18 @@ public record ModelInvocation(
   private static void validateStatusFields(
       ModelInvocationStatus status,
       int attempt,
+      List<ModelAttemptFailure> failedAttempts,
       ProviderResponse result,
       ModelInvocationError error,
       UUID resultEntryId,
       StreamCheckpoint streamCheckpoint) {
+    int expectedRunningFailures = Math.subtractExact(attempt, 1);
     boolean terminal = status.isTerminal();
     if (!terminal && resultEntryId != null) {
       throw new IllegalArgumentException("resultEntryId is only allowed on terminal states");
     }
     if (status == ModelInvocationStatus.READY) {
+      requireFailureCount(failedAttempts, attempt, "READY");
       if (streamCheckpoint != null) {
         throw new IllegalArgumentException("READY must not carry a stream checkpoint");
       }
@@ -362,6 +482,7 @@ public record ModelInvocation(
         throw new IllegalArgumentException("READY must not carry terminal result facts");
       }
     } else if (status == ModelInvocationStatus.DISPATCHING) {
+      requireFailureCount(failedAttempts, attempt, "DISPATCHING");
       if (streamCheckpoint != null) {
         throw new IllegalArgumentException("DISPATCHING must not carry a stream checkpoint");
       }
@@ -372,6 +493,7 @@ public record ModelInvocation(
       if (attempt <= 0) {
         throw new IllegalArgumentException("RUNNING requires a positive attempt");
       }
+      requireFailureCount(failedAttempts, expectedRunningFailures, "RUNNING");
       if (result != null || error != null) {
         throw new IllegalArgumentException("RUNNING must not carry terminal result facts");
       }
@@ -379,6 +501,13 @@ public record ModelInvocation(
       if (attempt <= 0) {
         throw new IllegalArgumentException("SUCCEEDED requires a positive attempt");
       }
+      requireTerminalMaterialization(
+          failedAttempts,
+          streamCheckpoint,
+          resultEntryId,
+          expectedRunningFailures,
+          false,
+          "SUCCEEDED");
       if (result == null) {
         throw new IllegalArgumentException("SUCCEEDED requires a result");
       }
@@ -386,6 +515,8 @@ public record ModelInvocation(
         throw new IllegalArgumentException("SUCCEEDED must not carry an error");
       }
     } else if (status == ModelInvocationStatus.FAILED) {
+      requireTerminalMaterialization(
+          failedAttempts, streamCheckpoint, resultEntryId, attempt, true, "FAILED");
       if (error == null) {
         throw new IllegalArgumentException("FAILED requires an error");
       }
@@ -396,6 +527,13 @@ public record ModelInvocation(
       if (attempt <= 0) {
         throw new IllegalArgumentException("UNKNOWN requires a positive attempt");
       }
+      requireTerminalMaterialization(
+          failedAttempts,
+          streamCheckpoint,
+          resultEntryId,
+          expectedRunningFailures,
+          false,
+          "UNKNOWN");
       if (error == null) {
         throw new IllegalArgumentException("UNKNOWN requires an error");
       }
@@ -403,12 +541,45 @@ public record ModelInvocation(
         throw new IllegalArgumentException("UNKNOWN must not carry a result");
       }
     } else {
+      requireTerminalMaterialization(
+          failedAttempts, streamCheckpoint, resultEntryId, attempt, true, "CANCELLED");
       if (error == null) {
         throw new IllegalArgumentException(status + " requires an error");
       }
       if (result != null) {
         throw new IllegalArgumentException(status + " must not carry a result");
       }
+    }
+  }
+
+  private static void requireFailureCount(
+      List<ModelAttemptFailure> failedAttempts, int expected, String status) {
+    if (failedAttempts.size() != expected) {
+      throw new IllegalArgumentException(status + " requires failedAttempts.size == " + expected);
+    }
+  }
+
+  private static void requireTerminalMaterialization(
+      List<ModelAttemptFailure> failedAttempts,
+      StreamCheckpoint streamCheckpoint,
+      UUID resultEntryId,
+      int expectedFailures,
+      boolean allowOneFewerFailure,
+      String status) {
+    if (resultEntryId != null) {
+      if (!failedAttempts.isEmpty() || streamCheckpoint != null) {
+        throw new IllegalArgumentException(
+            status + " with resultEntryId must not retain materialized attempt state");
+      }
+      return;
+    }
+    boolean valid = failedAttempts.size() == expectedFailures;
+    if (allowOneFewerFailure && expectedFailures > 0) {
+      valid |= failedAttempts.size() == expectedFailures - 1;
+    }
+    if (!valid) {
+      throw new IllegalArgumentException(
+          status + " requires the pending failedAttempts prefix for attempt " + expectedFailures);
     }
   }
 }
