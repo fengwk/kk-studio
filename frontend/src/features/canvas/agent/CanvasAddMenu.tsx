@@ -15,7 +15,6 @@ const MENU_ITEMS: Array<{
   { action: 'text-resource', labelKey: 'canvas.add.textResource', icon: 'T' },
   { action: 'image-function', labelKey: 'canvas.add.imageFunction', icon: '✦' },
   { action: 'video-function', labelKey: 'canvas.add.videoFunction', icon: '✧' },
-  { action: 'group', labelKey: 'canvas.add.group', icon: '□' },
 ]
 
 /** 由 CanvasToolRail 组合的上弹式 add 菜单，支持键盘导航。 */

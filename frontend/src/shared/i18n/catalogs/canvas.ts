@@ -161,18 +161,6 @@ export const canvasCatalog = {
     'en-US': 'Resource',
     'zh-CN': '资源',
   },
-  'canvas.node.renameAria': {
-    'en-US': 'Node name',
-    'zh-CN': '节点名称',
-  },
-  'canvas.node.renameAction': {
-    'en-US': 'Edit the name of {{name}}',
-    'zh-CN': '编辑「{{name}}」的名称',
-  },
-  'canvas.node.deleteAction': {
-    'en-US': 'Delete node {{name}}',
-    'zh-CN': '删除节点「{{name}}」',
-  },
   'canvas.node.deleteConfirmTitle': {
     'en-US': 'Delete “{{name}}”?',
     'zh-CN': '删除「{{name}}」？',
@@ -189,10 +177,6 @@ export const canvasCatalog = {
     'en-US': 'Delete',
     'zh-CN': '确认删除',
   },
-  'canvas.node.editMarkdown': {
-    'en-US': 'Edit Markdown',
-    'zh-CN': '编辑 Markdown',
-  },
   'canvas.node.emptyFunction': {
     'en-US': 'No resources until the Function succeeds',
     'zh-CN': 'Function 首次成功前暂无资源',
@@ -200,10 +184,6 @@ export const canvasCatalog = {
   'canvas.node.empty': {
     'en-US': 'No resources yet',
     'zh-CN': '暂无资源',
-  },
-  'canvas.node.runReady': {
-    'en-US': 'Ready',
-    'zh-CN': '就绪',
   },
   'canvas.node.switcherAria': {
     'en-US': 'Resource index switcher',
@@ -373,21 +353,9 @@ export const canvasCatalog = {
     'en-US': 'Play video {{name}}',
     'zh-CN': '播放视频 {{name}}',
   },
-  'canvas.media.play': {
-    'en-US': 'Play {{name}}',
-    'zh-CN': '播放 {{name}}',
-  },
-  'canvas.media.playAudio': {
-    'en-US': 'Play audio {{name}}',
-    'zh-CN': '播放音频 {{name}}',
-  },
-  'canvas.media.loadAudio': {
-    'en-US': 'Load audio',
-    'zh-CN': '加载音频',
-  },
-  'canvas.media.loading': {
-    'en-US': 'Loading…',
-    'zh-CN': '加载中…',
+  'canvas.media.download': {
+    'en-US': 'Download',
+    'zh-CN': '下载',
   },
   'canvas.media.signing': {
     'en-US': 'Signing…',
@@ -409,9 +377,145 @@ export const canvasCatalog = {
     'en-US': 'Waiting to enter viewport',
     'zh-CN': '等待进入视口',
   },
+  'canvas.audio.play': {
+    'en-US': 'Play audio {{name}}',
+    'zh-CN': '播放音频 {{name}}',
+  },
+  'canvas.audio.pause': {
+    'en-US': 'Pause audio {{name}}',
+    'zh-CN': '暂停音频 {{name}}',
+  },
+  'canvas.audio.seekAria': {
+    'en-US': 'Seek position of {{name}}',
+    'zh-CN': '调节 {{name}} 的播放位置',
+  },
+  'canvas.audio.volumeAria': {
+    'en-US': 'Volume of {{name}}',
+    'zh-CN': '{{name}} 的音量',
+  },
+  'canvas.audio.mute': {
+    'en-US': 'Mute {{name}}',
+    'zh-CN': '静音 {{name}}',
+  },
+  'canvas.audio.unmute': {
+    'en-US': 'Unmute {{name}}',
+    'zh-CN': '取消静音 {{name}}',
+  },
+  'canvas.audio.playFailed': {
+    'en-US': 'Playback could not start',
+    'zh-CN': '无法开始播放',
+  },
+  'canvas.menu.ariaLabel': {
+    'en-US': 'Canvas node actions',
+    'zh-CN': '画布节点操作',
+  },
+  'canvas.menu.rename': {
+    'en-US': 'Rename',
+    'zh-CN': '重命名',
+  },
+  'canvas.menu.renameInputAria': {
+    'en-US': 'New name',
+    'zh-CN': '新名称',
+  },
+  'canvas.menu.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'canvas.menu.save': {
+    'en-US': 'Save',
+    'zh-CN': '保存',
+  },
+  'canvas.menu.editText': {
+    'en-US': 'Edit text',
+    'zh-CN': '编辑文本',
+  },
+  'canvas.menu.run': {
+    'en-US': 'Run',
+    'zh-CN': '运行',
+  },
+  'canvas.menu.cancelRun': {
+    'en-US': 'Cancel run',
+    'zh-CN': '取消生成',
+  },
+  'canvas.menu.openOriginal': {
+    'en-US': 'Open original',
+    'zh-CN': '打开原件',
+  },
+  'canvas.menu.download': {
+    'en-US': 'Download',
+    'zh-CN': '下载',
+  },
+  'canvas.menu.delete': {
+    'en-US': 'Delete',
+    'zh-CN': '删除',
+  },
+  'canvas.menu.group': {
+    'en-US': 'Group',
+    'zh-CN': '打组',
+  },
+  'canvas.menu.ungroup': {
+    'en-US': 'Ungroup',
+    'zh-CN': '解组',
+  },
+  'canvas.menu.groupDeleteConfirmTitle': {
+    'en-US': 'Delete group “{{title}}”?',
+    'zh-CN': '删除分组「{{title}}」？',
+  },
+  'canvas.menu.groupDeleteConfirmDescription': {
+    'en-US': 'This removes the group boundary; member nodes stay on the canvas.',
+    'zh-CN': '将移除分组边界，成员节点保留在画布上。',
+  },
+  'canvas.functionLabel.image': {
+    'en-US': 'Image generation · {{name}}',
+    'zh-CN': '图片生成 · {{name}}',
+  },
+  'canvas.functionLabel.video': {
+    'en-US': 'Video generation · {{name}}',
+    'zh-CN': '视频生成 · {{name}}',
+  },
+  'canvas.textEditor.createAria': {
+    'en-US': 'Create Markdown text',
+    'zh-CN': '创建 Markdown 文本',
+  },
+  'canvas.textEditor.editAria': {
+    'en-US': 'Edit Markdown text {{name}}',
+    'zh-CN': '编辑 Markdown 文本「{{name}}」',
+  },
+  'canvas.textEditor.createKicker': {
+    'en-US': 'New text',
+    'zh-CN': '新建文本',
+  },
+  'canvas.textEditor.editKicker': {
+    'en-US': 'Edit text',
+    'zh-CN': '编辑文本',
+  },
+  'canvas.textEditor.close': {
+    'en-US': 'Close text editor',
+    'zh-CN': '关闭文本编辑',
+  },
+  'canvas.textEditor.name': {
+    'en-US': 'Name',
+    'zh-CN': '名称',
+  },
+  'canvas.textEditor.markdown': {
+    'en-US': 'Markdown',
+    'zh-CN': 'Markdown 内容',
+  },
+  'canvas.textEditor.characters': {
+    'en-US': '{{count}} characters',
+    'zh-CN': '{{count}} 字',
+  },
+  'canvas.textEditor.cancel': {
+    'en-US': 'Cancel',
+    'zh-CN': '取消',
+  },
+  'canvas.textEditor.save': {
+    'en-US': 'Save',
+    'zh-CN': '保存',
+  },
   'canvas.add.ariaLabel': {
-    'en-US': 'Add resource, Function, or group',
-    'zh-CN': '添加资源、Function 或分组',
+    'en-US': 'Add resource or Function',
+    'zh-CN': '添加资源或 Function',
   },
   'canvas.add.imageResource': {
     'en-US': 'Image resource',
@@ -436,10 +540,6 @@ export const canvasCatalog = {
   'canvas.add.videoFunction': {
     'en-US': 'Video generation',
     'zh-CN': '视频生成',
-  },
-  'canvas.add.group': {
-    'en-US': 'Group',
-    'zh-CN': '分组',
   },
   'canvas.agent.thread.ariaLabel': {
     'en-US': 'Canvas Chat messages',

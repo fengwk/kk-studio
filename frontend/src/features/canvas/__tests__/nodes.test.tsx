@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
@@ -68,11 +68,7 @@ function resourceNode(overrides: Partial<ResourceNode> = {}): ResourceNode {
   }
 }
 
-function renderResourceNode(node: ResourceNode, callbacks = {
-  renameNode: vi.fn(),
-  editTextNode: vi.fn(),
-  deleteNode: vi.fn(),
-}) {
+function renderResourceNode(node: ResourceNode, callbacks = { editTextNode: vi.fn() }) {
   const Component = canvasNodeTypes.resource
   const data: ResourceFlowNodeData = {
     kind: 'resource',
@@ -117,7 +113,7 @@ function renderResourceNode(node: ResourceNode, callbacks = {
 }
 
 describe('Canvas resource/group node renderers', () => {
-  it('renders basic cards for IMAGE, VIDEO, AUDIO, and TEXT resources', () => {
+  it('renders minimal content-first nodes for IMAGE, VIDEO, AUDIO, and TEXT resources', () => {
     const fixtures = [
       resource('IMAGE', { width: 1024, height: 768 }),
       resource('VIDEO', { durationMs: 65_000 }),
@@ -134,6 +130,15 @@ describe('Canvas resource/group node renderers', () => {
       if (fixture.kind === 'TEXT') {
         expect(screen.getByText('hello world')).toBeInTheDocument()
       }
+      if (fixture.kind === 'AUDIO') {
+        // 音频节点内嵌紧凑自定义播放器，原生 controls 的 audio 元素在首次播放后才挂载。
+        expect(view.container.querySelector('.audio-player')).not.toBeNull()
+        expect(view.container.querySelector('audio')).toBeNull()
+        expect(view.container.querySelector('.audio-load-button')).toBeNull()
+      }
+      // 常驻标题栏编辑/删除按钮全部移除，只保留透明标签。
+      expect(view.container.querySelector('.resource-node-titlebar')).toBeNull()
+      expect(view.container.querySelector('.resource-node-action')).toBeNull()
       expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(1)
       view.unmount()
     }
@@ -160,7 +165,7 @@ describe('Canvas resource/group node renderers', () => {
       width: 1024,
       height: 768,
     }))
-    renderResourceNode(resourceNode({ resources }))
+    const view = renderResourceNode(resourceNode({ resources }))
     const previous = screen.getByRole('button', { name: '上一个资源' })
     const next = screen.getByRole('button', { name: '下一个资源' })
     expect(previous).toBeDisabled()
@@ -176,10 +181,12 @@ describe('Canvas resource/group node renderers', () => {
     expect(screen.getByText('4 / 5')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '查看资源 2' }))
     expect(screen.getByText('2 / 5')).toBeInTheDocument()
+    view.unmount()
   })
 
-  it('renders Function/run state and both reference handles without a generation panel', () => {
+  it('renders a minimal Function node with the localized kind label and both handles', () => {
     const view = renderResourceNode(resourceNode({
+      name: 'Generator',
       resources: [],
       function: { modelKey: 'fake-image', configJson: '{}' },
       run: {
@@ -192,41 +199,30 @@ describe('Canvas resource/group node renderers', () => {
       },
     }))
 
+    // 顶部透明标签：图片生成 · Generator；卡片/页脚/摘要全部移除。
+    expect(screen.getByText('图片生成 · Generator')).toBeInTheDocument()
     expect(screen.getByText('Function 首次成功前暂无资源')).toBeInTheDocument()
-    expect(screen.getByText('Model label')).toBeInTheDocument()
-    expect(screen.getByText('失败')).toBeInTheDocument()
     expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
+    expect(view.container.querySelector('.resource-node-kind-label')).toHaveClass(
+      'resource-node-kind-label',
+    )
+    expect(view.container.querySelector('.function-footer')).toBeNull()
+    expect(view.container.querySelector('.resource-node-summary')).toBeNull()
     expect(view.container.querySelector('.generation-panel')).toBeNull()
+    expect(view.container.querySelector('.resource-node.function-node')).not.toBeNull()
   })
 
-  it('renders a cancelled Function with a neutral localized status', () => {
+  it('renders the Function kind label from the model output kind', () => {
+    // 顶部标签跟随模型 outputKind 本地化：图片生成 · {nodeName}。
     const view = renderResourceNode(resourceNode({
-      resources: [],
-      function: { modelKey: 'fake-image', configJson: '{}' },
-      run: {
-        nodeId: '2',
-        requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
-        status: 'CANCELLED',
-        stage: 'CANCELLED',
-        error: null,
-        updatedAt: '2026-08-10T00:00:00Z',
-      },
-    }))
-    expect(screen.getByText('已取消')).toHaveClass('run-status', 'cancelled')
-    expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
-  })
-
-  it('renders a ready Function with the content-fit run-status badge class', () => {
-    // 徽标样式由 .function-footer .run-status 显式重置全局 .run-status 的固定尺寸。
-    const view = renderResourceNode(resourceNode({
+      name: 'Clip maker',
       resources: [],
       function: { modelKey: 'fake-image', configJson: '{}' },
       run: null,
     }))
-    const badge = view.container.querySelector('.function-footer .run-status')
-    expect(badge).not.toBeNull()
-    expect(badge).toHaveClass('run-status', 'ready')
-    expect(badge).toHaveTextContent('就绪')
+    expect(view.container.querySelector('.resource-node-kind-label')).toHaveTextContent(
+      '图片生成 · Clip maker',
+    )
   })
 
   it('renders the generic empty-resource state without a model descriptor', () => {
@@ -235,72 +231,21 @@ describe('Canvas resource/group node renderers', () => {
     expect(screen.getByText('暂无资源')).toBeInTheDocument()
   })
 
-  it('supports rename and text edit callbacks', async () => {
-    const user = userEvent.setup()
-    const callbacks = {
-      renameNode: vi.fn(),
-      editTextNode: vi.fn(),
-      deleteNode: vi.fn(),
-    }
+  it('opens the text editor through double-click without any permanent chrome', async () => {
+    const callbacks = { editTextNode: vi.fn() }
     const node = resourceNode({
       name: 'Note',
       resources: [resource('TEXT', { textContent: 'note' })],
     })
     renderResourceNode(node, callbacks)
 
-    await user.click(screen.getByRole('button', { name: '编辑「Note」的名称' }))
-    const input = screen.getByRole('textbox', { name: '节点名称' })
-    await user.clear(input)
-    await user.type(input, 'Renamed{Enter}')
-    expect(callbacks.renameNode).toHaveBeenCalledWith('2', 'Renamed')
-
+    expect(screen.queryByRole('button', { name: /编辑/ })).not.toBeInTheDocument()
     fireEvent.doubleClick(screen.getByText('note'))
     expect(callbacks.editTextNode).toHaveBeenCalledWith(node)
-    fireEvent.click(screen.getByRole('button', { name: '编辑 Markdown' }))
-    expect(callbacks.editTextNode).toHaveBeenCalledTimes(2)
+    expect(callbacks.editTextNode).toHaveBeenCalledTimes(1)
   })
 
-  it('cancels an in-progress rename on Escape', async () => {
-    const user = userEvent.setup()
-    const callbacks = {
-      renameNode: vi.fn(),
-      editTextNode: vi.fn(),
-      deleteNode: vi.fn(),
-    }
-    renderResourceNode(resourceNode({ name: 'Original' }), callbacks)
-
-    await user.click(screen.getByRole('button', { name: '编辑「Original」的名称' }))
-    const input = screen.getByRole('textbox', { name: '节点名称' })
-    await user.type(input, ' changed')
-    fireEvent.keyDown(input, { key: 'Escape' })
-
-    expect(screen.getByText('Original')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '编辑「Original」的名称' })).toBeInTheDocument()
-    expect(callbacks.renameNode).not.toHaveBeenCalled()
-  })
-
-  it('requires an explicit second confirmation before deleting a node', async () => {
-    const user = userEvent.setup()
-    const callbacks = {
-      renameNode: vi.fn(),
-      editTextNode: vi.fn(),
-      deleteNode: vi.fn(),
-    }
-    renderResourceNode(resourceNode({ name: 'Disposable' }), callbacks)
-
-    const deleteAction = screen.getByRole('button', { name: '删除节点「Disposable」' })
-    await user.click(deleteAction)
-    const dialog = screen.getByRole('alertdialog', { name: '删除「Disposable」？' })
-    expect(callbacks.deleteNode).not.toHaveBeenCalled()
-
-    await user.click(within(dialog).getByRole('button', { name: '取消' }))
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    await user.click(deleteAction)
-    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认删除' }))
-    expect(callbacks.deleteNode).toHaveBeenCalledWith('2')
-  })
-
-  it('renders a world-coordinate group card', () => {
+  it('renders a lightweight dashed group boundary with a transparent title', () => {
     const Component = canvasNodeTypes.group
     const group: Group = {
       id: '4',
@@ -328,7 +273,12 @@ describe('Canvas resource/group node renderers', () => {
         <Component {...props} />
       </ReactFlowProvider>,
     )
-    expect(screen.getByText('Group title')).toBeInTheDocument()
+    const shell = document.querySelector('.canvas-group-node') as HTMLElement
+    expect(shell).not.toBeNull()
+    expect(shell.querySelector('.canvas-group-title')).toHaveTextContent('Group title')
+    // 组不是业务卡片：无 header 卡片、无成员内容。
+    expect(shell.querySelector('header')).toBeNull()
+    expect(shell.querySelector('.resource-node')).toBeNull()
   })
 
   it('fails closed when a renderer receives the other node-data discriminator', () => {
@@ -371,62 +321,43 @@ describe('Canvas resource/group node renderers', () => {
           kind: 'resource',
           node,
           model: null,
-          callbacks: { renameNode: vi.fn(), editTextNode: vi.fn(), deleteNode: vi.fn() },
+          callbacks: { editTextNode: vi.fn() },
         },
       } as NodeProps<CanvasFlowNode>)} />,
     )
     expect(groupView.container).toBeEmptyDOMElement()
   })
 
-  it('uses a compact content-first shell for media nodes', () => {
+  it('uses a compact content-first shell for media and Function nodes', () => {
     const view = renderResourceNode(resourceNode({
       name: 'Vision board',
       resources: [resource('IMAGE', { width: 1024, height: 768 })],
     }))
-    expect(view.container.querySelector('.resource-node-titlebar')).not.toHaveClass(
-      'resource-node-drag-handle',
-    )
-    expect(view.container.querySelector('.resource-node-content')).not.toBeNull()
-    expect(view.container.querySelector('.resource-node-preview')).not.toHaveClass('nodrag')
-    expect(screen.getByText('Vision board')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '编辑「Vision board」的名称' })).toHaveClass('nodrag')
-    expect(screen.getByRole('button', { name: '删除节点「Vision board」' })).toHaveClass('nodrag')
-    expect(view.container.querySelector('.media-original-actions')).toHaveClass('nodrag')
+    expect(view.container.querySelector('.resource-node-titlebar')).toBeNull()
+    expect(view.container.querySelector('.resource-node-action')).toBeNull()
     expect(view.container.querySelector('.resource-node.compact-media-node')).not.toBeNull()
+    expect(screen.getByText('Vision board')).toBeInTheDocument()
+    expect(view.container.querySelector('.media-original-actions')).toBeNull()
     expect(view.container.querySelector('.resource-node-footer')).toBeNull()
-  })
-
-  it('extracts a real Function summary from the prompt config', () => {
-    const view = renderResourceNode(resourceNode({
-      name: 'Generator',
-      resources: [],
-      function: {
-        modelKey: 'fake-image',
-        configJson: JSON.stringify({
-          prompt: { segments: [{ type: 'TEXT', text: 'generate a red square' }] },
-          parameters: {},
-        }),
-      },
-      run: null,
-    }))
-    const summary = view.container.querySelector('.resource-node-summary')
-    expect(summary).not.toBeNull()
-    expect(summary).toHaveTextContent('generate a red square')
   })
 
   it('localizes visible chrome labels with the active locale', () => {
     setLocale('en-US')
-    const imageView = renderResourceNode(resourceNode({
-      resources: [resource('IMAGE', { width: 1024, height: 768 })],
+    const functionView = renderResourceNode(resourceNode({
+      name: 'Generator',
+      resources: [],
+      function: { modelKey: 'fake-image', configJson: '{}' },
+      run: null,
     }))
-    expect(screen.getByRole('button', { name: 'Edit the name of Resource node' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Delete node Resource node' })).toBeInTheDocument()
-    imageView.unmount()
+    expect(screen.getByText('Image generation · Generator')).toBeInTheDocument()
+    expect(screen.queryByText('Edit Markdown')).not.toBeInTheDocument()
+    functionView.unmount()
 
     const textView = renderResourceNode(resourceNode({
       resources: [resource('TEXT', { textContent: 'note' })],
     }))
-    expect(screen.getByRole('button', { name: 'Edit Markdown' })).toBeInTheDocument()
+    expect(screen.getByText('note')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Markdown' })).not.toBeInTheDocument()
     textView.unmount()
 
     const multiView = renderResourceNode(resourceNode({

@@ -369,7 +369,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.setSelection([NODE_NOTE])
-      result.current.nodeCallbacks.renameNode(NODE_NOTE, ' Renamed ')
+      result.current.renameNode(NODE_NOTE, ' Renamed ')
     })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_NODE'
@@ -497,7 +497,7 @@ describe('useCanvasController real snapshot runtime', () => {
     const deleteNodeCommandCount = commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     )).length
-    act(() => result.current.nodeCallbacks.deleteNode(NODE_NOTE))
+    act(() => result.current.deleteNode(NODE_NOTE))
     await waitFor(() => expect(commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     ))).toHaveLength(deleteNodeCommandCount + 1))
@@ -533,6 +533,88 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => result.current.openLibrary())
     expect(result.current.state.view).toBe('library')
+  })
+
+  it('drives group context-menu commands with correct UNGROUP/DELETE_GROUP semantics', async () => {
+    // UNGROUP 由服务端同时删除边界：单组解组只发 UNGROUP，绝不追加 DELETE_GROUP。
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => result.current.ungroupGroup(GROUP_A))
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'UNGROUP'
+    ))).toBe(true))
+    const ungroupBodies = commands.filter((request) => (
+      request.commands[0]?.type === 'UNGROUP'
+    ))
+    expect(ungroupBodies).toHaveLength(1)
+    expect(ungroupBodies[0]?.commands).toEqual([{
+      type: 'UNGROUP',
+      groupId: GROUP_A,
+      memberNodeIds: expect.arrayContaining([NODE_FN, NODE_IMG]),
+    }])
+    expect(ungroupBodies[0]?.commands.some((command) => (
+      command.type === 'DELETE_GROUP'
+    ))).toBe(false)
+
+    act(() => result.current.renameGroup(GROUP_A, '  新分组  '))
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'RENAME_GROUP'
+    ))).toBe(true))
+    expect(commands.find((request) => (
+      request.commands[0]?.type === 'RENAME_GROUP'
+    ))?.commands).toEqual([{ type: 'RENAME_GROUP', groupId: GROUP_A, title: '新分组' }])
+
+    act(() => result.current.renameGroup(GROUP_A, '   '))
+    expect(commands.filter((request) => (
+      request.commands[0]?.type === 'RENAME_GROUP'
+    ))).toHaveLength(1)
+
+    act(() => result.current.deleteGroup(GROUP_A))
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'DELETE_GROUP'
+    ))).toBe(true))
+    expect(commands.find((request) => (
+      request.commands[0]?.type === 'DELETE_GROUP'
+    ))?.commands).toEqual([{ type: 'DELETE_GROUP', groupId: GROUP_A }])
+  })
+
+  it('persists a text-editor rename together with the markdown update', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    const node = result.current.snapshot?.nodes.find((item) => item.id === NODE_NOTE)
+    expect(node?.name).toBe('Note')
+
+    act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never)
+    )
+    act(() => result.current.setTextEditorDraft({ name: 'Note v2', markdown: 'updated' }))
+    act(() => result.current.saveTextEditor())
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))).toBe(true))
+    const body = commands.find((request) => (
+      request.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))
+    expect(body?.commands).toEqual([
+      { type: 'UPDATE_TEXT_NODE', nodeId: NODE_NOTE, markdown: 'updated' },
+      { type: 'RENAME_NODE', nodeId: NODE_NOTE, name: 'Note v2' },
+    ])
+    // 名称未变化时只发 UPDATE_TEXT_NODE。
+    act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never)
+    )
+    act(() => result.current.setTextEditorDraft({ name: 'Note', markdown: 'again' }))
+    act(() => result.current.saveTextEditor())
+    await waitFor(() => expect(commands.filter((request) => (
+      request.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))).toHaveLength(2))
+    const second = commands.filter((request) => (
+      request.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))[1]
+    expect(second?.commands).toEqual([
+      { type: 'UPDATE_TEXT_NODE', nodeId: NODE_NOTE, markdown: 'again' },
+    ])
   })
 
   it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {

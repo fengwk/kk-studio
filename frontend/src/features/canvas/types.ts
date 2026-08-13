@@ -15,7 +15,6 @@ export type AddMenuAction =
   | 'text-resource'
   | 'image-function'
   | 'video-function'
-  | 'group'
 
 export interface CanvasLinkSelection {
   sourceNodeId: UUIDString
@@ -44,9 +43,8 @@ export interface CanvasLocalState {
 }
 
 export interface CanvasNodeCallbacks {
-  renameNode: (nodeId: UUIDString, name: string) => void
+  /** TEXT 节点进入内嵌编辑面板（双击或右键 Edit 动作共用）。 */
   editTextNode: (node: ResourceNode) => void
-  deleteNode: (nodeId: UUIDString) => void
 }
 
 export interface PendingFunctionConfig {

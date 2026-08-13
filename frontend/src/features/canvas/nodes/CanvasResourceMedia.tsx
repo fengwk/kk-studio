@@ -1,9 +1,16 @@
 import {
-  Download,
-  ExternalLink,
   LoaderCircle,
+  Pause,
+  Play,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from 'react'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
@@ -51,18 +58,27 @@ export function CanvasResourceThumbnail({ resource }: { resource: Resource }) {
   )
 }
 
+/**
+ * preview 恢复状态机（同一失败周期内不无限重试）：
+ * initial -> (img onError) -> refreshing（强制重新签名）-> refreshed -> (新 URL 再错)
+ * -> original（请求并渲染原件）；刷新失败或原件请求失败都停在 original/failed。
+ */
+type PreviewRecoveryPhase = 'initial' | 'refreshing' | 'refreshed' | 'original'
+
 function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   const { t } = useI18n()
+  const hasPreview = resource.kind === 'IMAGE' || resource.kind === 'VIDEO'
+  const [recoveryPhase, setRecoveryPhase] = useState<PreviewRecoveryPhase>('initial')
   const [originalRequested, setOriginalRequested] = useState(false)
   const [playRequested, setPlayRequested] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
-  const hasPreview = resource.kind === 'IMAGE' || resource.kind === 'VIDEO'
   const dimensions = resourceDimensions(resource)
   const {
     targetRef: previewTargetRef,
     url: previewUrl,
     loading: previewLoading,
     error: previewError,
+    refresh: refreshPreview,
   } = useCanvasResourceUrl({
     canvasId: resource.canvasId,
     resourceId: resource.id,
@@ -81,13 +97,13 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     kind: 'original',
     enabled: originalRequested,
   })
-  const requestOriginal = () => {
-    if (originalRequested) {
-      void refreshOriginal()
-    } else {
-      setOriginalRequested(true)
-    }
-  }
+
+  // 画布或资源切换时重置恢复状态机。
+  useEffect(() => {
+    setRecoveryPhase('initial')
+    setOriginalRequested(false)
+    setPlayRequested(false)
+  }, [resource.canvasId, resource.id])
 
   useEffect(() => () => {
     const media = mediaRef.current
@@ -96,10 +112,51 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     }
   }, [])
 
+  const requestOriginal = () => {
+    if (originalRequested) {
+      void refreshOriginal()
+    } else {
+      setOriginalRequested(true)
+    }
+  }
+
+  const recoverWithOriginal = () => {
+    setRecoveryPhase('original')
+    requestOriginal()
+  }
+
+  const handlePreviewError = () => {
+    if (recoveryPhase === 'initial') {
+      setRecoveryPhase('refreshing')
+      void refreshPreview()
+        .then((result) => {
+          if (result.isError) {
+            recoverWithOriginal()
+          } else {
+            setRecoveryPhase('refreshed')
+          }
+        })
+        .catch(recoverWithOriginal)
+    } else if (recoveryPhase === 'refreshed') {
+      recoverWithOriginal()
+    }
+    // refreshing（等待重新签名）与 original（最终兜底）期间忽略重复 error。
+  }
+
   if (resource.kind === 'IMAGE') {
     return (
       <div className="canvas-resource-media image" ref={previewTargetRef}>
-        {previewUrl ? (
+        {recoveryPhase === 'original' && originalUrl ? (
+          <img
+            src={originalUrl}
+            alt={resource.name}
+            width={dimensions?.width}
+            height={dimensions?.height}
+            draggable={false}
+            loading="lazy"
+            decoding="async"
+          />
+        ) : recoveryPhase !== 'original' && previewUrl && recoveryPhase !== 'refreshing' ? (
           <img
             src={previewUrl}
             alt={resource.name}
@@ -108,27 +165,16 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             draggable={false}
             loading="lazy"
             decoding="async"
+            onError={handlePreviewError}
           />
         ) : (
           <MediaPlaceholder
-            loading={previewLoading}
-            error={previewError}
+            loading={previewLoading || originalLoading || recoveryPhase === 'refreshing'}
+            error={recoveryPhase === 'original' ? originalError : previewError}
             kind="IMAGE"
             t={t}
           />
         )}
-        <OriginalActions
-          resource={resource}
-          url={originalUrl}
-          loading={originalLoading}
-          error={originalError}
-          requestLabel={t('canvas.media.fetchImage')}
-          openLabel={t('canvas.media.openImage')}
-          downloadLabel={t('canvas.media.downloadImage')}
-          signingLabel={t('canvas.media.signing')}
-          signFailedLabel={t('canvas.media.signFailed')}
-          onRequest={requestOriginal}
-        />
       </div>
     )
   }
@@ -152,11 +198,21 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             autoPlay
             playsInline
             preload="metadata"
-            aria-label={t('canvas.media.play', { name: resource.name })}
+            aria-label={t('canvas.media.playVideo', { name: resource.name })}
           />
         ) : (
           <>
-            {previewUrl ? (
+            {recoveryPhase === 'original' && originalUrl ? (
+              <img
+                src={originalUrl}
+                alt=""
+                width={dimensions?.width}
+                height={dimensions?.height}
+                draggable={false}
+                loading="lazy"
+                decoding="async"
+              />
+            ) : recoveryPhase !== 'original' && previewUrl && recoveryPhase !== 'refreshing' ? (
               <img
                 src={previewUrl}
                 alt=""
@@ -165,11 +221,12 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
                 draggable={false}
                 loading="lazy"
                 decoding="async"
+                onError={handlePreviewError}
               />
             ) : (
               <MediaPlaceholder
-                loading={previewLoading}
-                error={previewError}
+                loading={previewLoading || originalLoading || recoveryPhase === 'refreshing'}
+                error={recoveryPhase === 'original' ? originalError : previewError}
                 kind="VIDEO"
                 t={t}
               />
@@ -184,134 +241,222 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
               }}
               aria-label={t('canvas.media.playVideo', { name: resource.name })}
             >
-              {originalLoading ? t('canvas.media.loading') : '▶'}
+              {originalLoading ? (
+                <LoaderCircle className="media-action-spinner" aria-hidden="true" />
+              ) : (
+                '▶'
+              )}
             </button>
           </>
         )}
-        <OriginalActions
-          resource={resource}
-          url={originalUrl}
-          loading={originalLoading}
-          error={originalError}
-          requestLabel={t('canvas.media.fetchVideo')}
-          openLabel={t('canvas.media.openVideo')}
-          downloadLabel={t('canvas.media.downloadVideo')}
-          signingLabel={t('canvas.media.signing')}
-          signFailedLabel={t('canvas.media.signFailed')}
-          onRequest={requestOriginal}
-        />
       </div>
     )
   }
 
-  const durationMs = finiteNumber(resource.durationMs)
   return (
     <div className="canvas-resource-media audio">
-      {playRequested && originalUrl ? (
-        <audio
-          ref={(element) => {
-            if (element) {
-              mediaRef.current = element
-            }
-          }}
-          src={originalUrl}
-          className="nodrag nowheel"
-          controls
-          preload="metadata"
-          aria-label={t('canvas.media.playAudio', { name: resource.name })}
-        />
-      ) : (
-        <button
-          type="button"
-          className="audio-load-button nodrag"
-          disabled={originalLoading}
-          onClick={() => {
-            setPlayRequested(true)
-            requestOriginal()
-          }}
-        >
-          <span aria-hidden="true">♪</span>
-          <strong>{originalLoading ? t('canvas.media.loading') : t('canvas.media.loadAudio')}</strong>
-          <small>{durationMs === null ? resource.mediaType : formatDuration(durationMs)}</small>
-        </button>
-      )}
-      <OriginalActions
-        resource={resource}
-        url={originalUrl}
-        loading={originalLoading}
-        error={originalError}
-        requestLabel={t('canvas.media.fetchAudio')}
-        openLabel={t('canvas.media.openAudio')}
-        downloadLabel={t('canvas.media.downloadAudio')}
-        signingLabel={t('canvas.media.signing')}
-        signFailedLabel={t('canvas.media.signFailed')}
-        onRequest={requestOriginal}
-      />
+      <CanvasAudioPlayer resource={resource} />
     </div>
   )
 }
 
-function OriginalActions({
-  resource,
-  url,
-  loading,
-  error,
-  requestLabel,
-  openLabel,
-  downloadLabel,
-  signingLabel,
-  signFailedLabel,
-  onRequest,
-}: {
-  resource: Resource
-  url: string | null
-  loading: boolean
-  error: unknown
-  requestLabel: string
-  openLabel: string
-  downloadLabel: string
-  signingLabel: string
-  signFailedLabel: string
-  onRequest: () => void
-}) {
+function CanvasAudioPlayer({ resource }: { resource: Resource }) {
+  const { t } = useI18n()
+  const [originalRequested, setOriginalRequested] = useState(false)
+  const {
+    url: originalUrl,
+    loading: originalLoading,
+    error: originalError,
+    refresh: refreshOriginal,
+  } = useCanvasResourceUrl({
+    canvasId: resource.canvasId,
+    resourceId: resource.id,
+    kind: 'original',
+    enabled: originalRequested,
+  })
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const pendingPlayRef = useRef(false)
+  const [playing, setPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(finiteSeconds(resource.durationMs) ?? 0)
+  const [volume, setVolume] = useState(1)
+  const [muted, setMuted] = useState(false)
+  const [playError, setPlayError] = useState(false)
+
+  useEffect(() => {
+    if (!originalUrl || !audioRef.current) {
+      return
+    }
+    if (!pendingPlayRef.current) {
+      return
+    }
+    pendingPlayRef.current = false
+    setPlayError(false)
+    const audio = audioRef.current
+    const result = audio.play()
+    if (result && typeof result.then === 'function') {
+      result
+        .then(() => setPlaying(true))
+        .catch(() => {
+          setPlaying(false)
+          setPlayError(true)
+        })
+    } else {
+      setPlaying(true)
+    }
+  }, [originalUrl])
+
+  const requestOriginal = () => {
+    if (originalRequested) {
+      void refreshOriginal()
+    } else {
+      setOriginalRequested(true)
+    }
+  }
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio || !originalUrl) {
+      pendingPlayRef.current = true
+      setPlayError(false)
+      requestOriginal()
+      return
+    }
+    setPlayError(false)
+    if (audio.paused) {
+      const result = audio.play()
+      if (result && typeof result.then === 'function') {
+        result
+          .then(() => setPlaying(true))
+          .catch(() => {
+            setPlaying(false)
+            setPlayError(true)
+          })
+      } else {
+        setPlaying(true)
+      }
+    } else {
+      audio.pause()
+      setPlaying(false)
+    }
+  }
+
+  const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
+    const next = Number(event.target.value)
+    setCurrentTime(next)
+    const audio = audioRef.current
+    if (audio && Number.isFinite(audio.duration)) {
+      audio.currentTime = Math.min(next, audio.duration)
+    }
+  }
+
+  const handleVolume = (event: ChangeEvent<HTMLInputElement>) => {
+    const next = Number(event.target.value)
+    setVolume(next)
+    setMuted(false)
+    const audio = audioRef.current
+    if (audio) {
+      audio.volume = next
+      audio.muted = false
+    }
+  }
+
+  const toggleMute = () => {
+    const next = !muted
+    setMuted(next)
+    const audio = audioRef.current
+    if (audio) {
+      audio.muted = next
+    }
+  }
+
+  const signing = originalLoading && !originalUrl
   return (
-    <div className="media-original-actions nodrag">
-      {url ? (
-        <>
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            title={openLabel}
-            aria-label={`${openLabel} ${resource.name}`}
+    <div className="audio-player nodrag nowheel">
+      <button
+        type="button"
+        className="audio-player-play"
+        onClick={togglePlay}
+        disabled={signing}
+        aria-label={playing
+          ? t('canvas.audio.pause', { name: resource.name })
+          : t('canvas.audio.play', { name: resource.name })}
+      >
+        {signing ? (
+          <LoaderCircle className="media-action-spinner" aria-hidden="true" />
+        ) : playing ? (
+          <Pause aria-hidden="true" />
+        ) : (
+          <Play aria-hidden="true" />
+        )}
+      </button>
+      <div className="audio-player-main">
+        <strong className="audio-player-name" title={resource.name}>{resource.name}</strong>
+        <div className="audio-player-row">
+          <span className="audio-player-time">
+            {formatTime(currentTime)}
+            {' / '}
+            {formatTime(duration)}
+          </span>
+          <input
+            type="range"
+            className="audio-player-seek"
+            min={0}
+            max={Math.max(duration, 0.001)}
+            step={0.1}
+            value={Math.min(currentTime, Math.max(duration, 0.001))}
+            onChange={handleSeek}
+            aria-label={t('canvas.audio.seekAria', { name: resource.name })}
+          />
+          <input
+            type="range"
+            className="audio-player-volume"
+            min={0}
+            max={1}
+            step={0.05}
+            value={muted ? 0 : volume}
+            onChange={handleVolume}
+            aria-label={t('canvas.audio.volumeAria', { name: resource.name })}
+          />
+          <button
+            type="button"
+            className="audio-player-mute"
+            onClick={toggleMute}
+            aria-label={muted
+              ? t('canvas.audio.unmute', { name: resource.name })
+              : t('canvas.audio.mute', { name: resource.name })}
+            aria-pressed={muted}
           >
-            <ExternalLink aria-hidden="true" />
-          </a>
-          <a
-            href={url}
-            download={resource.name}
-            title={downloadLabel}
-            aria-label={`${downloadLabel} ${resource.name}`}
-          >
-            <Download aria-hidden="true" />
-          </a>
-        </>
-      ) : (
-        <button
-          type="button"
-          disabled={loading}
-          title={loading ? signingLabel : requestLabel}
-          onClick={onRequest}
-          aria-label={`${loading ? signingLabel : requestLabel} ${resource.name}`}
-        >
-          {loading ? (
-            <LoaderCircle className="media-action-spinner" aria-hidden="true" />
-          ) : (
-            <Download aria-hidden="true" />
-          )}
-        </button>
-      )}
-      {error ? <span className="media-error">{signFailedLabel}</span> : null}
+            {muted ? <VolumeX aria-hidden="true" /> : <Volume2 aria-hidden="true" />}
+          </button>
+        </div>
+      </div>
+      {playError ? <span className="audio-player-error" role="alert">{t('canvas.audio.playFailed')}</span> : null}
+      {!playError && originalError ? <span className="audio-player-error" role="alert">{t('canvas.media.signFailed')}</span> : null}
+      {originalUrl ? (
+        <audio
+          ref={(element) => {
+            if (element) {
+              audioRef.current = element
+            }
+          }}
+          src={originalUrl}
+          preload="metadata"
+          className="nodrag nowheel"
+          aria-label={t('canvas.audio.play', { name: resource.name })}
+          onLoadedMetadata={(event) => {
+            const audio = event.currentTarget
+            if (Number.isFinite(audio.duration)) {
+              setDuration(audio.duration)
+            }
+            setCurrentTime(audio.currentTime)
+          }}
+          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+          onPlay={() => setPlaying(true)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -358,6 +503,11 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function finiteSeconds(value: unknown): number | null {
+  const ms = finiteNumber(value)
+  return ms !== null ? ms / 1000 : null
+}
+
 function resourceDimensions(resource: Resource): { width: number; height: number } | null {
   const width = finiteNumber(resource.width)
   const height = finiteNumber(resource.height)
@@ -366,7 +516,10 @@ function resourceDimensions(resource: Resource): { width: number; height: number
     : null
 }
 
-function formatDuration(durationMs: number): string {
-  const seconds = Math.round(durationMs / 1000)
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '0:00'
+  }
+  const total = Math.floor(seconds)
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }

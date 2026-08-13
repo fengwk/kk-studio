@@ -520,11 +520,13 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       return
     }
     if (editor.mode === 'edit') {
-      void executeCommands([{
-        type: 'UPDATE_TEXT_NODE',
-        nodeId: editor.nodeId,
-        markdown: editor.markdown,
-      }]).then(() => {
+      const commands: CanvasCommandDTO[] = [{ type: 'UPDATE_TEXT_NODE', nodeId: editor.nodeId, markdown: editor.markdown }]
+      const current = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
+      const node = current?.nodes.find((item) => item.id === editor.nodeId)
+      if (node && node.name !== editor.name.trim()) {
+        commands.push({ type: 'RENAME_NODE', nodeId: editor.nodeId, name: editor.name.trim() })
+      }
+      void executeCommands(commands).then(() => {
         setState((current) => ({ ...current, textEditor: null }))
       }).catch(() => undefined)
       return
@@ -539,7 +541,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }]).then(() => {
       setState((current) => ({ ...current, textEditor: null }))
     }).catch(() => undefined).finally(() => releaseNodeAlias(alias))
-  }, [executeCommands, nextTransform, releaseNodeAlias, reserveNodeAlias, state.textEditor])
+  }, [executeCommands, nextTransform, releaseNodeAlias, reserveNodeAlias, snapshotQuery.data, state.textEditor])
 
   const createFunctionNode = useCallback((outputKind: 'IMAGE' | 'VIDEO') => {
     const model = modelsQuery.data?.find((item) => item.outputKind === outputKind && item.available)
@@ -634,6 +636,30 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
     void executeCommands(commands).catch(() => undefined)
   }, [executeCommands, setToast, snapshotQuery.data, state.selectedIds])
+
+  /** 解组单个 Group：UNGROUP 语义本身会解除成员并删除边界，不追加 DELETE_GROUP。 */
+  const ungroupGroup = useCallback((groupId: UUIDString) => {
+    const memberNodeIds = (snapshotQuery.data?.nodes ?? [])
+      .filter((node) => node.groupId === groupId)
+      .map((node) => node.id)
+    if (memberNodeIds.length === 0) {
+      setToast('当前分组没有成员。')
+      return
+    }
+    void executeCommands([{ type: 'UNGROUP', groupId, memberNodeIds }]).catch(() => undefined)
+  }, [executeCommands, setToast, snapshotQuery.data?.nodes])
+
+  const renameGroup = useCallback((groupId: UUIDString, title: string) => {
+    const normalized = title.trim()
+    if (!normalized) {
+      return
+    }
+    void executeCommands([{ type: 'RENAME_GROUP', groupId, title: normalized }]).catch(() => undefined)
+  }, [executeCommands])
+
+  const deleteGroup = useCallback((groupId: UUIDString) => {
+    void executeCommands([{ type: 'DELETE_GROUP', groupId }]).catch(() => undefined)
+  }, [executeCommands])
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     if (!state.canvasId) {
@@ -744,10 +770,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       createFunctionNode('IMAGE')
     } else if (action === 'video-function') {
       createFunctionNode('VIDEO')
-    } else if (action === 'group') {
-      createGroup()
     }
-  }, [createFunctionNode, createGroup, createTextNode])
+  }, [createFunctionNode, createTextNode])
 
   const deleteSelection = useCallback(() => {
     const commands: CanvasCommandDTO[] = []
@@ -844,10 +868,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   }, [executeCommands, flushFunctionConfig])
 
   const nodeCallbacks: CanvasNodeCallbacks = useMemo(() => ({
-    renameNode,
     editTextNode,
-    deleteNode,
-  }), [deleteNode, editTextNode, renameNode])
+  }), [editTextNode])
 
   const scheduleFunctionConfig = useCallback((
     nodeId: UUIDString,
@@ -1012,6 +1034,12 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     cancelFunctionRun,
     createGroup,
     ungroupSelection,
+    ungroupGroup,
+    renameGroup,
+    deleteGroup,
+    renameNode,
+    editTextNode,
+    deleteNode,
     uploadFiles,
     handleAddAction,
     bindThreadDocument,

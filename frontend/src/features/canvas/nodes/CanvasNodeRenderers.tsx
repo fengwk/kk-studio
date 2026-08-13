@@ -1,15 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import { Pencil, X } from 'lucide-react'
 import {
   memo,
   useEffect,
-  useMemo,
-  useRef,
   useState,
 } from 'react'
 import type { ResourceNode } from '@/features/canvas/domain'
-import { parseFunctionConfig, promptVisibleText } from '@/features/canvas/generation'
 import {
   CanvasResourceMedia,
   CanvasResourceThumbnail,
@@ -58,36 +54,19 @@ const ResourceNodeView = memo(function ResourceNodeView({
 }) {
   const { node, model, callbacks } = data
   const { t } = useI18n()
-  const [renaming, setRenaming] = useState(false)
-  const [name, setName] = useState(node.name)
   const [resourceIndex, setResourceIndex] = useState(0)
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
-  const deleteButtonRef = useRef<HTMLButtonElement>(null)
-  const confirmDeleteRef = useRef<HTMLButtonElement>(null)
   const resource = node.resources[resourceIndex] ?? node.resources[0]
   const compactMediaNode = isCompactMediaNode(node)
-
-  useEffect(() => {
-    setName(node.name)
-  }, [node.name])
 
   useEffect(() => {
     setResourceIndex((current) => Math.min(current, Math.max(0, node.resources.length - 1)))
   }, [node.resources.length])
 
-  useEffect(() => {
-    if (deleteConfirmOpen) {
-      confirmDeleteRef.current?.focus()
-    }
-  }, [deleteConfirmOpen])
-
-  const summary = useMemo(() => {
-    if (!node.function || !model) {
-      return null
-    }
-    const text = promptVisibleText(parseFunctionConfig(node.function.configJson, model).prompt.segments)
-    return text.trim() || null
-  }, [model, node.function])
+  const functionLabel = node.function && model
+    ? model.outputKind === 'VIDEO'
+      ? t('canvas.functionLabel.video', { name: node.name })
+      : t('canvas.functionLabel.image', { name: node.name })
+    : null
 
   return (
     <article
@@ -96,112 +75,23 @@ const ResourceNodeView = memo(function ResourceNodeView({
         node.function ? 'function-node' : '',
         compactMediaNode ? 'compact-media-node' : '',
       ].filter(Boolean).join(' ')}
-      data-resource-kind={node.resources[0]?.kind ?? model?.outputKind ?? 'EMPTY'}
+      data-resource-kind={resource?.kind ?? 'EMPTY'}
     >
       <ResourceHandles functionNode={Boolean(node.function)} />
-      <header className="resource-node-titlebar">
-        <div className="resource-node-title">
-          {renaming ? (
-            <input
-              className="nodrag nowheel"
-              value={name}
-              aria-label={t('canvas.node.renameAria')}
-              autoFocus
-              onChange={(event) => setName(event.target.value)}
-              onBlur={() => {
-                setRenaming(false)
-                callbacks.renameNode(node.id, name)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.currentTarget.blur()
-                } else if (event.key === 'Escape') {
-                  setName(node.name)
-                  setRenaming(false)
-                }
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            />
-          ) : (
-            <>
-              <strong className="resource-node-name" title={node.name}>{node.name}</strong>
-              <button
-                type="button"
-                className="resource-node-action nodrag"
-                aria-label={t('canvas.node.renameAction', { name: node.name })}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setRenaming(true)
-                }}
-              >
-                <Pencil aria-hidden="true" />
-              </button>
-            </>
-          )}
-        </div>
-        <button
-          ref={deleteButtonRef}
-          type="button"
-          className="resource-node-action resource-node-delete nodrag"
-          aria-label={t('canvas.node.deleteAction', { name: node.name })}
-          aria-haspopup="dialog"
-          aria-expanded={deleteConfirmOpen}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation()
-            setDeleteConfirmOpen(true)
-          }}
-        >
-          <X aria-hidden="true" />
-        </button>
-        {deleteConfirmOpen ? (
-          <div
-            className="resource-node-delete-confirm nodrag nowheel"
-            role="alertdialog"
-            aria-label={t('canvas.node.deleteConfirmTitle', { name: node.name })}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                setDeleteConfirmOpen(false)
-                window.requestAnimationFrame(() => deleteButtonRef.current?.focus())
-              }
-            }}
-          >
-            <strong>{t('canvas.node.deleteConfirmTitle', { name: node.name })}</strong>
-            <p>{t('canvas.node.deleteConfirmDescription')}</p>
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  setDeleteConfirmOpen(false)
-                  window.requestAnimationFrame(() => deleteButtonRef.current?.focus())
-                }}
-              >
-                {t('canvas.node.deleteCancel')}
-              </button>
-              <button
-                ref={confirmDeleteRef}
-                type="button"
-                className="danger"
-                onClick={() => {
-                  setDeleteConfirmOpen(false)
-                  callbacks.deleteNode(node.id)
-                }}
-              >
-                {t('canvas.node.deleteConfirm')}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </header>
+      <div className="resource-node-label">
+        {functionLabel ? (
+          <span className="resource-node-kind-label" title={functionLabel}>
+            {functionLabel}
+          </span>
+        ) : (
+          <span className="resource-node-name" title={node.name}>{node.name}</span>
+        )}
+      </div>
       <div className="resource-node-content">
         <div
           className="resource-node-preview"
           onDoubleClick={() => {
-            if (!node.function && node.resources[0]?.kind === 'TEXT') {
+            if (!node.function && resource?.kind === 'TEXT') {
               callbacks.editTextNode(node)
             }
           }}
@@ -224,20 +114,6 @@ const ResourceNodeView = memo(function ResourceNodeView({
             </div>
           )}
         </div>
-        {!compactMediaNode && summary ? <p className="resource-node-summary">{summary}</p> : null}
-        {!compactMediaNode && node.function ? (
-          <FunctionFooter node={node} modelLabel={model?.label ?? node.function.modelKey} />
-        ) : !compactMediaNode && resource?.kind === 'TEXT' ? (
-          <footer className="resource-node-footer">
-            <button
-              type="button"
-              className="nodrag"
-              onClick={() => callbacks.editTextNode(node)}
-            >
-              {t('canvas.node.editMarkdown')}
-            </button>
-          </footer>
-        ) : null}
       </div>
     </article>
   )
@@ -303,53 +179,15 @@ function ResourceIndexSwitcher({
   )
 }
 
-function FunctionFooter({
-  node,
-  modelLabel,
-}: {
-  node: ResourceNode
-  modelLabel: string
-}) {
-  const { t } = useI18n()
-  const status = node.run?.status ?? 'READY'
-  const stage = node.run?.stage
-  return (
-    <footer className="function-footer">
-      <span>{modelLabel}</span>
-      <span className={`run-status ${status.toLowerCase()}`}>
-        {status === 'READY'
-          ? t('canvas.node.runReady')
-          : stage && stage !== status
-            ? stage
-            : t(functionRunStatusKey(status))}
-      </span>
-    </footer>
-  )
-}
-
-function functionRunStatusKey(status: NonNullable<ResourceNode['run']>['status']): string {
-  if (status === 'RUNNING') {
-    return 'canvas.generation.status.running'
-  }
-  if (status === 'FAILED') {
-    return 'canvas.generation.status.failed'
-  }
-  if (status === 'CANCELLED') {
-    return 'canvas.generation.status.cancelled'
-  }
-  return 'canvas.generation.status.succeeded'
-}
-
 function GroupFlowNode(props: NodeProps<CanvasFlowNode>) {
   if (props.data.kind !== 'group') {
     return null
   }
   return (
     <section className="canvas-group-node">
-      <header>
-        <span>□</span>
+      <span className="canvas-group-title" title={props.data.group.title}>
         {props.data.group.title}
-      </header>
+      </span>
     </section>
   )
 }
