@@ -559,13 +559,12 @@ registerCase({
   id: 'thread.stale_command_cas_rejected',
   level: 'L1',
   title: 'stale 命令 CAS cursor 被拒绝',
-  docs: 'expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409；隔离 Thread 上精确断言 nextCommandSequence/revision/head 前后不变',
+  docs: '从当前 Catalog 解析任一有效 Agent/Model；expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/revision/head 前后不变',
   async run(ctx) {
-    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
-    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const { agent, model } = await resolveAnyCatalogTarget(ctx)
     const { snapshot } = await createConfiguredChatThread(ctx, {
-      agent: ctx.vars.agent,
-      model: modelSelectionOf(ctx),
+      agent,
+      model,
       title: `e2e-stale-cas-${cid().slice(0, 8)}`,
     })
     const thread = snapshot.thread
@@ -930,4 +929,33 @@ function modelSelectionOf(ctx) {
     modelName,
     variant: agent.variant || model.config.defaultVariant,
   }
+}
+
+/** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
+async function resolveAnyCatalogTarget(ctx) {
+  const agents = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')).json,
+  )
+  const models = pageResults(
+    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')).json,
+  )
+  for (const agent of agents) {
+    const separator = String(agent.model || '').indexOf('/')
+    if (separator <= 0) continue
+    const providerName = String(agent.model).slice(0, separator)
+    const modelName = String(agent.model).slice(separator + 1)
+    const model = models.find(
+      (candidate) => candidate.providerName === providerName && candidate.name === modelName,
+    )
+    if (!model) continue
+    const variant = agent.variant || model.config?.defaultVariant
+    if (!variant) continue
+    return {
+      agent,
+      model: { providerName, modelName, variant },
+    }
+  }
+  throw new Error(
+    `no resolvable Agent/Model in current Catalog: ${JSON.stringify({ agents, models })}`,
+  )
 }
