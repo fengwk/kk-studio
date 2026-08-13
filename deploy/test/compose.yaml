@@ -126,7 +126,7 @@ services:
     image: ${CANVAS_TEST_APP_IMAGE:-kk-studio-app:canvas-test}
     init: true
     environment:
-      SPRING_PROFILES_ACTIVE: e2e
+      SPRING_PROFILES_ACTIVE: dev
       KK_STUDIO_DB_URL: jdbc:postgresql://postgres:5432/canvas_test
       KK_STUDIO_DB_USER: canvas_test
       KK_STUDIO_DB_PASSWORD: canvas_test_only

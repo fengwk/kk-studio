@@ -165,10 +165,41 @@ import urllib.request
 with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as response:
     assert response.status == 200
     assert json.load(response) == {"status": "ok"}
+
+request = urllib.request.Request(
+    "http://127.0.0.1:8080/v1/chat/completions",
+    data=json.dumps(
+        {"model": "acceptance-stub", "messages": [{"role": "user", "content": "probe"}]}
+    ).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=5) as response:
+    assert response.status == 200
+    assert response.headers.get_content_type() == "text/event-stream"
+    body = response.read().decode()
+    assert body.endswith("data: [DONE]\n\n"), body
+    chunks = []
+    for event in body.split("\n\n"):
+        if not event:
+            continue
+        assert event.startswith("data: "), event
+        data = event.removeprefix("data: ")
+        if data == "[DONE]":
+            continue
+        chunks.append(json.loads(data))
+    assert chunks, "no chat completion chunks"
+    assert all(chunk["object"] == "chat.completion.chunk" for chunk in chunks), chunks
+    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant", chunks[0]
+    text = "".join(
+        chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
+    )
+    assert text == "This is a deterministic offline acceptance stub response.", text
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop", chunks[-1]
 '
 
 if [[ "$WITH_APP" == "true" ]]; then
-  step "Checking global Blob upload, Canvas consumption, Function runs, and signed media GET"
+  step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
   CANVAS_TEST_IMAGE_FIXTURE="$SCRIPT_DIR/../../core/src/test/resources/fun/fengwk/kkstudio/core/studio/resource/tiny.png" \
     python3 - <<'PY'
@@ -491,6 +522,104 @@ seedance_node = create_and_run(
 )
 assert len(seedance_node["resources"]) == 1
 assert seedance_node["resources"][0]["kind"] == "VIDEO"
+
+# Offline Chat smoke: dev seed default-assistant -> stub/acceptance-stub, with the
+# stub provider endpoint resolving to the in-stack http-mock SSE stub.
+providers = json_call("GET", "/api/ai/catalog/providers?pageNumber=1&pageSize=50")
+stub = next(item for item in providers["results"] if item["name"] == "stub")
+assert stub["providerType"] == "openai", stub
+assert stub["baseUrl"] == "http://http-mock:8080/v1", stub
+assert stub["configured"] is True, stub
+
+chat = json_call(
+    "POST",
+    "/api/ai/chat",
+    {"title": "offline-chat-smoke", "agentName": "default-assistant", "yoloEnabled": False},
+)
+assert chat["agentName"] == "default-assistant", chat
+thread_snapshot = json_call(
+    "POST",
+    f"/api/ai/chat/{chat['id']}/threads",
+    {
+        "branchSettings": {
+            "environmentName": None,
+            "agentName": "default-assistant",
+            "model": {
+                "providerName": "stub",
+                "modelName": "acceptance-stub",
+                "variant": "default",
+            },
+            "activeTools": [],
+        },
+        "yoloEnabled": False,
+    },
+)
+thread = thread_snapshot["thread"]
+assert thread["status"] == "IDLE" and thread["processing"] is False, thread
+marker = "offline-chat-smoke-" + uuid.uuid4().hex[:8]
+enqueued = json_call(
+    "POST",
+    f"/api/ai/runtime/threads/{thread['threadId']}/commands",
+    {
+        "expectedHeadEntryId": thread["headEntryId"],
+        "expectedNextCommandSequence": thread["nextCommandSequence"],
+        "commands": [
+            {
+                "type": "USER_MESSAGE",
+                "clientCommandId": new_id(),
+                "contents": [{"type": "TEXT", "text": marker}],
+            }
+        ],
+    },
+)
+assert enqueued[0]["type"] == "USER_MESSAGE", enqueued
+for _ in range(240):
+    current = json_call(
+        "GET", f"/api/ai/runtime/threads/{thread['threadId']}/snapshot"
+    )
+    candidate = current["thread"]
+    if (
+        candidate["status"] == "IDLE"
+        and candidate["processing"] is False
+        and len(current["queuedCommands"]) == 0
+        and current["modelInvocation"] is None
+        and len(current["toolInvocations"]) == 0
+    ):
+        break
+    time.sleep(0.25)
+else:
+    raise AssertionError(
+        f"offline Chat thread did not become quiescent: {json.dumps(current)}"
+    )
+assert current["thread"]["status"] == "IDLE", current
+assert not any(
+    entry["entryType"].upper() == "ASSISTANT_ERROR" for entry in current["entries"]
+), current["entries"]
+user_entries = [
+    entry
+    for entry in current["entries"]
+    if entry["entryType"].upper() == "MESSAGE"
+    and json.loads(entry["payloadJson"])["message"]["role"] == "USER"
+]
+assert user_entries, f"no durable USER entry: {json.dumps(current['entries'])}"
+assert marker in json.dumps(user_entries[-1]), current["entries"]
+assistant_entries = [
+    entry
+    for entry in current["entries"]
+    if entry["entryType"].upper() == "MESSAGE"
+    and json.loads(entry["payloadJson"])["message"]["role"] == "ASSISTANT"
+]
+assert assistant_entries, f"no durable assistant reply: {json.dumps(current['entries'])}"
+assistant_text = "".join(
+    content.get("text", "")
+    for content in json.loads(assistant_entries[-1]["payloadJson"])["message"]["contents"]
+    if content.get("type") == "text"
+)
+assert "offline acceptance stub" in assistant_text, assistant_text
+turn_end = next(
+    entry for entry in current["entries"] if entry["entryType"].upper() == "TURN_END"
+)
+assert json.loads(turn_end["payloadJson"])["outcome"] == "COMPLETED", turn_end
 PY
 fi
 

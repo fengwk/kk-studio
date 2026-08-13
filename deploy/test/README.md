@@ -6,7 +6,7 @@
 - Redis realtime overlay；
 - MinIO 与 bucket 初始化服务；
 - 一个可配置的 HTTP mock，同时提供容器网络别名 `opencli-hub` 和 `comfyui`；
-- 可选的当前 `deploy/local/Dockerfile` 应用服务。
+- 可选的当前 `deploy/local/Dockerfile` 应用服务（`dev` profile + dev seed）。
 
 所有宿主端口只绑定 `127.0.0.1`，服务位于当前 Compose project 的独立 bridge 网络，
 不会加入生产或其他本地栈的网络。Compose 中的账号均为固定、可丢弃的测试值，不得替换
@@ -52,8 +52,17 @@ original 字节不变、URL DTO 不暴露 bucket/key，以及 Redis Patch Cache 
 `seedance2.0fast -> fake submit/status -> fake Hub MP4 -> materialize` 两条完整 adapter
 闭环。这里没有浏览器登录、真实 provider 或付费请求。
 
-应用通过环境变量连接 `postgres:5432`、`redis:6379`、`minio:9000`、`comfyui:8080` 和
-`opencli-hub:8080`。ComfyUI 保持禁用；OpenCLI adapters 只在该隔离栈中指向内置 fake Hub。
+应用以 `dev` profile + dev seed 启动：`default-assistant` 指向 `stub/acceptance-stub`，
+stub provider 的 `base_url` 为 `http://http-mock:8080/v1`（仅在本栈网络内可解析），
+由 HTTP mock 内置的 `POST /v1/chat/completions` 确定性 OpenAI SSE 流应答。Chat smoke
+断言 catalog 中 stub provider 的 endpoint 与 `configured`，然后走完整 harness 协议
+`create Chat/Thread -> USER_MESSAGE -> poll snapshot 至 quiescent`，验证 durable
+assistant MESSAGE 文本包含确定性 stub 回复、`TURN_END` outcome 为 `COMPLETED` 且无
+`ASSISTANT_ERROR` 条目。其他本地栈若要使用该 stub 聊天，需经 catalog API 把 provider
+指向自己的 OpenAI 兼容端点。
+
+应用通过环境变量连接 `postgres:5432`、`redis:6379`、`minio:9000`、`comfyui:8080`、
+`opencli-hub:8080` 与 `http-mock:8080`。ComfyUI 保持禁用；OpenCLI adapters 只在该隔离栈中指向内置 fake Hub。
 Canvas Resource 媒体进程显式配置为容器内的 `ffprobe` / `ffmpeg`，
 临时目录为 `/tmp`，每次 finalize/materialize 都会清理自己的工作目录。
 
@@ -94,7 +103,9 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 
 ## 注入 mock routes
 
-HTTP mock 固定提供 `GET /health`，并在隔离栈中模拟本切片使用的 Hub upload、
+HTTP mock 固定提供 `GET /health`、内置的 `POST /v1/chat/completions` 确定性 OpenAI
+Chat Completions SSE stub（响应固定文本，`data:` 分块以 `[DONE]` 结尾，供 dev seed 的
+`stub/acceptance-stub` 离线对话），并在隔离栈中模拟本切片使用的 Hub upload、
 execute、execution detail 与 Resource download。其余 route 从 JSON 文件读取，只按 HTTP method 与
 URL path 精确匹配，不解析或假设请求体。默认
 [`mock/routes.json`](mock/routes.json) 为空。
