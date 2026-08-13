@@ -1,16 +1,19 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
 import {
-  memo,
-  useEffect,
-  useState,
-} from 'react'
+  AudioLines,
+  FileText,
+  Group,
+  Image,
+  Images,
+  PanelsTopLeft,
+  Sparkles,
+  Video,
+} from 'lucide-react'
+import { memo, type ReactNode } from 'react'
 import type { ResourceNode } from '@/features/canvas/domain'
-import {
-  CanvasResourceMedia,
-  CanvasResourceThumbnail,
-} from '@/features/canvas/nodes/CanvasResourceMedia'
-import { isCompactMediaNode } from '@/features/canvas/resource-node-size'
+import { CanvasNodeContainer } from '@/features/canvas/nodes/CanvasNodeContainer'
+import { CanvasResourceGrid } from '@/features/canvas/nodes/CanvasResourceGrid'
 import type { CanvasFlowNodeData } from '@/features/canvas/types'
 import { useI18n } from '@/shared/i18n'
 
@@ -54,142 +57,78 @@ const ResourceNodeView = memo(function ResourceNodeView({
 }) {
   const { node, model, callbacks } = data
   const { t } = useI18n()
-  const [resourceIndex, setResourceIndex] = useState(0)
-  const resource = node.resources[resourceIndex] ?? node.resources[0]
-  const compactMediaNode = isCompactMediaNode(node)
-
-  useEffect(() => {
-    setResourceIndex((current) => Math.min(current, Math.max(0, node.resources.length - 1)))
-  }, [node.resources.length])
-
-  const functionLabel = node.function && model
-    ? model.outputKind === 'VIDEO'
-      ? t('canvas.functionLabel.video', { name: node.name })
-      : t('canvas.functionLabel.image', { name: node.name })
-    : null
+  const descriptor = nodeDescriptor(node, model?.outputKind ?? null, t)
 
   return (
-    <article
-      className={[
-        'resource-node',
-        node.function ? 'function-node' : '',
-        compactMediaNode ? 'compact-media-node' : '',
-      ].filter(Boolean).join(' ')}
-      data-resource-kind={resource?.kind ?? 'EMPTY'}
+    <CanvasNodeContainer
+      className="resource-node"
+      icon={descriptor.icon}
+      typeLabel={descriptor.label}
+      name={node.name}
+      accessories={<ResourceHandles functionNode={Boolean(node.function)} />}
+      bodyClassName="resource-node-body"
+      onBodyDoubleClick={() => {
+        if (!node.function && node.resources[0]?.kind === 'TEXT') {
+          callbacks.editTextNode(node)
+        }
+      }}
     >
-      <ResourceHandles functionNode={Boolean(node.function)} />
-      <div className="resource-node-label">
-        {functionLabel ? (
-          <span className="resource-node-kind-label" title={functionLabel}>
-            {functionLabel}
-          </span>
-        ) : (
-          <span className="resource-node-name" title={node.name}>{node.name}</span>
-        )}
-      </div>
-      <div className="resource-node-content">
-        <div
-          className="resource-node-preview"
-          onDoubleClick={() => {
-            if (!node.function && resource?.kind === 'TEXT') {
-              callbacks.editTextNode(node)
-            }
-          }}
-        >
-          {resource ? (
-            <div className="resource-viewer">
-              <CanvasResourceMedia resource={resource} />
-              {node.resources.length > 1 ? (
-                <ResourceIndexSwitcher
-                  node={node}
-                  activeIndex={resourceIndex}
-                  onChange={setResourceIndex}
-                />
-              ) : null}
-            </div>
-          ) : (
-            <div className="resource-empty">
-              <span>✦</span>
-              <p>{node.function ? t('canvas.node.emptyFunction') : t('canvas.node.empty')}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </article>
+      <CanvasResourceGrid node={node} />
+    </CanvasNodeContainer>
   )
 })
 
-function ResourceIndexSwitcher({
-  node,
-  activeIndex,
-  onChange,
-}: {
-  node: ResourceNode
-  activeIndex: number
-  onChange: (index: number) => void
-}) {
-  const { t } = useI18n()
-  const visibleResources = node.resources.slice(0, 4)
-  return (
-    <div className="resource-index-switcher" aria-label={t('canvas.node.switcherAria')}>
-      <button
-        type="button"
-        className="nodrag"
-        aria-label={t('canvas.node.previous')}
-        disabled={activeIndex === 0}
-        onClick={() => onChange(activeIndex - 1)}
-      >
-        ‹
-      </button>
-      <div className="resource-index-thumbnails">
-        {visibleResources.map((resource, index) => (
-          <button
-            key={resource.id}
-            type="button"
-            className={`nodrag${index === activeIndex ? ' active' : ''}`}
-            aria-label={t('canvas.node.viewResource', { index: index + 1 })}
-            aria-pressed={index === activeIndex}
-            onClick={() => onChange(index)}
-          >
-            <CanvasResourceThumbnail resource={resource} />
-          </button>
-        ))}
-        {node.resources.length > visibleResources.length ? (
-          <span className="resource-index-more">
-            +
-            {node.resources.length - visibleResources.length}
-          </span>
-        ) : null}
-      </div>
-      <span className="resource-index-count">
-        {activeIndex + 1}
-        {' / '}
-        {node.resources.length}
-      </span>
-      <button
-        type="button"
-        className="nodrag"
-        aria-label={t('canvas.node.next')}
-        disabled={activeIndex >= node.resources.length - 1}
-        onClick={() => onChange(activeIndex + 1)}
-      >
-        ›
-      </button>
-    </div>
-  )
-}
-
 function GroupFlowNode(props: NodeProps<CanvasFlowNode>) {
+  const { t } = useI18n()
   if (props.data.kind !== 'group') {
     return null
   }
   return (
-    <section className="canvas-group-node">
-      <span className="canvas-group-title" title={props.data.group.title}>
-        {props.data.group.title}
-      </span>
-    </section>
+    <CanvasNodeContainer
+      as="section"
+      className="canvas-group-node"
+      icon={<PanelsTopLeft />}
+      typeLabel={t('canvas.node.type.group')}
+      name={props.data.group.title}
+      bodyClassName="canvas-group-body"
+    >
+      <span className="sr-only">{props.data.group.title}</span>
+    </CanvasNodeContainer>
   )
+}
+
+function nodeDescriptor(
+  node: ResourceNode,
+  functionOutputKind: 'IMAGE' | 'VIDEO' | null,
+  t: ReturnType<typeof useI18n>['t'],
+): { icon: ReactNode; label: string } {
+  if (node.function) {
+    if (functionOutputKind === 'IMAGE') {
+      return { icon: <Sparkles />, label: t('canvas.node.type.imageFunction') }
+    }
+    if (functionOutputKind === 'VIDEO') {
+      return { icon: <Sparkles />, label: t('canvas.node.type.videoFunction') }
+    }
+    return { icon: <Sparkles />, label: t('canvas.node.type.function') }
+  }
+  const kinds = new Set(node.resources.map((resource) => resource.kind))
+  if (kinds.size !== 1) {
+    return { icon: <Images />, label: t('canvas.node.type.resource') }
+  }
+  const kind = node.resources[0]?.kind
+  if (kind === 'IMAGE') {
+    return { icon: <Image />, label: t('canvas.node.type.image') }
+  }
+  if (kind === 'VIDEO') {
+    return { icon: <Video />, label: t('canvas.node.type.video') }
+  }
+  if (kind === 'AUDIO') {
+    return { icon: <AudioLines />, label: t('canvas.node.type.audio') }
+  }
+  if (kind === 'TEXT') {
+    return { icon: <FileText />, label: t('canvas.node.type.text') }
+  }
+  return { icon: <Group />, label: t('canvas.node.type.resource') }
 }
 
 export const canvasNodeTypes = {

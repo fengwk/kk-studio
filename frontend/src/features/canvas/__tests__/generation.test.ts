@@ -170,12 +170,12 @@ describe('Canvas structured generation config', () => {
     // Only linked IMAGE resources are candidates; aliases remain derived display data.
     const candidates = referenceCandidates(snapshot(), '9', imageModel)
     expect(candidates.map((candidate) => candidate.label)).toEqual([
-      '@single',
-      '@multi[0]',
-      '@multi[1]',
-      '@function-output[0]',
+      '@single_0',
+      '@multi_0',
+      '@multi_1',
+      '@function-output_0',
     ])
-    expect(referenceAlias(node('4', 'fn', ['IMAGE'], true), 0)).toBe('@fn[0]')
+    expect(referenceAlias(node('4', 'fn', ['IMAGE'], true), 0)).toBe('@fn_0')
   })
 
   it('inserts at the caret, allows duplicate mentions, and merges text after chip deletion', () => {

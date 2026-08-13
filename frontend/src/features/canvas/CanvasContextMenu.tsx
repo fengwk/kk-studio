@@ -312,7 +312,6 @@ function ResourceMenuItems({
 function ResourceActionItems({ resource, onClose }: { resource: Resource; onClose: () => void }) {
   const { t } = useI18n()
   const {
-    url,
     loading,
     error,
     ensureSigned,
@@ -326,11 +325,7 @@ function ResourceActionItems({ resource, onClose }: { resource: Resource; onClos
   }, [fulfilled, onClose])
 
   const requestAction = (intent: 'open' | 'download') => {
-    const immediate = url !== null
     ensureSigned(intent)
-    if (immediate) {
-      onClose()
-    }
   }
 
   return (

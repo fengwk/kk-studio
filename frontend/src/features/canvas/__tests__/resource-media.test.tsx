@@ -4,9 +4,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Resource } from '@/features/canvas/domain'
 import {
-  CanvasResourceMedia,
+  CanvasResourceRenderer as CanvasResourceMedia,
+} from '@/features/canvas/nodes/resources/CanvasResourceRenderer'
+import {
   CanvasResourceThumbnail,
-} from '@/features/canvas/nodes/CanvasResourceMedia'
+} from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
 import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
@@ -337,9 +339,10 @@ describe('Canvas lazy resource media', () => {
 
   it('loads AUDIO original on first play into the custom player', async () => {
     const view = renderMedia(resource('AUDIO'))
-    // 紧凑播放器常驻显示资源名与时间，未播放时不签名原件。
-    expect(screen.getByText('audio.asset')).toBeInTheDocument()
+    // 紧凑播放器常驻显示波形、格式与时间，未播放时不签名原件。
+    expect(screen.getByText('MP3')).toBeInTheDocument()
     expect(screen.getByText('0:00 / 1:05')).toBeInTheDocument()
+    expect(view.container.querySelectorAll('.audio-player-waveform > span')).toHaveLength(32)
     expect(screen.getByRole('button', { name: '播放音频 audio.asset' })).toBeInTheDocument()
     // 原件操作只走右键菜单：播放器内只有播放与静音两个按钮，无常驻下载入口。
     expect(screen.getAllByRole('button')).toHaveLength(2)
@@ -348,8 +351,11 @@ describe('Canvas lazy resource media', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '播放音频 audio.asset' }))
     await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
-    const audio = document.querySelector('audio') as HTMLAudioElement
-    await waitFor(() => expect(audio).not.toBeNull())
+    const audio = await waitFor(() => {
+      const element = document.querySelector('audio')
+      expect(element).not.toBeNull()
+      return element as HTMLAudioElement
+    })
     expect(audio).toHaveAttribute('src', 'https://s3.example/original')
     expect(audio).toHaveClass('nodrag', 'nowheel')
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()

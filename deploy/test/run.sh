@@ -528,7 +528,7 @@ assert seedance_node["resources"][0]["kind"] == "VIDEO"
 providers = json_call("GET", "/api/ai/catalog/providers?pageNumber=1&pageSize=50")
 stub = next(item for item in providers["results"] if item["name"] == "stub")
 assert stub["providerType"] == "openai", stub
-assert stub["baseUrl"] == "http://http-mock:8080/v1", stub
+assert stub["baseUrl"] == "http://stub.local:8080/v1", stub
 assert stub["configured"] is True, stub
 
 chat = json_call(

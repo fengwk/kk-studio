@@ -126,6 +126,9 @@ public sealed interface CanvasCommand
       Objects.requireNonNull(transform, "transform");
       Objects.requireNonNull(memberNodeIds, "memberNodeIds");
       memberNodeIds = List.copyOf(memberNodeIds);
+      if (memberNodeIds.isEmpty()) {
+        throw new IllegalArgumentException("memberNodeIds must not be empty");
+      }
       memberNodeIds.forEach(memberNodeId -> Objects.requireNonNull(memberNodeId, "memberNodeId"));
     }
   }

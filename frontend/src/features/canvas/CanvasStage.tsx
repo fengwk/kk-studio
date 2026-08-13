@@ -131,10 +131,13 @@ function StageInner() {
           : null,
       }
     }
-    const hasUngroupedResource = nodeIds.some((id) => {
-      const node = snapshot.resourceNodes.find((item) => item.id === id)
-      return Boolean(node && !node.groupId)
-    })
+    const selectedResources = nodeIds
+      .map((id) => snapshot.resourceNodes.find((item) => item.id === id))
+      .filter((node) => Boolean(node))
+    const hasUngroupedResource = (
+      selectedResources.length === nodeIds.length
+      && selectedResources.every((node) => !node?.groupId)
+    )
     return { kind: 'multi', nodeIds, hasUngroupedResource }
   }, [models, snapshot])
 
@@ -523,6 +526,13 @@ function StageInner() {
             onNodeClick={(event, node) => {
               if (!event.shiftKey) {
                 setSelection([node.id])
+                if (
+                  node.data.kind === 'resource'
+                  && !node.data.node.function
+                  && node.data.node.resources[0]?.kind === 'TEXT'
+                ) {
+                  runtime.editTextNode(node.data.node)
+                }
               }
             }}
             onPaneClick={() => {

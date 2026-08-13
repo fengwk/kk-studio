@@ -1,58 +1,50 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
-import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
+import { getCanvasResourceOriginalUrl } from '@/shared/api/studio-service'
 
 type OriginalIntent = 'open' | 'download'
 
 /**
- * 原件 open/download 动作的共享 hook：首次触发时才签名 original URL，
- * 签名完成后自动执行等待中的意图（下载/新窗口打开），失败可再次点击重试。
- * 供右键菜单的打开/下载入口复用，避免在各处复制签名状态机。
+ * 原件 open/download 动作的共享 hook：每次触发都获取新的 original 签名 URL，
+ * 签名完成后执行下载/新窗口打开；失败可再次点击重试。
  */
 export function useCanvasResourceActions(resource: Resource) {
-  const { canvasId, id } = resource
-  const [requested, setRequested] = useState(false)
-  const {
-    url,
-    loading,
-    error,
-    refresh,
-  } = useCanvasResourceUrl({
-    canvasId,
-    resourceId: id,
-    kind: 'original',
-    enabled: requested,
-  })
-  const pendingRef = useRef<OriginalIntent | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<unknown>(null)
   const [fulfilled, setFulfilled] = useState(false)
+  const requestIdRef = useRef(0)
 
-  useEffect(() => {
-    if (!url || !pendingRef.current) {
-      return
-    }
-    const intent = pendingRef.current
-    pendingRef.current = null
-    triggerAnchor(intent, url, resource.name)
-    setFulfilled(true)
-  }, [resource.name, url])
+  useEffect(() => () => {
+    requestIdRef.current += 1
+  }, [])
 
   const ensureSigned = useCallback((intent: OriginalIntent) => {
-    if (url) {
-      pendingRef.current = null
-      setFulfilled(false)
-      triggerAnchor(intent, url, resource.name)
-      return
-    }
-    pendingRef.current = intent
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    setLoading(true)
+    setError(null)
     setFulfilled(false)
-    if (requested && error) {
-      void refresh()
-    } else if (!requested) {
-      setRequested(true)
-    }
-  }, [error, refresh, requested, resource.name, url])
+    void getCanvasResourceOriginalUrl(resource.canvasId, resource.id)
+      .then(({ url }) => {
+        if (requestIdRef.current !== requestId) {
+          return
+        }
+        triggerAnchor(intent, url, resource.name)
+        setFulfilled(true)
+      })
+      .catch((reason: unknown) => {
+        if (requestIdRef.current === requestId) {
+          setError(reason)
+        }
+      })
+      .finally(() => {
+        if (requestIdRef.current === requestId) {
+          setLoading(false)
+        }
+      })
+  }, [resource.canvasId, resource.id, resource.name])
 
-  return { url, loading, error, fulfilled, ensureSigned }
+  return { loading, error, fulfilled, ensureSigned }
 }
 
 function triggerAnchor(intent: OriginalIntent, url: string, name: string): void {

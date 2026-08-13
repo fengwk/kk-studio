@@ -1,7 +1,6 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
-import { probeCanvasFileMetadata } from '@/features/canvas/canvas-file-metadata'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
 import { useCanvasVersionEvents } from '@/features/canvas/canvas-version-events'
 import {
@@ -9,12 +8,13 @@ import {
   type ResourceNode,
 } from '@/features/canvas/domain'
 import { createDefaultFunctionConfig } from '@/features/canvas/generation'
+import { isNodeCompletelyOutsideGroup } from '@/features/canvas/group-membership'
 import {
   normalizeNodeAlias,
   uniqueNodeAlias,
 } from '@/features/canvas/node-alias'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
-import { resourceNodeSize } from '@/features/canvas/resource-node-size'
+import { CANVAS_SINGLE_RESOURCE_NODE_SIZE } from '@/features/canvas/resource-node-size'
 import { isCanonicalUuid } from '@/features/canvas/uuid'
 import { createWorkerHasher, validateUploadFile } from '@/features/ai/composer'
 import type {
@@ -53,7 +53,11 @@ import { storageService } from '@/shared/api/storage-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
-const NODE_SIZE: CanvasTransformDTO = { x: 120, y: 120, width: 320, height: 260 }
+const NODE_SIZE: CanvasTransformDTO = {
+  x: 120,
+  y: 120,
+  ...CANVAS_SINGLE_RESOURCE_NODE_SIZE,
+}
 /** 画布资源上传与共享 composer 一致：Web Worker 中计算 SHA-256。 */
 const canvasUploadHasher = createWorkerHasher()
 
@@ -91,6 +95,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const transformTimerRef = useRef<number | null>(null)
   const pendingNodeTransformsRef = useRef(new Map<UUIDString, CanvasTransformDTO>())
   const pendingGroupMovesRef = useRef(new Map<UUIDString, { x: number; y: number }>())
+  const pendingUngroupsRef = useRef(new Map<UUIDString, UUIDString>())
   const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingFunctionConfig>())
   const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
   const functionConfigFlushesRef = useRef(new Map<UUIDString, Promise<void>>())
@@ -242,6 +247,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
+    pendingUngroupsRef.current.clear()
     for (const timer of functionConfigTimersRef.current.values()) {
       window.clearTimeout(timer)
     }
@@ -270,6 +276,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
     pendingNodeTransformsRef.current.clear()
     pendingGroupMovesRef.current.clear()
+    pendingUngroupsRef.current.clear()
     reservedNodeAliasesRef.current.clear()
     setInitialFitPending(false)
     setState((current) => ({
@@ -336,6 +343,16 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     if (updates.length > 0) {
       commands.push({ type: 'UPDATE_NODE_TRANSFORMS', updates })
     }
+    const ungroupedByGroup = new Map<UUIDString, UUIDString[]>()
+    for (const [nodeId, groupId] of pendingUngroupsRef.current) {
+      const memberNodeIds = ungroupedByGroup.get(groupId) ?? []
+      memberNodeIds.push(nodeId)
+      ungroupedByGroup.set(groupId, memberNodeIds)
+    }
+    pendingUngroupsRef.current.clear()
+    for (const [groupId, memberNodeIds] of ungroupedByGroup) {
+      commands.push({ type: 'UNGROUP', groupId, memberNodeIds })
+    }
     if (commands.length > 0) {
       void executeCommands(commands)
         .catch(() => undefined)
@@ -383,7 +400,21 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
             x: update.transform.x,
             y: update.transform.y,
           }
-          pendingNodeTransformsRef.current.set(update.id as UUIDString, update.transform)
+          const nodeId = update.id as UUIDString
+          pendingNodeTransformsRef.current.set(nodeId, update.transform)
+          const node = snapshot.nodes.find((item) => item.id === nodeId)
+          const group = node?.groupId
+            ? snapshot.groups.find((item) => item.id === node.groupId)
+            : null
+          if (
+            node?.groupId
+            && group
+            && isNodeCompletelyOutsideGroup(update.transform, group.transform)
+          ) {
+            pendingUngroupsRef.current.set(nodeId, node.groupId)
+          } else {
+            pendingUngroupsRef.current.delete(nodeId)
+          }
         }
       }
       return { ...current, positionDrafts }
@@ -572,10 +603,14 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
 
   const createGroup = useCallback(() => {
     const snapshot = snapshotQuery.data ? projectCanvasSnapshot(snapshotQuery.data) : null
-    const members = snapshot?.resourceNodes.filter(
-      (node) => state.selectedIds.includes(node.id) && !node.groupId,
-    ) ?? []
-    if (members.length === 0) {
+    const members = state.selectedIds
+      .map((id) => snapshot?.resourceNodes.find((node) => node.id === id))
+      .filter((node): node is ResourceNode => Boolean(node))
+    if (
+      members.length === 0
+      || members.length !== state.selectedIds.length
+      || members.some((node) => node.groupId)
+    ) {
       setToast('请先选择未分组的资源节点。')
       return
     }
@@ -601,41 +636,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     state.positionDrafts,
     state.selectedIds,
   ])
-
-  const ungroupSelection = useCallback(() => {
-    const snapshot = snapshotQuery.data
-    if (!snapshot) {
-      return
-    }
-    const byGroup = new Map<UUIDString, UUIDString[]>()
-    for (const node of snapshot.nodes) {
-      if (!node.groupId || !state.selectedIds.includes(node.id)) {
-        continue
-      }
-      const members = byGroup.get(node.groupId) ?? []
-      members.push(node.id)
-      byGroup.set(node.groupId, members)
-    }
-    const commands: CanvasCommandDTO[] = [...byGroup].map(([groupId, memberNodeIds]) => ({
-      type: 'UNGROUP',
-      groupId,
-      memberNodeIds,
-    }))
-    for (const id of state.selectedIds) {
-      const groupId = groupIdFromFlowId(id)
-      if (groupId && !commands.some((command) => (
-        (command.type === 'UNGROUP' || command.type === 'DELETE_GROUP')
-        && command.groupId === groupId
-      ))) {
-        commands.push({ type: 'DELETE_GROUP', groupId })
-      }
-    }
-    if (commands.length === 0) {
-      setToast('当前选区没有已分组的成员。')
-      return
-    }
-    void executeCommands(commands).catch(() => undefined)
-  }, [executeCommands, setToast, snapshotQuery.data, state.selectedIds])
 
   /** 解组单个 Group：UNGROUP 语义本身会解除成员并删除边界，不追加 DELETE_GROUP。 */
   const ungroupGroup = useCallback((groupId: UUIDString) => {
@@ -715,23 +715,14 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         }
         // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
         // 交由存储过期回收；绝不删除已消费（complete）的句柄。
-        const metadata = await probeCanvasFileMetadata(file, descriptor.kind)
         const alias = reserveNodeAlias(file.name)
-        const transform = nextTransform(resourceNodeSize({
-          transform: NODE_SIZE,
-          resources: [{
-            kind: descriptor.kind,
-            width: metadata.width,
-            height: metadata.height,
-          }],
-        }))
         try {
           await executeCommands([{
             type: 'CREATE_RESOURCE_NODE',
             nodeId: crypto.randomUUID(),
             name: alias,
             uploadIds: [uploadId],
-            transform,
+            transform: nextTransform(),
           }])
         } finally {
           releaseNodeAlias(alias)
@@ -775,21 +766,12 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
 
   const deleteSelection = useCallback(() => {
     const commands: CanvasCommandDTO[] = []
-    const nodeIds = new Set(snapshotQuery.data?.nodes.map((node) => node.id) ?? [])
     for (const link of state.selectedLinks) {
       commands.push({
         type: 'DELETE_LINK',
         sourceNodeId: link.sourceNodeId,
         targetNodeId: link.targetNodeId,
       })
-    }
-    for (const id of state.selectedIds) {
-      const groupId = groupIdFromFlowId(id)
-      if (groupId) {
-        commands.push({ type: 'DELETE_GROUP', groupId })
-      } else if (nodeIds.has(id as UUIDString)) {
-        commands.push({ type: 'DELETE_NODE', nodeId: id as UUIDString })
-      }
     }
     if (commands.length === 0) {
       return
@@ -803,8 +785,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }).catch(() => undefined)
   }, [
     executeCommands,
-    snapshotQuery.data?.nodes,
-    state.selectedIds,
     state.selectedLinks,
   ])
 
@@ -1033,7 +1013,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     startFunctionRun,
     cancelFunctionRun,
     createGroup,
-    ungroupSelection,
     ungroupGroup,
     renameGroup,
     deleteGroup,

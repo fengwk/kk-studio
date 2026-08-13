@@ -53,13 +53,13 @@ original 字节不变、URL DTO 不暴露 bucket/key，以及 Redis Patch Cache 
 闭环。这里没有浏览器登录、真实 provider 或付费请求。
 
 应用以 `dev` profile + dev seed 启动：`default-assistant` 指向 `stub/acceptance-stub`，
-stub provider 的 `base_url` 为 `http://http-mock:8080/v1`（仅在本栈网络内可解析），
-由 HTTP mock 内置的 `POST /v1/chat/completions` 确定性 OpenAI SSE 流应答。Chat smoke
+stub provider 的 `base_url` 为 `http://stub.local:8080/v1`；本栈将 `stub.local` 配置为
+HTTP mock 的网络别名，由其内置的 `POST /v1/chat/completions` 确定性 OpenAI SSE 流应答。Chat smoke
 断言 catalog 中 stub provider 的 endpoint 与 `configured`，然后走完整 harness 协议
 `create Chat/Thread -> USER_MESSAGE -> poll snapshot 至 quiescent`，验证 durable
 assistant MESSAGE 文本包含确定性 stub 回复、`TURN_END` outcome 为 `COMPLETED` 且无
-`ASSISTANT_ERROR` 条目。其他本地栈若要使用该 stub 聊天，需经 catalog API 把 provider
-指向自己的 OpenAI 兼容端点。
+`ASSISTANT_ERROR` 条目。其他本地栈若要使用该 stub 聊天，可提供同名本地 DNS/hosts
+映射，或经 catalog API 把 provider 指向自己的 OpenAI 兼容端点。
 
 应用通过环境变量连接 `postgres:5432`、`redis:6379`、`minio:9000`、`comfyui:8080`、
 `opencli-hub:8080` 与 `http-mock:8080`。ComfyUI 保持禁用；OpenCLI adapters 只在该隔离栈中指向内置 fake Hub。

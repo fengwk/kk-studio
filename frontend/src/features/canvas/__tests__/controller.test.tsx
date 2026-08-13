@@ -21,7 +21,6 @@ import {
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { storageService } from '@/shared/api/storage-service'
-import { probeCanvasFileMetadata } from '@/features/canvas/canvas-file-metadata'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_NOTE = 'aaaaaaaa-0000-4000-8000-000000000002'
@@ -57,10 +56,6 @@ vi.mock('@/shared/api/storage-service', () => ({
     getBlobOriginalUrl: vi.fn(),
     getBlobPreviewUrl: vi.fn(),
   },
-}))
-
-vi.mock('@/features/canvas/canvas-file-metadata', () => ({
-  probeCanvasFileMetadata: vi.fn(async () => ({ width: 1122, height: 1402 })),
 }))
 
 vi.mock('@/features/ai/composer', async (importOriginal) => {
@@ -428,7 +423,6 @@ describe('useCanvasController real snapshot runtime', () => {
     })
     act(() => {
       result.current.createGroup()
-      result.current.ungroupSelection()
     })
     act(() => {
       result.current.setSelection([NODE_NOTE])
@@ -436,17 +430,8 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.createGroup()
     })
-    act(() => {
-      result.current.setSelection([NODE_FN, NODE_IMG])
-    })
-    act(() => {
-      result.current.ungroupSelection()
-    })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_GROUP'
-    ))).toBe(true))
-    await waitFor(() => expect(commands.some((request) => (
-      request.commands[0]?.type === 'UNGROUP'
     ))).toBe(true))
 
     await act(async () => {
@@ -465,7 +450,6 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(storageService.uploadFile).toHaveBeenCalledOnce()
     expect(storageService.completeUpload).toHaveBeenCalledOnce()
     expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
-    expect(probeCanvasFileMetadata).toHaveBeenCalledWith(expect.any(File), 'IMAGE')
     expect(commands.some((request) => (
       request.commands[0]?.type === 'CREATE_RESOURCE_NODE'
     ))).toBe(true)
@@ -473,7 +457,7 @@ describe('useCanvasController real snapshot runtime', () => {
       .flatMap((request) => request.commands)
       .find((command) => command.type === 'CREATE_RESOURCE_NODE')
     expect(uploadedNode).toMatchObject({
-      transform: { width: 256, height: 344 },
+      transform: { width: 320, height: 246 },
       uploadIds: [UPLOAD_ID],
     })
     // 命令只引用共享存储 upload 句柄，绝不携带 resourceIds 或 canvas-scoped 上传 id。
@@ -486,14 +470,7 @@ describe('useCanvasController real snapshot runtime', () => {
     act(() => {
       result.current.createLink(NODE_NOTE, NODE_FN)
       result.current.deleteLink(NODE_NOTE, NODE_FN)
-      result.current.setSelection([`group:${GROUP_A}`, NODE_NOTE])
     })
-    act(() => {
-      result.current.deleteSelection()
-    })
-    await waitFor(() => expect(commands.some((request) => (
-      request.commands.some((command) => command.type === 'DELETE_GROUP')
-    ))).toBe(true))
     const deleteNodeCommandCount = commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     )).length
@@ -578,6 +555,58 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(commands.find((request) => (
       request.commands[0]?.type === 'DELETE_GROUP'
     ))?.commands).toEqual([{ type: 'DELETE_GROUP', groupId: GROUP_A }])
+  })
+
+  it('ungroups a member only after its dragged bounds fully leave the Group body', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_FN,
+        kind: 'resource',
+        // 仍与 x:[0,800] 的 Group body 有正面积交集。
+        transform: { x: 760, y: 100, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands[0]?.type === 'UPDATE_NODE_TRANSFORMS'
+    ))).toBe(true))
+    expect(commands.some((request) => (
+      request.commands.some((command) => command.type === 'UNGROUP')
+    ))).toBe(false)
+
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_FN,
+        kind: 'resource',
+        // 左边界恰好贴住 Group 右边界：无正面积交集，必须解绑。
+        transform: { x: 800, y: 100, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+    await waitFor(() => expect(commands.some((request) => (
+      request.commands.some((command) => command.type === 'UNGROUP')
+    ))).toBe(true))
+    const detachBatch = commands.find((request) => (
+      request.commands.some((command) => command.type === 'UNGROUP')
+    ))
+    expect(detachBatch?.commands).toEqual([
+      {
+        type: 'UPDATE_NODE_TRANSFORMS',
+        updates: [{
+          nodeId: NODE_FN,
+          transform: { x: 800, y: 100, width: 320, height: 260 },
+        }],
+      },
+      {
+        type: 'UNGROUP',
+        groupId: GROUP_A,
+        memberNodeIds: [NODE_FN],
+      },
+    ])
   })
 
   it('persists a text-editor rename together with the markdown update', async () => {
@@ -1004,8 +1033,8 @@ describe('useCanvasController real snapshot runtime', () => {
     })
   })
 
-  it('deletes selected links before their incident nodes in one atomic batch', async () => {
-    // DELETE_NODE 会移除 incident Link，因此同批显式 DELETE_LINK 必须先执行。
+  it('deletes selected links without bypassing node confirmation', async () => {
+    // 节点/Group 删除只经右键确认；键盘 Delete 仅处理无确认风险的连线。
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     act(() => {
@@ -1019,9 +1048,10 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     await waitFor(() => expect(commands).toHaveLength(1))
-    expect(commands[0]?.commands.map((command) => command.type)).toEqual([
-      'DELETE_LINK',
-      'DELETE_NODE',
-    ])
+    expect(commands[0]?.commands).toEqual([{
+      type: 'DELETE_LINK',
+      sourceNodeId: NODE_NOTE,
+      targetNodeId: NODE_FN,
+    }])
   })
 })

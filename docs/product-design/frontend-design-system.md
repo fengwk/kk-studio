@@ -306,6 +306,13 @@ CanvasToolRail（左侧垂直居中的功能轨）
 
 canvas-zoom-controls（左下）
 └── zoom controls（− / Fit All / % / ＋）
+
+CanvasContextMenu（Stage 级单一右键菜单）
+├── Resource：重命名 / 编辑文本 / 运行或取消 / 打开或下载原件 / 打组 / 删除确认
+├── Group：重命名 / 解组 / 删除确认
+└── Selection：全部为未分组 Resource 时打组
+
+CanvasTextEditor（非模态，编辑态锚定文本节点下方）
 ```
 
 规则：
@@ -323,10 +330,11 @@ canvas-zoom-controls（左下）
 | 区域 | 规则 |
 | --- | --- |
 | Stage | `--stage-bg`，点阵 `--stage-dot` |
-| 节点 | 内容优先。整张卡片均可抓取拖动，按钮、输入框和音视频控件等交互区域除外。图片/视频节点按源媒体比例自适应尺寸（最长边 320px，24px 标题栏），不显示固定 footer 或厚重卡片外壳；Pencil/X 在 hover、选中或键盘聚焦时出现，原件操作仅在媒体 hover 或键盘聚焦时出现。文本和未产出媒体的 Function 保留必要的结构化内容；X 删除继续使用节点内二次确认 |
+| 节点 | 内容优先。整张节点均可抓取拖动，输入框和音视频控件等交互区域除外。统一容器只负责「类型 \| 唯一名称」Header 与 Body；单资源尺寸由 Renderer 声明，图片/视频使用有界自适应容器，音频使用 320×112 Body（节点总高 138px），文本使用 320×220 Body；多资源使用固定 220×160 单元的近方形宫格，末行左对齐。文本聚焦或双击后在节点下方展开非模态编辑面板；节点不显示固定 footer、Pencil/X 或原件按钮 |
 | 首屏视口 | 无有效持久化视口时直接 fit 内容，允许在稀疏画布上放大到 160%；Fit All 同策略，Focus Selection 可到 180%。Chat panel 开关和拖拽调宽只按宽度差平移 viewport 以保持 world center，zoom 和卡片尺寸不变，面板内发生的用户缩放在收起后继续保留 |
-| 选区操作 | 不渲染额外悬浮工具栏；节点编辑/删除使用卡片标题栏，删除选区使用键盘，分组使用 Add Menu |
-| Function Workbench | 保持真实 Function 类型与参数；默认 560px、展开 720px，优先紧贴选中 Function 卡片下方，空间不足时回退上方 |
+| 选区操作 | 不渲染额外悬浮工具栏。编辑、删除、运行、打开/下载等动作统一由右键菜单按需出现；节点与 Group 删除必须在菜单内二次确认，Delete/Backspace 只删除选中连线。Add Menu 不提供 Group；单节点或框选的全部未分组 Resource 可右键打组 |
+| Group | Group 是位于成员下方的半透明轻量范围，不是业务卡片；标题使用同款 Header 并紧贴左上方。右键支持重命名、解组和删除；移动 Group 同步移动当前成员。成员包围框完全离开 Group Body 后自动解绑该成员，Group 与其余成员不受影响 |
+| Function Workbench | 保持真实 Function 类型与参数；默认 560px、展开 720px，优先紧贴选中 Function 节点下方，空间不足时回退上方。Workbench 只编辑配置与显示状态，运行/取消由节点右键菜单触发 |
 | Chat panel | threadOpen 时右侧默认 480px aside（head + 普通 Thread + composer），桌面可通过左边缘在 360-720px 内调宽且至少为画布保留 480px；≤900px 变 overlay；收起时不渲染 composer |
 | Tool rail | add launcher + add menu 位于左侧垂直居中的纵向功能轨，后续功能按钮向下追加；缩放控制独立位于左下；不展示 V/H 模式按钮 |
 | MiniMap | 右下，容器和 SVG 使用同一圆角裁切；≤1180px 或 Function Workbench 打开时隐藏 |
@@ -420,7 +428,7 @@ rg "#[0-9a-fA-F]{3,8}" frontend/src/styles.css frontend/src/features/**/*.css
 | Canvas Agent 面板 | 已按 pi/Chat 分型 | 保持 |
 | `useCanvasKeyboard` | 边界清晰 | **已拆出** |
 | `useCanvasTimers` | toast/save/run 计时 | **已拆出** |
-| `useCanvasController` 剩余 | actions + dialog focus refs | **停止**（再拆收益低） |
+| `useCanvasController` 剩余 | actions + overlay refs | **停止**（再拆收益低） |
 | `reducer.ts` | 单一状态机可读 | **停止** |
 | `CanvasStage` | RF 投影边界正确 | 保持 |
 | 共享 React 原语库 | 无强复用痛点 | **不做** |
