@@ -1,8 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react'
 import { fireEvent, render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
@@ -113,6 +112,10 @@ function renderResourceNode(node: ResourceNode, callbacks = { editTextNode: vi.f
 }
 
 describe('Canvas resource/group node renderers', () => {
+  beforeEach(() => {
+    setLocale('zh-CN')
+  })
+
   it('renders minimal content-first nodes for IMAGE, VIDEO, AUDIO, and TEXT resources', () => {
     const fixtures = [
       resource('IMAGE', { width: 1024, height: 768 }),
@@ -126,7 +129,19 @@ describe('Canvas resource/group node renderers', () => {
         id: `${fixtures.indexOf(fixture) + 2}`,
         resources: [fixture],
       }))
-      expect(view.container.querySelector('.resource-node')).toHaveAttribute('data-resource-kind', fixture.kind)
+      expect(view.container.querySelector('.resource-node')).toHaveClass(
+        'canvas-node-container',
+        'resource-node',
+      )
+      expect(view.container.querySelector('.canvas-resource-slot')).toHaveAttribute(
+        'data-resource-kind',
+        fixture.kind,
+      )
+      expect(view.container.querySelector('.canvas-resource-slot')).toHaveAttribute(
+        'aria-label',
+        '@Resource node_0',
+      )
+      expect(view.container.querySelector('.canvas-resource-index')).toHaveTextContent('0')
       if (fixture.kind === 'TEXT') {
         expect(screen.getByText('hello world')).toBeInTheDocument()
       }
@@ -144,44 +159,32 @@ describe('Canvas resource/group node renderers', () => {
     }
   })
 
-  it('caps the visible resource list at four', () => {
+  it('renders every ordered resource in one score-selected grid with zero-based aliases', () => {
     const resources = Array.from({ length: 5 }, (_, index) => resource('IMAGE', {
       id: `${20 + index}`,
       name: `image-${index}`,
       width: index === 0 ? 1024 : null,
       height: 768,
     }))
-    renderResourceNode(resourceNode({ resources }))
+    const view = renderResourceNode(resourceNode({ name: 'multi', resources }))
 
-    expect(screen.getAllByRole('button', { name: /查看资源/ })).toHaveLength(4)
-    expect(screen.getByText('+1')).toBeInTheDocument()
-  })
-
-  it('navigates resources beyond the four visible thumbnails', async () => {
-    const user = userEvent.setup()
-    const resources = Array.from({ length: 5 }, (_, index) => resource('IMAGE', {
-      id: `${20 + index}`,
-      name: `image-${index}.png`,
-      width: 1024,
-      height: 768,
-    }))
-    const view = renderResourceNode(resourceNode({ resources }))
-    const previous = screen.getByRole('button', { name: '上一个资源' })
-    const next = screen.getByRole('button', { name: '下一个资源' })
-    expect(previous).toBeDisabled()
-
-    await user.click(next)
-    await user.click(next)
-    await user.click(next)
-    await user.click(next)
-    expect(screen.getByText('5 / 5')).toBeInTheDocument()
-    expect(next).toBeDisabled()
-
-    await user.click(previous)
-    expect(screen.getByText('4 / 5')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '查看资源 2' }))
-    expect(screen.getByText('2 / 5')).toBeInTheDocument()
-    view.unmount()
+    const grid = view.container.querySelector('.canvas-resource-grid')
+    expect(grid).toHaveAttribute('data-rows', '2')
+    expect(grid).toHaveAttribute('data-cols', '3')
+    const slots = [...view.container.querySelectorAll('.canvas-resource-slot')]
+    expect(slots).toHaveLength(5)
+    expect(slots.map((slot) => slot.getAttribute('aria-label'))).toEqual([
+      '@multi_0',
+      '@multi_1',
+      '@multi_2',
+      '@multi_3',
+      '@multi_4',
+    ])
+    expect([...view.container.querySelectorAll('.canvas-resource-index')].map((item) => (
+      item.textContent
+    ))).toEqual(['0', '1', '2', '3', '4'])
+    // 不创建占位资源；CSS Grid 按 DOM 原序填充，末行自然从最左侧开始。
+    expect(grid?.children).toHaveLength(5)
   })
 
   it('renders a minimal Function node with the localized kind label and both handles', () => {
@@ -199,30 +202,25 @@ describe('Canvas resource/group node renderers', () => {
       },
     }))
 
-    // 顶部透明标签：图片生成 · Generator；卡片/页脚/摘要全部移除。
-    expect(screen.getByText('图片生成 · Generator')).toBeInTheDocument()
+    expect(screen.getByRole('banner', { name: '图片生成 | Generator' })).toBeInTheDocument()
     expect(screen.getByText('Function 首次成功前暂无资源')).toBeInTheDocument()
     expect(view.container.querySelectorAll('.react-flow__handle')).toHaveLength(2)
-    expect(view.container.querySelector('.resource-node-kind-label')).toHaveClass(
-      'resource-node-kind-label',
-    )
+    expect(view.container.querySelector('.canvas-node-header')).not.toBeNull()
+    expect(view.container.querySelector('.canvas-node-body')).not.toBeNull()
     expect(view.container.querySelector('.function-footer')).toBeNull()
     expect(view.container.querySelector('.resource-node-summary')).toBeNull()
     expect(view.container.querySelector('.generation-panel')).toBeNull()
-    expect(view.container.querySelector('.resource-node.function-node')).not.toBeNull()
+    expect(view.container.querySelector('.resource-node.canvas-node-container')).not.toBeNull()
   })
 
-  it('renders the Function kind label from the model output kind', () => {
-    // 顶部标签跟随模型 outputKind 本地化：图片生成 · {nodeName}。
-    const view = renderResourceNode(resourceNode({
+  it('renders the Function type and unique node name in the universal header', () => {
+    renderResourceNode(resourceNode({
       name: 'Clip maker',
       resources: [],
       function: { modelKey: 'fake-image', configJson: '{}' },
       run: null,
     }))
-    expect(view.container.querySelector('.resource-node-kind-label')).toHaveTextContent(
-      '图片生成 · Clip maker',
-    )
+    expect(screen.getByRole('banner', { name: '图片生成 | Clip maker' })).toBeInTheDocument()
   })
 
   it('renders the generic empty-resource state without a model descriptor', () => {
@@ -245,7 +243,7 @@ describe('Canvas resource/group node renderers', () => {
     expect(callbacks.editTextNode).toHaveBeenCalledTimes(1)
   })
 
-  it('renders a lightweight dashed group boundary with a transparent title', () => {
+  it('renders Group through the same header container and a dedicated tinted body', () => {
     const Component = canvasNodeTypes.group
     const group: Group = {
       id: '4',
@@ -275,9 +273,10 @@ describe('Canvas resource/group node renderers', () => {
     )
     const shell = document.querySelector('.canvas-group-node') as HTMLElement
     expect(shell).not.toBeNull()
-    expect(shell.querySelector('.canvas-group-title')).toHaveTextContent('Group title')
-    // 组不是业务卡片：无 header 卡片、无成员内容。
-    expect(shell.querySelector('header')).toBeNull()
+    expect(screen.getByRole('banner', { name: '组 | Group title' })).toBeInTheDocument()
+    expect(shell.querySelector('.canvas-group-body')).not.toBeNull()
+    // Group 复用通用 Header，但 Body 只是空间容器，不挂载 Resource renderer。
+    expect(shell.querySelector('.canvas-resource-grid')).toBeNull()
     expect(shell.querySelector('.resource-node')).toBeNull()
   })
 
@@ -328,14 +327,17 @@ describe('Canvas resource/group node renderers', () => {
     expect(groupView.container).toBeEmptyDOMElement()
   })
 
-  it('uses a compact content-first shell for media and Function nodes', () => {
+  it('uses the same modular container for every resource renderer', () => {
     const view = renderResourceNode(resourceNode({
       name: 'Vision board',
       resources: [resource('IMAGE', { width: 1024, height: 768 })],
     }))
     expect(view.container.querySelector('.resource-node-titlebar')).toBeNull()
     expect(view.container.querySelector('.resource-node-action')).toBeNull()
-    expect(view.container.querySelector('.resource-node.compact-media-node')).not.toBeNull()
+    expect(view.container.querySelector('.resource-node.canvas-node-container')).not.toBeNull()
+    expect(view.container.querySelector('.canvas-node-header')).not.toBeNull()
+    expect(view.container.querySelector('.canvas-node-body')).not.toBeNull()
+    expect(view.container.querySelector('.canvas-resource-grid')).not.toBeNull()
     expect(screen.getByText('Vision board')).toBeInTheDocument()
     expect(view.container.querySelector('.media-original-actions')).toBeNull()
     expect(view.container.querySelector('.resource-node-footer')).toBeNull()
@@ -349,7 +351,7 @@ describe('Canvas resource/group node renderers', () => {
       function: { modelKey: 'fake-image', configJson: '{}' },
       run: null,
     }))
-    expect(screen.getByText('Image generation · Generator')).toBeInTheDocument()
+    expect(screen.getByRole('banner', { name: 'Image generation | Generator' })).toBeInTheDocument()
     expect(screen.queryByText('Edit Markdown')).not.toBeInTheDocument()
     functionView.unmount()
 
@@ -361,13 +363,21 @@ describe('Canvas resource/group node renderers', () => {
     textView.unmount()
 
     const multiView = renderResourceNode(resourceNode({
+      name: 'Multi',
       resources: [
         resource('IMAGE', { width: 1024, height: 768 }),
-        resource('IMAGE', { width: 512, height: 512 }),
+        resource('IMAGE', { id: '21', width: 512, height: 512 }),
       ],
     }))
-    expect(screen.getByRole('button', { name: 'Previous resource' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Next resource' })).toBeEnabled()
+    expect(multiView.container.querySelector('.canvas-resource-grid')).toHaveAttribute(
+      'data-cols',
+      '2',
+    )
+    expect(multiView.container.querySelectorAll('.canvas-resource-slot')).toHaveLength(2)
+    expect(multiView.container.querySelector('.canvas-resource-slot')).toHaveAttribute(
+      'aria-label',
+      '@Multi_0',
+    )
     multiView.unmount()
 
     const emptyView = renderResourceNode(resourceNode({ resources: [] }))

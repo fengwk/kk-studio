@@ -149,16 +149,12 @@ function renderPanel(
 ) {
   const scheduleFunctionConfig = vi.fn()
   const flushFunctionConfig = vi.fn(async () => undefined)
-  const startFunctionRun = vi.fn(async () => undefined)
-  const cancelFunctionRun = vi.fn(async () => undefined)
   const setToast = vi.fn()
   const setSelection = vi.fn()
   const runtime = {
     models: availableModels,
     scheduleFunctionConfig,
     flushFunctionConfig,
-    startFunctionRun,
-    cancelFunctionRun,
     setToast,
     setSelection,
   } as unknown as CanvasController
@@ -183,8 +179,6 @@ function renderPanel(
     },
     scheduleFunctionConfig,
     flushFunctionConfig,
-    startFunctionRun,
-    cancelFunctionRun,
     setSelection,
   }
 }
@@ -198,10 +192,10 @@ describe('Canvas generic generation panel', () => {
     input.focus()
     input.setSelectionRange(5, 5)
     fireEvent.select(input)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single' }))
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
     expect(screen.getByRole('textbox', { name: '提示词片段 3' })).toHaveFocus()
-    await user.click(screen.getByRole('button', { name: '插入参考 @single' }))
-    await user.click(screen.getByRole('button', { name: '插入参考 @second' }))
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
+    await user.click(screen.getByRole('button', { name: '插入参考 @second_0' }))
 
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
     expect(latest.prompt.segments.filter((segment) => segment.type === 'REFERENCE')).toEqual([
@@ -209,12 +203,12 @@ describe('Canvas generic generation panel', () => {
       { type: 'REFERENCE', nodeId: '2', index: 0 },
       { type: 'REFERENCE', nodeId: '4', index: 0 },
     ])
-    expect(screen.getAllByRole('button', { name: '删除 @single' })).toHaveLength(2)
-    expect(screen.getByRole('button', { name: '插入参考 @single' })).toHaveAttribute(
+    expect(screen.getAllByRole('button', { name: '删除 @single_0' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '插入参考 @single_0' })).toHaveAttribute(
       'aria-pressed',
       'true',
     )
-    expect(screen.getByRole('button', { name: '插入参考 @second' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '插入参考 @second_0' })).toHaveAttribute(
       'aria-pressed',
       'true',
     )
@@ -228,29 +222,29 @@ describe('Canvas generic generation panel', () => {
     await user.click(input)
     await user.type(input, '@')
     expect(screen.getByRole('listbox', { name: '@ 引用候选' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: '@single' }))
+    await user.click(screen.getByRole('option', { name: '@single_0' }))
     const suffix = screen.getByRole('textbox', { name: '提示词片段 3' })
     suffix.focus()
     suffix.setSelectionRange(0, 0)
     fireEvent.keyDown(suffix, { key: 'Backspace' })
-    expect(screen.queryByRole('button', { name: '删除 @single' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
 
     const prefix = screen.getByRole('textbox', { name: '提示词片段 1' })
     prefix.focus()
     prefix.setSelectionRange(prefix.value.length, prefix.value.length)
     fireEvent.select(prefix)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single' }))
-    fireEvent.keyDown(screen.getByRole('button', { name: '删除 @single' }), { key: 'Backspace' })
-    expect(screen.queryByRole('button', { name: '删除 @single' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
+    fireEvent.keyDown(screen.getByRole('button', { name: '删除 @single_0' }), { key: 'Backspace' })
+    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
 
     prefix.focus()
     prefix.setSelectionRange(prefix.value.length, prefix.value.length)
     fireEvent.select(prefix)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single' }))
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
     prefix.focus()
     prefix.setSelectionRange(prefix.value.length, prefix.value.length)
     fireEvent.keyDown(prefix, { key: 'Delete' })
-    expect(screen.queryByRole('button', { name: '删除 @single' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('比例'), '16:9')
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
     expect(latest.parameters.ratio).toBe('16:9')
@@ -309,7 +303,7 @@ describe('Canvas generic generation panel', () => {
     // A prior IMAGE ref is deliberately incompatible with Image B, while its INTEGER default is retained.
     const user = userEvent.setup()
     const view = renderPanel()
-    await user.click(screen.getByRole('button', { name: '插入参考 @single' }))
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
     await user.selectOptions(screen.getByLabelText('模型'), 'image-b')
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
     expect(view.scheduleFunctionConfig.mock.calls.at(-1)?.[1]).toBe('image-b')
@@ -326,12 +320,11 @@ describe('Canvas generic generation panel', () => {
       .parameters.duration).toBe(8)
   })
 
-  it('flushes before submit through the runtime and exposes cancel/failure without hiding old output', async () => {
-    // The fake runtime isolates paid work while proving submit/cancel and terminal failure UI wiring.
-    const user = userEvent.setup()
+  it('keeps run actions out of the workbench while exposing run status and failures', () => {
+    // Run/cancel is a right-click action; the workbench only edits configuration and shows status.
     const ready = renderPanel()
-    await user.click(screen.getByRole('button', { name: '开始生成' }))
-    expect(ready.startFunctionRun).toHaveBeenCalledWith('9')
+    expect(screen.queryByRole('button', { name: '开始生成' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
     ready.unmount()
     expect(ready.flushFunctionConfig).toHaveBeenCalledWith('9')
 
@@ -343,8 +336,8 @@ describe('Canvas generic generation panel', () => {
       error: null,
       updatedAt: '2026-08-10T00:00:00Z',
     })
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    expect(running.cancelFunctionRun).toHaveBeenCalledWith('9', 'c9c9c9c9-9999-4999-8999-999999999991')
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
+    expect(screen.getByText('GENERATING')).toBeInTheDocument()
     running.unmount()
 
     renderPanel({
@@ -355,7 +348,7 @@ describe('Canvas generic generation panel', () => {
       error: 'provider failed',
       updatedAt: '2026-08-10T00:00:01Z',
     })
-    expect(await screen.findByRole('alert')).toHaveTextContent('provider failed')
+    expect(screen.getByRole('alert')).toHaveTextContent('provider failed')
   })
 
   it('shows the legacy header with the real model label and the true run status', () => {

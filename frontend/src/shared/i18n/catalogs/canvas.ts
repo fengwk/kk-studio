@@ -157,10 +157,6 @@ export const canvasCatalog = {
     'en-US': 'Zoom in',
     'zh-CN': '放大',
   },
-  'canvas.node.kind.resource': {
-    'en-US': 'Resource',
-    'zh-CN': '资源',
-  },
   'canvas.node.deleteConfirmTitle': {
     'en-US': 'Delete “{{name}}”?',
     'zh-CN': '删除「{{name}}」？',
@@ -185,21 +181,41 @@ export const canvasCatalog = {
     'en-US': 'No resources yet',
     'zh-CN': '暂无资源',
   },
-  'canvas.node.switcherAria': {
-    'en-US': 'Resource index switcher',
-    'zh-CN': '资源索引切换',
+  'canvas.node.type.resource': {
+    'en-US': 'Resources',
+    'zh-CN': '资源',
   },
-  'canvas.node.previous': {
-    'en-US': 'Previous resource',
-    'zh-CN': '上一个资源',
+  'canvas.node.type.image': {
+    'en-US': 'Image',
+    'zh-CN': '图片',
   },
-  'canvas.node.next': {
-    'en-US': 'Next resource',
-    'zh-CN': '下一个资源',
+  'canvas.node.type.video': {
+    'en-US': 'Video',
+    'zh-CN': '视频',
   },
-  'canvas.node.viewResource': {
-    'en-US': 'View resource {{index}}',
-    'zh-CN': '查看资源 {{index}}',
+  'canvas.node.type.audio': {
+    'en-US': 'Audio',
+    'zh-CN': '音频',
+  },
+  'canvas.node.type.text': {
+    'en-US': 'Text',
+    'zh-CN': '文本',
+  },
+  'canvas.node.type.function': {
+    'en-US': 'Function',
+    'zh-CN': 'Function',
+  },
+  'canvas.node.type.imageFunction': {
+    'en-US': 'Image generation',
+    'zh-CN': '图片生成',
+  },
+  'canvas.node.type.videoFunction': {
+    'en-US': 'Video generation',
+    'zh-CN': '视频生成',
+  },
+  'canvas.node.type.group': {
+    'en-US': 'Group',
+    'zh-CN': '组',
   },
   'canvas.node.handleIn': {
     'en-US': 'Function reference input',
@@ -293,14 +309,6 @@ export const canvasCatalog = {
     'en-US': 'The model reference limit has been reached.',
     'zh-CN': '当前模型的参考资源数量已达到上限。',
   },
-  'canvas.generation.submit': {
-    'en-US': 'Start generation',
-    'zh-CN': '开始生成',
-  },
-  'canvas.generation.cancel': {
-    'en-US': 'Cancel',
-    'zh-CN': '取消',
-  },
   'canvas.generation.modelUnavailable': {
     'en-US': 'unavailable',
     'zh-CN': '不可用',
@@ -313,53 +321,9 @@ export const canvasCatalog = {
     'en-US': 'Generation failed; previous resources are kept',
     'zh-CN': '生成失败，已有资源已保留',
   },
-  'canvas.media.fetchImage': {
-    'en-US': 'Fetch original',
-    'zh-CN': '获取原图',
-  },
-  'canvas.media.openImage': {
-    'en-US': 'Open original',
-    'zh-CN': '打开原图',
-  },
-  'canvas.media.downloadImage': {
-    'en-US': 'Download original',
-    'zh-CN': '下载原图',
-  },
-  'canvas.media.fetchVideo': {
-    'en-US': 'Fetch original video',
-    'zh-CN': '获取视频原件',
-  },
-  'canvas.media.openVideo': {
-    'en-US': 'Open original video',
-    'zh-CN': '打开视频原件',
-  },
-  'canvas.media.downloadVideo': {
-    'en-US': 'Download original video',
-    'zh-CN': '下载视频原件',
-  },
-  'canvas.media.fetchAudio': {
-    'en-US': 'Fetch original audio',
-    'zh-CN': '获取音频原件',
-  },
-  'canvas.media.openAudio': {
-    'en-US': 'Open original audio',
-    'zh-CN': '打开音频原件',
-  },
-  'canvas.media.downloadAudio': {
-    'en-US': 'Download original audio',
-    'zh-CN': '下载音频原件',
-  },
   'canvas.media.playVideo': {
     'en-US': 'Play video {{name}}',
     'zh-CN': '播放视频 {{name}}',
-  },
-  'canvas.media.download': {
-    'en-US': 'Download',
-    'zh-CN': '下载',
-  },
-  'canvas.media.signing': {
-    'en-US': 'Signing…',
-    'zh-CN': '签名中…',
   },
   'canvas.media.signFailed': {
     'en-US': 'Original signing failed',
@@ -468,14 +432,6 @@ export const canvasCatalog = {
   'canvas.menu.groupDeleteConfirmDescription': {
     'en-US': 'This removes the group boundary; member nodes stay on the canvas.',
     'zh-CN': '将移除分组边界，成员节点保留在画布上。',
-  },
-  'canvas.functionLabel.image': {
-    'en-US': 'Image generation · {{name}}',
-    'zh-CN': '图片生成 · {{name}}',
-  },
-  'canvas.functionLabel.video': {
-    'en-US': 'Video generation · {{name}}',
-    'zh-CN': '视频生成 · {{name}}',
   },
   'canvas.textEditor.createAria': {
     'en-US': 'Create Markdown text',

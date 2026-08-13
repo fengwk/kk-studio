@@ -497,26 +497,37 @@ public class DurableCanvasService implements CanvasCommandService {
 
   private void ungroup(UUID canvasId, CanvasCommand.Ungroup command, PatchAccumulator accumulator) {
     CanvasGroupDO group = requireGroup(canvasId, command.groupId());
-    Set<UUID> current = new HashSet<>();
+    Map<UUID, CanvasNodeDO> current = new HashMap<>();
     for (CanvasNodeDO node : nodeMapper.listByCanvas(canvasId)) {
       if (Objects.equals(node.getGroupId(), command.groupId())) {
-        current.add(node.getId());
+        current.put(node.getId(), node);
       }
     }
-    if (!current.equals(new HashSet<>(command.memberNodeIds()))) {
-      throw new IllegalArgumentException("memberNodeIds must match the current group members");
+    Set<UUID> requested = new HashSet<>(command.memberNodeIds());
+    if (requested.size() != command.memberNodeIds().size()) {
+      throw new IllegalArgumentException("memberNodeIds must not contain duplicates");
     }
-    nodeMapper.detachAllGroupMembers(canvasId, command.groupId());
-    if (groupMapper.deleteById(canvasId, command.groupId()) != 1) {
-      throw new IllegalArgumentException("Unknown group: " + command.groupId());
+    if (!current.keySet().containsAll(requested)) {
+      throw new IllegalArgumentException("memberNodeIds must belong to the current group");
     }
     for (UUID memberNodeId : command.memberNodeIds()) {
-      CanvasNodeDO node = requireNode(canvasId, memberNodeId);
+      if (nodeMapper.detachGroupMember(canvasId, command.groupId(), memberNodeId) != 1) {
+        throw new IllegalArgumentException("Unknown group member: " + memberNodeId);
+      }
+    }
+    for (UUID memberNodeId : command.memberNodeIds()) {
+      CanvasNodeDO node = current.get(memberNodeId);
+      node.setGroupId(null);
       accumulator.upsertNode(
           projectNode(
               node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));
     }
-    accumulator.removeGroup(command.groupId());
+    if (requested.size() == current.size()) {
+      if (groupMapper.deleteById(canvasId, command.groupId()) != 1) {
+        throw new IllegalArgumentException("Unknown group: " + command.groupId());
+      }
+      accumulator.removeGroup(command.groupId());
+    }
   }
 
   private void deleteGroup(
@@ -533,6 +544,7 @@ public class DurableCanvasService implements CanvasCommandService {
       throw new IllegalArgumentException("Unknown group: " + command.groupId());
     }
     for (CanvasNodeDO node : members) {
+      node.setGroupId(null);
       accumulator.upsertNode(
           projectNode(
               node, resourcesOfNode(canvasId, node.getId()), runsOfNode(canvasId, node.getId())));

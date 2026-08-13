@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.studio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.studio.canvas.CanvasGroup;
 import fun.fengwk.kkstudio.studio.canvas.CanvasGroupPatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasLinkPatch;
+import fun.fengwk.kkstudio.studio.canvas.CanvasNodePatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasPatch;
 import fun.fengwk.kkstudio.studio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.studio.canvas.CanvasResource;
@@ -261,7 +262,7 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  void groupMoveUsesDeltaAndUngroupDeleteRemoveRows() {
+  void groupMoveUsesDeltaAndUngroupSupportsMemberSubsets() {
     CanvasDocument canvas = commandService.createCanvas("groups");
     UUID firstId = UUID.randomUUID();
     UUID secondId = UUID.randomUUID();
@@ -290,30 +291,95 @@ public class DurableCanvasServiceTest extends PostgresSpringTestSupport {
     assertEquals(new CanvasTransform(110, 70, 100, 80), node(afterMove, firstId).transform());
     assertEquals(new CanvasTransform(130, 100, 110, 90), node(afterMove, secondId).transform());
 
-    CanvasPatch ungrouped =
+    CanvasPatch partiallyUngrouped =
         apply(
             canvas,
             3,
-            uuid("ungroup"),
-            new CanvasCommand.Ungroup(groupId, List.of(firstId, secondId)));
+            uuid("partial-ungroup"),
+            new CanvasCommand.Ungroup(groupId, List.of(secondId)));
+    CanvasSnapshot afterPartialUngroup = snapshot(canvas);
+    assertEquals(groupId, node(afterPartialUngroup, firstId).groupId());
+    assertNull(node(afterPartialUngroup, secondId).groupId());
+    assertEquals(1, afterPartialUngroup.groups().size(), "group remains while it has a member");
+    assertTrue(partiallyUngrouped.groups().isEmpty());
+    assertEquals(
+        new CanvasNodePatch.Upsert(node(afterPartialUngroup, secondId)),
+        partiallyUngrouped.nodes().get(0));
+
+    apply(
+        canvas,
+        4,
+        uuid("move-after-partial-ungroup"),
+        new CanvasCommand.MoveGroup(groupId, 200, 100));
+    CanvasSnapshot afterSecondMove = snapshot(canvas);
+    assertEquals(
+        new CanvasTransform(210, 120, 100, 80),
+        node(afterSecondMove, firstId).transform(),
+        "remaining member follows the group");
+    assertEquals(
+        new CanvasTransform(130, 100, 110, 90),
+        node(afterSecondMove, secondId).transform(),
+        "detached member must not follow later group moves");
+
+    CanvasPatch ungrouped =
+        apply(
+            canvas, 5, uuid("last-ungroup"), new CanvasCommand.Ungroup(groupId, List.of(firstId)));
     CanvasSnapshot afterUngroup = snapshot(canvas);
     assertNull(node(afterUngroup, firstId).groupId());
-    assertNull(node(afterUngroup, secondId).groupId());
-    assertTrue(afterUngroup.groups().isEmpty(), "ungroup removes the group row");
+    assertTrue(afterUngroup.groups().isEmpty(), "last member removal deletes the group row");
     assertEquals(List.of(new CanvasGroupPatch.Remove(groupId)), ungrouped.groups());
+    assertEquals(new CanvasNodePatch.Upsert(node(afterUngroup, firstId)), ungrouped.nodes().get(0));
 
     UUID secondGroupId = UUID.randomUUID();
     apply(
         canvas,
-        4,
+        6,
         uuid("re-group"),
         new CanvasCommand.CreateGroup(
             secondGroupId, "G", new CanvasTransform(0, 0, 300, 200), List.of(secondId)));
     CanvasPatch deleted =
-        apply(canvas, 5, uuid("delete-group"), new CanvasCommand.DeleteGroup(secondGroupId));
+        apply(canvas, 7, uuid("delete-group"), new CanvasCommand.DeleteGroup(secondGroupId));
     CanvasSnapshot afterDelete = snapshot(canvas);
     assertTrue(afterDelete.groups().isEmpty());
     assertNull(node(afterDelete, secondId).groupId());
+    assertEquals(new CanvasNodePatch.Upsert(node(afterDelete, secondId)), deleted.nodes().get(0));
+  }
+
+  @Test
+  void ungroupRejectsUnknownOrDuplicateMembers() {
+    CanvasDocument canvas = commandService.createCanvas("invalid-ungroup");
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    apply(
+        canvas,
+        0,
+        uuid("invalid-ungroup-nodes"),
+        new CanvasCommand.CreateTextNode(firstId, "a", "a", new CanvasTransform(10, 20, 100, 80)),
+        new CanvasCommand.CreateTextNode(secondId, "b", "b", new CanvasTransform(30, 50, 110, 90)));
+    UUID groupId = UUID.randomUUID();
+    apply(
+        canvas,
+        1,
+        uuid("invalid-ungroup-group"),
+        new CanvasCommand.CreateGroup(
+            groupId, "G", new CanvasTransform(0, 0, 300, 200), List.of(firstId)));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                canvas,
+                2,
+                uuid("invalid-ungroup-foreign"),
+                new CanvasCommand.Ungroup(groupId, List.of(secondId))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            apply(
+                canvas,
+                2,
+                uuid("invalid-ungroup-duplicate"),
+                new CanvasCommand.Ungroup(groupId, List.of(firstId, firstId))));
   }
 
   @Test

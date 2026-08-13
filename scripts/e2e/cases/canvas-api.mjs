@@ -8,7 +8,7 @@ registerCase({
   level: 'L1',
   title: 'Canvas UUID/version/patch/changes HTTP 契约',
   docs:
-    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 commandId 精确回放空 patch 与不同内容 409，changes 连续 patches 或权威 snapshot，删除后 404',
+    '免费 L1：create/list/get/commands 的 canonical UUID id 与十进制字符串 long version，expectedVersion CAS 409，同 commandId 精确回放空 patch 与不同内容 409，changes 连续 patches 或权威 snapshot，Group 重命名与成员子集解绑，删除后 404',
   async run(ctx) {
     const { json: createJson } = await ctx.call('POST', '/api/canvases', {
       title: 'e2e-version-contract',
@@ -21,6 +21,7 @@ registerCase({
     assert(!('graphRevision' in canvas), JSON.stringify(canvas))
 
     const nodeId = cid()
+    const remainingNodeId = cid()
     const firstCommandId = cid()
     const textCommand = {
       type: 'CREATE_TEXT_NODE',
@@ -29,13 +30,20 @@ registerCase({
       markdown: 'hello',
       transform: { x: 1, y: 2, width: 100, height: 80 },
     }
+    const remainingTextCommand = {
+      type: 'CREATE_TEXT_NODE',
+      nodeId: remainingNodeId,
+      name: 'remaining',
+      markdown: 'member',
+      transform: { x: 120, y: 2, width: 100, height: 80 },
+    }
     const { json: commandJson } = await ctx.call(
       'POST',
       `/api/canvases/${canvas.id}/commands`,
       {
         expectedVersion: '0',
         commandId: firstCommandId,
-        commands: [textCommand],
+        commands: [textCommand, remainingTextCommand],
       },
     )
     const patch = envelopeData(commandJson)
@@ -52,7 +60,7 @@ registerCase({
       {
         expectedVersion: '0',
         commandId: firstCommandId,
-        commands: [textCommand],
+        commands: [textCommand, remainingTextCommand],
       },
     )
     const replay = envelopeData(replayJson)
@@ -117,6 +125,23 @@ registerCase({
 
     // RENAME_GROUP：标题更新只发 group UPSERT patch；空白 title 与未知 group 都是 400。
     const groupId = cid()
+    await expectHttpError(
+      () =>
+        ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
+          expectedVersion: '1',
+          commandId: cid(),
+          commands: [
+            {
+              type: 'CREATE_GROUP',
+              groupId,
+              title: 'empty',
+              transform: { x: 0, y: 0, width: 300, height: 200 },
+              memberNodeIds: [],
+            },
+          ],
+        }),
+      { status: 400 },
+    )
     await ctx.call('POST', `/api/canvases/${canvas.id}/commands`, {
       expectedVersion: '1',
       commandId: cid(),
@@ -126,7 +151,7 @@ registerCase({
           groupId,
           title: 'G',
           transform: { x: 0, y: 0, width: 300, height: 200 },
-          memberNodeIds: [nodeId],
+          memberNodeIds: [nodeId, remainingNodeId],
         },
       ],
     })
@@ -171,17 +196,42 @@ registerCase({
       { status: 400 },
     )
 
+    // UNGROUP 接受当前成员的非空子集：只解绑指定成员，Group 与其余成员继续存在。
+    const { json: partialUngroupJson } = await ctx.call(
+      'POST',
+      `/api/canvases/${canvas.id}/commands`,
+      {
+        expectedVersion: '3',
+        commandId: cid(),
+        commands: [{ type: 'UNGROUP', groupId, memberNodeIds: [nodeId] }],
+      },
+    )
+    const partialUngroupPatch = envelopeData(partialUngroupJson)
+    assert(
+      partialUngroupPatch.baseVersion === '3' && partialUngroupPatch.version === '4',
+      JSON.stringify(partialUngroupPatch),
+    )
+    assert(partialUngroupPatch.groups.length === 0, JSON.stringify(partialUngroupPatch.groups))
+    const detachedNode = partialUngroupPatch.nodes.find(
+      (item) => item.op === 'UPSERT' && item.node.id === nodeId,
+    )
+    assert(detachedNode?.node.groupId === null, JSON.stringify(partialUngroupPatch.nodes))
+
     // snapshot/list：canonical UUID id、version 与 threadId 契约；删除后 404。
     const { json: snapshotJson } = await ctx.call('GET', `/api/canvases/${canvas.id}`)
     const snapshot = envelopeData(snapshotJson)
     assertDecimalVersion(snapshot.document.version, 'snapshot.document.version')
-    assert(snapshot.document.version === '3', JSON.stringify(snapshot.document))
+    assert(snapshot.document.version === '4', JSON.stringify(snapshot.document))
     assert(
       snapshot.nodes.some((item) => item.id === nodeId && item.resources[0].kind === 'TEXT'),
       JSON.stringify(snapshot.nodes),
     )
     assert(
-      snapshot.nodes.some((item) => item.id === nodeId && item.groupId === groupId),
+      snapshot.nodes.some((item) => item.id === nodeId && item.groupId === null),
+      JSON.stringify(snapshot.nodes),
+    )
+    assert(
+      snapshot.nodes.some((item) => item.id === remainingNodeId && item.groupId === groupId),
       JSON.stringify(snapshot.nodes),
     )
     assert(
@@ -195,7 +245,7 @@ registerCase({
     assert(list.some((item) => item.id === canvas.id), JSON.stringify(list))
     const listed = list.find((item) => item.id === canvas.id)
     assertDecimalVersion(listed?.version, 'listed canvas.version')
-    assert(listed?.version === '3', JSON.stringify(listed))
+    assert(listed?.version === '4', JSON.stringify(listed))
 
     await ctx.call('DELETE', `/api/canvases/${canvas.id}`)
     await expectHttpError(() => ctx.call('GET', `/api/canvases/${canvas.id}`), { status: 404 })

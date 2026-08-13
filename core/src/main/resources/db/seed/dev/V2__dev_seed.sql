@@ -4,17 +4,16 @@
 -- so existing timestamps and versions remain unchanged. No real credentials;
 -- the stub provider holds a local-only stub key for offline dev profiles.
 --
--- The stub base_url points at the http-mock service of the isolated deploy/test
--- stack (service name resolves only on that Compose network). Other local
--- stacks that want to chat with the stub must point this provider at their own
--- OpenAI-compatible endpoint via the catalog API.
+-- The stub base_url uses a local-only hostname. The isolated deploy/test stack
+-- maps that hostname to its deterministic HTTP mock; other local stacks can
+-- provide the same alias or update the provider through the catalog API.
 
 insert into agent_provider (
     name, description, provider_type, base_url, credential, config,
     created_at, updated_at, version
 ) values (
     'stub', 'Deterministic stub provider for offline dev profile.',
-    'openai', 'http://http-mock:8080/v1', 'stub-key',
+    'openai', 'http://stub.local:8080/v1', 'stub-key',
     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000}',
     current_timestamp, current_timestamp, 0
 )

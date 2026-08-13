@@ -106,9 +106,7 @@ export function referenceCandidates(
 }
 
 export function referenceAlias(node: ResourceNode, index: number): string {
-  return node.function || node.resources.length > 1
-    ? `@${node.name}[${index}]`
-    : `@${node.name}`
+  return `@${node.name}_${index}`
 }
 
 export function insertReferenceAtCursor(

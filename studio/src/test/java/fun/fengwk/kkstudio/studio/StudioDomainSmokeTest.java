@@ -148,6 +148,14 @@ class StudioDomainSmokeTest {
   }
 
   @Test
+  void groupCommandsRequireAtLeastOneMember() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasCommand.CreateGroup(id(1), "g", TRANSFORM, List.of()));
+    assertThrows(IllegalArgumentException.class, () -> new CanvasCommand.Ungroup(id(1), List.of()));
+  }
+
+  @Test
   void groupAndLinkCarryCanvasIdentityWithoutIndependentLinkId() {
     CanvasGroup group = new CanvasGroup(id(2), id(1), "g", TRANSFORM);
     CanvasLink link = new CanvasLink(id(1), id(3), id(4));

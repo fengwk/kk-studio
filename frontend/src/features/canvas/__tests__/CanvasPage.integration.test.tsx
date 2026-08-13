@@ -9,6 +9,7 @@ import {
 } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasPage } from '@/features/canvas/CanvasPage'
+import type { ResourceNode } from '@/features/canvas/domain'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import { applyEntityPatch } from '@/features/canvas/entity-patch'
 import type {
@@ -123,15 +124,12 @@ vi.mock('@xyflow/react', () => ({
   }),
 }))
 
-// jsdom 没有 Worker：hasher 与本地媒体探测在画布上传路径上以确定性 fake 代替，
+// jsdom 没有 Worker：hasher 在画布上传路径上以确定性 fake 代替，
 // 存储 wire 契约仍由 installBackend 的 fetch 桩完整验证。
 vi.mock('@/features/ai/composer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/ai/composer')>()
   return { ...actual, createWorkerHasher: () => async () => 'b'.repeat(64) }
 })
-vi.mock('@/features/canvas/canvas-file-metadata', () => ({
-  probeCanvasFileMetadata: vi.fn(async () => ({ width: 1, height: 1 })),
-}))
 
 // 真实 storageService 的 reserve/complete 走 axios（XHR），jsdom 无后端；
 // 这里用真实 createStorageService + fetch 桩 HttpClient 复现 wire 契约，
@@ -522,6 +520,18 @@ function buildPatch(
     } else if (command.type === 'MOVE_GROUP') {
       const group = groups.find((item) => item.id === command.groupId)
       if (group) {
+        const deltaX = command.x - group.transform.x
+        const deltaY = command.y - group.transform.y
+        for (const node of nodes.filter((item) => item.groupId === group.id)) {
+          upsertNode({
+            ...node,
+            transform: {
+              ...node.transform,
+              x: node.transform.x + deltaX,
+              y: node.transform.y + deltaY,
+            },
+          })
+        }
         const next: CanvasGroupDTO = {
           ...group,
           transform: { ...group.transform, x: command.x, y: command.y },
@@ -545,13 +555,15 @@ function buildPatch(
     } else if (command.type === 'UNGROUP') {
       const group = groups.find((item) => item.id === command.groupId)
       if (group) {
-        groups = groups.filter((item) => item.id !== group.id)
-        groupPatches.push({ op: 'REMOVE', groupId: group.id })
         for (const memberId of command.memberNodeIds) {
           const node = nodes.find((item) => item.id === memberId)
-          if (node) {
+          if (node?.groupId === group.id) {
             upsertNode({ ...node, groupId: null })
           }
+        }
+        if (!nodes.some((node) => node.groupId === group.id)) {
+          groups = groups.filter((item) => item.id !== group.id)
+          groupPatches.push({ op: 'REMOVE', groupId: group.id })
         }
       }
     }
@@ -1111,8 +1123,138 @@ describe('CanvasPage real list/create/load integration', () => {
     })
   })
 
+  it('detaches a member dragged fully outside and excludes it from later Group moves', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Audio',
+        transform: { x: 20, y: 50, width: 320, height: 138 },
+        groupId: GROUP_ID,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'audio.mp3',
+          textContent: null,
+          kind: 'AUDIO',
+          mediaType: 'audio/mpeg',
+          sizeBytes: '1024',
+          width: null,
+          height: null,
+          durationMs: '65000',
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 360, y: 80, width: 320, height: 246 },
+        groupId: GROUP_ID,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+      groups: [{
+        id: GROUP_ID,
+        canvasId: CANVAS_ID,
+        title: 'Frame',
+        transform: { x: 0, y: 0, width: 700, height: 400 },
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    type FlowHarness = {
+      nodes: Array<{
+        id: string
+        position: { x: number; y: number }
+        data: {
+          kind: 'resource' | 'group'
+          node?: { groupId: string | null }
+        }
+      }>
+      onNodesChange: (changes: unknown[]) => void
+      onNodeDragStop: () => void
+    }
+    act(() => {
+      const flow = flowHarness.current as FlowHarness
+      flow.onNodesChange([{
+        type: 'position',
+        id: NODE_A,
+        // 节点左边界恰好贴住 Group 右边界，没有正面积交集。
+        position: { x: 700, y: 100 },
+        dragging: true,
+      }])
+      flow.onNodeDragStop()
+    })
+
+    await waitFor(() => {
+      const detachBatch = commandBodies.find((body) => (
+        body.commands.some((command) => command.type === 'UNGROUP')
+      ))
+      expect(detachBatch?.commands).toEqual([
+        {
+          type: 'UPDATE_NODE_TRANSFORMS',
+          updates: [{
+            nodeId: NODE_A,
+            transform: { x: 700, y: 100, width: 320, height: 138 },
+          }],
+        },
+        {
+          type: 'UNGROUP',
+          groupId: GROUP_ID,
+          memberNodeIds: [NODE_A],
+        },
+      ])
+    })
+    await waitFor(() => {
+      const flow = flowHarness.current as FlowHarness
+      const detached = flow.nodes.find((node) => node.id === NODE_A)
+      const remaining = flow.nodes.find((node) => node.id === NODE_B)
+      expect(detached?.data.node?.groupId).toBeNull()
+      expect(remaining?.data.node?.groupId).toBe(GROUP_ID)
+      expect(flow.nodes.some((node) => node.id === `group:${GROUP_ID}`)).toBe(true)
+    })
+
+    act(() => {
+      const flow = flowHarness.current as FlowHarness
+      flow.onNodesChange([{
+        type: 'position',
+        id: `group:${GROUP_ID}`,
+        position: { x: 100, y: 50 },
+        dragging: true,
+      }])
+    })
+    await waitFor(() => {
+      const flow = flowHarness.current as FlowHarness
+      expect(flow.nodes.find((node) => node.id === NODE_A)?.position).toEqual({ x: 700, y: 100 })
+      expect(flow.nodes.find((node) => node.id === NODE_B)?.position).toEqual({ x: 460, y: 130 })
+    })
+    act(() => {
+      ;(flowHarness.current as FlowHarness).onNodeDragStop()
+    })
+    await waitFor(() => {
+      expect(commandBodies.some((body) => body.commands.some((command) => (
+        command.type === 'MOVE_GROUP'
+        && command.groupId === GROUP_ID
+        && command.x === 100
+        && command.y === 50
+      )))).toBe(true)
+    })
+  })
+
   it('keeps graph commands available without rendering a selection toolbar', async () => {
-    // Selection remains useful for keyboard deletion and the add-menu group action without extra chrome.
+    // Selection remains useful for link deletion and context-menu grouping without extra chrome.
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
     snapshots.set(CANVAS_ID, {
@@ -1157,7 +1299,7 @@ describe('CanvasPage real list/create/load integration', () => {
         },
         run: null,
       }],
-      // A real group exercises selection-driven group deletion without extra toolbar chrome.
+      // A real group proves Delete cannot bypass the group context-menu confirmation.
       groups: [{
         id: GROUP_ID,
         canvasId: CANVAS_ID,
@@ -1213,12 +1355,15 @@ describe('CanvasPage real list/create/load integration', () => {
       body.commands[0]?.type === 'CREATE_GROUP'
     ))).toBe(true))
     expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
-    // group flow id 由 UUID 编码而来，删除路径能解码回 canonical UUID。
+    // 节点/Group 删除必须经右键确认；Delete 不得绕过二次确认。
     act(() => flow.onSelectionChange({ nodes: [{ id: `group:${GROUP_ID}` }], edges: [] }))
-    fireEvent.keyDown(window, { key: 'Delete' })
-    await waitFor(() => expect(commandBodies.some((body) => (
+    const deleteGroupCount = commandBodies.filter((body) => (
       body.commands[0]?.type === 'DELETE_GROUP'
-    ))).toBe(true))
+    )).length
+    fireEvent.keyDown(window, { key: 'Delete' })
+    expect(commandBodies.filter((body) => (
+      body.commands[0]?.type === 'DELETE_GROUP'
+    ))).toHaveLength(deleteGroupCount)
 
     act(() => {
       flow.onSelectionChange({ nodes: [{ id: NODE_A }, { id: NODE_B }], edges: [] })
@@ -1604,6 +1749,7 @@ describe('CanvasPage real list/create/load integration', () => {
     const { commandBodies, snapshots } = installBackend()
     const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
     const textResourceId = 'eeeeeeee-0000-4000-8000-0000000000cc'
+    const readyFunctionId = 'f0e1d2c3-b4a5-4678-89ab-cdef01234567'
     snapshots.set(CANVAS_ID, {
       ...current,
       nodes: [{
@@ -1676,6 +1822,21 @@ describe('CanvasPage real list/create/load integration', () => {
         }],
         function: null,
         run: null,
+      }, {
+        id: readyFunctionId,
+        canvasId: CANVAS_ID,
+        name: 'Ready generator',
+        transform: { x: 1160, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
       }],
     })
     const user = userEvent.setup()
@@ -1703,6 +1864,12 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(within(menu).queryByRole('menuitem', { name: '运行' })).not.toBeInTheDocument()
     expect(within(menu).queryByRole('menuitem', { name: '打开原件' })).not.toBeInTheDocument()
     expect(within(menu).queryByRole('menuitem', { name: '下载' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // 未运行 Function：运行只经右键菜单。
+    rightClickNode(readyFunctionId)
+    menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '运行' })).toBeInTheDocument()
     fireEvent.keyDown(window, { key: 'Escape' })
 
     // RUNNING Function：取消生成而非运行。
@@ -1815,6 +1982,9 @@ describe('CanvasPage real list/create/load integration', () => {
     const downloadAnchor = clickSpy.mock.instances[0] as HTMLAnchorElement
     expect(downloadAnchor.href).toBe('https://s3.example/original')
     expect(downloadAnchor.download).toBe('image.png')
+    expect(vi.mocked(fetch).mock.calls.filter(([input, init]) => (
+      String(input).endsWith('/download-url') && init?.method === 'POST'
+    ))).toHaveLength(2)
   })
 
   it('edits text in a non-modal anchored panel without changing the node transform', async () => {
@@ -1861,20 +2031,36 @@ describe('CanvasPage real list/create/load integration', () => {
         }) => void
       }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
     })
-    // 右键 Edit 动作打开非模态编辑面板。
+    // 聚焦文本节点直接打开非模态编辑面板；右键 Edit 仍是同一路径的显式入口。
     act(() => {
       ;(flowHarness.current as {
-        onNodeContextMenu: (
-          event: { clientX: number; clientY: number; preventDefault: () => void },
-          node: { id: string; selected: boolean },
-        ) => void
-      }).onNodeContextMenu(
-        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
-        { id: NODE_A, selected: false },
+        onNodeClick: (event: { shiftKey: boolean }, node: {
+          id: string
+          data: {
+            kind: 'resource'
+            node: ResourceNode
+          }
+        }) => void
+        nodes: Array<{
+          id: string
+          data: {
+            kind: 'resource'
+            node: ResourceNode
+          }
+        }>
+      }).onNodeClick(
+        { shiftKey: false },
+        (flowHarness.current as {
+          nodes: Array<{
+            id: string
+            data: {
+              kind: 'resource'
+              node: ResourceNode
+            }
+          }>
+        }).nodes.find((node) => node.id === NODE_A)!,
       )
     })
-    const menu = await screen.findByRole('menu', { name: '画布节点操作' })
-    await user.click(within(menu).getByRole('menuitem', { name: '编辑文本' }))
     const input = await screen.findByRole('textbox', { name: 'Markdown 内容' })
     // 非模态：不存在 dialog/showModal，面板内联在 stage 中。
     expect(document.querySelector('dialog')).toBeNull()
@@ -1889,7 +2075,7 @@ describe('CanvasPage real list/create/load integration', () => {
     }
     expect(flow.nodes.find((node) => node.id === NODE_A)?.style).toEqual({
       width: 320,
-      height: 260,
+      height: 246,
     })
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(commandBodies.some((body) => (

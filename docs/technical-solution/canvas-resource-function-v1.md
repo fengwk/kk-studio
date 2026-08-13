@@ -158,7 +158,12 @@ Link identity 是 `(canvasId, sourceNodeId, targetNodeId)`：
 - Link 允许形成环；
 - Run start 时重新校验 Link、source/index 与 model policy，并冻结具体 resourceId/blobId；之后 Link 删除、重命名或 source 重跑不改变本次输入。
 
-移动 Group 在一个命令中按 delta 同时移动 Group 和成员 Node。`UNGROUP` 要求 `memberNodeIds` 精确等于当前成员并删除 Group 行；`DELETE_GROUP` 先 detach 全部成员再删除 Group。
+Group 在前端渲染为位于成员下方的半透明范围，标题以通用 Header 紧贴范围左上方。移动
+Group 在一个命令中按 delta 同时移动 Group 和当前成员 Node。`UNGROUP.memberNodeIds`
+必须是当前成员的非空子集：只 detach 指定成员；移除最后一个成员时才删除 Group 行。
+成员节点的包围框与 Group Body 不再有正面积交集时，前端在同一命令批中提交
+`UPDATE_NODE_TRANSFORMS` 与该成员的 `UNGROUP`。`DELETE_GROUP` 始终先 detach 全部成员再删除
+Group。
 
 ## 3. 持久化
 

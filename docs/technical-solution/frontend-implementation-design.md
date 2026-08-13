@@ -191,6 +191,28 @@ frontend/src
 └── styles.css
 ```
 
+### 13.1 Canvas 内容优先交互
+
+- `CanvasStage` 是 React Flow 投影与单一右键菜单所有者；选择状态仍唯一落在
+  `useCanvasController`，不复制第二套选区状态机。
+- Add Menu 只创建 Resource 与 Function。Group 由单个未分组 Resource 或框选的全部
+  未分组 Resource 右键创建，持久化为位于成员下方的半透明范围；通用 Header 紧贴范围
+  左上方。组右键执行 `RENAME_GROUP` / `UNGROUP` / `DELETE_GROUP`。成员包围框完全离开
+  Group Body 后，节点 transform 与单成员 `UNGROUP` 在同一命令批中提交；Group 与其余成员
+  保留。
+- Resource 节点不保留常驻编辑、删除、运行、打开或下载按钮。节点/Group 删除在
+  `CanvasContextMenu` 内二次确认；Delete/Backspace 只删除选中 Link。
+- `CanvasNodeContainer` 统一承载 Header 与 Body；单资源尺寸由对应 Renderer 声明，
+  image/video 使用有界自适应容器，audio 使用 320×112 Body，text 使用 320×220 Body。
+  多资源统一进入固定 220×160 单元的 `CanvasResourceGrid`，布局优先接近正方形并让末行
+  左对齐。`resources/` 子目录按 text/audio/visual/thumbnail 拆分 Renderer。
+- 图片/视频 preview 的签名 URL 加载失败时强制重新签名一次，仍失败则签名 original；
+  original 本身失败时显示“资源不可用”。右键打开/下载每次都重新签名，避免复用过期 URL。
+- 音频节点使用紧凑自定义播放器；文本节点默认展示 Markdown，聚焦或双击后在节点下方
+  展开非模态 `CanvasTextEditor`，打开编辑器不修改持久化 transform。
+- 图片/视频 Function 节点只保留媒体主体与「类型 | 节点名」透明标题；独立
+  `CanvasGenerationPanel` 只编辑配置和显示状态，运行/取消由右键菜单触发。
+
 ## 14. 验证
 
 ```bash

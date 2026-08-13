@@ -15,7 +15,6 @@ import {
   filterConfigReferences,
   insertReferenceAtCursor,
   parseFunctionConfig,
-  promptVisibleText,
   referenceCandidates,
   referenceKey,
   removePromptSegment,
@@ -23,7 +22,7 @@ import {
   type PromptCursor,
   type ReferenceCandidate,
 } from '@/features/canvas/generation'
-import { CanvasResourceThumbnail } from '@/features/canvas/nodes/CanvasResourceMedia'
+import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
 import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { useI18n } from '@/shared/i18n'
@@ -225,7 +224,6 @@ export function CanvasGenerationPanel({
   const outputKind = sourceModel?.outputKind ?? activeModel.outputKind
   const modelOptions = runtime.models.filter((item) => item.outputKind === outputKind)
   const running = node.run?.status === 'RUNNING'
-  const promptValid = Boolean(promptVisibleText(config.prompt.segments).trim())
 
   function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
     setConfig(next)
@@ -412,7 +410,7 @@ export function CanvasGenerationPanel({
               key={`reference:${index}:${segment.nodeId}:${segment.index}`}
               type="button"
               className="prompt-mention"
-              aria-label={t('canvas.generation.referenceRemove', { label: candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}[${segment.index}]` })}
+              aria-label={t('canvas.generation.referenceRemove', { label: candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}_${segment.index}` })}
               onClick={() => removeReferenceAt(index)}
               onKeyDown={(event) => {
                 if (event.key === 'Delete' || event.key === 'Backspace') {
@@ -422,7 +420,7 @@ export function CanvasGenerationPanel({
               }}
             >
               {candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label
-                ?? `@${segment.nodeId}[${segment.index}]`}
+                ?? `@${segment.nodeId}_${segment.index}`}
               <span aria-hidden="true">×</span>
             </button>
           )
@@ -542,29 +540,6 @@ export function CanvasGenerationPanel({
             {runDisplayLabel(t, node.run.status, node.run.stage)}
           </span>
         ) : null}
-        {running ? (
-          <button
-            type="button"
-            className="generation-submit cancel"
-            onClick={() => {
-              if (node.run?.requestId) {
-                void runtime.cancelFunctionRun(node.id, node.run.requestId)
-              }
-            }}
-          >
-            {t('canvas.generation.cancel')}
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="generation-submit"
-            aria-label={t('canvas.generation.submit')}
-            disabled={!activeModel.available || !promptValid}
-            onClick={() => void runtime.startFunctionRun(node.id)}
-          >
-            ↑
-          </button>
-        )}
         </div>
       </div>
     </section>

@@ -140,8 +140,7 @@ describe('Canvas snapshot projection', () => {
     })
   })
 
-  it('normalizes media node dimensions from the original aspect ratio', () => {
-    // Existing persisted 320x260 media nodes should immediately adopt the content-first visual size.
+  it('projects a single media renderer at its source-ratio size', () => {
     const snapshot = projectCanvasSnapshot({
       ...snapshotDTO,
       nodes: [{
@@ -164,7 +163,7 @@ describe('Canvas snapshot projection', () => {
       x: 20,
       y: 30,
       width: 256,
-      height: 344,
+      height: 346,
     })
 
     const nodes = projectNodes(snapshot, [], [], {
@@ -173,8 +172,8 @@ describe('Canvas snapshot projection', () => {
       deleteNode: vi.fn(),
     })
     expect(nodes[0]).toMatchObject({
-      style: { width: 256, height: 344 },
-      measured: { width: 256, height: 344 },
+      style: { width: 256, height: 346 },
+      measured: { width: 256, height: 346 },
     })
   })
 
