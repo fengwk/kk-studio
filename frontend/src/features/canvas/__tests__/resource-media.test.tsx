@@ -189,6 +189,20 @@ describe('Canvas lazy resource media', () => {
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
   })
 
+  it('falls back to the original when the first preview signature fails before an image exists', async () => {
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockRejectedValueOnce(new Error('preview signing outage'))
+      .mockRejectedValueOnce(new Error('preview signing outage'))
+    renderMedia(resource('IMAGE'))
+    revealPreview()
+
+    await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce(), { timeout: 4_000 })
+    expect(await screen.findByRole('img', { name: 'image.asset' })).toHaveAttribute(
+      'src',
+      'https://s3.example/original',
+    )
+  })
+
   it('falls back to the original when the preview refresh fails', async () => {
     // 刷新失败（含 useQuery 一次自动重试）后请求并渲染原件 URL。
     vi.mocked(getCanvasResourcePreviewUrl)
@@ -235,6 +249,30 @@ describe('Canvas lazy resource media', () => {
     expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2)
   })
 
+  it('shows an unavailable placeholder when the IMAGE original also fails', async () => {
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/stale.webp'))
+      .mockResolvedValueOnce(previewUrl('https://s3.example/refreshed.webp'))
+    const view = renderMedia(resource('IMAGE'))
+    revealPreview()
+    const preview = await screen.findByRole('img', { name: 'image.asset' })
+    fireEvent.error(preview)
+
+    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
+    const refreshed = await screen.findByRole('img', { name: 'image.asset' })
+    expect(refreshed).toHaveAttribute('src', 'https://s3.example/refreshed.webp')
+    fireEvent.error(refreshed)
+
+    await waitFor(() => {
+      const element = view.container.querySelector('img[src="https://s3.example/original"]')
+      expect(element).not.toBeNull()
+    })
+    fireEvent.error(view.container.querySelector('img[src="https://s3.example/original"]') as HTMLImageElement)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('资源不可用')
+    expect(screen.queryByRole('img', { name: 'image.asset' })).not.toBeInTheDocument()
+  })
+
   it('keeps VIDEO on preview until play and recovers the poster', async () => {
     // 显式播放才请求原件；poster 走与 IMAGE 相同的恢复状态机。
     vi.mocked(getCanvasResourcePreviewUrl)
@@ -242,30 +280,59 @@ describe('Canvas lazy resource media', () => {
       .mockResolvedValueOnce(previewUrl('https://s3.example/refreshed-poster.webp'))
     const view = renderMedia(resource('VIDEO'))
     revealPreview()
-    const posterImg = () => view.container.querySelector('.canvas-resource-media.video img') as HTMLImageElement
+    const posterImg = () => view.container.querySelector('.canvas-resource-media.video img') as HTMLImageElement | null
     await waitFor(() => {
-      expect(posterImg().src).toContain('video-poster.webp')
+      expect(posterImg()?.src).toContain('video-poster.webp')
     })
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
 
-    fireEvent.error(posterImg())
+    fireEvent.error(posterImg() as HTMLImageElement)
     await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
     await waitFor(() => {
-      expect(posterImg().src).toContain('refreshed-poster.webp')
+      expect(posterImg()?.src).toContain('refreshed-poster.webp')
     })
 
-    fireEvent.error(posterImg())
+    fireEvent.error(posterImg() as HTMLImageElement)
     await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
     await waitFor(() => {
-      expect(posterImg().src).toContain('https://s3.example/original')
+      expect(view.container.querySelector('.canvas-resource-media.video img')).toBeNull()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '播放视频 video.asset' }))
     const video = await screen.findByLabelText('播放视频 video.asset')
     expect(video).toHaveAttribute('src', 'https://s3.example/original')
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('preload', 'metadata')
+    expect(video).toHaveAttribute('playsinline')
+    expect((video as HTMLVideoElement).autoplay).toBe(false)
     expect(video).toHaveClass('nodrag', 'nowheel')
     view.unmount()
     expect(video).not.toHaveAttribute('src')
+  })
+
+  it('shows an unavailable placeholder when the VIDEO original also fails', async () => {
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/stale-poster.webp'))
+      .mockResolvedValueOnce(previewUrl('https://s3.example/refreshed-poster.webp'))
+    const view = renderMedia(resource('VIDEO'))
+    revealPreview()
+    const poster = () => view.container.querySelector('.canvas-resource-media.video img') as HTMLImageElement | null
+    await waitFor(() => expect(poster()?.src).toContain('stale-poster.webp'))
+    fireEvent.error(poster() as HTMLImageElement)
+
+    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
+    expect(poster()?.src).toContain('refreshed-poster.webp')
+    fireEvent.error(poster() as HTMLImageElement)
+
+    const video = await waitFor(() => {
+      const element = view.container.querySelector('video')
+      expect(element).not.toBeNull()
+      expect(element).toHaveAttribute('src', 'https://s3.example/original')
+      return element as HTMLVideoElement
+    })
+    fireEvent.error(video)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('资源不可用')
+    expect(screen.queryByLabelText('播放视频 video.asset')).not.toBeInTheDocument()
   })
 
   it('loads AUDIO original on first play into the custom player', async () => {

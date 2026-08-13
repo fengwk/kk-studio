@@ -702,45 +702,6 @@
   white-space: nowrap;
 }
 
-.canvas-feature .resource-node-footer,
-.canvas-feature .function-footer {
-  display: flex;
-  min-height: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: auto;
-  padding: 7px 2px 0;
-  border-top: 1px solid var(--line);
-  color: var(--dim);
-  font-size: 9px;
-}
-
-.canvas-feature .function-footer .run-status {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 999px;
-  text-align: left;
-  color: var(--green);
-  background: var(--green-soft);
-  font-size: 10px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-feature .function-footer .run-status.failed {
-  color: var(--danger, #ff8b8b);
-}
-
-.canvas-feature .function-footer .run-status.cancelled {
-  color: var(--fg-muted);
-  background: var(--surface-active);
-}
-
 .canvas-feature .resource-node.compact-media-node {
   border: 0;
   border-radius: 8px;

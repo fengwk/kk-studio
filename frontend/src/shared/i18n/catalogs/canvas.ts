@@ -369,6 +369,10 @@ export const canvasCatalog = {
     'en-US': 'Preview failed to load',
     'zh-CN': '预览加载失败',
   },
+  'canvas.media.resourceUnavailable': {
+    'en-US': 'Resource unavailable',
+    'zh-CN': '资源不可用',
+  },
   'canvas.media.loadingPreview': {
     'en-US': 'Loading preview…',
     'zh-CN': '加载预览…',

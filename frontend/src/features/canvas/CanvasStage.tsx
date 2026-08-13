@@ -103,6 +103,10 @@ function StageInner() {
   // 右键菜单：Stage 级单一 overlay，记录打开时的选区快照用于关闭判定。
   const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null)
   const contextMenuSelectionRef = useRef<string[] | null>(null)
+  const closeContextMenu = useCallback(() => {
+    contextMenuSelectionRef.current = null
+    setContextMenu(null)
+  }, [])
 
   const buildMenuTarget = useCallback((nodeIds: string[]): ContextMenuTarget | null => {
     if (!snapshot) {
@@ -144,19 +148,20 @@ function StageInner() {
       return
     }
     contextMenuSelectionRef.current = nodeIds
+    setSelection(nodeIds)
     setContextMenu({ x: event.clientX, y: event.clientY, target })
-  }, [buildMenuTarget])
+  }, [buildMenuTarget, setSelection])
 
   const handleNodeContextMenu = useCallback((
     event: MouseEvent,
     flowNode: CanvasFlowNode,
   ) => {
-    if (!flowNode.selected) {
-      setSelection([flowNode.id])
-    }
-    const nodeIds = flowNode.selected ? [...state.selectedIds] : [flowNode.id]
+    const isGroup = Boolean(groupIdFromFlowId(flowNode.id))
+    const nodeIds = !isGroup && flowNode.selected && state.selectedIds.includes(flowNode.id)
+      ? [...state.selectedIds]
+      : [flowNode.id]
     openContextMenu(event, nodeIds)
-  }, [openContextMenu, setSelection, state.selectedIds])
+  }, [openContextMenu, state.selectedIds])
 
   const handleSelectionContextMenu = useCallback((
     event: MouseEvent,
@@ -576,10 +581,7 @@ function StageInner() {
         <CanvasContextMenu
           key={contextMenuTargetKey(contextMenu.target)}
           state={contextMenu}
-          onClose={() => {
-            contextMenuSelectionRef.current = null
-            setContextMenu(null)
-          }}
+          onClose={closeContextMenu}
         />
       ) : null}
     </section>
@@ -597,7 +599,11 @@ function contextMenuTargetKey(target: ContextMenuTarget): string {
 }
 
 function sameIdList(left: string[], right: string[]): boolean {
-  return left.length === right.length && left.every((id, index) => id === right[index])
+  if (left.length !== right.length) {
+    return false
+  }
+  const rightIds = new Set(right)
+  return left.every((id) => rightIds.has(id))
 }
 
 export function CanvasStage() {

@@ -71,6 +71,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   const [recoveryPhase, setRecoveryPhase] = useState<PreviewRecoveryPhase>('initial')
   const [originalRequested, setOriginalRequested] = useState(false)
   const [playRequested, setPlayRequested] = useState(false)
+  const [originalUnavailable, setOriginalUnavailable] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
   const dimensions = resourceDimensions(resource)
   const {
@@ -103,6 +104,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     setRecoveryPhase('initial')
     setOriginalRequested(false)
     setPlayRequested(false)
+    setOriginalUnavailable(false)
   }, [resource.canvasId, resource.id])
 
   useEffect(() => () => {
@@ -125,6 +127,18 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
     requestOriginal()
   }
 
+  useEffect(() => {
+    if (
+      hasPreview
+      && (recoveryPhase === 'initial' || recoveryPhase === 'refreshing')
+      && previewError
+      && !previewUrl
+    ) {
+      setRecoveryPhase('original')
+      setOriginalRequested(true)
+    }
+  }, [hasPreview, previewError, previewUrl, recoveryPhase])
+
   const handlePreviewError = () => {
     if (recoveryPhase === 'initial') {
       setRecoveryPhase('refreshing')
@@ -146,7 +160,7 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   if (resource.kind === 'IMAGE') {
     return (
       <div className="canvas-resource-media image" ref={previewTargetRef}>
-        {recoveryPhase === 'original' && originalUrl ? (
+        {recoveryPhase === 'original' && originalUrl && !originalUnavailable ? (
           <img
             src={originalUrl}
             alt={resource.name}
@@ -155,6 +169,9 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             draggable={false}
             loading="lazy"
             decoding="async"
+            onError={() => {
+              setOriginalUnavailable(true)
+            }}
           />
         ) : recoveryPhase !== 'original' && previewUrl && recoveryPhase !== 'refreshing' ? (
           <img
@@ -170,9 +187,14 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
         ) : (
           <MediaPlaceholder
             loading={previewLoading || originalLoading || recoveryPhase === 'refreshing'}
-            error={recoveryPhase === 'original' ? originalError : previewError}
+            error={Boolean(
+              recoveryPhase === 'original'
+                ? originalError || originalUnavailable
+                : previewError,
+            )}
             kind="IMAGE"
             t={t}
+            errorLabel={recoveryPhase === 'original' ? t('canvas.media.resourceUnavailable') : undefined}
           />
         )}
       </div>
@@ -180,39 +202,43 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
   }
 
   if (resource.kind === 'VIDEO') {
+    const shouldRenderOriginalVideo = Boolean(
+      originalUrl && (playRequested || recoveryPhase === 'original'),
+    )
     return (
       <div className="canvas-resource-media video" ref={previewTargetRef}>
-        {playRequested && originalUrl ? (
+        {shouldRenderOriginalVideo && !originalUnavailable ? (
           <video
             ref={(element) => {
               if (element) {
                 mediaRef.current = element
               }
             }}
-            src={originalUrl}
+            src={originalUrl ?? undefined}
             width={dimensions?.width}
             height={dimensions?.height}
             className="nodrag nowheel"
             draggable={false}
             controls
-            autoPlay
+            autoPlay={playRequested}
             playsInline
             preload="metadata"
             aria-label={t('canvas.media.playVideo', { name: resource.name })}
+            onError={() => {
+              setOriginalUnavailable(true)
+            }}
           />
         ) : (
           <>
-            {recoveryPhase === 'original' && originalUrl ? (
-              <img
-                src={originalUrl}
-                alt=""
-                width={dimensions?.width}
-                height={dimensions?.height}
-                draggable={false}
-                loading="lazy"
-                decoding="async"
+            {recoveryPhase === 'original' || originalUnavailable ? (
+              <MediaPlaceholder
+                loading={originalLoading}
+                error={Boolean(originalError || originalUnavailable)}
+                kind="VIDEO"
+                t={t}
+                errorLabel={t('canvas.media.resourceUnavailable')}
               />
-            ) : recoveryPhase !== 'original' && previewUrl && recoveryPhase !== 'refreshing' ? (
+            ) : previewUrl && recoveryPhase !== 'refreshing' ? (
               <img
                 src={previewUrl}
                 alt=""
@@ -226,27 +252,30 @@ function CanvasBinaryResourceMedia({ resource }: { resource: Resource }) {
             ) : (
               <MediaPlaceholder
                 loading={previewLoading || originalLoading || recoveryPhase === 'refreshing'}
-                error={recoveryPhase === 'original' ? originalError : previewError}
+                error={Boolean(previewError)}
                 kind="VIDEO"
                 t={t}
+                errorLabel={undefined}
               />
             )}
-            <button
-              type="button"
-              className="media-play-button nodrag"
-              disabled={originalLoading}
-              onClick={() => {
-                setPlayRequested(true)
-                requestOriginal()
-              }}
-              aria-label={t('canvas.media.playVideo', { name: resource.name })}
-            >
-              {originalLoading ? (
-                <LoaderCircle className="media-action-spinner" aria-hidden="true" />
-              ) : (
-                '▶'
-              )}
-            </button>
+            {!originalUnavailable ? (
+              <button
+                type="button"
+                className="media-play-button nodrag"
+                disabled={originalLoading}
+                onClick={() => {
+                  setPlayRequested(true)
+                  requestOriginal()
+                }}
+                aria-label={t('canvas.media.playVideo', { name: resource.name })}
+              >
+                {originalLoading ? (
+                  <LoaderCircle className="media-action-spinner" aria-hidden="true" />
+                ) : (
+                  '▶'
+                )}
+              </button>
+            ) : null}
           </>
         )}
       </div>
@@ -466,18 +495,20 @@ function MediaPlaceholder({
   error,
   kind,
   t,
+  errorLabel,
 }: {
   loading: boolean
-  error: unknown
+  error: boolean
   kind: 'IMAGE' | 'VIDEO'
   t: (key: string, values?: Record<string, string | number>) => string
+  errorLabel?: string
 }) {
   return (
     <div className="media-placeholder" role={error ? 'alert' : undefined}>
       <span aria-hidden="true">{resourceIcon(kind)}</span>
       <small>
         {error
-          ? t('canvas.media.previewFailed')
+          ? errorLabel ?? t('canvas.media.previewFailed')
           : loading
             ? t('canvas.media.loadingPreview')
             : t('canvas.media.waitingViewport')}
