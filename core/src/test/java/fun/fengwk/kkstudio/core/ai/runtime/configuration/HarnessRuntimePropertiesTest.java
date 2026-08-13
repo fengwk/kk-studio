@@ -23,7 +23,6 @@ class HarnessRuntimePropertiesTest {
     assertEquals(Duration.ofSeconds(10), properties.getProcessorHeartbeatInterval());
     assertEquals(16, properties.getThreadStepLimit());
     assertEquals(Duration.ofSeconds(1), properties.getThreadResolveFailureDelay());
-    assertEquals(Duration.ofMillis(100), properties.getModelCheckpointFlushInterval());
     assertEquals(Duration.ofSeconds(1), properties.getModelDispatchBusyFallbackDelay());
     assertEquals(Duration.ofSeconds(1), properties.getToolPreflightFailureDelay());
     assertEquals(Duration.ofSeconds(1), properties.getToolDispatchBusyFallbackDelay());

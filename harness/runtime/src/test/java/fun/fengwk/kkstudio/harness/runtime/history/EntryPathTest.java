@@ -911,6 +911,47 @@ class EntryPathTest {
     assertEquals(Optional.empty(), path.openTurnStart());
   }
 
+  @Test
+  void modelAttemptFailuresAreConsecutiveAndPrecedeTheAssistantResult() {
+    Entry root = root(settings("root"));
+    Entry turn = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry user = userMessage(id(3L), id(2L));
+    Entry failure1 = modelAttemptFailure(id(4L), id(3L), 1);
+    Entry failure2 = modelAttemptFailure(id(5L), id(4L), 2);
+    Entry assistant = assistantMessage(id(6L), id(5L));
+    Entry end = turnEnd(id(7L), id(6L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+
+    EntryPath path = new EntryPath(List.of(root, turn, user, failure1, failure2, assistant, end));
+    assertEquals(end, path.head());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, turn, user, modelAttemptFailure(id(4L), id(3L), 2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    turn,
+                    user,
+                    assistantMessage(id(4L), id(3L)),
+                    modelAttemptFailure(id(5L), id(4L), 1))));
+  }
+
+  @Test
+  void modelAttemptFailureIsRejectedWithoutInputOrInsideCompaction() {
+    Entry root = root(settings("root"));
+    Entry inputTurn = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, inputTurn, modelAttemptFailure(id(3L), id(2L), 1))));
+
+    Entry compaction = compactionStart(id(2L), id(1L), settings("turn"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, compaction, modelAttemptFailure(id(3L), id(2L), 1))));
+  }
+
   private static final UUID SESSION_ID = id(1L);
 
   private static Entry root(BranchSettings settings) {
@@ -1076,8 +1117,21 @@ class EntryPathTest {
         id,
         SESSION_ID,
         parentId,
-        new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "down")),
+        new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "down"), null),
         time(id));
+  }
+
+  private static Entry modelAttemptFailure(UUID id, UUID parentId, int attempt) {
+    Instant failedAt = time(id);
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new ModelAttemptFailurePayload(
+            new ModelAttemptSnapshot(attempt, attempt, "partial-" + attempt, ""),
+            new AssistantError("TRANSIENT", "down-" + attempt),
+            failedAt.plusSeconds(1)),
+        failedAt);
   }
 
   private static Entry assistantAborted(UUID id, UUID parentId) {

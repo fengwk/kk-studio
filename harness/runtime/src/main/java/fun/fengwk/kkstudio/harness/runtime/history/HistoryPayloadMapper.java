@@ -73,10 +73,19 @@ public final class HistoryPayloadMapper {
         null);
   }
 
-  /** terminal Model 错误的 ASSISTANT_ERROR payload：code 使用 {@code error.kind().name()}。 */
+  /** 非 Model attempt 的 ASSISTANT_ERROR payload，例如 planning / stop barrier。 */
   public AssistantErrorPayload assistantErrorPayload(ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
-    return new AssistantErrorPayload(new AssistantError(error.kind().name(), error.message()));
+    return new AssistantErrorPayload(
+        new AssistantError(error.kind().name(), error.message()), null);
+  }
+
+  /** terminal Model 错误的 provider-transparent ASSISTANT_ERROR payload：保留已 durable 的完整 partial。 */
+  public AssistantErrorPayload assistantErrorPayload(
+      ModelInvocationError error, ModelAttemptSnapshot attempt) {
+    Objects.requireNonNull(error, "error");
+    return new AssistantErrorPayload(
+        new AssistantError(error.kind().name(), error.message()), attempt);
   }
 
   /**

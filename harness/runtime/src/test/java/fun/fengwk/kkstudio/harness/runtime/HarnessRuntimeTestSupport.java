@@ -774,6 +774,7 @@ final class HarnessRuntimeTestSupport {
         null,
         null,
         null,
+        List.of(),
         createdAt,
         createdAt);
   }

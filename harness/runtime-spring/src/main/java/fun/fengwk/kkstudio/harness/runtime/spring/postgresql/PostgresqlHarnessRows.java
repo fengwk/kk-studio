@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.RowMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelAttemptFailuresJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelInvocationRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
@@ -41,6 +42,8 @@ final class PostgresqlHarnessRows {
   static final ModelInvocationRequestJsonCodec MODEL_REQUESTS =
       new ModelInvocationRequestJsonCodec();
   static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS = new StreamCheckpointJsonCodec();
+  static final ModelAttemptFailuresJsonCodec MODEL_FAILED_ATTEMPTS =
+      new ModelAttemptFailuresJsonCodec();
   static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
   static final ModelInvocationErrorJsonCodec MODEL_ERRORS = new ModelInvocationErrorJsonCodec();
   static final ToolInvocationRequestJsonCodec TOOL_REQUESTS = new ToolInvocationRequestJsonCodec();
@@ -102,6 +105,7 @@ final class PostgresqlHarnessRows {
               decodeNullable(resultSet.getString("result"), MODEL_RESULTS::decode),
               decodeNullable(resultSet.getString("error"), MODEL_ERRORS::decode),
               nullableUuid(resultSet, "result_entry_id"),
+              MODEL_FAILED_ATTEMPTS.decode(resultSet.getString("failed_attempts")),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
 

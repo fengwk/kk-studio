@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -65,7 +66,6 @@ final class ModelExecution implements ModelGateway.Listener {
   private final ArrayDeque<Pending> pending = new ArrayDeque<>();
   private boolean gateOpen;
   private long lastCommittedSequence;
-  private Instant lastCheckpointFlushedAt;
   private ModelGateway.Handle handle;
 
   ModelExecution(
@@ -328,9 +328,8 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * 处理一个 stream delta：sequence 单调分配；每个事件都先在校验 RUNNING + attempt 与 ownership 的短事务中落地 （text/thinking
-   * 按 {@code checkpointFlushInterval} 节流写 checkpoint，首个 safe delta 立即 flush；tool-call fragment 永不
-   * checkpoint），commit 后 best-effort 发布 realtime delta。
+   * 处理一个 stream delta：sequence 单调分配；每个 safe text/thinking 事件都先在校验 RUNNING + attempt 与 ownership
+   * 的短事务中落地完整 checkpoint，tool-call fragment 永不 checkpoint；commit 后 best-effort 发布 realtime delta。
    */
   private Applied processEventLocked(ProviderStreamEvent event, List<Publish> publishes) {
     long sequence = nextSequence();
@@ -340,10 +339,10 @@ final class ModelExecution implements ModelGateway.Listener {
             || event instanceof ProviderStreamEvent.ThinkingDelta;
     Instant now = clock.instant();
     StreamCheckpoint pending = null;
-    if (safeContent && shouldFlushCheckpoint(now)) {
+    if (safeContent) {
       String text = accumulator.text();
       String thinking = accumulator.thinking();
-      if (!text.isBlank() || !thinking.isBlank()) {
+      if (!text.isEmpty() || !thinking.isEmpty()) {
         pending = new StreamCheckpoint(attempt, sequence, text, thinking);
       }
     }
@@ -353,18 +352,9 @@ final class ModelExecution implements ModelGateway.Listener {
     if (!committed) {
       return Applied.LOST;
     }
-    if (pendingCheckpoint != null) {
-      lastCheckpointFlushedAt = now;
-    }
     lastCommittedSequence = sequence;
     publishes.add(new Publish(event, sequence));
     return Applied.PROGRESSED;
-  }
-
-  /** 首个 safe delta 立即 flush；之后只有距上次 flush 达到 interval 才写 checkpoint。 */
-  private boolean shouldFlushCheckpoint(Instant now) {
-    return lastCheckpointFlushedAt == null
-        || !lastCheckpointFlushedAt.plus(config.checkpointFlushInterval()).isAfter(now);
   }
 
   private boolean persistEvent(
@@ -420,7 +410,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
     if (error.kind() == ProviderErrorKind.TRANSIENT && config.retryPolicy().allowsRetry(attempt)) {
       Duration delay = config.retryPolicy().delayBeforeRetry(attempt);
-      boolean committed = safeTerminal(() -> commitRetry(delay));
+      boolean committed = safeTerminal(() -> commitRetry(delay, error));
       if (committed) {
         log.info(
             "scheduled model retry for invocation {} (attempt {}) in {}",
@@ -470,8 +460,10 @@ final class ModelExecution implements ModelGateway.Listener {
             }));
   }
 
-  private boolean commitRetry(Duration delay) {
-    Instant now = clock.instant();
+  private boolean commitRetry(Duration delay, ModelInvocationError error) {
+    Objects.requireNonNull(error, "error");
+    Instant failedAt = clock.instant();
+    Instant retryAt = failedAt.plus(delay);
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
@@ -480,15 +472,24 @@ final class ModelExecution implements ModelGateway.Listener {
                 return false;
               }
               ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (model == null || tx.lockClaimedWork(claim, failedAt).isEmpty()) {
                 return false;
               }
               if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                 return false;
               }
-              tx.updateModelInvocation(model.retryReady(now));
-              tx.updateThread(thread.touchRevision(now));
-              tx.rescheduleWork(claim, now, now.plus(delay));
+              ModelAttemptFailure failure =
+                  new ModelAttemptFailure(
+                      attempt,
+                      lastCommittedSequence,
+                      accumulator.text(),
+                      accumulator.thinking(),
+                      error,
+                      failedAt,
+                      retryAt);
+              tx.updateModelInvocation(model.retryReady(failure, failedAt));
+              tx.updateThread(thread.touchRevision(failedAt));
+              tx.rescheduleWork(claim, failedAt, retryAt);
               return true;
             }));
   }
@@ -517,7 +518,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 String text = request.compaction() == null ? accumulator.text() : response.text();
                 String thinking =
                     request.compaction() == null ? accumulator.thinking() : response.thinking();
-                if (!text.isBlank() || !thinking.isBlank()) {
+                if (!text.isEmpty() || !thinking.isEmpty()) {
                   ModelInvocation checkpointed =
                       model.checkpoint(
                           new StreamCheckpoint(attempt, finalSequence, text, thinking), now);
@@ -554,6 +555,16 @@ final class ModelExecution implements ModelGateway.Listener {
                 tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
                 if (tx.lockClaimedWork(claim, now).isEmpty()) {
                   throw new ClaimLostSignal();
+                }
+                String text = accumulator.text();
+                String thinking = accumulator.thinking();
+                if (!text.isEmpty() || !thinking.isEmpty()) {
+                  ModelInvocation checkpointed =
+                      model.checkpoint(
+                          new StreamCheckpoint(attempt, lastCommittedSequence, text, thinking),
+                          now);
+                  tx.updateModelInvocation(checkpointed);
+                  model = checkpointed;
                 }
                 ModelInvocation next =
                     switch (kind) {

@@ -406,6 +406,7 @@ create table harness_entry (
             'TURN_START',
             'MESSAGE',
             'CUSTOM',
+            'MODEL_ATTEMPT_FAILURE',
             'CUSTOM_MESSAGE',
             'ASSISTANT_ERROR',
             'ASSISTANT_ABORTED',
@@ -426,7 +427,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
 
@@ -531,6 +532,7 @@ create table harness_model_invocation (
     result jsonb check (result is null or jsonb_typeof(result) = 'object'),
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
     result_entry_id uuid,
+    failed_attempts jsonb not null check (jsonb_typeof(failed_attempts) = 'array'),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_model_invocation_thread foreign key (thread_id)
@@ -571,6 +573,7 @@ comment on column harness_model_invocation.stream_checkpoint is 'RUNNING 流式�
 comment on column harness_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
 comment on column harness_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
 comment on column harness_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
+comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
 comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 

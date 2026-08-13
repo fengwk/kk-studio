@@ -43,9 +43,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -118,6 +120,7 @@ public abstract class HarnessStoreInvocationContract {
             model.result(),
             model.error(),
             model.resultEntryId(),
+            List.of(),
             model.createdAt().plusNanos(1),
             model.updatedAt().plusNanos(1));
     assertThrows(
@@ -210,6 +213,51 @@ public abstract class HarnessStoreInvocationContract {
         store.transaction(tx -> tx.hasModelInvocationForTurn(TestIds.id(42)));
     assertTrue(hasTurnInvocation);
     assertFalse(hasMissingTurnInvocation);
+  }
+
+  /** 非空 failedAttempts 必须在 InMemory/PostgreSQL 两个 Store 实现中无损往返。 */
+  @Test
+  void modelFailedAttemptsRoundTripAfterRetryTransition() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertModelInvocation(
+              modelInvocation(
+                  TestIds.id(1),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  baseline.turnStartEntryId(),
+                  ModelInvocationStatus.READY,
+                  null,
+                  T1));
+        });
+    ModelAttemptFailure failure =
+        new ModelAttemptFailure(
+            1,
+            7,
+            "partial",
+            "thinking",
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
+            T3,
+            T4);
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation model = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          ModelInvocation dispatching = model.beginDispatch(T2);
+          tx.updateModelInvocation(dispatching);
+          ModelInvocation running = dispatching.markRunning(T2);
+          tx.updateModelInvocation(running);
+          tx.updateModelInvocation(running.retryReady(failure, T3));
+        });
+
+    ModelInvocation stored =
+        store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
+    assertEquals(ModelInvocationStatus.READY, stored.status());
+    assertEquals(1, stored.attempt());
+    assertEquals(List.of(failure), stored.failedAttempts());
+    assertThrows(UnsupportedOperationException.class, () -> stored.failedAttempts().add(failure));
   }
 
   @Test
@@ -410,7 +458,7 @@ public abstract class HarnessStoreInvocationContract {
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
-        ModelInvocationStatus.CANCELLED,
+        ModelInvocationStatus.SUCCEEDED,
         assistantEntryId,
         T1);
     UUID thread5 =
@@ -425,7 +473,7 @@ public abstract class HarnessStoreInvocationContract {
         thread5,
         turnStartB,
         turnStartB,
-        ModelInvocationStatus.CANCELLED,
+        ModelInvocationStatus.FAILED,
         errorEntryId,
         T2);
     UUID thread6 =
@@ -619,16 +667,12 @@ public abstract class HarnessStoreInvocationContract {
                   ModelInvocationStatus.READY,
                   null,
                   T1));
-          ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(
-              modelInvocation(
-                  TestIds.id(1),
-                  baseline.threadId(),
-                  baseline.turnStartEntryId(),
-                  baseline.turnStartEntryId(),
-                  ModelInvocationStatus.CANCELLED,
-                  null,
-                  locked.createdAt()));
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.succeed(successResponse(), T2));
         });
     ModelInvocation committed =
         store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
@@ -700,20 +744,18 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation locked = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(
-              modelInvocation(
-                  locked.id(),
-                  locked.threadId(),
-                  locked.turnStartEntryId(),
-                  locked.basisHeadEntryId(),
-                  ModelInvocationStatus.CANCELLED,
-                  assistantEntryId,
-                  locked.createdAt()));
+          ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(T2));
+          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(T2));
+          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.succeed(successResponse(), T2));
+          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
+          tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
         });
     ModelInvocation committed =
         store.transaction(tx -> tx.findModelInvocation(TestIds.id(1)).orElseThrow());
-    assertEquals(ModelInvocationStatus.CANCELLED, committed.status());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed.status());
     assertEquals(assistantEntryId, committed.resultEntryId());
   }
 
@@ -761,6 +803,7 @@ public abstract class HarnessStoreInvocationContract {
                           stored.result(),
                           stored.error(),
                           stored.resultEntryId(),
+                          stored.failedAttempts(),
                           stored.createdAt(),
                           T2));
                 }));
@@ -785,6 +828,7 @@ public abstract class HarnessStoreInvocationContract {
                           stored.result(),
                           stored.error(),
                           stored.resultEntryId(),
+                          stored.failedAttempts(),
                           T2,
                           T2));
                 }));
@@ -837,6 +881,16 @@ public abstract class HarnessStoreInvocationContract {
                           null,
                           null,
                           null,
+                          List.of(
+                              new ModelAttemptFailure(
+                                  1,
+                                  0,
+                                  "",
+                                  "",
+                                  new ModelInvocationError(
+                                      ProviderErrorKind.TRANSIENT, "provider unavailable"),
+                                  T1,
+                                  T1)),
                           T1,
                           T1));
                 }));
@@ -960,16 +1014,38 @@ public abstract class HarnessStoreInvocationContract {
                   ModelInvocationStatus.READY,
                   null,
                   createdAt));
-          ModelInvocation locked = tx.lockModelInvocation(id).orElseThrow();
-          tx.updateModelInvocation(
-              modelInvocation(
-                  id,
-                  threadId,
-                  turnStartEntryId,
-                  basisHeadEntryId,
-                  status,
-                  resultEntryId,
-                  locked.createdAt()));
+          ModelInvocation current = tx.lockModelInvocation(id).orElseThrow();
+          if (status == ModelInvocationStatus.SUCCEEDED) {
+            tx.updateModelInvocation(current.beginDispatch(createdAt));
+            current = tx.lockModelInvocation(id).orElseThrow();
+            tx.updateModelInvocation(current.markRunning(createdAt));
+            current = tx.lockModelInvocation(id).orElseThrow();
+            tx.updateModelInvocation(current.succeed(successResponse(), createdAt));
+          } else if (status == ModelInvocationStatus.FAILED) {
+            tx.updateModelInvocation(
+                current.fail(
+                    new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model failed"),
+                    createdAt));
+          } else if (status == ModelInvocationStatus.CANCELLED) {
+            tx.updateModelInvocation(current.beginDispatch(createdAt));
+            current = tx.lockModelInvocation(id).orElseThrow();
+            tx.updateModelInvocation(current.markRunning(createdAt));
+            current = tx.lockModelInvocation(id).orElseThrow();
+            tx.updateModelInvocation(
+                current.checkpoint(new StreamCheckpoint(1, 1, "partial", ""), createdAt));
+            current = tx.lockModelInvocation(id).orElseThrow();
+            tx.updateModelInvocation(
+                current
+                    .cancel(
+                        new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled"),
+                        createdAt)
+                    .attachResultEntry(resultEntryId, createdAt));
+            return;
+          } else {
+            throw new IllegalArgumentException("unsupported terminal model status " + status);
+          }
+          current = tx.lockModelInvocation(id).orElseThrow();
+          tx.updateModelInvocation(current.attachResultEntry(resultEntryId, createdAt));
         });
   }
 
@@ -1040,7 +1116,7 @@ public abstract class HarnessStoreInvocationContract {
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
-        ModelInvocationStatus.CANCELLED,
+        ModelInvocationStatus.SUCCEEDED,
         assistantEntryId,
         T1);
     return assistantEntryId;
@@ -1131,7 +1207,7 @@ public abstract class HarnessStoreInvocationContract {
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
-        ModelInvocationStatus.CANCELLED,
+        ModelInvocationStatus.SUCCEEDED,
         assistantEntryId,
         T1);
     ToolInvocation invocation =
@@ -1334,7 +1410,7 @@ public abstract class HarnessStoreInvocationContract {
         baseline.threadId(),
         baseline.turnStartEntryId(),
         baseline.turnStartEntryId(),
-        ModelInvocationStatus.CANCELLED,
+        ModelInvocationStatus.FAILED,
         errorEntryId,
         T1);
     assertThrows(
@@ -2051,6 +2127,7 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   null,
                   null,
+                  List.of(),
                   T2,
                   T2));
           return modelId;
@@ -2339,6 +2416,7 @@ public abstract class HarnessStoreInvocationContract {
                           null,
                           null,
                           null,
+                          List.of(),
                           T2,
                           T2));
                 }));
@@ -2391,6 +2469,7 @@ public abstract class HarnessStoreInvocationContract {
             null,
             null,
             null,
+            List.of(),
             T2,
             T2));
     return start;

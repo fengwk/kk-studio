@@ -258,8 +258,8 @@ class HistoryEntryPayloadTest {
   @Test
   void assistantErrorAndPayloadValidateCodeAndMessage() {
     AssistantError error = new AssistantError("MODEL_FAILED", "provider unavailable");
-    assertEquals(error, new AssistantErrorPayload(error).error());
-    assertThrows(NullPointerException.class, () -> new AssistantErrorPayload(null));
+    assertEquals(error, new AssistantErrorPayload(error, null).error());
+    assertThrows(NullPointerException.class, () -> new AssistantErrorPayload(null, null));
     assertThrows(NullPointerException.class, () -> new AssistantError(null, "m"));
     assertThrows(NullPointerException.class, () -> new AssistantError("CODE", null));
     assertThrows(IllegalArgumentException.class, () -> new AssistantError("lowercase", "m"));

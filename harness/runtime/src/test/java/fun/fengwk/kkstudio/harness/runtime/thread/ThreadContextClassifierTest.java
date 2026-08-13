@@ -740,7 +740,7 @@ class ThreadContextClassifierTest {
             entry(
                 ERROR_ID,
                 USER_ID,
-                new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "boom")))));
+                new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "boom"), null))));
   }
 
   private static EntryPath closedTurnPath(boolean continueModel) {
@@ -805,6 +805,7 @@ class ThreadContextClassifierTest {
         result,
         error,
         resultEntryId,
+        List.of(),
         NOW,
         NOW);
   }

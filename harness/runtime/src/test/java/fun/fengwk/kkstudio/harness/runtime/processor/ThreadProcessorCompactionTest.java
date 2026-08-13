@@ -534,6 +534,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   null,
+                  List.of(),
                   NOW,
                   NOW));
           ids[1] = tx.nextId();
@@ -542,7 +543,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ids[1],
                   sessionId,
                   ids[0],
-                  new AssistantErrorPayload(new AssistantError("SUMMARIZATION_FAILED", "boom")),
+                  new AssistantErrorPayload(
+                      new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "boom"), null),
                   NOW));
           UUID endId = tx.nextId();
           tx.insertEntry(
@@ -644,6 +646,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   null,
+                  List.of(),
                   NOW,
                   NOW));
           ids[1] = tx.nextId();
@@ -778,6 +781,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       null,
                       null,
                       null,
+                      List.of(),
                       NOW,
                       NOW));
               tx.insertEntry(
@@ -786,7 +790,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       sessionId,
                       secondUserEntryId,
                       new AssistantErrorPayload(
-                          new AssistantError("CONTEXT_OVERFLOW", "context overflow")),
+                          new AssistantError(ProviderErrorKind.OVERFLOW.name(), "context overflow"),
+                          null),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -969,6 +974,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   null,
                   null,
                   null,
+                  List.of(),
                   NOW,
                   NOW));
           tx.insertEntry(

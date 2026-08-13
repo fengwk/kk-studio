@@ -352,6 +352,7 @@ class HarnessRuntimeApprovalLockingTest {
             model.result(),
             model.error(),
             model.resultEntryId(),
+            model.failedAttempts(),
             model.createdAt(),
             model.updatedAt());
     HarnessRuntimeConflictException error =

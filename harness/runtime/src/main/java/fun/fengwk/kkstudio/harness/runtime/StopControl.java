@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.processor.ModelAttemptFailureAppender;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -274,7 +275,7 @@ final class StopControl {
             barrierId,
             sessionId,
             turnStartId,
-            new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE)),
+            new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null),
             now));
     UUID turnEndId = tx.nextId();
     tx.insertEntry(
@@ -297,8 +298,10 @@ final class StopControl {
     EntryPayload barrier = modelStopBarrier(checkpoint);
     ModelInvocationError error =
         new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
+    UUID parentId =
+        ModelAttemptFailureAppender.append(tx, path.root().sessionId(), path.head().id(), model);
     UUID barrierId = tx.nextId();
-    tx.insertEntry(new Entry(barrierId, path.root().sessionId(), path.head().id(), barrier, now));
+    tx.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
     ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
     tx.updateModelInvocation(cancelled);
     UUID turnEndId = tx.nextId();
@@ -353,17 +356,17 @@ final class StopControl {
 
   private static EntryPayload modelStopBarrier(StreamCheckpoint checkpoint) {
     if (checkpoint == null) {
-      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE));
+      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null);
     }
     List<AgentMessageContent> contents = new ArrayList<>(2);
-    if (checkpoint.thinking() != null && !checkpoint.thinking().isBlank()) {
+    if (!checkpoint.thinking().isEmpty()) {
       contents.add(new ThinkingMessageContent(checkpoint.thinking()));
     }
-    if (checkpoint.text() != null && !checkpoint.text().isBlank()) {
+    if (!checkpoint.text().isEmpty()) {
       contents.add(new TextMessageContent(checkpoint.text()));
     }
     if (contents.isEmpty()) {
-      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE));
+      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null);
     }
     return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
   }

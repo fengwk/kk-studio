@@ -313,6 +313,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "result",
         "error",
         "result_entry_id",
+        "failed_attempts",
         "created_at",
         "updated_at");
     assertColumns(
@@ -385,6 +386,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "harness_model_invocation", "stream_checkpoint");
     assertColumnType("jsonb", "harness_model_invocation", "result");
     assertColumnType("jsonb", "harness_model_invocation", "error");
+    assertColumnType("jsonb", "harness_model_invocation", "failed_attempts");
     assertColumnType("jsonb", "harness_tool_invocation", "request");
     assertColumnType("jsonb", "harness_tool_invocation", "approval");
     assertColumnType("jsonb", "harness_tool_invocation", "result");

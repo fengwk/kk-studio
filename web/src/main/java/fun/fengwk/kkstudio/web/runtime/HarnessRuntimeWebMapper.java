@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.CreateThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CreatedThread;
+import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.MoveHeadCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
@@ -58,6 +59,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
@@ -293,6 +295,23 @@ public final class HarnessRuntimeWebMapper {
       tools.add(toToolInvocationDto(invocation));
     }
     dto.setToolInvocations(List.copyOf(tools));
+    List<ModelAttemptFailureDTO> failures = new ArrayList<>(snapshot.modelAttemptFailures().size());
+    for (ModelAttemptFailureProjection failure : snapshot.modelAttemptFailures()) {
+      ModelAttemptFailureDTO failureDto = new ModelAttemptFailureDTO();
+      failureDto.setModelInvocationId(failure.modelInvocationId().toString());
+      failureDto.setTurnStartEntryId(failure.turnStartEntryId().toString());
+      failureDto.setBasisHeadEntryId(failure.basisHeadEntryId().toString());
+      failureDto.setAttempt(failure.attempt());
+      failureDto.setSequence(failure.sequence());
+      failureDto.setText(failure.text());
+      failureDto.setThinking(failure.thinking());
+      failureDto.setErrorCode(failure.error().kind().name());
+      failureDto.setErrorMessage(failure.error().message());
+      failureDto.setFailedAt(failure.failedAt());
+      failureDto.setRetryAt(failure.retryAt());
+      failures.add(failureDto);
+    }
+    dto.setModelAttemptFailures(List.copyOf(failures));
     return dto;
   }
 
@@ -305,6 +324,7 @@ public final class HarnessRuntimeWebMapper {
             new EntryPath(List.of(created.rootEntry())),
             List.of(),
             null,
+            List.of(),
             List.of()));
   }
 

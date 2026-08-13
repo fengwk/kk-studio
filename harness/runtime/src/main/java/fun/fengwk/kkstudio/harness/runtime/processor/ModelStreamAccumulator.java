@@ -51,18 +51,34 @@ final class ModelStreamAccumulator {
    */
   Completion complete(ProviderResponse response) {
     List<ProviderStreamEvent> gaps = new ArrayList<>();
-    appendTextGap(gaps, text, response.text());
-    appendThinkingGap(gaps, thinking, response.thinking());
+    String textGap = textGap(response.text());
+    String thinkingGap = thinkingGap(response.thinking());
     if (partialToolCalls.keySet().stream()
         .anyMatch(index -> index >= response.toolCalls().size())) {
       throw new IllegalArgumentException("final response omits a streamed tool call");
     }
+    List<ToolGap> toolGaps = new ArrayList<>(response.toolCalls().size());
     for (int index = 0; index < response.toolCalls().size(); index++) {
       ProviderToolCall complete = response.toolCalls().get(index);
-      ProviderStreamEvent.ToolCallDelta gap =
-          partialToolCalls
-              .computeIfAbsent(index, ignored -> new PartialToolCall())
-              .gap(index, complete);
+      PartialToolCall partial = partialToolCalls.get(index);
+      ToolGap gap =
+          partial == null
+              ? PartialToolCall.previewComplete(index, complete)
+              : partial.previewGap(index, complete);
+      toolGaps.add(gap);
+    }
+    if (textGap != null) {
+      text.append(textGap);
+      gaps.add(new ProviderStreamEvent.TextDelta(textGap));
+    }
+    if (thinkingGap != null) {
+      thinking.append(thinkingGap);
+      gaps.add(new ProviderStreamEvent.ThinkingDelta(thinkingGap));
+    }
+    for (int index = 0; index < toolGaps.size(); index++) {
+      PartialToolCall partial =
+          partialToolCalls.computeIfAbsent(index, ignored -> new PartialToolCall());
+      ProviderStreamEvent.ToolCallDelta gap = partial.applyGap(toolGaps.get(index));
       if (gap != null) {
         gaps.add(gap);
       }
@@ -87,37 +103,25 @@ final class ModelStreamAccumulator {
         response.rawUsageJson());
   }
 
-  private static void appendTextGap(
-      List<ProviderStreamEvent> gaps, StringBuilder received, String complete) {
+  private String textGap(String complete) {
     String finalValue = complete == null ? "" : complete;
-    String partial = received.toString();
+    String partial = text.toString();
     if (!finalValue.startsWith(partial)) {
       throw new IllegalArgumentException("final response conflicts with streamed text");
     }
-    if (finalValue.length() <= received.length()) {
-      return;
-    }
-    String gap = finalValue.substring(received.length());
-    received.append(gap);
-    gaps.add(new ProviderStreamEvent.TextDelta(gap));
+    return finalValue.length() == partial.length() ? null : finalValue.substring(partial.length());
   }
 
-  private static void appendThinkingGap(
-      List<ProviderStreamEvent> gaps, StringBuilder received, String complete) {
+  private String thinkingGap(String complete) {
     String finalValue = complete == null ? "" : complete;
-    String partial = received.toString();
+    String partial = thinking.toString();
     if (finalValue.isEmpty()) {
-      return;
+      return null;
     }
     if (!finalValue.startsWith(partial)) {
       throw new IllegalArgumentException("final response conflicts with streamed thinking");
     }
-    if (finalValue.length() <= received.length()) {
-      return;
-    }
-    String gap = finalValue.substring(received.length());
-    received.append(gap);
-    gaps.add(new ProviderStreamEvent.ThinkingDelta(gap));
+    return finalValue.length() == partial.length() ? null : finalValue.substring(partial.length());
   }
 
   /** 生效的最终 response 与需要补发布的尾部 SSE gaps。 */
@@ -141,14 +145,27 @@ final class ModelStreamAccumulator {
       }
     }
 
-    private ProviderStreamEvent.ToolCallDelta gap(int index, ProviderToolCall complete) {
-      String idGap = gap(id, complete.id());
-      String nameGap = gap(name, complete.name());
-      String argumentsGap = gap(arguments, complete.argumentsJson());
-      if (idGap == null && nameGap == null && argumentsGap == null) {
+    private ToolGap previewGap(int index, ProviderToolCall complete) {
+      return new ToolGap(
+          index,
+          previewGap(id, complete.id()),
+          previewGap(name, complete.name()),
+          previewGap(arguments, complete.argumentsJson()));
+    }
+
+    private static ToolGap previewComplete(int index, ProviderToolCall complete) {
+      return new ToolGap(index, complete.id(), complete.name(), complete.argumentsJson());
+    }
+
+    private ProviderStreamEvent.ToolCallDelta applyGap(ToolGap gap) {
+      appendGap(id, gap.id());
+      appendGap(name, gap.name());
+      appendGap(arguments, gap.argumentsJson());
+      if (gap.id() == null && gap.name() == null && gap.argumentsJson() == null) {
         return null;
       }
-      return new ProviderStreamEvent.ToolCallDelta(index, idGap, nameGap, argumentsGap);
+      return new ProviderStreamEvent.ToolCallDelta(
+          gap.index(), gap.id(), gap.name(), gap.argumentsJson());
     }
 
     private static void appendIdentity(StringBuilder target, String value) {
@@ -171,17 +188,20 @@ final class ModelStreamAccumulator {
           "streamed tool call identity conflicts: " + current + " vs " + value);
     }
 
-    private static String gap(StringBuilder received, String complete) {
+    private static String previewGap(StringBuilder received, String complete) {
       String partial = received.toString();
       if (!complete.startsWith(partial)) {
         throw new IllegalArgumentException("final tool call conflicts with streamed data");
       }
-      if (complete.length() == partial.length()) {
-        return null;
+      return complete.length() == partial.length() ? null : complete.substring(partial.length());
+    }
+
+    private static void appendGap(StringBuilder received, String gap) {
+      if (gap != null) {
+        received.append(gap);
       }
-      String gap = complete.substring(partial.length());
-      received.append(gap);
-      return gap;
     }
   }
+
+  private record ToolGap(int index, String id, String name, String argumentsJson) {}
 }

@@ -16,14 +16,16 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 9 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
- * {@link MessagePayload} / {@link CustomEntryPayload} / {@link CustomMessagePayload} / {@link
- * AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link CompactionPayload} / {@link
- * TurnEndPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload} 实现显式拒绝。
+ * 最终 10 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
+ * {@link MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
+ * CustomMessagePayload} / {@link AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link
+ * CompactionPayload} / {@link TurnEndPayload}。直接对应 {@link EntryType}；其它 {@link EntryPayload}
+ * 实现显式拒绝。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -46,9 +48,13 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
       orderedSet("pluginId", "customType", "schemaVersion", "data");
+  private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
+      orderedSet("attempt", "error", "retryAt");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS =
       orderedSet("pluginId", "customType", "rendererKey", "message", "details");
-  private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error");
+  private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error", "attempt");
+  private static final Set<String> ATTEMPT_SNAPSHOT_FIELDS =
+      orderedSet("attempt", "sequence", "text", "thinking");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> COMPACTION_FIELDS =
       orderedSet(
@@ -75,7 +81,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   public HistoryEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 9 类 history payload，其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 10 类 history payload，其它实现显式拒绝。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
@@ -89,6 +95,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case TurnStartPayload value -> encodeTurnStart(value);
       case MessagePayload value -> encodeMessage(value);
       case CustomEntryPayload value -> encodeCustomEntry(value);
+      case ModelAttemptFailurePayload value -> encodeModelAttemptFailure(value);
       case CustomMessagePayload value -> encodeCustomMessage(value);
       case AssistantErrorPayload value -> encodeAssistantError(value);
       case AssistantAbortedPayload value -> encodeAssistantAborted(value);
@@ -125,6 +132,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case TURN_START -> decodeTurnStart(value);
       case MESSAGE -> decodeMessage(value);
       case CUSTOM -> decodeCustomEntry(value);
+      case MODEL_ATTEMPT_FAILURE -> decodeModelAttemptFailure(value);
       case CUSTOM_MESSAGE -> decodeCustomMessage(value);
       case ASSISTANT_ERROR -> decodeAssistantError(value);
       case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
@@ -189,6 +197,20 @@ public final class HistoryEntryPayloadJsonCodec {
     return node;
   }
 
+  private static ObjectNode encodeModelAttemptFailure(ModelAttemptFailurePayload value) {
+    ObjectNode node = NODES.objectNode();
+    ModelAttemptSnapshot attempt = value.attempt();
+    ObjectNode attemptNode = NODES.objectNode();
+    attemptNode.put("attempt", attempt.attempt());
+    attemptNode.put("sequence", attempt.sequence());
+    attemptNode.put("text", attempt.text());
+    attemptNode.put("thinking", attempt.thinking());
+    node.set("attempt", attemptNode);
+    node.set("error", encodeError(value.error()));
+    node.put("retryAt", value.retryAt().toString());
+    return node;
+  }
+
   private static ObjectNode encodeCustomMessage(CustomMessagePayload value) {
     ObjectNode node = NODES.objectNode();
     node.put("pluginId", value.pluginId());
@@ -202,6 +224,16 @@ public final class HistoryEntryPayloadJsonCodec {
   private static ObjectNode encodeAssistantError(AssistantErrorPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("error", encodeError(value.error()));
+    if (value.attempt() == null) {
+      node.putNull("attempt");
+    } else {
+      ObjectNode attempt = NODES.objectNode();
+      attempt.put("attempt", value.attempt().attempt());
+      attempt.put("sequence", value.attempt().sequence());
+      attempt.put("text", value.attempt().text());
+      attempt.put("thinking", value.attempt().thinking());
+      node.set("attempt", attempt);
+    }
     return node;
   }
 
@@ -343,10 +375,52 @@ public final class HistoryEntryPayloadJsonCodec {
             HistoryValueCodecs.requireObject(node.get("details"), "CUSTOM_MESSAGE.details")));
   }
 
+  private static ModelAttemptFailurePayload decodeModelAttemptFailure(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "MODEL_ATTEMPT_FAILURE");
+    HistoryValueCodecs.requireExactFields(
+        node, MODEL_ATTEMPT_FAILURE_FIELDS, "MODEL_ATTEMPT_FAILURE");
+    ObjectNode attemptNode =
+        HistoryValueCodecs.requireObject(node.get("attempt"), "MODEL_ATTEMPT_FAILURE.attempt");
+    HistoryValueCodecs.requireExactFields(
+        attemptNode, ATTEMPT_SNAPSHOT_FIELDS, "MODEL_ATTEMPT_FAILURE.attempt");
+    ModelAttemptSnapshot attempt =
+        new ModelAttemptSnapshot(
+            HistoryValueCodecs.requiredPositiveInt(
+                attemptNode, "attempt", "MODEL_ATTEMPT_FAILURE.attempt"),
+            HistoryValueCodecs.requiredNonNegativeLong(
+                attemptNode, "sequence", "MODEL_ATTEMPT_FAILURE.attempt"),
+            HistoryValueCodecs.text(attemptNode, "text"),
+            HistoryValueCodecs.text(attemptNode, "thinking"));
+    Instant retryAt;
+    try {
+      retryAt = Instant.parse(HistoryValueCodecs.text(node, "retryAt"));
+    } catch (RuntimeException error) {
+      throw new IllegalArgumentException(
+          "MODEL_ATTEMPT_FAILURE.retryAt must be an ISO-8601 instant", error);
+    }
+    return new ModelAttemptFailurePayload(attempt, decodeError(node.get("error")), retryAt);
+  }
+
   private static AssistantErrorPayload decodeAssistantError(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ERROR");
     HistoryValueCodecs.requireExactFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
-    return new AssistantErrorPayload(decodeError(node.get("error")));
+    JsonNode attempt = node.get("attempt");
+    ModelAttemptSnapshot snapshot = null;
+    if (!attempt.isNull()) {
+      ObjectNode snapshotNode =
+          HistoryValueCodecs.requireObject(attempt, "ASSISTANT_ERROR.attempt");
+      HistoryValueCodecs.requireExactFields(
+          snapshotNode, ATTEMPT_SNAPSHOT_FIELDS, "ASSISTANT_ERROR.attempt");
+      snapshot =
+          new ModelAttemptSnapshot(
+              HistoryValueCodecs.requiredPositiveInt(
+                  snapshotNode, "attempt", "ASSISTANT_ERROR.attempt"),
+              HistoryValueCodecs.requiredNonNegativeLong(
+                  snapshotNode, "sequence", "ASSISTANT_ERROR.attempt"),
+              HistoryValueCodecs.text(snapshotNode, "text"),
+              HistoryValueCodecs.text(snapshotNode, "thinking"));
+    }
+    return new AssistantErrorPayload(decodeError(node.get("error")), snapshot);
   }
 
   private static AssistantAbortedPayload decodeAssistantAborted(JsonNode value) {

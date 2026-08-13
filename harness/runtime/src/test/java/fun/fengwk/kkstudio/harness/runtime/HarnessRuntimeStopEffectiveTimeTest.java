@@ -132,6 +132,7 @@ class HarnessRuntimeStopEffectiveTimeTest {
         model.result(),
         model.error(),
         model.resultEntryId(),
+        model.failedAttempts(),
         model.createdAt(),
         updatedAt);
   }

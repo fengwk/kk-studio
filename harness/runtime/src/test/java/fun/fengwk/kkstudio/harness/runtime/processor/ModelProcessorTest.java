@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.CompactionRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -106,7 +107,6 @@ class ModelProcessorTest {
   private static final EnvironmentName ENV_ID = new EnvironmentName("env-1");
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
-  private static final Duration CHECKPOINT_INTERVAL = Duration.ofSeconds(10);
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(7);
   private static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
@@ -323,6 +323,11 @@ class ModelProcessorTest {
     Fixture fixture = fixture();
     transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    StreamCheckpoint checkpoint = new StreamCheckpoint(1, 7, "durable partial", "thinking");
+    transition(
+        fixture.store,
+        fixture.invocationId,
+        model -> model.checkpoint(checkpoint, NOW.plusSeconds(1)));
     ClaimedWork firstClaim = claim(fixture.store, fixture.invocationId, NOW);
     fixture.clock.advance(Duration.ofSeconds(61));
     ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
@@ -333,6 +338,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertEquals(checkpoint, model.streamCheckpoint());
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).revision());
     assertEquals(
@@ -618,12 +624,23 @@ class ModelProcessorTest {
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("partial"));
+    listener.onEvent(new ProviderStreamEvent.TextDelta("-tail"));
     listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unavailable"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(1, model.attempt());
     assertNull(model.streamCheckpoint());
+    assertEquals(1, model.failedAttempts().size());
+    assertEquals(1, model.failedAttempts().getFirst().attempt());
+    assertEquals(2, model.failedAttempts().getFirst().sequence());
+    assertEquals("partial-tail", model.failedAttempts().getFirst().text());
+    assertEquals("", model.failedAttempts().getFirst().thinking());
+    assertEquals(
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unavailable"),
+        model.failedAttempts().getFirst().error());
+    assertEquals(NOW, model.failedAttempts().getFirst().failedAt());
+    assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
     assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).revision());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
@@ -640,7 +657,7 @@ class ModelProcessorTest {
     // retry 后旧 execution 的 late callback 必须 no-op。
     listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
-    assertEquals(1, deltas(fixture.sink).size());
+    assertEquals(2, deltas(fixture.sink).size());
   }
 
   /** retry budget 耗尽：第二次 TRANSIENT 失败转为 FAILED，attempt 保持已确认值。 */
@@ -674,6 +691,9 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(2, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertEquals(1, model.failedAttempts().size());
+    assertEquals("first", model.failedAttempts().getFirst().error().message());
+    assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
     assertEquals(6, thread(fixture.store, fixture.baseline.threadId()).revision());
     assertEquals(
         2,
@@ -1083,6 +1103,9 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, model.error().kind());
+    assertNotNull(model.streamCheckpoint());
+    assertEquals(1, model.streamCheckpoint().sequence());
+    assertEquals("hello", model.streamCheckpoint().text());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1676,12 +1699,9 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /**
-   * checkpoint 节流：首个 safe delta 立即 flush；interval 内只验证 ownership 并发布 realtime；tool fragment 永不
-   * checkpoint；terminal success 总是 flush 完整 safe snapshot。
-   */
+  /** 每个 safe delta 在发布 realtime 前先持久化完整 checkpoint；tool fragment 永不 checkpoint。 */
   @Test
-  void checkpointFlushIsThrottledAndTerminalAlwaysFlushes() {
+  void everySafeDeltaPersistsCheckpointBeforeRealtimePublication() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
@@ -1693,20 +1713,16 @@ class ModelProcessorTest {
     assertEquals(1, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
     assertEquals("a", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
 
-    // interval 未到：不写 checkpoint，但仍验证 ownership 并发布 realtime。
     listener.onEvent(new ProviderStreamEvent.TextDelta("b"));
-    assertEquals(1, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
-    assertEquals("a", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
+    assertEquals(2, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
+    assertEquals("ab", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
     assertEquals(2, deltas(fixture.sink).size());
 
-    // 达到 interval：flush 累积文本（advance 保持在 claim lease 内）。
-    fixture.clock.advance(Duration.ofSeconds(20));
     listener.onEvent(new ProviderStreamEvent.TextDelta("c"));
     assertEquals(3, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
     assertEquals("abc", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
 
-    // tool fragment 永不 checkpoint（即使 interval 已到）；final 需携带该 tool call 才能 reconcile。
-    fixture.clock.advance(Duration.ofSeconds(20));
+    // tool fragment 永不 checkpoint；final 需携带该 tool call 才能 reconcile。
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
     assertEquals(3, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
 
@@ -2079,7 +2095,7 @@ class ModelProcessorTest {
             fixtureA.store,
             new FakeGateway(),
             fixtureA.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
             fixtureA.clock,
             newScheduler());
     assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
@@ -2129,7 +2145,7 @@ class ModelProcessorTest {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             hooked);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
@@ -2197,27 +2213,20 @@ class ModelProcessorTest {
     assertFalse(heartbeat.start(claimed));
   }
 
-  /** ModelProcessorConfig：checkpointFlushInterval 与 fallback delay 必须为正且至少 1ms。 */
+  /** ModelProcessorConfig：fallback delay 必须为正的整毫秒。 */
   @Test
   void processorConfigValidatesDurations() {
     Fixture fixture = fixture();
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, Duration.ZERO, NO_RETRY, FALLBACK_DELAY));
+        () -> new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelProcessorConfig(
-                LEASE_CONFIG, Duration.ofNanos(500), NO_RETRY, FALLBACK_DELAY));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ModelProcessorConfig(LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelProcessorConfig(
-                LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, Duration.ofNanos(500)));
-    new ModelProcessorConfig(LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, FALLBACK_DELAY);
+        () -> new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, Duration.ofNanos(500)));
+    assertEquals(
+        FALLBACK_DELAY,
+        new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY)
+            .dispatchBusyFallbackDelay());
     assertThrows(
         NullPointerException.class,
         () ->
@@ -2320,7 +2329,6 @@ class ModelProcessorTest {
             sink,
             new ModelProcessorConfig(
                 new ProcessorLeaseConfig(Duration.ofMillis(400), Duration.ofMillis(100)),
-                CHECKPOINT_INTERVAL,
                 NO_RETRY,
                 FALLBACK_DELAY),
             Clock.systemUTC(),
@@ -2365,7 +2373,7 @@ class ModelProcessorTest {
             fixture.store,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(LEASE_CONFIG, CHECKPOINT_INTERVAL, NO_RETRY, FALLBACK_DELAY),
+            new ModelProcessorConfig(LEASE_CONFIG, NO_RETRY, FALLBACK_DELAY),
             fixture.clock,
             dead);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
@@ -2511,8 +2519,7 @@ class ModelProcessorTest {
               store,
               gateway,
               sink,
-              new ModelProcessorConfig(
-                  LEASE_CONFIG, CHECKPOINT_INTERVAL, retryPolicy, FALLBACK_DELAY),
+              new ModelProcessorConfig(LEASE_CONFIG, retryPolicy, FALLBACK_DELAY),
               clock,
               scheduler);
     }
@@ -2566,6 +2573,7 @@ class ModelProcessorTest {
                   null,
                   null,
                   null,
+                  List.of(),
                   now,
                   now));
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);

@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -896,6 +897,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
       // update 不重复依赖 Thread 当前 head / session（relocation 后 terminal exact replay 仍合法）；
       // 仅当 resultEntry 出现时校验类型、path 与唯一性。
       requireValidModelResultEntry(invocation);
+      if (stored.resultEntryId() == null && invocation.resultEntryId() != null) {
+        ModelAttemptMaterialization.validate(
+            stored, invocation, loadEntryPath(invocation.resultEntryId()));
+      }
       state.modelInvocations.put(invocation.id(), invocation);
     }
 

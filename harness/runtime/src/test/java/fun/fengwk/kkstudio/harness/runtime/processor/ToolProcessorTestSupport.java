@@ -23,14 +23,14 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
@@ -254,24 +254,17 @@ final class ToolProcessorTestSupport {
                   null,
                   null,
                   null,
+                  List.of(),
                   now,
                   now));
-          tx.lockModelInvocation(modelId);
-          tx.updateModelInvocation(
-              new ModelInvocation(
-                  modelId,
-                  baseline.threadId(),
-                  baseline.turnStartEntryId(),
-                  baseline.turnStartEntryId(),
-                  modelRequest,
-                  ModelInvocationStatus.CANCELLED,
-                  0,
-                  null,
-                  null,
-                  new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"),
-                  baseline.assistantEntryId(),
-                  now,
-                  now));
+          ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.beginDispatch(now));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.markRunning(now));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.succeed(successResponse("call-1"), now));
+          current = tx.lockModelInvocation(modelId).orElseThrow();
+          tx.updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
           tx.insertToolInvocations(
               List.of(
                   new ToolInvocation(
@@ -528,6 +521,31 @@ final class ToolProcessorTestSupport {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO)),
         null);
+  }
+
+  private static ProviderResponse successResponse(String... toolCallIds) {
+    List<ProviderToolCall> calls = new ArrayList<>();
+    for (String toolCallId : toolCallIds) {
+      calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
+    }
+    return new ProviderResponse(
+        "assistant reply",
+        "",
+        calls,
+        calls.isEmpty() ? ProviderStopReason.COMPLETED : ProviderStopReason.TOOL_CALLS,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        "req-1",
+        null,
+        "{}");
   }
 
   private static EntryPayload toolResultPayload(

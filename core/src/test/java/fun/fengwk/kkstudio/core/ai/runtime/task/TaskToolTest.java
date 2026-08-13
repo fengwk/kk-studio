@@ -476,7 +476,8 @@ class TaskToolTest {
             busy.entryPath(),
             busy.queuedCommands(),
             modelInvocation(id(1)),
-            busy.toolSiblings());
+            busy.toolSiblings(),
+            List.of());
     doReturn(busyWithModel).when(runtime).getThreadSnapshot(RESUME_THREAD_ID);
     RecordingListener busyListener = new RecordingListener();
     tool.execute(
@@ -576,7 +577,8 @@ class TaskToolTest {
             detached.entryPath(),
             detached.queuedCommands(),
             null,
-            detached.toolSiblings());
+            detached.toolSiblings(),
+            List.of());
     doReturn(noModel).when(runtime).getThreadSnapshot(PARENT_THREAD_ID);
     RecordingListener noModelListener = new RecordingListener();
     tool.execute(
@@ -1598,7 +1600,8 @@ class TaskToolTest {
     when(modelRequest.subagentBindings()).thenReturn(allowedSubagents);
     ModelInvocation model = mock(ModelInvocation.class);
     when(model.request()).thenReturn(modelRequest);
-    return new ThreadSnapshot(thread, new EntryPath(List.of(root)), List.of(), model, toolSiblings);
+    return new ThreadSnapshot(
+        thread, new EntryPath(List.of(root)), List.of(), model, toolSiblings, List.of());
   }
 
   private static ToolInvocation taskInvocationSibling() {
@@ -1616,7 +1619,8 @@ class TaskToolTest {
     Entry root =
         new Entry(CHILD_ROOT_ENTRY_ID, SESSION_ID, null, new RootPayload(settings, context), NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, root.id(), true, 1L, 0L, NOW, NOW);
-    return new ThreadSnapshot(thread, new EntryPath(List.of(root)), List.of(), null, List.of());
+    return new ThreadSnapshot(
+        thread, new EntryPath(List.of(root)), List.of(), null, List.of(), List.of());
   }
 
   private static ThreadSnapshot completedChildSnapshot(ThreadSnapshot initial, String report) {
@@ -1640,7 +1644,12 @@ class TaskToolTest {
         new ThreadState(
             CHILD_THREAD_ID, end.id(), initial.thread().yoloEnabled(), 2L, 2L, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, assistant, end)), List.of(), null, List.of());
+        thread,
+        new EntryPath(List.of(root, turn, assistant, end)),
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
   private static ThreadSnapshot quiescentResumeSnapshot(
@@ -1681,7 +1690,12 @@ class TaskToolTest {
     ThreadState thread =
         new ThreadState(RESUME_THREAD_ID, headEntryId, true, 2L, revision, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, assistant, end)), List.of(), null, List.of());
+        thread,
+        new EntryPath(List.of(root, turn, assistant, end)),
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
   private static ThreadSnapshot resumeTerminalSnapshot(ThreadSnapshot resumed, String report) {
@@ -1725,7 +1739,8 @@ class TaskToolTest {
             resumed.thread().revision() + 1,
             NOW,
             NOW);
-    return new ThreadSnapshot(thread, new EntryPath(entries), List.of(), null, List.of());
+    return new ThreadSnapshot(
+        thread, new EntryPath(entries), List.of(), null, List.of(), List.of());
   }
 
   private static ThreadSnapshot runningRootSnapshot(
@@ -1743,7 +1758,7 @@ class TaskToolTest {
             new RootPayload(settings, SUBAGENT_CONTEXT),
             NOW);
     ThreadState thread = new ThreadState(threadId, headEntryId, true, 1L, revision, NOW, NOW);
-    return new ThreadSnapshot(thread, new EntryPath(List.of(root)), queued, null, tools);
+    return new ThreadSnapshot(thread, new EntryPath(List.of(root)), queued, null, tools, List.of());
   }
 
   private static ThreadSnapshot toolCallSnapshot(long revision, List<ToolInvocation> tools) {
@@ -1777,7 +1792,7 @@ class TaskToolTest {
     ThreadState thread =
         new ThreadState(CHILD_THREAD_ID, assistant.id(), true, 1L, revision, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, assistant)), List.of(), null, tools);
+        thread, new EntryPath(List.of(root, turn, assistant)), List.of(), null, tools, List.of());
   }
 
   /**
@@ -1844,7 +1859,8 @@ class TaskToolTest {
       }
     }
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, parent, true, 1L, revision, NOW, NOW);
-    return new ThreadSnapshot(thread, new EntryPath(entries), List.of(), model, List.of());
+    return new ThreadSnapshot(
+        thread, new EntryPath(entries), List.of(), model, List.of(), List.of());
   }
 
   private static ThreadSnapshot continueModelHeadSnapshot(boolean continueModel, long revision) {
@@ -1874,7 +1890,12 @@ class TaskToolTest {
             NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, revision, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, assistant, end)), List.of(), null, List.of());
+        thread,
+        new EntryPath(List.of(root, turn, assistant, end)),
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
   private static ThreadSnapshot failedTerminalSnapshot() {
@@ -1898,7 +1919,7 @@ class TaskToolTest {
             id(401),
             root.sessionId(),
             turn.id(),
-            new AssistantErrorPayload(new AssistantError("CHILD_FAILED", "child exploded")),
+            new AssistantErrorPayload(new AssistantError("CHILD_FAILED", "child exploded"), null),
             NOW);
     Entry end =
         new Entry(
@@ -1910,7 +1931,12 @@ class TaskToolTest {
             NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, error, end)), List.of(), null, List.of());
+        thread,
+        new EntryPath(List.of(root, turn, error, end)),
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
   private static ThreadSnapshot stoppedTerminalSnapshot() {
@@ -1949,7 +1975,12 @@ class TaskToolTest {
             NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, aborted, end)), List.of(), null, List.of());
+        thread,
+        new EntryPath(List.of(root, turn, aborted, end)),
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
   private static ThreadSnapshot cancelledTerminalSnapshot() {
@@ -1978,7 +2009,7 @@ class TaskToolTest {
             NOW);
     ThreadState thread = new ThreadState(CHILD_THREAD_ID, end.id(), true, 1L, 3L, NOW, NOW);
     return new ThreadSnapshot(
-        thread, new EntryPath(List.of(root, turn, end)), List.of(), null, List.of());
+        thread, new EntryPath(List.of(root, turn, end)), List.of(), null, List.of(), List.of());
   }
 
   private static MessagePayload assistantMessage(String text) {
