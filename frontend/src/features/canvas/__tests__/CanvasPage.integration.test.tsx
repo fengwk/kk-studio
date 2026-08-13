@@ -28,6 +28,7 @@ const CREATED_CANVAS_ID = 'e2f3a4b5-6c7d-4e8f-9a0b-1c2d3e4f5a6b'
 const MISSING_CANVAS_ID = 'f3a4b5c6-7d8e-4f9a-8b0c-1d2e3f4a5b6c'
 const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
 const NODE_B = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d'
+const NODE_C = 'b3c4d5e6-7f8a-4b9c-8d0e-1f2a3b4c5d6e'
 const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'
 const RESOURCE_ID = 'd5e6f7a8-9b0c-4d1e-8f2a-3b4c5d6e7f8a'
 const STORAGE_UPLOAD_ID = 'e6f7a8b9-0c1d-4e2f-8a3b-4c5d6e7f8a9b'
@@ -235,6 +236,17 @@ function installBackend(options: BackendOptions = {}) {
       const document = canvasDocument(CREATED_CANVAS_ID, '未命名画布')
       snapshots.set(document.id, baseSnapshot(document))
       return envelope(document, 201)
+    }
+    const resourceUrlMatch = /^\/api\/canvases\/([^/]+)\/resources\/([^/]+)\/(preview-url|download-url)$/.exec(url)
+    if (resourceUrlMatch && method === 'POST') {
+      return envelope({
+        method: 'GET',
+        url: resourceUrlMatch[3] === 'download-url'
+          ? 'https://s3.example/original'
+          : 'https://s3.example/preview',
+        headers: {},
+        expiresAt: '2026-08-10T00:15:00Z',
+      })
     }
     if (url === '/api/canvas-function-models') {
       return envelope([{
@@ -501,6 +513,12 @@ function buildPatch(
       }
       groups = [...groups, group]
       groupPatches.push({ op: 'UPSERT', group })
+      for (const memberNodeId of command.memberNodeIds) {
+        const node = nodes.find((item) => item.id === memberNodeId)
+        if (node && node.groupId === null) {
+          upsertNode({ ...node, groupId: command.groupId })
+        }
+      }
     } else if (command.type === 'MOVE_GROUP') {
       const group = groups.find((item) => item.id === command.groupId)
       if (group) {
@@ -514,6 +532,16 @@ function buildPatch(
     } else if (command.type === 'DELETE_GROUP') {
       groups = groups.filter((item) => item.id !== command.groupId)
       groupPatches.push({ op: 'REMOVE', groupId: command.groupId })
+      for (const node of nodes.filter((item) => item.groupId === command.groupId)) {
+        upsertNode({ ...node, groupId: null })
+      }
+    } else if (command.type === 'RENAME_GROUP') {
+      const group = groups.find((item) => item.id === command.groupId)
+      if (group) {
+        const next: CanvasGroupDTO = { ...group, title: command.title }
+        groups = groups.map((item) => item.id === next.id ? next : item)
+        groupPatches.push({ op: 'UPSERT', group: next })
+      }
     } else if (command.type === 'UNGROUP') {
       const group = groups.find((item) => item.id === command.groupId)
       if (group) {
@@ -588,7 +616,7 @@ describe('CanvasPage real list/create/load integration', () => {
     expect(await screen.findByLabelText(/无限画布/)).toBeInTheDocument()
     expect(screen.getByText('v0')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
+    await user.click(screen.getByRole('button', { name: '添加资源或 Function' }))
     await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /文本资源/ }))
     await user.clear(screen.getByLabelText('Markdown 内容'))
     await user.type(screen.getByLabelText('Markdown 内容'), '# E2E 文本')
@@ -625,7 +653,7 @@ describe('CanvasPage real list/create/load integration', () => {
       })
     })
 
-    await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
+    await user.click(screen.getByRole('button', { name: '添加资源或 Function' }))
     await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /图片生成/ }))
     await waitFor(() => {
       expect(commandBodies.some((body) => body.commands[0]?.type === 'CREATE_FUNCTION_NODE')).toBe(true)
@@ -1165,12 +1193,25 @@ describe('CanvasPage real list/create/load integration', () => {
       body.commands[0]?.type === 'DELETE_LINK'
     ))).toBe(true))
 
-    act(() => flow.onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] }))
-    await user.click(screen.getByRole('button', { name: '添加资源、Function 或分组' }))
-    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /分组/ }))
+    // 框选右键：菜单提供「打组」并调用现有 createGroup（AddMenu 不再有 Group）。
+    act(() => flow.onSelectionChange({ nodes: [{ id: NODE_A }, { id: NODE_B }], edges: [] }))
+    act(() => {
+      ;(flow as typeof flow & {
+        onSelectionContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          nodes: Array<{ id: string }>,
+        ) => void
+      }).onSelectionContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        [{ id: NODE_A }, { id: NODE_B }],
+      )
+    })
+    const groupMenu = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(groupMenu).getByRole('menuitem', { name: '打组' }))
     await waitFor(() => expect(commandBodies.some((body) => (
       body.commands[0]?.type === 'CREATE_GROUP'
     ))).toBe(true))
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
     // group flow id 由 UUID 编码而来，删除路径能解码回 canonical UUID。
     act(() => flow.onSelectionChange({ nodes: [{ id: `group:${GROUP_ID}` }], edges: [] }))
     fireEvent.keyDown(window, { key: 'Delete' })
@@ -1193,6 +1234,531 @@ describe('CanvasPage real list/create/load integration', () => {
         NODE_B,
       ])
     })
+  })
+
+  it('renames, ungroups, and deletes a group from its right-click menu', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: GROUP_ID,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'image.png',
+          textContent: null,
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          sizeBytes: '3',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: GROUP_ID,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: null,
+      }],
+      groups: [{
+        id: GROUP_ID,
+        canvasId: CANVAS_ID,
+        title: 'Frame',
+        transform: { x: 800, y: 30, width: 400, height: 300 },
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    const rightClickGroup = () => act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 120, clientY: 140, preventDefault: vi.fn() },
+        { id: `group:${GROUP_ID}`, selected: false },
+      )
+    })
+    const openGroupMenu = async () => {
+      rightClickGroup()
+      return screen.findByRole('menu', { name: '画布节点操作' })
+    }
+
+    // Rename 通过菜单内编辑持久化 RENAME_GROUP。
+    let menu = await openGroupMenu()
+    await user.click(within(menu).getByRole('menuitem', { name: '重命名' }))
+    const renameInput = within(menu).getByRole('textbox', { name: '新名称' })
+    await user.clear(renameInput)
+    await user.type(renameInput, '重命名分组')
+    await user.click(within(menu).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'RENAME_GROUP'
+    ))).toBe(true))
+    expect(commandBodies.find((body) => (
+      body.commands[0]?.type === 'RENAME_GROUP'
+    ))?.commands).toEqual([{ type: 'RENAME_GROUP', groupId: GROUP_ID, title: '重命名分组' }])
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+
+    // Delete 必须先确认：菜单内 alertdialog，确认后才发 DELETE_GROUP。
+    // 重命名已回显，组标题为「重命名分组」。
+    menu = await openGroupMenu()
+    await user.click(within(menu).getByRole('menuitem', { name: '删除' }))
+    const confirm = await within(menu).findByRole('alertdialog', { name: '删除分组「重命名分组」？' })
+    expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_GROUP'
+    ))).toBe(false)
+    await user.click(within(confirm).getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_GROUP'
+    ))).toBe(true))
+    expect(commandBodies.find((body) => (
+      body.commands[0]?.type === 'DELETE_GROUP'
+    ))?.commands).toEqual([{ type: 'DELETE_GROUP', groupId: GROUP_ID }])
+
+    // Ungroup：重新框选打组后解组，只发 UNGROUP（服务端同时删除边界）。
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: {
+          nodes: Array<{ id: string }>
+          edges: Array<{ source: string; target: string }>
+        }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }, { id: NODE_B }], edges: [] })
+      ;(flowHarness.current as {
+        onSelectionContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          nodes: Array<{ id: string }>,
+        ) => void
+      }).onSelectionContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        [{ id: NODE_A }, { id: NODE_B }],
+      )
+    })
+    const regroup = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(regroup).getByRole('menuitem', { name: '打组' }))
+    await waitFor(() => expect(commandBodies.filter((body) => (
+      body.commands[0]?.type === 'CREATE_GROUP'
+    ))).toHaveLength(1))
+    const createdGroup = commandBodies
+      .flatMap((body) => body.commands)
+      .filter((command) => command.type === 'CREATE_GROUP')[0]
+    expect(createdGroup?.type).toBe('CREATE_GROUP')
+    expect(createdGroup?.memberNodeIds).toEqual([NODE_A, NODE_B])
+    const newGroupId = createdGroup?.groupId as string
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 120, clientY: 140, preventDefault: vi.fn() },
+        { id: `group:${newGroupId}`, selected: false },
+      )
+    })
+    menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(menu).getByRole('menuitem', { name: '解组' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'UNGROUP'
+    ))).toBe(true))
+    const ungroupBody = commandBodies.find((body) => (
+      body.commands[0]?.type === 'UNGROUP'
+    ))
+    expect(ungroupBody?.commands).toEqual([{
+      type: 'UNGROUP',
+      groupId: newGroupId,
+      memberNodeIds: [NODE_A, NODE_B],
+    }])
+    expect(ungroupBody?.commands.some((command) => command.type === 'DELETE_GROUP')).toBe(false)
+  })
+
+  it('closes the context menu on Escape, outside pointer, pane click, and viewport move', async () => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    const openMenu = () => act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 300, clientY: 300, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+
+    openMenu()
+    expect(await screen.findByRole('menu', { name: '画布节点操作' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+
+    openMenu()
+    await screen.findByRole('menu', { name: '画布节点操作' })
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+
+    openMenu()
+    await screen.findByRole('menu', { name: '画布节点操作' })
+    act(() => {
+      ;(flowHarness.current as {
+        onMove: (
+          event: unknown,
+          viewport: { x: number; y: number; zoom: number },
+        ) => void
+      }).onMove(null, { x: 12, y: 18, zoom: 0.74 })
+    })
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+
+    openMenu()
+    await screen.findByRole('menu', { name: '画布节点操作' })
+    act(() => {
+      ;(flowHarness.current as {
+        onPaneClick: () => void
+      }).onPaneClick()
+    })
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+  })
+
+  it('offers only applicable resource actions and confirms node deletion in the menu', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    const textResourceId = 'eeeeeeee-0000-4000-8000-0000000000cc'
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Note',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: textResourceId,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: null,
+          name: 'note.md',
+          textContent: 'hello',
+          kind: 'TEXT',
+          mediaType: 'text/markdown',
+          sizeBytes: '5',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }, {
+        id: NODE_B,
+        canvasId: CANVAS_ID,
+        name: 'Generator',
+        transform: { x: 400, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [],
+        function: {
+          modelKey: 'fake-image',
+          configJson: JSON.stringify({
+            prompt: { segments: [{ type: 'TEXT', text: 'generate' }] },
+            parameters: { ratio: 'AUTO' },
+          }),
+        },
+        run: {
+          nodeId: NODE_B,
+          requestId: 'f1f2f3f4-0000-4000-8000-000000000001',
+          status: 'RUNNING',
+          stage: 'RUNNING',
+          error: null,
+          updatedAt: '2026-08-10T00:00:00Z',
+        },
+      }, {
+        id: NODE_C,
+        canvasId: CANVAS_ID,
+        name: 'Track',
+        transform: { x: 780, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: 'a9b8c7d6-0000-4000-8000-0000000000dd',
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_C,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000dd',
+          name: 'track.mp3',
+          textContent: null,
+          kind: 'AUDIO',
+          mediaType: 'audio/mpeg',
+          sizeBytes: '9',
+          width: null,
+          height: null,
+          durationMs: '65000',
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    const rightClickNode = (id: string, selected = false) => act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id, selected },
+      )
+    })
+
+    // TEXT 节点：只有重命名/编辑文本/删除。
+    rightClickNode(NODE_A)
+    let menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '重命名' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: '编辑文本' })).toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '运行' })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '打开原件' })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '下载' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // RUNNING Function：取消生成而非运行。
+    rightClickNode(NODE_B)
+    menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '取消生成' })).toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '运行' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // AUDIO 节点：无运行/编辑文本，原件操作只经右键菜单（播放器内不提供常驻下载）。
+    rightClickNode(NODE_C)
+    menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    expect(within(menu).getByRole('menuitem', { name: '打开原件' })).toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: '下载' })).toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '运行' })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: '编辑文本' })).not.toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    // 删除必须有菜单内确认，且不立即执行。
+    rightClickNode(NODE_A)
+    menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(menu).getByRole('menuitem', { name: '删除' }))
+    const confirm = await within(menu).findByRole('alertdialog', { name: '删除「Note」？' })
+    expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_NODE'
+    ))).toBe(false)
+    await user.click(within(confirm).getByRole('button', { name: '确认删除' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'DELETE_NODE'
+    ))).toBe(true))
+    expect(commandBodies.find((body) => (
+      body.commands[0]?.type === 'DELETE_NODE'
+    ))?.commands).toEqual([{ type: 'DELETE_NODE', nodeId: NODE_A }])
+  })
+
+  it('opens and downloads originals through the right-click menu after signing', async () => {
+    const { snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Image',
+        transform: { x: 20, y: 30, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: '00000000-0000-4000-8000-0000000000bb',
+          name: 'image.png',
+          textContent: null,
+          kind: 'IMAGE',
+          mediaType: 'image/png',
+          sizeBytes: '3',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+    const menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(menu).getByRole('menuitem', { name: '打开原件' }))
+    // 签名完成后自动触发新窗口打开并关闭菜单。
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce())
+    const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement
+    expect(anchor.href).toBe('https://s3.example/original')
+    expect(anchor.target).toBe('_blank')
+    expect(screen.queryByRole('menu', { name: '画布节点操作' })).not.toBeInTheDocument()
+
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+    const menu2 = await screen.findByRole('menu', { name: '画布节点操作' })
+    clickSpy.mockClear()
+    await user.click(within(menu2).getByRole('menuitem', { name: '下载' }))
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce())
+    const downloadAnchor = clickSpy.mock.instances[0] as HTMLAnchorElement
+    expect(downloadAnchor.href).toBe('https://s3.example/original')
+    expect(downloadAnchor.download).toBe('image.png')
+  })
+
+  it('edits text in a non-modal anchored panel without changing the node transform', async () => {
+    const { commandBodies, snapshots } = installBackend()
+    const current = snapshots.get(CANVAS_ID) as CanvasSnapshotDTO
+    snapshots.set(CANVAS_ID, {
+      ...current,
+      nodes: [{
+        id: NODE_A,
+        canvasId: CANVAS_ID,
+        name: 'Note',
+        transform: { x: 100, y: 80, width: 320, height: 260 },
+        groupId: null,
+        resources: [{
+          id: RESOURCE_ID,
+          canvasId: CANVAS_ID,
+          ownerNodeId: NODE_A,
+          resourceIndex: 0,
+          blobId: null,
+          name: 'note.md',
+          textContent: 'hello',
+          kind: 'TEXT',
+          mediaType: 'text/markdown',
+          sizeBytes: '5',
+          width: null,
+          height: null,
+          durationMs: null,
+          createdAt: '2026-08-10T00:00:00Z',
+        }],
+        function: null,
+        run: null,
+      }],
+    })
+    const user = userEvent.setup()
+    renderCanvasPage()
+    await user.click(await screen.findByRole('button', { name: /真实画布/ }))
+    await screen.findByLabelText(/无限画布/)
+
+    act(() => {
+      ;(flowHarness.current as {
+        onSelectionChange: (params: {
+          nodes: Array<{ id: string }>
+          edges: Array<{ source: string; target: string }>
+        }) => void
+      }).onSelectionChange({ nodes: [{ id: NODE_A }], edges: [] })
+    })
+    // 右键 Edit 动作打开非模态编辑面板。
+    act(() => {
+      ;(flowHarness.current as {
+        onNodeContextMenu: (
+          event: { clientX: number; clientY: number; preventDefault: () => void },
+          node: { id: string; selected: boolean },
+        ) => void
+      }).onNodeContextMenu(
+        { clientX: 200, clientY: 200, preventDefault: vi.fn() },
+        { id: NODE_A, selected: false },
+      )
+    })
+    const menu = await screen.findByRole('menu', { name: '画布节点操作' })
+    await user.click(within(menu).getByRole('menuitem', { name: '编辑文本' }))
+    const input = await screen.findByRole('textbox', { name: 'Markdown 内容' })
+    // 非模态：不存在 dialog/showModal，面板内联在 stage 中。
+    expect(document.querySelector('dialog')).toBeNull()
+    expect(screen.getByLabelText('编辑 Markdown 文本「Note」')).toBeInTheDocument()
+    expect(screen.getByText('5 字')).toBeInTheDocument()
+    await user.clear(input)
+    await user.type(input, '# updated')
+    expect(screen.getByText('9 字')).toBeInTheDocument()
+    // 打开/编辑面板不改动节点 transform 尺寸。
+    const flow = flowHarness.current as {
+      nodes: Array<{ id: string; style: { width: number; height: number } }>
+    }
+    expect(flow.nodes.find((node) => node.id === NODE_A)?.style).toEqual({
+      width: 320,
+      height: 260,
+    })
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(commandBodies.some((body) => (
+      body.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))).toBe(true))
+    expect(commandBodies.find((body) => (
+      body.commands[0]?.type === 'UPDATE_TEXT_NODE'
+    ))?.commands[0]).toEqual({ type: 'UPDATE_TEXT_NODE', nodeId: NODE_A, markdown: '# updated' })
+    expect(screen.queryByLabelText('编辑 Markdown 文本「Note」')).not.toBeInTheDocument()
   })
 
   it('keeps the generation input focused while its debounced config snapshot is adopted', async () => {

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Resource } from '@/features/canvas/domain'
 import {
@@ -80,22 +81,41 @@ function renderMedia(value: Resource) {
   )
 }
 
+function previewUrl(url: string) {
+  return {
+    method: 'GET' as const,
+    url,
+    headers: {},
+    expiresAt: '2026-08-10T00:15:00Z',
+  }
+}
+
+function originalUrl(url: string) {
+  return {
+    method: 'GET' as const,
+    url,
+    headers: {},
+    expiresAt: '2026-08-10T00:15:00Z',
+  }
+}
+
+/** 把 lazy preview 的 IntersectionObserver 触发出来。 */
+function revealPreview() {
+  intersectionCallback([{
+    isIntersecting: true,
+    target: observe.mock.calls[0]?.[0] as Element,
+  } as IntersectionObserverEntry], {} as IntersectionObserver)
+}
+
 describe('Canvas lazy resource media', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('IntersectionObserver', IntersectionObserverFake)
-    vi.mocked(getCanvasResourcePreviewUrl).mockResolvedValue({
-      method: 'GET',
-      url: 'https://s3.example/preview.webp',
-      headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
-    })
-    vi.mocked(getCanvasResourceOriginalUrl).mockResolvedValue({
-      method: 'GET',
-      url: 'https://s3.example/original',
-      headers: {},
-      expiresAt: '2026-08-10T00:15:00Z',
-    })
+    // jsdom 未实现媒体播放；静默 stub 原型，单测再按场景覆盖。
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => undefined)
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    vi.mocked(getCanvasResourcePreviewUrl).mockResolvedValue(previewUrl('https://s3.example/preview.webp'))
+    vi.mocked(getCanvasResourceOriginalUrl).mockResolvedValue(originalUrl('https://s3.example/original'))
   })
 
   afterEach(() => {
@@ -105,37 +125,19 @@ describe('Canvas lazy resource media', () => {
     disconnect.mockClear()
   })
 
-  it('lazily previews IMAGE and signs original open/download actions only after a click', async () => {
+  it('lazily previews IMAGE with aspect metadata and without signing the original', async () => {
     // Preview visibility and original access remain independent signed-URL boundaries.
-    const view = renderMedia(resource('IMAGE'))
+    renderMedia(resource('IMAGE'))
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
-    intersectionCallback([{
-      isIntersecting: true,
-      target: observe.mock.calls[0]?.[0] as Element,
-    } as IntersectionObserverEntry], {} as IntersectionObserver)
+    revealPreview()
     const image = await screen.findByRole('img', { name: 'image.asset' })
-    expect(image).toHaveAttribute(
-      'src',
-      'https://s3.example/preview.webp',
-    )
-    // Metadata gives the browser the original aspect ratio before the lazy thumbnail decodes.
+    expect(image).toHaveAttribute('src', 'https://s3.example/preview.webp')
     expect(image).toHaveAttribute('width', '1122')
     expect(image).toHaveAttribute('height', '1402')
     expect(image).toHaveAttribute('draggable', 'false')
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
-    const fetchOriginal = screen.getByRole('button', { name: '获取原图 image.asset' })
-    expect(fetchOriginal.closest('.media-original-actions')).toHaveClass('nodrag')
-    fireEvent.click(fetchOriginal)
-    expect(await screen.findByRole('link', { name: '打开原图 image.asset' })).toHaveAttribute(
-      'href',
-      'https://s3.example/original',
-    )
-    expect(screen.getByRole('link', { name: '下载原图 image.asset' })).toHaveAttribute(
-      'download',
-      'image.asset',
-    )
-    view.unmount()
-    expect(disconnect).toHaveBeenCalled()
+    // 常驻原件操作条已移除。
+    expect(document.querySelector('.media-original-actions')).toBeNull()
   })
 
   it('loads a lazy preview immediately when layout already places it near the viewport', async () => {
@@ -163,84 +165,193 @@ describe('Canvas lazy resource media', () => {
     expect(observe).not.toHaveBeenCalled()
   })
 
-  it('keeps VIDEO on preview until play and cleans the original media element on unmount', async () => {
-    // Explicit play is the boundary that permits an original URL request.
-    const view = renderMedia(resource('VIDEO'))
-    intersectionCallback([{
-      isIntersecting: true,
-      target: observe.mock.calls[0]?.[0] as Element,
-    } as IntersectionObserverEntry], {} as IntersectionObserver)
-    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledOnce())
+  it('recovers a stale preview by force-refetching a new signed URL', async () => {
+    // 即使 React Query 数据是新鲜的，onError 也会先强制重新签名一次。
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/stale.webp'))
+      .mockResolvedValueOnce(previewUrl('https://s3.example/fresh.webp'))
+    renderMedia(resource('IMAGE'))
+    revealPreview()
+    const image = await screen.findByRole('img', { name: 'image.asset' })
+    expect(image).toHaveAttribute('src', 'https://s3.example/stale.webp')
+
+    fireEvent.error(image)
+
+    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
+    await screen.findByRole('img', { name: 'image.asset' }, {})
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: 'image.asset' })).toHaveAttribute(
+        'src',
+        'https://s3.example/fresh.webp',
+      )
+    })
+    // 预览恢复阶段不触碰原件签名边界。
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '获取视频原件 video.asset' }))
-    expect(await screen.findByRole('link', { name: '下载视频原件 video.asset' })).toHaveAttribute(
-      'href',
-      'https://s3.example/original',
-    )
-    expect(screen.queryByLabelText('播放 video.asset')).not.toBeInTheDocument()
-    const playVideo = screen.getByRole('button', { name: '播放视频 video.asset' })
-    expect(playVideo).toHaveClass('nodrag')
-    fireEvent.click(playVideo)
-    const video = await screen.findByLabelText('播放 video.asset')
+  })
+
+  it('falls back to the original when the preview refresh fails', async () => {
+    // 刷新失败（含 useQuery 一次自动重试）后请求并渲染原件 URL。
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/stale.webp'))
+      .mockRejectedValueOnce(new Error('signing outage'))
+      .mockRejectedValueOnce(new Error('signing outage'))
+    renderMedia(resource('IMAGE'))
+    revealPreview()
+    const image = await screen.findByRole('img', { name: 'image.asset' })
+    fireEvent.error(image)
+
+    await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce(), { timeout: 4_000 })
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: 'image.asset' })).toHaveAttribute(
+        'src',
+        'https://s3.example/original',
+      )
+    })
+  })
+
+  it('falls back to the original when the refreshed preview URL also errors', async () => {
+    // 同一失败周期：重新签名后的新 URL 再次 error 时停止 preview 重试并回退原件。
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/stale.webp'))
+      .mockResolvedValueOnce(previewUrl('https://s3.example/still-broken.webp'))
+    renderMedia(resource('IMAGE'))
+    revealPreview()
+    let image = await screen.findByRole('img', { name: 'image.asset' })
+    fireEvent.error(image)
+
+    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
+    image = await screen.findByRole('img', { name: 'image.asset' })
+    expect(image).toHaveAttribute('src', 'https://s3.example/still-broken.webp')
+    fireEvent.error(image)
+
+    await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: 'image.asset' })).toHaveAttribute(
+        'src',
+        'https://s3.example/original',
+      )
+    })
+    // 回退原件后不再无限重试 preview。
+    expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps VIDEO on preview until play and recovers the poster', async () => {
+    // 显式播放才请求原件；poster 走与 IMAGE 相同的恢复状态机。
+    vi.mocked(getCanvasResourcePreviewUrl)
+      .mockResolvedValueOnce(previewUrl('https://s3.example/video-poster.webp'))
+      .mockResolvedValueOnce(previewUrl('https://s3.example/refreshed-poster.webp'))
+    const view = renderMedia(resource('VIDEO'))
+    revealPreview()
+    const posterImg = () => view.container.querySelector('.canvas-resource-media.video img') as HTMLImageElement
+    await waitFor(() => {
+      expect(posterImg().src).toContain('video-poster.webp')
+    })
+    expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
+
+    fireEvent.error(posterImg())
+    await waitFor(() => expect(getCanvasResourcePreviewUrl).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(posterImg().src).toContain('refreshed-poster.webp')
+    })
+
+    fireEvent.error(posterImg())
+    await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
+    await waitFor(() => {
+      expect(posterImg().src).toContain('https://s3.example/original')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '播放视频 video.asset' }))
+    const video = await screen.findByLabelText('播放视频 video.asset')
     expect(video).toHaveAttribute('src', 'https://s3.example/original')
     expect(video).toHaveClass('nodrag', 'nowheel')
     view.unmount()
     expect(video).not.toHaveAttribute('src')
   })
 
-  it('loads AUDIO original on demand and renders metadata duration', async () => {
-    // Audio has no preview endpoint and exposes duration before original bytes are requested.
-    renderMedia(resource('AUDIO'))
-    expect(screen.getByText('1:05')).toBeInTheDocument()
+  it('loads AUDIO original on first play into the custom player', async () => {
+    const view = renderMedia(resource('AUDIO'))
+    // 紧凑播放器常驻显示资源名与时间，未播放时不签名原件。
+    expect(screen.getByText('audio.asset')).toBeInTheDocument()
+    expect(screen.getByText('0:00 / 1:05')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '播放音频 audio.asset' })).toBeInTheDocument()
+    // 原件操作只走右键菜单：播放器内只有播放与静音两个按钮，无常驻下载入口。
+    expect(screen.getAllByRole('button')).toHaveLength(2)
     expect(getCanvasResourceOriginalUrl).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '获取音频原件 audio.asset' }))
-    expect(await screen.findByRole('link', { name: '下载音频原件 audio.asset' })).toHaveAttribute(
-      'download',
-      'audio.asset',
-    )
-    expect(screen.queryByLabelText('播放音频 audio.asset')).not.toBeInTheDocument()
-    const loadAudio = screen.getByRole('button', { name: /加载音频/ })
-    expect(loadAudio).toHaveClass('nodrag')
-    fireEvent.click(loadAudio)
-    const audio = await screen.findByLabelText('播放音频 audio.asset')
-    expect(audio).toHaveAttribute(
-      'src',
-      'https://s3.example/original',
-    )
+    expect(document.querySelector('audio')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '播放音频 audio.asset' }))
+    await waitFor(() => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledOnce())
+    const audio = document.querySelector('audio') as HTMLAudioElement
+    await waitFor(() => expect(audio).not.toBeNull())
+    expect(audio).toHaveAttribute('src', 'https://s3.example/original')
     expect(audio).toHaveClass('nodrag', 'nowheel')
     expect(getCanvasResourcePreviewUrl).not.toHaveBeenCalled()
+    view.unmount()
   })
 
-  it('lets the user retry a transient original signing failure', async () => {
-    // useQuery 的一次自动重试耗尽后，原件按钮仍必须能显式重新签名。
-    vi.mocked(getCanvasResourceOriginalUrl)
-      .mockRejectedValueOnce(new Error('temporary'))
-      .mockRejectedValueOnce(new Error('temporary'))
-      .mockResolvedValueOnce({
-        method: 'GET',
-        url: 'https://s3.example/recovered-original',
-        headers: {},
-        expiresAt: '2026-08-10T00:15:00Z',
-      })
-    renderMedia(resource('IMAGE'))
+  it('tracks audio progress/time and seeks through the range input', async () => {
+    const user = userEvent.setup()
+    renderMedia(resource('AUDIO'))
+    fireEvent.click(screen.getByRole('button', { name: '播放音频 audio.asset' }))
+    // 等自动播放状态落定后再取 audio 元素，避免 query 解析与 effect 提交竞争。
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停音频 audio.asset' })).toBeInTheDocument())
+    const audio = document.querySelector('audio') as HTMLAudioElement
 
-    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
-    await waitFor(
-      () => expect(getCanvasResourceOriginalUrl).toHaveBeenCalledTimes(2),
-      { timeout: 4_000 },
-    )
-    await screen.findByText('原件签名失败', {}, { timeout: 4_000 })
-    fireEvent.click(screen.getByRole('button', { name: '获取原图 image.asset' }))
+    Object.defineProperty(audio, 'duration', { configurable: true, value: 65 })
+    let current = 0
+    Object.defineProperty(audio, 'currentTime', {
+      configurable: true,
+      get: () => current,
+      set: (value: number) => {
+        current = value
+      },
+    })
+    fireEvent(audio, new Event('loadedmetadata'))
+    expect(screen.getByText('0:00 / 1:05')).toBeInTheDocument()
 
-    expect(await screen.findByRole('link', { name: '打开原图 image.asset' })).toHaveAttribute(
-      'href',
-      'https://s3.example/recovered-original',
+    current = 30
+    fireEvent(audio, new Event('timeupdate'))
+    expect(screen.getByText('0:30 / 1:05')).toBeInTheDocument()
+
+    const seek = screen.getByRole('slider', { name: '调节 audio.asset 的播放位置' })
+    await user.click(seek)
+    fireEvent.change(seek, { target: { value: '45' } })
+    expect(screen.getByText('0:45 / 1:05')).toBeInTheDocument()
+    expect(audio.currentTime).toBe(45)
+  })
+
+  it('controls audio volume and mute and surfaces a rejected play promise', async () => {
+    const user = userEvent.setup()
+    renderMedia(resource('AUDIO'))
+    fireEvent.click(screen.getByRole('button', { name: '播放音频 audio.asset' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停音频 audio.asset' })).toBeInTheDocument())
+    const audio = document.querySelector('audio') as HTMLAudioElement
+
+    const volume = screen.getByRole('slider', { name: 'audio.asset 的音量' })
+    fireEvent.change(volume, { target: { value: '0.4' } })
+    expect(audio.volume).toBe(0.4)
+    expect(screen.getByRole('button', { name: '静音 audio.asset' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
     )
-    expect(getCanvasResourceOriginalUrl).toHaveBeenCalledTimes(3)
+
+    await user.click(screen.getByRole('button', { name: '静音 audio.asset' }))
+    expect(audio.muted).toBe(true)
+    expect(screen.getByRole('button', { name: '取消静音 audio.asset' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    // play() 拒绝时回到暂停态并显示可访问错误。
+    vi.spyOn(audio, 'play').mockRejectedValueOnce(new Error('autoplay blocked'))
+    fireEvent.click(screen.getByRole('button', { name: '暂停音频 audio.asset' }))
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('无法开始播放')
+    })
+    expect(screen.getByRole('button', { name: '播放音频 audio.asset' })).toBeInTheDocument()
   })
 
   it('reuses the safe MarkdownRenderer for TEXT resources', () => {
-    // Heading/list semantics demonstrate TEXT is rendered rather than injected as raw HTML.
     renderMedia(resource('TEXT'))
     expect(screen.getByRole('heading', { name: 'Markdown title' })).toBeInTheDocument()
     expect(screen.getByRole('list')).toHaveTextContent('safe list')

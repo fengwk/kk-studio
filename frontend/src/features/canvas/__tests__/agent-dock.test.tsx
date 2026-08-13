@@ -190,11 +190,11 @@ describe('Canvas add menu', () => {
     fireEvent.keyDown(menu, { key: 'ArrowDown' })
     expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(1)
     fireEvent.keyDown(menu, { key: 'ArrowUp' })
-    expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(6)
+    expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(5)
     fireEvent.keyDown(menu, { key: 'Home' })
     expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(0)
     fireEvent.keyDown(menu, { key: 'End' })
-    expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(6)
+    expect(harness.controller.setAddMenuIndex).toHaveBeenLastCalledWith(5)
     fireEvent.keyDown(menu, { key: 'Escape' })
     expect(harness.controller.closeAddMenu).toHaveBeenCalled()
 
@@ -204,12 +204,11 @@ describe('Canvas add menu', () => {
 
     await user.hover(screen.getByRole('menuitem', { name: /视频生成/ }))
     expect(harness.controller.setAddMenuIndex).toHaveBeenCalledWith(5)
-    await user.click(screen.getByRole('menuitem', { name: /分组/ }))
-    expect(harness.controller.handleAddAction).toHaveBeenCalledWith('group')
+    expect(screen.queryByRole('menuitem', { name: /分组/ })).not.toBeInTheDocument()
 
     harness.rerender({ addMenuOpen: true, addMenuIndex: 99 })
     fireEvent.keyDown(screen.getByRole('menu'), { key: 'Enter' })
-    expect(harness.controller.handleAddAction).toHaveBeenCalledTimes(2)
+    expect(harness.controller.handleAddAction).toHaveBeenCalledTimes(1)
   })
 
   it('opens the correct file picker and uploads only non-empty selections', async () => {
