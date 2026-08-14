@@ -1,4 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,6 +17,7 @@ import type {
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
+  ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
@@ -1382,5 +1385,193 @@ describe('ChatWorkspacePane commands', () => {
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()
     }
+  })
+
+  it('keeps the events active row across conversation/events switches', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    // mousemove 到 USER 行：active 从最新（s1-assistant）改为 s1-user。
+    fireEvent.mouseMove(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await waitFor(() =>
+      expect(list.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user'),
+    )
+
+    // 切回 conversation 再进 events：active 行保留（跨视图恢复）。
+    await user.click(composer)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list2 = await screen.findByRole('listbox', { name: '事件' })
+    expect(list2.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user')
+  })
+
+  it('resets the events active row and detail when the pane rebinds to another Thread', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    const view = renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    fireEvent.mouseMove(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await waitFor(() =>
+      expect(list.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user'),
+    )
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
+    await screen.findByLabelText('事件详情', { exact: true })
+
+    // threadId 重绑：回到 conversation 且 detail 关闭。
+    view.rerender('t2')
+    await waitFor(() => expect(document.querySelector('.thread-dialogue')).not.toBeNull())
+    expect(screen.queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
+
+    // 再进 events：active 回到最新（旧 s1-user 选择不残留）。
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list2 = await screen.findByRole('listbox', { name: '事件' })
+    expect(list2.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-assistant')
+  })
+
+  it('places the event detail first in the widget zone, before the task status widget', async () => {
+    const user = userEvent.setup()
+    const heartbeat = JSON.stringify({
+      kind: 'task.status',
+      threadId: '101',
+      subagentType: 'explorer',
+      state: 'running_tool',
+      depth: 0,
+      turns: 3,
+      toolCalls: 5,
+      lastActivity: 'running read',
+      approvals: [],
+      descendants: [],
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), {
+        entries: [...sessionEntries(), toolCallEntry('e-task', 's1-assistant', 'call-task', 'task')],
+        toolInvocations: [
+          toolInvocation({
+            id: 'inv-task',
+            assistantEntryId: 'e-task',
+            toolCallId: 'call-task',
+            toolName: 'task',
+            rendererKey: 'task',
+            resultJson: JSON.stringify({ contents: [{ type: 'text', text: heartbeat }] }),
+          }),
+        ],
+      }),
+    )
+    renderBoundPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // 子任务心跳（task tool overlay）渲染 TaskStatus widget。
+    await waitFor(() =>
+      expect(document.querySelector('.task-status-widget')).not.toBeNull(),
+    )
+
+    // events 视图选中某条记录 → detail widget 出现。
+    await user.click(composer)
+    await user.keyboard('/events{Enter}')
+    const list = await screen.findByRole('listbox', { name: '事件' })
+    await user.click(within(list).getByRole('option', { name: /s1 prompt/ }))
+    const detail = await screen.findByLabelText('事件详情', { exact: true })
+
+    // 冻结契约：detail 是 widget zone 第一项，位于 TaskStatus 之前。
+    const widgetZone = document.querySelector<HTMLElement>('.thread-widget-zone')!
+    const detailInZone = widgetZone.querySelector('.thread-event-detail')!
+    const statusInZone = widgetZone.querySelector('.task-status-widget')!
+    expect(detailInZone).toBe(detail)
+    expect(detailInZone.compareDocumentPosition(statusInZone) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .not.toBe(0)
+  })
+
+  it('freezes the widget zone height contract at min(36vh, 320px)', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src', 'styles.css'), 'utf8')
+    const rule = css.match(/\.thread-widget-zone\s*\{[^}]*\}/)
+    expect(rule).not.toBeNull()
+    expect(rule![0]).toContain('max-height: min(36vh, 320px)')
+  })
+
+  it('isolates events view state across multiple panes', async () => {
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({}), { entries: sessionEntries() }),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const pane = (paneId: string) => (
+      <ChatWorkspacePane
+        chat={{
+          id: `chat-${paneId}`,
+          title: 'C',
+          agentName: 'assistant',
+          yoloEnabled: false,
+          version: '1',
+          createTime: null,
+          updateTime: null,
+        }}
+        agents={agents}
+        environments={[]}
+        pane={{ id: paneId, threadId: 't1' }}
+        focused
+        threadSort="recent"
+        onFocus={() => undefined}
+        onThreadChange={vi.fn()}
+        onThreadSortChange={vi.fn()}
+        onAgentChange={vi.fn(async () => undefined)}
+        onYoloChange={vi.fn(async () => undefined)}
+      />
+    )
+    render(
+      <QueryClientProvider client={queryClient}>
+        <div data-testid="pane-A">{pane('pane-A')}</div>
+        <div data-testid="pane-B">{pane('pane-B')}</div>
+      </QueryClientProvider>,
+    )
+    const paneA = () => screen.getByTestId('pane-A')
+    const paneB = () => screen.getByTestId('pane-B')
+    const composerA = await within(paneA()).findByLabelText('给 AI 发送消息')
+    const composerB = await within(paneB()).findByLabelText('给 AI 发送消息')
+
+    // Pane A 切到 events；Pane B 保持 conversation（无事件 listbox）。
+    await user.click(composerA)
+    await user.keyboard('/events{Enter}')
+    const listA = await within(paneA()).findByRole('listbox', { name: '事件' })
+    expect(within(paneB()).queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+
+    // Pane A 选择详情；Pane B 无 detail。
+    await user.click(within(listA).getByRole('option', { name: /s1 prompt/ }))
+    await within(paneA()).findByLabelText('事件详情', { exact: true })
+    expect(within(paneB()).queryByLabelText('事件详情', { exact: true })).not.toBeInTheDocument()
+
+    // Pane B 也切到 events：两份 listbox 各自持有独立 active。
+    await user.click(composerB)
+    await user.keyboard('/events{Enter}')
+    const listB = await within(paneB()).findByRole('listbox', { name: '事件' })
+    expect(within(paneA()).getByRole('listbox', { name: '事件' })).toBeInTheDocument()
+    expect(listA.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-user')
+    // Pane B 初始 active 是自己的最新事件（未被 Pane A 影响）。
+    expect(listB.getAttribute('aria-activedescendant')).toBe('thread-event-entry:s1-assistant')
+
+    // Pane A 切回 conversation：Pane B 的 events 视图不受影响。
+    await user.click(composerA)
+    await user.keyboard('/conversation{Enter}')
+    await waitFor(() =>
+      expect(within(paneA()).queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument(),
+    )
+    expect(within(paneB()).getByRole('listbox', { name: '事件' })).toBeInTheDocument()
   })
 })

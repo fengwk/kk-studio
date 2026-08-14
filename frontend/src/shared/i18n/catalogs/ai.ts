@@ -1682,57 +1682,65 @@ export const aiCatalog = {
     'en-US': 'unknown tool',
     'zh-CN': '未知工具',
   },
-  'ai.runtime.event.entryType.ROOT': {
+  'ai.runtime.event.kind.ROOT': {
     'en-US': 'Root',
     'zh-CN': '根节点',
   },
-  'ai.runtime.event.entryType.TURN_START': {
+  'ai.runtime.event.kind.TURN_START': {
     'en-US': 'Turn start',
     'zh-CN': '回合开始',
   },
-  'ai.runtime.event.entryType.MESSAGE': {
-    'en-US': 'Message',
-    'zh-CN': '消息',
+  'ai.runtime.event.kind.USER_MESSAGE': {
+    'en-US': 'User message',
+    'zh-CN': '用户消息',
   },
-  'ai.runtime.event.entryType.CUSTOM_MESSAGE': {
-    'en-US': 'Custom message',
-    'zh-CN': '自定义消息',
+  'ai.runtime.event.kind.ASSISTANT_MESSAGE': {
+    'en-US': 'Assistant message',
+    'zh-CN': '助手消息',
   },
-  'ai.runtime.event.entryType.MODEL_ATTEMPT_FAILURE': {
+  'ai.runtime.event.kind.TOOL_CALL': {
+    'en-US': 'Tool call',
+    'zh-CN': '工具调用',
+  },
+  'ai.runtime.event.kind.TOOL_RESULT': {
+    'en-US': 'Tool result',
+    'zh-CN': '工具结果',
+  },
+  'ai.runtime.event.kind.MODEL_ATTEMPT_FAILURE': {
     'en-US': 'Model attempt failure',
     'zh-CN': '模型尝试失败',
   },
-  'ai.runtime.event.entryType.ASSISTANT_ERROR': {
+  'ai.runtime.event.kind.ASSISTANT_ERROR': {
     'en-US': 'Assistant error',
     'zh-CN': '助手错误',
   },
-  'ai.runtime.event.entryType.ASSISTANT_ABORTED': {
+  'ai.runtime.event.kind.ASSISTANT_ABORTED': {
     'en-US': 'Assistant aborted',
     'zh-CN': '助手已停止',
   },
-  'ai.runtime.event.entryType.COMPACTION': {
-    'en-US': 'Compaction',
-    'zh-CN': '上下文压缩',
-  },
-  'ai.runtime.event.entryType.TURN_END': {
-    'en-US': 'Turn end',
-    'zh-CN': '回合结束',
-  },
-  'ai.runtime.event.entryType.CUSTOM': {
+  'ai.runtime.event.kind.CUSTOM': {
     'en-US': 'Custom',
     'zh-CN': '自定义',
   },
-  'ai.runtime.event.activeModel': {
+  'ai.runtime.event.kind.CUSTOM_MESSAGE': {
+    'en-US': 'Custom message',
+    'zh-CN': '自定义消息',
+  },
+  'ai.runtime.event.kind.COMPACTION': {
+    'en-US': 'Compaction',
+    'zh-CN': '上下文压缩',
+  },
+  'ai.runtime.event.kind.TURN_END': {
+    'en-US': 'Turn end',
+    'zh-CN': '回合结束',
+  },
+  'ai.runtime.event.kind.ACTIVE_MODEL_INVOCATION': {
     'en-US': 'Active model invocation',
     'zh-CN': '活跃模型调用',
   },
-  'ai.runtime.event.activeTool': {
+  'ai.runtime.event.kind.ACTIVE_TOOL_INVOCATION': {
     'en-US': 'Active tool invocation',
     'zh-CN': '活跃工具调用',
-  },
-  'ai.runtime.event.activeFailure': {
-    'en-US': 'Active model attempt failure',
-    'zh-CN': '活跃模型尝试失败',
   },
   'ai.runtime.event.detailTitle': {
     'en-US': 'Event details',
@@ -1741,10 +1749,6 @@ export const aiCatalog = {
   'ai.runtime.event.closeDetail': {
     'en-US': 'Close event details',
     'zh-CN': '关闭事件详情',
-  },
-  'ai.runtime.event.payloadLabel': {
-    'en-US': 'Raw payload',
-    'zh-CN': '原始 payload',
   },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',
@@ -1757,6 +1761,14 @@ export const aiCatalog = {
   'ai.runtime.event.detail.createTime': {
     'en-US': 'Time',
     'zh-CN': '时间',
+  },
+  'ai.runtime.event.detail.turn': {
+    'en-US': 'Turn',
+    'zh-CN': '回合',
+  },
+  'ai.runtime.event.detail.role': {
+    'en-US': 'Role',
+    'zh-CN': '角色',
   },
   'ai.runtime.event.detail.status': {
     'en-US': 'Status',
@@ -1798,49 +1810,57 @@ export const aiCatalog = {
     'en-US': 'Streamed characters',
     'zh-CN': '已流式字符数',
   },
-  'ai.runtime.event.status.WAITING_APPROVAL': {
-    'en-US': 'Waiting approval',
-    'zh-CN': '等待审批',
+  'ai.runtime.event.detail.outcome': {
+    'en-US': 'Outcome',
+    'zh-CN': '结果',
   },
-  'ai.runtime.event.status.READY': {
-    'en-US': 'Ready',
-    'zh-CN': '就绪',
+  'ai.runtime.event.detail.input': {
+    'en-US': 'Input tokens',
+    'zh-CN': '输入 tokens',
   },
-  'ai.runtime.event.status.DISPATCHING': {
-    'en-US': 'Dispatching',
-    'zh-CN': '派发中',
+  'ai.runtime.event.detail.output': {
+    'en-US': 'Output tokens',
+    'zh-CN': '输出 tokens',
+  },
+  'ai.runtime.event.detail.cacheRead': {
+    'en-US': 'Cache read tokens',
+    'zh-CN': '缓存读 tokens',
+  },
+  'ai.runtime.event.detail.cacheWrite': {
+    'en-US': 'Cache write tokens',
+    'zh-CN': '缓存写 tokens',
+  },
+  'ai.runtime.event.detail.reasoning': {
+    'en-US': 'Reasoning tokens',
+    'zh-CN': '推理 tokens',
+  },
+  'ai.runtime.event.detail.providerTotal': {
+    'en-US': 'Provider total tokens',
+    'zh-CN': 'Provider 总 tokens',
+  },
+  'ai.runtime.event.detail.cost': {
+    'en-US': 'Cost',
+    'zh-CN': '费用',
+  },
+  'ai.runtime.event.status.PENDING': {
+    'en-US': 'Pending',
+    'zh-CN': '等待中',
   },
   'ai.runtime.event.status.RUNNING': {
     'en-US': 'Running',
     'zh-CN': '运行中',
   },
-  'ai.runtime.event.status.SUCCEEDED': {
-    'en-US': 'Succeeded',
-    'zh-CN': '成功',
+  'ai.runtime.event.status.COMPLETED': {
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
   },
   'ai.runtime.event.status.FAILED': {
     'en-US': 'Failed',
     'zh-CN': '失败',
   },
-  'ai.runtime.event.status.CANCELLED': {
-    'en-US': 'Cancelled',
-    'zh-CN': '已取消',
-  },
-  'ai.runtime.event.status.UNKNOWN': {
-    'en-US': 'Unknown',
-    'zh-CN': '未知',
-  },
-  'ai.runtime.event.status.STREAMING': {
-    'en-US': 'Streaming',
-    'zh-CN': '流式中',
-  },
-  'ai.runtime.event.status.DONE': {
-    'en-US': 'Done',
-    'zh-CN': '完成',
-  },
-  'ai.runtime.event.status.ERROR': {
-    'en-US': 'Error',
-    'zh-CN': '错误',
+  'ai.runtime.event.status.STOPPED': {
+    'en-US': 'Stopped',
+    'zh-CN': '已停止',
   },
   'ai.runtime.entry.assistantRequestFailed': {
     'en-US': 'Assistant request failed',

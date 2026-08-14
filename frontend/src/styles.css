@@ -1796,13 +1796,14 @@ div.is-error {
 }
 
 .thread-event {
-  padding: 7px 10px;
+  padding: 5px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: 58px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1815,24 +1816,56 @@ div.is-error {
   border-color: var(--border-hover);
 }
 
-.thread-event-title {
+.thread-event-time {
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.thread-event-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.thread-event-summary {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
   font-size: 12px;
-  font-weight: 600;
+  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.thread-event-text {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-dim);
-  font-size: 12px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* failed danger 色（durable 失败 / 活跃失败 overlay）。 */
+.thread-event.status-failed .thread-event-summary {
+  color: var(--danger);
+}
+
+/* running pulse dot（活跃 model/tool invocation）。 */
+.thread-event-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: thread-event-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thread-event-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* 只读 Event detail widget（ThreadWidgetStack 内、Composer 上方） */
@@ -2691,7 +2724,8 @@ div.is-error {
 
 .thread-widget-zone {
   flex-shrink: 0;
-  max-height: 149px;
+  /* 冻结契约：widget zone 高度上限 min(36vh, 320px)。 */
+  max-height: min(36vh, 320px);
   overflow-y: auto;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);

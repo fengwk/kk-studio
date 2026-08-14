@@ -7,7 +7,7 @@ import {
   type AgentModelView,
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
-import { buildThreadEvents } from '@/features/ai/runtime/thread-events'
+import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
@@ -192,16 +192,16 @@ export function useAgentThreadController(
     modelInvocation,
   )
   // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
-  // useMemo 保证快照未变化时 events 引用稳定（Pane 的 detail-by-id 刷新 effect 依赖它）。
+  // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
   const events = useMemo(
-    () => buildThreadEvents(
+    () => buildThreadEventTimeline({
       entries,
       modelInvocation,
       toolInvocations,
       modelAttemptFailures,
-      realtime.modelStream,
-      realtime.toolStreams,
-    ),
+      modelStream: realtime.modelStream,
+      toolStreams: realtime.toolStreams,
+    }),
     [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)

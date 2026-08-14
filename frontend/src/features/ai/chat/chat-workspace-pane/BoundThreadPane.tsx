@@ -13,7 +13,7 @@ import {
   ThreadEventDetail,
   ThreadEventView,
   ThreadShortcutsPanel,
-  useMainViewScrollRestore,
+  useThreadPanelViewState,
   type ChatPanelActivityInput,
   type ChatPanelComposerInput,
   type ChatPanelFooterInput,
@@ -25,7 +25,6 @@ import {
   useAgentThreadController,
 } from '@/features/ai/runtime'
 import { threadCommandsForActiveView } from '@/features/ai/runtime/thread-panel/thread-commands'
-import type { ThreadEventItem } from '@/features/ai/runtime/thread-events'
 import {
   browserNotificationPermission,
   requestBrowserNotificationPermission,
@@ -147,17 +146,24 @@ export function BoundThreadPane({
   const [interaction, setInteraction] = useState<
     'thread' | 'agent' | 'environment' | 'history' | 'shortcuts' | null
   >(null)
-  // 互斥主视图与 Event detail：每个 mounted Pane 独立；threadId 改变时重置回 conversation。
-  // 两个主视图分别保存 scrollTop（切换前捕获、重新进入恢复、重绑清零）。
+  // 互斥主视图与 Event 状态（mode/selected/active + 双 scrollTop）：每个 mounted
+  // Pane 独立；threadId 重绑由 hook 全部重置回 conversation。
   const {
-    mainView,
-    switchMainView,
-    reset: resetMainViewScroll,
+    mode,
+    switchMode,
+    selectedEventId,
+    selectEvent,
+    activeEventId,
+    setActiveEventId,
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
-  } = useMainViewScrollRestore(controller.bodyRef)
-  const [eventDetail, setEventDetail] = useState<ThreadEventItem | null>(null)
+  } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
+  // detail widget 按最新 records 派生（id 消失时 hook 已清空 selected）。
+  const selectedRecord =
+    selectedEventId == null
+      ? null
+      : (controller.events.find((event) => event.id === selectedEventId) ?? null)
   const [rebindBlockedReason, setRebindBlockedReason] = useState<string | null>(null)
   const [discardConfirm, setDiscardConfirm] = useState<ConfirmModalState | null>(null)
   const queryClient = useQueryClient()
@@ -177,8 +183,8 @@ export function BoundThreadPane({
   })
 
   // 将面板重新绑定到另一个 Thread 时，会清空所有面板本地状态，并从新 snapshot
-  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）。
-  // threadId 改变时主视图重置回 conversation（含 Event selection/scroll）。
+  // 重新初始化 draft（controller 也会重置其 stop/decision replay 状态）；
+  // 主视图/Event 状态由 useThreadPanelViewState 在 threadId 变化时重置。
   useEffect(() => {
     if (boundThreadIdRef.current === threadId) {
       return
@@ -186,12 +192,9 @@ export function BoundThreadPane({
     boundThreadIdRef.current = threadId
     setBranchState(null)
     setInteraction(null)
-    // 重绑清零两个主视图的 scrollTop 并回到 conversation（含 Event selection/scroll）。
-    resetMainViewScroll()
-    setEventDetail(null)
     setRebindBlockedReason(null)
     setDiscardConfirm(null)
-  }, [resetMainViewScroll, threadId])
+  }, [threadId])
 
   const effectiveBase = useMemo(() => {
     if (branchState == null) {
@@ -458,12 +461,11 @@ export function BoundThreadPane({
         return
       case 'events':
         // 互斥主视图切换：Composer 保持挂载，draft/queue/working 状态不受影响。
-        switchMainView('events')
+        switchMode('events')
         return
       case 'conversation':
-        // 切回 conversation 同时关闭 event detail（只读 widget 随之卸载）。
-        setEventDetail(null)
-        switchMainView('conversation')
+        // 切回 conversation 同时关闭 event detail（hook 保留 Event active）。
+        switchMode('conversation')
         return
       case 'shortcuts':
         setInteraction('shortcuts')
@@ -589,7 +591,7 @@ export function BoundThreadPane({
       <ThreadShortcutsPanel onClose={() => setInteraction(null)} />
     ) : null
   // 当前已激活的主视图命令保持可见但禁用（events 激活时 /events 禁用）。
-  const commands = useMemo(() => threadCommandsForActiveView(BOUND_PANE_COMMANDS, mainView), [mainView])
+  const commands = useMemo(() => threadCommandsForActiveView(BOUND_PANE_COMMANDS, mode), [mode])
   const composer: ChatPanelComposerInput = {
     parts: controller.draft,
     // Pending 覆盖 in-flight HTTP 请求（同时禁用发送：canSend 已检查 disabled），
@@ -638,35 +640,28 @@ export function BoundThreadPane({
   // 不是 InteractionPanel（不隐藏 Composer、不抢焦点）。
   const mainViewInput: ThreadPanelMainView = {
     events:
-      mainView === 'events' ? (
+      mode === 'events' ? (
         <ThreadEventView
           events={controller.events}
+          activeEventId={activeEventId}
+          onActiveEventIdChange={setActiveEventId}
           bodyRef={eventsBodyRef}
           initialScrollTop={initialEventsScrollTop}
-          detailOpen={eventDetail != null}
-          onActivate={(event) => setEventDetail(event)}
-          onCloseDetail={() => setEventDetail(null)}
+          detailOpen={selectedEventId != null}
+          onSelect={(event) => selectEvent(event.id)}
+          onCloseDetail={() => selectEvent(null)}
         />
       ) : undefined,
   }
-  // events 变化时按 id 刷新已选中的 detail（内容更新跟随新快照）；id 消失则清空。
-  useEffect(() => {
-    setEventDetail((current) => {
-      if (current == null) {
-        return current
-      }
-      const next = controller.events.find((event) => event.id === current.id)
-      return next ?? null
-    })
-  }, [controller.events])
   const activity: ChatPanelActivityInput = {
     working: controller.working,
     // 子任务 widget 只读消费 timeline；审批按钮的决策回传目标子 Thread
     // （status.threadId），由 controller 的 targetThreadId 参数转发。
+    // Event detail 位于 widget zone 第一项、TaskStatus 之前。
     widgets: (
       <>
-        {eventDetail ? (
-          <ThreadEventDetail item={eventDetail} onClose={() => setEventDetail(null)} />
+        {selectedRecord ? (
+          <ThreadEventDetail record={selectedRecord} onClose={() => selectEvent(null)} />
         ) : null}
         {threadUiPreferences.taskStatusEnabled ? (
           <TaskStatusWidget

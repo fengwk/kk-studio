@@ -25,22 +25,26 @@ function entry(
   }
 }
 
-function assistant(text: string, metadata?: Record<string, unknown>): HarnessSessionEntryDTO {
+function assistant(
+  id: string,
+  text: string,
+  metadata?: Record<string, unknown>,
+): HarnessSessionEntryDTO {
   const payload: Record<string, unknown> = {
     message: { role: 'ASSISTANT', contents: [{ type: 'text', text }] },
   }
   if (metadata) {
     payload.assistantMetadata = metadata
   }
-  return entry('assistant-1', 'MESSAGE', payload)
+  return entry(id, 'MESSAGE', payload)
 }
 
-function turnStart(reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
-  return entry('turn-1', 'TURN_START', { reason })
+function turnStart(id = 'turn-1', reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
+  return entry(id, 'TURN_START', { reason })
 }
 
-function turnEnd(outcome = 'COMPLETED'): HarnessSessionEntryDTO {
-  return entry('end-1', 'TURN_END', { outcome, continueModel: false })
+function turnEnd(id = 'end-1', outcome = 'COMPLETED'): HarnessSessionEntryDTO {
+  return entry(id, 'TURN_END', { outcome, continueModel: false })
 }
 
 function userMessage(text: string): HarnessSessionEntryDTO {
@@ -61,7 +65,7 @@ describe('Turn usage after TURN_END', () => {
       [
         turnStart(),
         userMessage('问题'),
-        assistant('回答', usageMetadata(10, 20)),
+        assistant('assistant-1', '回答', usageMetadata(10, 20)),
         turnEnd(),
       ],
       [],
@@ -132,24 +136,16 @@ describe('Turn usage after TURN_END', () => {
   })
 
   it('keeps each turn usage attached to its own TURN_END across multiple turns', () => {
-    const secondAssistant = entry(
-      'assistant-2',
-      'MESSAGE',
-      {
-        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'second' }] },
-        assistantMetadata: usageMetadata(30, 40),
-      },
-    )
     const timeline = buildThreadTimeline(
       [
-        turnStart(),
+        turnStart('turn-1'),
         userMessage('a'),
-        assistant('first', usageMetadata(10, 20)),
-        turnEnd(),
-        entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+        assistant('assistant-1', 'first', usageMetadata(10, 20)),
+        turnEnd('end-1'),
+        turnStart('turn-2'),
         userMessage('b'),
-        secondAssistant,
-        entry('end-2', 'TURN_END', { outcome: 'COMPLETED' }),
+        assistant('assistant-2', 'second', usageMetadata(30, 40)),
+        turnEnd('end-2'),
       ],
       [],
       [],
@@ -191,13 +187,13 @@ describe('Turn usage after TURN_END', () => {
     // 新 TURN_START 必须丢弃残留，下一个 TURN_END 不再投影旧 usage。
     const timeline = buildThreadTimeline(
       [
-        turnStart(),
+        turnStart('turn-1'),
         userMessage('a'),
-        assistant('回答', usageMetadata(10, 20)),
-        entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+        assistant('assistant-1', '回答', usageMetadata(10, 20)),
+        turnStart('turn-2'),
         userMessage('b'),
-        assistant('回答 2', usageMetadata(5, 6)),
-        turnEnd(),
+        assistant('assistant-2', '回答 2', usageMetadata(5, 6)),
+        turnEnd('end-2'),
       ],
       [],
       [],
@@ -205,21 +201,21 @@ describe('Turn usage after TURN_END', () => {
 
     const ids = timeline.messages.map((message) => message.id)
     expect(ids.filter((id) => id.startsWith('meta-usage-entry-'))).toEqual([
-      'meta-usage-entry-assistant-1', // 仅第二个（已关闭）turn 的 summary
+      'meta-usage-entry-assistant-2', // 仅第二个（已关闭）turn 的 summary
     ])
   })
 
   it('does not project usage inside compaction turns', () => {
     const timeline = buildThreadTimeline(
       [
-        turnStart('COMPACTION'),
+        turnStart('turn-1', 'COMPACTION'),
         userMessage('summary'),
-        assistant('compact answer', usageMetadata(100, 50)),
-        turnEnd(),
-        turnStart(),
+        assistant('assistant-1', 'compact answer', usageMetadata(100, 50)),
+        turnEnd('end-1'),
+        turnStart('turn-2'),
         userMessage('real'),
-        assistant('real answer', usageMetadata(1, 2)),
-        turnEnd(),
+        assistant('assistant-2', 'real answer', usageMetadata(1, 2)),
+        turnEnd('end-2'),
       ],
       [],
       [],
@@ -227,10 +223,10 @@ describe('Turn usage after TURN_END', () => {
 
     const ids = timeline.messages.map((message) => message.id)
     expect(ids.filter((id) => id.startsWith('meta-usage-entry-'))).toEqual([
-      'meta-usage-entry-assistant-1',
+      'meta-usage-entry-assistant-2', // 仅真实 turn 的 summary
     ])
     // 真实 turn 的 summary 位于整个 timeline 的最后（紧随其 TURN_END）。
-    expect(ids.indexOf('meta-usage-entry-assistant-1')).toBe(ids.length - 1)
+    expect(ids.indexOf('meta-usage-entry-assistant-2')).toBe(ids.length - 1)
   })
 
   it('does not project a summary when usage/cost are all zero', () => {
@@ -238,7 +234,7 @@ describe('Turn usage after TURN_END', () => {
       [
         turnStart(),
         userMessage('a'),
-        assistant('回答', usageMetadata(0, 0, 0)),
+        assistant('assistant-1', '回答', usageMetadata(0, 0, 0)),
         turnEnd(),
       ],
       [],
